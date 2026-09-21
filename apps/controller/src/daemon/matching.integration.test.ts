@@ -56,6 +56,13 @@ const UNRESOLVABLE = "event.payload.nothing.deeper == 1";
 /** A condition that calls a function nobody registered. */
 const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
 
+/**
+ * A condition reading the original payload the source system sent. The matcher
+ * does not put it in the context at all, so this must fail rather than answer
+ * that there is none.
+ */
+const READS_RAW = "event.raw != null";
+
 const PROVIDER = providerDefinition("full-provider", { token: "t" });
 
 const FACTS: RunnerFacts = {
@@ -625,6 +632,38 @@ describe("enrichment's second look", () => {
       expect((await walk(arranged.harness)).position).toBe(before);
     });
   });
+
+  it("gets the row it wrote to an idle session, on the pass after the enrichment", async () => {
+    await withMatcher(async (arranged) => {
+      const agent = await subscriber(arranged, "late-holder");
+      const eventId = await emitted(arranged, [REF], "enriched into a match");
+      await caughtUp(arranged.harness);
+
+      // The subscription waits for a ref the event does not carry yet, so the
+      // pass that walked past the event matched nothing.
+      const subscriptionId = await subscribed(arranged, agent, OTHER_REF);
+      expect((await readSession(arranged, agent.session.id)).status).toBe("idle");
+
+      const response = await post(
+        arranged.harness.base,
+        `/api/v1/events/${String(eventId)}/enrich`,
+        { refs: [OTHER_REF] },
+        arranged.token,
+      );
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      // Nothing was sent on the request's own fiber: the frame crosses the
+      // socket because a later pass of the matcher sent it.
+      const frame = await frameWhen(arranged, "enriched into a match");
+      expect(frame.sessionId).toBe(agent.session.id);
+      const rows = await rowsWhen(
+        arranged.harness,
+        subscriptionId,
+        (found) => found[0]?.status === "delivered",
+      );
+      expect(rows).toHaveLength(1);
+    });
+  });
 });
 
 describe("a condition the matcher cannot evaluate", () => {
@@ -697,6 +736,29 @@ describe("a condition the matcher cannot evaluate", () => {
     });
   });
 
+  it("is a no-match when it reads the original payload, which the context does not carry", async () => {
+    await withMatcher(async (arranged) => {
+      const agent = await subscriber(arranged, "raw-reader");
+      const subscriptionId = await subscribed(arranged, agent, REF);
+      await storeCondition(arranged.harness, subscriptionId, READS_RAW);
+
+      const eventId = await emitted(arranged, [REF], "not for a reader of raw");
+
+      // Reading `raw` fails; it does not answer that there is none. A context
+      // carrying the field would make this condition a plain false, and the
+      // subscription's health would stay ok.
+      const health = await healthWhen(
+        arranged,
+        agent,
+        subscriptionId,
+        (one) => one.state === "error",
+      );
+      expect(health.message ?? "").toContain("raw");
+      expect(await effectRows(arranged.harness, subscriptionId)).toEqual([]);
+      expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
+    });
+  });
+
   it("treats an evaluation over the wall-clock budget as a no-match, and says so on the subscription", async () => {
     await withMatcher(
       async (arranged) => {
@@ -716,10 +778,10 @@ describe("a condition the matcher cannot evaluate", () => {
         expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
       },
       // Every evaluation on this controller is over budget, which is the only
-      // lever there is: the evaluator offers no timeout and no fuel. The
-      // budget is zero rather than one millisecond because a warm evaluator
-      // answers a condition like this one in about fifteen microseconds, so a
-      // budget a real evaluation can stay under leaves nothing to report.
+      // lever there is: the evaluator offers no timeout and no fuel. A budget
+      // of zero is the one that holds whatever the clock does, because an
+      // evaluation that reaches its budget is over it; a budget a real
+      // evaluation can stay under would leave nothing to report.
       { expressionBudget: Duration.zero },
     );
   });

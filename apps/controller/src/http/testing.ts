@@ -73,7 +73,7 @@ import {
 } from "../runners";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
-import { buildOperationLayers } from "./routes";
+import { operationLayers } from "./routes";
 import { bodyLimits, serve } from "./server";
 import type { WebBundle } from "./static";
 
@@ -93,7 +93,8 @@ const services = (home: string, notifier: Layer.Layer<EvaluationErrorNotifier>) 
   // session and workspace services and the plugin host, so it is provided this
   // block's output rather than merely merged beside it, the way the real boot's
   // operation layers reach what `withPlugins` built.
-  buildOperationLayers(notifier).pipe(
+  operationLayers.pipe(
+    Layer.provide(notifier),
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,

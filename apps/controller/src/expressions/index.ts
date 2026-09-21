@@ -163,6 +163,11 @@ export const checkExpression = (source: string): Effect.Effect<void, ExpressionE
  * An overrun retires nothing either. The same source is evaluated again on the
  * next tick and can go over again, which is deliberate: a slow evaluation is a
  * fact about the event as much as about the expression.
+ *
+ * An evaluation that exactly reaches the budget is over it, not under it. That
+ * makes a budget of zero refuse every evaluation by definition, which is how a
+ * test asks for the failure path without depending on a clock that may not
+ * have moved between two reads.
  */
 export const evaluateExpression = (
   source: string,
@@ -181,10 +186,12 @@ export const evaluateExpression = (
         }),
     });
     const elapsed = performance.now() - startedAt;
-    if (elapsed <= budget) return value;
+    if (elapsed < budget) return value;
     return yield* Effect.fail(
       new ExpressionError({
-        message: `that expression ran for ${Math.round(elapsed)} ms, over the ${budget} ms budget, so its answer is not used`,
+        message:
+          `that expression ran for ${Math.round(elapsed)} ms, which is not under the ` +
+          `${budget} ms budget, so its answer is not used`,
       }),
     );
   });

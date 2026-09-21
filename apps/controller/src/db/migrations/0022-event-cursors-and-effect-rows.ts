@@ -9,7 +9,8 @@
  * keyed by the consumer's name because a second consumer of the same log is a
  * second row and nothing else.
  *
- * `session_inputs` gains the two columns saying what an input row came from.
+ * `session_inputs` gains the two columns saying what an input row came from,
+ * and they are written together or not at all.
  * The unique index over the pair is what makes a second pass over the same
  * entries harmless: a consumer that committed its input rows and stopped
  * before it advanced its cursor reads those entries again, and the second
@@ -34,7 +35,14 @@ export default Effect.gen(function* () {
   `;
 
   yield* sql`ALTER TABLE session_inputs ADD COLUMN subscription_id BLOB`;
-  yield* sql`ALTER TABLE session_inputs ADD COLUMN event_id INTEGER`;
+  // The two columns are one fact and are written together or not at all. The
+  // constraint is carried by the second column because SQLite evaluates a
+  // column check over the whole row, and a table check cannot be added to a
+  // table that already exists.
+  yield* sql`
+    ALTER TABLE session_inputs ADD COLUMN event_id INTEGER
+    CHECK ((subscription_id IS NULL) = (event_id IS NULL))
+  `;
 
   yield* sql`
     CREATE UNIQUE INDEX session_inputs_effect ON session_inputs (subscription_id, event_id)

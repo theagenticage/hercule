@@ -307,9 +307,11 @@ const make = Effect.gen(function* () {
 
   /**
    * Puts a session whose harness is gone back on the queue, under the document
-   * that picks its own transcript up. Joins the caller's transaction.
+   * that picks its own transcript up. Joins the caller's transaction and
+   * announces nothing: every caller writes more than this and announces once
+   * for the whole write set.
    */
-  const resumeInPlace = (
+  const putBackOnQueue = (
     sessionId: string,
     spec: string,
     at: string,
@@ -322,7 +324,6 @@ const make = Effect.gen(function* () {
       yield* afterCommit(() => {
         tracking.delete(sessionId);
       });
-      yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
     });
 
   /**
@@ -788,7 +789,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
         if (taking.resumeSpec !== undefined) {
-          yield* resumeInPlace(taking.sessionId, taking.resumeSpec, taking.at);
+          yield* putBackOnQueue(taking.sessionId, taking.resumeSpec, taking.at);
         }
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
@@ -807,7 +808,16 @@ const make = Effect.gen(function* () {
         return created;
       }),
 
-    resumeInPlace,
+    /**
+     * Puts a session whose harness is gone back on the queue, under the
+     * document that picks its own transcript up, for a caller that is storing
+     * nothing else. Joins the caller's transaction.
+     */
+    resume: (sessionId: string, spec: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* putBackOnQueue(sessionId, spec, at);
+        yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+      }),
 
     /**
      * Stores the input one subscription's match produced, joining the caller's
@@ -840,7 +850,15 @@ const make = Effect.gen(function* () {
      * and a reader of the row sees why it never went through.
      */
     cancelMatchedInputs: (subscriptionId: string, reason: string): Effect.Effect<void, SqlError> =>
-      inputs.cancelQueuedForSubscription(subscriptionId, reason),
+      Effect.gen(function* () {
+        for (const sessionId of yield* inputs.cancelQueuedForSubscription(subscriptionId, reason)) {
+          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+        }
+      }),
+
+    /** The sessions holding an input a match produced that has not gone out yet. */
+    listSessionsAwaitingMatches: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      inputs.listSessionsAwaitingMatches(),
 
     queuedInput,
 

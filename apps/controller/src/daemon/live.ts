@@ -221,7 +221,7 @@ const make = Effect.gen(function* () {
    * queue with. Read back rather than built again, so the continuation runs
    * under exactly what the session ran under before its harness went.
    */
-  const buildResumeDocument = (
+  const buildResumeSpec = (
     sessionId: string,
     modelSelection: ModelSelection,
     nativeSessionId: string,
@@ -237,8 +237,15 @@ const make = Effect.gen(function* () {
       return JSON.stringify(encodeSpec(spec));
     });
 
-  /** Sends the oldest row still waiting on a session, where there is one. */
-  const flushOldest = (sessionId: string): Effect.Effect<void, SqlError> =>
+  /**
+   * Sends what one transition to idle releases: the oldest row still waiting,
+   * claimed the instant it is found, so a second transition landing before the
+   * machine answers cannot also take it - the claim is what a row's turn
+   * actually was for, so there is no boundary to count and nothing to catch up
+   * on. A refusal or silence is left where `deliverClaimed` puts it: back to
+   * waiting, for the next transition to send.
+   */
+  const flush = (sessionId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       const claimed = yield* sessions.claimOldest(sessionId);
       if (Option.isNone(claimed)) return;
@@ -251,15 +258,7 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    /**
-     * Sends what one transition to idle releases: the oldest row still waiting,
-     * claimed the instant it is found, so a second transition landing before
-     * the machine answers cannot also take it - the claim is what a row's turn
-     * actually was for, so there is no boundary to count and nothing to catch
-     * up on. A refusal or silence is left where `deliverClaimed` puts it: back
-     * to waiting, for the next transition to send.
-     */
-    flush: flushOldest,
+    flush,
 
     /**
      * Gets a row somebody else stored to the session it was stored for.
@@ -282,7 +281,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, NotFound | SqlError | SettingError | Schema.SchemaError> =>
       Effect.gen(function* () {
         const session = yield* one(sessionId);
-        if (session.status === "idle") return yield* flushOldest(sessionId);
+        if (session.status === "idle") return yield* flush(sessionId);
         if (session.status !== "exited") return;
         const nativeSessionId = yield* Effect.catchIf(
           Effect.asSome(resumableNativeSession(session)),
@@ -290,14 +289,14 @@ const make = Effect.gen(function* () {
           () => Effect.succeedNone,
         );
         if (Option.isNone(nativeSessionId)) return;
-        const document = yield* buildResumeDocument(
+        const resumeSpec = yield* buildResumeSpec(
           sessionId,
           session.modelSelection,
           nativeSessionId.value,
         );
         yield* withTransaction(
           sql,
-          Effect.flatMap(nowIso, (at) => sessions.resumeInPlace(sessionId, document, at)),
+          Effect.flatMap(nowIso, (at) => sessions.resume(sessionId, resumeSpec, at)),
         );
         // After the commit: dispatch tells a machine, and a transaction never
         // spans a wait on anything outside the database.
@@ -367,7 +366,7 @@ const make = Effect.gen(function* () {
               resumeSpec:
                 nativeSessionId === undefined
                   ? undefined
-                  : yield* buildResumeDocument(id, modelSelection, nativeSessionId),
+                  : yield* buildResumeSpec(id, modelSelection, nativeSessionId),
               text,
               at,
               claimed: session.status === "idle",

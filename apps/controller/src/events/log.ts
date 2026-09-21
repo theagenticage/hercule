@@ -6,6 +6,10 @@
  * answer with the same `Event`, built here from the same columns, so a record
  * pushed over the socket and the same record fetched over HTTP are the same
  * document field for field.
+ *
+ * The position a durable consumer has read to is kept here too, because it is
+ * a position in this log: a consumer that spelled the walk itself would be a
+ * second reader of the events table outside the domain that owns it.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -84,7 +88,7 @@ export const eventsAfter = (
  * that read them and then dropped them would read a log full of audit entries
  * one batch at a time and make no progress.
  */
-export const pipelineEventsAfter = (
+export const readPipelineEventsAfter = (
   sql: SqlClient.SqlClient,
   after: number,
   limit: number,
@@ -112,3 +116,33 @@ export const readPipelineEvent = (
     `,
     (rows) => Option.map(Option.fromNullishOr(rows[0]), toEvent),
   );
+
+/**
+ * The position this consumer has read to, creating its cursor at the start of
+ * the log the first time it asks. Ids count from one, so a consumer that has
+ * never run reads everything the log holds.
+ *
+ * The row is written only when it is absent, rather than on every read: a
+ * consumer reads its position on every pass, and an upsert would be a write
+ * on every one of them.
+ */
+export const readConsumerPosition = (
+  sql: SqlClient.SqlClient,
+  consumer: string,
+): Effect.Effect<number, SqlError> =>
+  Effect.gen(function* () {
+    const held = yield* sql<{
+      readonly position: number;
+    }>`SELECT position FROM event_cursors WHERE consumer = ${consumer}`;
+    if (held[0] !== undefined) return held[0].position;
+    yield* sql`INSERT INTO event_cursors (consumer, position) VALUES (${consumer}, 0)`;
+    return 0;
+  });
+
+/** Records that this consumer has finished with everything up to this position. */
+export const advanceConsumerCursor = (
+  sql: SqlClient.SqlClient,
+  consumer: string,
+  position: number,
+): Effect.Effect<void, SqlError> =>
+  Effect.asVoid(sql`UPDATE event_cursors SET position = ${position} WHERE consumer = ${consumer}`);

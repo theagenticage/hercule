@@ -6,5 +6,5 @@
  * only what the controller's entrypoint uses.
  */
 export { perimeterWarning } from "./perimeter";
-export { buildOperationLayers, operationLayers } from "./routes";
+export { operationLayers } from "./routes";
 export { bodyLimits, serve, webBundle } from "./server";

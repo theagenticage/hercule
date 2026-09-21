@@ -14,6 +14,12 @@ export {
   type AuditRow,
 } from "./audit-log";
 export { EventKindCatalog } from "./catalog";
-export { advanceConsumerCursor, openConsumerCursor } from "./cursors";
-export { eventsAfter, headOfLog, pipelineEventsAfter, readPipelineEvent } from "./log";
+export {
+  advanceConsumerCursor,
+  eventsAfter,
+  headOfLog,
+  readConsumerPosition,
+  readPipelineEvent,
+  readPipelineEventsAfter,
+} from "./log";
 export { EventService, EventServiceLayer } from "./service";

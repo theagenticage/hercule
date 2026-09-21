@@ -8,7 +8,7 @@
  * frames and the row moves the controller daemon calls as it sequences what a
  * machine is told.
  */
-export { type NewMatchedInput, type StoredInput } from "./inputs";
+export { type StoredInput } from "./inputs";
 export { buildContinuingSpec, timeoutsFrom, validatedOptions } from "./options";
 export { sessionRecordComposer } from "./records";
 export {

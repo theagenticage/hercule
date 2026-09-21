@@ -20,6 +20,7 @@ import { BootstrapConfig } from "./config";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import { bodyLimits, operationLayers, perimeterWarning, serve, webBundle } from "./http";
 import { LOCAL_RUNNER } from "./runners";
+import { EvaluationErrorNotifierLayer } from "./subscriptions";
 
 export { boot, bootWith, hashToken, setupUrl } from "./bootstrap";
 export type { BootError, BootOptions, BootOutcome, ControllerServices } from "./bootstrap";
@@ -150,7 +151,13 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
     // with this controller, and a controller that had already stopped listening
     // would read that departure as a machine that vanished.
     if (outcome.localRunner !== undefined) yield* outcome.localRunner.stop;
-  }).pipe(Effect.provide(operationLayers));
+  }).pipe(
+    Effect.provide(operationLayers),
+    // Where the matcher's report of a condition it cannot evaluate goes. The
+    // list above leaves it to whoever assembles the controller, so a test can
+    // hand over a listener of its own.
+    Effect.provide(EvaluationErrorNotifierLayer),
+  );
 
 export async function run(argv: readonly string[]): Promise<void> {
   // The signal handlers are installed outside the boot and come off only once

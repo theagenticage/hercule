@@ -183,18 +183,37 @@ const make = Effect.gen(function* () {
 
     /**
      * Ends every row still waiting for one subscription, with the reason the
-     * subscription itself ended. A row on the wire is left alone, for the
-     * reason `cancelQueued` gives.
+     * subscription itself ended, and answers the sessions whose rows moved. A
+     * row on the wire is left alone, for the reason `cancelQueued` gives.
      */
     cancelQueuedForSubscription: (
       subscriptionId: string,
       reason: string,
-    ): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', reason = ${reason}
-        WHERE subscription_id = ${uuidFromString(subscriptionId)}
-          AND status = 'queued' AND sent_at IS NULL
-      `),
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: Uint8Array }>`
+          UPDATE session_inputs SET status = 'cancelled', reason = ${reason}
+          WHERE subscription_id = ${uuidFromString(subscriptionId)}
+            AND status = 'queued' AND sent_at IS NULL
+          RETURNING session_id
+        `,
+        (rows) => [...new Set(rows.map((row) => uuidToString(row.session_id)))],
+      ),
+
+    /**
+     * The sessions holding an input a match produced that has not gone out
+     * yet. It is how a delivery is picked up again after a controller stopped
+     * between storing a row and sending it: the rows say what is owed, so
+     * nothing has to be remembered across a restart.
+     */
+    listSessionsAwaitingMatches: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: Uint8Array }>`
+          SELECT DISTINCT session_id FROM session_inputs
+          WHERE source = 'subscription' AND status = 'queued' AND sent_at IS NULL
+        `,
+        (rows) => rows.map((row) => uuidToString(row.session_id)),
+      ),
 
     /** Scoped by the session, so an id belonging to another one is simply not here. */
     one: (sessionId: string, id: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>

@@ -37,9 +37,9 @@ import {
   advanceConsumerCursor,
   EventService,
   headOfLog,
-  openConsumerCursor,
-  pipelineEventsAfter,
+  readConsumerPosition,
   readPipelineEvent,
+  readPipelineEventsAfter,
 } from "../events";
 import { evaluateExpression } from "../expressions";
 import { SessionService, sessionRepository } from "../sessions";
@@ -64,15 +64,17 @@ const MATCHER = "matcher";
 /**
  * How many entries one pass reads.
  *
- * It is what bounds the pass, and the pass holds a transaction open while it
- * runs. The worst case is this many entries times the number of live
- * subscriptions times the evaluation budget of the expressions domain: 100
- * events against 100 subscriptions, each one going the full 50 ms over, is
- * around eight minutes. Real evaluations take microseconds, so the true cost
- * of a full batch is milliseconds; the number is here to say what the bound
- * is, not what it costs.
+ * This is the only bound the pass has, and it bounds the entry count alone.
+ * The subscriptions a pass evaluates are read whole and unpaged, and the
+ * wall-clock guard on one evaluation reports an overrun after the fact
+ * rather than stopping it, so the time one pass takes is bounded by nothing:
+ * it grows with the number of live subscriptions and with what one expression
+ * does. The only hard bound anywhere is the parse-time limit on the source of
+ * an expression. A pass holds the database's one write lock the whole time it
+ * runs, so everything else writing waits behind it. Real evaluations take
+ * microseconds; a full pass over a hundred subscriptions is milliseconds.
  */
-const EVENT_BATCH = 100;
+const EVENTS_PER_PASS = 100;
 
 /** How often the matcher looks for entries it has not read. */
 const EVENT_MATCH_INTERVAL: Duration.Duration = Duration.seconds(1);
@@ -83,9 +85,10 @@ export const EventMatchInterval = Context.Reference<Duration.Duration>(
   { defaultValue: (): Duration.Duration => EVENT_MATCH_INTERVAL },
 );
 
-/** What ends a subscription whose holder is not there to be woken any more. */
-const HOLDER_ENDED =
-  "the session holding this subscription has exited and its transcript cannot be picked up again";
+/** Why a subscription was ended, for the row and for the inputs it produced. */
+const buildHolderEndedReason = (sessionId: string): string =>
+  `session ${sessionId}, which held this subscription, has exited and its transcript ` +
+  `cannot be picked up again`;
 
 /** The title the payload's subject carries, where it carries one. */
 const readSubjectTitle = (payload: Readonly<Record<string, unknown>>): string | undefined => {
@@ -131,16 +134,6 @@ interface EvaluationFailure {
   readonly message: string;
 }
 
-/** What one committed pass of matching leaves to be done outside the database. */
-interface Matched {
-  /** The sessions that got at least one input row they did not have before. */
-  readonly sessionIds: ReadonlySet<string>;
-  /** The failures that began a run of failures, which are the ones reported. */
-  readonly newFailures: ReadonlyArray<EvaluationFailure>;
-}
-
-const NOTHING_MATCHED: Matched = { sessionIds: new Set(), newFailures: [] };
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const events = yield* EventService;
@@ -152,45 +145,44 @@ const make = Effect.gen(function* () {
 
   /**
    * Ends every subscription whose holder session has ended for good, and
-   * answers the ones still waiting.
+   * answers which subscriptions those were.
    *
    * It is the first thing a pass does, so an event is never evaluated against
    * a claim nobody is left to answer. A process that merely exited ends
    * nothing: a session whose transcript can still be picked up is woken by a
-   * match like an idle one.
+   * match like an idle one. Joins the caller's transaction.
    */
-  const sweepEndedHolders = (
+  const endSubscriptionsOfEndedHolders = (
     standing: ReadonlyArray<StoredSubscription>,
-  ): Effect.Effect<ReadonlyArray<StoredSubscription>, SqlError> =>
+  ): Effect.Effect<ReadonlySet<string>, SqlError> =>
     Effect.gen(function* () {
       const holders = [...new Set(standing.map((one) => one.holder.id))];
-      const ended = new Set(yield* sessionRows.listEndedForGood(holders));
-      if (ended.size === 0) return standing;
-      for (const one of standing.filter((subscription) => ended.has(subscription.holder.id))) {
-        yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            // Nobody asked for this end, so the system is what stamps it.
-            yield* subscriptions.end({
-              id: one.id,
-              at: yield* nowIso,
-              reason: HOLDER_ENDED,
-              actor: SYSTEM_ACTOR,
-            });
-            // An input this subscription produced that nothing has delivered
-            // yet is waiting for a session that will never take it.
-            yield* sessions.cancelMatchedInputs(one.id, HOLDER_ENDED);
-          }),
-        );
+      const gone = new Set(yield* sessionRows.listEndedForGood(holders));
+      const ended = new Set<string>();
+      for (const one of standing.filter((subscription) => gone.has(subscription.holder.id))) {
+        const reason = buildHolderEndedReason(one.holder.id);
+        // Nobody asked for this end, so the system is what stamps it.
+        yield* subscriptions.end({
+          id: one.id,
+          at: yield* nowIso,
+          reason,
+          actor: SYSTEM_ACTOR,
+        });
+        // An input this subscription produced that nothing has delivered
+        // yet is waiting for a session that will never take it.
+        yield* sessions.cancelMatchedInputs(one.id, reason);
+        ended.add(one.id);
       }
-      return standing.filter((subscription) => !ended.has(subscription.holder.id));
+      return ended;
     });
 
   /**
    * Evaluates these events against these subscriptions and stores an input row
-   * for every match. Joins the caller's transaction and waits on nothing but
-   * SQL and this thread's own CPU: the evaluator is synchronous and reaches
-   * nothing outside the context it is given.
+   * for every match, answering the failures that began a run of failures.
+   *
+   * Joins the caller's transaction and waits on nothing but SQL and this
+   * thread's own CPU: the evaluator is synchronous and reaches nothing outside
+   * the context it is given.
    *
    * A condition that cannot be evaluated is a no-match for its own
    * subscription and nothing else: every other subscription is still
@@ -199,9 +191,8 @@ const make = Effect.gen(function* () {
   const matchEvents = (
     standing: ReadonlyArray<StoredSubscription>,
     batch: ReadonlyArray<Event>,
-  ): Effect.Effect<Matched, SqlError> =>
+  ): Effect.Effect<ReadonlyArray<EvaluationFailure>, SqlError> =>
     Effect.gen(function* () {
-      const sessionIds = new Set<string>();
       const newFailures: Array<EvaluationFailure> = [];
       /** Which subscriptions were in a run of failures when this pass began. */
       const failing = new Map(
@@ -230,7 +221,7 @@ const make = Effect.gen(function* () {
           // Only a condition that answers true has matched. A condition
           // answering a string or a number has not said yes to anything.
           if (answer.success !== true) continue;
-          const stored = yield* sessions.takeMatchedInput({
+          yield* sessions.takeMatchedInput({
             sessionId: subscription.holder.id,
             subscriptionId: subscription.id,
             eventId: event.id,
@@ -238,10 +229,9 @@ const make = Effect.gen(function* () {
             text,
             at: yield* nowIso,
           });
-          if (Option.isSome(stored)) sessionIds.add(subscription.holder.id);
         }
       }
-      return { sessionIds, newFailures };
+      return newFailures;
     });
 
   /** Tells whoever is to hear that these subscriptions cannot be evaluated. */
@@ -253,30 +243,41 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Gets what was just stored to the sessions it was stored for, one fiber
-   * each: a delivery waits on a machine, and a machine that is slow to answer
-   * must not hold up the sessions behind it or the next pass.
+   * Gets every input a match has produced and nothing has sent yet to the
+   * session it was stored for.
+   *
+   * It reads the rows rather than remembering what the pass just wrote, so a
+   * row that outlived the attempt to deliver it - a controller killed between
+   * the commit and the send, a machine that refused the frame, a session that
+   * was busy and whose transition to idle was missed - is picked up by the
+   * next pass instead of waiting for ever.
+   *
+   * One fiber per session: a delivery waits on a machine, and a machine that
+   * is slow to answer must not hold up the sessions behind it or the next
+   * pass. The fibers are children of the pass's own driver, which lives as
+   * long as the controller does.
    */
-  const deliverToSessions = (sessionIds: ReadonlySet<string>): Effect.Effect<void> =>
-    Effect.forEach(
-      sessionIds,
-      (sessionId) =>
-        forking(
-          "A session could not be given what it was waiting for",
-          live.deliverQueuedInput(sessionId),
-        ),
-      { discard: true },
-    );
+  const deliverWaitingMatches: Effect.Effect<void, SqlError> = Effect.gen(function* () {
+    for (const sessionId of yield* sessions.listSessionsAwaitingMatches()) {
+      yield* forking(
+        "A session could not be given what it was waiting for",
+        live.deliverQueuedInput(sessionId),
+      );
+    }
+  });
 
   /**
-   * One pass: the sweep, then the entries past the cursor, then what the pass
-   * owes the world outside the database.
+   * One pass: the sweep, the subscriptions still waiting, the entries past the
+   * cursor, and then what the pass owes the world outside the database.
    *
    * Everything the pass decides is one transaction, so a pass that fails part
-   * way writes nothing at all. Nothing in that transaction waits on anything
-   * but SQL and CPU: reading the entries and storing the rows are SQL, and
-   * evaluating a condition is this thread's own work. Telling a session, which
-   * waits on a machine, happens after the commit.
+   * way writes nothing at all, and a subscription created or cancelled while
+   * the pass runs is either wholly before it or wholly after it - never half
+   * seen, which is how an event could be walked past for a subscription that
+   * existed all along. Nothing in that transaction waits on anything but SQL
+   * and CPU: reading the entries and storing the rows are SQL, and evaluating
+   * a condition is this thread's own work. Telling a session, which waits on a
+   * machine, happens after the commit.
    *
    * The cursor moves even where nothing matched, and even where the batch came
    * back empty - to the end of the log as it stood inside the transaction - so
@@ -284,20 +285,22 @@ const make = Effect.gen(function* () {
    * again on every pass.
    */
   const matchNewEvents: Effect.Effect<void, SqlError> = Effect.gen(function* () {
-    const standing = yield* sweepEndedHolders(yield* subscriptions.listLive());
-    const matched = yield* withTransaction(
+    const failures = yield* withTransaction(
       sql,
       Effect.gen(function* () {
-        const position = yield* openConsumerCursor(sql, MATCHER);
-        const batch = yield* pipelineEventsAfter(sql, position, EVENT_BATCH);
-        const matched = yield* matchEvents(standing, batch);
+        const waiting = yield* subscriptions.listLive();
+        const ended = yield* endSubscriptionsOfEndedHolders(waiting);
+        const standing = waiting.filter((one) => !ended.has(one.id));
+        const position = yield* readConsumerPosition(sql, MATCHER);
+        const batch = yield* readPipelineEventsAfter(sql, position, EVENTS_PER_PASS);
+        const failures = yield* matchEvents(standing, batch);
         const reached = batch.at(-1)?.id ?? (yield* headOfLog(sql));
         if (reached > position) yield* advanceConsumerCursor(sql, MATCHER, reached);
-        return matched;
+        return failures;
       }),
     );
-    yield* reportFailures(matched.newFailures);
-    yield* deliverToSessions(matched.sessionIds);
+    yield* reportFailures(failures);
+    yield* deliverWaitingMatches;
   });
 
   /**
@@ -307,15 +310,17 @@ const make = Effect.gen(function* () {
    * The cursor is not touched: this is not a step through the log, and moving
    * it would either skip entries or read them again. The input rows are unique
    * per subscription and event, so whatever matched the first time gets
-   * nothing a second time. Joins the caller's transaction; what it answers is
-   * delivered after that transaction commits.
+   * nothing a second time. Joins the caller's transaction, and writes rows
+   * only: the next pass of the matcher sends them, within one interval.
    */
-  const rematchEvent = (eventId: number): Effect.Effect<Matched, SqlError> =>
+  const rematchEvent = (
+    eventId: number,
+  ): Effect.Effect<ReadonlyArray<EvaluationFailure>, SqlError> =>
     Effect.gen(function* () {
       const standing = yield* subscriptions.listLive();
-      if (standing.length === 0) return NOTHING_MATCHED;
+      if (standing.length === 0) return [];
       const event = yield* readPipelineEvent(sql, eventId);
-      if (Option.isNone(event)) return NOTHING_MATCHED;
+      if (Option.isNone(event)) return [];
       return yield* matchEvents(standing, [event.value]);
     });
 
@@ -325,7 +330,8 @@ const make = Effect.gen(function* () {
      *
      * The amendment and that second look are one transaction, so two
      * enrichments of one event cannot each drop the other's refs, and a look
-     * that writes cannot be separated from the write it read.
+     * that writes cannot be separated from the write it read. What the look
+     * writes reaches its session on the matcher's next pass.
      */
     enrichEvent: (
       input: EnrichInput,
@@ -335,17 +341,20 @@ const make = Effect.gen(function* () {
         yield* requireGrant("event.enrich");
         const decoded = yield* Effect.mapError(decodeEnrich(input), validationOf);
 
-        const { amended, matched } = yield* withTransaction(
+        const { amended, failures } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const amended = yield* events.amend(decoded);
             // A ref added here may be what a subscription has been waiting
-            // for, so the matcher looks at this one event again.
-            return { amended, matched: yield* rematchEvent(decoded.id) };
+            // for, so the matcher looks at this one event again. The rows that
+            // look writes are sent by the next pass of the matcher, within one
+            // interval: this call runs on a request's own fiber, which is gone
+            // the moment the answer is written, and a delivery started on it
+            // would be cut off half way.
+            return { amended, failures: yield* rematchEvent(decoded.id) };
           }),
         );
-        yield* reportFailures(matched.newFailures);
-        yield* deliverToSessions(matched.sessionIds);
+        yield* reportFailures(failures);
         return amended;
       }),
 
