@@ -4,7 +4,7 @@ Date: 2026-09-13
 
 ## Status
 
-Accepted. Decided by [Connections and the core OAuth2 client (#71)](https://github.com/rogierpennink/hydra/issues/71), landed in [PR #175](https://github.com/rogierpennink/hydra/pull/175). Refines [ADR 0006](./0006-plugins-request-capabilities-and-register-contributions-in-code.md) (contributions are registered in code and named by id) and [ADR 0010](./0010-external-accounts-are-core-owned-connections.md) (connection types are plugin-defined).
+Accepted. Decided by [Connections and the core OAuth2 client (#71)](https://github.com/theagenticage/hercule/issues/71), landed in [PR #175](https://github.com/theagenticage/hercule/pull/175). Refines [ADR 0006](./0006-plugins-request-capabilities-and-register-contributions-in-code.md) (contributions are registered in code and named by id) and [ADR 0010](./0010-external-accounts-are-core-owned-connections.md) (connection types are plugin-defined).
 
 ## Context
 

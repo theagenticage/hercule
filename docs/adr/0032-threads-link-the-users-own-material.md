@@ -4,7 +4,7 @@ Date: 2026-09-02
 
 ## Status
 
-Accepted. Decided by [User knowledge in Hercule sessions](https://github.com/rogierpennink/hydra/issues/52). Refines [ADR 0030](./0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md) (the Thread is where the exception lives) and the isolation rule of 06 §9.1; leaves [ADR 0028](./0028-provider-harnesses-are-runner-installed-executables.md) untouched.
+Accepted. Decided by [User knowledge in Hercule sessions](https://github.com/theagenticage/hercule/issues/52). Refines [ADR 0030](./0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md) (the Thread is where the exception lives) and the isolation rule of 06 §9.1; leaves [ADR 0028](./0028-provider-harnesses-are-runner-installed-executables.md) untouched.
 
 ## Context
 

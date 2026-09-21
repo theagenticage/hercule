@@ -1,6 +1,6 @@
 # Assistants
 
-An Assistant is an Agent with persistent Memory and Channel Bindings, oriented toward delegating work rather than doing it. It talks to the user inside Conversations, each backed by a lineage of finite Sessions that rotate through distillation into memory ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)). Memory is two tiers of assistant-scoped markdown held by the controller and reached only through `hercule memory` operations on the public API ([ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)). This document pins the assistant record, conversations, bindings, wake rules, session liveness and rotation, memory, the default permission profile, proactivity (unprompted speech, scheduled wakes: heartbeat and reminders), web chat, lifecycle, and what the Discord and Slack channel plugins must provide. Runtime defaults and edge rules were pinned by [Assistant runtime](https://github.com/rogierpennink/hydra/issues/40).
+An Assistant is an Agent with persistent Memory and Channel Bindings, oriented toward delegating work rather than doing it. It talks to the user inside Conversations, each backed by a lineage of finite Sessions that rotate through distillation into memory ([ADR 0014](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)). Memory is two tiers of assistant-scoped markdown held by the controller and reached only through `hercule memory` operations on the public API ([ADR 0020](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)). This document pins the assistant record, conversations, bindings, wake rules, session liveness and rotation, memory, the default permission profile, proactivity (unprompted speech, scheduled wakes: heartbeat and reminders), web chat, lifecycle, and what the Discord and Slack channel plugins must provide. Runtime defaults and edge rules were pinned by [Assistant runtime](https://github.com/theagenticage/hercule/issues/40).
 
 ## 1. Assistant
 
@@ -40,7 +40,7 @@ Bindings, conversations, memory documents and reminders hang off the assistant i
 
 ## 2. Conversations
 
-A Conversation is one continuous exchange with one assistant inside one platform container. One platform container = one conversation. The container table, pinned by [Channel contribution interface and conversation ingress](https://github.com/rogierpennink/hydra/issues/39):
+A Conversation is one continuous exchange with one assistant inside one platform container. One platform container = one conversation. The container table, pinned by [Channel contribution interface and conversation ingress](https://github.com/theagenticage/hercule/issues/39):
 
 | Channel | Container | Conversation | Container key (section 3) |
 |---|---|---|---|
@@ -61,7 +61,7 @@ Rules:
 - Continuity across conversations comes from assistant-scoped memory and transcript recall, never from moving or swapping sessions. Cross-surface continuation ("carry on what we discussed in Slack") is recall: the assistant summarizes from memory and transcript search and continues in the current session.
 - A conversation holds exactly one live session at a time (the current incarnation); predecessors remain readable as ordinary session history.
 
-**Conversation messages.** The core keeps every message it observes in a bound container - owner lines, third-party lines, bot lines, the assistant's own replies, and notification sink posts - as **conversation messages**, one core-owned table keyed by container ([./04-state-store.md](./04-state-store.md)). That table is the conversation view in the web app, the source of the context delivered at wake (section 4.3), and the record of what was said. It is **not** the event log: a chat message is input to an assistant, not an external fact for triggers ([ADR 0023](../adr/0023-chat-messages-are-conversation-input-not-events.md)); nothing enters the pipeline of [./08-events-and-connections.md](./08-events-and-connections.md). Containers with no matching binding are not stored at all. Retention is a `retention.conversations` setting; its default is owned by [Operations details](https://github.com/rogierpennink/hydra/issues/44).
+**Conversation messages.** The core keeps every message it observes in a bound container - owner lines, third-party lines, bot lines, the assistant's own replies, and notification sink posts - as **conversation messages**, one core-owned table keyed by container ([./04-state-store.md](./04-state-store.md)). That table is the conversation view in the web app, the source of the context delivered at wake (section 4.3), and the record of what was said. It is **not** the event log: a chat message is input to an assistant, not an external fact for triggers ([ADR 0023](../adr/0023-chat-messages-are-conversation-input-not-events.md)); nothing enters the pipeline of [./08-events-and-connections.md](./08-events-and-connections.md). Containers with no matching binding are not stored at all. Retention is a `retention.conversations` setting; its default is owned by [Operations details](https://github.com/theagenticage/hercule/issues/44).
 
 ## 3. Channel bindings
 
@@ -157,7 +157,7 @@ A conversation is backed by generational sessions: a lineage of ordinary Session
 
 - The session is *started* on the conversation's first wake, not when the conversation is created.
 - After the runner's idle timeout (runner-owned, one controller-wide default of 15 minutes; not per assistant) the runner *exits* the process. The Session stays the same incarnation, `exited` and resumable ([./06-providers.md](./06-providers.md) section 4.1).
-- The next wake (a message, a subscription delivery, a scheduled wake) *resumes* it: ~~`continue.mode: "resume"` on the same runner~~ *(amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162))* in place, under the same session id, by the `session.input` path of [./06-providers.md](./06-providers.md) section 4.1 (`SessionSpec.continue.mode: "resume"` on the runner side), on the same runner, transcript intact. Cost: one process spawn per wake-after-idle.
+- The next wake (a message, a subscription delivery, a scheduled wake) *resumes* it: ~~`continue.mode: "resume"` on the same runner~~ *(amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162))* in place, under the same session id, by the `session.input` path of [./06-providers.md](./06-providers.md) section 4.1 (`SessionSpec.continue.mode: "resume"` on the runner side), on the same runner, transcript intact. Cost: one process spawn per wake-after-idle.
 - Twenty open Slack threads are twenty conversations and twenty session rows, and however many processes are mid-turn or inside their idle window. The per-runner session cap counts running processes only.
 - Scheduled wakes (section 8) do **not** reset the idle timeout: the process resumes for the wake's turn and, absent real activity, exits again at the next check. (OpenClaw's rule: heartbeats do not keep a session alive.)
 
@@ -171,7 +171,7 @@ The controller rotates a conversation's live session when any of these fires:
 2. **Daily timer.** `rotation.dailyAt`, default `04:00`, in `rotation.timezone` or, when unset, the user's timezone setting (below). A session with **no turns since it started** (nothing happened that day) is not rotated and runs no flush turn; a session that only heard heartbeats does rotate, since its context grew like any other.
 3. **Manual.** `conversation.rotate` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)): "start fresh" in the web app, the `/new` of OpenClaw and Hermes. Same contract as the other two.
 
-**Timezone (spec-wide rule, pinned here).** The user's timezone is a **user setting** (Settings > Profile, set at onboarding from the browser; the onboarding step is owned by [Web app details](https://github.com/rogierpennink/hydra/issues/45)). One resolver supplies it everywhere a timezone is needed and none is given: cron triggers that omit `timezone` ([./07-workflows.md](./07-workflows.md) section 2.2), the daily rotation, the heartbeat schedule, Intake's "since you last checked" and check-in age labels ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)), and all display. There is no separate "controller timezone". Per-trigger and per-assistant overrides stay.
+**Timezone (spec-wide rule, pinned here).** The user's timezone is a **user setting** (Settings > Profile, set at onboarding from the browser; the onboarding step is owned by [Web app details](https://github.com/theagenticage/hercule/issues/45)). One resolver supplies it everywhere a timezone is needed and none is given: cron triggers that omit `timezone` ([./07-workflows.md](./07-workflows.md) section 2.2), the daily rotation, the heartbeat schedule, Intake's "since you last checked" and check-in age labels ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)), and all display. There is no separate "controller timezone". Per-trigger and per-assistant overrides stay.
 
 ### 5.3 Rotation contract
 
@@ -275,7 +275,7 @@ Assistants act on the system through the public API like any agent ([ADR 0013](.
 - A denied operation returns a 403 naming the missing grant; the assistant may raise a Permission Request via `permission.request` and learns the outcome through the subscription that operation registers for it ([./13-security.md](./13-security.md#64-escalation-permission-request)).
 - Assistant sessions get no Workspace. Workspace-less sessions get `GH_TOKEN` from the user-designated default Connection or no token ([./13-security.md](./13-security.md)).
 
-**Access mode and harness tools (pinned).** Assistant sessions run under `full-access` by default (`accessMode` on the Assistant record, per-assistant override like any agent's), with the harness's **file-edit tools removed**: the Agent's `disallowedTools` field defaults to `["edit"]` on assistants and the adapter maps it where the harness has an allowlist (Claude `disallowedTools`, pi `excludeTools`; Codex declares it unsupported; field pinned 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)). The shell stays: the assistant reaches Hercule through the `hercule` CLI, i.e. through the shell tool, so `approval-required` would turn every `hercule` call into an approval and pi's lack of `auto` would park every call under the fallback. "Delegate, don't do" therefore rests on three stated facts: the profile withholds workspaces at the API layer, the session's cwd is an empty scratch directory, and the edit tools are gone on two of three harnesses. Accident-proof, not malice-proof - the same posture as the `HERCULE_SESSION` marker in [./13-security.md](./13-security.md). Locking this down further is on the record under Post-v1 (a hercule-only tool in place of a general shell).
+**Access mode and harness tools (pinned).** Assistant sessions run under `full-access` by default (`accessMode` on the Assistant record, per-assistant override like any agent's), with the harness's **file-edit tools removed**: the Agent's `disallowedTools` field defaults to `["edit"]` on assistants and the adapter maps it where the harness has an allowlist (Claude `disallowedTools`, pi `excludeTools`; Codex declares it unsupported; field pinned 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)). The shell stays: the assistant reaches Hercule through the `hercule` CLI, i.e. through the shell tool, so `approval-required` would turn every `hercule` call into an approval and pi's lack of `auto` would park every call under the fallback. "Delegate, don't do" therefore rests on three stated facts: the profile withholds workspaces at the API layer, the session's cwd is an empty scratch directory, and the edit tools are gone on two of three harnesses. Accident-proof, not malice-proof - the same posture as the `HERCULE_SESSION` marker in [./13-security.md](./13-security.md). Locking this down further is on the record under Post-v1 (a hercule-only tool in place of a general shell).
 
 ## 8. Proactivity
 
@@ -328,7 +328,7 @@ The web app reaches an assistant with no channel Connection involved. A web chat
 
 ## 11. Channel plugins: Discord and Slack
 
-Channels are contributions into the `channel` extension point ([./05-plugins.md](./05-plugins.md)); Discord and Slack are the two v1 channel plugins, built in-process as plugins. The contract below is pinned by [Channel contribution interface and conversation ingress](https://github.com/rogierpennink/hydra/issues/39); platform facts were verified against the Discord and Slack developer documentation on 2026-08-30 (`research/channel-platform-facts.md`, branch `research/channel-platform-facts`).
+Channels are contributions into the `channel` extension point ([./05-plugins.md](./05-plugins.md)); Discord and Slack are the two v1 channel plugins, built in-process as plugins. The contract below is pinned by [Channel contribution interface and conversation ingress](https://github.com/theagenticage/hercule/issues/39); platform facts were verified against the Discord and Slack developer documentation on 2026-08-30 (`research/channel-platform-facts.md`, branch `research/channel-platform-facts`).
 
 ### 11.1 The channel contribution interface
 
@@ -458,7 +458,7 @@ type ClickOutcome =
 ```
 
 - **Target**: enabling delivery on a channel Connection asks for a **notification container** - a channel or the owner's DM - stored on the Connection; the default offer is the owner's DM once an owner identity on that channel is paired. The target may coincide with a bound conversation's container; the post is still the sink's, never the assistant speaking, and is stored as a conversation message with `origin: notification` (section 4.3). This resolves the sink-target question of [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.3: an assistant's conversation is a valid *container* for a sink, but a sink post is not an assistant message.
-- **Rendering** (compact, pinned by [Prototype: rendering bound actions](https://github.com/rogierpennink/hydra/issues/50) 2026-09-01): title in bold, the body as markdown, then **one line per answer: bold label · the core-rendered describe line** ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4), with the producer's description, when present, as subtext under it (Discord `-#` subtext; Slack a `context` block) - the describe line is never dropped; then one button per answer carrying the label only (Discord message components; Slack Block Kit `actions`; the `primary` answer in the platform's primary style), and a deep link to the in-app record. The earlier "label, description, describe line as three lines per answer" rendering was prototyped and rejected as too long. Informational notifications render without buttons.
+- **Rendering** (compact, pinned by [Prototype: rendering bound actions](https://github.com/theagenticage/hercule/issues/50) 2026-09-01): title in bold, the body as markdown, then **one line per answer: bold label · the core-rendered describe line** ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4), with the producer's description, when present, as subtext under it (Discord `-#` subtext; Slack a `context` block) - the describe line is never dropped; then one button per answer carrying the label only (Discord message components; Slack Block Kit `actions`; the `primary` answer in the platform's primary style), and a deep link to the in-app record. The earlier "label, description, describe line as three lines per answer" rendering was prototyped and rejected as too long. Informational notifications render without buttons.
 - **Clicks**: Discord `INTERACTION_CREATE` type 3 with `custom_id = hercule:<notificationId>:<actionId>` (fits 100 characters), acknowledged at once with a deferred update (type 6); Slack `block_actions` with `action_id = hercule:<actionId>` and `value = <notificationId>`, envelope acknowledged at once. The plugin then calls `host.click()` with the sender's identity key and renders the outcome: `executed` and `already-decided` edit the message through `resolved()`-style rendering; `refused` posts an ephemeral "only the owner can decide"; `failed` posts the error ephemerally and leaves the buttons in place for a retry or another answer.
 - **Resolution fan-out**: with deliver-to-all-enabled one decision can sit in Discord, Slack and the web app. The core stores each sink's `DeliveryRef` and, on resolution from anywhere, calls `resolved()` on every sink that delivered: buttons removed, one line "✓ *Start Bugfix* - decided in the web app". If the edit fails the buttons go stale and the pinned "already decided" reply is the safety net.
 - Authentication and execution stay in the core ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4): the plugin reports a click, it never decides.
@@ -486,20 +486,20 @@ type ClickOutcome =
 
 Tickets:
 
-- [Research: event ingress options](https://github.com/rogierpennink/hydra/issues/5)
-- [Domain model & ubiquitous language](https://github.com/rogierpennink/hydra/issues/6)
-- [Plugin architecture: API shape, loading, dogfooding](https://github.com/rogierpennink/hydra/issues/11)
-- [Event & trigger ingress](https://github.com/rogierpennink/hydra/issues/14)
-- [Triage engine & user-set bounds](https://github.com/rogierpennink/hydra/issues/15)
-- [Agent-operates-system surface](https://github.com/rogierpennink/hydra/issues/16)
-- [Assistant design: memory, identity, channel binding](https://github.com/rogierpennink/hydra/issues/17)
-- [Channel contribution interface and conversation ingress (Discord, Slack)](https://github.com/rogierpennink/hydra/issues/39)
-- [Assistant runtime: rotation, heartbeat, injection, memory op edge cases](https://github.com/rogierpennink/hydra/issues/40)
-- [Security & secrets model](https://github.com/rogierpennink/hydra/issues/18)
-- [Web app architecture: observability-first, desktop-shell-ready](https://github.com/rogierpennink/hydra/issues/19)
-- [Assemble the v1 spec](https://github.com/rogierpennink/hydra/issues/21) (comments: memory API ops, CLI content channel, provider-home isolation, compaction rule, version-history flag)
-- [Prototype: assistant memory interface](https://github.com/rogierpennink/hydra/issues/31)
-- [Research: smoothest Connection-setup path](https://github.com/rogierpennink/hydra/issues/32)
+- [Research: event ingress options](https://github.com/theagenticage/hercule/issues/5)
+- [Domain model & ubiquitous language](https://github.com/theagenticage/hercule/issues/6)
+- [Plugin architecture: API shape, loading, dogfooding](https://github.com/theagenticage/hercule/issues/11)
+- [Event & trigger ingress](https://github.com/theagenticage/hercule/issues/14)
+- [Triage engine & user-set bounds](https://github.com/theagenticage/hercule/issues/15)
+- [Agent-operates-system surface](https://github.com/theagenticage/hercule/issues/16)
+- [Assistant design: memory, identity, channel binding](https://github.com/theagenticage/hercule/issues/17)
+- [Channel contribution interface and conversation ingress (Discord, Slack)](https://github.com/theagenticage/hercule/issues/39)
+- [Assistant runtime: rotation, heartbeat, injection, memory op edge cases](https://github.com/theagenticage/hercule/issues/40)
+- [Security & secrets model](https://github.com/theagenticage/hercule/issues/18)
+- [Web app architecture: observability-first, desktop-shell-ready](https://github.com/theagenticage/hercule/issues/19)
+- [Assemble the v1 spec](https://github.com/theagenticage/hercule/issues/21) (comments: memory API ops, CLI content channel, provider-home isolation, compaction rule, version-history flag)
+- [Prototype: assistant memory interface](https://github.com/theagenticage/hercule/issues/31)
+- [Research: smoothest Connection-setup path](https://github.com/theagenticage/hercule/issues/32)
 
 ADRs:
 

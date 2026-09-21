@@ -6,9 +6,9 @@ A Workflow is a stored, editable, declarative source of execution plans: typed i
 
 A workflow is data in the controller database, created and edited through the public API and the web app ([./14-web-app.md](./14-web-app.md) owns the editor: schema-validated structured text plus a read-only DAG preview). There is no user-authored code in a workflow and no repo-local definition; expressiveness comes from agent steps and plugin-contributed actions ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)). Editing a workflow never affects in-flight runs, because every run executes its own frozen copy ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md)); there is no workflow versioning.
 
-**The stored form of a workflow is its YAML source** (resolved 2026-09-01, [Web app details](https://github.com/rogierpennink/hydra/issues/45), [ADR 0029](../adr/0029-workflow-definitions-are-stored-as-their-yaml-source.md)): the text the user wrote, kept byte for byte, so comments, key order and formatting survive every save and a git-versioned future round-trips exactly. The `Workflow` shape below is what the controller *parses* the source into - a derived column recomputed on every write and never written on its own - for validation, the editor's preview and stamping; a run's frozen plan holds the parsed form only. The public API accepts either the source or a definition object and always stores source: an object is rendered to canonical YAML by one deterministic rule (contract key order, a block scalar for any string containing a newline, double quotes for anything else that needs quoting, two-space indent) so two controllers render identically. `workflow.read` returns the source, never a parsed object ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). Three fields of the shape are **row state outside the text** - `id`, `enabled` and the timestamps - and so is each start trigger's `status`, keyed by `(workflowId, triggerId)`: a breaker trip or an enable toggle must never rewrite the user's file.
+**The stored form of a workflow is its YAML source** (resolved 2026-09-01, [Web app details](https://github.com/theagenticage/hercule/issues/45), [ADR 0029](../adr/0029-workflow-definitions-are-stored-as-their-yaml-source.md)): the text the user wrote, kept byte for byte, so comments, key order and formatting survive every save and a git-versioned future round-trips exactly. The `Workflow` shape below is what the controller *parses* the source into - a derived column recomputed on every write and never written on its own - for validation, the editor's preview and stamping; a run's frozen plan holds the parsed form only. The public API accepts either the source or a definition object and always stores source: an object is rendered to canonical YAML by one deterministic rule (contract key order, a block scalar for any string containing a newline, double quotes for anything else that needs quoting, two-space indent) so two controllers render identically. `workflow.read` returns the source, never a parsed object ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). Three fields of the shape are **row state outside the text** - `id`, `enabled` and the timestamps - and so is each start trigger's `status`, keyed by `(workflowId, triggerId)`: a breaker trip or an enable toggle must never rewrite the user's file.
 
-Names pinned by the tickets are used verbatim (`maxTraversals`, `freshSession`, `iteration-limit`, cron `schedule`/`timezone`, action ids). Other field names below are this document's consolidation and are normative for the implementation; the concepts behind them are the tickets'. The execution semantics (joins, skips, signal nodes, terminal steps, errors, run and step states, one workspace per run) were pinned by [Workflow execution semantics](https://github.com/rogierpennink/hydra/issues/36).
+Names pinned by the tickets are used verbatim (`maxTraversals`, `freshSession`, `iteration-limit`, cron `schedule`/`timezone`, action ids). Other field names below are this document's consolidation and are normative for the implementation; the concepts behind them are the tickets'. The execution semantics (joins, skips, signal nodes, terminal steps, errors, run and step states, one workspace per run) were pinned by [Workflow execution semantics](https://github.com/theagenticage/hercule/issues/36).
 
 ```ts
 interface Workflow {
@@ -190,11 +190,11 @@ Actor and permission context: a built-in action executing inside a run is stampe
 
 An agent step starts a Session for the named Agent and waits until its turn completes. The controller authors the SessionSpec (the agent's provider instance, the step's `model` selection, `accessMode`, the run's `workspaceId` (section 4.4), system prompt from the agent, the step's `outputSchema`), places it on the run's runner (section 4.4; a full runner queues the placement and the step waits), and sends the rendered `prompt` as the first turn. The session carries a copy of the agent's permission profile id (shipped default for workflow agent steps: `worker`, [./13-security.md](./13-security.md)) and reaches Hercule through the `hercule` CLI with its session token. The session is linked to the run and step from the session side; the run's step record holds the session id.
 
-Defaults come from the Agent (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): the step's `model` and `accessMode` are optional overrides of the Agent's `model` and `accessMode` (default `full-access`); absent both, the instance's default model applies. Every resolved value is copied into the Session at spawn; the session never reads through its agent afterwards ([./02-domain-model.md](./02-domain-model.md) rule 9).
+Defaults come from the Agent (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)): the step's `model` and `accessMode` are optional overrides of the Agent's `model` and `accessMode` (default `full-access`); absent both, the instance's default model applies. Every resolved value is copied into the Session at spawn; the session never reads through its agent afterwards ([./02-domain-model.md](./02-domain-model.md) rule 9).
 
 `accessMode` names one of the four fixed modes. If the provider does not support it natively, the controller substitutes the hardcoded fallback before session start, strictly downward in permissiveness; if no equal-or-less-permissive mode exists the step fails with a clear error ([./06-providers.md](./06-providers.md), [./13-security.md](./13-security.md); [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md) as amended).
 
-Runner-owned inactivity and absolute timeouts apply to the session; a session that times out or exits abnormally fails the step. *(Amended 2026-09-12, [#162](https://github.com/rogierpennink/hydra/issues/162).)* A timeout while the step's turn runs fails the step; an inactivity exit between iterations does not, and the next iteration's prompt resumes the session in place ([./06-providers.md](./06-providers.md) section 4.1).
+Runner-owned inactivity and absolute timeouts apply to the session; a session that times out or exits abnormally fails the step. *(Amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162).)* A timeout while the step's turn runs fails the step; an inactivity exit between iterations does not, and the next iteration's prompt resumes the session in place ([./06-providers.md](./06-providers.md) section 4.1).
 
 Iterations: when an edge brings the graph back to an agent step (a cycle, or a signal node firing into it), the step by default sends the newly rendered prompt as the next turn of the same session, so review feedback or a failed-checks signal arrives as a follow-up in context. `freshSession: true` opts out for context-poisoning cases and starts a new session each iteration. Each iteration produces its own step record (section 7.2). A step's `outputSchema` travels on the `SessionSpec` once, and the adapter applies it to every turn of that session ([./06-providers.md](./06-providers.md) section 7), so each iteration yields a fresh structured result.
 
@@ -416,22 +416,22 @@ Whether a gate step earns a return is a post-dogfooding question: it needs a kno
 
 Tickets:
 
-- Workflow model: recipes, triggers, human gates - https://github.com/rogierpennink/hydra/issues/13
-- Workflow execution semantics: joins, signals, errors, run states - https://github.com/rogierpennink/hydra/issues/36
-- Research: TypeScript-native expression language for workflow conditions - https://github.com/rogierpennink/hydra/issues/27
-- Research: structured output across provider harnesses - https://github.com/rogierpennink/hydra/issues/28
-- Triage engine & user-set bounds - https://github.com/rogierpennink/hydra/issues/15
-- Event & trigger ingress design - https://github.com/rogierpennink/hydra/issues/14
-- Domain model & ubiquitous language - https://github.com/rogierpennink/hydra/issues/6
-- Controller/runner architecture: registration, placement, scheduling - https://github.com/rogierpennink/hydra/issues/7
-- Runner execution substrate - https://github.com/rogierpennink/hydra/issues/8
-- Plugin architecture: API shape, loading, dogfooding - https://github.com/rogierpennink/hydra/issues/11
-- Provider adapter interface - https://github.com/rogierpennink/hydra/issues/12
-- Agent-operates-system surface - https://github.com/rogierpennink/hydra/issues/16
-- Security & secrets model - https://github.com/rogierpennink/hydra/issues/18
-- Assemble the v1 spec (Intake constraint: stored triage verdict) - https://github.com/rogierpennink/hydra/issues/21
-- Task model: shape, status axis, lifecycle, provenance - https://github.com/rogierpennink/hydra/issues/29
-- Prototype: the Intake view - https://github.com/rogierpennink/hydra/issues/30
+- Workflow model: recipes, triggers, human gates - https://github.com/theagenticage/hercule/issues/13
+- Workflow execution semantics: joins, signals, errors, run states - https://github.com/theagenticage/hercule/issues/36
+- Research: TypeScript-native expression language for workflow conditions - https://github.com/theagenticage/hercule/issues/27
+- Research: structured output across provider harnesses - https://github.com/theagenticage/hercule/issues/28
+- Triage engine & user-set bounds - https://github.com/theagenticage/hercule/issues/15
+- Event & trigger ingress design - https://github.com/theagenticage/hercule/issues/14
+- Domain model & ubiquitous language - https://github.com/theagenticage/hercule/issues/6
+- Controller/runner architecture: registration, placement, scheduling - https://github.com/theagenticage/hercule/issues/7
+- Runner execution substrate - https://github.com/theagenticage/hercule/issues/8
+- Plugin architecture: API shape, loading, dogfooding - https://github.com/theagenticage/hercule/issues/11
+- Provider adapter interface - https://github.com/theagenticage/hercule/issues/12
+- Agent-operates-system surface - https://github.com/theagenticage/hercule/issues/16
+- Security & secrets model - https://github.com/theagenticage/hercule/issues/18
+- Assemble the v1 spec (Intake constraint: stored triage verdict) - https://github.com/theagenticage/hercule/issues/21
+- Task model: shape, status axis, lifecycle, provenance - https://github.com/theagenticage/hercule/issues/29
+- Prototype: the Intake view - https://github.com/theagenticage/hercule/issues/30
 
 ADRs: [0001](../adr/0001-runs-freeze-an-execution-plan.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md), [0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md), [0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [0013](../adr/0013-agents-operate-hercule-through-the-public-api.md), [0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md).
 

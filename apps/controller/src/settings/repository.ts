@@ -100,7 +100,7 @@ const encode = (
  * row gets there: a key this build does not declare, which is what a downgrade
  * leaves behind, and a value the key no longer takes, which is what narrowing a
  * key's type leaves behind (`thread.workspace` lost `none` in
- * [#72](https://github.com/rogierpennink/hydra/issues/72)). Both read as unset,
+ * [#72](https://github.com/theagenticage/hercule/issues/72)). Both read as unset,
  * which is what the setting meant either way, so neither needs a migration.
  */
 const decodeRows = <S extends TypedScope>(

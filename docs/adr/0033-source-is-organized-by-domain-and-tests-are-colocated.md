@@ -4,7 +4,7 @@ Date: 2026-09-04
 
 ## Status
 
-Accepted. Decided by [State store and first run (#56)](https://github.com/rogierpennink/hydra/issues/56). Follows from [ADR 0031](./0031-the-backend-is-written-on-effect.md) (every operation is a method on an Effect service).
+Accepted. Decided by [State store and first run (#56)](https://github.com/theagenticage/hercule/issues/56). Follows from [ADR 0031](./0031-the-backend-is-written-on-effect.md) (every operation is a method on an Effect service).
 
 ## Context
 
@@ -38,7 +38,7 @@ Source under an app or package is organized **by domain**, one folder per domain
 
 ## Amendment: the web app's layout (2026-09-04)
 
-Recorded by [The web app shell (#58)](https://github.com/rogierpennink/hydra/issues/58). The web app has no domains of its own - it renders the controller's - so the decision above needs three names for it, and the test rule needs one clarification.
+Recorded by [The web app shell (#58)](https://github.com/theagenticage/hercule/issues/58). The web app has no domains of its own - it renders the controller's - so the decision above needs three names for it, and the test rule needs one clarification.
 
 - **`apps/web/src/app/` is the third non-domain folder**, the web app's equivalent of `db/`: the wiring that every screen sits on. It holds the router, the router context, the shared query options, the entry guard, the form adapter, and the test harness. **Nothing that renders a screen.**
 - **`apps/web/src/screens/` holds presentation shared across screens that knows about Hercule**: the centered frame outside the shell, the fallback screens, the timezone control, the Connect rows. `apps/web/src/routes/` holds the screens themselves, and a `-` prefixed file there is local to its route folder.
@@ -47,9 +47,9 @@ Recorded by [The web app shell (#58)](https://github.com/rogierpennink/hydra/iss
 
 ## Amendment: the controller daemon is the layer above the domains (2026-09-17)
 
-Recorded by [The controller daemon (#208)](https://github.com/rogierpennink/hydra/issues/208). Some work belongs to no single domain: placing a session reads settings, providers and runners, writes session and workspace rows, and ends in a frame to a machine. Put in the domain that owns the rows, that work made the controller's domain graph a cycle - the thing the decision above is meant to prevent.
+Recorded by [The controller daemon (#208)](https://github.com/theagenticage/hercule/issues/208). Some work belongs to no single domain: placing a session reads settings, providers and runners, writes session and workspace rows, and ends in a frame to a machine. Put in the domain that owns the rows, that work made the controller's domain graph a cycle - the thing the decision above is meant to prevent.
 
 - **`apps/controller/src/daemon/` is a layer above the domains**, "the controller daemon". One file per use case, beside a shared helper or two (`absorbing.ts`, `resuming.ts`), and a use case is anything that sequences a write set across domains together with a message to a runner: placement, dispatch, inbound, live, retirement, and provisioning (the workspace provision and dispose operations, the re-send on arrival and the expiry sweep). It is the only module that sends frames to runners and the only consumer of what they report, but for the one exception below; a domain below it holds rows and their lifecycle rules and produces frames as values, and a runner publishes what it hears and calls nobody. It is not a fourth infrastructure folder beside `db/` and `config/`: those sit under the domains, this one sits above them.
 - **The import graph of `apps/controller/src` is a DAG**, enforced by `pnpm dep-lint` with no allowlist of edges. A write that crosses a domain comes from above; a read across domains - a repository query, a SQL predicate, a pure function, a type - stays sideways and is fine. Only `http/` imports the controller daemon; no domain may.
 - **Some operations' service methods live in the controller daemon**, not in the domain that owns the rows: `session.spawn`, `session.input`, `workspace.provision` and `runner.retire` are controller daemon use cases. The rule of [ADR 0031](./0031-the-backend-is-written-on-effect.md) is unchanged - an operation is still one method on an Effect service, and its handler is still one line.
-- One exception remains: the providers domain still sends its own frames to runners (login, probe, harness install). Same principle, no cycle today; tracked in [#209](https://github.com/rogierpennink/hydra/issues/209).
+- One exception remains: the providers domain still sends its own frames to runners (login, probe, harness install). Same principle, no cycle today; tracked in [#209](https://github.com/theagenticage/hercule/issues/209).

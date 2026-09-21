@@ -4,7 +4,7 @@ Date: 2026-09-01
 
 ## Status
 
-Accepted. Decided by [Web app details (#45)](https://github.com/rogierpennink/hydra/issues/45). Refines [ADR 0001](./0001-runs-freeze-an-execution-plan.md) (a run still freezes the parsed plan) and [ADR 0008](./0008-workflow-graphs-route-on-declared-outputs.md) (the definition stays declarative).
+Accepted. Decided by [Web app details (#45)](https://github.com/theagenticage/hercule/issues/45). Refines [ADR 0001](./0001-runs-freeze-an-execution-plan.md) (a run still freezes the parsed plan) and [ADR 0008](./0008-workflow-graphs-route-on-declared-outputs.md) (the definition stays declarative).
 
 ## Context
 
