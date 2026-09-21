@@ -1061,3 +1061,20 @@ describe("hercule transcript read: a turn that answered under a schema", () => {
     ]);
   });
 });
+
+// A positional whose field carries a shorthand is decoded by that field's own
+// schema before the call, so the wire never carries the terminal's spelling.
+describe("a positional a field's own schema decodes", () => {
+  it("sends the decoded target, not the shorthand the agent typed", async () => {
+    const { fetch, run } = cli(() => ({ subscriptionId: id("aaaaaaa1") }));
+
+    expect(await run("subscription", "create", "github:pr:o/r#87")).toBe(0);
+
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/subscriptions",
+      body: { target: { kind: "ref", ref: "github:pr:o/r#87" } },
+    });
+  });
+});
