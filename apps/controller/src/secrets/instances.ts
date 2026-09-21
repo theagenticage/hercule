@@ -9,7 +9,7 @@
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { secretFields, type ProviderDefinition } from "@hydra/plugin-host";
+import { secretFields, type ProviderDefinition } from "@hercule/plugin-host";
 import { providerInstanceOwner, Secrets, type SecretDecryptError } from "./repository";
 
 /**

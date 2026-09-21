@@ -17,7 +17,7 @@ import type {
   RunnerFacts,
   RunnerLifecycle,
   RunnerWatermark,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";

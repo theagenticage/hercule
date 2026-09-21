@@ -102,7 +102,7 @@ describe("workspace.provision", () => {
 
   // D-20a: adopting a folder in place is not built, so the payload takes no
   // path and one offered is refused rather than quietly ignored.
-  it("refuses a path: a main workspace is always Hydra's own clone", async () => {
+  it("refuses a path: a main workspace is always Hercule's own clone", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await repo(arranged, "https://github.com/acme/web");
       const refused = await provision(arranged, {
@@ -272,7 +272,7 @@ describe("the machine's report", () => {
         workspaceId,
         status: "ready",
         checkouts: [
-          { checkoutId, branch: "hydra/run-ffffffff", branches: ["main"], defaultBranch: "main" },
+          { checkoutId, branch: "hercule/run-ffffffff", branches: ["main"], defaultBranch: "main" },
         ],
       } as never);
       arranged.wire.send({
@@ -390,14 +390,14 @@ describe("the machine's report", () => {
 describe("workspace.query and workspace.read", () => {
   it("answers with what a workspace holds, and filters by machine, repo, project, kind and status", async () => {
     await withWorkspaces(async (arranged) => {
-      const hydra = await post(
+      const hercule = await post(
         arranged.harness.base,
         "/api/v1/projects",
-        { name: "Hydra" },
+        { name: "Hercule" },
         arranged.token,
       );
-      expect([200, 201], await hydra.clone().text()).toContain(hydra.status);
-      const projectId = ((await hydra.json()) as { id: string }).id;
+      expect([200, 201], await hercule.clone().text()).toContain(hercule.status);
+      const projectId = ((await hercule.json()) as { id: string }).id;
 
       const created = await post(
         arranged.harness.base,

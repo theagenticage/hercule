@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { WorkspaceMenu, WorkspacePick } from "@hydra/client-core";
+import type { WorkspaceMenu, WorkspacePick } from "@hercule/client-core";
 import { MenuHeader, MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 

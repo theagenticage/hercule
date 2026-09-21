@@ -6,15 +6,15 @@ import {
   idTail,
   priorityGlyph,
   provenanceTarget,
-} from "@hydra/client-core";
+} from "@hercule/client-core";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
   type Project,
   type Task,
   type TaskUpdateInput,
-} from "@hydra/contract";
-import { Button, Drawer, Input, LaneLabel, PriorityGlyph, Row, Select } from "@hydra/ui";
+} from "@hercule/contract";
+import { Button, Drawer, Input, LaneLabel, PriorityGlyph, Row, Select } from "@hercule/ui";
 
 const NO_PROJECT = "";
 

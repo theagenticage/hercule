@@ -30,7 +30,7 @@ import {
   notFound,
   validation,
   type ApiError,
-} from "@hydra/contract";
+} from "@hercule/contract";
 
 /** The eight error classes all carry `error`; this is what puts one on the wire. */
 export const responseFor = (error: ApiError): HttpServerResponse.HttpServerResponse =>

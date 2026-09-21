@@ -1,7 +1,7 @@
 import type { JSX } from "react";
-import { cn } from "@hydra/ui";
-import { formatStamp } from "@hydra/client-core";
-import type { Runner } from "@hydra/contract";
+import { cn } from "@hercule/ui";
+import { formatStamp } from "@hercule/client-core";
+import type { Runner } from "@hercule/contract";
 
 /**
  * Only `online` is live and only `unreachable` was nobody's choice. The
@@ -34,7 +34,7 @@ export function Connectivity({
       {live ? (
         <span
           aria-hidden="true"
-          className="hydra-live-dot size-1.5 shrink-0 rounded-full bg-live"
+          className="hercule-live-dot size-1.5 shrink-0 rounded-full bg-live"
         />
       ) : null}
       {runner.connectivity}

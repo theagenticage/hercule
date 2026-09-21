@@ -13,7 +13,7 @@
  * reviewer reading the extension source.
  */
 import { afterAll, describe, expect, it } from "vitest";
-import type { AccessMode } from "@hydra/protocol";
+import type { AccessMode } from "@hercule/protocol";
 import { SUBMIT_RESULT_TOOL } from "./extension";
 import { requiresApproval } from "./policy";
 import { cleanupHomes, settle, SPEC, started, taggedIn, until } from "./testing";
@@ -21,7 +21,7 @@ import { cleanupHomes, settle, SPEC, started, taggedIn, until } from "./testing"
 afterAll(cleanupHomes);
 
 /**
- * pi 0.85.1's own built-ins, Hydra's own tool for a session's answer, and one
+ * pi 0.85.1's own built-ins, Hercule's own tool for a session's answer, and one
  * name from no built-in at all: an MCP tool or a tool a later pi adds is the
  * case the catch-all rows are about.
  */
@@ -51,7 +51,7 @@ const TABLE: Readonly<
     powershell: true,
     write: true,
     edit: true,
-    // Hydra's own: recording the answer the session was asked for touches
+    // Hercule's own: recording the answer the session was asked for touches
     // nothing, and an unattended session has nobody to approve it.
     submit_result: false,
     mcp__jira__create: true,
@@ -93,7 +93,7 @@ describe("which tools an access mode parks", () => {
   }
 });
 
-describe("Hydra's own tool for a session's answer", () => {
+describe("Hercule's own tool for a session's answer", () => {
   for (const mode of Object.keys(TABLE) as ReadonlyArray<AccessMode>) {
     it(`runs it unasked under ${mode}`, () => {
       // The name is spelled a second time inside `requiresApproval`, which
@@ -110,7 +110,7 @@ describe("what a launched pi is told about its access mode", () => {
     it(`launches a ${mode} session under that mode`, async () => {
       const run = await started({}, { ...SPEC, accessMode: mode });
 
-      expect(run.child.env["HYDRA_ACCESS_MODE"]).toBe(mode);
+      expect(run.child.env["HERCULE_ACCESS_MODE"]).toBe(mode);
     });
   }
 

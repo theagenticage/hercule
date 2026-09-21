@@ -30,7 +30,7 @@ import { transcript } from "./groups/transcript";
 import { user } from "./groups/user";
 import { workspace } from "./groups/workspace";
 
-export const api = HttpApi.make("hydra")
+export const api = HttpApi.make("hercule")
   .add(
     setup,
     auth,

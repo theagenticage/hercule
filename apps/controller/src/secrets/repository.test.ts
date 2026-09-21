@@ -9,7 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { homePaths, HydraHome } from "../config";
+import { homePaths, HerculeHome } from "../config";
 import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { masterKeyLayer } from "./masterKey";
@@ -21,14 +21,14 @@ const TOKEN = "ghp_a-real-looking-token";
 let homes: Array<string> = [];
 
 /** A master key file in its own temporary home; a second home is a different key. */
-const keyIn = (): Layer.Layer<HydraHome> => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-secrets-"));
+const keyIn = (): Layer.Layer<HerculeHome> => {
+  const home = mkdtempSync(join(tmpdir(), "hercule-secrets-"));
   homes.push(home);
-  return Layer.succeed(HydraHome, HydraHome.of(homePaths(home, join(home, "data"))));
+  return Layer.succeed(HerculeHome, HerculeHome.of(homePaths(home, join(home, "data"))));
 };
 
 /** The real repository over a `:memory:` database with the real migrations. */
-const stack = (home: Layer.Layer<HydraHome> = keyIn()) =>
+const stack = (home: Layer.Layer<HerculeHome> = keyIn()) =>
   secretsLayer.pipe(
     Layer.provide(masterKeyLayer("file").pipe(Layer.provide(home))),
     Layer.provideMerge(TestDatabase),

@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import { Popover, PopoverContent, PopoverTrigger, cn } from "@hydra/ui";
+import { Popover, PopoverContent, PopoverTrigger, cn } from "@hercule/ui";
 
 /**
  * One composer selector: a trigger and its menu, anchored above it. Which

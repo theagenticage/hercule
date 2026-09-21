@@ -25,7 +25,7 @@ const BUDGET_BYTES = 250 * 1024;
 const dist = fileURLToPath(new URL("../apps/web/dist", import.meta.url));
 
 if (!existsSync(dist)) {
-  console.error("check-bundle-budget: no apps/web/dist; run `pnpm --filter @hydra/web build`.");
+  console.error("check-bundle-budget: no apps/web/dist; run `pnpm --filter @hercule/web build`.");
   process.exit(1);
 }
 

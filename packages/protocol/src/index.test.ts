@@ -165,8 +165,8 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
     checkouts: [
       {
         checkoutId: CHECKOUT_ID,
-        branch: "hydra/run-0199e0e7",
-        branches: ["main", "hydra/run-0199e0e7"],
+        branch: "hercule/run-0199e0e7",
+        branches: ["main", "hercule/run-0199e0e7"],
         defaultBranch: "main",
       },
     ],
@@ -235,7 +235,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
         resourceId: RESOURCE_ID,
         remote: "https://github.com/acme/web",
         subdirectory: null,
-        branch: "hydra/run-0199e0e7",
+        branch: "hercule/run-0199e0e7",
         baseBranch: "main",
         setupCommand: "pnpm install",
         workspaceInclude: true,

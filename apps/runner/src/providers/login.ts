@@ -16,7 +16,7 @@ import {
   type LoginFailed,
   type LoginResult,
   type LoginUrl,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
 import { fact } from "./text";
 

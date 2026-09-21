@@ -11,7 +11,7 @@
  * A repo's Connection has to be a GitHub one: it is what a push authenticates
  * with, and any other account would be a credential that cannot work.
  *
- * Delete is real, not soft: a resource is a pointer at something outside Hydra,
+ * Delete is real, not soft: a resource is a pointer at something outside Hercule,
  * and a pointer nobody wants is gone. It is refused while a workspace stands on
  * it, because that workspace is a working copy on a machine.
  */
@@ -43,7 +43,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { requireGrant, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
@@ -103,7 +103,7 @@ const offRepo = (given: {
       : undefined;
 
 const NOT_A_REMOTE =
-  "that is not a remote Hydra can clone: write https://host/owner/repo or git@host:owner/repo";
+  "that is not a remote Hercule can clone: write https://host/owner/repo or git@host:owner/repo";
 
 const STANDS_ON =
   "a workspace still stands on that resource; dispose of it before removing the resource";
@@ -392,7 +392,7 @@ const make = Effect.gen(function* () {
 export class ResourceService extends Context.Service<
   ResourceService,
   Effect.Success<typeof make>
->()("hydra/controller/resources/ResourceService") {}
+>()("hercule/controller/resources/ResourceService") {}
 
 export const ResourceServiceLayer: Layer.Layer<
   ResourceService,

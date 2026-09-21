@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { EmptyState } from "@hydra/ui";
+import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { pluginsQuery } from "../../../app/queries";
 import { PluginCard } from "./-plugin-card";
@@ -31,7 +31,7 @@ function Plugins(): JSX.Element {
     return (
       <EmptyState
         headline="No plugins are installed."
-        lead="Plugins bring channels, event sources, providers and workflow actions. Each one declares what it contributes, and Hydra generates its configuration form from that."
+        lead="Plugins bring channels, event sources, providers and workflow actions. Each one declares what it contributes, and Hercule generates its configuration form from that."
       />
     );
   }

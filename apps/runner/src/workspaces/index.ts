@@ -6,7 +6,7 @@
  * Ids come in and paths go out. The registry, not the controller, is what
  * remembers where a workspace is.
  */
-import type { WorkspaceDispose, WorkspaceProvision, WorkspaceReport } from "@hydra/protocol";
+import type { WorkspaceDispose, WorkspaceProvision, WorkspaceReport } from "@hercule/protocol";
 import { disposeWorkspace } from "./dispose";
 import { provisionWorkspace, reprovision } from "./provision";
 import {

@@ -8,7 +8,7 @@
  *
  * Two things it establishes, and every later credential keeps:
  *
- * - **A credential is stored only as a hash.** Every token Hydra issues is
+ * - **A credential is stored only as a hash.** Every token Hercule issues is
  *   opaque and 256 bits of randomness, so the hash is SHA-256 hex and lookup is
  *   one indexed equality. The password is the other case
  *   and is stored as an argon2id PHC string, which carries its own parameters

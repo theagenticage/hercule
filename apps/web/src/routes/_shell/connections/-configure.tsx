@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@hydra/ui";
+import { Button } from "@hercule/ui";
 import {
   configDraft,
   configFields,
@@ -9,9 +9,9 @@ import {
   queryKeys,
   type ConfigDraft,
   type ConnectionType,
-  type HydraClient,
-} from "@hydra/client-core";
-import type { Connection } from "@hydra/contract";
+  type HerculeClient,
+} from "@hercule/client-core";
+import type { Connection } from "@hercule/contract";
 import { ConfigFieldRow } from "../../../screens/plugins/config-form";
 import { SaveStatus, messageOf } from "../../../screens/save-status";
 import { Naming } from "./-naming";
@@ -28,7 +28,7 @@ export function ConfigureConnection({
   type,
   onDone,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly connection: Connection;
   /** Absent when the plugin that declared the type is no longer in the binary. */
   readonly type: ConnectionType | undefined;

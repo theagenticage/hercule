@@ -12,10 +12,10 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import type userEvent from "@testing-library/user-event";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createClient, createLive, type FetchLike, type Live } from "@hydra/client-core";
-import type { Runner } from "@hydra/contract";
-import { StubSocket, openInto } from "@hydra/client-core/testing";
-import { memoryStorage } from "@hydra/ui/testing";
+import { createClient, createLive, type FetchLike, type Live } from "@hercule/client-core";
+import type { Runner } from "@hercule/contract";
+import { StubSocket, openInto } from "@hercule/client-core/testing";
+import { memoryStorage } from "@hercule/ui/testing";
 import { createAppRouter } from "./router";
 import { followLiveStatus } from "./live-status";
 

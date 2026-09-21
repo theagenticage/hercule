@@ -38,14 +38,14 @@ import {
   type TranscriptRow,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { Effect, Fiber, Latch, Layer, Result, Schedule, Stream } from "effect";
 import * as RpcClient from "effect/unstable/rpc/RpcClient";
 import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as Socket from "effect/unstable/socket/Socket";
-import type { HydraClient } from "../client";
+import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
 import { queryKeysFor, type LiveQueryKey } from "./keys";
 
@@ -71,7 +71,7 @@ export type LiveWebSocketConstructor = (url: string) => WebSocket;
 
 export interface LiveOptions {
   /** The client the ticket is fetched with, and whose credential the socket inherits. */
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   /** Where the controller lives, e.g. `http://127.0.0.1:7717`. */
   readonly baseUrl: string;
   /** The `WebSocket` to dial with. Defaults to the global one; a seam for tests. */

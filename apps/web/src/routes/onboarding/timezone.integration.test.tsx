@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { browserTimezone } from "@hydra/client-core";
+import { browserTimezone } from "@hercule/client-core";
 import { renderApp, stubApi, type Handler } from "../../app/testing";
 
 /** A signed-in controller with nothing recorded against onboarding yet. */

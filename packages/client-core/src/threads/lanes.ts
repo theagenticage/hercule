@@ -4,7 +4,7 @@
  * lanes always come back empty - the fixed order is what a screen renders,
  * not a guess about what is populated.
  */
-import type { Session } from "@hydra/contract";
+import type { Session } from "@hercule/contract";
 import { isSettled, WORKING_STATUSES } from "./status";
 
 export type LaneKind = "waiting" | "running" | "idle" | "assistants" | "settled";

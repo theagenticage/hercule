@@ -5,7 +5,7 @@
  * this process found and does not survive a restart; `enabled` and `config` do.
  */
 import { Schema } from "effect";
-import { PluginCapability, PluginId } from "@hydra/plugin-host";
+import { PluginCapability, PluginId } from "@hercule/plugin-host";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -22,7 +22,7 @@ export const MAX_PLUGIN_MESSAGE_LENGTH = 2048;
 const PluginMessage = Schema.String.check(Schema.isMaxLength(MAX_PLUGIN_MESSAGE_LENGTH));
 
 /** Re-exported from the package plugins are written against: one list, two readers. */
-export { PluginCapability } from "@hydra/plugin-host";
+export { PluginCapability } from "@hercule/plugin-host";
 
 /**
  * Each is decided from the manifest alone, before any plugin code runs, which

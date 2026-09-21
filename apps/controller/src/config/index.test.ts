@@ -3,23 +3,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
-import { BootstrapConfig, envName, layer, HydraHome } from "./index";
+import { BootstrapConfig, envName, layer, HerculeHome } from "./index";
 
 let home: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "hydra-home-"));
+  home = mkdtempSync(join(tmpdir(), "hercule-home-"));
 });
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-/** Resolve config the way `hydra serve` does, against the temporary home. */
+/** Resolve config the way `hercule serve` does, against the temporary home. */
 const load = (argv: ReadonlyArray<string> = [], env: Record<string, string | undefined> = {}) =>
   Effect.runPromise(
     Effect.gen(function* () {
-      return { home: yield* HydraHome, config: yield* BootstrapConfig };
+      return { home: yield* HerculeHome, config: yield* BootstrapConfig };
     }).pipe(Effect.provide(layer(["--home", home, ...argv], env)), Effect.result),
   );
 
@@ -42,10 +42,10 @@ const failed = async (
 };
 
 describe("envName", () => {
-  it("uppercases, turns dots into underscores and prefixes HYDRA_", () => {
-    expect(envName("bind.port")).toBe("HYDRA_BIND_PORT");
-    expect(envName("data.dir")).toBe("HYDRA_DATA_DIR");
-    expect(envName("log.level")).toBe("HYDRA_LOG_LEVEL");
+  it("uppercases, turns dots into underscores and prefixes HERCULE_", () => {
+    expect(envName("bind.port")).toBe("HERCULE_BIND_PORT");
+    expect(envName("data.dir")).toBe("HERCULE_DATA_DIR");
+    expect(envName("log.level")).toBe("HERCULE_LOG_LEVEL");
   });
 });
 
@@ -98,13 +98,13 @@ describe("the config layer", () => {
     expect(fromFile.config.bindHost).toBe("10.0.0.1");
     expect(fromFile.config.bindPort).toBe(5000);
 
-    const fromEnv = await loaded([], { HYDRA_BIND_HOST: "10.0.0.2", HYDRA_BIND_PORT: "5001" });
+    const fromEnv = await loaded([], { HERCULE_BIND_HOST: "10.0.0.2", HERCULE_BIND_PORT: "5001" });
     expect(fromEnv.config.bindHost).toBe("10.0.0.2");
     expect(fromEnv.config.bindPort).toBe(5001);
 
     const fromFlag = await loaded(["-c", "bind.host=10.0.0.3", "-c", "bind.port=5002"], {
-      HYDRA_BIND_HOST: "10.0.0.2",
-      HYDRA_BIND_PORT: "5001",
+      HERCULE_BIND_HOST: "10.0.0.2",
+      HERCULE_BIND_PORT: "5001",
     });
     expect(fromFlag.config.bindHost).toBe("10.0.0.3");
     expect(fromFlag.config.bindPort).toBe(5002);
@@ -117,7 +117,7 @@ describe("the config layer", () => {
 
   it("accepts --home=<dir> as well as --home <dir>", async () => {
     const result = await Effect.runPromise(
-      HydraHome.pipe(Effect.provide(layer([`--home=${home}`], {})), Effect.result),
+      HerculeHome.pipe(Effect.provide(layer([`--home=${home}`], {})), Effect.result),
     );
     expect(Result.isSuccess(result) && result.success.home).toBe(home);
   });
@@ -159,8 +159,8 @@ describe("the config layer", () => {
     expect(error.message).toContain("-c bind.port");
     expect(error.message).toContain('"nope"');
 
-    const fromEnv = await failed([], { HYDRA_LOG_LEVEL: "chatty" });
-    expect(fromEnv.message).toContain("HYDRA_LOG_LEVEL");
+    const fromEnv = await failed([], { HERCULE_LOG_LEVEL: "chatty" });
+    expect(fromEnv.message).toContain("HERCULE_LOG_LEVEL");
     expect(fromEnv.message).toContain('"chatty"');
 
     writeFileSync(join(home, "config.toml"), "bind.port = 0\n");
@@ -188,8 +188,8 @@ describe("the config layer", () => {
     expect((await failed(["-c", "bind.host=http://127.0.0.1"]))._tag).toBe("ConfigValueError");
   });
 
-  it("takes the hosts hydra can actually bind", async () => {
-    for (const host of ["127.0.0.1", "0.0.0.0", "::", "::1", "localhost", "hydra.local"]) {
+  it("takes the hosts hercule can actually bind", async () => {
+    for (const host of ["127.0.0.1", "0.0.0.0", "::", "::1", "localhost", "hercule.local"]) {
       const config = await Effect.runPromise(
         BootstrapConfig.pipe(
           Effect.provide(layer(["--home", home, "-c", `bind.host=${host}`], {})),
@@ -199,18 +199,18 @@ describe("the config layer", () => {
     }
   });
 
-  it("refuses an argument hydra serve does not have", async () => {
+  it("refuses an argument hercule serve does not have", async () => {
     const result = await Effect.runPromise(
-      HydraHome.pipe(Effect.provide(layer(["--home", home, "--version"], {})), Effect.result),
+      HerculeHome.pipe(Effect.provide(layer(["--home", home, "--version"], {})), Effect.result),
     );
     expect(Result.isFailure(result) && result.failure._tag).toBe("InvalidOptionError");
-    expect(Result.isFailure(result) && result.failure.message).toContain("usage: hydra serve");
+    expect(Result.isFailure(result) && result.failure.message).toContain("usage: hercule serve");
     expect(existsSync(join(home, "config.toml"))).toBe(false);
   });
 
   it("reports a malformed global option", async () => {
     const result = await Effect.runPromise(
-      HydraHome.pipe(Effect.provide(layer(["--home", home, "-c", "oops"], {})), Effect.result),
+      HerculeHome.pipe(Effect.provide(layer(["--home", home, "-c", "oops"], {})), Effect.result),
     );
     expect(Result.isFailure(result) && result.failure._tag).toBe("InvalidOptionError");
   });

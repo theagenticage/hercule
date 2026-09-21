@@ -5,8 +5,8 @@
  * at read time, not from the stored row.
  */
 import { Schema } from "effect";
-import { DeclaredCapabilities, MAX_PROVIDER_NAME_LENGTH } from "@hydra/plugin-host";
-import { ModelDescriptor, SnapshotAuth } from "@hydra/protocol";
+import { DeclaredCapabilities, MAX_PROVIDER_NAME_LENGTH } from "@hercule/plugin-host";
+import { ModelDescriptor, SnapshotAuth } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import {
@@ -30,10 +30,10 @@ export const MAX_PROVIDER_INSTANCE_NAME_LENGTH = MAX_PROVIDER_NAME_LENGTH;
 const ProviderInstanceName = bounded(1, MAX_PROVIDER_INSTANCE_NAME_LENGTH);
 
 /** Re-exported so a reader of an instance needs only this package. */
-export { DeclaredCapabilities } from "@hydra/plugin-host";
+export { DeclaredCapabilities } from "@hercule/plugin-host";
 
 /** Re-exported rather than copied, so the public shape cannot drift from the wire shape. */
-export { ModelDescriptor, ModelOption, SnapshotAuth } from "@hydra/protocol";
+export { ModelDescriptor, ModelOption, SnapshotAuth } from "@hercule/protocol";
 
 /**
  * How the harness version a runner reported stands against the version this

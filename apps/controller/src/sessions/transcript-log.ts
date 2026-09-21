@@ -9,8 +9,8 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { ProviderEvent } from "@hydra/protocol";
-import type { TranscriptRow } from "@hydra/contract";
+import type { ProviderEvent } from "@hercule/protocol";
+import type { TranscriptRow } from "@hercule/contract";
 import { UUID_PATTERN, uuidFromString } from "../db";
 
 /**

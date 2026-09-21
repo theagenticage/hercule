@@ -4,8 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Schema } from "effect";
-import type { LiveMessage } from "@hydra/contract";
-import { secret, type Plugin, type ProviderDefinition } from "@hydra/plugin-host";
+import type { LiveMessage } from "@hercule/contract";
+import { secret, type Plugin, type ProviderDefinition } from "@hercule/plugin-host";
 import {
   collecting,
   completeSetup,

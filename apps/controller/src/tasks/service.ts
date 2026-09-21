@@ -40,7 +40,7 @@ import {
   type Task,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -343,7 +343,7 @@ const make = Effect.gen(function* () {
 
 /** The task service. */
 export class TaskService extends Context.Service<TaskService, Effect.Success<typeof make>>()(
-  "hydra/controller/tasks/TaskService",
+  "hercule/controller/tasks/TaskService",
 ) {}
 
 export const TaskServiceLayer: Layer.Layer<TaskService, never, SqlClient.SqlClient | AuditLog> =

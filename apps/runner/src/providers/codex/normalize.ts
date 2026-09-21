@@ -23,7 +23,7 @@ import {
   type StructuredResult,
   type TurnState,
   type Usage,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
 import { judgeAnswer, type HarnessAnswer } from "../structured-result";
 import { idOf } from "../events";
@@ -89,7 +89,7 @@ const raw = (payload: unknown): ReturnType<typeof rawOf> => rawOf(CODEX_NOTIFICA
 /**
  * Codex's item vocabulary in the taxonomy's; everything else is `unknown`.
  * `userMessage` is `null` rather than `user_message`: it is Codex echoing back
- * what Hydra sent, and the adapter already reported that input itself, with
+ * what Hercule sent, and the adapter already reported that input itself, with
  * what it did to the turn. Two items for one message would read as the user
  * having said it twice.
  */

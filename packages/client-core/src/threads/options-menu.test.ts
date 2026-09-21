@@ -5,7 +5,7 @@
  * boolean, and a value nobody picked reads as the descriptor's own default.
  */
 import { describe, expect, it } from "vitest";
-import type { ModelOption } from "@hydra/contract";
+import type { ModelOption } from "@hercule/contract";
 import { optionsMenu } from "./options-menu";
 
 const EFFORT: ModelOption = {

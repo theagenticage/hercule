@@ -5,7 +5,7 @@
  *
  * Conventions this migration establishes, and every later one keeps:
  *
- * - Every Hydra-owned entity has a 16-byte `BLOB` primary key holding a UUIDv7.
+ * - Every Hercule-owned entity has a 16-byte `BLOB` primary key holding a UUIDv7.
  *   The event log is the one exception: its id is the integer log position.
  * - **Timestamps are ISO-8601 strings in UTC** with millisecond precision
  *   (`2026-09-04T09:21:33.084Z`), which sort lexicographically, read plainly in

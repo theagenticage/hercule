@@ -1,11 +1,11 @@
 /**
- * `hydra git-credential get`, driven against a real socket. What git
+ * `hercule git-credential get`, driven against a real socket. What git
  * reads on stdout is the whole contract: the exact two lines, or nothing at
  * all, which is git's signal to try the next helper.
  */
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import type { CredentialAnswer } from "@hydra/protocol";
+import type { CredentialAnswer } from "@hercule/protocol";
 import { helperMain, runCredentialAction, serveCredentialSocket } from "./index";
 import { cleanTemporaries, temporary } from "../workspaces/testing";
 
@@ -31,7 +31,7 @@ const serving = async (
   answer: () => Promise<CredentialAnswer>,
 ): Promise<{ path: string; close: () => Promise<void> }> => {
   asked.length = 0;
-  const path = join(temporary("hydra-helper-"), "daemon.sock");
+  const path = join(temporary("hercule-helper-"), "daemon.sock");
   const server = await serveCredentialSocket({
     path,
     ask: (request) => {
@@ -53,8 +53,8 @@ describe("what the helper prints", () => {
     );
 
     const printed = await helperMain(GIT_ASKS, {
-      HYDRA_RUNNER_SOCKET: served.path,
-      HYDRA_TOKEN: "the-session-token",
+      HERCULE_RUNNER_SOCKET: served.path,
+      HERCULE_TOKEN: "the-session-token",
     });
 
     // Byte for byte: git parses this, and a trailing anything is a parse error.
@@ -68,8 +68,8 @@ describe("what the helper prints", () => {
     const served = await serving(() => Promise.resolve(answering({ error: "unauthorized" })));
 
     const printed = await helperMain(GIT_ASKS, {
-      HYDRA_RUNNER_SOCKET: served.path,
-      HYDRA_TOKEN: "a-foreign-token",
+      HERCULE_RUNNER_SOCKET: served.path,
+      HERCULE_TOKEN: "a-foreign-token",
     });
 
     expect(printed).toBe("");
@@ -81,7 +81,7 @@ describe("what the helper prints", () => {
       Promise.resolve(answering({ token: "ghp_the-token", username: "octocat" })),
     );
 
-    const printed = await helperMain(GIT_ASKS, { HYDRA_RUNNER_SOCKET: served.path });
+    const printed = await helperMain(GIT_ASKS, { HERCULE_RUNNER_SOCKET: served.path });
 
     expect(printed).toBe("");
     expect(asked).toEqual([]);
@@ -94,8 +94,8 @@ describe("what the helper prints", () => {
     );
 
     const printed = await helperMain(GIT_ASKS, {
-      HYDRA_RUNNER_SOCKET: served.path,
-      HYDRA_WORKSPACE_PROVISIONING: "0199e0e7-0000-7000-8000-00000000000b",
+      HERCULE_RUNNER_SOCKET: served.path,
+      HERCULE_WORKSPACE_PROVISIONING: "0199e0e7-0000-7000-8000-00000000000b",
     });
 
     // The machine has no session to be, so it names the workspace it is making.
@@ -112,8 +112,8 @@ describe("what the helper prints", () => {
     );
 
     const printed = await helperMain(GIT_ASKS, {
-      HYDRA_RUNNER_SOCKET: served.path,
-      HYDRA_TOKEN: "the-session-token",
+      HERCULE_RUNNER_SOCKET: served.path,
+      HERCULE_TOKEN: "the-session-token",
     });
 
     // git reads the answer line by line: a break in a value is a line nobody
@@ -124,8 +124,8 @@ describe("what the helper prints", () => {
 
   it("prints nothing when there is no daemon to ask", async () => {
     const printed = await helperMain(GIT_ASKS, {
-      HYDRA_RUNNER_SOCKET: join(temporary("hydra-helper-"), "nothing-listens-here.sock"),
-      HYDRA_TOKEN: "the-session-token",
+      HERCULE_RUNNER_SOCKET: join(temporary("hercule-helper-"), "nothing-listens-here.sock"),
+      HERCULE_TOKEN: "the-session-token",
     });
 
     // git then falls through to the machine's own helpers, rather than failing.
@@ -133,7 +133,7 @@ describe("what the helper prints", () => {
   });
 
   it("prints nothing when the environment names no socket at all", async () => {
-    const printed = await helperMain(GIT_ASKS, { HYDRA_TOKEN: "the-session-token" });
+    const printed = await helperMain(GIT_ASKS, { HERCULE_TOKEN: "the-session-token" });
 
     expect(printed).toBe("");
   });

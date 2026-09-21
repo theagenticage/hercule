@@ -27,9 +27,9 @@ import {
   type ProviderEvent,
   type SessionInput,
   type SessionStart,
-} from "@hydra/protocol";
-import type { Plugin } from "@hydra/plugin-host";
-import type { Input, Profile, Session } from "@hydra/contract";
+} from "@hercule/protocol";
+import type { Plugin } from "@hercule/plugin-host";
+import type { Input, Profile, Session } from "@hercule/contract";
 import { fixture, providerDefinition } from "../plugins/testing";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 

@@ -7,14 +7,14 @@
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { CODEX_VERSION, VERSION } from "@hydra/home/version";
+import { CODEX_VERSION, VERSION } from "@hercule/home/version";
 import {
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   type ModelDescriptor,
   type ModelOption,
   type ProbeResult,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import type { InstallOutcome, ProviderRunnerContext } from "../index";
 import { installing } from "../install";
 import { PROBE_DEADLINE, probeFailed } from "../probe";
@@ -43,7 +43,7 @@ export interface AppServer {
  * pinned release declares.
  */
 const INITIALIZE: InitializeParams = {
-  clientInfo: { name: "hydra", title: "Hydra", version: VERSION },
+  clientInfo: { name: "hercule", title: "Hercule", version: VERSION },
   capabilities: { experimentalApi: false, requestAttestation: false },
 };
 
@@ -96,7 +96,7 @@ const selecting = (
 });
 
 /**
- * Hydra's name for the tier Codex runs on when it is told none. Codex has no id
+ * Hercule's name for the tier Codex runs on when it is told none. Codex has no id
  * for it: `serviceTiers` lists only the tiers beyond the standard one, and a
  * `defaultServiceTier` of `null` means that one. Without a choice for it the
  * only selectable value would be a paid tier nobody asked for, so it is offered

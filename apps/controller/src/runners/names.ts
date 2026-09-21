@@ -9,7 +9,7 @@ const NAMES = [
   "daedalus",
   "echo",
   "hermes",
-  "hydra",
+  "hercule",
   "icarus",
   "iris",
   "janus",

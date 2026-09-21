@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link, useMatches } from "@tanstack/react-router";
-import { EmptyState } from "@hydra/ui";
+import { EmptyState } from "@hercule/ui";
 import { HOME_PATH } from "../app/entry-guard";
 import { CenteredScreen } from "./centered-screen";
 
@@ -30,7 +30,7 @@ export function RenderFailure({ error }: { readonly error: Error }): JSX.Element
   return inShell ? (
     <EmptyState
       headline="This screen did not load"
-      lead="Something went wrong rendering it. The rest of Hydra is still here."
+      lead="Something went wrong rendering it. The rest of Hercule is still here."
     >
       {message}
       <HomeLink />
@@ -57,7 +57,10 @@ export const NOT_FOUND_HEADLINE = "No screen here";
  */
 export function NotFound(): JSX.Element {
   return (
-    <CenteredScreen title={NOT_FOUND_HEADLINE} lead="That address does not name anything in Hydra.">
+    <CenteredScreen
+      title={NOT_FOUND_HEADLINE}
+      lead="That address does not name anything in Hercule."
+    >
       <HomeLink />
     </CenteredScreen>
   );

@@ -6,7 +6,7 @@
  * are derived from the contract's CLI table, so the only way to know they are
  * really there is to run the thing a release ships. The plugin registry is compiled in the same way,
  * so what a release boots with is only visible from a release. This suite runs
- * `./hydra` as the controller and as the CLI, which is why it is out of
+ * `./hercule` as the controller and as the CLI, which is why it is out of
  * `pnpm test`: `pnpm build:binary` first, then `pnpm test:binary`.
  */
 import { existsSync } from "node:fs";
@@ -26,13 +26,13 @@ import {
 } from "./harness";
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;
 
 /** The CLI, as the binary, under the credential file the login wrote. */
-const hydra = (args: ReadonlyArray<string>, stdin?: string) =>
+const hercule = (args: ReadonlyArray<string>, stdin?: string) =>
   cli(args, { home: state.home, binary, stdin });
 
 /** Fails with the command's own output rather than on an undefined field. */
@@ -61,7 +61,7 @@ beforeAll(async () => {
   const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-  const login = await hydra(
+  const login = await hercule(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-cli"],
     PASSWORD,
   );
@@ -75,14 +75,14 @@ afterAll(async () => {
 
 describe("tasks, projects, the log and the plugins through the binary", () => {
   it("creates, lists, reads, updates and deletes a task", async () => {
-    const project = ok(await hydra(["project", "create", "--name", "hydra", "--json"])) as {
+    const project = ok(await hercule(["project", "create", "--name", "hercule", "--json"])) as {
       id: string;
       name: string;
     };
-    expect(project.name).toBe("hydra");
+    expect(project.name).toBe("hercule");
 
     const created = ok(
-      await hydra(
+      await hercule(
         [
           "task",
           "create",
@@ -106,36 +106,36 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
 
     // A task that matches neither filter, so a listing that answers with both
     // rows would fail here rather than pass by accident.
-    ok(await hydra(["task", "create", "--title", "unrelated", "--json"], ""));
+    ok(await hercule(["task", "create", "--title", "unrelated", "--json"], ""));
 
     const queried = ok(
-      await hydra(["task", "list", "--status", "open", "--label", "x", "--json"]),
+      await hercule(["task", "list", "--status", "open", "--label", "x", "--json"]),
     ) as { items: ReadonlyArray<TaskRow> };
     expect(queried.items.map((task) => task.id)).toEqual([created.id]);
 
-    const byTail = ok(await hydra(["task", "read", created.id.slice(-8), "--json"])) as TaskRow;
+    const byTail = ok(await hercule(["task", "read", created.id.slice(-8), "--json"])) as TaskRow;
     expect(byTail.id).toBe(created.id);
 
     const updated = ok(
-      await hydra(["task", "update", created.id, "--status", "in-progress", "--json"]),
+      await hercule(["task", "update", created.id, "--status", "in-progress", "--json"]),
     ) as TaskRow;
     expect(updated.status).toBe("in-progress");
 
-    const deleted = await hydra(["task", "delete", created.id, "--json"]);
+    const deleted = await hercule(["task", "delete", created.id, "--json"]);
     expect(deleted.code).toBe(0);
 
-    const gone = await hydra(["task", "read", created.id, "--json"]);
+    const gone = await hercule(["task", "read", created.id, "--json"]);
     expect(gone.code).toBe(1);
     expect(jsonOf(gone)).toMatchObject({ error: { code: "not_found" } });
 
-    const projects = ok(await hydra(["project", "list", "--json"])) as {
+    const projects = ok(await hercule(["project", "list", "--json"])) as {
       items: ReadonlyArray<{ id: string; name: string }>;
     };
-    expect(projects.items.map((one) => one.name)).toContain("hydra");
+    expect(projects.items.map((one) => one.name)).toContain("hercule");
   }, 60_000);
 
   it("shows the task events the commands wrote, each stamped with the user", async () => {
-    const events = ok(await hydra(["event", "list", "--kind", "task.created", "--json"])) as {
+    const events = ok(await hercule(["event", "list", "--kind", "task.created", "--json"])) as {
       items: ReadonlyArray<{ id: number; kind: string; actor: string | null }>;
     };
     expect(events.items.length).toBeGreaterThanOrEqual(2);
@@ -168,9 +168,9 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
   }, 30_000);
 
   it("lists the five task verbs in help, each with its grant and a line of its own", async () => {
-    const help = await hydra(["task", "--help"]);
+    const help = await hercule(["task", "--help"]);
     expect(help.code).toBe(0);
-    expect(help.stdout).toContain("usage: hydra task <verb>");
+    expect(help.stdout).toContain("usage: hercule task <verb>");
     for (const verb of ["list", "read", "create", "update", "delete"]) {
       // Each verb in its positional shape, with the grant it needs: what the
       // tree built from the contract's CLI table produced.
@@ -186,7 +186,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
   }, 30_000);
 
   it("ends the help of one command with its operation, route and grant", async () => {
-    const help = await hydra(["task", "create", "--help"]);
+    const help = await hercule(["task", "create", "--help"]);
     expect(help.code).toBe(0);
     expect(help.stdout.trimEnd().split("\n").at(-1)).toBe(
       "operation task.create · POST /api/v1/tasks · grant task.create",

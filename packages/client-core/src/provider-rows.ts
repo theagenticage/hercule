@@ -3,7 +3,7 @@
  * runner build carries. Which moves a row offers follows from those, so it is
  * decided here rather than in the markup.
  */
-import type { ProviderInstance, ProviderSecretField, Runner } from "@hydra/contract";
+import type { ProviderInstance, ProviderSecretField, Runner } from "@hercule/contract";
 
 /** What an install can be on a row: offered, dimmed with its reason, or absent. */
 type Install = "offered" | "blocked" | "none";

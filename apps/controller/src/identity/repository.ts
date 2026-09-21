@@ -87,7 +87,7 @@ export class ControllerIdentity extends Context.Service<
       payload: Uint8Array<ArrayBuffer>,
     ) => Effect.Effect<Uint8Array<ArrayBuffer>, SqlError | SecretNameError>;
   }
->()("hydra/controller/identity/ControllerIdentity") {}
+>()("hercule/controller/identity/ControllerIdentity") {}
 
 export const controllerIdentityLayer: Layer.Layer<
   ControllerIdentity,

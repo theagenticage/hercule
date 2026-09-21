@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Option } from "effect";
-import type { ModelDescriptor } from "@hydra/protocol";
+import type { ModelDescriptor } from "@hercule/protocol";
 import { validatedOptions, type ModelOptions } from "./options";
 
 const MODELS: ReadonlyArray<ModelDescriptor> = [

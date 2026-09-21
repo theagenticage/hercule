@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
-import { homePaths, HydraHome } from "../config";
+import { homePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
@@ -28,7 +28,7 @@ afterEach(() => {
 
 /** The real service over the real repositories, a `:memory:` database and a key file. */
 const stack = () => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-connection-service-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-connection-service-"));
   homes.push(home);
   return ConnectionServiceLayer.pipe(
     Layer.provideMerge(PluginHostLayer),
@@ -38,7 +38,7 @@ const stack = () => {
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HydraHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
   );
 };
 

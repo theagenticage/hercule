@@ -28,7 +28,7 @@ import {
   type ConnectionsRuntime,
   type ConnectionTypeContribution,
   type OAuthDeclaration,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import { announce, nowIso, withTransaction } from "../db";
 import { Secrets } from "../secrets";
 import {
@@ -280,7 +280,7 @@ const make = Effect.gen(function* () {
 export class ConnectionTypes extends Context.Service<
   ConnectionTypes,
   Effect.Success<typeof make>
->()("hydra/controller/connections/ConnectionTypes") {}
+>()("hercule/controller/connections/ConnectionTypes") {}
 
 export const ConnectionTypesLayer: Layer.Layer<
   ConnectionTypes,

@@ -9,8 +9,8 @@
  */
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import type { Live } from "@hydra/client-core";
-import type { MutableLiveTopic } from "@hydra/contract";
+import type { Live } from "@hercule/client-core";
+import type { MutableLiveTopic } from "@hercule/contract";
 
 /** Follows one topic for as long as the calling screen is mounted. */
 export const useLiveInvalidation = (

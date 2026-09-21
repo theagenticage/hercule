@@ -7,7 +7,7 @@
  *
  * Opt-in twice over, because the alternative is that `pnpm test` on any
  * developer's machine quietly spends their subscription:
- * `HYDRA_LIVE_SESSION_TEST` asks for the run, and `CODEX_HOME` names the
+ * `HERCULE_LIVE_SESSION_TEST` asks for the run, and `CODEX_HOME` names the
  * directory the login is borrowed from - the developer's own Codex home is
  * never looked for, let alone read. The login is copied into a throwaway
  * instance home rather than used where it lies, because that home is the one
@@ -18,20 +18,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Stream } from "effect";
-import type { OutputSchema, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { OutputSchema, ProviderEvent, SessionSpec } from "@hercule/protocol";
 import {
   ASSESSOR_SYSTEM_PROMPT,
   FIXTURE_PROMPT,
   FIXTURE_SCHEMA,
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
-} from "@hydra/protocol/testing";
+} from "@hercule/protocol/testing";
 import { codex } from "./adapter";
 import type { ProviderRunnerContext } from "../index";
 
 const binary = Bun.which("codex") ?? undefined;
 
-const wanted = process.env["HYDRA_LIVE_SESSION_TEST"] !== undefined;
+const wanted = process.env["HERCULE_LIVE_SESSION_TEST"] !== undefined;
 
 /** The directory the login is borrowed from; unset means this suite skips. */
 const borrowed = process.env["CODEX_HOME"];
@@ -43,7 +43,7 @@ afterAll(() => {
 });
 
 const scratchDir = (label: string): string => {
-  const made = mkdtempSync(join(tmpdir(), `hydra-codex-${label}-`));
+  const made = mkdtempSync(join(tmpdir(), `hercule-codex-${label}-`));
   scratch.push(made);
   return made;
 };
@@ -67,7 +67,7 @@ const contextFor = (home: string): ProviderRunnerContext => ({
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
   secrets: {},
-  hydraTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
+  herculeTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 
 const ready =

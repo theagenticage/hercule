@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Runner } from "@hydra/contract";
+import type { Runner } from "@hercule/contract";
 import { runnerFactsReading } from "./runner-facts";
 
 const GIB = 1024 * 1024 * 1024;

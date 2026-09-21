@@ -15,7 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { JoinTokenRef } from "@hydra/contract";
+import type { JoinTokenRef } from "@hercule/contract";
 import { hashToken, mintToken } from "../credentials";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 
@@ -108,7 +108,7 @@ const make = Effect.gen(function* () {
 });
 
 export class JoinTokens extends Context.Service<JoinTokens, Effect.Success<typeof make>>()(
-  "hydra/controller/runners/JoinTokens",
+  "hercule/controller/runners/JoinTokens",
 ) {}
 
 export const JoinTokensLayer: Layer.Layer<JoinTokens, never, SqlClient.SqlClient> =

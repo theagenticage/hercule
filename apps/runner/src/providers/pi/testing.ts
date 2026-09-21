@@ -18,7 +18,7 @@
  */
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
-import type { ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
 import type { ProviderRunnerContext } from "../index";
 import type { Ran } from "../process";
 import { CWD, lines, scratchHome, taggedIn, until } from "../testing";
@@ -39,9 +39,9 @@ export const contextIn = (
   cwd,
   home,
   binary: "/usr/local/bin/pi",
-  env: { PATH: "/usr/local/bin:/usr/bin", HYDRA_RUNNER: "runner-1" },
+  env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },
   secrets,
-  hydraTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
+  herculeTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 
 export const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";

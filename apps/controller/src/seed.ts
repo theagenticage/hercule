@@ -9,13 +9,13 @@
  *
  * The consequence, and it is deliberate: a shipped profile is frozen at the
  * boot that first seeded it. The three shipped profiles are editable, so a
- * later Hydra that adds a grant to one of them cannot write it over the user's
+ * later Hercule that adds a grant to one of them cannot write it over the user's
  * version; that upgrade is a migration, not a seed.
  */
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { ALL_GRANTS, type Grant } from "@hydra/contract";
+import { ALL_GRANTS, type Grant } from "@hercule/contract";
 import { withTransaction } from "./db";
 import { PermissionProfiles, type GrantsError } from "./permissions";
 import { Settings, type SettingError } from "./settings";

@@ -1,8 +1,8 @@
 import { useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@hydra/ui";
-import { queryKeys, retireQuestion, type HydraClient } from "@hydra/client-core";
-import type { RunnerDetail } from "@hydra/contract";
+import { Button } from "@hercule/ui";
+import { queryKeys, retireQuestion, type HerculeClient } from "@hercule/client-core";
+import type { RunnerDetail } from "@hercule/contract";
 import { messageOf } from "../../../screens/save-status";
 
 type Move = "drain" | "undrain" | "refreshFacts" | "retire";
@@ -23,7 +23,7 @@ export function Moves({
   runner,
   defaultRunnerId,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly runner: RunnerDetail;
   readonly defaultRunnerId: string | null;
 }): JSX.Element {

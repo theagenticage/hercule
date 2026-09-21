@@ -120,7 +120,7 @@ implement -> open-pr
 [pr-merged]      correlation.run: steps.open-pr.output.prNumber  -> task-done    (terminal step)
 ```
 
-`checks-failed` firing into `implement` is an ordinary re-entry of `implement` (section 4.3): the next turn of its session, with the prompt re-rendered from `steps.checks-failed.output`. That is how a run "revives" a finished step on new information, visibly and bounded. Steps never hold subscriptions of their own; only sessions do, and a session's subscriptions are the agent's own doing through the `hydra` CLI, not the plan's ([./08-events-and-connections.md](./08-events-and-connections.md) section 7.2).
+`checks-failed` firing into `implement` is an ordinary re-entry of `implement` (section 4.3): the next turn of its session, with the prompt re-rendered from `steps.checks-failed.output`. That is how a run "revives" a finished step on new information, visibly and bounded. Steps never hold subscriptions of their own; only sessions do, and a session's subscriptions are the agent's own doing through the `hercule` CLI, not the plan's ([./08-events-and-connections.md](./08-events-and-connections.md) section 7.2).
 
 **Output.** `outputs` maps event fields onto `steps.<signalId>.output` with expressions over `event`, the same mechanism as a start trigger's input mapping. When `outputs` is absent, the output is the whole event envelope as expressions see it (`kind`, `source`, `connectionId`, `system`, `refs`, `url`, `occurredAt`, `payload.*`; never `raw`). The default is the loose shape because an agent step is the usual consumer and copes with it; a human pre-mapping every field is the exception. Section 3's "the raw event never enters the plan" therefore reads: not unless the author asks, and `raw` (the provider's untouched body) never.
 
@@ -188,7 +188,7 @@ Actor and permission context: a built-in action executing inside a run is stampe
 
 ### 4.2 Agent steps
 
-An agent step starts a Session for the named Agent and waits until its turn completes. The controller authors the SessionSpec (the agent's provider instance, the step's `model` selection, `accessMode`, the run's `workspaceId` (section 4.4), system prompt from the agent, the step's `outputSchema`), places it on the run's runner (section 4.4; a full runner queues the placement and the step waits), and sends the rendered `prompt` as the first turn. The session carries a copy of the agent's permission profile id (shipped default for workflow agent steps: `worker`, [./13-security.md](./13-security.md)) and reaches Hydra through the `hydra` CLI with its session token. The session is linked to the run and step from the session side; the run's step record holds the session id.
+An agent step starts a Session for the named Agent and waits until its turn completes. The controller authors the SessionSpec (the agent's provider instance, the step's `model` selection, `accessMode`, the run's `workspaceId` (section 4.4), system prompt from the agent, the step's `outputSchema`), places it on the run's runner (section 4.4; a full runner queues the placement and the step waits), and sends the rendered `prompt` as the first turn. The session carries a copy of the agent's permission profile id (shipped default for workflow agent steps: `worker`, [./13-security.md](./13-security.md)) and reaches Hercule through the `hercule` CLI with its session token. The session is linked to the run and step from the session side; the run's step record holds the session id.
 
 Defaults come from the Agent (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)): the step's `model` and `accessMode` are optional overrides of the Agent's `model` and `accessMode` (default `full-access`); absent both, the instance's default model applies. Every resolved value is copied into the Session at spawn; the session never reads through its agent afterwards ([./02-domain-model.md](./02-domain-model.md) rule 9).
 
@@ -230,7 +230,7 @@ A run takes place in one workspace on one runner. The workflow declares the `Wor
 
 Policy: `none` runs sessions workspace-less (assistant-style, API-only work); `primary` uses the resource's long-lived main checkout on the runner, sharing it with whatever else runs there (a dirty primary is the next run's starting reality); `ephemeral` provisions fresh worktrees for the listed resources off the runner's per-resource cache, with each resource's setup command run first. Provisioning happens when the first agent step starts. Ephemeral workspaces are deleted on clean completion of the run and kept on failure until the user dismisses the failed run; a re-run provisions fresh ones. Parallel agent steps share the one workspace, allowed and the author's risk, as with a primary. Substrate details in [./03-controller-and-runners.md](./03-controller-and-runners.md).
 
-Branch: `branch` is a template over `inputs` (and `steps`, though nothing has run yet); the default is `hydra/run-<runId>`, always unique. It is the *initial* name only: the runner tracks the worktree by path, so an agent is free to rename the branch to something meaningful and PR creation uses whatever branch is current. Shipped task-driven workflows template `task/{{ inputs.taskId }}`; "task branch" is a convention of those workflows, not a core rule.
+Branch: `branch` is a template over `inputs` (and `steps`, though nothing has run yet); the default is `hercule/run-<runId>`, always unique. It is the *initial* name only: the runner tracks the worktree by path, so an agent is free to rename the branch to something meaningful and PR creation uses whatever branch is current. Shipped task-driven workflows template `task/{{ inputs.taskId }}`; "task branch" is a convention of those workflows, not a core rule.
 
 ## 5. Expressions: CEL
 
@@ -249,7 +249,7 @@ One language, CEL, is used at every condition site. Termination is a property of
 
 `inputs` is the run's resolved inputs by name. `steps` is a map of step id (or signal trigger id) to `{ output }`, holding the output of every step that has completed and every signal node that has fired in this run; when a step ran more than once, `steps.<id>.output` is the latest iteration's output. A skipped, dead or not-yet-run step has no entry, so `has(steps.<id>)` is the test for "did it run" (section 4.3). `event` is the event envelope as defined in [./08-events-and-connections.md](./08-events-and-connections.md): `event.kind`, `event.source`, `event.connectionId`, `event.system`, `event.refs`, `event.url`, `event.occurredAt`, `event.payload.*`; `event.raw` is not readable by expressions. `has()` covers presence tests on loosely shaped payloads (`has(event.changes.status) && event.changes.status.new == "done"`).
 
-Evaluator: `@marcbachmann/cel-js` (pure JS, zero dependencies) behind a small Hydra-owned wrapper exposing parse, check and evaluate and nothing else; `@bufbuild/cel` is the named fallback implementation, swappable without touching stored workflows because definitions store CEL source only. Wrapper rules:
+Evaluator: `@marcbachmann/cel-js` (pure JS, zero dependencies) behind a small Hercule-owned wrapper exposing parse, check and evaluate and nothing else; `@bufbuild/cel` is the named fallback implementation, swappable without touching stored workflows because definitions store CEL source only. Wrapper rules:
 
 - Context variables (`inputs`, `steps`, `event`) are declared `dyn` in v1 so plain JSON numbers work without BigInt friction; typed schemas can come later.
 - Every stored expression is checked with the environment's `check()` at save time; parse or type errors reject the save.
@@ -259,7 +259,7 @@ Evaluator: `@marcbachmann/cel-js` (pure JS, zero dependencies) behind a small Hy
 
 Interpolation: action parameter values and agent prompts are templates whose embedded expressions are ordinary CEL over `inputs` and `steps`, delimited `{{ expr }}`: `Fix the failing checks on {{ inputs.prUrl }}. CI said: {{ steps.checks-failed.output.payload.summary }}`. A non-string value renders as JSON. A literal `{{` is written `{{ '{{' }}`. `{{ }}` was chosen over `${ }` because prompts routinely quote code, where `${...}` is common. Only the step `prompt` and string `params` are templates; an Agent's system prompt is a standalone entity with no run to reference and is not interpolated. A template that throws is an `expression-error` (section 4.3).
 
-**Verify at build time:** the exact values of the parse-time limits, and a Hydra-side corpus of representative expressions run in CI against the wrapper (optionally including selected official conformance cases from `@bufbuild/cel-spec`) to pin the subset Hydra relies on.
+**Verify at build time:** the exact values of the parse-time limits, and a Hercule-side corpus of representative expressions run in CI against the wrapper (optionally including selected official conformance cases from `@bufbuild/cel-spec`) to pin the subset Hercule relies on.
 
 ## 6. The agent-to-graph contract
 
@@ -370,7 +370,7 @@ There is no cleanup machinery beyond the substrate's: the run's ephemeral worksp
 
 ## 8. Built-in actions
 
-Five built-in actions ship in the core, registered into the workflow-action extension point like any plugin contribution but owned by the core. Each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hydra-through-the-public-api.md)) and carries the **same id as the operation** it calls ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3); its input and output are that operation's contract schemas, so nothing is reachable through an action that is not reachable over HTTP. The tickets called the notification action `notify`; its id is `notification.create`. This table is the single owner of the catalogue; Task semantics are in [./09-tasks.md](./09-tasks.md), the Notification record and triage-specific usage in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
+Five built-in actions ship in the core, registered into the workflow-action extension point like any plugin contribution but owned by the core. Each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)) and carries the **same id as the operation** it calls ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3); its input and output are that operation's contract schemas, so nothing is reachable through an action that is not reachable over HTTP. The tickets called the notification action `notify`; its id is `notification.create`. This table is the single owner of the catalogue; Task semantics are in [./09-tasks.md](./09-tasks.md), the Notification record and triage-specific usage in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
 
 | Action | Input (contract op) | Output | Notes |
 |---|---|---|---|
@@ -433,6 +433,6 @@ Tickets:
 - Task model: shape, status axis, lifecycle, provenance - https://github.com/rogierpennink/hydra/issues/29
 - Prototype: the Intake view - https://github.com/rogierpennink/hydra/issues/30
 
-ADRs: [0001](../adr/0001-runs-freeze-an-execution-plan.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md), [0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md), [0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [0013](../adr/0013-agents-operate-hydra-through-the-public-api.md), [0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md).
+ADRs: [0001](../adr/0001-runs-freeze-an-execution-plan.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md), [0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md), [0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [0013](../adr/0013-agents-operate-hercule-through-the-public-api.md), [0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md).
 
 Research: `research/expression-language.md` (branch `research/expression-language`), `research/structured-output.md` (branch `research/structured-output`).

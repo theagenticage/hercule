@@ -1,8 +1,8 @@
 import { Fragment, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, cn } from "@hydra/ui";
-import { queryKeys, type ConnectionType, type HydraClient } from "@hydra/client-core";
-import type { Connection, ConnectionStatus } from "@hydra/contract";
+import { Button, cn } from "@hercule/ui";
+import { queryKeys, type ConnectionType, type HerculeClient } from "@hercule/client-core";
+import type { Connection, ConnectionStatus } from "@hercule/contract";
 import { SaveStatus, messageOf } from "../../../screens/save-status";
 import { ConfigureConnection } from "./-configure";
 import { ConnectionSetup } from "./-setup";
@@ -31,7 +31,7 @@ export function ConnectionRow({
   connection,
   type,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly connection: Connection;
   /** Absent when the plugin that declared the type is no longer in the binary. */
   readonly type: ConnectionType | undefined;

@@ -4,8 +4,8 @@
  * said which providers its build carries an adapter for.
  */
 import * as Effect from "effect/Effect";
-import { invalidState, validation, type InvalidState, type Validation } from "@hydra/contract";
-import type { RunnerDetail } from "@hydra/contract";
+import { invalidState, validation, type InvalidState, type Validation } from "@hercule/contract";
+import type { RunnerDetail } from "@hercule/contract";
 
 const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything";
 

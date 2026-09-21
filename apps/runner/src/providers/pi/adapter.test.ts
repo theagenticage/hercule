@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { OutputSchema, SessionSpec } from "@hydra/protocol";
+import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import { piAdapter, REPROMPT } from "./adapter";
 import { OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
 import {
@@ -45,7 +45,7 @@ const flagsFor = (home: string): ReadonlyArray<string> => [
   "--no-approve",
   "--offline",
   "-e",
-  join(home, "hydra-extension.ts"),
+  join(home, "hercule-extension.ts"),
   "--session-dir",
   join(home, "sessions"),
   "--session-id",
@@ -112,7 +112,7 @@ describe("the pi a session is launched as", () => {
   it("writes the extension pi loads, and parks its decision on the abort signal", async () => {
     const run = await started();
 
-    const path = join(run.ctx.home, "hydra-extension.ts");
+    const path = join(run.ctx.home, "hercule-extension.ts");
     expect(existsSync(path)).toBe(true);
     const source = readFileSync(path, "utf8");
     expect(source).not.toBe("");
@@ -128,7 +128,7 @@ describe("the pi a session is launched as", () => {
 
     await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
 
-    // An id would make pi look the session up, and ask on stdin - Hydra's own
+    // An id would make pi look the session up, and ask on stdin - Hercule's own
     // JSON channel - whether to fork it into this directory.
     expect(after(run.spawns[0]!.command, "--session")).toBe(path);
     expect(run.spawns[0]!.command).not.toContain("--fork");
@@ -563,7 +563,7 @@ describe("what a pi turn under an output schema answers with", () => {
 
     await until("asked again for the tool", () => sentOf(run.sent, "prompt").length === 2);
     expect(sentOf(run.sent, "prompt")[1]).toMatchObject({ message: REPROMPT });
-    // The re-prompt stays inside the one Hydra turn: a second `turn.started`
+    // The re-prompt stays inside the one Hercule turn: a second `turn.started`
     // would bracket one episode twice, and a completion here would report an
     // answer the session is still being asked for.
     await settle();

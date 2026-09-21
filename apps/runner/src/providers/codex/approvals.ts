@@ -5,13 +5,13 @@
  * subject - a request answered in a shape Codex does not take is a turn that
  * never ends, with nothing said anywhere.
  *
- * Three answers are stretches, because the harness cannot express what Hydra
+ * Three answers are stretches, because the harness cannot express what Hercule
  * offers. A permissions request has no decision enum, so a refusal is an empty
  * grant; an elicitation has no for-session accept, so `allow_always` is not
  * offered; and a question has no refusal shape at all, so a refusal is a
  * JSON-RPC error reply.
  */
-import type { ApprovalDecision, OpenRequest } from "@hydra/protocol";
+import type { ApprovalDecision, OpenRequest } from "@hercule/protocol";
 import { idOf } from "../events";
 import { questionRequest } from "../questions";
 import { fact, text } from "../text";
@@ -70,7 +70,7 @@ const EVERY_ANSWER: Decisions = ["allow", "allow_always", "deny", "cancel"];
 
 /**
  * Both approval enums name the same four answers; the command one additionally
- * has policy-amendment arms Hydra never sends, so the narrower type covers both.
+ * has policy-amendment arms Hercule never sends, so the narrower type covers both.
  */
 const APPROVED: Readonly<Record<ApprovalDecision, FileChangeApprovalDecision>> = {
   allow: "accept",

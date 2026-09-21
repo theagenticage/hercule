@@ -2,7 +2,7 @@
  * Test-only, not exported from the package index. `providerRows` and
  * `sessionsEmptyState` read the same machine, so they share one arrangement of it.
  */
-import type { ProviderInstance, Runner } from "@hydra/contract";
+import type { ProviderInstance, Runner } from "@hercule/contract";
 
 const GIB = 1024 * 1024 * 1024;
 

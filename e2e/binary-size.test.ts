@@ -18,7 +18,7 @@ import { ROOT } from "./harness";
  */
 const SIZE_BUDGET_BYTES = 95 * 1024 * 1024;
 
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 const MIB = 1024 * 1024;
 

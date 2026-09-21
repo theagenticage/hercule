@@ -25,9 +25,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { invalidState, type InvalidState } from "@hydra/contract";
+import { invalidState, type InvalidState } from "@hercule/contract";
 import { USER_ACTOR } from "../actor";
-import { HydraHome } from "../config";
+import { HerculeHome } from "../config";
 import { Credentials, hashToken, mintToken } from "../credentials";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -47,7 +47,7 @@ const make = Effect.gen(function* () {
   const credentials = yield* Credentials;
   const settings = yield* Settings;
   const audit = yield* AuditLog;
-  const paths = yield* HydraHome;
+  const paths = yield* HerculeHome;
   const cost = yield* PasswordCost;
 
   const row = sql<{
@@ -100,7 +100,7 @@ const make = Effect.gen(function* () {
             `;
             const changed = yield* sql<{ readonly rows: number }>`SELECT changes() AS rows`;
             if ((changed[0]?.rows ?? 0) === 0) {
-              return yield* Effect.fail(invalidState("Hydra is already set up."));
+              return yield* Effect.fail(invalidState("Hercule is already set up."));
             }
 
             const user = yield* users.create(input.username, passwordHash);
@@ -134,11 +134,11 @@ const make = Effect.gen(function* () {
 
 /** The setup service. */
 export class Setup extends Context.Service<Setup, Effect.Success<typeof make>>()(
-  "hydra/controller/setup/Setup",
+  "hercule/controller/setup/Setup",
 ) {}
 
 export const SetupLayer: Layer.Layer<
   Setup,
   never,
-  SqlClient.SqlClient | Users | Credentials | Settings | HydraHome | AuditLog
+  SqlClient.SqlClient | Users | Credentials | Settings | HerculeHome | AuditLog
 > = Layer.effect(Setup)(make);

@@ -5,7 +5,7 @@
  * carries: no native session means the transcript is gone; otherwise the
  * runner it ran on was retired.
  */
-import type { Session } from "@hydra/contract";
+import type { Session } from "@hercule/contract";
 
 export const resumeBlockedReason = (session: Session): string | null => {
   if (session.status !== "exited" || session.resumable) return null;

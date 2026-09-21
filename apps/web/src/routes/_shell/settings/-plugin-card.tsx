@@ -1,15 +1,15 @@
 import { useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, FormCard, cn } from "@hydra/ui";
+import { Button, FormCard, cn } from "@hercule/ui";
 import {
   configFields,
   configIssues,
   queryKeys,
   refusalReason,
   type ConfigJson,
-  type HydraClient,
-} from "@hydra/client-core";
-import type { PluginDetail, PluginStatus } from "@hydra/contract";
+  type HerculeClient,
+} from "@hercule/client-core";
+import type { PluginDetail, PluginStatus } from "@hercule/contract";
 import { ConfigForm } from "../../../screens/plugins/config-form";
 import { SaveStatus, messageOf } from "../../../screens/save-status";
 
@@ -35,7 +35,7 @@ export function PluginCard({
   client,
   plugin,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly plugin: PluginDetail;
 }): JSX.Element {
   const queryClient = useQueryClient();

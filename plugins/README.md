@@ -1,9 +1,9 @@
 # Plugins
 
-One workspace package per plugin, at `plugins/<id>`, named `@hydra/plugin-<id>`
+One workspace package per plugin, at `plugins/<id>`, named `@hercule/plugin-<id>`
 (see [`docs/spec/05-plugins.md`](../docs/spec/05-plugins.md)).
 
-A plugin package depends on `@hydra/plugin-host` and `effect`, and on nothing else in
+A plugin package depends on `@hercule/plugin-host` and `effect`, and on nothing else in
 this repository: a plugin reaches no controller internal, and everything it needs is
 handed to it through the host. It exports a `Plugin` - a manifest, a `register` that
 declares contributions, and an `activate` that starts machinery and hands back its own
@@ -17,8 +17,8 @@ register one provider definition:
 
 | Package | Contributes |
 | --- | --- |
-| `@hydra/plugin-claude-code` | the `claude-code` provider |
-| `@hydra/plugin-codex` | the `codex` provider |
-| `@hydra/plugin-pi` | the `pi` provider |
+| `@hercule/plugin-claude-code` | the `claude-code` provider |
+| `@hercule/plugin-codex` | the `codex` provider |
+| `@hercule/plugin-pi` | the `pi` provider |
 
 The runner entrypoint imports no plugin host and no plugin package.

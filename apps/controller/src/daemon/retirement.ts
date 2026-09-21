@@ -7,7 +7,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { RunnerDetail } from "@hydra/contract";
+import type { RunnerDetail } from "@hercule/contract";
 import { withTransaction } from "../db";
 import { RunnerConnections, RunnerService, type MoveError, type RetireInput } from "../runners";
 import { SessionService } from "../sessions";
@@ -66,7 +66,7 @@ const make = Effect.gen(function* () {
 });
 
 export class Retirement extends Context.Service<Retirement, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/Retirement",
+  "hercule/controller/daemon/Retirement",
 ) {}
 
 export const RetirementLayer: Layer.Layer<

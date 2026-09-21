@@ -10,9 +10,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
-import type { ModelDescriptor, RunnerFacts } from "@hydra/protocol";
-import type { Agent as AgentRecord, Session } from "@hydra/contract";
+import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
+import type { Agent as AgentRecord, Session } from "@hercule/contract";
 import { del, get, post, send } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
 import {
@@ -73,7 +73,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   sharedWithFleet(body, { plugins: registry(), facts: FACTS, models: MODELS });
 
-/** An id shaped the way every Hydra id is, that nothing holds. */
+/** An id shaped the way every Hercule id is, that nothing holds. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
 
 const findInstanceId = (arranged: Arranged, providerId: string): string => {

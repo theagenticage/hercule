@@ -25,7 +25,7 @@ import {
   type RunnerFactsRequest,
   type RunnerHello,
   type RunnerToController as RunnerMessage,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import {
   ControllerNotRecognised,
   connect,
@@ -258,11 +258,14 @@ const DEADLINE = Duration.millis(500);
 const PATIENT = Duration.minutes(1);
 
 /** Nothing here starts a session, so none of these is ever made. */
-const PROVIDERS_DIR = "/nonexistent/hydra-runner-providers";
-const SCRATCH_DIR = "/nonexistent/hydra-runner-scratch";
-const STORAGE_DIR = "/nonexistent/hydra-runner-storage";
-const BIN_DIR = "/nonexistent/hydra-runner-bin";
-const HYDRA_TOOL = { skill: "# hydra", claudePluginDir: "/nonexistent/hydra-runner-claude-plugin" };
+const PROVIDERS_DIR = "/nonexistent/hercule-runner-providers";
+const SCRATCH_DIR = "/nonexistent/hercule-runner-scratch";
+const STORAGE_DIR = "/nonexistent/hercule-runner-storage";
+const BIN_DIR = "/nonexistent/hercule-runner-bin";
+const HERCULE_TOOL = {
+  skill: "# hercule",
+  claudePluginDir: "/nonexistent/hercule-runner-claude-plugin",
+};
 
 /** Runs one connection to its end and reports how it ended. */
 const attempt = (
@@ -283,7 +286,7 @@ const attempt = (
         socketPath: `${STORAGE_DIR}/daemon.sock`,
         credentials: makeCredentialRelay(),
         binDir: BIN_DIR,
-        hydraTool: HYDRA_TOOL,
+        herculeTool: HERCULE_TOOL,
         proofDeadline,
       }),
     ),
@@ -498,7 +501,7 @@ describe("a runner whose controller has retired it", () => {
   const RETIRED = "RETIRED";
 
   /** What the operator has to read to know what to do about it. */
-  const RE_ENLIST = "this runner was retired; run `hydra runner join` to re-enlist";
+  const RE_ENLIST = "this runner was retired; run `hercule runner join` to re-enlist";
 
   it("says so, so the daemon can stop and the operator knows to re-enlist", async () => {
     const stub = await stubController();

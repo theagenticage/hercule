@@ -5,12 +5,12 @@ import {
   InvalidOptionError,
   parseGlobalOptions,
   resolveHomePath,
-} from "@hydra/home";
+} from "@hercule/home";
 import { BootstrapConfig, loadConfigFile, resolveConfig } from "./bootstrap";
 import type { ConfigError } from "./errors";
-import { createDirectory, createLayout, HydraHome } from "./home";
+import { createDirectory, createLayout, HerculeHome } from "./home";
 
-// The pure home pieces live in `@hydra/home`, which the CLI and the runner link
+// The pure home pieces live in `@hercule/home`, which the CLI and the runner link
 // too; a controller module reaches them through here.
 export {
   configFileIn,
@@ -23,17 +23,17 @@ export {
   setupUrlFileIn,
   type GlobalOptions,
   type HomePaths,
-} from "@hydra/home";
+} from "@hercule/home";
 export * from "./bootstrap";
 export * from "./errors";
 export * from "./home";
 export { formatToml, parseToml } from "./toml";
 
-/** What `hydra serve` accepts; it takes no arguments of its own. */
-const USAGE = "usage: hydra serve [--home <dir>] [-c key=value]";
+/** What `hercule serve` accepts; it takes no arguments of its own. */
+const USAGE = "usage: hercule serve [--home <dir>] [-c key=value]";
 
 /**
- * Resolve the Hydra Home and the bootstrap config, and create the home layout.
+ * Resolve the Hercule Home and the bootstrap config, and create the home layout.
  *
  * Step 1 of first run (spec 15 section 7) and the first thing every controller
  * boot does. `argv` and `env` are passed in rather than read off the process,
@@ -44,17 +44,17 @@ const USAGE = "usage: hydra serve [--home <dir>] [-c key=value]";
 export const layer = (
   argv: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
-): Layer.Layer<HydraHome | BootstrapConfig, ConfigError> =>
+): Layer.Layer<HerculeHome | BootstrapConfig, ConfigError> =>
   Layer.unwrap(
     Effect.gen(function* () {
       const options = yield* Effect.fromResult(parseGlobalOptions(argv));
-      // Everything the global options did not claim is an argument `hydra
+      // Everything the global options did not claim is an argument `hercule
       // serve` does not have. Booting anyway would silently ignore it.
       const unknown = options.rest[0];
       if (unknown !== undefined) {
         return yield* new InvalidOptionError({
           option: unknown,
-          message: `hydra serve takes no arguments; ${USAGE}`,
+          message: `hercule serve takes no arguments; ${USAGE}`,
         });
       }
 
@@ -77,7 +77,7 @@ export const layer = (
       yield* createLayout(paths);
 
       return Layer.mergeAll(
-        Layer.succeed(HydraHome, HydraHome.of(paths)),
+        Layer.succeed(HerculeHome, HerculeHome.of(paths)),
         Layer.succeed(BootstrapConfig, config),
       );
     }),

@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { AccessMode } from "@hydra/protocol";
+import { AccessMode } from "@hercule/protocol";
 import { SchemaValue } from "./manifest";
 
 const Support = Schema.Literals(["native", "unsupported"]);

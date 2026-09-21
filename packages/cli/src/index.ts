@@ -8,12 +8,12 @@
  * of `<home>/setup-url`, needing no credential, because it is what a user has
  * before they have any credential at all.
  *
- * No Effect code lives past this package's own use of `@hydra/home`: the CLI
+ * No Effect code lives past this package's own use of `@hercule/home`: the CLI
  * talks to the API through `client-core`'s promises.
  */
 import { readFileSync } from "node:fs";
-import { ApiError, ConnectionError, RequestError, createClient } from "@hydra/client-core";
-import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hydra/home";
+import { ApiError, ConnectionError, RequestError, createClient } from "@hercule/client-core";
+import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hercule/home";
 import { Result } from "effect";
 import { parseArguments, said } from "./commands/args";
 import { execute } from "./commands/execute";
@@ -25,7 +25,7 @@ import { EXIT, UsageError } from "./exit";
 import { login, loginHelp } from "./login";
 import { processIo, type Io } from "./io";
 
-/** What `hydra setup-url` prints, or the reason there is nothing to print. */
+/** What `hercule setup-url` prints, or the reason there is nothing to print. */
 export function readSetupUrl(argv: readonly string[], env: Env): Result.Result<string, string> {
   const options = parseGlobalOptions(argv);
   if (Result.isFailure(options)) {
@@ -38,7 +38,7 @@ export function readSetupUrl(argv: readonly string[], env: Env): Result.Result<s
     // The controller deletes the file the moment setup completes, so an absent
     // file is one of two ordinary states, never a crash.
     return Result.fail(
-      `No setup URL in ${file}: either setup is already complete, or \`hydra serve\` has not run yet.`,
+      `No setup URL in ${file}: either setup is already complete, or \`hercule serve\` has not run yet.`,
     );
   }
 }
@@ -115,7 +115,7 @@ const runOperation = async (
   } else if (command.requires === "setup-token") {
     if (args.setupToken === undefined) {
       throw new UsageError(
-        `${command.id} needs --setup-token <token>; \`hydra setup-url\` prints the URL that carries it`,
+        `${command.id} needs --setup-token <token>; \`hercule setup-url\` prints the URL that carries it`,
         command.spelling,
       );
     }
@@ -165,14 +165,14 @@ const walk = (
 const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
   const options = parseGlobalOptions(argv);
   if (Result.isFailure(options)) {
-    io.err(`hydra: ${options.failure.option}: ${options.failure.message}`);
+    io.err(`hercule: ${options.failure.option}: ${options.failure.message}`);
     return EXIT.usage;
   }
 
   const [head, ...after] = options.success.rest;
   const home = resolveHomePath(options.success.home, io.env);
 
-  // `hydra` on its own is the same ask as `hydra --help`: what is there.
+  // `hercule` on its own is the same ask as `hercule --help`: what is there.
   if (head === undefined || head === "--help" || head === "-h") {
     for (const line of rootHelp()) io.out(line);
     return EXIT.ok;
@@ -180,7 +180,7 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
 
   if (head === "setup-url") {
     if (wantsHelp(options.success.rest)) {
-      io.out("usage: hydra setup-url");
+      io.out("usage: hercule setup-url");
       io.out("");
       io.out("Prints the one-time setup URL this machine's controller wrote, or says why");
       io.out("there is none. Needs no credential: it is a read of <home>/setup-url.");
@@ -190,7 +190,7 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
     if (Result.isFailure(url)) {
       // Nothing was sent, so this is not an API failure. It is the same class as
       // a missing credential: the local file this command needs is not there.
-      io.err(`hydra: ${url.failure}`);
+      io.err(`hercule: ${url.failure}`);
       return EXIT.connection;
     }
     io.out(url.success);
@@ -270,24 +270,26 @@ const refusals = (error: ApiError): ReadonlyArray<string> => {
 /** Turn whatever went wrong into a message and an exit code. */
 const report = (error: unknown, json: boolean, io: Io): number => {
   if (error instanceof UsageError) {
-    io.err(`hydra: ${error.message}`);
-    io.err(error.help === undefined ? "run `hydra --help`" : `run \`hydra ${error.help} --help\``);
+    io.err(`hercule: ${error.message}`);
+    io.err(
+      error.help === undefined ? "run `hercule --help`" : `run \`hercule ${error.help} --help\``,
+    );
     return EXIT.usage;
   }
   if (error instanceof CredentialError) {
-    io.err(`hydra: ${error.message}`);
+    io.err(`hercule: ${error.message}`);
     return EXIT.connection;
   }
   if (error instanceof ConnectionError) {
     // There is no envelope: nothing answered. `--json` gets the same line.
-    io.err(`hydra: ${error.message}`);
+    io.err(`hercule: ${error.message}`);
     return EXIT.connection;
   }
   if (error instanceof ApiError) {
     if (json) {
       io.err(JSON.stringify(error, null, 2));
     } else {
-      io.err(`hydra: ${error.message}`);
+      io.err(`hercule: ${error.message}`);
       const grant = (error.details as { grant?: unknown } | undefined)?.grant;
       if (typeof grant === "string" && !error.message.includes(grant)) {
         io.err(`missing grant ${grant}`);

@@ -39,7 +39,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -503,7 +503,7 @@ const make = Effect.gen(function* () {
 });
 
 export class RunnerService extends Context.Service<RunnerService, Effect.Success<typeof make>>()(
-  "hydra/controller/runners/RunnerService",
+  "hercule/controller/runners/RunnerService",
 ) {}
 
 export const RunnerServiceLayer: Layer.Layer<

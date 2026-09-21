@@ -4,7 +4,7 @@ Date: 2026-09-01
 
 ## Status
 
-Accepted. Decided by [Domain model residue](https://github.com/rogierpennink/hydra/issues/46). Refines [ADR 0013](./0013-agents-operate-hydra-through-the-public-api.md) (session tokens still resolve to one permission profile) and [ADR 0001](./0001-runs-freeze-an-execution-plan.md) (the same freeze-at-start rule, applied to sessions).
+Accepted. Decided by [Domain model residue](https://github.com/rogierpennink/hydra/issues/46). Refines [ADR 0013](./0013-agents-operate-hercule-through-the-public-api.md) (session tokens still resolve to one permission profile) and [ADR 0001](./0001-runs-freeze-an-execution-plan.md) (the same freeze-at-start rule, applied to sessions).
 
 ## Context
 
@@ -21,6 +21,6 @@ The deeper issue was reference versus copy. A session that reads its model, acce
 ## Consequences
 
 - Reassigning an agent's profile or changing its defaults affects sessions spawned afterwards, not running ones. Editing a profile's *grants* still applies live, because the session points at the profile row.
-- Agents are what workflows and assistants use. A user who never touches workflows or Intake sees only threads and experiences Hydra as another t3-code.
+- Agents are what workflows and assistants use. A user who never touches workflows or Intake sees only threads and experiences Hercule as another t3-code.
 - Adding a provider adds no agent. Deleting an agent is refused while a non-exited session references it; exited sessions keep the id as history.
 - "Chat" is reserved for a possible post-v1 non-agentic conversation surface and is not a synonym for thread.

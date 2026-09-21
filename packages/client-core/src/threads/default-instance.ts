@@ -6,7 +6,7 @@
  * composer and Settings > Threads both prefill from this same rule (through
  * `threadDefaults`), which is the server's own placement rule (spec 06 §3).
  */
-import type { ProviderInstance } from "@hydra/contract";
+import type { ProviderInstance } from "@hercule/contract";
 
 export const defaultInstanceId = (instances: readonly ProviderInstance[]): string | null =>
   instances.find((instance) => instance.snapshots.some((snapshot) => snapshot.auth.status === "ok"))

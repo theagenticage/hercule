@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { Cause, Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { freemem, tmpdir, totalmem } from "node:os";
-import type { RunnerWatermark } from "@hydra/protocol";
+import type { RunnerWatermark } from "@hercule/protocol";
 import { checkWatermark, machineHeadroom, WATERMARK_INTERVAL } from "./watermark";
 
 const GIB = 1024 * 1024 * 1024;

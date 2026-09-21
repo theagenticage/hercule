@@ -3,7 +3,7 @@
  * runner, which is the one thing a caller may write about the controller.
  */
 import { describe, expect, it } from "vitest";
-import type { Runner } from "@hydra/contract";
+import type { Runner } from "@hercule/contract";
 import { completeSetup, get, send, withServer } from "../http/testing";
 
 interface ControllerInfo {

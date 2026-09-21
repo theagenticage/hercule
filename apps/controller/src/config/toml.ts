@@ -8,7 +8,7 @@ export type TomlScalar = string | number | boolean;
  * and `bind.port = 4937` both read as `bind.port`.
  *
  * The parser is Bun's, which the binary and the tests both run on, so this is
- * only the flattening. Bootstrap config is four scalar keys Hydra authors
+ * only the flattening. Bootstrap config is four scalar keys Hercule authors
  * itself (spec 15 section 6), so anything that is not a scalar or a table is
  * rejected by the key it sits under; the caller rejects the keys it does not
  * know.
@@ -48,7 +48,7 @@ function flatten(
       const failure = flatten(value, `${path}.`, into);
       if (failure !== undefined) return failure;
     } else {
-      return `${path} holds a value Hydra cannot read; every bootstrap key is a string, a number or a boolean`;
+      return `${path} holds a value Hercule cannot read; every bootstrap key is a string, a number or a boolean`;
     }
   }
   return undefined;

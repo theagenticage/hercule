@@ -11,8 +11,8 @@
  */
 import { expect } from "vitest";
 import type * as Duration from "effect/Duration";
-import type { ModelDescriptor, RunnerFacts } from "@hydra/protocol";
-import type { Plugin } from "@hydra/plugin-host";
+import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
+import type { Plugin } from "@hercule/plugin-host";
 import { get, post } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
 import { withFleet as withRunnerFleet, type Arranged, type Wire } from "../sessions/testing";

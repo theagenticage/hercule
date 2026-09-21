@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { siblingTabs, threadDefaults } from "@hydra/client-core";
+import { siblingTabs, threadDefaults } from "@hercule/client-core";
 import {
   localRunnerQuery,
   profilesQuery,

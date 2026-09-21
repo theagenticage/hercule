@@ -47,14 +47,14 @@ import {
   type Task,
   type TapItem,
   type TranscriptRow,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import {
   PROTOCOL_VERSION,
   type JoinAnswer,
   type RunnerFacts,
   type SessionStart,
-} from "@hydra/protocol";
-import type { Plugin } from "@hydra/plugin-host";
+} from "@hercule/protocol";
+import type { Plugin } from "@hercule/plugin-host";
 import { fixture, providerDefinition } from "../plugins/testing";
 import {
   collecting,
@@ -173,7 +173,7 @@ const readEvent = async (base: string, token: string, id: number): Promise<Event
 };
 
 describe("opening a live connection", () => {
-  it("is not there at all until Hydra is set up", async () => {
+  it("is not there at all until Hercule is set up", async () => {
     await withServer(async ({ base }) => {
       // Nothing on the socket is reachable before the password exists - a
       // ticket needs a credential, and there is no user to hold one - so the

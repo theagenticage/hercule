@@ -3,11 +3,11 @@
  *
  * The canonical form every spelling of one repository lands on - the identity a
  * second resource collides on and a credential request is matched against -
- * lives in `@hydra/protocol`, because the runner reads remotes by the same
+ * lives in `@hercule/protocol`, because the runner reads remotes by the same
  * rule. What is left here is the narrower question only the controller asks:
- * whether Hydra will hand this remote to git at all.
+ * whether Hercule will hand this remote to git at all.
  */
-import { canonicalRemoteOf } from "@hydra/protocol";
+import { canonicalRemoteOf } from "@hercule/protocol";
 
 export { canonicalRemoteOf };
 
@@ -21,7 +21,7 @@ const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 const SCP = /^[^@/]+@[^@/:]+:[^:]+$/;
 
 /**
- * Whether Hydra will hand this remote to git: an `https://` URL, or git's own
+ * Whether Hercule will hand this remote to git: an `https://` URL, or git's own
  * `user@host:owner/repo`. Asked of what a user writes on a resource, and not of
  * what a machine reports: git names the remote it is talking to as `host/path`,
  * which is a canonical form rather than a spelling anyone would clone. Local

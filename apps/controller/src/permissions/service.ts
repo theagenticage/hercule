@@ -36,7 +36,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { afterCommit, withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -72,7 +72,7 @@ const make = Effect.gen(function* () {
 
   /**
    * The profile this id names, if this domain's own rules allow it to be
-   * deleted. A shipped profile is `invalid_state`: it is part of what Hydra
+   * deleted. A shipped profile is `invalid_state`: it is part of what Hercule
    * ships, and the user's way to change it is to edit it.
    *
    * What else holds the profile - a live session, an Agent - is read by the
@@ -87,7 +87,7 @@ const make = Effect.gen(function* () {
       if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_PROFILE));
       if (found.value.shipped) {
         return yield* Effect.fail(
-          invalidState(`${found.value.name} is a profile Hydra ships; it cannot be deleted.`),
+          invalidState(`${found.value.name} is a profile Hercule ships; it cannot be deleted.`),
         );
       }
       return found.value;
@@ -237,7 +237,7 @@ const make = Effect.gen(function* () {
 
 /** The profile service. */
 export class Profiles extends Context.Service<Profiles, Effect.Success<typeof make>>()(
-  "hydra/controller/permissions/Profiles",
+  "hercule/controller/permissions/Profiles",
 ) {}
 
 export const ProfilesLayer: Layer.Layer<

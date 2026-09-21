@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import type { ThreadRow } from "@hydra/client-core";
-import { DoneMark, WorkingMark, cn } from "@hydra/ui";
+import type { ThreadRow } from "@hercule/client-core";
+import { DoneMark, WorkingMark, cn } from "@hercule/ui";
 
 /**
  * One thread row: the sidebar and All sessions both render `threadRows`'

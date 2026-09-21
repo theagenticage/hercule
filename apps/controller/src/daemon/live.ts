@@ -18,7 +18,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SessionSpec, type ModelSelection, type SessionInputResult } from "@hydra/protocol";
+import { SessionSpec, type ModelSelection, type SessionInputResult } from "@hercule/protocol";
 import {
   Id,
   InvalidState,
@@ -35,7 +35,7 @@ import {
   type SessionSelection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -93,7 +93,7 @@ const SESSION_INPUT_DEADLINE: Duration.Duration = Duration.seconds(10);
 
 /** Tests hand over a deadline they can wait out. */
 export const SessionInputDeadline = Context.Reference<Duration.Duration>(
-  "hydra/controller/daemon/SessionInputDeadline",
+  "hercule/controller/daemon/SessionInputDeadline",
   { defaultValue: (): Duration.Duration => SESSION_INPUT_DEADLINE },
 );
 
@@ -503,7 +503,7 @@ const make = Effect.gen(function* () {
  * can reach the API.
  */
 export class Live extends Context.Service<Live, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/Live",
+  "hercule/controller/daemon/Live",
 ) {}
 
 export const LiveLayer: Layer.Layer<

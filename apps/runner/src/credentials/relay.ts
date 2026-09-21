@@ -14,7 +14,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Scope from "effect/Scope";
-import type { CredentialAnswer, CredentialRequest } from "@hydra/protocol";
+import type { CredentialAnswer, CredentialRequest } from "@hercule/protocol";
 import { CREDENTIAL_DEADLINE_MS } from "./socket";
 import type { CredentialAsk } from "./socket";
 

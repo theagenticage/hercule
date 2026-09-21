@@ -1,7 +1,7 @@
 /**
  * Boot-time migrations (spec 04, Migrations on boot; spec 15 section 8).
  *
- * On `hydra serve` the controller takes a `VACUUM INTO` copy of the database,
+ * On `hercule serve` the controller takes a `VACUUM INTO` copy of the database,
  * refuses to start if the database is newer than the binary, and applies every
  * pending migration inside one transaction.
  */
@@ -130,8 +130,8 @@ export const migrate = (options: {
         databaseVersion: version,
         binaryVersion: target,
         message:
-          `This database is at schema version ${version}, and this Hydra binary only knows ` +
-          `version ${target}. Hydra has no down migrations; run a build at or after ` +
+          `This database is at schema version ${version}, and this Hercule binary only knows ` +
+          `version ${target}. Hercule has no down migrations; run a build at or after ` +
           `schema version ${version}.`,
       });
     }

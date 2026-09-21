@@ -14,7 +14,7 @@
  */
 import * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
-import { IDENTITY_PORT_COUNT } from "@hydra/protocol";
+import { IDENTITY_PORT_COUNT } from "@hercule/protocol";
 const LOOPBACK = "127.0.0.1";
 
 const IDENTITY_PATH = "/identity";

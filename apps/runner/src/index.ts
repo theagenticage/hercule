@@ -14,7 +14,7 @@ import * as Latch from "effect/Latch";
 import * as Logger from "effect/Logger";
 import type * as Scope from "effect/Scope";
 import { Result } from "effect";
-import { parseGlobalOptions, resolveHomePath } from "@hydra/home";
+import { parseGlobalOptions, resolveHomePath } from "@hercule/home";
 import { runCredentialAction } from "./credentials";
 import { daemon } from "./daemon";
 import { join } from "./join";
@@ -27,10 +27,10 @@ import { setController } from "./set-controller";
 const EXIT = { failed: 1, usage: 2 } as const;
 
 const USAGE = [
-  "usage: hydra runner",
-  "       hydra runner --local",
-  "       hydra runner join <controller-url> --token <token> [--reserved]",
-  "       hydra runner set-controller <controller-url>",
+  "usage: hercule runner",
+  "       hercule runner --local",
+  "       hercule runner join <controller-url> --token <token> [--reserved]",
+  "       hercule runner set-controller <controller-url>",
 ].join("\n");
 
 /**
@@ -79,13 +79,13 @@ const hold = async (work: Effect.Effect<void, { readonly message: string }>): Pr
     ),
   );
   if (outcome._tag === "Failure") {
-    console.error(`hydra: ${outcome.failure.message}`);
+    console.error(`hercule: ${outcome.failure.message}`);
     process.exitCode = EXIT.failed;
   }
 };
 
 const misuse = (reason: string): void => {
-  console.error(`hydra: ${reason}`);
+  console.error(`hercule: ${reason}`);
   console.error(USAGE);
   process.exitCode = EXIT.usage;
 };
@@ -93,7 +93,7 @@ const misuse = (reason: string): void => {
 export async function run(argv: readonly string[]): Promise<void> {
   const options = parseGlobalOptions(argv);
   if (Result.isFailure(options)) {
-    console.error(`hydra: ${options.failure.option}: ${options.failure.message}`);
+    console.error(`hercule: ${options.failure.option}: ${options.failure.message}`);
     process.exitCode = EXIT.usage;
     return;
   }
@@ -111,7 +111,7 @@ export async function run(argv: readonly string[]): Promise<void> {
     return await hold(verb === "--local" ? local(home) : daemon(home));
   }
   if (verb !== "join" && verb !== "set-controller") {
-    // Everything else that reaches this role came from `hydra git-credential`:
+    // Everything else that reaches this role came from `hercule git-credential`:
     // the dispatcher sends every other runner subcommand to the CLI. git names
     // the action, and only `get` has an answer.
     return await runCredentialAction(verb);
@@ -129,7 +129,7 @@ export async function run(argv: readonly string[]): Promise<void> {
       Effect.result(setController({ home, controllerUrl: args[0]! })),
     );
     if (outcome._tag === "Failure") {
-      console.error(`hydra: ${outcome.failure.message}`);
+      console.error(`hercule: ${outcome.failure.message}`);
       process.exitCode = EXIT.failed;
       return;
     }
@@ -163,7 +163,7 @@ export async function run(argv: readonly string[]): Promise<void> {
   );
 
   if (outcome._tag === "Failure") {
-    console.error(`hydra: ${outcome.failure.message}`);
+    console.error(`hercule: ${outcome.failure.message}`);
     process.exitCode = EXIT.failed;
     return;
   }

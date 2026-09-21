@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
-import type { LiveMessage } from "@hydra/contract";
-import { HOST_API, type Plugin } from "@hydra/plugin-host";
+import type { LiveMessage } from "@hercule/contract";
+import { HOST_API, type Plugin } from "@hercule/plugin-host";
 import {
   collecting,
   completeSetup,

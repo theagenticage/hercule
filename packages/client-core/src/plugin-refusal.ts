@@ -4,7 +4,7 @@
  * schema complaint - so turning each into something a person can act on is a
  * reading of the domain, and lives here with a test.
  */
-import type { PluginRefusalReason } from "@hydra/contract";
+import type { PluginRefusalReason } from "@hercule/contract";
 
 export const refusalReason = (reason: PluginRefusalReason): string => {
   if (reason.kind === "hostApi") {

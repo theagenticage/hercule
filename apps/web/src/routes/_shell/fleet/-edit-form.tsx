@@ -1,15 +1,15 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, Checkbox, Field, Input, StringList } from "@hydra/ui";
+import { Button, Checkbox, Field, Input, StringList } from "@hercule/ui";
 import {
   queryKeys,
   runnerConflictField,
   runnerDraft,
   runnerPatch,
-  type HydraClient,
+  type HerculeClient,
   type RunnerDraft,
-} from "@hydra/client-core";
-import type { RunnerDetail, RunnerUpdateInput } from "@hydra/contract";
+} from "@hercule/client-core";
+import type { RunnerDetail, RunnerUpdateInput } from "@hercule/contract";
 import { messageOf, SaveStatus } from "../../../screens/save-status";
 
 const GIB = 1024 * 1024 * 1024;
@@ -28,7 +28,7 @@ export function EditForm({
   client,
   runner,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly runner: RunnerDetail;
 }): JSX.Element {
   const queryClient = useQueryClient();

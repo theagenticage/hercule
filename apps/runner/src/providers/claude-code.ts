@@ -21,7 +21,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { CLAUDE_CODE_VERSION } from "@hydra/home/version";
+import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import {
   MAX_FACT_ITEMS,
   type AccessMode,
@@ -37,7 +37,7 @@ import {
   type SessionBinding,
   type SessionSpec,
   type TurnInput,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import {
   normalize,
   buildNormalizingState,
@@ -427,7 +427,7 @@ const effortIn = (options: SessionSpec["modelSelection"]["options"]): EffortLeve
 };
 
 /**
- * hydra-as-a-tool on Claude: the one plugin Hydra owns, loaded by path from the
+ * hercule-as-a-tool on Claude: the one plugin Hercule owns, loaded by path from the
  * directory the runner wrote it into at start (spec 06 section 9.3). The whole
  * of what this adapter knows about the skill.
  *
@@ -435,7 +435,7 @@ const effortIn = (options: SessionSpec["modelSelection"]["options"]): EffortLeve
  * named here, not discovered among whatever settings sit on this runner.
  */
 const pluginsFor = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
-  { type: "local", path: ctx.hydraTool.claudePluginDir },
+  { type: "local", path: ctx.herculeTool.claudePluginDir },
 ];
 
 /**
@@ -455,7 +455,7 @@ const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<stri
 /**
  * A session, unlike a probe, runs the user's work: it gets the workspace as its
  * cwd and the instance's home as its config directory. Auto memory is off and
- * `settingSources` is empty because a Hydra session's context is Hydra's to
+ * `settingSources` is empty because a Hercule session's context is Hercule's to
  * author, never whatever files happen to sit on this runner (spec 06 section 4.2,
  * section 10.1).
  */
@@ -503,7 +503,7 @@ const sessionOptionsFor = (
 /**
  * Which native session a start lands on, and what the CLI has to be told to get
  * there. A resume continues the parent's own session, so there is nothing to
- * name. A fork and a fresh start are named by Hydra rather than by the harness:
+ * name. A fork and a fresh start are named by Hercule rather than by the harness:
  * in streaming-input mode the CLI says nothing at all, `init` included, until a
  * first turn arrives, so a binding that waited for it would make `startSession`
  * block until somebody sent input.
@@ -784,7 +784,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         if (binary === undefined) {
           return Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
         }
-        // Two harnesses under one Hydra session id would report their events,
+        // Two harnesses under one Hercule session id would report their events,
         // and their exit, as each other's. The second start is the mistake.
         if (live.has(sessionId)) {
           return Effect.fail(`session ${sessionId} is already running here`);

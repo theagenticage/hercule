@@ -4,7 +4,7 @@
  * shapes `turns.test.ts` uses (spec 06 §6.3).
  */
 import { describe, expect, it } from "vitest";
-import type { TranscriptRow } from "@hydra/contract";
+import type { TranscriptRow } from "@hercule/contract";
 import { openItemOf } from "./open-item";
 
 const SESSION_ID = "session-1";

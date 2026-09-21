@@ -3,7 +3,7 @@
  * selector shows for what is picked under the model.
  */
 import { describe, expect, it } from "vitest";
-import type { ModelOption } from "@hydra/contract";
+import type { ModelOption } from "@hercule/contract";
 import { optionsLabel } from "./options-label";
 
 const EFFORT: ModelOption = {

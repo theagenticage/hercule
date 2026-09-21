@@ -12,7 +12,7 @@ import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { invalidState, type InvalidState } from "@hydra/contract";
+import { invalidState, type InvalidState } from "@hercule/contract";
 import { loggedIn, NO_PLACEMENT, providerRepository } from "../providers";
 import { DRAINING, RETIRED, runnerRepository } from "../runners";
 import type { StoredSession } from "../sessions";

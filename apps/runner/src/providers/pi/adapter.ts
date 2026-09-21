@@ -1,7 +1,7 @@
 /**
  * The pi adapter. One pi process per session, spoken to over its RPC mode, and
  * everything that process touches lives under the instance's own agent
- * directory: a runner that let pi read the developer's own would mix Hydra's
+ * directory: a runner that let pi read the developer's own would mix Hercule's
  * sessions with the user's login, skills and settings.
  */
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -24,7 +24,7 @@ import type {
   SessionBinding,
   SessionSpec,
   TurnInput,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import type { ProviderAdapter, ProviderRunnerContext } from "../index";
 import { userMessage } from "../events";
 import { probeFailed } from "../probe";
@@ -53,7 +53,7 @@ export const PI = "pi";
 const PI_BINARY = "pi";
 
 /**
- * The Z.ai credential, as Hydra's instance config names it and as pi reads it.
+ * The Z.ai credential, as Hercule's instance config names it and as pi reads it.
  * The runner cannot import the pi plugin, so the adapter owns the mapping the
  * way the Claude adapter owns `CLAUDE_CONFIG_DIR`.
  */
@@ -65,7 +65,7 @@ const MAX_COMPLAINT_LINES = 5;
 /**
  * How long a stopped pi is given to leave on its own. Closing its stdin is the
  * cue it leaves on, a question it is holding included; a pi that does not take
- * that cue would go on running with the user's key in it while Hydra believes
+ * that cue would go on running with the user's key in it while Hercule believes
  * the session is over.
  */
 const STOP_DEADLINE: Duration.Duration = Duration.seconds(2);
@@ -208,7 +208,7 @@ const parseHeldCall = (message: unknown): Record<string, unknown> => {
     const parsed: unknown = JSON.parse(message);
     return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   } catch {
-    // Only Hydra's own approval hook asks anything in these sessions, so a message in
+    // Only Hercule's own approval hook asks anything in these sessions, so a message in
     // any other shape names no call - and a question about no call is one the
     // reader below refuses rather than docks.
     return {};
@@ -287,7 +287,7 @@ const getSessionThinkingLevel = (selection: ModelSelection): string => {
 
 /**
  * The transcript of a native session, by its id. pi resolves a bare id against
- * the sessions recorded for the current directory and asks on stdin - Hydra's
+ * the sessions recorded for the current directory and asks on stdin - Hercule's
  * own JSON channel - when it has to look wider, so a path is what it is given.
  */
 const transcriptOf = (home: string, nativeSessionId: string): string | undefined => {
@@ -315,7 +315,7 @@ const PI_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>
 };
 
 /**
- * The launch. `--session-id` names the session Hydra's own id, and a resume
+ * The launch. `--session-id` names the session Hercule's own id, and a resume
  * takes the transcript instead: pi refuses the two together, because the
  * session the transcript is already carries its own id.
  */
@@ -330,14 +330,14 @@ const argvFor = (
   return [
     "--mode",
     "rpc",
-    // Nothing of the user's own: a Hydra session runs on what the controller
+    // Nothing of the user's own: a Hercule session runs on what the controller
     // authored for it and on nothing this machine happens to have lying about.
     "--no-context-files",
     "--no-extensions",
     "--no-skills",
     "--no-prompt-templates",
     "--no-themes",
-    // Approvals are Hydra's own, through the extension below; pi's own prompt
+    // Approvals are Hercule's own, through the extension below; pi's own prompt
     // would be asked on the JSON channel nobody is reading as a terminal.
     "--no-approve",
     "--offline",
@@ -452,7 +452,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       tell(held, dialog.id, "deny");
       warn(
         sessionId,
-        "pi asked a second thing while the first was still unanswered; Hydra asks one at a time, so this one was refused and can be asked again",
+        "pi asked a second thing while the first was still unanswered; Hercule asks one at a time, so this one was refused and can be asked again",
       );
       return;
     }

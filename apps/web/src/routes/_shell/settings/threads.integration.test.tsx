@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Connection, Profile, ProviderInstance, Runner } from "@hydra/contract";
+import type { Connection, Profile, ProviderInstance, Runner } from "@hercule/contract";
 import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 
 const RUNNER_LOCAL: Runner = {

@@ -3,7 +3,7 @@
  * say it is.
  *
  * `GIT_CONFIG_COUNT` and its pairs are how configuration reaches git without a
- * file: nothing Hydra sets is written to disk, and nothing it sets outlives the
+ * file: nothing Hercule sets is written to disk, and nothing it sets outlives the
  * process it was given to.
  */
 import { join as joinPath } from "node:path";
@@ -56,7 +56,7 @@ export const gitCredentialEnv = (options: {
         ] as const)),
   ];
   return {
-    HYDRA_RUNNER_SOCKET: options.socketPath,
+    HERCULE_RUNNER_SOCKET: options.socketPath,
     GIT_CONFIG_COUNT: String(pairs.length),
     ...Object.fromEntries(
       pairs.flatMap((pair, at) => [

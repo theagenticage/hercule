@@ -1,4 +1,4 @@
-import { CLI, NOUNS } from "@hydra/contract";
+import { CLI, NOUNS } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { parseArguments } from "./args";
 import { COMMANDS, commandAt, mentionsIn } from "./tree";
@@ -252,7 +252,7 @@ describe("every example in the table", () => {
       for (const [index, example] of (row.examples ?? []).entries()) {
         await expect(
           parseArguments(command, example.args, () => Promise.resolve(example.stdin ?? "")),
-          `${id} example ${index}: hydra ${row.command} ${example.args.join(" ")}`,
+          `${id} example ${index}: hercule ${row.command} ${example.args.join(" ")}`,
         ).resolves.toBeDefined();
       }
     }
@@ -289,7 +289,7 @@ describe("every command the table's prose names", () => {
       for (const mention of mentionsIn(text)) {
         expect(
           mention.names,
-          `${where} names "hydra ${mention.words.join(" ")}", which is not a command`,
+          `${where} names "hercule ${mention.words.join(" ")}", which is not a command`,
         ).toBeDefined();
       }
     }

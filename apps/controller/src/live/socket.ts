@@ -48,8 +48,8 @@ import {
   type Internal,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
-import { VERSION } from "@hydra/home/version";
+} from "@hercule/contract";
+import { VERSION } from "@hercule/home/version";
 import { CurrentActor, requireGrant, type UserActor } from "../actor";
 import { Credentials } from "../credentials";
 import { WsTickets } from "./tickets";
@@ -110,7 +110,7 @@ interface Connection {
  * a `hello` starts being answered; carrying an actor is what "authenticated"
  * means here.
  */
-class Greeted extends Context.Service<Greeted, Connection>()("hydra/controller/live/Greeted") {}
+class Greeted extends Context.Service<Greeted, Connection>()("hercule/controller/live/Greeted") {}
 
 const decodeSchemaTopic = Schema.decodeUnknownEffect(LiveTopic);
 

@@ -1,6 +1,6 @@
 # Events and Connections
 
-Every event in Hydra - ingested by an event-source plugin, ticked by the scheduler, posted by hand, or emitted by the controller about its own runs and tasks - is normalized into one envelope and appended to one persisted event log. Plugins only emit; the core alone persists, matches, and dispatches, using durable-cursor transactions whose effect rows are unique per (trigger or subscription, event). External accounts are core-owned Connections: plugin-defined types, one ingest loop per Connection, every event stamped with the Connection it arrived through, and every trigger and outbound action naming its Connection explicitly. This document specifies the event envelope, the pipeline, the v1 event sources (GitHub, Gmail, cron, manual, platform events), subscriptions, the Connection record, and the Connection setup flows. Rationale lives in [ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md) and [ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md).
+Every event in Hercule - ingested by an event-source plugin, ticked by the scheduler, posted by hand, or emitted by the controller about its own runs and tasks - is normalized into one envelope and appended to one persisted event log. Plugins only emit; the core alone persists, matches, and dispatches, using durable-cursor transactions whose effect rows are unique per (trigger or subscription, event). External accounts are core-owned Connections: plugin-defined types, one ingest loop per Connection, every event stamped with the Connection it arrived through, and every trigger and outbound action naming its Connection explicitly. This document specifies the event envelope, the pipeline, the v1 event sources (GitHub, Gmail, cron, manual, platform events), subscriptions, the Connection record, and the Connection setup flows. Rationale lives in [ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md) and [ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md).
 
 ## 1. Pipeline overview
 
@@ -20,7 +20,7 @@ One envelope for every event, regardless of source.
 
 | Field | Type | Set by | Notes |
 |---|---|---|---|
-| `id` | Hydra id | core | Identity of the event. The event log also carries a monotonic **position**, the cursor unit for the matcher and for live-topic replay ([./04-state-store.md](./04-state-store.md), [./14-web-app.md](./14-web-app.md)). |
+| `id` | Hercule id | core | Identity of the event. The event log also carries a monotonic **position**, the cursor unit for the matcher and for live-topic replay ([./04-state-store.md](./04-state-store.md), [./14-web-app.md](./14-web-app.md)). |
 | `source` | string | core | The emitting plugin id or core emitter name: `github`, `gmail`, `cron`, `manual`, `platform`. |
 | `connectionId` | id or null | emitter | The Connection the event arrived through. Required for plugin-emitted events; null for core emitters. |
 | `system` | string | emitter, then enrichment | The external system the event is *about*, defaulting to the source's own system (`github`, `gmail`). Writable after ingest (see below). |
@@ -72,7 +72,7 @@ Because effect rows are unique per (trigger or subscription, event), a crash bet
 
 The warning is a `health` field on the trigger row (and on the subscription row for correlation errors): `ok`, or `error` with the last message and time, overwritten on every evaluation. When a failing evaluation finds the field at `ok`, the same write also creates one informational Notification `core.trigger-filter-error` naming the trigger, the workflow and the error; while the field stays `error`, later failures only refresh the message. A clean evaluation returns it to `ok` silently, and the next failure after that is a new streak with a new notification. No counters, no timers, no dedup table (pinned by [Notification lifecycle](https://github.com/rogierpennink/hydra/issues/42)).
 
-**Expressions.** All four expression sites (start-trigger filters, signal-trigger correlation keys, step and edge conditions) use CEL, evaluated by `@marcbachmann/cel-js` behind a Hydra-owned wrapper, context variables dyn-typed ([./07-workflows.md](./07-workflows.md); research/expression-language.md (branch `research/expression-language`)). Filters see the whole envelope as `event`; the raw event never leaks into the frozen plan - the trigger's input mapping copies what the run needs.
+**Expressions.** All four expression sites (start-trigger filters, signal-trigger correlation keys, step and edge conditions) use CEL, evaluated by `@marcbachmann/cel-js` behind a Hercule-owned wrapper, context variables dyn-typed ([./07-workflows.md](./07-workflows.md); research/expression-language.md (branch `research/expression-language`)). Filters see the whole envelope as `event`; the raw event never leaks into the frozen plan - the trigger's input mapping copies what the run needs.
 
 ### 4.1 Spawn bounds
 
@@ -178,7 +178,7 @@ A Subscription is a live, correlated claim on future events held by a run or a s
 
 ### 7.2 Session-held subscriptions
 
-- **Registered by the session itself** through the ordinary `subscription.create` operation (`subscription` grant), via the `hydra` CLI: the response to a spawn-type op teaches the follow-up (`subscribe for updates: hydra subscription create run:r_3`). The canonical long-wait pattern is start, subscribe, end turn; the event wakes the session. No polling surface and no blocking waits ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
+- **Registered by the session itself** through the ordinary `subscription.create` operation (`subscription` grant), via the `hercule` CLI: the response to a spawn-type op teaches the follow-up (`subscribe for updates: hercule subscription create run:r_3`). The canonical long-wait pattern is start, subscribe, end turn; the event wakes the session. No polling surface and no blocking waits ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 - A registration names a **target**, one of four kinds ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2): `run` (the `run.*` kinds for that run), `session` (the `session.*` kinds for that session), `ref` (any event whose `refs` include that External Ref), `request` (the decision on a Permission Request). The controller expands the target into the pipeline's matching condition and stores both. No free-form CEL target in v1.
 - **Delivered as queued input**: the matched event is rendered as text plus its structured payload and queued for the session's next turn boundary. It never steers a running turn by default.
 - **Two load-bearing uses:** mid-session artifacts (an agent opens PR #87 mid-task and subscribes to its checks and reviews) and assistants (long-lived, no run to hold claims). An assistant conversation's subscriptions migrate to the successor session at rotation ([./12-assistants.md](./12-assistants.md)); a workflow agent step's session subscriptions die with that session.
@@ -219,27 +219,27 @@ A plugin reports credential trouble (refresh failure, revoked token) by setting 
 
 ## 9. Connection setup flows
 
-Policy (from [./13-security.md](./13-security.md)): bring-your-own OAuth client where the provider demands one, no Hydra-hosted OAuth relay, paste-a-token as the universal fallback. Credential storage, encryption, and refresh mechanics are owned by [./13-security.md](./13-security.md); this section states only what each Connection needs and how the user gets there. Facts from research/connection-setup-ux.md (branch `research/connection-setup-ux`).
+Policy (from [./13-security.md](./13-security.md)): bring-your-own OAuth client where the provider demands one, no Hercule-hosted OAuth relay, paste-a-token as the universal fallback. Credential storage, encryption, and refresh mechanics are owned by [./13-security.md](./13-security.md); this section states only what each Connection needs and how the user gets there. Facts from research/connection-setup-ux.md (branch `research/connection-setup-ux`).
 
 ### 9.1 Two flow shapes
 
 The plugin declares its setup flow through the `connections` capability; the core renders it in the Connections screen and stores the result. The declaration shape (setup step list, `validate`, the core OAuth2 client, pending-setup rows and `state` routing) is pinned in [./05-plugins.md](./05-plugins.md) section 10.1.
 
 1. **Token paste** (universal): the user pastes a token, the plugin validates it against the provider (e.g. `GET /user`), the core stores it and sets `connected`. Primary path for GitHub, Slack, Discord.
-2. **OAuth redirect** to the controller's own origin: the core serves `/oauth/callback` on whatever origin the user's browser already uses to reach Hydra, and **displays the exact redirect URI to register**, derived from that request origin. The flow carries a state parameter bound to the pending Connection; the callback exchanges the code, stores the refresh token, and sets `connected`. Primary path for Google.
+2. **OAuth redirect** to the controller's own origin: the core serves `/oauth/callback` on whatever origin the user's browser already uses to reach Hercule, and **displays the exact redirect URI to register**, derived from that request origin. The flow carries a state parameter bound to the pending Connection; the callback exchanges the code, stores the refresh token, and sets `connected`. Primary path for Google.
 
 Tailscale Funnel is never required: the browser performing the redirect can already reach the controller. The only public-endpoint case (webhooks) is post-v1.
 
 ### 9.2 Google (Gmail)
 
-Device flow is a dead end: Google's limited-input device flow excludes Gmail scopes. The setup steps Hydra documents and its setup screen walks through:
+Device flow is a dead end: Google's limited-input device flow excludes Gmail scopes. The setup steps Hercule documents and its setup screen walks through:
 
-1. Serve Hydra on an HTTPS tailnet origin: enable MagicDNS and HTTPS in Tailscale, run `tailscale cert`, serve at `https://<node>.<tailnet>.ts.net`. Google validates the redirect URI *string* (HTTPS, not a raw IP, host under a public-suffix domain - `ts.net` qualifies), not reachability. Private LAN IPs and `.local` / `.internal` names are rejected.
+1. Serve Hercule on an HTTPS tailnet origin: enable MagicDNS and HTTPS in Tailscale, run `tailscale cert`, serve at `https://<node>.<tailnet>.ts.net`. Google validates the redirect URI *string* (HTTPS, not a raw IP, host under a public-suffix domain - `ts.net` qualifies), not reachability. Private LAN IPs and `.local` / `.internal` names are rejected.
 2. Create a GCP project, enable the Gmail API, configure the consent screen with user type External, and **publish it to production without verification** (sanctioned for personal use under 100 users). Workspace accounts choose Internal instead and skip the warning. Staying in "Testing" yields 7-day refresh tokens and is unacceptable for an always-on controller.
-3. Add the authorized domain and the redirect URI Hydra displays (`https://<node>.<tailnet>.ts.net/oauth/callback`), create a Web application client, paste client id and secret into the Gmail plugin's settings (client id = plugin config, client secret = plugin-owned secret; one client serves every `gmail/gmail` Connection, [./05-plugins.md](./05-plugins.md)).
+3. Add the authorized domain and the redirect URI Hercule displays (`https://<node>.<tailnet>.ts.net/oauth/callback`), create a Web application client, paste client id and secret into the Gmail plugin's settings (client id = plugin config, client secret = plugin-owned secret; one client serves every `gmail/gmail` Connection, [./05-plugins.md](./05-plugins.md)).
 4. Connect; click through the "unverified app" warning once (Advanced > Go to app). Result: a non-expiring refresh token.
 
-**Localhost fallback:** `http://localhost:<port>` / `http://127.0.0.1:<port>` are exempt from Google's HTTPS rule but resolve on the *browser's* machine, so they work only when the user browses from the controller host. Hydra documents this as a same-machine fallback, never the default.
+**Localhost fallback:** `http://localhost:<port>` / `http://127.0.0.1:<port>` are exempt from Google's HTTPS rule but resolve on the *browser's* machine, so they work only when the user browses from the controller host. Hercule documents this as a same-machine fallback, never the default.
 
 **Documented expectation:** Gmail-scoped refresh tokens die on a Google password change; the Connection then goes `needs-reauth` and the user reconnects.
 

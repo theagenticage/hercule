@@ -7,7 +7,7 @@
  * the database's rather than a read the service could race.
  *
  * No path is stored anywhere here, and none is taken: where a working copy sits
- * is the machine's own business, and a primary is always a Hydra-managed clone
+ * is the machine's own business, and a primary is always a Hercule-managed clone
  * under that machine's storage.
  *
  * `project_resources` is rebuilt rather than altered: SQLite cannot add a

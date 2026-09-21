@@ -17,7 +17,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { unauthenticated, type Unauthenticated } from "@hydra/contract";
+import { unauthenticated, type Unauthenticated } from "@hercule/contract";
 import { CurrentActor, NO_CREDENTIAL, type UserActor } from "../actor";
 import { mintToken } from "../credentials";
 
@@ -94,7 +94,7 @@ const make = Effect.sync(() => {
 
 /** The live socket's tickets. */
 export class WsTickets extends Context.Service<WsTickets, Effect.Success<typeof make>>()(
-  "hydra/controller/live/WsTickets",
+  "hercule/controller/live/WsTickets",
 ) {}
 
 export const WsTicketsLayer: Layer.Layer<WsTickets> = Layer.effect(WsTickets)(make);

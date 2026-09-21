@@ -9,8 +9,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Delivery } from "@hydra/protocol";
-import type { InputSource, InputStatus, SortDirection } from "@hydra/contract";
+import type { Delivery } from "@hercule/protocol";
+import type { InputSource, InputStatus, SortDirection } from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,

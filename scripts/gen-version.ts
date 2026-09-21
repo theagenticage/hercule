@@ -3,8 +3,8 @@
  *
  * The version is baked in at build time: a compiled binary has no
  * `package.json` on disk to read. It is generated into
- * `@hydra/home` because that is the one leaf every role links: the dispatcher
- * prints it for `hydra --version` and the controller answers it from
+ * `@hercule/home` because that is the one leaf every role links: the dispatcher
+ * prints it for `hercule --version` and the controller answers it from
  * `controller.read`, and neither may depend on the other.
  *
  * The Claude Code version is baked in beside it: the SDK talks to the CLI it

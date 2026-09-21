@@ -22,7 +22,7 @@ const ENROLLED: RunnerFile = {
 };
 
 const homeHolding = (contents: Record<string, unknown>): string => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-runner-file-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-runner-file-"));
   homes.push(home);
   const path = runnerFileIn(home);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });

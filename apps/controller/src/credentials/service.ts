@@ -25,7 +25,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentUser, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -163,7 +163,7 @@ const make = Effect.gen(function* () {
 
 /** The API key service. */
 export class ApiKeys extends Context.Service<ApiKeys, Effect.Success<typeof make>>()(
-  "hydra/controller/credentials/ApiKeys",
+  "hercule/controller/credentials/ApiKeys",
 ) {}
 
 export const ApiKeysLayer: Layer.Layer<

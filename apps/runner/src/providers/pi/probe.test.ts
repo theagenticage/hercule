@@ -9,7 +9,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { ProbeResult } from "@hydra/protocol";
+import type { ProbeResult } from "@hercule/protocol";
 import { piAdapter } from "./adapter";
 import {
   buildFakePiSeam,

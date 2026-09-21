@@ -1,5 +1,5 @@
 import { useState, type JSX, type ReactNode } from "react";
-import type { ComposerPick, LoginTarget, ModelMenu, ModelPill } from "@hydra/client-core";
+import type { ComposerPick, LoginTarget, ModelMenu, ModelPill } from "@hercule/client-core";
 import { PillLabel } from "./controls";
 import { ModelList } from "./model-list";
 import { SelectorShell } from "./selector-shell";

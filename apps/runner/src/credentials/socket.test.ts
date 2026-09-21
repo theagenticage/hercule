@@ -8,13 +8,13 @@ import { existsSync, statSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { CredentialAnswer } from "@hydra/protocol";
+import type { CredentialAnswer } from "@hercule/protocol";
 import { serveCredentialSocket } from "./index";
 import { cleanTemporaries, temporary } from "../workspaces/testing";
 
 afterAll(cleanTemporaries);
 
-const socketPath = (): string => join(temporary("hydra-credentials-"), "daemon.sock");
+const socketPath = (): string => join(temporary("hercule-credentials-"), "daemon.sock");
 
 /** D-21 F5: an answer is a credential or a refusal, never a struct of maybes. */
 const answering = (

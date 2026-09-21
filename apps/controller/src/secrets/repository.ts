@@ -210,7 +210,7 @@ export class Secrets extends Context.Service<
       SqlError | SecretNameError | SecretDecryptError
     >;
   }
->()("hydra/controller/secrets/Secrets") {}
+>()("hercule/controller/secrets/Secrets") {}
 
 /**
  * The secrets repository over the controller database, encrypting under the
@@ -232,7 +232,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
           message:
             `The secret ${owner.kind}/${owner.id}/${name} did not decrypt under this machine's ` +
             `master key. Either the key is not the one it was written under, or the row was ` +
-            `edited outside Hydra.`,
+            `edited outside Hercule.`,
         });
 
       // AES-GCM with a valid key and a 12-byte nonce has no failure mode, so a

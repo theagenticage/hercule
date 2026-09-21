@@ -5,7 +5,7 @@
  * §The thread surface).
  */
 import type { JSX, RefObject } from "react";
-import { formatStamp, type ThreadTurn } from "@hydra/client-core";
+import { formatStamp, type ThreadTurn } from "@hercule/client-core";
 import { Markdown } from "./markdown";
 import { TurnDivider } from "./turn-divider";
 

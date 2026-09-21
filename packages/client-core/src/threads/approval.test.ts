@@ -8,7 +8,7 @@
  * typed off the contract's own `OpenRequest` so no shape is restated here.
  */
 import { describe, expect, it } from "vitest";
-import type { OpenRequest } from "@hydra/contract";
+import type { OpenRequest } from "@hercule/contract";
 import { approvalCard } from "./approval";
 
 const COMMAND: OpenRequest = {
@@ -100,7 +100,7 @@ describe("approvalCard", () => {
             question: "Which database should it use?",
             header: "Database",
             options: [
-              { label: "SQLite", description: "the one Hydra ships" },
+              { label: "SQLite", description: "the one Hercule ships" },
               { label: "Postgres", description: "somebody else's server" },
             ],
             multiSelect: false,
@@ -123,7 +123,7 @@ describe("approvalCard", () => {
         header: "Database",
         question: "Which database should it use?",
         options: [
-          { label: "SQLite", description: "the one Hydra ships" },
+          { label: "SQLite", description: "the one Hercule ships" },
           { label: "Postgres", description: "somebody else's server" },
         ],
         note: null,

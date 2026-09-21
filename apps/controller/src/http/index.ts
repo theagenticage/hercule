@@ -1,5 +1,5 @@
 /**
- * The public API over HTTP: what `hydra serve` needs to bind a listener.
+ * The public API over HTTP: what `hercule serve` needs to bind a listener.
  *
  * Everything else in this domain - the envelope, the gates, the derived routes
  * - is reached by its siblings through relative imports; the boundary names

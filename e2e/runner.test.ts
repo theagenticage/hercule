@@ -23,11 +23,11 @@ import {
 } from "./harness";
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;
-/** The key `hydra login` wrote, which is what reads the fleet back. */
+/** The key `hercule login` wrote, which is what reads the fleet back. */
 let apiKey: string;
 
 /** Mints a single-use join token, the way an operator on the controller does. */
@@ -90,7 +90,7 @@ afterAll(async () => {
   state.remove();
 });
 
-describe("hydra runner join through the binary", () => {
+describe("hercule runner join through the binary", () => {
   it("enlists the machine, prints the name it was given and writes runner.json", async () => {
     const machine = temporaryHome();
     try {
@@ -225,7 +225,7 @@ describe("retiring a joined runner through the binary", () => {
       daemon = undefined;
       expect(ended.code, `the daemon stayed up:\n${ended.stdout}\n${ended.stderr}`).not.toBe(0);
       expect(`${ended.stdout}${ended.stderr}`).toContain(
-        "this runner was retired; run `hydra runner join` to re-enlist",
+        "this runner was retired; run `hercule runner join` to re-enlist",
       );
 
       const afterRetire = (await runners()).find((one) => one.id === runner.id);

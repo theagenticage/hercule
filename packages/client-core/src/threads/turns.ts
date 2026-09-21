@@ -9,7 +9,7 @@
  * off the concatenated `assistant_text` deltas in the turn, in the order the
  * transcript carries them.
  */
-import type { TranscriptRow } from "@hydra/contract";
+import type { TranscriptRow } from "@hercule/contract";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;

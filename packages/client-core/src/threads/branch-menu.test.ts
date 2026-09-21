@@ -36,7 +36,7 @@ describe("branchField: a main workspace", () => {
     expect(field?.rows).toEqual([
       { branch: "main", badge: "current", dimmed: null },
       { branch: "release/2.4", badge: null, dimmed: null },
-      { branch: "hydra/run-3f1", badge: null, dimmed: "in workspace hydra/run-3f1" },
+      { branch: "hercule/run-3f1", badge: null, dimmed: "in workspace hercule/run-3f1" },
     ]);
   });
 
@@ -95,10 +95,10 @@ describe("branchField: a fresh worktree", () => {
     expect(field?.label).toBe("from main");
     expect(field?.rows.find((row) => row.branch === "main")?.badge).toBe("default");
     expect(phraseText(field?.foot ?? [])).toBe(
-      "The new branch is hydra/run-…, named after the thread, and starts from origin/main when the remote has it.",
+      "The new branch is hercule/run-…, named after the thread, and starts from origin/main when the remote has it.",
     );
     // The two git words in it are mono, as a git word is everywhere.
-    expect(field?.foot).toContainEqual({ text: "hydra/run-…", mono: true });
+    expect(field?.foot).toContainEqual({ text: "hercule/run-…", mono: true });
     expect(field?.foot).toContainEqual({ text: "origin/main", mono: true });
   });
 

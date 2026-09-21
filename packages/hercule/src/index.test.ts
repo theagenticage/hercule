@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatch, VERSION } from "./index";
 
 const run = vi.hoisted(() => ({ controller: vi.fn(), runner: vi.fn(), cli: vi.fn() }));
-vi.mock("@hydra/controller", () => ({ run: run.controller }));
-vi.mock("@hydra/runner", () => ({ run: run.runner }));
-vi.mock("@hydra/cli", () => ({ run: run.cli }));
+vi.mock("@hercule/controller", () => ({ run: run.controller }));
+vi.mock("@hercule/runner", () => ({ run: run.runner }));
+vi.mock("@hercule/cli", () => ({ run: run.cli }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -97,8 +97,8 @@ describe("dispatch", () => {
     expect(run.cli).not.toHaveBeenCalled();
   });
 
-  // git always names an action. A bare `hydra git-credential` must not read as
-  // `hydra runner` and start a daemon, so the word itself rides along.
+  // git always names an action. A bare `hercule git-credential` must not read as
+  // `hercule runner` and start a daemon, so the word itself rides along.
   it("keeps git-credential in the line when no action follows it", async () => {
     await dispatch(["git-credential"]);
     expect(run.runner).toHaveBeenCalledWith(["git-credential"]);

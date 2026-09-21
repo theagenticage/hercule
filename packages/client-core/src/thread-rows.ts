@@ -5,7 +5,7 @@
  * a defaulted one: the default lives here, in the one place that reads the key,
  * so the sidebar never carries a `?? "meta"` of its own.
  */
-import type { ThreadRows } from "@hydra/contract";
+import type { ThreadRows } from "@hercule/contract";
 
 /** What a thread row shows when the user has not said otherwise. */
 export const THREAD_ROWS_DEFAULT: ThreadRows = "meta";

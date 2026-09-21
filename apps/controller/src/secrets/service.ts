@@ -36,7 +36,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentUser, USER_ACTOR } from "../actor";
 import { withTransaction, type CursorError } from "../db";
 import { AuditLog } from "../events";
@@ -201,7 +201,7 @@ const make = Effect.gen(function* () {
 
 /** The secret service. */
 export class Secret extends Context.Service<Secret, Effect.Success<typeof make>>()(
-  "hydra/controller/secrets/Secret",
+  "hercule/controller/secrets/Secret",
 ) {}
 
 export const SecretLayer: Layer.Layer<Secret, never, SqlClient.SqlClient | Secrets | AuditLog> =

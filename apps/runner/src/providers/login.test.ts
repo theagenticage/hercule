@@ -26,13 +26,13 @@ const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
 
 const CONTEXT: ProviderRunnerContext = {
   cwd: null,
-  home: `/var/hydra/runner/providers/${INSTANCE}`,
+  home: `/var/hercule/runner/providers/${INSTANCE}`,
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
   secrets: {},
   // Never read by a probe, an install or a login; the context type carries it
   // for the sessions this adapter also hosts.
-  hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },
+  herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
 };
 
 const URL_ONE = "https://claude.ai/oauth/authorize?code=challenge-one";
@@ -433,13 +433,13 @@ describe("a device-code login", () => {
   // homes when it builds the command, exactly as it does for a session.
   const CODEX_CONTEXT: ProviderRunnerContext = {
     cwd: null,
-    home: mkdtempSync(join(tmpdir(), "hydra-login-")),
+    home: mkdtempSync(join(tmpdir(), "hercule-login-")),
     binary: "/usr/local/bin/codex",
     env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
     secrets: {},
     // Never read by a probe, an install or a login; the context type carries it
     // for the sessions this adapter also hosts.
-    hydraTool: { skill: "", claudePluginDir: "/var/hydra/runner/storage/claude-plugin" },
+    herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
   };
 
   afterAll(() => {

@@ -5,8 +5,8 @@
  * this; the composer's menu dims on it - one function, so the mode the menu
  * offers as available is always the mode the controller will actually grant.
  */
-import type { DeclaredCapabilities } from "@hydra/plugin-host";
-import type { AccessMode } from "@hydra/protocol";
+import type { DeclaredCapabilities } from "@hercule/plugin-host";
+import type { AccessMode } from "@hercule/protocol";
 
 /** Least to most permissive - the order the fallback walks down. */
 export const ACCESS_MODE_CHAIN: readonly AccessMode[] = [

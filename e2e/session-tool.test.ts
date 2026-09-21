@@ -1,5 +1,5 @@
 /**
- * Hydra-as-a-tool, proved end to end through the release binary.
+ * Hercule-as-a-tool, proved end to end through the release binary.
  *
  * A Thread is spawned under the shipped `worker` profile with a prompt that
  * asks for three things: create a task, update it, delete it. The first two are
@@ -10,16 +10,16 @@
  * `missing grant task.delete` rather than quietly getting its way.
  *
  * Nothing here is arranged behind the agent's back: every one of those three
- * commands is the `hydra` binary the runner put on the session's PATH, called
+ * commands is the `hercule` binary the runner put on the session's PATH, called
  * by the model out of a bare process, against the token the runner injected.
  *
  * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
- * and takes a couple of minutes. `HYDRA_LIVE_SESSION_TEST=1` asks for it.
+ * and takes a couple of minutes. `HERCULE_LIVE_SESSION_TEST=1` asks for it.
  *
  * ## The login is lent for the run
  *
  * A session runs against the Provider Instance's own `CLAUDE_CONFIG_DIR` under
- * the runner's storage (spec 06 section 4.2), which in a throwaway Hydra Home
+ * the runner's storage (spec 06 section 4.2), which in a throwaway Hercule Home
  * is empty, so nothing could start. The developer's own login is lent to it for
  * the run: on macOS the Claude CLI keeps it as a Keychain item and reads
  * `.credentials.json` in the config directory when the Keychain has none, so
@@ -29,7 +29,7 @@
  *
  * ## What this test does not assert
  *
- * That the session's token is 401 after `hydra session stop`. The token is
+ * That the session's token is 401 after `hercule session stop`. The token is
  * deliberately unreachable from out here: it exists in the `SessionStart` frame
  * and in the session process's environment, and the one thing that could print
  * it - the agent - must never be asked to. Revocation on exit is proved instead
@@ -62,10 +62,10 @@ import {
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
-const wanted = process.env["HYDRA_LIVE_SESSION_TEST"] !== undefined;
+const wanted = process.env["HERCULE_LIVE_SESSION_TEST"] !== undefined;
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;
@@ -96,8 +96,8 @@ const UPDATED = "updated by a session";
  * is untouched by naming it.
  */
 const PROMPT =
-  "Using the hydra CLI (run `hydra --help` first if needed): create a task titled " +
-  `"${TITLE}" with description "${MADE}" and provenance {"ref":"hydra:proof:p011"}, then ` +
+  "Using the hercule CLI (run `hercule --help` first if needed): create a task titled " +
+  `"${TITLE}" with description "${MADE}" and provenance {"ref":"hercule:proof:p011"}, then ` +
   `update its description to "${UPDATED}", then try to delete it. Report each command's ` +
   "output verbatim.";
 
@@ -244,7 +244,7 @@ afterAll(async () => {
   state.remove();
 });
 
-describe.skipIf(!wanted)("an agent reaching Hydra from inside a session", () => {
+describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () => {
   it(
     "creates and updates a task as itself, is refused the delete its profile withholds",
     async (ctx) => {

@@ -20,7 +20,7 @@ import {
 
 afterAll(cleanTemporaries);
 
-const storage = (): string => temporary("hydra-storage-");
+const storage = (): string => temporary("hercule-storage-");
 
 const disposing = (workspaceId: string) => ({ _tag: "workspaceDispose", workspaceId }) as const;
 
@@ -35,7 +35,7 @@ describe("disposing an ephemeral workspace", () => {
       provisionFrame({
         workspaceId,
         kind: "ephemeral",
-        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hydra/run-4d4d4d4d" })],
+        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-4d4d4d4d" })],
       }),
     );
     const directory = join(storageDir, "workspaces", workspaceId);
@@ -47,7 +47,7 @@ describe("disposing an ephemeral workspace", () => {
     expect(report.workspaceId).toBe(workspaceId);
     expect(existsSync(directory)).toBe(false);
     // The work the agent did is not thrown away with the directory.
-    expect(git(cache, "rev-parse", "--verify", "hydra/run-4d4d4d4d")).toMatch(/^[0-9a-f]{40}$/);
+    expect(git(cache, "rev-parse", "--verify", "hercule/run-4d4d4d4d")).toMatch(/^[0-9a-f]{40}$/);
     // And git no longer believes a worktree lives there.
     expect(git(cache, "worktree", "list")).not.toContain(directory);
     // A restart must not resurrect it.
@@ -56,7 +56,7 @@ describe("disposing an ephemeral workspace", () => {
 });
 
 describe("disposing a primary", () => {
-  // D-20a: a primary is always Hydra's own clone, so what must survive a dispose
+  // D-20a: a primary is always Hercule's own clone, so what must survive a dispose
   // is that clone rather than a folder of the user's that was adopted.
   it("refuses, and leaves the main workspace where it is", async () => {
     const remote = makeRemote();
@@ -111,7 +111,9 @@ describe("disposing a workspace that is still being provisioned", () => {
     const frame = provisionFrame({
       workspaceId,
       kind: "ephemeral",
-      checkouts: [checkout({ resourceId: id(), remote: remote.url, branch: "hydra/run-2e2e2e2e" })],
+      checkouts: [
+        checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-2e2e2e2e" }),
+      ],
     });
 
     const [, disposed] = await Promise.all([

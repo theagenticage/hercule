@@ -19,7 +19,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/unstable/socket/Socket";
-import { VERSION } from "@hydra/home/version";
+import { VERSION } from "@hercule/home/version";
 import {
   ControllerToRunner,
   PeerVersion,
@@ -38,7 +38,7 @@ import {
   type RunnerWatermark,
   MAX_MESSAGE_LENGTH,
   type WorkspaceReport,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import type { CredentialRelay } from "./credentials";
 import { refreshFacts } from "./probe";
 import { wentWrong } from "./report";
@@ -101,10 +101,10 @@ export interface ConnectOptions {
   readonly socketPath: string;
   /** Carries a helper's question to the controller and the answer back. */
   readonly credentials: CredentialRelay;
-  /** `<home>/runner/bin`, holding the `hydra` symlink every session gets on `PATH`. */
+  /** `<home>/runner/bin`, holding the `hercule` symlink every session gets on `PATH`. */
   readonly binDir: string;
-  /** hydra-as-a-tool, resolved once at runner start (spec 06 section 9.3). */
-  readonly hydraTool: ProviderRunnerContext["hydraTool"];
+  /** hercule-as-a-tool, resolved once at runner start (spec 06 section 9.3). */
+  readonly herculeTool: ProviderRunnerContext["herculeTool"];
   /** The shipped deadline unless a test says otherwise. */
   readonly proofDeadline?: Duration.Duration;
 }
@@ -127,7 +127,7 @@ export class RunnerRetired extends Schema.TaggedError<RunnerRetired>()("RunnerRe
   message: Schema.String,
 }) {}
 
-export const RETIRED_MESSAGE = "this runner was retired; run `hydra runner join` to re-enlist";
+export const RETIRED_MESSAGE = "this runner was retired; run `hercule runner join` to re-enlist";
 
 /** Its own error because an operator can act on it: upgrade the runner. */
 export class ProtocolMismatch extends Schema.TaggedError<ProtocolMismatch>()("ProtocolMismatch", {
@@ -272,7 +272,7 @@ export const connect = (
         secrets,
         // Carried because the context type is one: a probe, an install and a
         // login never load the skill.
-        hydraTool: options.hydraTool,
+        herculeTool: options.herculeTool,
       };
     };
 
@@ -284,7 +284,7 @@ export const connect = (
         providersDir: options.providersDir,
         scratchDir: options.scratchDir,
         binDir: options.binDir,
-        hydraTool: options.hydraTool,
+        herculeTool: options.herculeTool,
         controllerUrl: pin.controllerUrl,
         baseEnv: process.env,
         binaryOf,

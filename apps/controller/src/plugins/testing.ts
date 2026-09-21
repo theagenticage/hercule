@@ -16,9 +16,9 @@ import {
   type PluginCapability,
   type ProviderDefinition,
   type RegistrationHost,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
-import { homePaths, HydraHome } from "../config";
+import { homePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
@@ -67,7 +67,7 @@ afterAll(() => {
  * of what is under test.
  */
 export const pluginStack = () => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-plugins-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
   homes.push(home);
   return PluginsLayer.pipe(
     Layer.provideMerge(PluginHostLayer),
@@ -77,7 +77,7 @@ export const pluginStack = () => {
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HydraHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
   );
 };
 

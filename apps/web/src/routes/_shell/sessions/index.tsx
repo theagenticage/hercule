@@ -1,9 +1,9 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ageOf, headlineOf, lanesOf, threadRows, type LaneKind } from "@hydra/client-core";
-import type { Session } from "@hydra/contract";
-import { Group, LaneLabel, useMinuteClock } from "@hydra/ui";
+import { ageOf, headlineOf, lanesOf, threadRows, type LaneKind } from "@hercule/client-core";
+import type { Session } from "@hercule/contract";
+import { Group, LaneLabel, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { providersQuery, sessionsQuery } from "../../../app/queries";
 import { CreateThreadLink } from "../../../screens/create-thread-link";

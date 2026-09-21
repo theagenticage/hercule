@@ -19,9 +19,9 @@ afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-/** An empty Hydra Home, as a machine that has never joined has. */
+/** An empty Hercule Home, as a machine that has never joined has. */
 const temporaryHome = (): string => {
-  const home = mkdtempSync(pathJoin(tmpdir(), "hydra-join-"));
+  const home = mkdtempSync(pathJoin(tmpdir(), "hercule-join-"));
   homes.push(home);
   return home;
 };
@@ -72,7 +72,7 @@ const RUNNER_JSON_FIELDS = [
 describe("the join", () => {
   it("writes runner.json readable by nobody else, holding exactly what a runner needs", async () => {
     const home = temporaryHome();
-    const body = answer("0199e0e7-2222-7000-8000-000000000000", "hydra-thalia");
+    const body = answer("0199e0e7-2222-7000-8000-000000000000", "hercule-thalia");
 
     const result = await run({ home, body });
 
@@ -137,7 +137,7 @@ describe("the join", () => {
  * The `--reserved` flag, through the runner role's `run(argv)`: the flag is
  * argv, so the parsing and the request body it produces are one behaviour.
  */
-describe("hydra runner join --reserved", () => {
+describe("hercule runner join --reserved", () => {
   /** The body of the one join request `run(argv)` made. */
   const joinBody = async (argv: ReadonlyArray<string>): Promise<unknown> => {
     const bodies: Array<unknown> = [];

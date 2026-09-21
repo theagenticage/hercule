@@ -1,5 +1,5 @@
 /**
- * The Hydra Home: the global command-line options that locate it, and the
+ * The Hercule Home: the global command-line options that locate it, and the
  * layout inside it.
  *
  * A leaf package on purpose. Every role needs to find the home, and the

@@ -1,6 +1,6 @@
 /**
  * What the runner puts on the machine once, at start, so that every session it
- * hosts can reach Hydra: the `hydra` binary on a directory it prepends to
+ * hosts can reach Hercule: the `hercule` binary on a directory it prepends to
  * PATH (spec 15 section 2) and the Claude plugin directory the skill is
  * materialized into (spec 06 section 9.3).
  *
@@ -30,12 +30,12 @@ afterAll(() => {
 });
 
 const root = (): string => {
-  const made = mkdtempSync(join(tmpdir(), "hydra-tooling-"));
+  const made = mkdtempSync(join(tmpdir(), "hercule-tooling-"));
   roots.push(made);
   return made;
 };
 
-const SKILL = "# hydra\n\nCall `hydra --help` to find out what this controller can do.\n";
+const SKILL = "# hercule\n\nCall `hercule --help` to find out what this controller can do.\n";
 
 /** A home and a storage directory of one runner, with a binary to point at. */
 const machine = (): {
@@ -47,21 +47,21 @@ const machine = (): {
   const home = join(under, "home");
   const storageDir = join(under, "home", "runner", "controller-one");
   mkdirSync(storageDir, { recursive: true });
-  const execPath = join(under, "hydra-binary");
+  const execPath = join(under, "hercule-binary");
   writeFileSync(execPath, "#!/bin/sh\n", { mode: 0o755 });
   return { home, storageDir, execPath };
 };
 
-describe("the hydra binary a session calls", () => {
+describe("the hercule binary a session calls", () => {
   it("is a symlink to this running binary, on the directory sessions get on PATH", () => {
     const { home, storageDir, execPath } = machine();
 
     const { binDir } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
     // The very path spec 15 section 2 names, because the PATH prepend and this
-    // are two halves of one promise: `which hydra` works inside a session.
+    // are two halves of one promise: `which hercule` works inside a session.
     expect(binDir).toBe(join(home, "runner", "bin"));
-    const link = join(binDir, "hydra");
+    const link = join(binDir, "hercule");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(readlinkSync(link)).toBe(execPath);
   });
@@ -70,13 +70,13 @@ describe("the hydra binary a session calls", () => {
     const { home, storageDir, execPath } = machine();
     const binDir = join(home, "runner", "bin");
     mkdirSync(binDir, { recursive: true });
-    symlinkSync(join(home, "a-binary-that-was-replaced"), join(binDir, "hydra"));
+    symlinkSync(join(home, "a-binary-that-was-replaced"), join(binDir, "hercule"));
 
     prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
     // Refreshed at every runner start, so an upgrade follows rather than
     // leaving every session calling the build that was replaced.
-    expect(readlinkSync(join(binDir, "hydra"))).toBe(execPath);
+    expect(readlinkSync(join(binDir, "hercule"))).toBe(execPath);
   });
 });
 
@@ -85,7 +85,7 @@ describe("the Claude plugin directory the skill is materialized into", () => {
     const { home, storageDir, execPath } = machine();
 
     const {
-      hydraTool: { claudePluginDir },
+      herculeTool: { claudePluginDir },
     } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
     // Under the runner's storage, so re-enlisting the machine takes it with
@@ -94,8 +94,8 @@ describe("the Claude plugin directory the skill is materialized into", () => {
     // The two files the SDK needs to load a local plugin and find its skill.
     const manifest = join(claudePluginDir, ".claude-plugin", "plugin.json");
     expect(existsSync(manifest)).toBe(true);
-    expect(JSON.parse(readFileSync(manifest, "utf8"))).toMatchObject({ name: "hydra" });
-    expect(readFileSync(join(claudePluginDir, "skills", "hydra", "SKILL.md"), "utf8")).toContain(
+    expect(JSON.parse(readFileSync(manifest, "utf8"))).toMatchObject({ name: "hercule" });
+    expect(readFileSync(join(claudePluginDir, "skills", "hercule", "SKILL.md"), "utf8")).toContain(
       SKILL,
     );
   });
@@ -109,16 +109,19 @@ describe("the Claude plugin directory the skill is materialized into", () => {
       skill: "what the previous build said",
     });
     expect(
-      readFileSync(join(first.hydraTool.claudePluginDir, "skills", "hydra", "SKILL.md"), "utf8"),
+      readFileSync(
+        join(first.herculeTool.claudePluginDir, "skills", "hercule", "SKILL.md"),
+        "utf8",
+      ),
     ).toContain("what the previous build said");
 
     const {
-      hydraTool: { claudePluginDir },
+      herculeTool: { claudePluginDir },
     } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
     // Stale skill text teaches an agent commands this build may no longer
     // spell that way, and nothing else on the machine ever rewrites it.
-    const written = readFileSync(join(claudePluginDir, "skills", "hydra", "SKILL.md"), "utf8");
+    const written = readFileSync(join(claudePluginDir, "skills", "hercule", "SKILL.md"), "utf8");
     expect(written).toContain(SKILL);
     expect(written).not.toContain("what the previous build said");
   });

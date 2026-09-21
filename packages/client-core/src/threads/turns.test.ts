@@ -9,7 +9,7 @@
  * `content.delta`, never on the `assistant_message` item events themselves.
  */
 import { describe, expect, it } from "vitest";
-import type { TranscriptRow } from "@hydra/contract";
+import type { TranscriptRow } from "@hercule/contract";
 import { turnsOf } from "./turns";
 
 const SESSION_ID = "session-1";

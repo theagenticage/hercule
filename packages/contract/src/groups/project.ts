@@ -1,5 +1,5 @@
 /**
- * Projects: a way to group information inside Hydra.
+ * Projects: a way to group information inside Hercule.
  *
  * A project carries no behaviour. It has no default connection, no status and
  * nothing derived: a task points at one through `projectId`, and a resource

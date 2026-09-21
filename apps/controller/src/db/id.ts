@@ -1,5 +1,5 @@
 /**
- * UUIDv7 ids for every Hydra-owned entity.
+ * UUIDv7 ids for every Hercule-owned entity.
  *
  * Ids are minted by the controller, stored as a 16-byte `BLOB` primary key, and
  * rendered as the canonical lowercase string everywhere they leave the database.
@@ -14,7 +14,7 @@ export const mintUuid = (): Uint8Array => new Uint8Array(Bun.randomUUIDv7("buffe
 /** Renders stored bytes as the canonical lowercase string. */
 export const uuidToString = (bytes: Uint8Array): string => {
   if (bytes.length !== 16) {
-    throw new TypeError(`A Hydra id is 16 bytes, got ${bytes.length}`);
+    throw new TypeError(`A Hercule id is 16 bytes, got ${bytes.length}`);
   }
   let hex = "";
   for (const byte of bytes) {

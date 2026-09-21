@@ -5,10 +5,10 @@ import {
   secret,
   type Plugin,
   type ProviderDefinition,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 
 /**
- * What pi's RPC mode can do, at the version Hydra pins. Every value is a fact,
+ * What pi's RPC mode can do, at the version Hercule pins. Every value is a fact,
  * so the controller and the UI read their affordances off this rather than off
  * the provider's name.
  */

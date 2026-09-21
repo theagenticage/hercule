@@ -1,5 +1,5 @@
 {
-  "name": "@hydra/web",
+  "name": "@hercule/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,9 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@hydra/client-core": "workspace:*",
-    "@hydra/contract": "workspace:*",
-    "@hydra/ui": "workspace:*",
+    "@hercule/client-core": "workspace:*",
+    "@hercule/contract": "workspace:*",
+    "@hercule/ui": "workspace:*",
     "@tanstack/react-query": "5.102.8",
     "@tanstack/react-router": "1.170.32",
     "react": "19.2.8",

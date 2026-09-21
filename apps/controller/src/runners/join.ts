@@ -12,8 +12,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { unauthenticated, type Unauthenticated } from "@hydra/contract";
-import type { JoinAnswer } from "@hydra/protocol";
+import { unauthenticated, type Unauthenticated } from "@hercule/contract";
+import type { JoinAnswer } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken, mintToken } from "../credentials";
 import { nowIso, withTransaction } from "../db";
@@ -111,7 +111,7 @@ const make = Effect.gen(function* () {
 });
 
 export class RunnerJoin extends Context.Service<RunnerJoin, Effect.Success<typeof make>>()(
-  "hydra/controller/runners/RunnerJoin",
+  "hercule/controller/runners/RunnerJoin",
 ) {}
 
 export const RunnerJoinLayer: Layer.Layer<

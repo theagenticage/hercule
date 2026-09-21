@@ -8,8 +8,12 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import type { Plugin, ProviderDefinition } from "@hydra/plugin-host";
-import { MAX_OUTPUT_SCHEMA_LENGTH, type ModelDescriptor, type RunnerFacts } from "@hydra/protocol";
+import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import {
+  MAX_OUTPUT_SCHEMA_LENGTH,
+  type ModelDescriptor,
+  type RunnerFacts,
+} from "@hercule/protocol";
 import { get, post, send } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
 import {

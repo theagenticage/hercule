@@ -1,5 +1,5 @@
 /**
- * The Hydra client: the contract's derived HttpApi client, wrapped into plain
+ * The Hercule client: the contract's derived HttpApi client, wrapped into plain
  * promise-returning functions.
  *
  * This module is the whole reason `client-core` exists. The web app and the CLI
@@ -8,7 +8,7 @@
  * by hand: the shape below is derived from `api`, so an operation added to the
  * contract appears here with no edit.
  */
-import { api } from "@hydra/contract";
+import { api } from "@hercule/contract";
 import { Effect, Result } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
@@ -31,7 +31,7 @@ type Promisified<T> = {
 /** Every operation, grouped by entity: `client.profile.read({ params })`. */
 export type Operations = Promisified<HttpApiClient.ForApi<typeof api>>;
 
-export type HydraClient = Operations & {
+export type HerculeClient = Operations & {
   /**
    * The bearer token sent on every call from now on, and kept where a token
    * store was given. `null` sends none and clears what was kept.
@@ -78,7 +78,7 @@ const TOKEN_FROM: Record<string, (result: unknown) => string | null> = {
   "auth.logout": () => null,
 };
 
-export const createClient = (options: ClientOptions): HydraClient => {
+export const createClient = (options: ClientOptions): HerculeClient => {
   const store = options.tokenStore;
 
   // A token given to the constructor is the caller's answer and replaces
@@ -159,5 +159,5 @@ export const createClient = (options: ClientOptions): HydraClient => {
     );
   }
 
-  return client as HydraClient;
+  return client as HerculeClient;
 };

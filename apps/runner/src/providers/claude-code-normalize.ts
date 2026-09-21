@@ -22,7 +22,7 @@ import {
   type StructuredResult,
   type TurnState,
   type Usage,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 
 /** The channel name every raw payload from this adapter is filed under. */
@@ -157,7 +157,7 @@ const count = (value: number | null | undefined): number =>
 type Emit = Array<ProviderEvent>;
 
 /**
- * Unsolicited output arrives outside any turn Hydra opened. The taxonomy has no
+ * Unsolicited output arrives outside any turn Hercule opened. The taxonomy has no
  * home for an item without a turn, so one is opened (spec 06 section 6.2).
  */
 export const openTurn = (
@@ -404,7 +404,7 @@ const onAssistant = (
 };
 
 /**
- * A user message the harness sends back is its echo of what Hydra pushed, and
+ * A user message the harness sends back is its echo of what Hercule pushed, and
  * an echo cannot say which input it echoes - which is what `user_message`
  * carries as `steered` (spec 06 section 6.3). The adapter holds both, so it
  * reports the user's own messages and nothing is read out of the echo. What is
@@ -448,7 +448,7 @@ const readTurnState = (sdk: Extract<SDKMessage, { type: "result" }>): TurnState 
 
 /**
  * `modelUsage`, not `usage`: the SDK documents `usage` as the main agent loop
- * only and per-turn in a streaming-input session, which every Hydra session is.
+ * only and per-turn in a streaming-input session, which every Hercule session is.
  * `modelUsage` and `total_cost_usd` are cumulative across turns, which is what
  * the snapshot is pinned to be (spec 06 section 6.6).
  */

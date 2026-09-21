@@ -42,7 +42,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -257,7 +257,7 @@ const make = Effect.gen(function* () {
 
 /** The project service. */
 export class ProjectService extends Context.Service<ProjectService, Effect.Success<typeof make>>()(
-  "hydra/controller/projects/ProjectService",
+  "hercule/controller/projects/ProjectService",
 ) {}
 
 export const ProjectServiceLayer: Layer.Layer<

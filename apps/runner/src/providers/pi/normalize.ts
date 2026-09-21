@@ -21,7 +21,7 @@ import type {
   StructuredResult,
   TurnState,
   Usage,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
 import { idOf } from "../events";
 import { judgeAnswer } from "../structured-result";
@@ -126,7 +126,7 @@ export interface Normalizing {
    * answer shown back to them as something that went wrong.
    */
   readonly declined: Set<string>;
-  /** Summed over the pi turns of this Hydra turn, and of the session. */
+  /** Summed over the pi turns of this Hercule turn, and of the session. */
   readonly turnTotals: Totals;
   readonly sessionTotals: Totals;
   /**
@@ -629,7 +629,7 @@ export const normalize = (
         ? []
         : [failure(state, "auto_retry_failed", readText(event.finalError))];
     case "extension_error":
-      // Hydra's own extension is the only one a session loads, so this is a
+      // Hercule's own extension is the only one a session loads, so this is a
       // hook that threw: the user hears it rather than reading a quiet allow.
       return [failure(state, "extension_error", readText(event.error))];
     case "message_update":

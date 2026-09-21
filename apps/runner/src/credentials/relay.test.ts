@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { CredentialAnswer, CredentialRequest } from "@hydra/protocol";
+import type { CredentialAnswer, CredentialRequest } from "@hercule/protocol";
 import { makeCredentialRelay } from "./relay";
 
 const answering = (requestId: string, token: string): CredentialAnswer => ({

@@ -15,7 +15,7 @@ import type {
   Runner,
   Session,
   Workspace,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { BARE, instance, snapshot } from "../providers.testing";
 import { composerFields, pendingModelNote } from "./composer-fields";
 import { phraseText } from "./workspaces";
@@ -372,8 +372,8 @@ const RUN_3F1: Workspace = {
       resourceId: WEBSHOP.id,
       form: "worktree",
       subdirectory: null,
-      branch: "hydra/run-3f1",
-      branches: ["hydra/run-3f1"],
+      branch: "hercule/run-3f1",
+      branches: ["hercule/run-3f1"],
       defaultBranch: "main",
     },
   ],
@@ -551,7 +551,7 @@ describe("composerFields: the machine a joined workspace settles (AC-19)", () =>
       "draft",
     );
 
-    expect(fields.machine.label).toBe("set by the workspace hydra/run-3f1");
+    expect(fields.machine.label).toBe("set by the workspace hercule/run-3f1");
     expect(fields.machine.locked).toBe("The workspace it joins decides the machine");
   });
 
@@ -680,7 +680,7 @@ describe("composerFields: the lead sentence follows the workspace (AC-17)", () =
     );
 
     expect(phraseText(fields.lead ?? [])).toBe(
-      "It joins “hydra/run-3f1” there: the agents see each other's edits, on one branch.",
+      "It joins “hercule/run-3f1” there: the agents see each other's edits, on one branch.",
     );
   });
 

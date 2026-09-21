@@ -12,7 +12,12 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { CheckoutForm, SortDirection, WorkspaceKind, WorkspaceStatus } from "@hydra/contract";
+import type {
+  CheckoutForm,
+  SortDirection,
+  WorkspaceKind,
+  WorkspaceStatus,
+} from "@hercule/contract";
 import { onlineWhere } from "../runners";
 import {
   decodeCursor,

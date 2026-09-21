@@ -8,8 +8,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { RunnerFacts, SessionStart, SessionStop as SessionStopFrame } from "@hydra/protocol";
-import type { Runner, RunnerDetail, Session } from "@hydra/contract";
+import type { RunnerFacts, SessionStart, SessionStop as SessionStopFrame } from "@hercule/protocol";
+import type { Runner, RunnerDetail, Session } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { hashToken } from "../credentials";
 import type { ServerHarness } from "../http/testing";
@@ -756,7 +756,7 @@ describe("POST /runners/join", () => {
     });
   });
 
-  it("is reachable before Hydra has been set up, because the local runner joins then", async () => {
+  it("is reachable before Hercule has been set up, because the local runner joins then", async () => {
     await withServer(async (harness) => {
       const response = await join(harness.base, await harness.joinToken());
       expect(response.status, await response.clone().text()).toBe(201);

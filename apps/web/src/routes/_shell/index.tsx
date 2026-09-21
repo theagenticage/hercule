@@ -1,8 +1,8 @@
 import type { JSX, ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Button, EmptyState } from "@hydra/ui";
-import { queryKeys, sessionsEmptyState } from "@hydra/client-core";
+import { Button, EmptyState } from "@hercule/ui";
+import { queryKeys, sessionsEmptyState } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { CreateThreadLink } from "../../screens/create-thread-link";
@@ -62,12 +62,12 @@ function Sessions(): JSX.Element {
     return (
       <Screen
         headline="No runner has been detected on this machine."
-        lead="A thread runs on a machine. Start a runner here and Hydra will look for the harnesses installed on it - Claude Code, Codex, pi - and offer to log in to them."
+        lead="A thread runs on a machine. Start a runner here and Hercule will look for the harnesses installed on it - Claude Code, Codex, pi - and offer to log in to them."
         fine={
           <>
             Run{" "}
             <code className="rounded-[4px] bg-line-soft px-1.5 py-px font-mono text-fine">
-              hydra runner
+              hercule runner
             </code>{" "}
             on this machine, or join another one from Fleet.
           </>
@@ -80,7 +80,7 @@ function Sessions(): JSX.Element {
     return (
       <Screen
         headline="No coding harness was found on this machine."
-        lead="A thread runs on a coding harness - Claude Code, Codex or pi. Install one on this machine and Hydra will offer to log in to it."
+        lead="A thread runs on a coding harness - Claude Code, Codex or pi. Install one on this machine and Hercule will offer to log in to it."
         fine={
           <Link to="/fleet/$runnerId" params={{ runnerId: local.id }} className="underline">
             Install one from Fleet

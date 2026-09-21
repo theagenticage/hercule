@@ -1,8 +1,8 @@
 import type { JSX, ReactNode } from "react";
 import { useMatches } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
-import type { HydraClient, Live } from "@hydra/client-core";
-import type { SettingsState } from "@hydra/contract";
+import type { HerculeClient, Live } from "@hercule/client-core";
+import type { SettingsState } from "@hercule/contract";
 import { Sidebar } from "./sidebar";
 import { TopBar, ownsItsTopBar } from "./top-bar";
 
@@ -15,7 +15,7 @@ export function Shell({
   children,
 }: {
   readonly settings: SettingsState;
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly queryClient: QueryClient;
   readonly live: Live;
   readonly children: ReactNode;

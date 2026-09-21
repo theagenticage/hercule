@@ -1,7 +1,7 @@
 import { Fragment, type JSX } from "react";
-import { optionsMenu } from "@hydra/client-core";
-import type { ModelOption } from "@hydra/contract";
-import { SegmentedControl, SegmentedControlItem } from "@hydra/ui";
+import { optionsMenu } from "@hercule/client-core";
+import type { ModelOption } from "@hercule/contract";
+import { SegmentedControl, SegmentedControlItem } from "@hercule/ui";
 import { MenuHeader } from "./menu";
 import { SelectorShell } from "./selector-shell";
 

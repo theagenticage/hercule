@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { BranchField } from "@hydra/client-core";
+import type { BranchField } from "@hercule/client-core";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 import { Phrases } from "./phrases";
 import { SelectorShell } from "./selector-shell";

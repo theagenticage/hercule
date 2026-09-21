@@ -10,7 +10,7 @@
  *
  * It lives in the shipped source rather than beside one test because two
  * packages drive the same supervisor: this one's unit tests and the web app's
- * integration tests. It is reached as `@hydra/client-core/testing`, which
+ * integration tests. It is reached as `@hercule/client-core/testing`, which
  * nothing in the app imports.
  */
 

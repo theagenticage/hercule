@@ -4,7 +4,7 @@
  * sentence.
  */
 import { describe, expect, it } from "vitest";
-import type { Session } from "@hydra/contract";
+import type { Session } from "@hercule/contract";
 import { headlineOf, lanesOf } from "./lanes";
 
 const BASE: Session = {

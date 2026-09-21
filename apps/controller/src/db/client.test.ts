@@ -14,8 +14,8 @@ let home: string;
 let file: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "hydra-db-"));
-  file = join(home, "hydra.db");
+  home = mkdtempSync(join(tmpdir(), "hercule-db-"));
+  file = join(home, "hercule.db");
 });
 
 afterEach(() => {
@@ -24,7 +24,7 @@ afterEach(() => {
 
 describe("databaseError", () => {
   it("names the other controller when a real transaction times out on the write lock", async () => {
-    // The shape a second `hydra serve` hits: one connection holds the write
+    // The shape a second `hercule serve` hits: one connection holds the write
     // lock, the other opens a transaction that reads and then writes. The busy
     // timeout is shortened to keep the suite quick; the default is five seconds.
     const holder = new Database(file, { create: true });
@@ -49,7 +49,7 @@ describe("databaseError", () => {
     try {
       const error = await Effect.runPromise(write.pipe(Effect.flip));
       expect(databaseError(file, error).message).toContain(
-        "already open by another Hydra controller",
+        "already open by another Hercule controller",
       );
     } finally {
       holder.run("ROLLBACK");
@@ -63,7 +63,7 @@ describe("databaseError", () => {
     });
     const outer = new SqlError({ reason: new UnknownError({ cause: inner }) });
     expect(databaseError(file, outer).message).toContain(
-      "already open by another Hydra controller",
+      "already open by another Hercule controller",
     );
   });
 
@@ -96,7 +96,7 @@ describe("one controller per home", () => {
     });
 
     const error = await Effect.runPromise(Effect.scoped(both));
-    expect(error.message).toContain("already open by another Hydra controller");
+    expect(error.message).toContain("already open by another Hercule controller");
   });
 
   it("lets the next controller in once the first has closed", async () => {

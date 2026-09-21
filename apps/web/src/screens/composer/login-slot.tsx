@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { HydraClient, LoginTarget } from "@hydra/client-core";
+import type { HerculeClient, LoginTarget } from "@hercule/client-core";
 import { ProviderLogin } from "../provider-login";
 
 /**
@@ -10,7 +10,7 @@ import { ProviderLogin } from "../provider-login";
  * there (spec 06 §3.1).
  */
 export const loginSlot =
-  (client: HydraClient, onLoggedIn: () => void) =>
+  (client: HerculeClient, onLoggedIn: () => void) =>
   (login: LoginTarget, className: string): ReactNode => (
     <ProviderLogin
       className={className}

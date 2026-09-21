@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
-import type { ProviderEvent } from "@hydra/protocol";
+import type { ProviderEvent } from "@hercule/protocol";
 
 const homes: Array<string> = [];
 
@@ -22,7 +22,7 @@ export const cleanupHomes = (): void => {
 
 /** A home of this test's own, named for the harness it stands in for. */
 export const scratchHome = (label: string): string => {
-  const home = mkdtempSync(join(tmpdir(), `hydra-${label}-`));
+  const home = mkdtempSync(join(tmpdir(), `hercule-${label}-`));
   homes.push(home);
   return home;
 };

@@ -8,8 +8,8 @@
  * exit, and - the in-item cadence spec 04 left open and this build pins - once
  * the held text passes `DELTA_FLUSH_BYTES`. Every other event is its own row.
  */
-import type { OpenRequest, ProviderEvent, StreamKind } from "@hydra/protocol";
-import type { SessionStatus } from "@hydra/contract";
+import type { OpenRequest, ProviderEvent, StreamKind } from "@hercule/protocol";
+import type { SessionStatus } from "@hercule/contract";
 
 /**
  * How much held delta text forces a flush inside one item. Roughly a screenful

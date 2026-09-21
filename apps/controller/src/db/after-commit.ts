@@ -22,7 +22,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { InvalidateKind, MutableLiveTopic, TapItem } from "@hydra/contract";
+import type { InvalidateKind, MutableLiveTopic, TapItem } from "@hercule/contract";
 
 /**
  * One thing a committed transaction changed, or - for `tap` - one thing that
@@ -46,14 +46,14 @@ export interface AfterCommitListener {
 }
 
 export class AfterCommit extends Context.Service<AfterCommit, AfterCommitListener>()(
-  "hydra/controller/db/AfterCommit",
+  "hercule/controller/db/AfterCommit",
 ) {}
 
 /** The lists the transaction in progress is filling. */
 class Pending extends Context.Service<
   Pending,
   { readonly changes: Array<Change>; readonly settles: Array<() => void> }
->()("hydra/controller/db/Pending") {}
+>()("hercule/controller/db/Pending") {}
 
 const publishNow = (changes: ReadonlyArray<Change>): Effect.Effect<void> =>
   changes.length === 0

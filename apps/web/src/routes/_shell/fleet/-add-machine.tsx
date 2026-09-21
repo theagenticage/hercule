@@ -1,7 +1,13 @@
 import { useState, type JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Checkbox } from "@hydra/ui";
-import { formatStamp, idTail, joinCommand, queryKeys, type HydraClient } from "@hydra/client-core";
+import { Button, Checkbox } from "@hercule/ui";
+import {
+  formatStamp,
+  idTail,
+  joinCommand,
+  queryKeys,
+  type HerculeClient,
+} from "@hercule/client-core";
 import { joinTokensQuery } from "../../../app/queries";
 
 /**
@@ -18,7 +24,7 @@ export function AddMachine({
   client,
   timezone,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly timezone: string;
 }): JSX.Element {
   const queryClient = useQueryClient();

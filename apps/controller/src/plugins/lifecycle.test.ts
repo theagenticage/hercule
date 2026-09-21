@@ -14,7 +14,7 @@ import {
   type KeyValueStore,
   type PluginSecrets,
   type RegistrationHost,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import { CurrentActor } from "../actor";
 import { AuditLog } from "../events";
 import { Secret, Secrets } from "../secrets";

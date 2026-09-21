@@ -1,17 +1,17 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { Context, Effect } from "effect";
-import type { HomePaths } from "@hydra/home";
-import { HydraHomeError } from "./errors";
+import type { HomePaths } from "@hercule/home";
+import { HerculeHomeError } from "./errors";
 
 /**
- * Hydra Home: the one directory holding everything Hydra keeps on a machine.
+ * Hercule Home: the one directory holding everything Hercule keeps on a machine.
  * Only `dataDir` (the Data Root) moves with promotion (spec 15 section 5).
  *
- * The layout itself is `@hydra/home`, which every role links; this is the
+ * The layout itself is `@hercule/home`, which every role links; this is the
  * controller's view of it, plus the two effects that put it on disk.
  */
-export class HydraHome extends Context.Service<HydraHome, HomePaths>()(
-  "hydra/controller/config/HydraHome",
+export class HerculeHome extends Context.Service<HerculeHome, HomePaths>()(
+  "hercule/controller/config/HerculeHome",
 ) {}
 
 /**
@@ -23,7 +23,7 @@ export class HydraHome extends Context.Service<HydraHome, HomePaths>()(
 export const createDirectory = Effect.fn("createDirectory")(function* (path: string) {
   yield* Effect.try({
     try: () => mkdirSync(path, { recursive: true, mode: 0o700 }),
-    catch: (cause) => new HydraHomeError({ action: "create", path, cause }),
+    catch: (cause) => new HerculeHomeError({ action: "create", path, cause }),
   });
 });
 
@@ -47,6 +47,6 @@ export const createLayout = Effect.fn("createLayout")(function* (paths: HomePath
   // this rule, or that someone widened, is narrowed again on every boot.
   yield* Effect.try({
     try: () => chmodSync(paths.home, 0o700),
-    catch: (cause) => new HydraHomeError({ action: "secure", path: paths.home, cause }),
+    catch: (cause) => new HerculeHomeError({ action: "secure", path: paths.home, cause }),
   });
 });

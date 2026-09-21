@@ -4,7 +4,7 @@
  * provider row that says nothing at all.
  */
 import * as Duration from "effect/Duration";
-import type { ProbeResult } from "@hydra/protocol";
+import type { ProbeResult } from "@hercule/protocol";
 import { fact } from "./text";
 
 /** Long enough for a cold harness, short enough that a Fleet page does not look hung. */

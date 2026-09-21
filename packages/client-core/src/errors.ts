@@ -6,7 +6,7 @@
  * derived client can produce is folded into one of these three plain errors
  * before it reaches the web app or the CLI.
  */
-import { ERROR_CODES, ERROR_STATUS, issuesOf, type ErrorCode, type Issue } from "@hydra/contract";
+import { ERROR_CODES, ERROR_STATUS, issuesOf, type ErrorCode, type Issue } from "@hercule/contract";
 import { Schema } from "effect";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 

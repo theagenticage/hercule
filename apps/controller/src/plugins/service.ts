@@ -22,7 +22,7 @@ import {
   type PluginDetail,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
 import { AuditLog } from "../events";
@@ -246,7 +246,7 @@ const make = Effect.gen(function* () {
 });
 
 export class Plugins extends Context.Service<Plugins, Effect.Success<typeof make>>()(
-  "hydra/controller/plugins/Plugins",
+  "hercule/controller/plugins/Plugins",
 ) {}
 
 export const PluginsLayer: Layer.Layer<

@@ -4,13 +4,13 @@ The controller keeps everything it durably owns in one SQLite database file insi
 
 ## Engine and driver
 
-- The store is **one SQLite database file** in the Data Root (`~/.hydra/data/` by default; layout in [./15-packaging-and-operations.md](./15-packaging-and-operations.md)). No Postgres, no dialect-agnostic SQL layer, no second data file.
+- The store is **one SQLite database file** in the Data Root (`~/.hercule/data/` by default; layout in [./15-packaging-and-operations.md](./15-packaging-and-operations.md)). No Postgres, no dialect-agnostic SQL layer, no second data file.
 - The driver is **`bun:sqlite`**, which is blessed for `bun build --compile` (`research/bun-compile.md` on branch `research/bun-compile`). On macOS Bun uses Apple's system SQLite, on Linux its own statically linked build; both are newer than 3.27, so `VACUUM INTO` is available. No SQLite extensions are loaded (extension loading on macOS would require shipping a dylib; nothing needs one).
 - The database runs in **WAL mode** (`PRAGMA journal_mode = WAL`).
-- The controller is the **only writer process** ([ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md): one brain). Runners never open the file; the runner entrypoint must not even import the DB engine ([ADR 0018](../adr/0018-hydra-ships-as-one-self-contained-binary.md) mode isolation).
+- The controller is the **only writer process** ([ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md): one brain). Runners never open the file; the runner entrypoint must not even import the DB engine ([ADR 0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md) mode isolation).
 - Repository SQL uses SQLite features freely: JSON functions, upserts, partial indexes, FTS5 (task search, see below). There is no lowest-common-denominator constraint.
 
-**Verified 2026-09-04 ([#59](https://github.com/rogierpennink/hydra/issues/59)):** the pinned Bun (1.4.0) bundles SQLite 3.43.2 with `ENABLE_FTS5`, including the `unicode61 remove_diacritics 2` tokenizer and `bm25`. Hydra needs FTS5 for `hydra task query` and cannot load it as an extension on macOS.
+**Verified 2026-09-04 ([#59](https://github.com/rogierpennink/hydra/issues/59)):** the pinned Bun (1.4.0) bundles SQLite 3.43.2 with `ENABLE_FTS5`, including the `unicode61 remove_diacritics 2` tokenizer and `bm25`. Hercule needs FTS5 for `hercule task query` and cannot load it as an extension on macOS.
 
 ## Repository interfaces
 
@@ -39,9 +39,9 @@ Both tables are written **in the same transaction as the state they accompany**.
 
 Every append-only table carries a **monotonic position** (a single integer sequence assigned at insert, per table for the event log and per session for streams). Positions are what consumers store as cursors and what live topics replay from on reconnect ([./14-web-app.md](./14-web-app.md): append-only streams carry payload deltas with cursor replay; mutable records get invalidation nudges and an HTTP refetch). [./08-events-and-connections.md](./08-events-and-connections.md) uses the event log position as the event's `id`.
 
-This document owns the id format for Hydra-owned entities (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)):
+This document owns the id format for Hercule-owned entities (resolved 2026-09-01, [Domain model residue](https://github.com/rogierpennink/hydra/issues/46)):
 
-- **UUIDv7 for every Hydra-owned entity**, minted by the controller at insert, stored as a 16-byte `BLOB` primary key, rendered as the canonical lowercase string in the API and everywhere a machine reads it (typed references, actor stamps, `hydra/run-<id>` branch names). Chosen over integer rowids because ids leak beyond the database - onto runner disks, onto git remotes as branch names, into chat messages - and a restore from backup rewinds an integer counter, so a new row could collide with an id the outside world already holds; UUIDv7 never collides across restores, promotions or controllers, and sorts by creation time for free. ULID was the runner-up (same properties, smaller ecosystem, no RFC).
+- **UUIDv7 for every Hercule-owned entity**, minted by the controller at insert, stored as a 16-byte `BLOB` primary key, rendered as the canonical lowercase string in the API and everywhere a machine reads it (typed references, actor stamps, `hercule/run-<id>` branch names). Chosen over integer rowids because ids leak beyond the database - onto runner disks, onto git remotes as branch names, into chat messages - and a restore from backup rewinds an integer counter, so a new row could collide with an id the outside world already holds; UUIDv7 never collides across restores, promotions or controllers, and sorts by creation time for free. ULID was the runner-up (same properties, smaller ecosystem, no RFC).
 - **Short form = the last eight hex characters.** The first 48 bits of a UUIDv7 are a millisecond timestamp, so the head is shared by every id minted in the same minute; the tail is the random part. The web app and the CLI show the tail where an id must be shown; every CLI `<id>` argument accepts a full id or a tail of eight or more characters and answers `conflict` when the tail is ambiguous.
 - **The Event is the one exception**: its `id` is the integer log position, a plain `INTEGER PRIMARY KEY`; there is no second id column. Per-session stream rows are keyed by (session, position). Provenance and Notification `eventId` reference the position; references are consistent within any one database snapshot, the only place they are ever resolved.
 - **Soft-deleted rows** (Tasks and Projects carry `deleted_at`, [./02-domain-model.md](./02-domain-model.md) Deletion rules): every index on those tables is a partial index `WHERE deleted_at IS NULL`, so live-row queries stay index-served and deleted rows drop out of the indexes; the FTS5 task index joins back to `tasks` and filters there. Chosen over a `deleted` status value because "all live tasks" would then be an inequality no index serves, and because deletion is a fact about the record, not a state of the work.
@@ -94,7 +94,7 @@ Actively watched sessions still see tokens live: the web app's live topic passes
 
 Rule: **if it is durable and domain-relevant, it is a row in the one file.** In the store:
 
-- All domain entities: Tasks (with provenance entries as child rows and an FTS5 index over title and description for `hydra task query`, [./09-tasks.md](./09-tasks.md)), Projects, Resources, Workspaces and Checkouts as records, Agents, Assistants, Conversations with their conversation messages (chat lines keyed by container, under `retention.conversations`; [12-assistants.md](./12-assistants.md) section 2) and session lineages, Platform Identities, Sessions as records with their SessionBinding to a provider-native id, Runs with frozen plans and step records, Workflows and their triggers, Connections, Notifications, runner records (identity, labels, probed facts, state, and the hash of the runner's credential: an opaque random token stored hashed like every other token, ticket 18).
+- All domain entities: Tasks (with provenance entries as child rows and an FTS5 index over title and description for `hercule task query`, [./09-tasks.md](./09-tasks.md)), Projects, Resources, Workspaces and Checkouts as records, Agents, Assistants, Conversations with their conversation messages (chat lines keyed by container, under `retention.conversations`; [12-assistants.md](./12-assistants.md) section 2) and session lineages, Platform Identities, Sessions as records with their SessionBinding to a provider-native id, Runs with frozen plans and step records, Workflows and their triggers, Connections, Notifications, runner records (identity, labels, probed facts, state, and the hash of the runner's credential: an opaque random token stored hashed like every other token, ticket 18).
 - The event log and per-session streams.
 - Queues, schedules, subscriptions, held events, outbox rows and cursors (above).
 - Workflow definitions. A Workflow is a stored, editable record; there is no repo-local config and no workflow file on disk ([./01-overview-and-scope.md](./01-overview-and-scope.md)).
@@ -109,8 +109,8 @@ Rule: **if it is durable and domain-relevant, it is a row in the one file.** In 
 Outside the store:
 
 - **Workspace contents and provider-native session state.** These live on runner disk under the runner's own storage directory; the controller stores runner-owned paths only as opaque facts keyed by id ([./03-controller-and-runners.md](./03-controller-and-runners.md)). Losing a runner loses resumability and workspaces, never history.
-- **Process logs** of the controller and runners: rotated files under `~/.hydra/logs/`, machine-bound.
-- **Backups**: `~/.hydra/backups/`, machine-bound.
+- **Process logs** of the controller and runners: rotated files under `~/.hercule/logs/`, machine-bound.
+- **Backups**: `~/.hercule/backups/`, machine-bound.
 - **The master key**: OS keychain (macOS `security` CLI via subprocess; keytar is archived), or a plain key file on headless Linux. It never enters the database and never leaves its machine.
 
 There is **no controller-side blob directory** in v1. Artifacts are out of v1 scope; when blob storage arrives it MUST live inside the Data Root so it moves with the bundle (ticket 10). Promotion duration growing with blob volume is the accepted cost; streaming or resumable transfer is the known escape hatch.
@@ -119,7 +119,7 @@ There is **no controller-side blob directory** in v1. Artifacts are out of v1 sc
 
 The Data Root is the unit promotion moves ([ADR 0005](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)), so the database must be valid wherever the directory lands:
 
-- **No absolute paths in the database.** Anything the controller stores about its own machine is expressed relative to the Data Root. Repositories MUST reject or normalize absolute paths on write. The Data Root's own location comes from `config.toml` or `HYDRA_HOME`, never from a row.
+- **No absolute paths in the database.** Anything the controller stores about its own machine is expressed relative to the Data Root. Repositories MUST reject or normalize absolute paths on write. The Data Root's own location comes from `config.toml` or `HERCULE_HOME`, never from a row.
 - **Runner-side paths are runner-owned opaque facts keyed by id.** The controller never rewrites them; they stay valid across promotion because runner disks do not move.
 - The promotion bundle is the database file plus packed secrets (re-encrypted under a key derived from the promotion token). During transfer the old controller holds the store **read-only**: event polling and mutations pause, in-flight sessions keep running on runners and buffer to their outboxes, and their streams replay into the new controller's store after the switch. Ceremony and sealing are in [./03-controller-and-runners.md](./03-controller-and-runners.md).
 
@@ -127,7 +127,7 @@ The Data Root is the unit promotion moves ([ADR 0005](../adr/0005-promotion-is-m
 
 All secret values (Connection credentials, plugin secrets, runner-scoped secrets, provider-instance secrets, core secrets) are rows in **one owner-scoped secrets table** with owners `connection | plugin | runner | provider-instance | core` *(amended 2026-09-04, [#56](https://github.com/rogierpennink/hydra/issues/56): `provider-instance` was missing here and present in [./13-security.md](./13-security.md) §2.1, which is the later and owning document)*. The `runner` owner kind is reserved for runner-scoped secrets; the per-runner credential itself is not in this table, it is a token stored hashed on the runner record (above). Each value is encrypted per value under the Master Key; the SQLite file itself stays plain, so any copy of the file, backup or bundle is inert without the key. Secret values never appear in the event log, in API responses or in process logs; other rows hold references to secret rows, never values. The plugin secrets service is a scoped view over this table (owner `plugin`, namespaced by plugin id). Promotion export enumerates and re-encrypts these rows under a token-derived key and the new controller re-wraps them under its own Master Key. Everything else about secrets, keys and credentials is in [./13-security.md](./13-security.md) and [ADR 0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md).
 
-The plain-key-file fallback (every platform but macOS, see [./13-security.md](./13-security.md) §2.2) is **`~/.hydra/master.key`**, mode 0600 (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): at the Hydra Home root, outside the Data Root and outside `backups/`, so the promotion bundle and offsite backups stay inert.
+The plain-key-file fallback (every platform but macOS, see [./13-security.md](./13-security.md) §2.2) is **`~/.hercule/master.key`**, mode 0600 (resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44)): at the Hercule Home root, outside the Data Root and outside `backups/`, so the promotion bundle and offsite backups stay inert.
 
 ## Plugin namespaced KV
 
@@ -151,15 +151,15 @@ Retention (this document owns the final statement; other documents link here):
 
 ## Backups
 
-- **Daily online backup**: `VACUUM INTO` from the running controller to `backups/<timestamp>.db` under Hydra Home (`~/.hydra/backups/`). `VACUUM INTO` produces a consistent single-file snapshot without stopping writers and works under WAL. Secrets inside the snapshot stay encrypted; offsite backup is the user copying that directory, which is honest because the snapshot is inert without the Master Key.
+- **Daily online backup**: `VACUUM INTO` from the running controller to `backups/<timestamp>.db` under Hercule Home (`~/.hercule/backups/`). `VACUUM INTO` produces a consistent single-file snapshot without stopping writers and works under WAL. Secrets inside the snapshot stay encrypted; offsite backup is the user copying that directory, which is honest because the snapshot is inert without the Master Key.
 - **Backup before migrations**: a `VACUUM INTO` copy (`backups/<timestamp>-premigration.db`, same code path) is taken before any boot-time migration runs (next section; resolved 2026-09-01, [#44](https://github.com/rogierpennink/hydra/issues/44) - a plain file copy would miss unmerged `-wal` writes after an unclean shutdown).
 - Schedule and retention (same resolution): daily at **03:30 in the user timezone setting**; keep the last **14 daily snapshots** and, separately, the last **3 pre-migration copies**. Controller-state settings `backup.time` and `backup.keep` carry the defaults.
-- Restore is a file replacement while the controller is stopped; there is no in-app restore in v1. Runbook in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) section 10: stop the unit, replace `data/hydra.db` with the snapshot, delete `-wal`/`-shm`, start the unit. Same machine only - moving is promotion.
+- Restore is a file replacement while the controller is stopped; there is no in-app restore in v1. Runbook in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) section 10: stop the unit, replace `data/hercule.db` with the snapshot, delete `-wal`/`-shm`, start the unit. Same machine only - moving is promotion.
 
 ## Migrations on boot
 
 - Migrations are **forward-only** and **embedded in the binary** as inline SQL strings or embedded files (`with { type: "file" }` or `--asset`); never loaded from filesystem-relative `.sql` paths, which do not exist inside a compiled binary (`research/bun-compile.md`).
-- On `hydra serve`, after the pre-migration backup, all pending migrations run **inside one transaction**; the schema version is recorded in the database.
+- On `hercule serve`, after the pre-migration backup, all pending migrations run **inside one transaction**; the schema version is recorded in the database.
 - An **older binary meeting a newer database refuses to start** with a clear message. There are no down migrations.
 - First run on an empty Data Root creates the file and applies every migration as part of auto-initialization; the CLI never prompts ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
 - Tests apply the same migration set to `:memory:`, so migration drift is caught by every test run.
@@ -202,7 +202,7 @@ ADRs:
 - [ADR 0009 - All events flow through one persisted pipeline](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)
 - [ADR 0014 - Assistants remember through distilled memory](../adr/0014-assistants-remember-through-distilled-memory-not-merged-sessions.md)
 - [ADR 0015 - Secrets are encrypted per-value under a keychain-held master key](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)
-- [ADR 0018 - Hydra ships as one self-contained binary](../adr/0018-hydra-ships-as-one-self-contained-binary.md)
+- [ADR 0018 - Hercule ships as one self-contained binary](../adr/0018-hercule-ships-as-one-self-contained-binary.md)
 - [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
 
 Research: `research/bun-compile.md` (branch `research/bun-compile`).

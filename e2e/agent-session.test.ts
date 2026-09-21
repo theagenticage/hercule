@@ -5,23 +5,23 @@
  *
  * The two schemas are imported from the protocol package's own testing module
  * rather than written again. A package reaches that module as
- * `@hydra/protocol/testing`, and this suite reaches it by relative path,
- * because the suite depends on no Hydra package. `live.test.ts` beside it
+ * `@hercule/protocol/testing`, and this suite reaches it by relative path,
+ * because the suite depends on no Hercule package. `live.test.ts` beside it
  * reaches client-core the same way. The module holds data only. Nothing else
- * of Hydra is imported here, and the binary under test knows nothing about
+ * of Hercule is imported here, and the binary under test knows nothing about
  * this process.
  *
  * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
- * and takes a couple of minutes. `HYDRA_LIVE_SESSION_TEST=1` asks for it.
+ * and takes a couple of minutes. `HERCULE_LIVE_SESSION_TEST=1` asks for it.
  *
  * ## The login the session runs on
  *
  * A session runs against the Provider Instance's own `CLAUDE_CONFIG_DIR` under
- * the runner's storage (spec 06 section 4.2), which in a throwaway Hydra Home
+ * the runner's storage (spec 06 section 4.2), which in a throwaway Hercule Home
  * is empty. There are two ways to give it one, and the case skips saying so
  * when it has neither:
  *
- * - `HYDRA_E2E_CLAUDE_CREDENTIALS` names a file holding what the Claude CLI
+ * - `HERCULE_E2E_CLAUDE_CREDENTIALS` names a file holding what the Claude CLI
  *   stores as its credential. It is copied into the throwaway instance
  *   directory as `.credentials.json` and the instance is re-probed; the whole
  *   home, credential included, is deleted when the suite ends. Reading the
@@ -65,10 +65,10 @@ import {
 const wanted = liveSessionsAsked();
 
 /** The file a caller lent its Claude login through, where it lent one. */
-const lentCredentials = process.env["HYDRA_E2E_CLAUDE_CREDENTIALS"];
+const lentCredentials = process.env["HERCULE_E2E_CLAUDE_CREDENTIALS"];
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;
@@ -289,7 +289,7 @@ describe.skipIf(!wanted)("a session spawned from an Agent under an output schema
       if (ready === undefined) {
         ctx.skip(
           "no login for the claude-code instance: name a credentials file in " +
-            "HYDRA_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
+            "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
         );
         return;
       }

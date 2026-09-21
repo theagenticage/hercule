@@ -434,7 +434,7 @@ describe("Settings > Plugins > nothing installed", () => {
 
     expect(reading()).toContain("No plugins are installed.");
     expect(reading()).toContain(
-      "Plugins bring channels, event sources, providers and workflow actions. Each one declares what it contributes, and Hydra generates its configuration form from that.",
+      "Plugins bring channels, event sources, providers and workflow actions. Each one declares what it contributes, and Hercule generates its configuration form from that.",
     );
   });
 });

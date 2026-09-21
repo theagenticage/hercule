@@ -59,7 +59,7 @@ export type ModelSelection = Schema.Schema.Type<typeof ModelSelection>;
 
 /**
  * A family of harness tools a session may have taken away from it. This is
- * Hydra's own vocabulary, and it is coarse on purpose. Each adapter maps a
+ * Hercule's own vocabulary, and it is coarse on purpose. Each adapter maps a
  * family onto the names its harness gives those tools. A harness that cannot
  * take a family away declares that, and does not pretend to enforce it.
  */
@@ -141,7 +141,7 @@ export const SessionSpec = Schema.Struct({
 export type SessionSpec = Schema.Schema.Type<typeof SessionSpec>;
 
 /**
- * The explicit join between a Hydra session and the provider-native object
+ * The explicit join between a Hercule session and the provider-native object
  * behind it. The two ids are separate concepts and nothing else joins them.
  */
 export const SessionBinding = Schema.Struct({
@@ -477,7 +477,7 @@ export const ProviderEvent = Schema.Union([
 export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
 
 /**
- * The longest a session token may be. Hydra mints 32 random bytes rendered
+ * The longest a session token may be. Hercule mints 32 random bytes rendered
  * base64url, which is 43 characters; the bound is a multiple of that so a
  * change of encoding does not need a protocol change, and it is far below a
  * fact's, because a credential is not free text.
@@ -486,7 +486,7 @@ const MAX_TOKEN_LENGTH = 128;
 
 /**
  * Start one session. It carries the instance's decoded config the way a probe
- * does, because the runner holds no Hydra state and cannot look it up.
+ * does, because the runner holds no Hercule state and cannot look it up.
  */
 export const SessionStart = Schema.Struct({
   _tag: Schema.Literal("sessionStart"),

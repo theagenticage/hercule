@@ -9,7 +9,7 @@
  * shape whichever runner it is looking at.
  */
 import { Schema } from "effect";
-import { Capabilities, Fact, RunnerFacts, RunnerWatermark } from "@hydra/protocol";
+import { Capabilities, Fact, RunnerFacts, RunnerWatermark } from "@hercule/protocol";
 import { CapabilitySnapshot } from "./provider";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -39,7 +39,7 @@ export {
   RunnerFacts,
   RunnerWatermark,
   Toolchain as RunnerToolchain,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 
 /** A name is what the fleet list shows, not a note. */
 export const MAX_RUNNER_NAME_LENGTH = 128;

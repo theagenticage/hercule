@@ -7,7 +7,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { ModelDescriptor, type ProbeResult } from "@hydra/protocol";
+import { ModelDescriptor, type ProbeResult } from "@hercule/protocol";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 
 /** An instance as it is stored: the definition's half is composed at read. */

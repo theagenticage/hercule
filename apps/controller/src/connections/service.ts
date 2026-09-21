@@ -23,7 +23,7 @@ import * as Schema from "effect/Schema";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { decodeAgainst, type ConnectionValidationFailed } from "@hydra/plugin-host";
+import { decodeAgainst, type ConnectionValidationFailed } from "@hercule/plugin-host";
 import {
   CONNECTION_SORT_FIELDS,
   ConnectionCreateInput,
@@ -46,7 +46,7 @@ import {
   type SortDirection,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentStamp, requireGrant, USER_ACTOR } from "../actor";
 import { mintToken } from "../credentials";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
@@ -758,7 +758,7 @@ const make = Effect.gen(function* () {
 export class ConnectionService extends Context.Service<
   ConnectionService,
   Effect.Success<typeof make>
->()("hydra/controller/connections/ConnectionService") {}
+>()("hercule/controller/connections/ConnectionService") {}
 
 export const ConnectionServiceLayer: Layer.Layer<
   ConnectionService,

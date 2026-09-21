@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { formatStamp } from "@hydra/client-core";
+import { formatStamp } from "@hercule/client-core";
 import { reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";

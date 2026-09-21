@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join as joinPath } from "node:path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { StorageId, WorkspaceKind } from "@hydra/protocol";
+import { StorageId, WorkspaceKind } from "@hercule/protocol";
 
 const RegisteredCheckout = Schema.Struct({
   checkoutId: StorageId,
@@ -49,7 +49,7 @@ export const stillOnDisk = (entry: RegisteredWorkspace): boolean =>
 const registryPathIn = (storageDir: string): string => joinPath(storageDir, "workspaces.json");
 
 /**
- * A file that is not there yet, or that something outside Hydra has made
+ * A file that is not there yet, or that something outside Hercule has made
  * unreadable, is read as an empty registry: a machine that holds nothing is
  * exactly what the controller then re-provisions against.
  */

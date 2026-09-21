@@ -1,5 +1,5 @@
 /**
- * What an agent inside a session is told about Hydra: one provider-agnostic
+ * What an agent inside a session is told about Hercule: one provider-agnostic
  * text, materialized into each harness's own channel by its adapter (spec 06
  * section 9.3).
  *
@@ -9,22 +9,22 @@
  * names the three help forms and nothing else, and the test beside it holds it
  * to that against the contract's CLI table.
  */
-export const HYDRA_SKILL = `# hydra
+export const HERCULE_SKILL = `# hercule
 
-This process runs inside a Hydra session. Hydra is the platform that started
+This process runs inside a Hercule session. Hercule is the platform that started
 it: it holds the tasks, sessions, runners and workflows this work belongs to,
 and it is reachable from here.
 
-Hydra's CLI is on PATH as **hydra**, already authenticated as this session.
+Hercule's CLI is on PATH as **hercule**, already authenticated as this session.
 Never log in, never look for credentials, never set a token.
 
 Ask it what it can do; its help is generated from the API it calls, so it is
 never out of date:
 
-- \`hydra --help\` lists every noun, its verbs, and the conventions that hold
+- \`hercule --help\` lists every noun, its verbs, and the conventions that hold
   everywhere.
-- \`hydra <noun> --help\` lists that noun's verbs and the grant each needs.
-- \`hydra <noun> <verb> --help\` gives purpose, usage, examples, arguments,
+- \`hercule <noun> --help\` lists that noun's verbs and the grant each needs.
+- \`hercule <noun> <verb> --help\` gives purpose, usage, examples, arguments,
   flags, what it returns and what can go wrong.
 
 Add \`--json\` to any command to get the operation's output verbatim, for when
@@ -36,5 +36,5 @@ that fails with 403 names the missing grant (\`missing grant <name>\`, or
 looking for a way around it.
 
 Nothing here is worth waiting on: no command blocks, so never sit in a loop
-polling Hydra for something that has not happened yet.
+polling Hercule for something that has not happened yet.
 `;

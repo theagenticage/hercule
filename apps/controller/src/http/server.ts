@@ -1,5 +1,5 @@
 /**
- * The controller's HTTP listener: what `hydra serve` binds.
+ * The controller's HTTP listener: what `hercule serve` binds.
  *
  * The routes are derived from the contract's HttpApi declaration and nothing
  * else; this module is the order the request passes through:
@@ -19,7 +19,7 @@
  * credential on a WebSocket handshake. The join at `POST /api/v1/runners/join`
  * stops before it: the caller is a machine holding a single-use join token
  * rather than a user, and the controller's own local runner joins before
- * anybody has set Hydra up. The runner socket at `GET /api/v1/runners/socket`
+ * anybody has set Hercule up. The runner socket at `GET /api/v1/runners/socket`
  * stops there too, and for the same reason: what it presents is a runner's
  * durable credential, which no operation accepts and no grant belongs to. The
  * OAuth callback at `GET /oauth/callback` stops before the credential gate as
@@ -45,7 +45,7 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServer from "effect/unstable/http/HttpServer";
 import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import { ALL_OPERATIONS, api, validation } from "@hydra/contract";
+import { ALL_OPERATIONS, api, validation } from "@hercule/contract";
 import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
@@ -195,7 +195,7 @@ export const serve = (bundle: WebBundle | undefined) =>
     yield* Effect.orDie(connections.strandedByTheLastRun);
     // Forked before the listener binds, and the arrivals replay covers the rest
     // of the gap, so no machine says hello unheard. The tick is there because a
-    // login expires and a harness is upgraded outside Hydra.
+    // login expires and a harness is upgraded outside Hercule.
     yield* Effect.forkScoped(Effect.flatMap(ProviderProbes, (probes) => probes.driving));
     // Workspaces: a machine that dials in is told what it still owes, and a
     // workspace nothing needs any more is taken off its machine's disk. Forked

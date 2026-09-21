@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { HydraClient } from "@hydra/client-core";
-import type { SettingsPatch } from "@hydra/contract";
+import type { HerculeClient } from "@hercule/client-core";
+import type { SettingsPatch } from "@hercule/contract";
 import { messageOf } from "../../../screens/save-status";
 import { settingsQuery } from "../../../app/queries";
 
@@ -10,7 +10,7 @@ import { settingsQuery } from "../../../app/queries";
  * The answer the API sends back is the whole store, so it replaces the cached
  * copy outright: no screen refetches to find out what it just wrote.
  */
-export function useSaveSettings(client: HydraClient): {
+export function useSaveSettings(client: HerculeClient): {
   readonly save: (patch: SettingsPatch) => void;
   readonly saving: boolean;
   readonly saved: boolean;

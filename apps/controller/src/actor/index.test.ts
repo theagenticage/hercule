@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import { ALL_OPERATIONS, requirementOf } from "@hydra/contract";
+import { ALL_OPERATIONS, requirementOf } from "@hercule/contract";
 import { CurrentActor, currentStamp, grantCheck, stampOf, type Actor } from ".";
 
 const user: Actor = {

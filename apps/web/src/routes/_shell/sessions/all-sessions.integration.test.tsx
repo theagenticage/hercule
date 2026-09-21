@@ -4,8 +4,8 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import type { Session } from "@hydra/contract";
-import { headlineOf } from "@hydra/client-core";
+import type { Session } from "@hercule/contract";
+import { headlineOf } from "@hercule/client-core";
 import { renderApp, stubApi, type Handler } from "../../../app/testing";
 
 /**

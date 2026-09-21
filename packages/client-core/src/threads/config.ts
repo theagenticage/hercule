@@ -13,7 +13,7 @@ import type {
   Session,
   ThreadWorkspace,
   Workspace,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import type { ThreadDefaults } from "./thread-defaults";
 import type { WorkspacePick } from "./workspaces";
 

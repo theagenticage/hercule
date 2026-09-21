@@ -2,8 +2,8 @@
  * What a session gets on this machine. Every assertion here is a leak the spec
  * names: a cwd the harness would read instruction files out of, a config
  * directory shared with another instance or with the user's own, and an
- * environment where instance config could take `HYDRA_SESSION` away from the
- * `hydra` CLI the session calls.
+ * environment where instance config could take `HERCULE_SESSION` away from the
+ * `hercule` CLI the session calls.
  */
 import {
   existsSync,
@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { SessionStart } from "@hydra/protocol";
+import type { SessionStart } from "@hercule/protocol";
 import { resolve, type Machine } from "./context";
 import { makeWorkspaces } from "../workspaces";
 import {
@@ -39,7 +39,7 @@ afterAll(() => {
 });
 
 const root = (): string => {
-  const made = mkdtempSync(join(tmpdir(), "hydra-sessions-"));
+  const made = mkdtempSync(join(tmpdir(), "hercule-sessions-"));
   roots.push(made);
   return made;
 };
@@ -53,7 +53,7 @@ const machining = (overrides: Partial<Machine> = {}): Machine => {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
     binDir: join(under, "runner", "bin"),
-    hydraTool: { skill: "# hydra", claudePluginDir: join(under, "claude-plugin") },
+    herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin", HOME: "/home/somebody" },
     binaryOf: (name) => `/usr/local/bin/${name}`,
@@ -156,7 +156,7 @@ describe("the environment a session runs with", () => {
     return outcome._tag === "Success" ? { ...outcome.success.ctx.env } : {};
   };
 
-  it("layers the machine's own, then the instance's, then Hydra's", () => {
+  it("layers the machine's own, then the instance's, then Hercule's", () => {
     const env = envOf(
       starting({
         config: { env: { ANTHROPIC_BASE_URL: "https://gateway.example", PATH: "/opt" } },
@@ -166,7 +166,7 @@ describe("the environment a session runs with", () => {
 
     // The instance's routing reaches the harness: that is what instance config
     // is for (spec 06 section 2.1). Its `PATH` does not, because the session
-    // would then have no `hydra` to call.
+    // would then have no `hercule` to call.
     expect(env["ANTHROPIC_BASE_URL"]).toBe("https://gateway.example");
     expect(env["HOME"]).toBe("/home/somebody");
   });
@@ -174,12 +174,12 @@ describe("the environment a session runs with", () => {
   it("tells the session where the API is and that it is one", () => {
     const env = envOf(starting(), machining());
 
-    expect(env["HYDRA_API_URL"]).toBe("https://controller.example:4938");
-    // The `hydra` CLI refuses the user's stored key under this (spec 15 section 2).
-    expect(env["HYDRA_SESSION"]).toBe("1");
-    // The credential the session calls Hydra with: the very token the frame
+    expect(env["HERCULE_API_URL"]).toBe("https://controller.example:4938");
+    // The `hercule` CLI refuses the user's stored key under this (spec 15 section 2).
+    expect(env["HERCULE_SESSION"]).toBe("1");
+    // The credential the session calls Hercule with: the very token the frame
     // carried, never one the runner invented (spec 06 section 9.3).
-    expect(env["HYDRA_TOKEN"]).toBe("a-session-token");
+    expect(env["HERCULE_TOKEN"]).toBe("a-session-token");
   });
 
   it("puts the runner's own bin directory at the front of PATH", () => {
@@ -187,7 +187,7 @@ describe("the environment a session runs with", () => {
 
     const env = envOf(starting(), machine);
 
-    // `which hydra` has to work, and the machine's own tools have to keep
+    // `which hercule` has to work, and the machine's own tools have to keep
     // working after it (spec 15 section 2).
     expect(env["PATH"]).toBe(`${machine.binDir}:/usr/bin`);
   });
@@ -208,9 +208,9 @@ describe("the environment a session runs with", () => {
       starting({
         config: {
           env: {
-            HYDRA_SESSION: "0",
-            HYDRA_API_URL: "http://attacker.example",
-            HYDRA_TOKEN: "a token nobody minted",
+            HERCULE_SESSION: "0",
+            HERCULE_API_URL: "http://attacker.example",
+            HERCULE_TOKEN: "a token nobody minted",
             PATH: "/opt",
           },
         },
@@ -219,10 +219,10 @@ describe("the environment a session runs with", () => {
     );
 
     // Instance config is the user's routing, not a way to point the session's
-    // credential, its controller or its `hydra` at something else.
-    expect(env["HYDRA_SESSION"]).toBe("1");
-    expect(env["HYDRA_API_URL"]).toBe("https://controller.example:4938");
-    expect(env["HYDRA_TOKEN"]).toBe("a-session-token");
+    // credential, its controller or its `hercule` at something else.
+    expect(env["HERCULE_SESSION"]).toBe("1");
+    expect(env["HERCULE_API_URL"]).toBe("https://controller.example:4938");
+    expect(env["HERCULE_TOKEN"]).toBe("a-session-token");
     expect(env["PATH"]).toBe(`${machine.binDir}:/usr/bin`);
   });
 
@@ -240,8 +240,8 @@ describe("the environment a session runs with", () => {
     const env = envOf(starting({ config: { env: { PORT: 8080 } } }), machining());
 
     expect(env["PORT"]).toBeUndefined();
-    expect(env["HYDRA_SESSION"]).toBe("1");
-    expect(envOf(starting({ config: "nonsense" }), machining())["HYDRA_SESSION"]).toBe("1");
+    expect(env["HERCULE_SESSION"]).toBe("1");
+    expect(envOf(starting({ config: "nonsense" }), machining())["HERCULE_SESSION"]).toBe("1");
   });
 });
 
@@ -273,7 +273,7 @@ describe("a session that has a workspace", () => {
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({ resourceId: id(), remote: remote.url, branch: "hydra/run-9c9c9c9c" }),
+          checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-9c9c9c9c" }),
         ],
       }),
     );
@@ -357,9 +357,9 @@ describe("the git credential environment a session runs with", () => {
     const outcome = await resolvingAsync(starting({ token: "the-session-token" }), machine);
     const env = outcome._tag === "Success" ? { ...outcome.success.ctx.env } : {};
 
-    expect(env["HYDRA_RUNNER_SOCKET"]).toBe(machine.socketPath);
+    expect(env["HERCULE_RUNNER_SOCKET"]).toBe(machine.socketPath);
     // The helper authenticates as this session, and nothing else.
-    expect(env["HYDRA_TOKEN"]).toBe("the-session-token");
+    expect(env["HERCULE_TOKEN"]).toBe("the-session-token");
     const pairs = gitConfigOf(env);
     // The empty entry comes first: an inherited helper would otherwise answer
     // with the machine owner's credentials, for any repository.
@@ -457,14 +457,14 @@ describe("where the session's token is written", () => {
       providersDir: join(under, "providers"),
       scratchDir: join(under, "scratch"),
       binDir: join(under, "bin"),
-      hydraTool: { skill: "# hydra", claudePluginDir: join(under, "claude-plugin") },
+      herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
     });
-    const token = `hydra-token-${crypto.randomUUID()}`;
+    const token = `hercule-token-${crypto.randomUUID()}`;
 
     const outcome = resolving(starting({ token }), machine);
 
     expect(outcome._tag).toBe("Success");
-    expect(outcome._tag === "Success" ? outcome.success.ctx.env["HYDRA_TOKEN"] : "").toBe(token);
+    expect(outcome._tag === "Success" ? outcome.success.ctx.env["HERCULE_TOKEN"] : "").toBe(token);
     // A token on disk outlives the session that held it; the whole point of
     // one is that it dies with the process (spec 06 section 9.3).
     const leaked = filesUnder(under).filter((path) => readFileSync(path, "utf8").includes(token));

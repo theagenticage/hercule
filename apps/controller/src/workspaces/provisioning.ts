@@ -10,14 +10,14 @@
  * clone, the setup command to run, whether to copy what `.workspaceinclude`
  * lists - is the resource's, so the resource is handed in beside the checkout.
  *
- * No path crosses this boundary. A primary is always a Hydra-managed clone
+ * No path crosses this boundary. A primary is always a Hercule-managed clone
  * under the machine's own storage, so all the machine is ever told is which
  * repository to make it from.
  */
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { WorkspaceProvision } from "@hydra/protocol";
-import type { Actor, CheckoutForm, WorkspaceKind } from "@hydra/contract";
+import type { WorkspaceProvision } from "@hercule/protocol";
+import type { Actor, CheckoutForm, WorkspaceKind } from "@hercule/contract";
 import type { AuditLog } from "../events";
 import type { StoredRepo } from "../resources";
 import type { StoredCheckout, StoredWorkspace, workspaceRepository } from "./repository";

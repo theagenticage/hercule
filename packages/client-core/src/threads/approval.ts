@@ -5,7 +5,7 @@
  * or reword - the user reads what the click does, in the same words on every
  * surface (spec 10 §7.4, spec 14 §Answers as a ledger).
  */
-import type { ApprovalDecision, OpenRequest } from "@hydra/contract";
+import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
 
 /** One answer row: the row is the button, the label its left column. */
 export interface ApprovalRow {
@@ -99,7 +99,7 @@ const describeOf = (decision: ApprovalDecision, subject: string): string => {
 };
 
 /**
- * Conflict between what the harness asks and what Hydra can send back:
+ * Conflict between what the harness asks and what Hercule can send back:
  * `session.respond` carries a decision and no answers, so there is nothing an
  * allow could run the tool with. The card says so rather than leaving the
  * missing Allow to be read as a bug.

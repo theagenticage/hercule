@@ -20,7 +20,7 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hydra/contract";
+import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hercule/contract";
 import {
   GOING_AWAY_CLOSE_CODE,
   RETIRED_CLOSE_CODE,
@@ -41,7 +41,7 @@ import {
   type SessionsReport,
   type CredentialRequest,
   type WorkspaceReport,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken } from "../credentials";
 import { announce, nowIso, withTransaction } from "../db";
@@ -61,7 +61,7 @@ const RUNNER_FACTS_DEADLINE: Duration.Duration = Duration.seconds(10);
 
 /** Tests hand over a deadline they can wait out. */
 export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
-  "hydra/controller/runners/RunnerFactsDeadline",
+  "hercule/controller/runners/RunnerFactsDeadline",
   { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
 );
 
@@ -571,7 +571,7 @@ const make = Effect.gen(function* () {
 export class RunnerConnections extends Context.Service<
   RunnerConnections,
   Effect.Success<typeof make>
->()("hydra/controller/runners/RunnerConnections") {}
+>()("hercule/controller/runners/RunnerConnections") {}
 
 export const RunnerConnectionsLayer: Layer.Layer<
   RunnerConnections,

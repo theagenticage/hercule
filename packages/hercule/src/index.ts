@@ -1,5 +1,5 @@
-import { parseGlobalOptions } from "@hydra/home";
-import { VERSION } from "@hydra/home/version";
+import { parseGlobalOptions } from "@hercule/home";
+import { VERSION } from "@hercule/home/version";
 import { Result } from "effect";
 
 export type Role = "controller" | "runner" | "cli";
@@ -13,17 +13,17 @@ type RoleModule = { run: (argv: readonly string[]) => void | Promise<void> };
  * module graph.
  */
 const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
-  controller: () => import("@hydra/controller"),
-  runner: () => import("@hydra/runner"),
-  cli: () => import("@hydra/cli"),
+  controller: () => import("@hercule/controller"),
+  runner: () => import("@hercule/runner"),
+  cli: () => import("@hercule/cli"),
 };
 
 /**
  * Which role owns this invocation, and the arguments that role receives.
  *
- * `hydra serve` is the controller; `hydra runner`, `hydra runner --local`,
- * `hydra runner join` and `hydra runner set-controller` are the runner. Every
- * other verb, `hydra runner join-token create` included, is the CLI. The role
+ * `hercule serve` is the controller; `hercule runner`, `hercule runner --local`,
+ * `hercule runner join` and `hercule runner set-controller` are the runner. Every
+ * other verb, `hercule runner join-token create` included, is the CLI. The role
  * keeps the global options; only the verb is consumed.
  *
  * `--home <dir>` and `-c key=value` may precede the verb, so the verb is
@@ -42,11 +42,11 @@ function route(
     // git runs this one, per request, and what answers it is the runner's own
     // socket rather than the public API. The action git names is what the role
     // acts on; with none named the word itself rides along, so a bare
-    // `hydra git-credential` cannot be read as `hydra runner` and start a daemon.
+    // `hercule git-credential` cannot be read as `hercule runner` and start a daemon.
     case "git-credential":
       return { role: "runner", args: subcommand === undefined ? argv : withoutVerb };
     case "runner":
-      // A bridge for as long as `hydra runner` names the daemon as well as the
+      // A bridge for as long as `hercule runner` names the daemon as well as the
       // noun: help for either is one screen, and the CLI is what renders it.
       if (subcommand === "--help" || subcommand === "-h") return { role: "cli", args: argv };
       // The daemon forms take no subcommand, and `join` and `set-controller`
@@ -68,7 +68,7 @@ export async function dispatch(argv: readonly string[]): Promise<void> {
   if (Result.isFailure(parsed)) {
     // A malformed global option cannot be routed on: the verb's position
     // depends on how many tokens the option took.
-    console.error(`hydra: ${parsed.failure.option}: ${parsed.failure.message}`);
+    console.error(`hercule: ${parsed.failure.option}: ${parsed.failure.message}`);
     process.exitCode = 1;
     return;
   }
@@ -81,5 +81,5 @@ export async function dispatch(argv: readonly string[]): Promise<void> {
   await entrypoint.run(args);
 }
 
-export { spawnHydra } from "./spawn";
+export { spawnHercule } from "./spawn";
 export { VERSION };

@@ -1,8 +1,8 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { EmptyState, Group, LaneLabel } from "@hydra/ui";
-import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hydra/client-core";
+import { EmptyState, Group, LaneLabel } from "@hercule/ui";
+import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hercule/client-core";
 import { secretsQuery, settingsQuery } from "../../../app/queries";
 import { SecretRow } from "./-secret-row";
 import { SetSecret } from "./-set-secret";
@@ -33,7 +33,7 @@ function Secrets(): JSX.Element {
       {secrets.length === 0 ? (
         <EmptyState
           headline="No secrets are stored."
-          lead="Secrets are the tokens and keys connections and workflows use. Hydra keeps their values out of every read and shows only where each one is used."
+          lead="Secrets are the tokens and keys connections and workflows use. Hercule keeps their values out of every read and shows only where each one is used."
         />
       ) : (
         <section>

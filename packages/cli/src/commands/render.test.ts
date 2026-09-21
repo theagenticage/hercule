@@ -20,7 +20,7 @@ const row = (position: number, event: Record<string, unknown>) => ({
   event: { eventId: "e1", sessionId: SESSION, at: "2026-09-07T10:00:00.000Z", ...event },
 });
 
-describe("hydra session spawn", () => {
+describe("hercule session spawn", () => {
   it("prints the session and teaches the command that reads it back", () => {
     const lines = renderHuman(
       { kind: "value", value: { id: SESSION, status: "starting" } },
@@ -29,7 +29,7 @@ describe("hydra session spawn", () => {
 
     expect(lines[0]).toBe(`id      ${SESSION.slice(-8)}`);
     expect(lines).toContain(
-      `read what it says with \`hydra transcript read ${SESSION.slice(-8)}\``,
+      `read what it says with \`hercule transcript read ${SESSION.slice(-8)}\``,
     );
   });
 
@@ -39,11 +39,11 @@ describe("hydra session spawn", () => {
       command("session", "read"),
     );
 
-    expect(lines.join("\n")).not.toContain("hydra transcript read");
+    expect(lines.join("\n")).not.toContain("hercule transcript read");
   });
 });
 
-describe("hydra transcript read", () => {
+describe("hercule transcript read", () => {
   it("prints one line per row: position, instant, tag, and what that tag adds", () => {
     const lines = renderHuman(
       {

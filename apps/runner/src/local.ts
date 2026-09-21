@@ -1,5 +1,5 @@
 /**
- * `hydra runner --local`: an ordinary runner in every way but its first two
+ * `hercule runner --local`: an ordinary runner in every way but its first two
  * seconds.
  *
  * `runner.json` has one owner, so a controller cannot read who its child is; the
@@ -12,7 +12,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
-import { LocalAnnouncement, LocalEnrolment } from "@hydra/protocol";
+import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
 import { daemon, type ToolingUnavailable } from "./daemon";
 import type { RunnerRetired } from "./socket";
 import { join, JoinError } from "./join";

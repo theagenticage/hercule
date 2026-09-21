@@ -27,7 +27,7 @@ import {
   type Unauthenticated,
   type Validation,
   type Workspace,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
 import { RunnerConnections } from "../runners";
@@ -48,7 +48,7 @@ const WORKSPACE_SWEEP_INTERVAL: Duration.Duration = Duration.minutes(10);
 
 /** Tests hand over an interval they can wait out. */
 export const WorkspaceSweepInterval = Context.Reference<Duration.Duration>(
-  "hydra/controller/daemon/WorkspaceSweepInterval",
+  "hercule/controller/daemon/WorkspaceSweepInterval",
   { defaultValue: (): Duration.Duration => WORKSPACE_SWEEP_INTERVAL },
 );
 
@@ -155,7 +155,7 @@ const make = Effect.gen(function* () {
 });
 
 export class Provisioning extends Context.Service<Provisioning, Effect.Success<typeof make>>()(
-  "hydra/controller/daemon/Provisioning",
+  "hercule/controller/daemon/Provisioning",
 ) {}
 
 export const ProvisioningLayer: Layer.Layer<

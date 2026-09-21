@@ -19,7 +19,7 @@ import {
   type ActivationContext,
   type Plugin,
   type SetupStep,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import {
   completeSetup,
   del,

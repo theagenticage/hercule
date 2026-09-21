@@ -4,7 +4,7 @@
  *
  * A grant is written family-dot-verb (`task.delete`, `infra.write`). Grants are
  * coarse and unscoped in v1: `session.read` reads any session. The vocabulary
- * itself lives in `@hydra/contract` - a 403 names the missing grant on the wire
+ * itself lives in `@hercule/contract` - a 403 names the missing grant on the wire
  * and `profile.create` takes a list of them - and is re-exported here so the
  * controller reads it from the domain that enforces it. They are stored
  * as a JSON array of grant strings on the profile row, which keeps a profile
@@ -17,7 +17,7 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { GrantSchema, type Grant } from "@hydra/contract";
+import { GrantSchema, type Grant } from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,
@@ -249,7 +249,7 @@ const make = Effect.gen(function* () {
 export class PermissionProfiles extends Context.Service<
   PermissionProfiles,
   Effect.Success<typeof make>
->()("hydra/controller/permissions/PermissionProfiles") {}
+>()("hercule/controller/permissions/PermissionProfiles") {}
 
 export const PermissionProfilesLayer: Layer.Layer<PermissionProfiles, never, SqlClient.SqlClient> =
   Layer.effect(PermissionProfiles, make);

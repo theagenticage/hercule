@@ -6,17 +6,17 @@
  * Where it lives, by platform:
  *
  * - **macOS**: the login keychain, through the `security` CLI, as a generic
- *   password with service `Hydra` and the absolute Hydra Home path as the
+ *   password with service `Hercule` and the absolute Hercule Home path as the
  *   account, so two homes on one machine never collide. The controller runs as
  *   a user-level service precisely so it can read the login keychain without a
  *   prompt.
  * - **Everywhere else**: `<home>/master.key`, mode 0600, holding the key
- *   **base64-encoded with a trailing newline**. It sits at the Hydra Home root,
+ *   **base64-encoded with a trailing newline**. It sits at the Hercule Home root,
  *   outside `data/` and `backups/`, so promotion never moves it and backups
  *   stay inert.
  *
  * Spec 13 section 2.2 also names the Linux desktop keychain (Secret Service).
- * Hydra v1 does not implement it; the file is the only non-macOS store, and
+ * Hercule v1 does not implement it; the file is the only non-macOS store, and
  * that narrowing is recorded in the spec rather than left implicit.
  *
  * A key is minted only when the store has none **and** the database holds no
@@ -36,13 +36,13 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { HydraHome } from "../config";
+import { HerculeHome } from "../config";
 
 /** A master key is 32 bytes: AES-256 takes nothing else. */
 export const MASTER_KEY_BYTES = 32;
 
-/** The keychain service name every Hydra home on a machine shares. */
-export const KEYCHAIN_SERVICE = "Hydra";
+/** The keychain service name every Hercule home on a machine shares. */
+export const KEYCHAIN_SERVICE = "Hercule";
 
 /** `security` exits 44 when the item is not in the keychain. */
 const KEYCHAIN_ITEM_NOT_FOUND = 44;
@@ -66,7 +66,7 @@ export class MasterKey extends Context.Service<
   {
     readonly key: CryptoKey;
   }
->()("hydra/controller/secrets/MasterKey") {}
+>()("hercule/controller/secrets/MasterKey") {}
 
 /** Plain bytes, not a view on a `SharedArrayBuffer`: what WebCrypto accepts. */
 type Bytes = Uint8Array<ArrayBuffer>;
@@ -93,7 +93,7 @@ const decodeBase64 = (encoded: string, source: string): Bytes => {
   const bytes = new Uint8Array(Buffer.from(encoded.trim(), "base64"));
   if (bytes.length !== MASTER_KEY_BYTES) {
     throw new Error(
-      `${source} holds ${bytes.length} bytes; a Hydra master key is ${MASTER_KEY_BYTES} bytes.`,
+      `${source} holds ${bytes.length} bytes; a Hercule master key is ${MASTER_KEY_BYTES} bytes.`,
     );
   }
   return bytes;
@@ -123,7 +123,7 @@ export const fileStore = (path: string): KeyStore => {
   const readAfterRace = Effect.flatMap(read, (bytes) =>
     bytes === undefined
       ? new MasterKeyError({
-          message: `${path} appeared while Hydra was creating it, and then held no master key.`,
+          message: `${path} appeared while Hercule was creating it, and then held no master key.`,
         })
       : Effect.succeed(bytes),
   );
@@ -168,7 +168,7 @@ export type SecurityRunner = (
  *
  * There is no way to hand it a password on stdin, so the key is on the command
  * line for the lifetime of the process, visible to `ps` for the same OS user.
- * Hydra's perimeter is one user's own machine (spec 13 section 1), and this
+ * Hercule's perimeter is one user's own machine (spec 13 section 1), and this
  * happens once, at first run.
  */
 export const spawnSecurity: SecurityRunner = async (argv) => {
@@ -177,7 +177,7 @@ export const spawnSecurity: SecurityRunner = async (argv) => {
   return { exitCode: await child.exited, stdout };
 };
 
-/** The macOS login keychain, one item per Hydra Home. */
+/** The macOS login keychain, one item per Hercule Home. */
 export const keychainStore = (account: string, run: SecurityRunner = spawnSecurity): KeyStore => {
   const item = `the ${KEYCHAIN_SERVICE} keychain item for account ${account}`;
   const security = (argv: ReadonlyArray<string>, failure: string) =>
@@ -268,11 +268,11 @@ const secretCount: Effect.Effect<number, SqlError, SqlClient.SqlClient> = Effect
  */
 export const masterKeyLayer = (
   backend: MasterKeyBackend = defaultBackend,
-): Layer.Layer<MasterKey, MasterKeyError | SqlError, HydraHome | SqlClient.SqlClient> =>
+): Layer.Layer<MasterKey, MasterKeyError | SqlError, HerculeHome | SqlClient.SqlClient> =>
   Layer.effect(
     MasterKey,
     Effect.gen(function* () {
-      const home = yield* HydraHome;
+      const home = yield* HerculeHome;
       const store =
         backend === "keychain" ? keychainStore(home.home) : fileStore(home.masterKeyFile);
 
@@ -285,7 +285,7 @@ export const masterKeyLayer = (
               `${store.describe} holds no master key, but ${home.databaseFile} holds ${secrets} ` +
               `encrypted secret ${secrets === 1 ? "row" : "rows"}. Minting a new key would make ` +
               `${secrets === 1 ? "it" : "them"} unreadable. ` +
-              `Restore the key this machine had, or start from an empty Hydra Home.`,
+              `Restore the key this machine had, or start from an empty Hercule Home.`,
           });
         }
         // The store answers with the key it holds, which is another boot's if

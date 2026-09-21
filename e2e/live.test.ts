@@ -3,9 +3,9 @@
  *
  * The socket is the one part of the live overlay that no unit test can prove:
  * `client-core`'s tests drive a stub `WebSocket` and the controller's drive an
- * in-process RPC client. This suite runs `./hydra` as the controller and as the
+ * in-process RPC client. This suite runs `./hercule` as the controller and as the
  * CLI, and puts a real `client-core` live client - real ticket fetch, real
- * WebSocket, real greeting - between them, so a `hydra task create` in one
+ * WebSocket, real greeting - between them, so a `hercule task create` in one
  * process has to reach a subscriber in another. `pnpm build:binary` first, then
  * `pnpm test:binary`.
  */
@@ -28,15 +28,15 @@ import {
 } from "./harness";
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;
-/** The token `hydra login` wrote, which is what a client of the same home holds. */
+/** The token `hercule login` wrote, which is what a client of the same home holds. */
 let token: string;
 
 /** The CLI, as the binary, under the credential file the login wrote. */
-const hydra = (args: ReadonlyArray<string>, stdin?: string) =>
+const hercule = (args: ReadonlyArray<string>, stdin?: string) =>
   cli(args, { home: state.home, binary, stdin });
 
 /** Fails with the command's own output rather than on an undefined field. */
@@ -66,7 +66,7 @@ beforeAll(async () => {
   const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-  const login = await hydra(
+  const login = await hercule(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-live"],
     PASSWORD,
   );
@@ -83,7 +83,7 @@ afterAll(async () => {
 describe("the binary serving live topics", () => {
   it("stops when it is told to, although a socket is still open", async () => {
     // A watched controller always has an open socket, and the listener's drain
-    // waits for every connection, so without a deadline `hydra serve` could not
+    // waits for every connection, so without a deadline `hercule serve` could not
     // be stopped while anybody was looking at it.
     const home = temporaryHome();
     let its: Controller | undefined;
@@ -130,7 +130,7 @@ describe("the binary serving live topics", () => {
     expect(ticket.ticket.length).toBeGreaterThanOrEqual(43);
 
     // Hidden means absent, not undocumented: the spelling is an unknown command.
-    const ran = await hydra(["auth", "ws-ticket", "--json"]);
+    const ran = await hercule(["auth", "ws-ticket", "--json"]);
     expect(ran.code).toBe(2);
   }, 30_000);
 
@@ -151,7 +151,7 @@ describe("the binary serving live topics", () => {
       const greeted = calls.length;
 
       const created = ok(
-        await hydra(["task", "create", "--title", "live from the binary", "--json"], ""),
+        await hercule(["task", "create", "--title", "live from the binary", "--json"], ""),
       ) as { readonly id: string };
 
       await until("the task invalidation", () => calls.length > greeted);

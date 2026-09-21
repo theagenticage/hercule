@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hydra/client-core";
+import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hercule/client-core";
 import {
   localRunnerQuery,
   projectsQuery,

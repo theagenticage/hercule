@@ -5,8 +5,8 @@
  * function from a request to a response and a stub terminal is three arrays.
  * No server is started anywhere in this package's tests.
  */
-import type { ErrorCode } from "@hydra/contract";
-import type { FetchLike } from "@hydra/client-core";
+import type { ErrorCode } from "@hercule/contract";
+import type { FetchLike } from "@hercule/client-core";
 import type { Io } from "./io";
 
 export interface StubRequest {

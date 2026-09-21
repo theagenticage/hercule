@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, Field, Input, LaneLabel } from "@hydra/ui";
+import { Button, Field, Input, LaneLabel } from "@hercule/ui";
 import {
   configIssues,
   credentialFieldsOf,
@@ -8,9 +8,9 @@ import {
   redirectUriFor,
   setupFlowOf,
   type ConnectionType,
-  type HydraClient,
-} from "@hydra/client-core";
-import type { Connection } from "@hydra/contract";
+  type HerculeClient,
+} from "@hercule/client-core";
+import type { Connection } from "@hercule/contract";
 import { SaveStatus, messageOf } from "../../../screens/save-status";
 import { Naming } from "./-naming";
 
@@ -30,7 +30,7 @@ export function ConnectionSetup({
   connection,
   onDone,
 }: {
-  readonly client: HydraClient;
+  readonly client: HerculeClient;
   readonly type: ConnectionType;
   /** The connection being reconnected; absent when this is a first setup. */
   readonly connection?: Connection;
@@ -96,7 +96,7 @@ export function ConnectionSetup({
         <p>
           {flow === "pairing"
             ? "Pairing a chat account is not built yet."
-            : `Setting up ${type.displayName} takes a step this version of Hydra does not know.`}
+            : `Setting up ${type.displayName} takes a step this version of Hercule does not know.`}
         </p>
         <Button className="-ml-2" onClick={onDone}>
           Back

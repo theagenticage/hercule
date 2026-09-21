@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Profile } from "@hydra/contract";
+import type { Profile } from "@hercule/contract";
 import { completeSetup, post, send, withServer } from "./testing";
 
 /** Permission profiles over a real socket. */
@@ -10,7 +10,7 @@ const list = async (base: string, token: string, query = ""): Promise<Profile[]>
 };
 
 describe("permission profiles over HTTP", () => {
-  it("lists the three profiles Hydra ships, by name", async () => {
+  it("lists the three profiles Hercule ships, by name", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const items = await list(base, token);

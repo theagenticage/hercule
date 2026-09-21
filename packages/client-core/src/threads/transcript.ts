@@ -7,7 +7,7 @@
  * the result the same whichever order they arrive in - a row already held is
  * the same row, so the one in hand stands and the rest are placed in order.
  */
-import type { TranscriptRow } from "@hydra/contract";
+import type { TranscriptRow } from "@hercule/contract";
 
 export const mergeTranscript = (
   current: readonly TranscriptRow[],

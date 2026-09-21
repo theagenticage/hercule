@@ -12,7 +12,7 @@
  * everything.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { Profile } from "@hydra/contract";
+import type { Profile } from "@hercule/contract";
 import {
   agentOn,
   profileNamed,

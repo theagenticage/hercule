@@ -1,5 +1,5 @@
 /**
- * Connections: what the screen says about the accounts Hydra acts through, and
+ * Connections: what the screen says about the accounts Hercule acts through, and
  * what setting one up sends.
  *
  * Everything the screen offers comes from the plugin catalog: the types, their

@@ -7,9 +7,9 @@ import {
   threadDefaults,
   threadModelField,
   threadRowsMode,
-} from "@hydra/client-core";
-import type { AccessMode, ThreadRows, ThreadWorkspace } from "@hydra/contract";
-import { Field, FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hydra/ui";
+} from "@hercule/client-core";
+import type { AccessMode, ThreadRows, ThreadWorkspace } from "@hercule/contract";
+import { Field, FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hercule/ui";
 import {
   connectionsQuery,
   localRunnerQuery,

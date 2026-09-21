@@ -1,6 +1,6 @@
 import type { JSX } from "react";
-import type { AccessModeMenuItem } from "@hydra/client-core";
-import type { AccessMode } from "@hydra/contract";
+import type { AccessModeMenuItem } from "@hercule/client-core";
+import type { AccessMode } from "@hercule/contract";
 import { MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 

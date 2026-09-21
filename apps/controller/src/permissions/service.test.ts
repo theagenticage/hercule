@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import type { Grant } from "@hydra/contract";
+import type { Grant } from "@hercule/contract";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";
@@ -142,7 +142,7 @@ describe("profile.read", () => {
 });
 
 describe("profile.update", () => {
-  it("edits a shipped profile: the three Hydra ships are editable", async () => {
+  it("edits a shipped profile: the three Hercule ships are editable", async () => {
     const { updated, entries } = await run(
       Effect.gen(function* () {
         const store = yield* PermissionProfiles;

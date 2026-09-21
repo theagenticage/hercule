@@ -11,7 +11,7 @@ import type {
   ModelOption,
   ProviderInstance,
   Runner,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { accessModeMenu, type AccessModeMenuItem } from "./access-modes";
 import { accountName, loginTarget, snapshotOn, type LoginTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./config";

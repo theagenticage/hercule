@@ -11,7 +11,7 @@
 import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Actor, InvalidateKind, MutableLiveTopic } from "@hydra/contract";
+import type { Actor, InvalidateKind, MutableLiveTopic } from "@hercule/contract";
 import { announce, nowIso } from "../db";
 
 /**
@@ -251,7 +251,7 @@ const make = Effect.gen(function* () {
 
 /** The audit writer. */
 export class AuditLog extends Context.Service<AuditLog, Effect.Success<typeof make>>()(
-  "hydra/controller/events/AuditLog",
+  "hercule/controller/events/AuditLog",
 ) {}
 
 export const AuditLogLayer: Layer.Layer<AuditLog, never, SqlClient.SqlClient> = Layer.effect(

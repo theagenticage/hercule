@@ -1,5 +1,5 @@
 /**
- * Connections: one record per external account Hydra acts through.
+ * Connections: one record per external account Hercule acts through.
  *
  * The type is a plugin contribution, so what a connection takes to set up - its
  * fields, its config schema - is read from the plugin catalog rather than from
@@ -14,7 +14,7 @@
  * and is never read back, by this API or any other.
  */
 import { Schema } from "effect";
-import { ConnectionStatus } from "@hydra/plugin-host";
+import { ConnectionStatus } from "@hercule/plugin-host";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
@@ -33,7 +33,7 @@ import { atMost, bounded, SecretValue } from "../strings";
 import { Label, MAX_TASK_LABELS } from "./task";
 
 /** Re-exported from the package plugins are written against: one list, two readers. */
-export { ConnectionStatus } from "@hydra/plugin-host";
+export { ConnectionStatus } from "@hercule/plugin-host";
 
 /**
  * The shipped GitHub type, by the qualified id the host mints for it. A repo's
@@ -63,7 +63,7 @@ const Topics = atMost(Label, MAX_TASK_LABELS).check(Schema.isMinLength(1));
  */
 const Origin = Schema.String.check(
   Schema.isPattern(/^https?:\/\/[^/?#]+$/, {
-    message: "an origin is a scheme and a host with no path, like https://hydra.example",
+    message: "an origin is a scheme and a host with no path, like https://hercule.example",
   }),
 );
 

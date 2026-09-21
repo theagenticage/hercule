@@ -1,6 +1,6 @@
 import type { JSX } from "react";
-import type { ModelPill } from "@hydra/client-core";
-import { cn, ProviderLogo } from "@hydra/ui";
+import type { ModelPill } from "@hercule/client-core";
+import { cn, ProviderLogo } from "@hercule/ui";
 
 const GLYPH =
   "inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted";

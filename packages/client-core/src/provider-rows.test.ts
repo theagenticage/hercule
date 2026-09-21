@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderInstance, Runner } from "@hydra/contract";
+import type { ProviderInstance, Runner } from "@hercule/contract";
 import { providerRows } from "./provider-rows";
 import { instance, snapshot, WITH_CLAUDE } from "./providers.testing";
 

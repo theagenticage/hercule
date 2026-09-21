@@ -42,7 +42,7 @@ let dir: string;
 const roots: Array<string> = [];
 
 beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "hydra-dep-lint-"));
+  dir = await mkdtemp(join(tmpdir(), "hercule-dep-lint-"));
   await Promise.all(
     Object.entries(FIXTURES).map(([name, body]) => writeFile(join(dir, `${name}.ts`), `${body}\n`)),
   );
@@ -114,7 +114,7 @@ describe("the vendor SDK's per-platform CLI packages", () => {
    * own store.
    */
   const scriptOver = async (...packages: ReadonlyArray<string>): Promise<string> => {
-    const one = await mkdtemp(join(tmpdir(), "hydra-dep-lint-root-"));
+    const one = await mkdtemp(join(tmpdir(), "hercule-dep-lint-root-"));
     roots.push(one);
     await mkdir(join(one, "scripts"), { recursive: true });
     await copyFile(join(root, "scripts/dep-lint.ts"), join(one, "scripts/dep-lint.ts"));

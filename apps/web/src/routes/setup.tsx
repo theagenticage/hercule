@@ -1,8 +1,8 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { browserTimezone } from "@hydra/client-core";
-import { SetupForm } from "@hydra/contract";
-import { Button, Field, Input } from "@hydra/ui";
+import { browserTimezone } from "@hercule/client-core";
+import { SetupForm } from "@hercule/contract";
+import { Button, Field, Input } from "@hercule/ui";
 import { validate, type FieldErrors } from "../app/form";
 import { SETUP_PATH } from "../app/entry-guard";
 import { CenteredScreen } from "../screens/centered-screen";
@@ -30,7 +30,9 @@ function Setup(): JSX.Element {
     return (
       <CenteredScreen title="Open the setup link">
         <p className="text-meta text-muted">
-          {"`hydra serve` printed a setup URL in the terminal. It carries the one-time token this "}
+          {
+            "`hercule serve` printed a setup URL in the terminal. It carries the one-time token this "
+          }
           {"screen needs, so this is where you have to arrive from."}
         </p>
       </CenteredScreen>
@@ -74,7 +76,7 @@ function Setup(): JSX.Element {
   return (
     <CenteredScreen
       title="Create your account"
-      lead="This is the account you will sign in to Hydra with."
+      lead="This is the account you will sign in to Hercule with."
     >
       <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
         <Field id="username" label="Username" error={errors.username}>

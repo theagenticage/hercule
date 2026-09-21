@@ -6,7 +6,7 @@
  * selectable, marked as missing, so a choice made on a runner since replaced
  * does not silently disappear from the field.
  */
-import type { ProviderInstance } from "@hydra/contract";
+import type { ProviderInstance } from "@hercule/contract";
 
 export interface ThreadModelFieldOption {
   readonly slug: string;

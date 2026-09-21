@@ -6,7 +6,7 @@
  * they are. That mapping is a reading of the domain, so it lives here with a
  * test rather than inside a component.
  */
-import type { ProvenanceEntry, TaskPriority, TaskStatus } from "@hydra/contract";
+import type { ProvenanceEntry, TaskPriority, TaskStatus } from "@hercule/contract";
 
 /** The grey a glyph is painted in. */
 export type GlyphTone = "faint" | "muted" | "ink";

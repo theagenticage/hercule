@@ -1,7 +1,7 @@
 /**
  * The one thing the bundler adds to the module system that this package uses.
  *
- * `@hydra/ui` takes no build of its own - it is imported as source - so it
+ * `@hercule/ui` takes no build of its own - it is imported as source - so it
  * links no bundler's types, and `import.meta.glob` is declared here instead.
  */
 interface ImportMeta {

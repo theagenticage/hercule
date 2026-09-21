@@ -28,7 +28,7 @@ import {
   type SessionRespond,
   type SessionStart,
   type SessionStop,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { noAdapterFor, type ProviderAdapter } from "../providers";
 import { now, wentWrong } from "../report";
 import { resolve, type Machine } from "./context";

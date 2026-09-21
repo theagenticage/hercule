@@ -15,8 +15,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
-import type { SessionStart } from "@hydra/protocol";
-import type { Session } from "@hydra/contract";
+import type { SessionStart } from "@hercule/protocol";
+import type { Session } from "@hercule/contract";
 import { get, send } from "../http/testing";
 import { framesWhen, report, spawned, until, type Arranged } from "../sessions/testing";
 import {

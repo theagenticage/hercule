@@ -1,8 +1,8 @@
 import { useEffect, useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { EmptyState, Group, LaneLabel } from "@hydra/ui";
-import { connectionTypes, setupFlowOf, type ConnectionType } from "@hydra/client-core";
+import { EmptyState, Group, LaneLabel } from "@hercule/ui";
+import { connectionTypes, setupFlowOf, type ConnectionType } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { connectionsQuery, pluginsQuery } from "../../../app/queries";
 import { ConnectRows } from "../../../screens/connect-rows";
@@ -54,7 +54,7 @@ const gistOf = (type: ConnectionType): string => {
 };
 
 /**
- * The accounts Hydra acts through, and everything that can be connected.
+ * The accounts Hercule acts through, and everything that can be connected.
  *
  * Nothing about a particular account is written here: the types, their setup
  * steps and their settings all come from the plugin catalog, so a plugin added
@@ -119,7 +119,7 @@ function Connections(): JSX.Element {
       {connections.length === 0 ? (
         <EmptyState
           headline="Nothing connected yet."
-          lead="Connections are the accounts Hydra reads and speaks through. Events come from GitHub and Gmail; chat comes from Discord and Slack."
+          lead="Connections are the accounts Hercule reads and speaks through. Events come from GitHub and Gmail; chat comes from Discord and Slack."
         >
           {offers}
         </EmptyState>

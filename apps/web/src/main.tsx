@@ -2,7 +2,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider, createBrowserHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createClient, createLive, createTokenStore, detectLocalRunner } from "@hydra/client-core";
+import {
+  createClient,
+  createLive,
+  createTokenStore,
+  detectLocalRunner,
+} from "@hercule/client-core";
 import { createAppRouter } from "./app/router";
 import { followLiveStatus } from "./app/live-status";
 import "./styles.css";

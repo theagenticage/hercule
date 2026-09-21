@@ -1,5 +1,5 @@
 {
-  "name": "@hydra/cli",
+  "name": "@hercule/cli",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,9 +7,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@hydra/client-core": "workspace:*",
-    "@hydra/contract": "workspace:*",
-    "@hydra/home": "workspace:*",
+    "@hercule/client-core": "workspace:*",
+    "@hercule/contract": "workspace:*",
+    "@hercule/home": "workspace:*",
     "effect": "4.0.0-rc.112"
   }
 }

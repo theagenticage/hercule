@@ -1,5 +1,5 @@
 /**
- * The runner the controller runs beside itself, so every Hydra is a fleet of at
+ * The runner the controller runs beside itself, so every Hercule is a fleet of at
  * least one without anybody enlisting a machine by hand.
  *
  * The child is a fleet member like any other: nothing records that it is local,
@@ -15,14 +15,14 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { LocalAnnouncement, LocalEnrolment } from "@hydra/protocol";
+import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { nowIso } from "../db";
 import { AuditLog } from "../events";
 import { JoinTokens } from "./join-tokens";
 
 /**
- * Spawn, never fork: a forked Hydra would share this process's database handle
+ * Spawn, never fork: a forked Hercule would share this process's database handle
  * and its signal handlers.
  */
 export const LOCAL_RUNNER_COMMAND: ReadonlyArray<string> = [process.execPath, "runner", "--local"];
@@ -31,8 +31,8 @@ export const LOCAL_RUNNER_COMMAND: ReadonlyArray<string> = [process.execPath, "r
 const EMBEDDED = "/$bunfs/";
 
 /**
- * For a Hydra that has not been compiled, whose executable is Bun rather than
- * Hydra. Without this, `hydra serve` from a checkout has no local runner.
+ * For a Hercule that has not been compiled, whose executable is Bun rather than
+ * Hercule. Without this, `hercule serve` from a checkout has no local runner.
  */
 const spawnCommand = (): ReadonlyArray<string> =>
   Bun.main.startsWith(EMBEDDED)
@@ -85,7 +85,7 @@ export interface RunnerAlertListener {
 }
 
 export class RunnerAlerts extends Context.Service<RunnerAlerts, RunnerAlertListener>()(
-  "hydra/controller/runners/RunnerAlerts",
+  "hercule/controller/runners/RunnerAlerts",
 ) {}
 
 export class LocalRunnerFailed extends Schema.TaggedError<LocalRunnerFailed>()(
@@ -153,7 +153,7 @@ const announcement = (stdout: ReadableStream<Uint8Array>): Promise<string | unde
     } catch (cause) {
       // A broken pipe is a child that is gone; waiting the handshake deadline
       // out for it would hold the boot for half a minute.
-      process.stderr.write(`hydra: the local runner's output ended: ${String(cause)}\n`);
+      process.stderr.write(`hercule: the local runner's output ended: ${String(cause)}\n`);
     }
     if (!heard) said(undefined);
   })();
@@ -195,7 +195,7 @@ export const startLocalRunner = (
         stderr: "inherit",
         // The controller's home is not always the default one. Never the token:
         // everything this child starts would inherit it.
-        env: { ...process.env, HYDRA_HOME: home },
+        env: { ...process.env, HERCULE_HOME: home },
       });
       child = spawned;
 

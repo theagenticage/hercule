@@ -8,7 +8,7 @@
  * because a plugin whose schema goes beyond that is refused at load and carries
  * no schema at all.
  */
-import type { Issue, PluginConfigureInput } from "@hydra/contract";
+import type { Issue, PluginConfigureInput } from "@hercule/contract";
 import { ApiError } from "./errors";
 
 /** What one setting is, and which widget renders it. */

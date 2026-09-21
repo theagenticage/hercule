@@ -123,7 +123,7 @@ export const IDENTITY_PORT_COUNT = 10;
  * What a runner knows about the machine it is on. Latest-wins state, not
  * events: it rides the hello and is re-sent only when a value changed. The
  * controller stores a report whole and hands it back on its public API, which
- * is why `@hydra/contract` exports this schema rather than a copy of it.
+ * is why `@hercule/contract` exports this schema rather than a copy of it.
  */
 export const RunnerFacts = Schema.Struct({
   os: Fact,
@@ -500,7 +500,7 @@ export type ControllerHello = Schema.Schema.Type<typeof ControllerHello>;
  * colon always separates the two halves.
  */
 export const signedChallenge = (runnerId: string, nonce: string): Uint8Array<ArrayBuffer> =>
-  new TextEncoder().encode(`hydra:runner-hello:${runnerId}:${nonce}`);
+  new TextEncoder().encode(`hercule:runner-hello:${runnerId}:${nonce}`);
 
 /**
  * Asks the runner to probe its machine now and report what it finds, whether or

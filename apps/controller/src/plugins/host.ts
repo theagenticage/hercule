@@ -35,7 +35,7 @@ import {
   type PluginCapability,
   type PluginSecrets,
   type RegistrationHost,
-} from "@hydra/plugin-host";
+} from "@hercule/plugin-host";
 import {
   issuesOf,
   MAX_PLUGIN_MESSAGE_LENGTH,
@@ -43,7 +43,7 @@ import {
   type PluginRefusalReason,
   type PluginStatus,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { CurrentActor, stampOf, SYSTEM_ACTOR } from "../actor";
@@ -642,7 +642,7 @@ const make = Effect.gen(function* () {
 });
 
 export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeof make>>()(
-  "hydra/controller/plugins/PluginHost",
+  "hercule/controller/plugins/PluginHost",
 ) {}
 
 export const PluginHostLayer: Layer.Layer<

@@ -10,7 +10,7 @@
  */
 import { chmodSync, rmSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
-import type { CredentialAnswer } from "@hydra/protocol";
+import type { CredentialAnswer } from "@hercule/protocol";
 
 /** Long enough for a controller round trip, short enough that git is never hung on it. */
 export const CREDENTIAL_DEADLINE_MS = 10_000;
@@ -104,8 +104,8 @@ export const serveCredentialSocket = async (options: {
 }): Promise<{ close(): Promise<void> }> => {
   if (await answeredAt(options.path)) {
     throw new Error(
-      `another Hydra runner is already listening at ${options.path}; ` +
-        "only one daemon may run against one Hydra home",
+      `another Hercule runner is already listening at ${options.path}; ` +
+        "only one daemon may run against one Hercule home",
     );
   }
   const server = createServer((connection: Socket) => {

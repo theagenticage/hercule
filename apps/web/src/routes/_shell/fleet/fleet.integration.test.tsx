@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { formatStamp } from "@hydra/client-core";
+import { formatStamp } from "@hercule/client-core";
 import { reading, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 import { CONTROLLER_VERSION, GIB, MOSS, ZONE, type Fixture } from "./-fixtures";
 
@@ -219,7 +219,7 @@ describe("Fleet", () => {
 
     expect(reading()).toContain("no runner has joined yet");
     expect(reading()).toContain(
-      "A runner probes the machine it runs on and reports what it found. Until one joins, Hydra knows nothing about this machine.",
+      "A runner probes the machine it runs on and reports what it found. Until one joins, Hercule knows nothing about this machine.",
     );
     expect(screen.getByText("Add machine")).toBeTruthy();
   });
@@ -254,7 +254,7 @@ describe("Fleet > add machine", () => {
     await user.click(screen.getByRole("button", { name: /add machine/i }));
 
     await waitFor(() => {
-      expect(reading()).toContain(`hydra runner join ${window.location.origin} --token ${TOKEN}`);
+      expect(reading()).toContain(`hercule runner join ${window.location.origin} --token ${TOKEN}`);
     });
     expect(
       api.calls.filter(
@@ -262,7 +262,7 @@ describe("Fleet > add machine", () => {
       ).length,
     ).toBeGreaterThan(0);
     // The command that predates the join exchange is not what is shown.
-    expect(reading()).not.toContain("hydra runner --controller");
+    expect(reading()).not.toContain("hercule runner --controller");
   });
 });
 
@@ -372,7 +372,7 @@ describe("Fleet > add machine > personal", () => {
     await open([MOSS]);
 
     await user.click(screen.getByRole("button", { name: /add machine/i }));
-    const plain = `hydra runner join ${window.location.origin} --token ${TOKEN}`;
+    const plain = `hercule runner join ${window.location.origin} --token ${TOKEN}`;
     await waitFor(() => {
       expect(reading()).toContain(plain);
     });

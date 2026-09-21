@@ -1,8 +1,8 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Group, LaneLabel } from "@hydra/ui";
-import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hydra/client-core";
+import { Group, LaneLabel } from "@hercule/ui";
+import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
   controllerQuery,

@@ -11,11 +11,17 @@
  * Static help and 403s that name the missing grant are the two teaching
  * channels, so every screen names the grant a command needs.
  */
-import { NOUNS, type ErrorCode, type Grant, type NounRow, type Requirement } from "@hydra/contract";
+import {
+  NOUNS,
+  type ErrorCode,
+  type Grant,
+  type NounRow,
+  type Requirement,
+} from "@hercule/contract";
 import { COMMANDS, commandsUnder, mentionsIn, type Command, type Field } from "./tree";
 
 /** How wide a line is allowed to be before it is wrapped. */
-const WIDTH = 92;
+const WIDTH = 94;
 
 /** The grant an operation needs, or `undefined` for one of the three markers. */
 const grantOf = (requires: Requirement): Grant | undefined =>
@@ -82,7 +88,7 @@ export const shellExample = (
   args: ReadonlyArray<string>,
   stdin: string | undefined,
 ): ReadonlyArray<string> => {
-  const invocation = ["hydra", ...command.words, ...args.map(shellArg)].join(" ");
+  const invocation = ["hercule", ...command.words, ...args.map(shellArg)].join(" ");
   if (stdin === undefined) return [`  ${invocation}`];
   if (!stdin.includes("\n")) return [`  echo ${shellArg(stdin)} | ${invocation}`];
   return [`  ${invocation} <<'EOF'`, ...stdin.split("\n"), "EOF"];
@@ -125,7 +131,7 @@ const mentioned = (command: Command): ReadonlyArray<string> => {
   return found;
 };
 
-/** `hydra <noun>... <verb> --help`. */
+/** `hercule <noun>... <verb> --help`. */
 export const commandHelp = (command: Command): ReadonlyArray<string> => {
   const flags = [...command.payload.filter((field) => !field.stdin), ...command.query];
   const onStdin = command.payload.filter((field) => field.stdin);
@@ -135,7 +141,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
   const takesFlags = flags.length > 0 || command.paged || command.requires === "setup-token";
   lines.push(
     "",
-    ["usage: hydra", command.spelling, shape, takesFlags ? "[flags]" : ""]
+    ["usage: hercule", command.spelling, shape, takesFlags ? "[flags]" : ""]
       .filter((part) => part !== "")
       .join(" "),
   );
@@ -172,7 +178,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
       rows.push({
         label: "--setup-token <token>",
         notes: "required",
-        help: "The one-time token `hydra setup-url` prints.",
+        help: "The one-time token `hercule setup-url` prints.",
       });
     }
     if (command.paged) {
@@ -251,7 +257,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
   for (const code of command.codes) {
     const meaning =
       code === "forbidden" && grant !== undefined
-        ? `you lack ${grant}; ask with \`hydra permission request ${grant}\``
+        ? `you lack ${grant}; ask with \`hercule permission request ${grant}\``
         : (command.meanings[code] ?? GENERIC[code]);
     lines.push(...labelled(code, width, meaning));
   }
@@ -259,7 +265,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
   const next = mentioned(command);
   if (next.length > 0) {
     lines.push("", "next:");
-    for (const named of next) lines.push(`  hydra ${named}`);
+    for (const named of next) lines.push(`  hercule ${named}`);
   }
 
   lines.push(
@@ -269,16 +275,16 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
   return lines;
 };
 
-/** The daemon forms of `hydra runner`, which are not operations and have no rows. */
+/** The daemon forms of `hercule runner`, which are not operations and have no rows. */
 const DAEMON_FORMS = [
   "daemon forms (this machine's own runner, not the fleet):",
-  "  hydra runner",
-  "  hydra runner --local",
-  "  hydra runner join <controller-url> --token <token> [--reserved]",
-  "  hydra runner set-controller <controller-url>",
+  "  hercule runner",
+  "  hercule runner --local",
+  "  hercule runner join <controller-url> --token <token> [--reserved]",
+  "  hercule runner set-controller <controller-url>",
 ];
 
-/** `hydra <noun> --help`, and the same for a nested noun. */
+/** `hercule <noun> --help`, and the same for a nested noun. */
 export const nounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<string> => {
   const noun = prefix.join(" ");
   const commands = commandsUnder(prefix);
@@ -291,7 +297,7 @@ export const nounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<string> =
   const noted: NounRow | undefined =
     prefix.length === 1 ? NOUNS[prefix[0] as keyof typeof NOUNS] : undefined;
 
-  const lines: Array<string> = [`usage: hydra ${noun} <verb> [arguments] [flags]`];
+  const lines: Array<string> = [`usage: hercule ${noun} <verb> [arguments] [flags]`];
   if (noted !== undefined) lines.push("", ...wrap(noted.summary, ""));
   if (noun === "runner") lines.push("", ...DAEMON_FORMS);
 
@@ -303,7 +309,7 @@ export const nounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<string> =
   }
 
   if (noted?.flow !== undefined) lines.push("", "flow:", ...wrap(noted.flow, "  "));
-  lines.push("", `run \`hydra ${noun} <verb> --help\` for one command's arguments and examples.`);
+  lines.push("", `run \`hercule ${noun} <verb> --help\` for one command's arguments and examples.`);
   return lines;
 };
 
@@ -332,15 +338,15 @@ const nounsOfTheRoot = (): ReadonlyArray<{
   });
 };
 
-/** `hydra --help`. */
+/** `hercule --help`. */
 export const rootHelp = (): ReadonlyArray<string> => {
   const nouns = nounsOfTheRoot();
   const width = Math.max(...nouns.map((each) => each.noun.length));
   const indent = " ".repeat(width + 4);
   const lines: Array<string> = [
-    "hydra - the command line for a Hydra controller.",
+    "hercule - the command line for a Hercule controller.",
     "",
-    "usage: hydra <noun> <verb> [arguments] [flags]",
+    "usage: hercule <noun> <verb> [arguments] [flags]",
     "",
     "nouns:",
   ];
@@ -356,7 +362,7 @@ export const rootHelp = (): ReadonlyArray<string> => {
   lines.push(
     "",
     "other commands:",
-    "  hydra login <url>, hydra setup-url, hydra serve, and the daemon forms of hydra runner.",
+    "  hercule login <url>, hercule setup-url, hercule serve, and the daemon forms of hercule runner.",
     "",
     "conventions:",
     "  ids       An id in full, or its last eight characters or more where a command's help",
@@ -371,9 +377,9 @@ export const rootHelp = (): ReadonlyArray<string> => {
     "  exit      0 succeeded, 1 the controller answered with an error envelope, 2 the command",
     "            line was wrong and nothing was sent, 3 no credential or no controller.",
     "  403       A forbidden envelope names the grant you lack. Ask the user for it with",
-    "            `hydra permission request <grant>`.",
+    "            `hercule permission request <grant>`.",
     "",
-    "run `hydra <noun> --help` for a noun's verbs, `hydra <noun> <verb> --help` for one command.",
+    "run `hercule <noun> --help` for a noun's verbs, `hercule <noun> <verb> --help` for one command.",
   );
   return lines;
 };

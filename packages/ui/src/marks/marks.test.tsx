@@ -97,7 +97,7 @@ describe("the mark family", () => {
   it("gives the working mark three bars that a stylesheet can animate", () => {
     const { container } = render(<WorkingMark />);
     const svg = container.querySelector("svg")!;
-    expect(svg.classList.contains("hydra-equalizer")).toBe(true);
+    expect(svg.classList.contains("hercule-equalizer")).toBe(true);
     expect(svg.querySelectorAll("rect")).toHaveLength(3);
   });
 });

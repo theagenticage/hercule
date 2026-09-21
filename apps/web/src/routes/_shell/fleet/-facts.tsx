@@ -1,7 +1,7 @@
 import type { JSX } from "react";
-import { Row } from "@hydra/ui";
-import { runnerFactsReading, type RunnerFactsReading } from "@hydra/client-core";
-import type { RunnerDetail } from "@hydra/contract";
+import { Row } from "@hercule/ui";
+import { runnerFactsReading, type RunnerFactsReading } from "@hercule/client-core";
+import type { RunnerDetail } from "@hercule/contract";
 
 const LINES: ReadonlyArray<readonly [string, keyof RunnerFactsReading]> = [
   ["Machine", "machine"],

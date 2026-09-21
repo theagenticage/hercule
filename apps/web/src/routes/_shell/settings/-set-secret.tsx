@@ -1,8 +1,8 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button, Field, FormCard, Input, Select } from "@hydra/ui";
-import { queryKeys, type HydraClient } from "@hydra/client-core";
-import type { OwnerKind } from "@hydra/contract";
+import { Button, Field, FormCard, Input, Select } from "@hercule/ui";
+import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import type { OwnerKind } from "@hercule/contract";
 import { SaveStatus, messageOf } from "../../../screens/save-status";
 
 /**
@@ -28,7 +28,7 @@ const EMPTY = { ownerKind: OWNER_KINDS[0], ownerId: "", name: "", value: "" };
  * putting one back by hand. Setting a name that already exists rotates it,
  * which is what the API does with the same call.
  */
-export function SetSecret({ client }: { readonly client: HydraClient }): JSX.Element {
+export function SetSecret({ client }: { readonly client: HerculeClient }): JSX.Element {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<{
     ownerKind: OwnerKind;

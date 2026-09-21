@@ -10,7 +10,7 @@
  */
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
-import type { ProviderEvent, SessionSpec } from "@hydra/protocol";
+import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
 import type { ProviderRunnerContext } from "../index";
 import { CWD, lines, scratchHome, taggedIn, until } from "../testing";
 import { codexAdapter, type CodexSeam } from "./adapter";
@@ -23,11 +23,11 @@ export const contextIn = (home: string, cwd: string | null = null): ProviderRunn
   cwd,
   home,
   binary: "/usr/local/bin/codex",
-  env: { PATH: "/usr/local/bin:/usr/bin", HYDRA_RUNNER: "runner-1" },
+  env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },
   secrets: {},
   // The runner resolves this once, at start; a test that cares about it says
   // what it is.
-  hydraTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
+  herculeTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 
 export const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
@@ -43,7 +43,7 @@ export const SPEC: SessionSpec = {
 
 /** `samples/probe-initialize.json`. The version lives inside the user agent. */
 export const INITIALIZE = {
-  userAgent: "hydra/0.154.0 (Mac OS 15.7.8; arm64) unknown (hydra; 0.0.0)",
+  userAgent: "hercule/0.154.0 (Mac OS 15.7.8; arm64) unknown (hercule; 0.0.0)",
   codexHome: "/private/tmp/ch.XXXX",
   platformFamily: "unix",
   platformOs: "macos",

@@ -1,6 +1,6 @@
 /**
  * The web app out of the release binary: a browser pointed at a machine running
- * `hydra` gets the app, on the same port and origin as the API.
+ * `hercule` gets the app, on the same port and origin as the API.
  *
  * This is the one test that proves the bundle is embedded rather than read off
  * disk, so it runs what a release ships. It runs a binary that is already
@@ -21,7 +21,7 @@ let controller: Controller | undefined;
 let url: string;
 
 beforeAll(async () => {
-  const binary = join(ROOT, "hydra");
+  const binary = join(ROOT, "hercule");
   if (!existsSync(binary)) {
     throw new Error(
       `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,

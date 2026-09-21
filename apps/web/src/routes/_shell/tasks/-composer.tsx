@@ -4,8 +4,8 @@ import {
   TaskCreateForm,
   type Project,
   type TaskCreateInput,
-} from "@hydra/contract";
-import { Button, Field, Input, Select, Textarea } from "@hydra/ui";
+} from "@hercule/contract";
+import { Button, Field, Input, Select, Textarea } from "@hercule/ui";
 import { validate, type FieldErrors } from "../../../app/form";
 
 const NO_PROJECT = "";

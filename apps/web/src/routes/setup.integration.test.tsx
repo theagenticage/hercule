@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { browserTimezone } from "@hydra/client-core";
+import { browserTimezone } from "@hercule/client-core";
 import { envelope, renderApp, stubApi, type Answer, type Handler } from "../app/testing";
 
 /** A controller on its first run, which is over once setup has answered. */

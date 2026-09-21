@@ -13,7 +13,7 @@
  * all. Required, it is read unasked; optional, only when its
  * `--<flag>-stdin` marker says so, so an empty pipe never blanks a field.
  *
- * `hydra user set-password` is the one command that reads two fields, one line
+ * `hercule user set-password` is the one command that reads two fields, one line
  * each, in the order its schema declares them - never in the order the markers
  * were written, or two passwords would silently swap.
  */

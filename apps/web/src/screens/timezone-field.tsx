@@ -1,6 +1,6 @@
 import type { JSX } from "react";
-import { supportedTimezones } from "@hydra/client-core";
-import { Select } from "@hydra/ui";
+import { supportedTimezones } from "@hercule/client-core";
+import { Select } from "@hercule/ui";
 
 /** The zones on offer never change within a page load, so they are read once. */
 const ZONES = supportedTimezones();

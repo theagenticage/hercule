@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { homePaths } from "@hydra/home";
-import { HydraHome } from "../config";
+import { homePaths } from "@hercule/home";
+import { HerculeHome } from "../config";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
@@ -18,7 +18,7 @@ const TOKEN = "a-setup-token";
 let home: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "hydra-setup-"));
+  home = mkdtempSync(join(tmpdir(), "hercule-setup-"));
   writeFileSync(join(home, "setup-url"), "http://127.0.0.1:4937/setup?token=a-setup-token\n");
 });
 
@@ -43,7 +43,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
             Layer.mergeAll(UsersLayer, CredentialsLayer, SettingsLayer, AuditLogLayer),
           ),
           Layer.provideMerge(TestDatabase),
-          Layer.provideMerge(Layer.succeed(HydraHome, homePaths(home, join(home, "data")))),
+          Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),

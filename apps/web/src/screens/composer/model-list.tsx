@@ -1,6 +1,6 @@
 import { Fragment, type JSX, type ReactNode } from "react";
-import type { LoginTarget, ModelMenu } from "@hydra/client-core";
-import { ProviderLogo } from "@hydra/ui";
+import type { LoginTarget, ModelMenu } from "@hercule/client-core";
+import { ProviderLogo } from "@hercule/ui";
 import { Lane, markerOf, MenuRow } from "./menu";
 
 type Row = ModelMenu["current"]["rows"][number];

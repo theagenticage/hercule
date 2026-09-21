@@ -1,14 +1,14 @@
 import type { JSX } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { FormCard, useMinuteClock } from "@hydra/ui";
+import { FormCard, useMinuteClock } from "@hercule/ui";
 import {
   FALLBACK_TIMEZONE,
   ageOf,
   capacityLine,
   isSupportedTimezone,
   queuedSessions,
-} from "@hydra/client-core";
+} from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
   controllerQuery,

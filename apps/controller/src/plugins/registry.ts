@@ -4,10 +4,10 @@
  * There is no discovery and no install step, so this file is the whole
  * inventory, and its order is the order Settings > Plugins lists them in.
  */
-import type { Plugin } from "@hydra/plugin-host";
-import { claudeCode } from "@hydra/plugin-claude-code";
-import { codex } from "@hydra/plugin-codex";
-import { github } from "@hydra/plugin-github";
-import { pi } from "@hydra/plugin-pi";
+import type { Plugin } from "@hercule/plugin-host";
+import { claudeCode } from "@hercule/plugin-claude-code";
+import { codex } from "@hercule/plugin-codex";
+import { github } from "@hercule/plugin-github";
+import { pi } from "@hercule/plugin-pi";
 
 export const registry: ReadonlyArray<Plugin> = [claudeCode, codex, pi, github];

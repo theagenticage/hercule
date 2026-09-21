@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Clock, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MAX_TASK_LABELS, MAX_TASK_TITLE_LENGTH, type Task } from "@hydra/contract";
+import { MAX_TASK_LABELS, MAX_TASK_TITLE_LENGTH, type Task } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -781,7 +781,7 @@ describe("the project a task belongs to", () => {
         const live = mintUuid();
         const gone = mintUuid();
         yield* sql`INSERT INTO projects (id, name, created_at, updated_at)
-                   VALUES (${live}, 'hydra', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z')`;
+                   VALUES (${live}, 'hercule', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z')`;
         yield* sql`INSERT INTO projects (id, name, created_at, updated_at, deleted_at)
                    VALUES (${gone}, 'retired', '2026-09-04T10:00:00.000Z',
                            '2026-09-04T10:00:00.000Z', '2026-09-04T11:00:00.000Z')`;
@@ -809,7 +809,7 @@ describe("the project a task belongs to", () => {
         const tasks = yield* TaskService;
         const id = mintUuid();
         yield* sql`INSERT INTO projects (id, name, created_at, updated_at)
-                   VALUES (${id}, 'hydra', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z')`;
+                   VALUES (${id}, 'hercule', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z')`;
         yield* tasks.create({
           title: "inside",
           description: "d",

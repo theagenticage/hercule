@@ -29,8 +29,8 @@ import * as Effect from "effect/Effect";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import { API_PREFIX } from "@hydra/contract";
-import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hydra/protocol";
+import { API_PREFIX } from "@hercule/contract";
+import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hercule/protocol";
 
 /**
  * The built web app: where its `index.html` is, and where every file it can

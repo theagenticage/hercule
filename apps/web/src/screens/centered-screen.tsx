@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import { Logo } from "@hydra/ui";
+import { Logo } from "@hercule/ui";
 
 /**
  * The frame the three screens outside the app shell share: setup, login, and an

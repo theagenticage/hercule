@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { arch, platform, totalmem } from "node:os";
-import { IDENTITY_PORT, MAX_FACT_LENGTH, RunnerFacts } from "@hydra/protocol";
+import { IDENTITY_PORT, MAX_FACT_LENGTH, RunnerFacts } from "@hercule/protocol";
 import {
   FACTS_REFRESH,
   VERSION_DEADLINE,

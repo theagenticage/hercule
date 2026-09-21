@@ -9,7 +9,7 @@ import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { RunnerWatermark } from "@hydra/protocol";
+import type { RunnerWatermark } from "@hercule/protocol";
 
 export const WATERMARK_INTERVAL: Duration.Duration = Duration.seconds(60);
 

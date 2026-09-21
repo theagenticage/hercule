@@ -8,7 +8,7 @@
  * another model, another account, another machine - drops them rather than
  * carrying a value the new catalog never offered.
  */
-import type { AccessMode } from "@hydra/contract";
+import type { AccessMode } from "@hercule/contract";
 import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { instanceDefaults } from "./thread-defaults";
 import type { WorkspacePick } from "./workspaces";

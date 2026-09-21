@@ -3,7 +3,7 @@
  *
  * The current password is verified even though the caller already holds a
  * credential. A bearer token left in a terminal, a browser or a credential file
- * is enough to read Hydra; it is deliberately not enough to take the account
+ * is enough to read Hercule; it is deliberately not enough to take the account
  * over.
  *
  * Credentials issued under the old password survive the change. A password
@@ -18,7 +18,12 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { validation, type Forbidden, type Unauthenticated, type Validation } from "@hydra/contract";
+import {
+  validation,
+  type Forbidden,
+  type Unauthenticated,
+  type Validation,
+} from "@hercule/contract";
 import { currentUser, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -84,7 +89,7 @@ const make = Effect.gen(function* () {
 
 /** The user service. */
 export class User extends Context.Service<User, Effect.Success<typeof make>>()(
-  "hydra/controller/users/User",
+  "hercule/controller/users/User",
 ) {}
 
 export const UserLayer: Layer.Layer<User, never, SqlClient.SqlClient | Users | AuditLog> =

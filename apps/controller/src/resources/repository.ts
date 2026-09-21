@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Resource, ResourceKind, SortDirection } from "@hydra/contract";
+import type { Resource, ResourceKind, SortDirection } from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,
@@ -46,7 +46,7 @@ export interface StoredRepo extends ResourceFields {
   readonly canonicalRemote: string;
 }
 
-/** A folder or a mailbox: a record of something outside Hydra, with no remote. */
+/** A folder or a mailbox: a record of something outside Hercule, with no remote. */
 export interface StoredRecordResource extends ResourceFields {
   readonly kind: "folder" | "mailbox";
   readonly remote: null;
@@ -58,7 +58,7 @@ export type StoredResource = StoredRepo | StoredRecordResource;
 
 /**
  * Whether this resource is one a working copy is made from. Only a repo is: a
- * folder and a mailbox are records of something outside Hydra. Every door that
+ * folder and a mailbox are records of something outside Hercule. Every door that
  * checks something out asks this one question and refuses with the one sentence
  * below, in whatever error its own shape calls for.
  */

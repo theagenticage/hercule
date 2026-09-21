@@ -1,9 +1,9 @@
 /**
  * What a user may write as a remote, and what a repository is called.
  *
- * The canonical form itself is tested in `@hydra/protocol`, where it lives
+ * The canonical form itself is tested in `@hercule/protocol`, where it lives
  * because the runner reads remotes by the same rule. What is asked here is the
- * controller's own narrower question - whether Hydra will hand this spelling to
+ * controller's own narrower question - whether Hercule will hand this spelling to
  * git - which has to be refused where the user can read why rather than on a
  * machine as a git argument.
  */
@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import { canonicalRemoteOf, isClonableRemote, repoNameOf } from "./remote";
 
-describe("the remotes Hydra will hand to git", () => {
+describe("the remotes Hercule will hand to git", () => {
   it("takes an https URL and git's own user@host:owner/repo", () => {
     for (const remote of [
       "https://github.com/acme/web",

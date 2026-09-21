@@ -139,7 +139,7 @@ describe("SegmentedControl", () => {
     return (
       <SegmentedControl value={face} onValueChange={setFace} aria-label="Sidebar face">
         <SegmentedControlItem value="threads">Threads</SegmentedControlItem>
-        <SegmentedControlItem value="hydra">Hydra</SegmentedControlItem>
+        <SegmentedControlItem value="hercule">Hercule</SegmentedControlItem>
       </SegmentedControl>
     );
   }
@@ -147,8 +147,8 @@ describe("SegmentedControl", () => {
   it("marks exactly one face as on", async () => {
     render(<Example />);
     expect(screen.getByRole("radio", { name: "Threads" }).dataset.state).toBe("on");
-    await userEvent.click(screen.getByRole("radio", { name: "Hydra" }));
-    expect(screen.getByRole("radio", { name: "Hydra" }).dataset.state).toBe("on");
+    await userEvent.click(screen.getByRole("radio", { name: "Hercule" }));
+    expect(screen.getByRole("radio", { name: "Hercule" }).dataset.state).toBe("on");
     expect(screen.getByRole("radio", { name: "Threads" }).dataset.state).toBe("off");
   });
 
@@ -162,7 +162,7 @@ describe("SegmentedControl", () => {
     render(<Example />);
     await userEvent.tab();
     await userEvent.keyboard("{ArrowRight}");
-    expect(screen.getByRole("radio", { name: "Hydra" })).toBe(document.activeElement);
+    expect(screen.getByRole("radio", { name: "Hercule" })).toBe(document.activeElement);
   });
 });
 

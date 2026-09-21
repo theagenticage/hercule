@@ -22,7 +22,7 @@ import {
   type SettingsState,
   type Unauthenticated,
   type Validation,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import { currentUser, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { withTransaction } from "../db";
@@ -164,7 +164,7 @@ const make = Effect.gen(function* () {
 export class SettingsOperations extends Context.Service<
   SettingsOperations,
   Effect.Success<typeof make>
->()("hydra/controller/settings/SettingsOperations") {}
+>()("hercule/controller/settings/SettingsOperations") {}
 
 export const SettingsOperationsLayer: Layer.Layer<
   SettingsOperations,

@@ -16,8 +16,8 @@ import { Deferred, Effect, Exit, Fiber, Layer, Logger, Option, Redacted } from "
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SessionSpec, type ModelSelection, type SessionStart } from "@hydra/protocol";
-import { homePaths, HydraHome } from "../config";
+import { SessionSpec, type ModelSelection, type SessionStart } from "@hercule/protocol";
+import { homePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";
 import { mintUuid, uuidToString, withTransaction } from "../db";
@@ -54,12 +54,12 @@ const hostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClient>) 
  * sweep after each test removes what the last one made, so a home minted once
  * at import would be gone by the second case.
  */
-const aScratchHome = (): Layer.Layer<HydraHome> =>
-  Layer.effect(HydraHome)(
+const aScratchHome = (): Layer.Layer<HerculeHome> =>
+  Layer.effect(HerculeHome)(
     Effect.sync(() => {
-      const home = mkdtempSync(join(tmpdir(), "hydra-sessions-"));
+      const home = mkdtempSync(join(tmpdir(), "hercule-sessions-"));
       homes.push(home);
-      return HydraHome.of(homePaths(home, join(home, "data")));
+      return HerculeHome.of(homePaths(home, join(home, "data")));
     }),
   );
 

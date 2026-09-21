@@ -31,7 +31,7 @@ describe("ThemeSelector", () => {
   });
 
   it("paints the document and remembers a picked theme", async () => {
-    const held = memoryStorage({ "hydra:theme": "light" });
+    const held = memoryStorage({ "hercule:theme": "light" });
     vi.stubGlobal("localStorage", held);
     painted("light");
     render(<ThemeSelector />);
@@ -40,7 +40,7 @@ describe("ThemeSelector", () => {
     await userEvent.click(option("Dark"));
 
     expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(held.getItem("hydra:theme")).toBe("dark");
+    expect(held.getItem("hercule:theme")).toBe("dark");
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
@@ -48,7 +48,7 @@ describe("ThemeSelector", () => {
   });
 
   it("returns to the machine's own appearance, remembered as no choice at all", async () => {
-    const held = memoryStorage({ "hydra:theme": "dark" });
+    const held = memoryStorage({ "hercule:theme": "dark" });
     vi.stubGlobal("localStorage", held);
     painted("dark");
     render(<ThemeSelector />);
@@ -57,7 +57,7 @@ describe("ThemeSelector", () => {
     await userEvent.click(option("System"));
 
     expect(document.documentElement.dataset.theme).toBeUndefined();
-    expect(held.getItem("hydra:theme")).toBeNull();
+    expect(held.getItem("hercule:theme")).toBeNull();
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
@@ -93,7 +93,7 @@ describe("ThemeSelector", () => {
     await userEvent.keyboard("{ArrowDown}");
 
     expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(held.getItem("hydra:theme")).toBe("dark");
+    expect(held.getItem("hercule:theme")).toBe("dark");
     const dark = screen.getByRole("radio", { name: "Dark" });
     expect(dark.getAttribute("aria-checked")).toBe("true");
     // Focus follows the check, and the popover is still open to keep browsing.

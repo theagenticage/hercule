@@ -10,7 +10,7 @@
  * in `:inputId` is the row's.
  */
 import { Schema } from "effect";
-import { Delivery } from "@hydra/protocol";
+import { Delivery } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";

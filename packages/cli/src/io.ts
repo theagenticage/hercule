@@ -7,7 +7,7 @@
  */
 import { createInterface } from "node:readline";
 import { hostname } from "node:os";
-import type { FetchLike } from "@hydra/client-core";
+import type { FetchLike } from "@hercule/client-core";
 import type { Env } from "./credentials";
 
 export interface Io {
@@ -22,7 +22,7 @@ export interface Io {
   readonly isTty: () => boolean;
   /** Reads a password with echo off. The one prompt the CLI is allowed. */
   readonly prompt: (label: string) => Promise<string>;
-  /** The machine name, the default `hydra login --name`. */
+  /** The machine name, the default `hercule login --name`. */
   readonly hostname: () => string;
   /** The transport `client-core` sends through; the one seam a test replaces. */
   readonly fetch: FetchLike;

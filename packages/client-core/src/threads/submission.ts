@@ -4,7 +4,7 @@
  * account are fixed, so its input carries the text and only the picks the user
  * actually made - a key that is absent is a value the session keeps.
  */
-import type { SessionInputPayload, SessionSpawnInput } from "@hydra/contract";
+import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
 import {
   effectiveConfig,
   threadConfig,

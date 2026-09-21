@@ -6,7 +6,7 @@
  * is absent on a workspace the thread merely joins - that workspace is named
  * after its branch - and on a thread with no checkout at all.
  */
-import type { Workspace } from "@hydra/contract";
+import type { Workspace } from "@hercule/contract";
 import {
   baseBranchOf,
   readyPrimary,
@@ -160,7 +160,7 @@ export const branchField = (
         ? null
         : [
             { text: "The new branch is " },
-            { text: "hydra/run-…", mono: true },
+            { text: "hercule/run-…", mono: true },
             { text: ", named after the thread, and starts from " },
             { text: `origin/${base}`, mono: true },
             { text: " when the remote has it." },

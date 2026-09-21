@@ -4,11 +4,11 @@
  * transcript.
  *
  * Opt-in, for the same reason the adapter's own live test is: it spends the
- * developer's tokens and takes a minute. `HYDRA_LIVE_SESSION_TEST=1` asks for
+ * developer's tokens and takes a minute. `HERCULE_LIVE_SESSION_TEST=1` asks for
  * it.
  *
  * A session runs against the instance's own `CLAUDE_CONFIG_DIR` under the
- * runner's storage (spec 06 section 4.2), which in a throwaway Hydra Home is
+ * runner's storage (spec 06 section 4.2), which in a throwaway Hercule Home is
  * empty. The developer's own `~/.claude` login cannot be borrowed into it - on
  * macOS it is a Keychain item keyed by that directory - so the credential this
  * test needs is `ANTHROPIC_API_KEY` on the environment. Without a logged-in
@@ -40,7 +40,7 @@ import {
 const wanted = liveSessionsAsked();
 
 const state = temporaryHome();
-const binary = join(ROOT, "hydra");
+const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;
@@ -169,7 +169,7 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
       });
 
       expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
-      expect(ran.stdout).toContain("hydra transcript read");
+      expect(ran.stdout).toContain("hercule transcript read");
       // The wait for a logged-in instance plus the spawn behind it, not the wait
       // alone: a case whose timeout is its own first wait has nothing left for
       // what it is actually testing.

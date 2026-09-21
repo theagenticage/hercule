@@ -17,12 +17,12 @@ import { Forbidden, Unauthenticated } from "./errors";
 
 /** Any credential: a login bearer token, an API key or a session token. */
 export class Authenticated extends HttpApiMiddleware.Service<Authenticated>()(
-  "hydra/contract/Authenticated",
+  "hercule/contract/Authenticated",
   { security: { bearer: HttpApiSecurity.bearer }, error: [Unauthenticated, Forbidden] },
 ) {}
 
 /** The one-time setup token, and nothing else. */
 export class SetupToken extends HttpApiMiddleware.Service<SetupToken>()(
-  "hydra/contract/SetupToken",
+  "hercule/contract/SetupToken",
   { security: { bearer: HttpApiSecurity.bearer }, error: [Unauthenticated] },
 ) {}

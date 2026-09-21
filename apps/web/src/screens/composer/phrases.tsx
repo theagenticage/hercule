@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { Phrase } from "@hydra/client-core";
+import type { Phrase } from "@hercule/client-core";
 
 /**
  * A sentence the composer writes, as it is set: the git words in it - a

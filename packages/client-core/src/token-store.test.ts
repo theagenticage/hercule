@@ -20,7 +20,7 @@ describe("token store", () => {
   it("keys the token by origin", () => {
     assert.strictEqual(
       tokenStorageKey("http://127.0.0.1:7717"),
-      "hydra:token:http://127.0.0.1:7717",
+      "hercule:token:http://127.0.0.1:7717",
     );
   });
 
@@ -35,7 +35,7 @@ describe("token store", () => {
 
     assert.strictEqual(here.read(), "tok_a");
     assert.strictEqual(there.read(), "tok_b");
-    assert.strictEqual(storage.map.get("hydra:token:http://a.test"), "tok_a");
+    assert.strictEqual(storage.map.get("hercule:token:http://a.test"), "tok_a");
   });
 
   it("removes the entry when written null", () => {
@@ -45,7 +45,7 @@ describe("token store", () => {
     store.write(null);
 
     assert.strictEqual(store.read(), null);
-    assert.strictEqual(storage.map.has("hydra:token:http://a.test"), false);
+    assert.strictEqual(storage.map.has("hercule:token:http://a.test"), false);
   });
 });
 

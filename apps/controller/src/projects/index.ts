@@ -1,4 +1,4 @@
-/** Projects: the way information is grouped inside Hydra. */
+/** Projects: the way information is grouped inside Hercule. */
 export {
   ProjectService,
   ProjectServiceLayer,

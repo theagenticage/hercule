@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Result } from "effect";
-import { CLI, NOUNS } from "@hydra/contract";
+import { CLI, NOUNS } from "@hercule/contract";
 import { main, readSetupUrl } from "./index";
 import { envelope, id, stubFetch, stubIo, type Handler } from "./testing";
 
@@ -22,7 +22,7 @@ const profile = (tail: string, name: string) => ({
 let home: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "hydra-cli-"));
+  home = mkdtempSync(join(tmpdir(), "hercule-cli-"));
 });
 
 afterEach(() => {
@@ -33,7 +33,7 @@ afterEach(() => {
 const cli = (handler: Handler = () => ({})) => {
   const fetch = stubFetch(handler);
   const io = stubIo({
-    env: { HYDRA_TOKEN: "test-token", HYDRA_API_URL: "http://controller.test" },
+    env: { HERCULE_TOKEN: "test-token", HERCULE_API_URL: "http://controller.test" },
     fetch,
   });
   return {
@@ -43,7 +43,7 @@ const cli = (handler: Handler = () => ({})) => {
   };
 };
 
-describe("hydra setup-url", () => {
+describe("hercule setup-url", () => {
   const writeSetupUrl = () => {
     writeFileSync(join(home, "setup-url"), `${SETUP_URL}\n`, { mode: 0o600 });
   };
@@ -51,7 +51,7 @@ describe("hydra setup-url", () => {
   it("reads the file the controller wrote, needing no credential", () => {
     writeSetupUrl();
     expect(readSetupUrl(["setup-url", "--home", home], {})).toEqual(Result.succeed(SETUP_URL));
-    expect(readSetupUrl(["setup-url"], { HYDRA_HOME: home })).toEqual(Result.succeed(SETUP_URL));
+    expect(readSetupUrl(["setup-url"], { HERCULE_HOME: home })).toEqual(Result.succeed(SETUP_URL));
   });
 
   it("prints the URL on stdout and nothing else", async () => {
@@ -78,7 +78,7 @@ describe("hydra setup-url", () => {
 /** The lines one `--help` printed, at exit 0. */
 const help = async (...argv: ReadonlyArray<string>): Promise<ReadonlyArray<string>> => {
   const { io, run } = cli();
-  expect(await run(...argv, "--help"), `hydra ${argv.join(" ")} --help`).toBe(0);
+  expect(await run(...argv, "--help"), `hercule ${argv.join(" ")} --help`).toBe(0);
   return io.stdout;
 };
 
@@ -108,13 +108,13 @@ const nounBlock = (out: ReadonlyArray<string>, noun: string): string => {
   return out.slice(from, next === -1 ? out.length : next).join("\n");
 };
 
-/** Every visible command, as the words after `hydra`. */
+/** Every visible command, as the words after `hercule`. */
 const spellings = Object.values(CLI as Record<string, { hidden?: true; command?: string }>)
   .filter((row) => row.hidden !== true)
   .map((row) => (row.command ?? "").split(" "));
 
 // the command screen, in one fixed shape.
-describe("hydra session input --help", () => {
+describe("hercule session input --help", () => {
   const MARKERS = [
     "usage:",
     "examples:",
@@ -140,7 +140,7 @@ describe("hydra session input --help", () => {
   it("renders the example as a piped shell line", async () => {
     const out = await help("session", "input");
     expect(out.join("\n")).toMatch(
-      /echo "Carry on, and run the tests when you are done\." \| hydra session input 1f3a9c2e/,
+      /echo "Carry on, and run the tests when you are done\." \| hercule session input 1f3a9c2e/,
     );
   });
 
@@ -172,7 +172,7 @@ describe("hydra session input --help", () => {
   it("says what forbidden means and how to ask for the grant", async () => {
     const block = between(await help("session", "input"), "errors:", "next:");
     expect(block).toContain("forbidden");
-    expect(block).toContain("hydra permission request session.steer");
+    expect(block).toContain("hercule permission request session.steer");
   });
 
   it("ends on the operation line", async () => {
@@ -182,7 +182,7 @@ describe("hydra session input --help", () => {
   });
 });
 
-describe("hydra task list --help", () => {
+describe("hercule task list --help", () => {
   it("shows the paging section and a page's items", async () => {
     const out = await help("task", "list");
     expect(section(out, "paging:"), "no paging section").toBeGreaterThan(-1);
@@ -190,7 +190,7 @@ describe("hydra task list --help", () => {
   });
 });
 
-describe("hydra session --help", () => {
+describe("hercule session --help", () => {
   const VERBS = [
     "list",
     "read",
@@ -215,11 +215,11 @@ describe("hydra session --help", () => {
   it("names the usual order in a flow line", async () => {
     const out = await help("session");
     expect(section(out, "flow:"), "no flow line").toBeGreaterThan(-1);
-    expect(out.join("\n")).toContain("hydra session spawn starts one");
+    expect(out.join("\n")).toContain("hercule session spawn starts one");
   });
 });
 
-describe("hydra --help", () => {
+describe("hercule --help", () => {
   it("lists every visible noun with its verbs", async () => {
     const out = await help();
     for (const words of spellings) {
@@ -238,7 +238,7 @@ describe("hydra --help", () => {
     const text = (await help()).join("\n");
     expect(text).toContain("--json");
     expect(text).toContain("exit");
-    expect(text).toContain("hydra permission request");
+    expect(text).toContain("hercule permission request");
   });
 
   it("has no auth noun at all", async () => {
@@ -249,17 +249,17 @@ describe("hydra --help", () => {
 });
 
 // the bridge, on the CLI's side of it.
-describe("hydra runner --help", () => {
+describe("hercule runner --help", () => {
   it("shows the four daemon forms above the verbs", async () => {
     const out = await help("runner");
     const text = out.join("\n");
     expect(
-      out.some((line) => /^hydra runner(\s\s|$)/.test(line.trim())),
+      out.some((line) => /^hercule runner(\s\s|$)/.test(line.trim())),
       "no bare daemon form",
     ).toBe(true);
-    expect(text).toContain("hydra runner --local");
-    expect(text).toContain("hydra runner join");
-    expect(text).toContain("hydra runner set-controller");
+    expect(text).toContain("hercule runner --local");
+    expect(text).toContain("hercule runner join");
+    expect(text).toContain("hercule runner set-controller");
     expect(text).toContain("list");
   });
 });
@@ -323,7 +323,7 @@ describe("a stdin field with no pipe", () => {
   it("exits 2 naming the field and the piped form, and never reads stdin", async () => {
     const fetch = stubFetch(() => ({}));
     const base = stubIo({
-      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
       fetch,
     });
     let reads = 0;
@@ -339,16 +339,18 @@ describe("a stdin field with no pipe", () => {
     expect(await main(["--home", home, "session", "input", id("aaaaaaa1")], io)).toBe(2);
     expect(reads).toBe(0);
     expect(base.stderr.join("\n")).toContain("text");
-    expect(base.stderr.join("\n")).toContain("| hydra session input");
+    expect(base.stderr.join("\n")).toContain("| hercule session input");
     expect(fetch.calls).toEqual([]);
   });
 
   it("shows the line the caller wrote, with the pipe it was missing", async () => {
-    const base = stubIo({ env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" } });
+    const base = stubIo({ env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" } });
     const io = { ...base, isTty: () => true };
 
     expect(await main(["--home", home, "task", "create", "--title", "x"], io)).toBe(2);
-    expect(base.stderr.join("\n")).toContain('echo "<description>" | hydra task create --title x');
+    expect(base.stderr.join("\n")).toContain(
+      'echo "<description>" | hercule task create --title x',
+    );
   });
 });
 
@@ -440,7 +442,7 @@ describe("running an operation", () => {
       createdAt: "2026-09-04T10:00:00.000Z",
     }));
     const io = stubIo({
-      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
       fetch,
       stdin: "s3cret\n",
     });
@@ -457,7 +459,7 @@ describe("running an operation", () => {
   it("reads two passwords as two lines of stdin, in schema order", async () => {
     const fetch = stubFetch(() => ({}));
     const io = stubIo({
-      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
       fetch,
       stdin: "old-password\nnew-password\n",
     });
@@ -495,7 +497,7 @@ describe("paging", () => {
       return page([profile("aaaaaaa3", "three")]);
     });
     const io = stubIo({
-      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
       fetch,
     });
     expect(await main(["--home", home, "profile", "list", "--all", "--json"], io)).toBe(0);
@@ -513,7 +515,7 @@ describe("paging", () => {
       return page([profile("aaaaaaa3", "three")]);
     });
     const io = stubIo({
-      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
       fetch,
     });
     expect(
@@ -564,7 +566,7 @@ describe("id tails", () => {
     );
 
   const io = (fetch: ReturnType<typeof stubFetch>) =>
-    stubIo({ env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" }, fetch });
+    stubIo({ env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" }, fetch });
 
   it("resolves a unique tail through the entity's query operation", async () => {
     const fetch = withProfiles(() => profiles[1]!);
@@ -643,7 +645,7 @@ describe("id tails", () => {
       id: 42,
       source: "platform",
       connectionId: null,
-      system: "hydra",
+      system: "hercule",
       kind: "auth.login.failed",
       occurredAt: "2026-09-04T10:00:00.000Z",
       receivedAt: "2026-09-04T10:00:00.000Z",
@@ -713,7 +715,7 @@ describe("id tails", () => {
   it("exits 2 on a tail where the row names no listing, and calls nothing", async () => {
     const fetch = stubFetch(() => ({}));
     const stub = io(fetch);
-    // A queued input's own id is a Hydra id nothing lists on its own.
+    // A queued input's own id is a Hercule id nothing lists on its own.
     expect(await main(["--home", home, "input", "cancel", id("aaaaaaa1"), "1f3a9c2e"], stub)).toBe(
       2,
     );
@@ -721,7 +723,7 @@ describe("id tails", () => {
     expect(stub.stderr.join("\n")).toContain("full id");
   });
 
-  it("sends a name that only looks like a tail, where the field holds no Hydra id", async () => {
+  it("sends a name that only looks like a tail, where the field holds no Hercule id", async () => {
     const fetch = stubFetch(() => ({ items: [] }));
     const stub = io(fetch);
 
@@ -753,7 +755,7 @@ describe("failures", () => {
   it("exits 2 on an unknown flag and points at --help", async () => {
     const { io, run } = cli();
     expect(await run("profile", "create", "--nope", "x")).toBe(2);
-    expect(io.stderr.join("\n")).toContain("hydra profile create --help");
+    expect(io.stderr.join("\n")).toContain("hercule profile create --help");
   });
 
   it("exits 2 when a required flag is missing", async () => {
@@ -792,7 +794,7 @@ describe("failures", () => {
     ).toBe(2);
     expect(fetch.calls).toEqual([]);
     expect(io.stderr.join("\n")).toContain("--provenance: A provenance entry names at least one");
-    expect(io.stderr.join("\n")).toContain("run `hydra task create --help`");
+    expect(io.stderr.join("\n")).toContain("run `hercule task create --help`");
   });
 
   it("names a field read from stdin by its name, never by a flag it does not have", async () => {
@@ -810,7 +812,7 @@ describe("failures", () => {
       throw new TypeError("connect ECONNREFUSED");
     });
     const io = stubIo({
-      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
       fetch,
     });
     expect(await main(["--home", home, "controller", "read"], io)).toBe(3);
@@ -820,7 +822,7 @@ describe("failures", () => {
   it("exits 3 when no credential resolves", async () => {
     const io = stubIo({ env: {} });
     expect(await main(["--home", home, "controller", "read"], io)).toBe(3);
-    expect(io.stderr.join("\n")).toContain("hydra login");
+    expect(io.stderr.join("\n")).toContain("hercule login");
   });
 });
 
@@ -839,7 +841,7 @@ const buildAgentRecord = (agentId: string, name: string) => ({
   updatedAt: "2026-09-19T10:00:00.000Z",
 });
 
-describe("hydra session spawn --agent", () => {
+describe("hercule session spawn --agent", () => {
   const AGENT = buildAgentRecord(id("aaaaaaa1"), "triager");
 
   const SPAWNED = {
@@ -873,7 +875,7 @@ describe("hydra session spawn --agent", () => {
     return {
       fetch,
       io: stubIo({
-        env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+        env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
         fetch,
         stdin: "Assess this task.\n",
       }),
@@ -905,7 +907,7 @@ describe("hydra session spawn --agent", () => {
         : SPAWNED,
     );
     const io = stubIo({
-      env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" },
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
       fetch,
       stdin: "Assess this task.\n",
     });
@@ -943,7 +945,7 @@ describe("hydra session spawn --agent", () => {
   });
 });
 
-describe("hydra session list --agent", () => {
+describe("hercule session list --agent", () => {
   const AGENTS = [
     buildAgentRecord(id("aaaaaaa1"), "triager"),
     buildAgentRecord("0192f0a1-0000-7000-8000-999911112222", "reviewer"),
@@ -955,7 +957,7 @@ describe("hydra session list --agent", () => {
     );
     return {
       fetch,
-      io: stubIo({ env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" }, fetch }),
+      io: stubIo({ env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" }, fetch }),
     };
   };
 
@@ -997,7 +999,7 @@ describe("hydra session list --agent", () => {
   });
 });
 
-describe("hydra transcript read: a turn that answered under a schema", () => {
+describe("hercule transcript read: a turn that answered under a schema", () => {
   const SESSION_ID = id("eeeeeee1");
   const VALUE = { verdict: "accept", confidence: 0.9 };
 
@@ -1027,7 +1029,7 @@ describe("hydra transcript read: a turn that answered under a schema", () => {
     const fetch = stubFetch(() => ({ items: ROWS }));
     return {
       fetch,
-      io: stubIo({ env: { HYDRA_TOKEN: "t", HYDRA_API_URL: "http://controller.test" }, fetch }),
+      io: stubIo({ env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" }, fetch }),
     };
   };
 

@@ -68,7 +68,7 @@ export type OAuthDeclaration = Schema.Schema.Type<typeof OAuthDeclaration>;
 export const ConnectionType = Schema.Struct({
   /**
    * The bare word this plugin calls the type, which the host qualifies with the
-   * plugin's id to make the identity the rest of Hydra keys on. The separator
+   * plugin's id to make the identity the rest of Hercule keys on. The separator
    * is refused here, where the plugin is told, so that the qualified string has
    * exactly one reading.
    */

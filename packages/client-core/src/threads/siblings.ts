@@ -6,7 +6,7 @@
  *
  * With one thread and no draft there is no strip at all: the row is the title.
  */
-import type { Session, Workspace } from "@hydra/contract";
+import type { Session, Workspace } from "@hercule/contract";
 import { markOf, type ThreadMark } from "./rows";
 
 export interface ThreadTab {

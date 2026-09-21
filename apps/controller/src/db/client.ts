@@ -37,7 +37,7 @@ export class DatabaseError extends Data.TaggedError("DatabaseError")<{
 
 /**
  * One line for whatever the driver said, in the terms of the person running
- * `hydra serve`.
+ * `hercule serve`.
  *
  * A lock timeout is the interesting case: SQLite has one writer, the driver
  * waits five seconds for it, and the only thing that holds it that long is a
@@ -55,7 +55,7 @@ export class DatabaseError extends Data.TaggedError("DatabaseError")<{
  *
  * Two shapes count. The driver raises `LockTimeoutError` when it waits out its
  * busy timeout on a statement of its own; the very first statement of an open,
- * which the driver runs before Hydra sees the connection, comes back as a bare
+ * which the driver runs before Hercule sees the connection, comes back as a bare
  * `database is locked` from `bun:sqlite` instead. Both mean the same thing:
  * another controller holds the home.
  */
@@ -84,7 +84,7 @@ const BUSY_TIMEOUT = Duration.seconds(1);
 
 /** What a second controller on the same home is told. */
 const ALREADY_OPEN = (filename: string): string =>
-  `${filename} is already open by another Hydra controller. One controller serves a home; ` +
+  `${filename} is already open by another Hercule controller. One controller serves a home; ` +
   `stop the other one and try again.`;
 
 export const databaseError = (filename: string, error: unknown): DatabaseError => {
@@ -113,7 +113,7 @@ const configure = (
       if (journalMode.toLowerCase() !== "wal") {
         return yield* new DatabaseError({
           filename,
-          message: `${filename} opened in journal mode ${journalMode}; Hydra requires WAL.`,
+          message: `${filename} opened in journal mode ${journalMode}; Hercule requires WAL.`,
         });
       }
       yield* takeTheHome(filename);

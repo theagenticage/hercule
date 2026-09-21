@@ -16,14 +16,14 @@ import type {
   ModelSelection,
   OpenRequest,
   ProviderEvent,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import {
   notFound,
   SESSION_STATUSES,
   type NotFound,
   type SessionStatus,
   type SortDirection,
-} from "@hydra/contract";
+} from "@hercule/contract";
 import {
   decodeCursor,
   decodeIdCursor,

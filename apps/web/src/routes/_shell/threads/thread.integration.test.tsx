@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { approvalCard, formatDuration, formatStamp } from "@hydra/client-core";
+import { approvalCard, formatDuration, formatStamp } from "@hercule/client-core";
 import type {
   Input,
   ModelOption,
@@ -24,8 +24,8 @@ import type {
   Session,
   TranscriptRow,
   Workspace,
-} from "@hydra/contract";
-import { sessionStreamTopic, sessionTapTopic } from "@hydra/contract";
+} from "@hercule/contract";
+import { sessionStreamTopic, sessionTapTopic } from "@hercule/contract";
 import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
@@ -542,7 +542,7 @@ describe("Thread: transcript (AC-11)", () => {
     const divider = await screen.findByRole("button", { name: /worked for/i });
     expect(reading(divider)).toBe("Worked for —›");
     // Settled, not still running: no shimmer, no live hue, no ticking.
-    expect(divider.className).not.toContain("hydra-thread-shimmer");
+    expect(divider.className).not.toContain("hercule-thread-shimmer");
     expect(divider.className).not.toContain("text-live");
   });
 });
@@ -590,7 +590,7 @@ describe("Thread: the live turn (AC-12)", () => {
     await settle();
 
     const divider = screen.getByRole("button", { name: /^Working for 3s$/ });
-    expect(divider.className).toContain("hydra-thread-shimmer");
+    expect(divider.className).toContain("hercule-thread-shimmer");
 
     // The running tool item's line, once the divider (collapsed by default,
     // as AC-11's) is opened. `fireEvent`, not `userEvent`, since userEvent's
@@ -607,8 +607,8 @@ describe("Thread: the live turn (AC-12)", () => {
   });
 
   it("leaves the shimmer class in place under prefers-reduced-motion, since the stylesheet owns that rule", async () => {
-    // `.hydra-thread-shimmer` drops its own sweep and keeps the live hue
-    // inside `@media (prefers-reduced-motion: reduce)` in `@hydra/ui`. There
+    // `.hercule-thread-shimmer` drops its own sweep and keeps the live hue
+    // inside `@media (prefers-reduced-motion: reduce)` in `@hercule/ui`. There
     // is deliberately no JS copy of that rule, so the class the divider
     // carries is the same either way; whether the sweep actually stops is a
     // stylesheet question jsdom cannot answer and a manual check does.
@@ -626,7 +626,7 @@ describe("Thread: the live turn (AC-12)", () => {
     await settle();
 
     const divider = screen.getByRole("button", { name: /^Working for 3s$/ });
-    expect(divider.className).toContain("hydra-thread-shimmer");
+    expect(divider.className).toContain("hercule-thread-shimmer");
   });
 
   it("reads a dangling last turn on a session that is no longer busy as settled, with no shimmer and no ticking", async () => {
@@ -645,7 +645,7 @@ describe("Thread: the live turn (AC-12)", () => {
     await settle();
 
     const divider = screen.getByRole("button", { name: /^Worked for —$/ });
-    expect(divider.className).not.toContain("hydra-thread-shimmer");
+    expect(divider.className).not.toContain("hercule-thread-shimmer");
 
     // Nothing ticks: a minute later it still reads the same settled line.
     await act(async () => {
@@ -2392,7 +2392,7 @@ describe("Thread: the permission card", () => {
           question: "Which database should it use?",
           header: "Database",
           options: [
-            { label: "SQLite", description: "the one Hydra ships" },
+            { label: "SQLite", description: "the one Hercule ships" },
             { label: "Postgres", description: "somebody else's server" },
           ],
           multiSelect: false,
@@ -2611,7 +2611,7 @@ describe("Thread: the permission card", () => {
     expect(screen.getByText("Database").className).toContain("uppercase");
     expect(screen.getByText("Which database should it use?")).toBeDefined();
     expect(screen.getByText("SQLite").className).toContain("font-emph");
-    expect(screen.getByText("the one Hydra ships")).toBeDefined();
+    expect(screen.getByText("the one Hercule ships")).toBeDefined();
     // Cancel first: a reply sent while the session is parked queues behind the
     // turn instead of reaching the harness that is asking.
     expect(reading()).toContain(
@@ -2668,8 +2668,8 @@ const ephemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
       resourceId: R_WEBSHOP.id,
       form: "worktree",
       subdirectory: null,
-      branch: "hydra/run-3f1",
-      branches: ["hydra/run-3f1"],
+      branch: "hercule/run-3f1",
+      branches: ["hercule/run-3f1"],
       defaultBranch: "main",
     },
   ],

@@ -9,11 +9,11 @@ export const LOG_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"] a
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
 /**
- * The bootstrap config: the only keys Hydra needs before the database can open
+ * The bootstrap config: the only keys Hercule needs before the database can open
  * (spec 15 section 6). Everything else is controller state.
  *
  * `dataDir` is the value as configured, which may be relative: it is resolved
- * against the Hydra Home by `homePaths`, so a home that moves takes its Data
+ * against the Hercule Home by `homePaths`, so a home that moves takes its Data
  * Root with it (spec 04, Relocatable Data Root).
  */
 export class BootstrapConfig extends Context.Service<
@@ -24,16 +24,16 @@ export class BootstrapConfig extends Context.Service<
     readonly bindPort: number;
     readonly logLevel: LogLevel;
   }
->()("hydra/controller/config/BootstrapConfig") {}
+>()("hercule/controller/config/BootstrapConfig") {}
 
 /** The four bootstrap keys, in dotted TOML form. Nothing else may be added (spec 15 section 6). */
 export const BOOTSTRAP_KEYS = ["data.dir", "bind.host", "bind.port", "log.level"] as const;
 
 export type BootstrapKey = (typeof BOOTSTRAP_KEYS)[number];
 
-/** The env form of a bootstrap key: uppercase, dots to underscores, `HYDRA_` prefix. */
+/** The env form of a bootstrap key: uppercase, dots to underscores, `HERCULE_` prefix. */
 export function envName(key: BootstrapKey): string {
-  return `HYDRA_${key.toUpperCase().replaceAll(".", "_")}`;
+  return `HERCULE_${key.toUpperCase().replaceAll(".", "_")}`;
 }
 
 /**
@@ -55,7 +55,7 @@ export const DEFAULTS: Record<BootstrapKey, TomlScalar> = {
  *
  * The check is structural rather than an equality on the hostname, because
  * `URL` also canonicalizes: it reads `127.1` as `127.0.0.1` and `0:0:0:0:0:0:0:1`
- * as `[::1]`, and both of those are hosts Hydra can bind.
+ * as `[::1]`, and both of those are hosts Hercule can bind.
  */
 const isBindHost = (host: string): boolean => {
   const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
@@ -172,7 +172,7 @@ export const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
       Effect.mapError(
         (error) =>
           new ConfigValueError({
-            message: `${source} is ${JSON.stringify(value)}, which Hydra cannot use: ${error.message}`,
+            message: `${source} is ${JSON.stringify(value)}, which Hercule cannot use: ${error.message}`,
           }),
       ),
     );

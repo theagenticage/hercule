@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { Grant } from "@hydra/contract";
+import type { Grant } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { agentRepository } from "../agents";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
@@ -114,7 +114,7 @@ describe("profile.delete", () => {
       }),
     );
     expect(error).toMatchObject({ error: { code: "invalid_state" } });
-    expect(messageOf(error)).toContain("Hydra ships");
+    expect(messageOf(error)).toContain("Hercule ships");
   });
 
   it("answers not_found for an id nobody has", async () => {

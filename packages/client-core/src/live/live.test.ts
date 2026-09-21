@@ -16,7 +16,7 @@
  * attempt.
  */
 import { afterEach, assert, beforeEach, describe, it, vi } from "vitest";
-import type { Event } from "@hydra/contract";
+import type { Event } from "@hercule/contract";
 import {
   createClient,
   createLive,
@@ -125,7 +125,7 @@ const event = (id: number): Event => ({
   id,
   source: "platform",
   connectionId: null,
-  system: "hydra",
+  system: "hercule",
   kind: "task.created",
   occurredAt: "2026-09-05T10:00:00.000Z",
   receivedAt: "2026-09-05T10:00:00.000Z",

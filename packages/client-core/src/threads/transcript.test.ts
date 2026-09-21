@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TranscriptRow } from "@hydra/contract";
+import type { TranscriptRow } from "@hercule/contract";
 import { mergeTranscript } from "./transcript";
 
 const row = (position: number): TranscriptRow => ({

@@ -1,9 +1,9 @@
 /**
- * `hydra runner --local`: the supervised child, driven the only way its
+ * `hercule runner --local`: the supervised child, driven the only way its
  * contract can be driven - as a process, with its stdout read a byte at a time
  * and its stdin held by whoever spawned it.
  *
- * The whole of what makes this entry point different from `hydra runner` is the
+ * The whole of what makes this entry point different from `hercule runner` is the
  * handshake on those two pipes, so the test spawns the real dispatcher rather
  * than calling into a function: a first line that is one byte off, or a line
  * printed after something else, is a controller that cannot tell what it
@@ -14,10 +14,18 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runnerDirIn } from "@hydra/home";
+import { runnerDirIn } from "@hercule/home";
 
-/** The dispatcher, run from source: `hydra` before it is compiled. */
-const HYDRA = join(dirname(import.meta.dirname), "..", "..", "packages", "hydra", "src", "main.ts");
+/** The dispatcher, run from source: `hercule` before it is compiled. */
+const HERCULE = join(
+  dirname(import.meta.dirname),
+  "..",
+  "..",
+  "packages",
+  "hercule",
+  "src",
+  "main.ts",
+);
 
 const homes: Array<string> = [];
 
@@ -26,7 +34,7 @@ afterEach(() => {
 });
 
 const temporaryHome = (): string => {
-  const home = mkdtempSync(join(tmpdir(), "hydra-local-runner-"));
+  const home = mkdtempSync(join(tmpdir(), "hercule-local-runner-"));
   homes.push(home);
   return home;
 };
@@ -70,7 +78,7 @@ interface Child {
 
 const spawnLocal = (home: string): Child => {
   const process_ = Bun.spawn(
-    [process.execPath, "run", HYDRA, "runner", "--local", "--home", home],
+    [process.execPath, "run", HERCULE, "runner", "--local", "--home", home],
     {
       stdin: "pipe",
       stdout: "pipe",
@@ -106,7 +114,7 @@ const until = async (ready: () => boolean, within = 10_000): Promise<void> => {
   for (let waited = 0; waited < within && !ready(); waited += 20) await delay(20);
 };
 
-describe("hydra runner --local", () => {
+describe("hercule runner --local", () => {
   it("says who it is on its first line, and says nothing else before it dials", async () => {
     const runnerId = "0199e0e7-0000-7000-8000-000000000000";
     const asked: Array<Asked> = [];

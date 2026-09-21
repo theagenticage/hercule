@@ -11,8 +11,8 @@
  * and what clears a rejected token are all decided in `client-core`; nothing
  * here interprets a settings value or an error beyond routing on it.
  */
-import { ApiError, nextOnboardingStep, type OnboardingStep } from "@hydra/client-core";
-import type { SettingsState } from "@hydra/contract";
+import { ApiError, nextOnboardingStep, type OnboardingStep } from "@hercule/client-core";
+import type { SettingsState } from "@hercule/contract";
 import type { RouterContext } from "./context";
 import { setupQuery, settingsQuery } from "./queries";
 

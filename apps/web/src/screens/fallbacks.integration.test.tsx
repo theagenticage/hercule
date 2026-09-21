@@ -49,14 +49,14 @@ describe("the screen a render failure leaves behind", () => {
   it("is a screen of the shell when the shell is what failed inside", async () => {
     await failureAt("/tasks");
 
-    expect(screen.getByText(/The rest of Hydra is still here/)).toBeDefined();
-    expect(screen.queryByText("Hydra")).toBeNull();
+    expect(screen.getByText(/The rest of Hercule is still here/)).toBeDefined();
+    expect(screen.queryByText("Hercule")).toBeNull();
   });
 
   it("is the whole page outside the shell, where there is nothing to keep", async () => {
     await failureAt("/login", null);
 
-    expect(screen.queryByText(/The rest of Hydra is still here/)).toBeNull();
-    expect(screen.getByText("Hydra")).toBeDefined();
+    expect(screen.queryByText(/The rest of Hercule is still here/)).toBeNull();
+    expect(screen.getByText("Hercule")).toBeDefined();
   });
 });

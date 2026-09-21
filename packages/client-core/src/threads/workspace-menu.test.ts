@@ -42,7 +42,7 @@ describe("workspaceMenu", () => {
     expect(menu().rows.map((row) => row.name)).toEqual([
       "Main workspace",
       "New workspace",
-      "hydra/run-3f1",
+      "hercule/run-3f1",
     ]);
   });
 
@@ -88,7 +88,7 @@ describe("workspaceMenu", () => {
   it("reads the trigger off the row in force", () => {
     expect(menu().label).toBe("Main workspace");
     expect(menu({ pick: { kind: "existing", workspaceId: RUN_3F1.id } }).label).toBe(
-      "hydra/run-3f1",
+      "hercule/run-3f1",
     );
   });
 });

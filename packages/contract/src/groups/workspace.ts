@@ -9,11 +9,11 @@
  * disposed of afterwards.
  *
  * The controller stores no path and takes none. Where the folder is is the
- * machine's own business: a primary is always a Hydra-managed clone under that
+ * machine's own business: a primary is always a Hercule-managed clone under that
  * machine's own storage.
  */
 import { Schema } from "effect";
-import { CheckoutForm, WorkspaceKind } from "@hydra/protocol";
+import { CheckoutForm, WorkspaceKind } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";

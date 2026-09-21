@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { CODEX_VERSION } from "@hydra/home/version";
-import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hydra/protocol";
+import { CODEX_VERSION } from "@hercule/home/version";
+import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
 import { INSTALL_DEADLINE } from "../install";
 import { codexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { PROBE_DEADLINE } from "../probe";
@@ -150,7 +150,7 @@ describe("what the Codex adapter reports about a machine", () => {
 
     // `serviceTiers` lists only the tiers beyond the standard one and
     // `defaultServiceTier: null` means that one, so the
-    // standard tier is a choice of Hydra's own and the default where Codex
+    // standard tier is a choice of Hercule's own and the default where Codex
     // names none - otherwise every turn would run on a paid tier nobody chose.
     expect(optionOf(probed.models, "gpt-6-astra", "serviceTier")).toMatchObject({
       kind: "select",
@@ -536,7 +536,7 @@ const pair = async (): Promise<ReturnType<typeof driving>> => {
   });
   const withToken = (sessionId: keyof typeof TOKENS) => ({
     ...run.ctx,
-    env: { ...run.ctx.env, HYDRA_TOKEN: TOKENS[sessionId] },
+    env: { ...run.ctx.env, HERCULE_TOKEN: TOKENS[sessionId] },
   });
   await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, withToken(SESSION)));
   await Effect.runPromise(run.adapter.startSession(OTHER_SESSION, SPEC, withToken(OTHER_SESSION)));
@@ -558,8 +558,8 @@ describe("the app-server one session of an instance gets to itself", () => {
     // and a 401 for both the moment the first session's token is revoked (spec
     // 06 section 9.3).
     expect(run.spawns).toHaveLength(2);
-    expect(run.spawns[0]?.env["HYDRA_TOKEN"]).toBe(TOKENS[SESSION]);
-    expect(run.spawns[1]?.env["HYDRA_TOKEN"]).toBe(TOKENS[OTHER_SESSION]);
+    expect(run.spawns[0]?.env["HERCULE_TOKEN"]).toBe(TOKENS[SESSION]);
+    expect(run.spawns[1]?.env["HERCULE_TOKEN"]).toBe(TOKENS[OTHER_SESSION]);
     expect(await Effect.runPromise(run.adapter.listSessions)).toHaveLength(2);
   });
 
@@ -654,14 +654,14 @@ describe("the model a turn runs under", () => {
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
 
     const opened = sentOf(run.requests, "turn/start")[0] as Record<string, unknown>;
-    // The thread's own model stands: naming one here would be Hydra choosing.
+    // The thread's own model stands: naming one here would be Hercule choosing.
     expect(opened["model"]).toBeUndefined();
     expect(opened["effort"]).toBeUndefined();
     expect(opened["serviceTier"]).toBeUndefined();
   });
 
   it("sends no service tier for a selection of the standard one, and sends a chosen one", async () => {
-    // "standard" is Hydra's name for the tier Codex runs on when it is told
+    // "standard" is Hercule's name for the tier Codex runs on when it is told
     // none, so choosing it means leaving the field off.
     const opened = async (tier: string): Promise<Record<string, unknown>> => {
       const run = await started();
@@ -887,7 +887,7 @@ const grepping = (pattern: string): string =>
 describe("the two Codex surfaces this adapter must never reach for", () => {
   it("calls neither the shell-command method nor the process one", () => {
     // A runner that let a harness spawn its own processes would host work
-    // outside every session boundary Hydra places.
+    // outside every session boundary Hercule places.
     expect(grepping(["thread/shell", "Command", "\\|process/", "spawn"].join(""))).toBe("");
   });
 
@@ -899,8 +899,8 @@ describe("the two Codex surfaces this adapter must never reach for", () => {
 
 /** What the runner resolved once, at start, for every adapter. */
 const TOOL = {
-  skill: "# hydra\n\nCall `hydra --help` to find out what this controller can do.\n",
-  claudePluginDir: "/var/hydra/runner/storage/claude-plugin",
+  skill: "# hercule\n\nCall `hercule --help` to find out what this controller can do.\n",
+  claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
 };
 
 /**
@@ -928,7 +928,7 @@ const STRUCTURED: SessionSpec = {
 
 const ANSWER = { verdict: "accept", confidence: 0.9 };
 
-describe("hydra-as-a-tool on a Codex thread", () => {
+describe("hercule-as-a-tool on a Codex thread", () => {
   /** The Agent's instructions above the skill, as one text. */
   const INSTRUCTED = `${SYSTEM_PROMPT}\n\n${TOOL.skill}`;
 
@@ -958,7 +958,7 @@ describe("hydra-as-a-tool on a Codex thread", () => {
     async (method, spec, instructions) => {
       const { adapter, ctx, requests } = driving();
 
-      await Effect.runPromise(adapter.startSession(SESSION, spec, { ...ctx, hydraTool: TOOL }));
+      await Effect.runPromise(adapter.startSession(SESSION, spec, { ...ctx, herculeTool: TOOL }));
 
       // The channel #73 found, and the only one: a session that cannot be told
       // the CLI exists never calls it (spec 06 section 9.1). An Agent's own
@@ -973,11 +973,11 @@ describe("hydra-as-a-tool on a Codex thread", () => {
     const scratch = homing();
     const { adapter, ctx } = driving({}, scratch);
 
-    await Effect.runPromise(adapter.startSession(SESSION, SPEC, { ...ctx, hydraTool: TOOL }));
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, { ...ctx, herculeTool: TOOL }));
     await settle();
 
     // The retired channel (spec 06 section 9.1, amended 2026-09-14): a file
-    // here is instructions the harness reads out of a directory Hydra says is
+    // here is instructions the harness reads out of a directory Hercule says is
     // empty, and one more copy of the skill to keep current.
     expect(existsSync(join(scratch, "AGENTS.md"))).toBe(false);
     expect(readdirSync(scratch)).toEqual([]);
@@ -1033,7 +1033,9 @@ const runTurnToCompletion = async (
   status: "completed" | "failed" | "interrupted" = "completed",
 ): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
   const run = driving();
-  await Effect.runPromise(run.adapter.startSession(SESSION, spec, { ...run.ctx, hydraTool: TOOL }));
+  await Effect.runPromise(
+    run.adapter.startSession(SESSION, spec, { ...run.ctx, herculeTool: TOOL }),
+  );
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
   completeTurn(run, items, status);
   await until("closed the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
@@ -1044,7 +1046,9 @@ describe("a Codex session the controller spawned from an Agent", () => {
   it("carries the agent's instructions above the skill as the thread's developer instructions", async () => {
     const { adapter, ctx, requests } = driving();
 
-    await Effect.runPromise(adapter.startSession(SESSION, STRUCTURED, { ...ctx, hydraTool: TOOL }));
+    await Effect.runPromise(
+      adapter.startSession(SESSION, STRUCTURED, { ...ctx, herculeTool: TOOL }),
+    );
 
     // Both, in that order, and nothing else: the skill is how a session learns
     // the CLI exists (spec 06 section 9.1) and dropping it for the Agent's
@@ -1089,7 +1093,7 @@ describe("a Codex session the controller spawned from an Agent", () => {
     const startAndSend = async (spec: SessionSpec): Promise<ReadonlyArray<unknown>> => {
       const run = driving();
       await Effect.runPromise(
-        run.adapter.startSession(SESSION, spec, { ...run.ctx, hydraTool: TOOL }),
+        run.adapter.startSession(SESSION, spec, { ...run.ctx, herculeTool: TOOL }),
       );
       await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
       return [...sentOf(run.requests, "thread/start"), ...sentOf(run.requests, "turn/start")];

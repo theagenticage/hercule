@@ -1,4 +1,4 @@
-/** The user: the one account Hydra authenticates in v1. */
+/** The user: the one account Hercule authenticates in v1. */
 export {
   hashPassword,
   PasswordCost,

@@ -13,7 +13,7 @@ import {
   type ProviderBinary,
   type RunnerFacts,
   type Toolchain,
-} from "@hydra/protocol";
+} from "@hercule/protocol";
 import { ADAPTER_IDS } from "./providers";
 
 /** Deliberately two: anything else is installed by hand and named with a label. */
