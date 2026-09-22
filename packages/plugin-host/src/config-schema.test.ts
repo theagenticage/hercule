@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Result, Schema } from "effect";
-import { configJsonSchema, secret } from "./config-schema";
+import { deriveConfigJsonSchema, secret } from "./config-schema";
 
 const supported = Schema.Struct({
   token: Schema.String.annotate({ title: "API token", description: "Used for every call" }),
@@ -26,9 +26,9 @@ const unsupported: ReadonlyArray<readonly [string, Schema.Top, string]> = [
   ["an identified inner schema", Schema.Struct({ server: IdentifiedInner }), "server"],
 ];
 
-describe("configJsonSchema", () => {
+describe("deriveConfigJsonSchema", () => {
   it("derives an object schema from a flat supported struct", () => {
-    const result = configJsonSchema(supported);
+    const result = deriveConfigJsonSchema(supported);
 
     expect(Result.isSuccess(result)).toBe(true);
     if (!Result.isSuccess(result)) return;
@@ -48,7 +48,7 @@ describe("configJsonSchema", () => {
   });
 
   it.each(unsupported)("refuses %s, naming the property", (_label, schema, property) => {
-    const result = configJsonSchema(schema);
+    const result = deriveConfigJsonSchema(schema);
 
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;
@@ -59,7 +59,7 @@ describe("configJsonSchema", () => {
   // The shape every plugin with nothing to configure ships, and the one effect
   // derives as "an object or an array" rather than as an empty object schema.
   it("takes a struct with no properties", () => {
-    const result = configJsonSchema(Schema.Struct({}));
+    const result = deriveConfigJsonSchema(Schema.Struct({}));
 
     expect(Result.isSuccess(result)).toBe(true);
     if (!Result.isSuccess(result)) return;
@@ -72,13 +72,15 @@ describe("configJsonSchema", () => {
   });
 
   it("takes an annotated struct with no properties", () => {
-    const result = configJsonSchema(Schema.Struct({}).annotate({ title: "Nothing to configure" }));
+    const result = deriveConfigJsonSchema(
+      Schema.Struct({}).annotate({ title: "Nothing to configure" }),
+    );
 
     expect(Result.isSuccess(result)).toBe(true);
   });
 
   it("refuses a union of an object and an array", () => {
-    const result = configJsonSchema(
+    const result = deriveConfigJsonSchema(
       Schema.Union([Schema.Struct({ token: Schema.String }), Schema.Array(Schema.String)]),
     );
 
@@ -89,7 +91,7 @@ describe("configJsonSchema", () => {
     ["numbers", Schema.Literals([1, 2])],
     ["booleans", Schema.Literals([true, false])],
   ])("refuses an enum of %s", (_label, mode) => {
-    const result = configJsonSchema(Schema.Struct({ mode }));
+    const result = deriveConfigJsonSchema(Schema.Struct({ mode }));
 
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;
@@ -97,7 +99,7 @@ describe("configJsonSchema", () => {
   });
 
   it("refuses a schema that is not an object", () => {
-    const result = configJsonSchema(Schema.String);
+    const result = deriveConfigJsonSchema(Schema.String);
 
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;
@@ -113,7 +115,7 @@ describe("configJsonSchema", () => {
  */
 describe("a config field the plugin marked secret", () => {
   it("derives as a string carrying the plugin's own words and the secret marker", () => {
-    const result = configJsonSchema(
+    const result = deriveConfigJsonSchema(
       Schema.Struct({
         zaiApiKey: secret({
           title: "Z.ai API key",
@@ -135,7 +137,7 @@ describe("a config field the plugin marked secret", () => {
   });
 
   it("leaves a field nobody marked unmarked", () => {
-    const result = configJsonSchema(Schema.Struct({ token: Schema.String }));
+    const result = deriveConfigJsonSchema(Schema.Struct({ token: Schema.String }));
 
     expect(Result.isSuccess(result)).toBe(true);
     if (!Result.isSuccess(result)) return;
@@ -147,7 +149,7 @@ describe("a config field the plugin marked secret", () => {
     ["a boolean", Schema.Boolean.annotate({ secret: true })],
     ["a list of strings", Schema.Array(Schema.String).annotate({ secret: true })],
   ])("refuses %s marked secret, naming the property", (_label, marked) => {
-    const result = configJsonSchema(Schema.Struct({ zaiApiKey: marked }));
+    const result = deriveConfigJsonSchema(Schema.Struct({ zaiApiKey: marked }));
 
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;

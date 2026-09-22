@@ -29,6 +29,7 @@ import {
   type SchemaVersionError,
 } from "./db";
 import { ConnectionService, ConnectionServiceLayer, ConnectionTypesLayer } from "./connections";
+import { cancelStrandedInputsAndReportLostWakeUps } from "./daemon";
 import { AuditLog, AuditLogLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
@@ -74,7 +75,7 @@ import {
   ProviderServiceLayer,
 } from "./providers";
 import { seed } from "./seed";
-import { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./sessions";
+import { SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 import { WorkspaceService, WorkspaceServiceLayer } from "./workspaces";
 
@@ -309,9 +310,10 @@ export const bootWith = <A, E>(
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
       // A row on the wire from before this boot cannot be asked whether the
       // harness took it, so this ends it rather than a runner resending
-      // something it may already have. After the schema, before anything is
-      // placed on a runner.
-      yield* cancelStrandedInputs;
+      // something it may already have, and says on the subscription which
+      // wake-up ended with it. After the schema, before anything is placed on
+      // a runner.
+      yield* cancelStrandedInputsAndReportLostWakeUps;
       yield* seed;
 
       const identity = yield* ControllerIdentity;

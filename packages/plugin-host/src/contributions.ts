@@ -23,14 +23,20 @@ export const DeclaredCapabilities = Schema.Struct({
 export type DeclaredCapabilities = Schema.Schema.Type<typeof DeclaredCapabilities>;
 
 /**
- * Ids and display names reach both columns and the wire, so an overrun is
- * refused at registration rather than written as a row nothing can read back.
+ * The longest name a contribution may carry. Ids and display names reach both
+ * columns and the wire, so an overrun is refused at registration rather than
+ * written as a row nothing can read back.
  */
-export const MAX_PROVIDER_NAME_LENGTH = 128;
+export const MAX_CONTRIBUTION_NAME_LENGTH = 128;
 
-const ProviderName = Schema.String.check(
+/**
+ * The name of one contribution: a provider, an event source, or whatever a
+ * later extension point contributes. One bound for all of them, because they
+ * all reach the same columns.
+ */
+const ContributionName = Schema.String.check(
   Schema.isMinLength(1),
-  Schema.isMaxLength(MAX_PROVIDER_NAME_LENGTH),
+  Schema.isMaxLength(MAX_CONTRIBUTION_NAME_LENGTH),
 );
 
 /**
@@ -39,10 +45,10 @@ const ProviderName = Schema.String.check(
  * already returned: a function would not survive the crossing into the catalog.
  */
 export const ProviderDefinition = Schema.Struct({
-  id: ProviderName,
-  displayName: ProviderName,
+  id: ContributionName,
+  displayName: ContributionName,
   /** The harness's own name on `PATH`, which is what joins a runner's facts to an instance. */
-  binaryName: ProviderName,
+  binaryName: ContributionName,
   /** Several accounts of one harness, kept apart by per-instance config dirs. */
   supportsMultipleInstances: Schema.Boolean,
   /** Per-instance logical settings only: environment and model defaults, never paths. */
@@ -52,3 +58,41 @@ export const ProviderDefinition = Schema.Struct({
 });
 
 export type ProviderDefinition = Schema.Schema.Type<typeof ProviderDefinition>;
+
+/**
+ * One event kind, as the plugin that emits it declares it: what the payload of
+ * such an event must be, and one line saying what the event means. The host
+ * derives JSON Schema from the schema for the catalog and keeps the schema
+ * itself, which is what an emitted payload is read against.
+ */
+export interface EventKindDeclaration {
+  readonly description: string;
+  readonly schema: Schema.Top;
+}
+
+/**
+ * The two names an event source is identified by. They reach a column and the
+ * wire, so they are decoded rather than taken as the plugin wrote them. The
+ * kinds are not here: each declaration holds a live schema, which no schema
+ * of this kind can describe.
+ */
+export const EventSourceNames = Schema.Struct({
+  id: ContributionName,
+  connectionType: ContributionName,
+});
+
+/**
+ * What a plugin contributes as a source of events: the bare word it calls
+ * itself, the Connection type its events arrive through, and every kind it can
+ * emit. The host qualifies the bare word with the plugin's id, so two plugins
+ * may each call themselves `github` and still name two different sources.
+ *
+ * Each kind's name carries the plugin's id as its first segment, which makes a
+ * kind unique across plugins and lets a reader of the catalog find the owner of
+ * a kind without a second column. The host refuses a kind that does not.
+ */
+export interface EventSourceDefinition {
+  readonly id: string;
+  readonly connectionType: string;
+  readonly kinds: Record<string, EventKindDeclaration>;
+}

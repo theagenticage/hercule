@@ -265,7 +265,26 @@ export {
   WorkspaceProvisionInput,
   WorkspaceStatus,
 } from "./groups/workspace";
-export { EVENT_SORT_FIELDS, Event, EventId, MAX_EVENT_KIND_LENGTH } from "./groups/event";
+export {
+  EventEmitInput,
+  EventEmitted,
+  EventEnrichInput,
+  EVENT_SORT_FIELDS,
+  Event,
+  EventId,
+  MAX_EVENT_KIND_LENGTH,
+} from "./groups/event";
+export {
+  SUBSCRIPTION_SORT_FIELDS,
+  Subscription,
+  SubscriptionCreateInput,
+  SubscriptionCreated,
+  SubscriptionHealth,
+  SubscriptionHolder,
+  SubscriptionTarget,
+  SubscriptionTargetFromShorthand,
+} from "./groups/subscription";
+export { readShorthandDecoder } from "./shorthand";
 export {
   Delta,
   Invalidate,

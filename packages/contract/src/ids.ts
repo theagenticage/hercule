@@ -60,6 +60,9 @@ export type NullableActor = Schema.Schema.Type<typeof NullableActor>;
 /** The longest External Ref. It is an identity, not a document. */
 export const MAX_EXTERNAL_REF_LENGTH = 512;
 
+/** The grammar of an External Ref, written once. */
+const EXTERNAL_REF_PATTERN = /^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/;
+
 /**
  * A fully-qualified identifier for a thing outside Hercule:
  * `<system>:<kind>:<identity>`, for example `github:issue:owner/repo#42` or
@@ -73,10 +76,16 @@ export const MAX_EXTERNAL_REF_LENGTH = 512;
  */
 export const ExternalRef = Schema.String.check(
   Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),
-  Schema.isPattern(/^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/, {
-    title: "external ref",
-    description: "`<system>:<kind>:<identity>`, lowercase system, no whitespace",
-  }),
+  // A filter rather than a pattern check, so that the refusal quotes the ref
+  // the caller wrote: a pattern check reports the position of the value and
+  // never the value, and a caller sending a list of refs cannot act on a
+  // position alone.
+  Schema.makeFilter((ref) =>
+    EXTERNAL_REF_PATTERN.test(ref)
+      ? undefined
+      : `${ref} is not an external ref: write <system>:<kind>:<identity>, ` +
+        `lowercase system, no whitespace`,
+  ),
 );
 
 export type ExternalRef = Schema.Schema.Type<typeof ExternalRef>;

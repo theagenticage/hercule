@@ -39,7 +39,13 @@ import { homePaths } from "@hercule/home";
 import { HerculeHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
-import { SessionInputDeadline, WorkspaceSweepInterval } from "../daemon";
+import {
+  cancelStrandedInputsAndReportLostWakeUps,
+  EventRoutingInterval,
+  SessionInputDeadline,
+  WorkspaceSweepInterval,
+} from "../daemon";
+import { ExpressionBudget } from "../expressions";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer, type AuditKind, type AuditRow } from "../events";
@@ -56,8 +62,9 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
-import { cancelStrandedInputs, SessionServiceLayer } from "../sessions";
+import { SessionServiceLayer } from "../sessions";
 import { ResourceServiceLayer } from "../resources";
+import { EvaluationErrorNotifier, EvaluationErrorNotifierLayer } from "../subscriptions";
 import { SettingsLayer } from "../settings";
 import { WorkspaceServiceLayer } from "../workspaces";
 import {
@@ -86,12 +93,13 @@ export const USERNAME = "rogier";
  * and the routes must share one: the status a request reads is held by the same
  * object the boot's activation pass wrote it into.
  */
-const services = (home: string) =>
+const services = (home: string, notifier: Layer.Layer<EvaluationErrorNotifier>) =>
   // The routes' own layer holds the controller daemon, which reaches the
   // session and workspace services and the plugin host, so it is provided this
   // block's output rather than merely merged beside it, the way the real boot's
   // operation layers reach what `withPlugins` built.
   operationLayers.pipe(
+    Layer.provide(notifier),
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,
@@ -223,6 +231,19 @@ export interface ServerOptions {
   readonly inputDeadline?: Duration.Duration;
   /** The shipped ten minutes is longer than a test that watches it can wait. */
   readonly workspaceSweepInterval?: Duration.Duration;
+  /** The shipped second is longer than a test that waits out several ticks can wait. */
+  readonly eventRoutingInterval?: Duration.Duration;
+  /**
+   * How long one evaluation of a condition may run before the wrapper reports
+   * it. A test that wants every evaluation reported hands over a budget no
+   * evaluation can stay under: the evaluator offers no other lever.
+   */
+  readonly expressionBudget?: Duration.Duration;
+  /**
+   * Where the report of a condition that cannot be evaluated goes. The
+   * shipped one goes nowhere, which nothing can read.
+   */
+  readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
   /** The shipped registry is compiled in, so a test hands over its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
@@ -252,7 +273,7 @@ export const withServer = (
         // The boot's steps in the boot's order, so a request sees what a real
         // controller has. Held as one effect because reboot runs them again.
         const bootSteps = Effect.gen(function* () {
-          yield* cancelStrandedInputs;
+          yield* cancelStrandedInputsAndReportLostWakeUps;
           yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
           yield* seed;
           yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
@@ -271,6 +292,8 @@ export const withServer = (
         named(ProviderLoginDeadline, options.loginDeadline);
         named(SessionInputDeadline, options.inputDeadline);
         named(WorkspaceSweepInterval, options.workspaceSweepInterval);
+        named(EventRoutingInterval, options.eventRoutingInterval);
+        named(ExpressionBudget, options.expressionBudget);
         yield* listening;
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
@@ -321,7 +344,7 @@ export const withServer = (
       }),
     ).pipe(
       Effect.provide(
-        services(home).pipe(
+        services(home, options.evaluationErrorNotifier ?? EvaluationErrorNotifierLayer).pipe(
           // The same listener `hercule serve` builds, body cap included: the cap
           // is the transport's, so a harness without it would test a different
           // server from the one that ships.
@@ -362,6 +385,47 @@ export const send = (
           body: typeof options.body === "string" ? options.body : JSON.stringify(options.body),
         }),
   });
+
+/** The body every refusal the envelope writes has. */
+interface ErrorBody {
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+    readonly details?: {
+      readonly grant?: string;
+      readonly issues?: ReadonlyArray<{ readonly path: ReadonlyArray<string> }>;
+    };
+  };
+}
+
+/** One refusal, read out of the envelope the API writes it in. */
+export interface Refusal {
+  readonly code: string;
+  readonly message: string;
+  /** The grant a `forbidden` names; absent on every other refusal. */
+  readonly grant?: string;
+  /** The path of each issue a `validation` lists, in the order it listed them. */
+  readonly issues: ReadonlyArray<ReadonlyArray<string>>;
+  /** The whole body, for an assertion message that has to show what was said. */
+  readonly text: string;
+}
+
+/**
+ * What a response refused, and what it said. The body is read once and parsed
+ * here, so a caller may ask about the code, the grant and the issue paths
+ * without juggling clones of a stream that can only be read once.
+ */
+export const readRefusal = async (response: Response): Promise<Refusal> => {
+  const text = await response.text();
+  const body = JSON.parse(text) as ErrorBody;
+  return {
+    code: body.error.code,
+    message: body.error.message,
+    ...(body.error.details?.grant === undefined ? {} : { grant: body.error.details.grant }),
+    issues: (body.error.details?.issues ?? []).map((issue) => issue.path),
+    text,
+  };
+};
 
 /** A GET with a bearer token. */
 export const get = (base: string, path: string, token?: string): Promise<Response> =>

@@ -16,6 +16,7 @@ import {
   CLI,
   OPERATIONS,
   api,
+  readShorthandDecoder,
   sortFieldsOf,
   type CliRow,
   type ErrorCode,
@@ -30,6 +31,9 @@ import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 /** How a flag's or positional's text becomes a value. */
 export type FieldKind = "string" | "number" | "boolean" | "json";
 
+/** Which half of the request a field's value travels in. */
+export type FieldCarrier = "path" | "payload" | "query";
+
 export interface Field {
   /** The name the API knows the field by. */
   readonly name: string;
@@ -37,7 +41,15 @@ export interface Field {
   readonly spelling: string;
   /** The field is written as a bare word in its place, not as a flag. */
   readonly positional: boolean;
+  /** Where the value travels: the route, the body, or the query string. */
+  readonly carriedIn: FieldCarrier;
   readonly kind: FieldKind;
+  /**
+   * Decodes the one word a person writes into the value the wire carries, for
+   * a field whose schema carries a shorthand. `undefined` where the written
+   * text is the value, which is every other field.
+   */
+  readonly decodeShorthand: ((text: string) => unknown) | undefined;
   /** The flag may be given more than once; the values become a list. */
   readonly repeated: boolean;
   readonly optional: boolean;
@@ -75,9 +87,13 @@ export interface Command {
   readonly requires: Requirement;
   readonly method: Method;
   readonly path: string;
-  /** The path parameters, in route order; given as bare words. */
+  /**
+   * The fields given as bare words, in the order the command takes them: the
+   * path parameters in route order, then any payload field the table writes as
+   * a bare word.
+   */
   readonly positionals: ReadonlyArray<Field>;
-  /** Payload fields; given as `--<flag>`. */
+  /** Payload fields given as `--<flag>`; a payload positional is not among them. */
   readonly payload: ReadonlyArray<Field>;
   /** Query fields other than the pagination triple; given as `--<flag>`. */
   readonly query: ReadonlyArray<Field>;
@@ -133,7 +149,9 @@ const withoutNull = (ast: Ast): Ast => {
 
 /** Whether `null` is one of the values this field holds. */
 const isNullable = (ast: Ast): boolean =>
-  ast._tag === "Union" && ast.types !== undefined && ast.types.some((m) => m._tag === "Null");
+  ast._tag === "Union" &&
+  ast.types !== undefined &&
+  ast.types.some((member) => member._tag === "Null");
 
 /**
  * The element of a field that holds several values, or `undefined` for one that
@@ -183,8 +201,19 @@ const scalarKind = (input: Ast): FieldKind => {
 /** `sessionId` on the wire is `<session-id>` on the command line. */
 const kebab = (name: string): string => name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 
-/** The shape of one field, as the schema has it and the row spells it. */
-const fieldOf = (name: string, ast: Ast, row: FieldRow): Field => {
+/**
+ * The shape of one field, as the schema has it and the row spells it.
+ *
+ * `schema` is the field's own schema where the operation declares one, which is
+ * what a shorthand is read from. The AST alone answers everything else.
+ */
+const buildField = (
+  name: string,
+  ast: Ast,
+  row: FieldRow,
+  carriedIn: FieldCarrier,
+  schema: unknown,
+): Field => {
   const element = elementOf(ast);
   const value = element ?? ast;
   // A positional is spelled by the row where its own name would not say whose
@@ -194,7 +223,9 @@ const fieldOf = (name: string, ast: Ast, row: FieldRow): Field => {
     name,
     spelling,
     positional: "positional" in row,
+    carriedIn,
     kind: scalarKind(value),
+    decodeShorthand: readShorthandDecoder(schema),
     repeated: element !== undefined,
     optional: ast.context?.isOptional === true,
     nullable: isNullable(ast) || isNullable(value),
@@ -212,12 +243,19 @@ const fieldOf = (name: string, ast: Ast, row: FieldRow): Field => {
  * table does not write is a row missing from the contract, and it is said here
  * rather than rendered as a nameless flag.
  */
-const fieldsOf = (
+const buildFields = (
   id: OperationId,
   schema: unknown,
   rows: Record<string, FieldRow>,
+  carriedIn: FieldCarrier,
 ): ReadonlyArray<Field> => {
-  const ast = (schema as { ast?: Ast } | undefined)?.ast;
+  const struct = schema as
+    | { ast?: Ast; fields?: Record<string, unknown>; schema?: { fields?: Record<string, unknown> } }
+    | undefined;
+  // A query parameter set arrives wrapped in the codec that reads a query
+  // string, so the struct holding the field schemas is one level down there.
+  const fields = struct?.fields ?? struct?.schema?.fields;
+  const ast = struct?.ast;
   if (ast?.propertySignatures === undefined) return [];
   return ast.propertySignatures
     .map((property) => [String(property.name), property.type] as const)
@@ -225,12 +263,18 @@ const fieldsOf = (
     .map(([name, type]) => {
       const row = rows[name];
       if (row === undefined) throw new Error(`${id}: ${name} has no row`);
-      return fieldOf(name, type, row);
+      // A bare word is a route parameter or a payload field. A query
+      // parameter written as one would be parsed as a positional and then
+      // sent nowhere, so the table is wrong and says so here.
+      if (carriedIn === "query" && "positional" in row) {
+        throw new Error(`${id}: ${name} is a query parameter and cannot be a bare word`);
+      }
+      return buildField(name, type, row, carriedIn, fields?.[name]);
     });
 };
 
 /** The payload schema hides one level deeper: a media-type map holding a codec. */
-const payloadFieldsOf = (
+const buildPayloadFields = (
   id: OperationId,
   payload: unknown,
   rows: Record<string, FieldRow>,
@@ -238,7 +282,7 @@ const payloadFieldsOf = (
   if (!(payload instanceof Map)) return [];
   const json = payload.get("application/json") as { schemas?: ReadonlyArray<unknown> } | undefined;
   const codec = json?.schemas?.[0] as { schema?: unknown } | undefined;
-  return fieldsOf(id, codec?.schema, rows);
+  return buildFields(id, codec?.schema, rows, "payload");
 };
 
 const propertyNames = (ast: Ast | undefined): ReadonlyArray<string> =>
@@ -299,10 +343,10 @@ const build = (): ReadonlyArray<Command> => {
         error?: unknown;
       };
       const params = new Map(
-        fieldsOf(id, each.params, row.fields).map((field) => [field.name, field]),
+        buildFields(id, each.params, row.fields, "path").map((field) => [field.name, field]),
       );
-      const payload = payloadFieldsOf(id, each.payload, row.fields);
-      const query = fieldsOf(id, each.query, row.fields);
+      const payload = buildPayloadFields(id, each.payload, row.fields);
+      const query = buildFields(id, each.query, row.fields, "query");
       const inPath = pathParams(operation.path);
 
       commands.push({
@@ -314,8 +358,14 @@ const build = (): ReadonlyArray<Command> => {
         path: operation.path,
         // A route parameter the params schema does not declare is a contract
         // mistake, not a string: the CLI would send a value nothing decodes.
-        positionals: inPath.map((name) => params.get(name)!),
-        payload,
+        // A payload field the table writes as a bare word follows them, so a
+        // command whose one argument is its content is typed as that word and
+        // not as a flag.
+        positionals: [
+          ...inPath.map((name) => params.get(name)!),
+          ...payload.filter((field) => field.positional),
+        ],
+        payload: payload.filter((field) => !field.positional),
         query,
         // The paging triple travels together, so the sort field is enough to
         // say the operation pages.

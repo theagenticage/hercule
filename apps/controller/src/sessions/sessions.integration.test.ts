@@ -172,13 +172,25 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 10_000 });
  */
 const INPUT_DEADLINE = Duration.seconds(2);
 
+/**
+ * Longer than any case here runs, so the pipeline never ticks: what the case
+ * then sees is its own request's work and nothing else's. A case that watches
+ * a row go back to waiting needs it, because the tick sends a waiting row
+ * again as soon as the session can take it.
+ */
+const NO_TICK = Duration.hours(1);
+
 /** A controller with one enlisted, connected, logged-in machine on it, on this suite's own fleet. */
-const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
+const withFleet = (
+  body: (arranged: Arranged) => Promise<void>,
+  options: { readonly eventRoutingInterval?: Duration.Duration } = {},
+): Promise<void> =>
   sharedWithFleet(body, {
     plugins: registry(),
     facts: FACTS,
     models: MODELS,
     inputDeadline: INPUT_DEADLINE,
+    ...options,
   });
 
 const instanceOf = (arranged: Arranged, providerId: string): string => {
@@ -955,18 +967,24 @@ describe("session.input", () => {
   });
 
   it("leaves the row queued, with a message, when an idle session's machine never answers", async () => {
-    await withFleet(async (arranged) => {
-      const session = await started(arranged, "hello");
-      arranged.wire.answering(() => undefined);
+    await withFleet(
+      async (arranged) => {
+        const session = await started(arranged, "hello");
+        arranged.wire.answering(() => undefined);
 
-      const response = await sendInput(arranged, session.id, { text: "into the silence" });
+        const response = await sendInput(arranged, session.id, { text: "into the silence" });
 
-      expect(response.status).toBe(409);
-      const row = (await inputsOf(arranged, session.id)).at(-1);
-      expect(row).toMatchObject({ text: "into the silence", status: "queued", delivery: null });
-      expect(row!.sentAt).toBeNull();
-      expect(typeof row!.reason).toBe("string");
-    });
+        expect(response.status).toBe(409);
+        const row = (await inputsOf(arranged, session.id)).at(-1);
+        expect(row).toMatchObject({ text: "into the silence", status: "queued", delivery: null });
+        expect(row!.sentAt).toBeNull();
+        expect(typeof row!.reason).toBe("string");
+      },
+      // The session is still idle and the row is still waiting, which is what
+      // the tick sends again. The tick is stopped so that the row can be read
+      // as the unanswered delivery left it.
+      { eventRoutingInterval: NO_TICK },
+    );
   });
 });
 
@@ -2436,23 +2454,29 @@ describe("the queue at the transition to idle, one row per boundary", () => {
   });
 
   it("leaves an unanswered row queued with sentAt cleared and a message once the deadline passes", async () => {
-    await withFleet(async (arranged) => {
-      arranged.wire.answering(() => undefined);
-      const session = await spawned(arranged, { prompt: "one" });
-      await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
+    await withFleet(
+      async (arranged) => {
+        arranged.wire.answering(() => undefined);
+        const session = await spawned(arranged, { prompt: "one" });
+        await framesWhen<SessionStart>(arranged.wire, "sessionStart", 1);
 
-      report(arranged.wire, ...transcript(session.id)[0]!);
-      await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
+        report(arranged.wire, ...transcript(session.id)[0]!);
+        await framesWhen<SessionInput>(arranged.wire, "sessionInput", 1);
 
-      // The one wait on a clock here: the row is on the wire from the moment
-      // the frame goes out, and nothing else says when the controller has
-      // given up waiting for an answer.
-      await delay(Duration.toMillis(INPUT_DEADLINE) + 1000);
+        // The one wait on a clock here: the row is on the wire from the moment
+        // the frame goes out, and nothing else says when the controller has
+        // given up waiting for an answer.
+        await delay(Duration.toMillis(INPUT_DEADLINE) + 1000);
 
-      const rows = await inputsOf(arranged, session.id);
-      expect(rows[0]).toMatchObject({ status: "queued", sentAt: null });
-      expect(typeof rows[0]!.reason).toBe("string");
-    });
+        const rows = await inputsOf(arranged, session.id);
+        expect(rows[0]).toMatchObject({ status: "queued", sentAt: null });
+        expect(typeof rows[0]!.reason).toBe("string");
+      },
+      // What the deadline leaves behind is a row waiting on an idle session,
+      // which is exactly what the tick sends again. The tick is stopped so
+      // that the row can be read as the deadline left it.
+      { eventRoutingInterval: NO_TICK },
+    );
   });
 
   it("cancels rows still waiting when the session exits, but leaves the one on the wire until it is answered", async () => {

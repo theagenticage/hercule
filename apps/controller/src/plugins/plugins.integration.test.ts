@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import type { LiveMessage } from "@hercule/contract";
-import { HOST_API, type Plugin } from "@hercule/plugin-host";
+import { HOST_API, registerEventSource, type Plugin } from "@hercule/plugin-host";
 import {
   collecting,
   completeSetup,
@@ -518,6 +518,208 @@ describe("the shipped registry over the routes", () => {
         });
       },
       { plugins: [asking.plugin] },
+    );
+  });
+});
+
+/**
+ * The kind catalog the pipeline validates an emit against. It is an ordinary
+ * contribution, so what is asserted here is the row a boot leaves behind and
+ * what a second boot does to it, read both from the table and over the route.
+ */
+
+/** The spec 08 section 5.1 roster, spelled out because the roster is the claim. */
+const GITHUB_KINDS = [
+  "github.notification",
+  "github.issue.opened",
+  "github.issue.closed",
+  "github.issue.reopened",
+  "github.issue.labeled",
+  "github.issue.assigned",
+  "github.issue.commented",
+  "github.pr.opened",
+  "github.pr.synchronized",
+  "github.pr.review-submitted",
+  "github.pr.commented",
+  "github.pr.merged",
+  "github.pr.closed",
+  "github.pr.labeled",
+  "github.pr.checks-completed",
+] as const;
+
+/** The block every payload carries, so a ref and a url derive the same way. */
+const SUBJECT_FIELDS = ["repo", "number", "title", "author", "state", "url"] as const;
+
+interface ContributionRow {
+  readonly owner: string;
+  readonly extension_point: string;
+  readonly id: string;
+  readonly definition: string;
+}
+
+const contributionRows = (
+  sql: ServerHarness["sql"],
+  extensionPoint: string,
+): Promise<ReadonlyArray<ContributionRow>> =>
+  Effect.runPromise(
+    Effect.orDie(
+      sql<ContributionRow>`
+        SELECT owner, extension_point, id, definition FROM plugin_contributions
+        WHERE extension_point = ${extensionPoint} ORDER BY owner, id
+      `,
+    ),
+  );
+
+type JsonSchema = Record<string, unknown>;
+
+/**
+ * A JSON Schema node, with a reference into the document's own definitions
+ * followed. A schema shared by fifteen kinds is written once and pointed at, so
+ * a test that reads only the inline form would be asserting on the derivation
+ * rather than on the block.
+ */
+const followRef = (node: unknown, root: JsonSchema): JsonSchema => {
+  const schema = (node ?? {}) as JsonSchema;
+  const ref = schema["$ref"];
+  if (typeof ref !== "string") return schema;
+  const name = ref.split("/").at(-1) ?? "";
+  const defs = (root["$defs"] ?? root["definitions"] ?? {}) as Record<string, JsonSchema>;
+  return defs[name] ?? {};
+};
+
+/** A plugin contributing one event source, for the cases about registration. */
+const eventSourcePlugin = (kinds: ReadonlyArray<string>): Plugin => ({
+  manifest: {
+    id: "acme",
+    displayName: "Plugin acme",
+    hostApi: HOST_API,
+    capabilities: ["event-sources"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    registerEventSource(host, {
+      id: "acme",
+      connectionType: "acme/acme",
+      kinds: Object.fromEntries(
+        kinds.map((kind) => [
+          kind,
+          {
+            description: `Something happened: ${kind}`,
+            schema: Schema.Struct({
+              subject: Schema.Struct({ repo: Schema.String, url: Schema.String }),
+            }),
+          },
+        ]),
+      ),
+    }),
+  activate: () => Effect.succeed(Effect.void),
+});
+
+describe("the event kinds the shipped github plugin declares", () => {
+  it("writes one event-source row naming the connection type and the whole roster", async () => {
+    await withServer(
+      async ({ base, sql }) => {
+        const token = await completeSetup(base);
+
+        const rows = await contributionRows(sql, "event-source");
+        expect(rows).toHaveLength(1);
+        const row = rows[0]!;
+        expect(row.owner).toBe("github");
+        expect(row.id).toBe("github/github");
+
+        const definition = JSON.parse(row.definition) as {
+          readonly connectionType: string;
+          readonly kinds: Record<string, { description: string; schema: JsonSchema }>;
+        };
+        expect(definition.connectionType).toBe("github/github");
+        expect(Object.keys(definition.kinds).sort()).toEqual([...GITHUB_KINDS].sort());
+
+        // The same row over the route a client reads the catalog with.
+        const found = (await list(base, token)).find((plugin) => plugin.id === "github");
+        const contribution = found?.contributions.find(
+          (one) => one.extensionPoint === "event-source",
+        );
+        expect(contribution?.id).toBe("github/github");
+        expect(contribution?.definition).toEqual(definition);
+      },
+      { plugins: shipped },
+    );
+  });
+
+  it("declares each kind with a description and a payload schema carrying the subject", async () => {
+    await withServer(
+      async ({ sql }) => {
+        const rows = await contributionRows(sql, "event-source");
+        const definition = JSON.parse(rows[0]!.definition) as {
+          readonly kinds: Record<string, { description: string; schema: JsonSchema }>;
+        };
+
+        for (const kind of GITHUB_KINDS) {
+          const declared = definition.kinds[kind];
+          expect(declared, kind).toBeDefined();
+          expect((declared?.description ?? "").length, kind).toBeGreaterThan(0);
+
+          const schema = declared!.schema;
+          expect(schema["type"], kind).toBe("object");
+          const properties = (schema["properties"] ?? {}) as Record<string, unknown>;
+          const subject = followRef(properties["subject"], schema);
+          expect(subject["type"], `${kind} subject`).toBe("object");
+          expect(
+            Object.keys((subject["properties"] ?? {}) as Record<string, unknown>),
+            `${kind} subject`,
+          ).toEqual(expect.arrayContaining([...SUBJECT_FIELDS]));
+        }
+      },
+      { plugins: shipped },
+    );
+  });
+
+  it("leaves the same row behind when the controller boots a second time", async () => {
+    await withServer(
+      async ({ sql, reboot }) => {
+        const before = await contributionRows(sql, "event-source");
+        expect(before).toHaveLength(1);
+
+        await reboot();
+
+        expect(await contributionRows(sql, "event-source")).toEqual(before);
+      },
+      { plugins: shipped },
+    );
+  });
+});
+
+describe("an event source whose kind is not namespaced", () => {
+  it("refuses the registration, naming the kind, and writes no row", async () => {
+    await withServer(
+      async ({ base, sql }) => {
+        const token = await completeSetup(base);
+
+        const plugin = await read(base, token, "acme");
+        expect(plugin.status._tag).toBe("errored");
+        expect(plugin.status.message ?? "").toContain("thing.happened");
+        expect(plugin.contributions).toEqual([]);
+        expect(await contributionRows(sql, "event-source")).toEqual([]);
+      },
+      { plugins: [eventSourcePlugin(["thing.happened"])] },
+    );
+  });
+
+  it("takes the same kind once it carries the plugin id", async () => {
+    await withServer(
+      async ({ base, sql }) => {
+        const token = await completeSetup(base);
+
+        expect(await read(base, token, "acme")).toMatchObject({ status: { _tag: "active" } });
+        const rows = await contributionRows(sql, "event-source");
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.id).toBe("acme/acme");
+        const definition = JSON.parse(rows[0]!.definition) as {
+          readonly kinds: Record<string, unknown>;
+        };
+        expect(Object.keys(definition.kinds)).toEqual(["acme.thing.happened"]);
+      },
+      { plugins: [eventSourcePlugin(["acme.thing.happened"])] },
     );
   });
 });

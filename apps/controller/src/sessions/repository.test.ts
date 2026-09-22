@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { ProviderEvent } from "@hercule/protocol";
-import { CursorError, mintUuid, uuidToString } from "../db";
+import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { LIVE_SESSION_STATUSES, sessionRepository, type StoredStreamRow } from "./repository";
 
@@ -246,6 +246,26 @@ describe("the transcript walk", () => {
   });
 });
 
+/**
+ * Makes an exited session one whose transcript can still be picked up: the
+ * machine it ran on is still enlisted, and it reported a provider-native
+ * session. `resume` moves nothing without both.
+ */
+const madeResumable = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                           credential_hash, created_at, updated_at)
+      SELECT runner_id, 'a machine', 'online', 'active', 0, '[]', 'a hash', ${at}, ${at}
+      FROM sessions WHERE id = ${uuidFromString(sessionId)}
+    `;
+    yield* sql`
+      UPDATE sessions SET native_session_id = 'native-1'
+      WHERE id = ${uuidFromString(sessionId)}
+    `;
+  });
+
 describe("the session's own credential across a resume", () => {
   it("is gone the moment the session goes back on the queue", async () => {
     // A resumed session is queued again, with no process to be the identity of,
@@ -258,6 +278,7 @@ describe("the session's own credential across a resume", () => {
         yield* sessions.moved(sessionId, "starting", at);
         yield* sessions.setTokenHash(sessionId, "hash-one");
         yield* sessions.moved(sessionId, "exited", at);
+        yield* madeResumable(sessionId);
         const before = yield* hashOf(sessionId);
         yield* sessions.resume(sessionId, "{}", at);
         return { before, after: yield* hashOf(sessionId) };

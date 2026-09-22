@@ -71,7 +71,7 @@ import { AuditLog } from "../events";
 import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { gitIdentityOf, type GitCredential } from "../workspaces";
-import { inputRepository, type StoredInput } from "./inputs";
+import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
 import { sessionRecordComposer } from "./records";
 import {
   requireSession,
@@ -304,6 +304,38 @@ const make = Effect.gen(function* () {
    * of spec 06 section 4.1, which this build does not have.
    */
   const tracking = new Map<string, Tracked>();
+
+  /**
+   * Puts a session whose harness is gone back on the queue, under the document
+   * that picks its own transcript up. Joins the caller's transaction, and
+   * answers whether it moved the session: a caller that reads `false` has a
+   * session somebody else has already put back, and has nothing left to do
+   * about it.
+   *
+   * A caller that writes more than this one move asks for no announcement and
+   * announces once for its whole write set; a caller for which this move is the
+   * whole write set asks for the announcement here.
+   */
+  const resume = (
+    sessionId: string,
+    spec: string,
+    at: string,
+    announceTheMove: boolean,
+  ): Effect.Effect<boolean, SqlError> =>
+    Effect.gen(function* () {
+      const moved = yield* sessions.resume(sessionId, spec, at);
+      if (!moved) return false;
+      // The resumed process numbers its events from the start, so what the
+      // stored stream reached is not what they are judged against. Dropped
+      // once the resume is durable, like any other invalidation.
+      yield* afterCommit(() => {
+        tracking.delete(sessionId);
+      });
+      if (announceTheMove) {
+        yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+      }
+      return true;
+    });
 
   /**
    * The input a caller may still act on: one this session holds, one that has
@@ -768,13 +800,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
         if (taking.resumeSpec !== undefined) {
-          yield* sessions.resume(taking.sessionId, taking.resumeSpec, taking.at);
-          // The resumed process numbers its events from the start, so what the
-          // stored stream reached is not what they are judged against. Dropped
-          // once the resume is durable, like any other invalidation.
-          yield* afterCommit(() => {
-            tracking.delete(taking.sessionId);
-          });
+          yield* resume(taking.sessionId, taking.resumeSpec, taking.at, false);
         }
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
@@ -792,6 +818,53 @@ const make = Effect.gen(function* () {
         });
         return created;
       }),
+
+    resume,
+
+    /**
+     * Stores the input one subscription's match produced, joining the caller's
+     * transaction. `none` where that subscription and that event already have
+     * a row, which is how the same event reaching the event router twice wakes the
+     * session once.
+     *
+     * The row is stored waiting, never claimed: what gets it to the session -
+     * sending it now, holding it for the end of a running turn, or starting
+     * the session again - is decided after the write is durable.
+     */
+    storeMatchedInput: (
+      matched: NewMatchedInput,
+    ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.gen(function* () {
+        const created = yield* inputs.insertMatched(matched);
+        if (Option.isNone(created)) return created;
+        yield* announce({
+          _tag: "record",
+          topic: "session",
+          id: matched.sessionId,
+          kind: "updated",
+        });
+        return created;
+      }),
+
+    /**
+     * Ends every input still waiting for one subscription, with the reason
+     * that subscription ended: nothing waits on a claim nobody holds any more,
+     * and a reader of the row sees why it never went through.
+     */
+    cancelMatchedInputs: (subscriptionId: string, reason: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        for (const sessionId of yield* inputs.cancelQueuedForSubscription(subscriptionId, reason)) {
+          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+        }
+      }),
+
+    /** The sessions holding a queued input that has not gone out yet. */
+    listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      inputs.listSessionsAwaitingInput(),
+
+    /** Whether a row this session holds is out on the wire and unanswered. */
+    holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      inputs.holdsInputOnTheWire(sessionId),
 
     queuedInput,
 
@@ -1103,11 +1176,18 @@ export const SessionServiceLayer: Layer.Layer<
  * layer before it runs a migration, so a query against a column a fresh
  * database does not have yet would fail there. Called explicitly, after
  * migrations and before anything is placed on a runner.
+ *
+ * It answers the wake-ups the cancelled rows carried. Who is told about a
+ * wake-up that is lost is not this domain's question: a subscription is not a
+ * word the sessions domain knows.
  */
-export const cancelStrandedInputs: Effect.Effect<void, SqlError, SqlClient.SqlClient> =
-  Effect.flatMap(inputRepository, (inputs) =>
-    inputs.cancelStranded(
-      "the controller restarted while this input was on its way to the runner; " +
-        "whether the harness took it is unknown",
-    ),
-  );
+export const cancelStrandedInputs: Effect.Effect<
+  ReadonlyArray<LostWakeUp>,
+  SqlError,
+  SqlClient.SqlClient
+> = Effect.flatMap(inputRepository, (inputs) =>
+  inputs.cancelStranded(
+    "the controller restarted while this input was on its way to the runner; " +
+      "whether the harness took it is unknown",
+  ),
+);

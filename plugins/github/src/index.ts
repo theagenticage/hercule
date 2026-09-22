@@ -2,9 +2,11 @@
  * GitHub, as a connection type: a personal access token pasted by the user and
  * checked against the account it belongs to.
  *
- * Nothing else lives here yet. Ingest, resources and the watch list arrive with
- * the tickets that need them; a type with no per-connection config declares no
- * config schema at all.
+ * It is also the source the pipeline knows GitHub events by: the event kinds it
+ * can emit are declared here, so a subscription or a filter can name one before
+ * anything polls. Ingest, resources and the watch list arrive with the tickets
+ * that need them; a type with no per-connection config declares no config
+ * schema at all.
  */
 import { Effect, Schema } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
@@ -12,9 +14,12 @@ import {
   ConnectionValidationFailed,
   HOST_API,
   registerConnectionType,
+  registerEventSource,
   type ConnectionTypeContribution,
+  type EventSourceDefinition,
   type Plugin,
 } from "@hercule/plugin-host";
+import { GITHUB_EVENT_KINDS } from "./kinds";
 
 /** The endpoint that answers who a token belongs to. */
 const USER_URL = "https://api.github.com/user";
@@ -75,15 +80,26 @@ const connectionType: ConnectionTypeContribution = {
   validate,
 };
 
+/** The bare word the host qualifies into `github/github`. */
+const eventSource: EventSourceDefinition = {
+  id: "github",
+  connectionType: "github/github",
+  kinds: GITHUB_EVENT_KINDS,
+};
+
 export const github: Plugin = {
   manifest: {
     id: "github",
     displayName: "GitHub",
     hostApi: HOST_API,
-    capabilities: ["connections"],
+    capabilities: ["connections", "event-sources"],
     configSchema: Schema.Struct({}),
   },
-  register: (host) => registerConnectionType(host, connectionType),
+  register: (host) =>
+    Effect.andThen(
+      registerConnectionType(host, connectionType),
+      registerEventSource(host, eventSource),
+    ),
   // Nothing runs on the controller yet: the ingest loop belongs to the event
   // source ticket.
   activate: () => Effect.succeed(Effect.void),

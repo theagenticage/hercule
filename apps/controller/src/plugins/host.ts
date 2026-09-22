@@ -19,7 +19,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as Semaphore from "effect/Semaphore";
 import {
-  configJsonSchema,
+  deriveConfigJsonSchema,
   ConnectionType,
   decodeAgainst,
   HOST_API,
@@ -37,8 +37,6 @@ import {
   type RegistrationHost,
 } from "@hercule/plugin-host";
 import {
-  issuesOf,
-  MAX_PLUGIN_MESSAGE_LENGTH,
   validationOf,
   type PluginRefusalReason,
   type PluginStatus,
@@ -52,6 +50,8 @@ import { Secrets, type SecretOwner } from "../secrets";
 // both live in the connections domain: everything they touch is there. This is
 // the only direction the two point in.
 import { ConnectionTypes, PluginConfigs, type RegisteredConnectionType } from "../connections";
+import { asPluginError, describeFieldIssues, truncateMessage } from "./errors";
+import { registerEventSourceContribution } from "./event-sources";
 import { pluginRepository, type NewContribution } from "./repository";
 
 /**
@@ -59,7 +59,13 @@ import { pluginRepository, type NewContribution } from "./repository";
  * so a plugin written against a later build is refused by name here rather than
  * activated without the surface it asked for.
  */
-const IMPLEMENTED: ReadonlyArray<PluginCapability> = ["providers", "kv", "secrets", "connections"];
+const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
+  "providers",
+  "kv",
+  "secrets",
+  "connections",
+  "event-sources",
+];
 
 export interface LoadedPlugin {
   readonly id: string;
@@ -99,22 +105,6 @@ const exposed = (entry: Entry): LoadedPlugin => ({
 const PROVIDER = "provider";
 const CONNECTION_TYPE = "connection-type";
 
-/**
- * Cutting a plugin's unbounded text where the message is made, rather than at
- * each reader, is what makes the published maximum true of every message.
- */
-const bounded = (message: string): string =>
-  message.length <= MAX_PLUGIN_MESSAGE_LENGTH
-    ? message
-    : `${message.slice(0, MAX_PLUGIN_MESSAGE_LENGTH - 3)}...`;
-
-const fieldMessage = (error: Schema.SchemaError): string =>
-  bounded(
-    issuesOf(error)
-      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-      .join("; "),
-  );
-
 // An excess key is refused rather than stripped: dropping a field the host does
 // not know would let an unserializable value look accepted.
 const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
@@ -134,7 +124,7 @@ const decodeConnectionType = Schema.decodeUnknownEffect(ConnectionType, {
  * stack trace would say less than the sentence at the top of it.
  */
 const messageOf = (cause: Cause.Cause<PluginError>): string =>
-  bounded(
+  truncateMessage(
     Option.match(Cause.findErrorOption(cause), {
       onSome: (error) => error.message,
       onNone: () => {
@@ -152,11 +142,6 @@ const named = (what: string, value: string): Effect.Effect<void> =>
   value.length === 0
     ? Effect.die(new PluginError({ message: `A plugin ${what} cannot be empty.` }))
     : Effect.void;
-
-const asPluginError = (error: Schema.SchemaError): PluginError =>
-  new PluginError({
-    message: fieldMessage(error),
-  });
 
 /**
  * The claimed id is the useful half, but it is also the field most likely to be
@@ -176,7 +161,7 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
     Effect.catchTag("SchemaError", (error) =>
       Effect.die(
         new Error(
-          `The plugin ${nameOf(manifest, index)} has an invalid manifest: ${fieldMessage(error)}`,
+          `The plugin ${nameOf(manifest, index)} has an invalid manifest: ${describeFieldIssues(error)}`,
         ),
       ),
     ),
@@ -205,12 +190,12 @@ const inspect = (
   if (secretFields(manifest.configSchema).length > 0) {
     return Result.fail({
       kind: "unsupportedConfigSchema",
-      message: bounded(`the plugin's own config: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`),
+      message: truncateMessage(`the plugin's own config: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`),
     });
   }
-  return Result.mapError(configJsonSchema(manifest.configSchema), (error) => ({
+  return Result.mapError(deriveConfigJsonSchema(manifest.configSchema), (error) => ({
     kind: "unsupportedConfigSchema",
-    message: bounded(error.message),
+    message: truncateMessage(error.message),
   }));
 };
 
@@ -229,6 +214,7 @@ const registrationHost = (
   declared: Array<NewContribution>,
   live: Array<ProviderDefinition>,
   types: Array<RegisteredConnectionType>,
+  kinds: Map<string, Schema.Top>,
 ): RegistrationHost => ({
   ...(manifest.capabilities.includes("providers")
     ? {
@@ -240,7 +226,7 @@ const registrationHost = (
               );
               // The catalog persists the derived JSON Schema: what the plugin
               // authored is a live Effect Schema no catalog reader can use.
-              const configSchema = configJsonSchema(decoded.configSchema);
+              const configSchema = deriveConfigJsonSchema(decoded.configSchema);
               if (Result.isFailure(configSchema)) {
                 return yield* Effect.fail(
                   new PluginError({
@@ -311,7 +297,7 @@ const registrationHost = (
               const configSchema =
                 decoded.configSchema === undefined
                   ? undefined
-                  : configJsonSchema(decoded.configSchema);
+                  : deriveConfigJsonSchema(decoded.configSchema);
               if (configSchema !== undefined && Result.isFailure(configSchema)) {
                 return yield* Effect.fail(
                   new PluginError({
@@ -339,6 +325,14 @@ const registrationHost = (
         },
       }
     : {}),
+  ...(manifest.capabilities.includes("event-sources")
+    ? {
+        eventSources: {
+          register: (definition) =>
+            registerEventSourceContribution(manifest.id, definition, declared, kinds),
+        },
+      }
+    : {}),
 });
 
 const make = Effect.gen(function* () {
@@ -351,6 +345,8 @@ const make = Effect.gen(function* () {
   // Outside `gate`, unlike everything else here: registration is pure and runs
   // only at boot, so this is settled for the life of the process.
   const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
+  /** Every event kind this boot registered, by name. Settled with the providers. */
+  const eventKinds = yield* Ref.make<ReadonlyMap<string, Schema.Top>>(new Map());
   /**
    * One permit for the whole host, held across a move's reads, hooks and
    * writes. Without it two moves interleave around the await inside a hook and
@@ -455,8 +451,11 @@ const make = Effect.gen(function* () {
     declared: Array<NewContribution>,
     live: Array<ProviderDefinition>,
     types: Array<RegisteredConnectionType>,
+    kinds: Map<string, Schema.Top>,
   ): Effect.Effect<PluginStatus> =>
-    Effect.suspend(() => plugin.register(registrationHost(manifest, declared, live, types))).pipe(
+    Effect.suspend(() =>
+      plugin.register(registrationHost(manifest, declared, live, types, kinds)),
+    ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
         Effect.succeed<PluginStatus>({ _tag: "errored", message: messageOf(cause) }),
@@ -494,7 +493,9 @@ const make = Effect.gen(function* () {
         }),
       );
     }).pipe(
-      Effect.catchTag("SchemaError", (error) => markErrored(id, "activate", fieldMessage(error))),
+      Effect.catchTag("SchemaError", (error) =>
+        markErrored(id, "activate", describeFieldIssues(error)),
+      ),
     );
 
   /**
@@ -533,6 +534,7 @@ const make = Effect.gen(function* () {
         const catalog: Array<NewContribution> = [];
         const registeredProviders: Array<ProviderDefinition> = [];
         const registeredTypes: Array<RegisteredConnectionType> = [];
+        const registeredKinds = new Map<string, Schema.Top>();
 
         for (const [index, plugin] of registry.entries()) {
           const manifest = yield* decodeManifest(plugin.manifest, index);
@@ -566,12 +568,14 @@ const make = Effect.gen(function* () {
           const declared: Array<NewContribution> = [];
           const live: Array<ProviderDefinition> = [];
           const types: Array<RegisteredConnectionType> = [];
-          const status = yield* registerPass(plugin, manifest, declared, live, types);
+          const kinds = new Map<string, Schema.Top>();
+          const status = yield* registerPass(plugin, manifest, declared, live, types, kinds);
           const registered = status._tag !== "errored";
           if (registered) {
             catalog.push(...declared);
             registeredProviders.push(...live);
             registeredTypes.push(...types);
+            for (const [kind, entry] of kinds) registeredKinds.set(kind, entry);
           }
           booted.set(manifest.id, {
             ...facts,
@@ -591,6 +595,7 @@ const make = Effect.gen(function* () {
         );
         yield* Ref.set(entries, booted);
         yield* Ref.set(providers, registeredProviders);
+        yield* Ref.set(eventKinds, registeredKinds);
         yield* connectionTypes.replace(registeredTypes);
 
         yield* gate.withPermits(1)(
@@ -615,6 +620,9 @@ const make = Effect.gen(function* () {
 
     /** Every provider this boot registered, in registry order. */
     providers: (): Effect.Effect<ReadonlyArray<ProviderDefinition>> => Ref.get(providers),
+
+    /** Every event kind this boot registered, by name. */
+    eventKinds: (): Effect.Effect<ReadonlyMap<string, Schema.Top>> => Ref.get(eventKinds),
 
     refresh,
     stop,

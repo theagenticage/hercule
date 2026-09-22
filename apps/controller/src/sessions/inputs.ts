@@ -54,6 +54,23 @@ export interface NewInput {
   readonly sentAt?: string;
 }
 
+/** A wake-up that was sent, never acknowledged, and cannot be written again. */
+export interface LostWakeUp {
+  readonly subscriptionId: string;
+  readonly eventId: number;
+}
+
+/** An input a subscription's match produced, and the two things it came from. */
+export interface NewMatchedInput {
+  readonly sessionId: string;
+  readonly subscriptionId: string;
+  /** The position in the log of the event that matched. */
+  readonly eventId: number;
+  readonly actor: string;
+  readonly text: string;
+  readonly at: string;
+}
+
 export interface InputPageRequest {
   readonly sessionId: string;
   readonly limit: number;
@@ -97,7 +114,7 @@ const toInput = (row: InputRow): StoredInput => ({
  * belongs to: without it one session's cursor would silently hide rows on
  * another's list.
  */
-const scopeOf = (sessionId: string, direction: SortDirection): CursorScope => ({
+const buildCursorScope = (sessionId: string, direction: SortDirection): CursorScope => ({
   op: "input.query",
   field: `createdAt:${sessionId}`,
   direction,
@@ -131,6 +148,110 @@ const make = Effect.gen(function* () {
         };
       }),
 
+    /**
+     * Stores the input one match produced, or nothing where the same
+     * subscription and event already have a row.
+     *
+     * A consumer of the event log that committed its rows and stopped before
+     * it recorded how far it had read reads those events again, so the unique
+     * pair - not the caller - is what keeps one fact to one matched input. The row
+     * is never claimed inside the insert: the session is told about it only
+     * after the write is durable.
+     */
+    insertMatched: (input: NewMatchedInput): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.gen(function* () {
+        const id = mintUuid();
+        const written = yield* sql<{ readonly id: Uint8Array }>`
+          INSERT INTO session_inputs
+            (id, session_id, source, actor, text, status, created_at, subscription_id, event_id)
+          VALUES (${id}, ${uuidFromString(input.sessionId)}, 'subscription', ${input.actor},
+                  ${input.text}, 'queued', ${input.at},
+                  ${uuidFromString(input.subscriptionId)}, ${input.eventId})
+          ON CONFLICT (subscription_id, event_id) WHERE subscription_id IS NOT NULL
+            DO NOTHING
+          RETURNING id
+        `;
+        if (written.length === 0) return Option.none();
+        return Option.some({
+          id: uuidToString(id),
+          sessionId: input.sessionId,
+          source: "subscription",
+          actor: input.actor,
+          text: input.text,
+          status: "queued",
+          delivery: null,
+          createdAt: input.at,
+          deliveredAt: null,
+          sentAt: null,
+          reason: null,
+        });
+      }),
+
+    /**
+     * Ends every row still waiting for one subscription, with the reason the
+     * subscription itself ended, and answers the sessions whose rows moved. A
+     * row on the wire is left alone, for the reason `cancelQueued` gives.
+     */
+    cancelQueuedForSubscription: (
+      subscriptionId: string,
+      reason: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: Uint8Array }>`
+          UPDATE session_inputs SET status = 'cancelled', reason = ${reason}
+          WHERE subscription_id = ${uuidFromString(subscriptionId)}
+            AND status = 'queued' AND sent_at IS NULL
+          RETURNING session_id
+        `,
+        (rows) => [...new Set(rows.map((row) => uuidToString(row.session_id)))],
+      ),
+
+    /**
+     * The sessions holding a queued input that has not gone out yet, whatever
+     * wrote it. The rows say what is owed, so nothing has to be remembered
+     * across a restart: a row a controller stopped on between the commit and
+     * the send, and a row whose session went idle without the controller
+     * seeing the transition, are both picked up by the next caller. Who wrote
+     * the row makes no difference to that, so a person's typed input is
+     * answered here as well as a match's.
+     *
+     * A session that already has a row on the wire is left out. The runner
+     * takes one input per turn boundary, so a second row sent before the turn
+     * the first one opened has started is a row the runner has to hold.
+     */
+    listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: Uint8Array }>`
+          SELECT DISTINCT waiting.session_id FROM session_inputs AS waiting
+          WHERE waiting.status = 'queued' AND waiting.sent_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM session_inputs AS onTheWire
+              WHERE onTheWire.session_id = waiting.session_id
+                AND onTheWire.status = 'queued' AND onTheWire.sent_at IS NOT NULL
+            )
+        `,
+        (rows) => rows.map((row) => uuidToString(row.session_id)),
+      ),
+
+    /**
+     * Whether a row this session holds is out on the wire and unanswered.
+     *
+     * The runner takes one input per turn boundary. A second row sent before
+     * the turn the first row opened has started is a row the runner has to
+     * hold, so a caller with a row still out sends nothing more until the
+     * runner has reported what that row did.
+     */
+    holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)}
+            AND status = 'queued' AND sent_at IS NOT NULL
+          LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
     /** Scoped by the session, so an id belonging to another one is simply not here. */
     one: (sessionId: string, id: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
@@ -143,7 +264,7 @@ const make = Effect.gen(function* () {
 
     list: (request: InputPageRequest): Effect.Effect<Page<StoredInput>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = scopeOf(request.sessionId, request.direction);
+        const scope = buildCursorScope(request.sessionId, request.direction);
         const after =
           request.cursor === undefined
             ? undefined
@@ -256,12 +377,29 @@ const make = Effect.gen(function* () {
      * Ends every row a restart caught on the wire: whether the harness took it
      * before the connection dropped is unknown, so it is neither delivered nor
      * resent - resending risks the message reaching the harness twice.
+     *
+     * It answers the wake-ups that ended with those rows. A row a match wrote
+     * names the subscription and the event it came from, and the pair can
+     * never be written again, so the caller has to be able to say on which
+     * subscription a wake-up was lost.
      */
-    cancelStranded: (reason: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
-        WHERE status = 'queued' AND sent_at IS NOT NULL
-      `),
+    cancelStranded: (reason: string): Effect.Effect<ReadonlyArray<LostWakeUp>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly subscription_id: Uint8Array | null;
+          readonly event_id: number | null;
+        }>`
+          UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
+          WHERE status = 'queued' AND sent_at IS NOT NULL
+          RETURNING subscription_id, event_id
+        `,
+        (rows) =>
+          rows.flatMap((row) =>
+            row.subscription_id === null || row.event_id === null
+              ? []
+              : [{ subscriptionId: uuidToString(row.subscription_id), eventId: row.event_id }],
+          ),
+      ),
   };
 });
 

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Result } from "effect";
-import { CLI, NOUNS } from "@hercule/contract";
+import { CLI, NOUNS, OPERATIONS, type OperationId } from "@hercule/contract";
 import { main, readSetupUrl } from "./index";
 import { envelope, id, stubFetch, stubIo, type Handler } from "./testing";
 
@@ -1059,5 +1059,43 @@ describe("hercule transcript read: a turn that answered under a schema", () => {
       { outcome: "ok", value: VALUE },
       { outcome: "schema-failure", reason: "/verdict: not one of the enum values" },
     ]);
+  });
+});
+
+// A positional whose field carries a shorthand is decoded by that field's own
+// schema before the call, so the wire never carries the terminal's spelling.
+describe("a positional a field's own schema decodes", () => {
+  it("sends the decoded target, not the shorthand the agent typed", async () => {
+    const { fetch, run } = cli(() => ({ subscriptionId: id("aaaaaaa1") }));
+
+    expect(await run("subscription", "create", "github:pr:o/r#87")).toBe(0);
+
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/subscriptions",
+      body: { target: { kind: "ref", ref: "github:pr:o/r#87" } },
+    });
+  });
+});
+
+// An agent reads one help screen and then makes the call. The last line is what
+// tells it which operation that is, where it lands, and what its profile must
+// hold for the call to be let through.
+describe("the last line of every command's help", () => {
+  it("names the operation, its route, and the grant it needs", async () => {
+    const rows = Object.entries(CLI as Record<string, { command?: string; hidden?: true }>);
+    for (const [id, row] of rows) {
+      if (row.hidden === true) continue;
+      const printed = lastLine(await help(...row.command!.split(" ")));
+      const operation = OPERATIONS[id as OperationId];
+      expect(printed, row.command).toContain(`operation ${id}`);
+      expect(printed, row.command).toContain(`${operation.method} ${operation.path}`);
+      // A grant always contains a dot. The requirements that are not grants
+      // are written as prose on this line, not as the marker word.
+      if (operation.requires.includes(".")) {
+        expect(printed, row.command).toContain(operation.requires);
+      }
+    }
   });
 });

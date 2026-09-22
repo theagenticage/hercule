@@ -77,6 +77,16 @@ describe("the spelling of a command", () => {
     expect(spelled).toEqual(written);
   });
 
+  it("never takes a query parameter as a bare word", () => {
+    // The tree refuses such a row while it builds, so this holds for every
+    // command there is; what it asserts is that the rule is applied at all.
+    for (const command of COMMANDS) {
+      for (const field of command.query) {
+        expect(field.positional, `${spelling(command)}: --${field.spelling}`).toBe(false);
+      }
+    }
+  });
+
   it("writes every word in kebab-case", () => {
     for (const command of COMMANDS) {
       for (const word of command.words) {
@@ -106,12 +116,20 @@ describe("the spelling of a command", () => {
     }
   });
 
-  it("takes the path parameters positionally, in route order", () => {
+  it("takes the path parameters positionally, in route order, before any other bare word", () => {
     for (const command of COMMANDS) {
+      const inPath = command.positionals.filter((field) => field.carriedIn === "path");
       expect(
-        command.positionals.map((field) => field.name),
+        inPath.map((field) => field.name),
         spelling(command),
       ).toEqual(pathParams(command.path));
+      // A payload field the table writes as a bare word stands after them, and
+      // nothing else is ever a bare word.
+      const rest = command.positionals.slice(inPath.length);
+      expect(
+        rest.every((field) => field.carriedIn === "payload"),
+        `${spelling(command)}: ${rest.map((field) => field.name).join(", ")}`,
+      ).toBe(true);
     }
   });
 });
@@ -221,6 +239,7 @@ describe("the placeholders a usage line shows", () => {
   /** Every command whose positionals are not one plain `<id>`. */
   const NAMED: Record<string, string> = {
     "secret set": "<owner-kind> <owner-id> <name>",
+    "subscription create": "<target>",
     "secret delete": "<owner-kind> <owner-id> <name>",
     "input list": "<session-id>",
     "input update": "<session-id> <input-id>",

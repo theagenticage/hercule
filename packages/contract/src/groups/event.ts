@@ -2,7 +2,7 @@
  * The event log, read.
  *
  * One table holds two populations under one envelope: pipeline events, which
- * the matcher will evaluate against triggers, and audit entries, which it never
+ * the event router will evaluate against triggers, and audit entries, which it never
  * will. Both come back from `query`, told apart by `kind`, because the log is
  * also the audit log and the reason to open it is usually to read a security
  * entry beside the events around it. One population filter applies: the
@@ -69,6 +69,44 @@ export type Event = Schema.Schema.Type<typeof Event>;
 /** The log is walked by position, and by nothing else. */
 export const EVENT_SORT_FIELDS = ["id"] as const;
 
+/** The longest idempotency key an emitter may write. */
+export const MAX_DEDUP_KEY_LENGTH = 200;
+
+/** The longest system name. It is the name of a system, not a sentence. */
+export const MAX_EVENT_SYSTEM_LENGTH = 64;
+
+/** The longest source URL. It is where a person opens the event, not a document. */
+export const MAX_EVENT_URL_LENGTH = 2048;
+
+/** What a manual emit hands over. Everything else on the envelope is the core's. */
+export const EventEmitInput = Schema.Struct({
+  kind: EventKind,
+  payload: JsonObject,
+  connectionId: Schema.optionalKey(Id),
+  refs: Schema.optionalKey(Schema.Array(ExternalRef)),
+  dedupKey: Schema.optionalKey(bounded(1, MAX_DEDUP_KEY_LENGTH)),
+});
+
+export type EventEmitInput = Schema.Schema.Type<typeof EventEmitInput>;
+
+/** Where a manual emit lands in the log. */
+export const EventEmitted = Schema.Struct({ eventId: EventId });
+
+export type EventEmitted = Schema.Schema.Type<typeof EventEmitted>;
+
+/**
+ * What enrichment may amend. An omitted field is left as it was; `refs` is
+ * added to and never taken from, so a later reader of an event never finds
+ * fewer identities on it than an earlier one did.
+ */
+export const EventEnrichInput = Schema.Struct({
+  system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
+  url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
+  refs: Schema.optionalKey(Schema.Array(ExternalRef)),
+});
+
+export type EventEnrichInput = Schema.Schema.Type<typeof EventEnrichInput>;
+
 export const event = HttpApiGroup.make("event")
   .add(
     HttpApiEndpoint.get("query", "/events", {
@@ -91,6 +129,22 @@ export const event = HttpApiGroup.make("event")
     }),
     HttpApiEndpoint.get("read", "/events/:id", {
       params: { id: Schema.FiniteFromString.pipe(Schema.decodeTo(EventId)) },
+      success: Event,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * A synthetic event, posted by hand. A namespaced kind means a manual
+     * `github.issue.opened` reaches a subscription the way an ingested one
+     * does; a filter that has to tell the two apart reads `event.source`.
+     */
+    HttpApiEndpoint.post("emit", "/events/emit", {
+      payload: EventEmitInput,
+      success: EventEmitted,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.post("enrich", "/events/:id/enrich", {
+      params: { id: Schema.FiniteFromString.pipe(Schema.decodeTo(EventId)) },
+      payload: EventEnrichInput,
       success: Event,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),

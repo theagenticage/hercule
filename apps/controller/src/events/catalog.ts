@@ -1,0 +1,23 @@
+/**
+ * The schema an event kind's payload must satisfy, declared as a question
+ * rather than taken from whoever answers it.
+ *
+ * A kind is declared by a plugin at registration, so the answer lives in the
+ * plugins domain. That domain appends audit entries to this log, so it already
+ * depends on this one, and an import the other way would make the two a cycle.
+ * The question is therefore declared here and the plugins domain provides the
+ * Layer, the way the database layer declares `AfterCommit` and the live domain
+ * answers it.
+ */
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
+import type * as Schema from "effect/Schema";
+
+export class EventKindCatalog extends Context.Service<
+  EventKindCatalog,
+  {
+    /** What a payload of this kind must be, or nothing for a kind nobody declared. */
+    readonly readPayloadSchema: (kind: string) => Effect.Effect<Option.Option<Schema.Top>>;
+  }
+>()("hercule/controller/events/EventKindCatalog") {}

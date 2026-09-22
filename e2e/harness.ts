@@ -9,7 +9,16 @@
  * The processes are started with `Bun.spawn` rather than `spawnHercule`, which
  * inherits stdio: a test has to read what the command printed.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -66,6 +75,53 @@ function cleanEnv(): Record<string, string> {
 export function liveSessionsAsked(): boolean {
   const asked = process.env["HERCULE_LIVE_SESSION_TEST"];
   return asked !== undefined && asked !== "" && asked !== "0";
+}
+
+/**
+ * ## The login a live session runs on
+ *
+ * A session runs against the Provider Instance's own `CLAUDE_CONFIG_DIR` under
+ * the runner's storage (spec 06 section 4.2), which in a throwaway Hercule
+ * Home is empty, so nothing could start. There are two ways to give it a
+ * login, and a case that has neither skips saying so:
+ *
+ * - `HERCULE_E2E_CLAUDE_CREDENTIALS` names a file holding what the Claude CLI
+ *   stores as its credential. `lendCredential` copies it into the throwaway
+ *   instance directory as `.credentials.json`, and the caller re-probes the
+ *   instance; the whole home, credential included, is deleted when the suite
+ *   ends. Reading the developer's own login out of wherever their machine
+ *   keeps it is the caller's business, never this file's: a test that reaches
+ *   into a personal credential store takes a secret nobody handed it.
+ * - `ANTHROPIC_API_KEY` on the environment, which reaches the session through
+ *   the runner the controller starts for itself.
+ */
+export const LENT_CREDENTIALS = process.env["HERCULE_E2E_CLAUDE_CREDENTIALS"];
+
+/** Whether either of the two login routes is open for this run. */
+export function loginLent(): boolean {
+  return LENT_CREDENTIALS !== undefined || process.env["ANTHROPIC_API_KEY"] !== undefined;
+}
+
+/**
+ * `<home>/runner/<storage>/providers/<instanceId>`: the instance's private
+ * config directory, named by the storage directory this runner's identity
+ * owns. The runner writes `runner.json` as it enrols, so nothing may call this
+ * before it has.
+ */
+function buildInstanceDir(home: string, instanceId: string): string {
+  const pin = JSON.parse(readFileSync(join(home, "runner", "runner.json"), "utf8")) as {
+    readonly storageDirectory: string;
+  };
+  return join(home, "runner", pin.storageDirectory, "providers", instanceId);
+}
+
+/** Lends the credential the caller named to the throwaway instance, for this run. */
+export function lendCredential(home: string, instanceId: string): void {
+  const dir = buildInstanceDir(home, instanceId);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, ".credentials.json");
+  writeFileSync(path, readFileSync(LENT_CREDENTIALS!, "utf8"), { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 /** What a finished command left behind. */
@@ -341,6 +397,14 @@ export function jsonOk<A>(ran: Ran): A {
   return jsonOf(ran) as A;
 }
 
+/** One page of a listing, as the CLI prints it with `--json`. */
+export interface Page<A> {
+  readonly items: ReadonlyArray<A>;
+}
+
+/** Long enough for the runner to enrol and to probe a directory it was just handed. */
+export const LOGIN_DEADLINE_MS = 120_000;
+
 /** What a runner reported about one Provider Instance when it last probed it. */
 export interface Snapshot {
   readonly auth: { readonly status: string; readonly message?: string };
@@ -369,6 +433,94 @@ export async function instancesOf(options: {
   if (!response.ok)
     throw new Error(`GET /api/v1/providers answered ${String(response.status)}: ${body}`);
   return JSON.parse(body) as ReadonlyArray<Instance>;
+}
+
+/**
+ * The controller's own runner, once it has enrolled and dialled in. It writes
+ * `runner.json` and its storage directory on the way, which is what the login
+ * is lent into, so nothing may read either before this answers.
+ */
+export async function waitForEnrolledRunner(options: {
+  readonly home: string;
+  readonly binary: string;
+}): Promise<string> {
+  const deadline = Date.now() + LOGIN_DEADLINE_MS;
+  for (;;) {
+    const ran = await cli(["runner", "list", "--json"], options);
+    const id = ran.code === 0 ? jsonOk<Page<{ readonly id: string }>>(ran).items[0]?.id : undefined;
+    if (id !== undefined && existsSync(join(options.home, "runner", "runner.json"))) return id;
+    if (Date.now() > deadline) throw new Error(`no runner dialled the controller:\n${ran.stdout}`);
+    await Bun.sleep(500);
+  }
+}
+
+/** The claude-code Provider Instance the controller seeds for itself. */
+export async function readClaudeInstance(options: {
+  readonly url: string;
+  readonly apiKey: string;
+}): Promise<Instance> {
+  const found = (await instancesOf(options)).find((one) => one.providerId === "claude-code");
+  if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
+  return found;
+}
+
+/**
+ * Probes the instance until a machine says its login works, and answers with
+ * that snapshot. Repeated rather than trusted once: a probe of a directory
+ * that was empty a moment ago has been seen to answer `unauthenticated`.
+ */
+export async function probeUntilLoggedIn(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly runnerId: string;
+  readonly instanceId: string;
+}): Promise<Snapshot> {
+  const deadline = Date.now() + LOGIN_DEADLINE_MS;
+  let last: string;
+  for (;;) {
+    const ran = await cli(
+      ["runner", "probe", options.runnerId, "--instance", options.instanceId, "--json"],
+      options,
+    );
+    if (ran.code === 0) {
+      const snapshot = jsonOk<Snapshot>(ran);
+      if (snapshot.auth.status === "ok") return snapshot;
+      last = `${snapshot.auth.status}: ${snapshot.auth.message ?? "no message"}`;
+    } else {
+      last = `${ran.stdout}\n${ran.stderr}`;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `the instance never probed ok within ${String(LOGIN_DEADLINE_MS / 1000)}s: ${last}`,
+      );
+    }
+    await Bun.sleep(2_000);
+  }
+}
+
+/** A runner, a Provider Instance and the login it runs on, all in place. */
+export interface LoggedInInstance {
+  readonly runnerId: string;
+  readonly instance: Instance;
+  readonly snapshot: Snapshot;
+}
+
+/**
+ * Everything a live session needs before it can be spawned: the enrolled
+ * runner, the claude-code instance, the lent credential where the caller named
+ * one, and a probe that says the login works.
+ */
+export async function prepareLoggedInInstance(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly url: string;
+  readonly apiKey: string;
+}): Promise<LoggedInInstance> {
+  const runnerId = await waitForEnrolledRunner(options);
+  const instance = await readClaudeInstance(options);
+  if (LENT_CREDENTIALS !== undefined) lendCredential(options.home, instance.id);
+  const snapshot = await probeUntilLoggedIn({ ...options, runnerId, instanceId: instance.id });
+  return { runnerId, instance, snapshot };
 }
 
 /** A session as the session operations answer it. */

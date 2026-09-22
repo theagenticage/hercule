@@ -99,6 +99,12 @@ const COMMANDS: Record<string, string> = {
 
   "event.query": "event list",
   "event.read": "event read",
+  "event.emit": "event emit",
+  "event.enrich": "event enrich",
+
+  "subscription.query": "subscription list",
+  "subscription.create": "subscription create",
+  "subscription.cancel": "subscription cancel",
 
   "runner.query": "runner list",
   "runner.read": "runner read",
@@ -357,7 +363,13 @@ describe("the resolvers", () => {
   });
 
   it("leaves an id with no listing of its own unresolved", () => {
-    for (const name of ["event.read id", "plugin.configure id", "input.update inputId"]) {
+    for (const name of [
+      "event.read id",
+      "event.enrich id",
+      "subscription.cancel id",
+      "plugin.configure id",
+      "input.update inputId",
+    ]) {
       expect(resolvers()[name], `${name} should take a full id`).toBeUndefined();
     }
   });

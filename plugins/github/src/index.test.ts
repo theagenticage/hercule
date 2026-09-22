@@ -12,22 +12,39 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
-import type { ConnectionTypeContribution, Plugin, RegistrationHost } from "@hercule/plugin-host";
+import type {
+  ConnectionTypeContribution,
+  EventSourceDefinition,
+  Plugin,
+  RegistrationHost,
+} from "@hercule/plugin-host";
 import { github } from "./index";
 
 /** Runs `register` and hands back everything the plugin contributed. */
-const registered = async (plugin: Plugin): Promise<ReadonlyArray<ConnectionTypeContribution>> => {
-  const contributions: Array<ConnectionTypeContribution> = [];
+const registered = async (
+  plugin: Plugin,
+): Promise<{
+  readonly types: ReadonlyArray<ConnectionTypeContribution>;
+  readonly sources: ReadonlyArray<EventSourceDefinition>;
+}> => {
+  const types: Array<ConnectionTypeContribution> = [];
+  const sources: Array<EventSourceDefinition> = [];
   const host: RegistrationHost = {
     connections: {
       registerType: (contribution) =>
         Effect.sync(() => {
-          contributions.push(contribution);
+          types.push(contribution);
+        }),
+    },
+    eventSources: {
+      register: (definition) =>
+        Effect.sync(() => {
+          sources.push(definition);
         }),
     },
   };
   await Effect.runPromise(plugin.register(host));
-  return contributions;
+  return { types, sources };
 };
 
 /** The requests the stub was handed, and what it answered them with. */
@@ -67,7 +84,7 @@ const PAT = "ghp_a-real-looking-token";
 
 /** The one type the plugin contributes, for the tests that drive its `validate`. */
 const connectionType = async (): Promise<ConnectionTypeContribution> => {
-  const contribution = (await registered(github))[0];
+  const contribution = (await registered(github)).types[0];
   if (contribution === undefined) throw new Error("the plugin registered no connection type");
   return contribution;
 };
@@ -90,11 +107,33 @@ const messageOf = (
   return outcome.failure.message;
 };
 
+/** The roster the pipeline spec pins, spelled out because the roster is the claim. */
+const KINDS = [
+  "github.notification",
+  "github.issue.opened",
+  "github.issue.closed",
+  "github.issue.reopened",
+  "github.issue.labeled",
+  "github.issue.assigned",
+  "github.issue.commented",
+  "github.pr.opened",
+  "github.pr.synchronized",
+  "github.pr.review-submitted",
+  "github.pr.commented",
+  "github.pr.merged",
+  "github.pr.closed",
+  "github.pr.labeled",
+  "github.pr.checks-completed",
+] as const;
+
 describe("what the github plugin registers", () => {
   it("asks for the connections capability and contributes one credentials-flow type", async () => {
-    expect(github.manifest).toMatchObject({ id: "github", capabilities: ["connections"] });
+    expect(github.manifest).toMatchObject({
+      id: "github",
+      capabilities: ["connections", "event-sources"],
+    });
 
-    const contributions = await registered(github);
+    const contributions = (await registered(github)).types;
 
     expect(contributions).toHaveLength(1);
     expect(contributions[0]).toMatchObject({
@@ -109,6 +148,18 @@ describe("what the github plugin registers", () => {
     });
     // A personal access token is pasted, never redirected for.
     expect(contributions[0]?.oauth).toBeUndefined();
+  });
+
+  it("contributes one event source declaring the whole kind roster", async () => {
+    const sources = (await registered(github)).sources;
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.id).toBe("github");
+    expect(sources[0]?.connectionType).toBe("github/github");
+    expect(Object.keys(sources[0]?.kinds ?? {}).sort()).toEqual([...KINDS].sort());
+    for (const kind of KINDS) {
+      expect(sources[0]?.kinds[kind]?.description ?? "", kind).not.toBe("");
+    }
   });
 });
 

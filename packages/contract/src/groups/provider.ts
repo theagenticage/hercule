@@ -5,7 +5,7 @@
  * at read time, not from the stored row.
  */
 import { Schema } from "effect";
-import { DeclaredCapabilities, MAX_PROVIDER_NAME_LENGTH } from "@hercule/plugin-host";
+import { DeclaredCapabilities, MAX_CONTRIBUTION_NAME_LENGTH } from "@hercule/plugin-host";
 import { ModelDescriptor, SnapshotAuth } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -22,10 +22,10 @@ import { Authenticated } from "../security";
 import { bounded } from "../strings";
 
 /**
- * The longest name a provider instance may carry. It is the provider's own
+ * The longest name a provider instance may carry. It is a contribution's own
  * bound because the controller names an instance after its provider.
  */
-export const MAX_PROVIDER_INSTANCE_NAME_LENGTH = MAX_PROVIDER_NAME_LENGTH;
+export const MAX_PROVIDER_INSTANCE_NAME_LENGTH = MAX_CONTRIBUTION_NAME_LENGTH;
 
 const ProviderInstanceName = bounded(1, MAX_PROVIDER_INSTANCE_NAME_LENGTH);
 

@@ -39,6 +39,10 @@ import {
   InboundLayer,
   Live,
   LiveLayer,
+  Enrichment,
+  EnrichmentLayer,
+  EventRouterLayer,
+  PipelineLayer,
   Placement,
   PlacementLayer,
   ProfileRemoval,
@@ -49,9 +53,10 @@ import {
   RetirementLayer,
 } from "../daemon";
 import { Profiles, ProfilesLayer } from "../permissions";
-import { Plugins } from "../plugins";
+import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
+import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
@@ -262,9 +267,24 @@ const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
 const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
   Effect.gen(function* () {
     const events = yield* EventService;
+    const enrichment = yield* Enrichment;
     return handlers
       .handle("query", ({ query }) => operation(events.query(query)))
-      .handle("read", ({ params }) => operation(events.read(params)));
+      .handle("read", ({ params }) => operation(events.read(params)))
+      .handle("emit", ({ payload }) => operation(events.emit(payload)))
+      .handle("enrich", ({ params, payload }) =>
+        operation(enrichment.enrichEvent({ id: params.id, ...payload })),
+      );
+  }),
+);
+
+const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) =>
+  Effect.gen(function* () {
+    const subscriptions = yield* SubscriptionService;
+    return handlers
+      .handle("query", ({ query }) => operation(subscriptions.query(query)))
+      .handle("create", ({ payload }) => operation(subscriptions.create(payload)))
+      .handle("cancel", ({ params }) => operation(subscriptions.cancel(params)));
   }),
 );
 
@@ -424,6 +444,10 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * instances the boot built: a second one would hold no plugins, no connections,
  * none of the ingest state a session's stream is coalesced in, and would write
  * over the same rows the drivers act on. They reach the handlers from there.
+ *
+ * `EvaluationErrorNotifier` is left to the caller for the same reason from the
+ * other side: a test reads what a routing table reported by handing over a
+ * listener of its own, which a layer provided in here could not be replaced by.
  */
 export const operationLayers = Layer.mergeAll(
   SetupLayer,
@@ -444,16 +468,29 @@ export const operationLayers = Layer.mergeAll(
   // that one is layered under it rather than merged beside it.
   RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
   RunnerJoinLayer,
-  // The inbound driver reaches both dispatch and the live channel and placement
-  // reaches dispatch, so those two are layered under the pair rather than merged
-  // beside it. The live channel reaches dispatch too, which is why it is
-  // provided first.
-  Layer.mergeAll(InboundLayer, PlacementLayer).pipe(
-    Layer.provideMerge(LiveLayer),
-    Layer.provideMerge(DispatchLayer),
-  ),
+  // The inbound driver reaches both dispatch and the live channel, placement
+  // reaches dispatch, and the delivery of what a routing table matched goes out
+  // through that same live channel, so those three are layered under the group
+  // rather than merged beside it. The live channel reaches dispatch too, which
+  // is why it is provided first.
+  Layer.mergeAll(
+    InboundLayer,
+    PlacementLayer,
+    // The events service reads what kinds exist from the plugins domain, which
+    // appends to the event log and so may not be imported by it; the two meet
+    // here, where the whole controller is assembled. The controller daemon's
+    // enrichment use case writes through that same service, so it is layered
+    // over it rather than merged beside it. The clock and the enrichment both
+    // hand their work to one router, so the router is provided to the pair.
+    Layer.mergeAll(
+      PipelineLayer,
+      EnrichmentLayer.pipe(
+        Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
+      ),
+    ).pipe(Layer.provideMerge(EventRouterLayer)),
+  ).pipe(Layer.provideMerge(LiveLayer), Layer.provideMerge(DispatchLayer)),
   ProvisioningLayer,
-  EventServiceLayer,
+  SubscriptionServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,
 );
@@ -475,6 +512,7 @@ export const handlerLayers = Layer.mergeAll(
   workspaceRoutes,
   connectionRoutes,
   eventRoutes,
+  subscriptionRoutes,
   runnerRoutes,
   pluginRoutes,
   providerRoutes,

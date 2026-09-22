@@ -760,6 +760,146 @@ export const CLI = {
         "no entry has that id, or it is a security entry and you do not hold event.audit; the two answer alike on purpose",
     },
   },
+  "event.emit": {
+    command: "event emit",
+    help: "Posts one event into the pipeline by hand. Reach for it to test a subscription or a filter without waiting for the real thing to happen, or to tell Hercule about something no source watches. The kind must be one a plugin declared, and the payload must be what that kind's schema says; the core stamps the rest and answers with the new event's id.",
+    examples: [
+      {
+        args: [
+          "--kind",
+          "github.issue.opened",
+          "--payload",
+          '{"subject":{"repo":"octo/repo","number":42,"url":"https://github.com/octo/repo/issues/42"}}',
+          "--ref",
+          "github:issue:octo/repo#42",
+        ],
+      },
+      {
+        args: [
+          "--kind",
+          "github.pr.merged",
+          "--payload",
+          '{"subject":{"repo":"octo/repo","number":87,"url":"https://github.com/octo/repo/pull/87"}}',
+          "--dedup-key",
+          "pr-87-merged",
+        ],
+      },
+    ],
+    fields: {
+      kind: {
+        flag: "kind",
+        help: "The declared event kind, such as github.issue.opened; an unregistered kind is refused by name.",
+      },
+      payload: {
+        flag: "payload",
+        help: "The event's payload as one JSON object, read against the kind's declared schema.",
+      },
+      connectionId: {
+        flag: "connection",
+        help: "The Connection the event is to be stamped with, by its full id; omit it for an event that came through none.",
+      },
+      refs: {
+        flag: "ref",
+        help: "An External Ref the event is about, written <system>:<kind>:<identity>; repeat the flag for several.",
+      },
+      dedupKey: {
+        flag: "dedup-key",
+        help: "The emitter's idempotency key: a second emit with the same key and Connection answers the first event's id instead of writing a second.",
+      },
+    },
+    errors: {
+      not_found: "no Connection has that id",
+      validation:
+        "no plugin declares that kind, or the payload does not fit the kind's schema, or a ref is not written <system>:<kind>:<identity>",
+    },
+  },
+  "event.enrich": {
+    command: "event enrich",
+    help: "Amends one event that is already in the log. What may be amended is the system it is about, where a person opens it, and the External Refs it carries. Reach for it after reading an event that arrived through one system and is really about another. What is named is overwritten, what is left out stays as it was, and refs are added to and never removed; the payload and the original are never touched.",
+    examples: [
+      {
+        args: [
+          "4217",
+          "--system",
+          "sentry",
+          "--url",
+          "https://sentry.io/issues/123",
+          "--ref",
+          "sentry:issue:123",
+        ],
+      },
+      { args: ["4217", "--ref", "github:pr:octo/repo#87"] },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The event's id, which is its position in the log: a whole number counted from one, never a tail.",
+      },
+      system: {
+        flag: "system",
+        help: "The external system the event is really about, such as sentry; it replaces what the emitter stamped.",
+      },
+      url: {
+        flag: "url",
+        help: "Where a person opens this event in that system; it replaces the one the emitter stamped.",
+      },
+      refs: {
+        flag: "ref",
+        help: "An External Ref to add, written <system>:<kind>:<identity>; repeat the flag for several, and one already there is kept once.",
+      },
+    },
+    errors: {
+      not_found:
+        "no entry has that id, or it is an audit entry: the log's record of what Hercule itself did is never amended, and reads as absent here",
+    },
+  },
+
+  "subscription.query": {
+    command: "subscription list",
+    help: "Lists what a session is waiting on. Each row carries the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, naming the event that will not be delivered again. A session token that names no holder lists its own. Only live subscriptions are listed; a cancelled one is gone from here.",
+    examples: [
+      { args: [] },
+      { args: ["--holder", "session:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
+    ],
+    fields: {
+      holder: {
+        flag: "holder",
+        help: "Whose subscriptions to list, written session:<session id> with the full id; a session token that names none lists its own, and a user credential must name one.",
+      },
+    },
+  },
+  "subscription.create": {
+    command: "subscription create",
+    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Reach for it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session may hold a subscription, and the session that calls is the holder.",
+    examples: [{ args: ["github:pr:o/r#87"] }, { args: ["gmail:thread:19b2c"] }],
+    fields: {
+      target: {
+        positional: true,
+        placeholder: "target",
+        help: "What to wait on, as one word: an External Ref written <system>:<kind>:<identity>, or run:<run id>, session:<session id>, request:<permission request id>.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "this version has no runs, no session platform events and no Permission Requests, so only a ref target can be waited on",
+      validation: "a user credential holds no subscription; call this on a session token",
+    },
+  },
+  "subscription.cancel": {
+    command: "subscription cancel",
+    help: "Ends one subscription, so the event router stops evaluating it and nothing more arrives through it. Find the id with `hercule subscription list`.",
+    examples: [{ args: ["0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The subscription's full id, as `hercule subscription create` answered with it; a tail is not resolved here.",
+      },
+    },
+    errors: {
+      not_found:
+        "nothing here to end: no subscription has that id, or it has ended already, or another session holds it; the three answer alike",
+    },
+  },
 
   "runner.query": {
     command: "runner list",
@@ -1825,7 +1965,12 @@ export const NOUNS = {
   },
   event: {
     summary: "The event log: external events and audit entries, under one envelope.",
-    flow: "hercule event list to see what came in, hercule event read for one entry in full.",
+    flow: "hercule event list to see what came in, hercule event read for one entry in full, hercule event emit to post one by hand, hercule event enrich to say what an entry is really about.",
+  },
+  subscription: {
+    summary:
+      "Subscriptions: the standing claims sessions hold on events that have not happened yet.",
+    flow: "hercule subscription create starts a wait, hercule subscription list shows what a session waits on, hercule subscription cancel ends one.",
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",

@@ -24,6 +24,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { bootWith, type BootOutcome, type ControllerServices } from "../bootstrap";
 import { operationLayers, serve } from "../http";
+import { EvaluationErrorNotifierLayer } from "../subscriptions";
 import { Settings } from "../settings";
 import {
   CRASH_LOOP_LIMIT,
@@ -210,6 +211,7 @@ const bootHolding = <A>(
             return yield* body(outcome);
           }).pipe(
             Effect.provide(operationLayers),
+            Effect.provide(EvaluationErrorNotifierLayer),
             Effect.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port, reusePort: true })),
           ),
         ),

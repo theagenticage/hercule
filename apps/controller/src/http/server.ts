@@ -50,7 +50,7 @@ import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { OAuthCallbackRouteLayer } from "../connections";
-import { Inbound, Provisioning } from "../daemon";
+import { Inbound, Pipeline, Provisioning } from "../daemon";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerConnections, RunnerSocketRouteLayer } from "../runners";
@@ -209,5 +209,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     // them and the rest of the fleet's reports never wait behind them.
     yield* Effect.forkScoped(Effect.flatMap(Inbound, (inbound) => inbound.driving));
     yield* Effect.forkScoped(Effect.flatMap(Inbound, (inbound) => inbound.ingesting));
+    // The event pipeline: the router is the one durable-cursor consumer of the
+    // event log. It reads its own position from the database, so the clock is
+    // forked here like the rest and needs nothing to have happened before it.
+    yield* Effect.forkScoped(Effect.flatMap(Pipeline, (pipeline) => pipeline.driving));
     yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
   });

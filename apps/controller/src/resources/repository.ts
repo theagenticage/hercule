@@ -119,7 +119,7 @@ const COLUMNS =
   "id, kind, remote, canonical_remote, label, connection_id, setup_command, " +
   "workspace_include, created_at, updated_at";
 
-const scopeOf = (direction: SortDirection): CursorScope => ({
+const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "resource.query",
   field: "createdAt",
   direction,
@@ -324,7 +324,7 @@ const make = Effect.gen(function* () {
       request: ResourcePageRequest,
     ): Effect.Effect<Page<StoredResource>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = scopeOf(request.direction);
+        const scope = buildCursorScope(request.direction);
         const after =
           request.cursor === undefined
             ? undefined

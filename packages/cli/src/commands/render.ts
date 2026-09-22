@@ -182,8 +182,9 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
     const record = value as Record<string, unknown>;
     const lines = [...keyValues(record)];
     // The one teaching line this build has. A caller who has just spawned a
-    // session wants to watch it, and subscriptions do not exist yet, so what it
-    // is pointed at is the transcript it can already read.
+    // session wants to watch it. It is not pointed at a subscription on that
+    // session: no platform event about a session is emitted yet, so such a
+    // claim is refused. It is pointed at the transcript it can already read.
     if (command.id === "session.spawn") {
       lines.push("", `read what it says with \`hercule transcript read ${cell(record["id"])}\``);
     }

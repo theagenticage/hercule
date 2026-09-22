@@ -384,6 +384,14 @@ const make = Effect.gen(function* () {
      * machine is holding no connection, which is what a caller reports as a
      * session it could not place.
      */
+    /**
+     * Whether this machine is holding a connection this moment. For a caller
+     * deciding whether to start work that only a connected machine can
+     * finish; a caller that simply has a frame to send uses `tell`, which
+     * answers the same question by trying.
+     */
+    holdsConnection: (id: string): Effect.Effect<boolean> => Effect.sync(() => reachable.has(id)),
+
     tell: (id: string, frame: ControllerToRunner): Effect.Effect<boolean> =>
       Effect.suspend(() => {
         const held = reachable.get(id);

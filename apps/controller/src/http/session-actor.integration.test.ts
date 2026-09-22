@@ -17,12 +17,12 @@ import {
   agentOn,
   at,
   profileNamed,
-  profileOf,
+  createProfile,
   report,
   sessionWhen,
   spawn,
   startFrames,
-  tokenOf,
+  readSessionToken,
   WAIT_DEADLINE_MS,
   withAgentFleet as withFleet,
   type Agent,
@@ -136,7 +136,7 @@ describe("the token the controller mints for a session", () => {
       expect(resumed.status, await resumed.clone().text()).toBe(200);
 
       const frames = await startFrames(arranged, session.id, 2);
-      const next = tokenOf(frames[1]!);
+      const next = readSessionToken(frames[1]!);
       expect(next).not.toBe(token);
 
       report(arranged.wire, 1, {
@@ -193,7 +193,7 @@ describe("what a session token may reach", () => {
     await withFleet(async (arranged) => {
       // A profile that reads tasks and nothing else, so the operation whose
       // body could be malformed is one this session may not reach.
-      const reader = await profileOf(arranged, "reader", ["task.read"]);
+      const reader = await createProfile(arranged, "reader", ["task.read"]);
       const { token } = await agentOn(arranged, reader);
       const base = arranged.harness.base;
 

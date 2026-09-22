@@ -1,6 +1,6 @@
 import { Effect, Option, Redacted, Schema } from "effect";
 import type { PluginManifest } from "./manifest";
-import type { ProviderDefinition } from "./contributions";
+import type { EventSourceDefinition, ProviderDefinition } from "./contributions";
 import type {
   ConnectionRegistration,
   ConnectionsRuntime,
@@ -19,6 +19,10 @@ export interface ProviderRegistration {
   readonly register: (definition: ProviderDefinition) => Effect.Effect<void, PluginError>;
 }
 
+export interface EventSourceRegistration {
+  readonly register: (definition: EventSourceDefinition) => Effect.Effect<void, PluginError>;
+}
+
 /**
  * What `register` may call. A surface is present only when the manifest asked
  * for its capability, so a plugin that did not request one has no way to reach
@@ -27,6 +31,7 @@ export interface ProviderRegistration {
 export interface RegistrationHost {
   readonly providers?: ProviderRegistration;
   readonly connections?: ConnectionRegistration;
+  readonly eventSources?: EventSourceRegistration;
 }
 
 /** The plugin's durable state, namespaced by plugin id. Values are JSON. */
@@ -89,3 +94,11 @@ export const registerConnectionType = (
   host.connections === undefined
     ? Effect.fail(new PluginError({ message: "the connections capability was not granted" }))
     : host.connections.registerType(contribution);
+
+export const registerEventSource = (
+  host: RegistrationHost,
+  definition: EventSourceDefinition,
+): Effect.Effect<void, PluginError> =>
+  host.eventSources === undefined
+    ? Effect.fail(new PluginError({ message: "the event-sources capability was not granted" }))
+    : host.eventSources.register(definition);

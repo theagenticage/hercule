@@ -1,0 +1,175 @@
+/**
+ * The wrapper's two gates: what a stored expression must pass before it is
+ * saved, and what one evaluation reports when it runs too long.
+ *
+ * Every source here is deliberately far over any modest limit. The concrete
+ * limit values belong to the implementation, so these tests assert the name of
+ * the limit that was exceeded and that the message carries a number, never the
+ * number itself.
+ */
+import { describe, expect, it } from "vitest";
+import { Cause, Duration, Effect, Exit, Option } from "effect";
+import {
+  checkExpression,
+  evaluateExpression,
+  ExpressionBudget,
+  parseExpression,
+  type ExpressionError,
+} from "./index";
+
+/** The message an effect failed with, or a thrown report that it succeeded. */
+const failureMessage = <A>(effect: Effect.Effect<A, ExpressionError>): string => {
+  const exit = Effect.runSyncExit(effect);
+  if (Exit.isSuccess(exit))
+    throw new Error(`expected a failure, got ${JSON.stringify(exit.value)}`);
+  const error = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
+  if (error === undefined) throw new Error(`expected an error, got ${Cause.pretty(exit.cause)}`);
+  return error.message;
+};
+
+/**
+ * What the evaluator itself said about a source, without the sentence the
+ * wrapper puts around it. The wrapper says what the caller was doing - saving,
+ * compiling, evaluating - and the rest is the complaint about the source.
+ */
+const readEvaluatorSummary = (message: string): string => message.slice(message.indexOf(": ") + 2);
+
+/** How many numbers a message spells, which is how a named value is found. */
+const numbersIn = (message: string): number => (message.match(/\d+/g) ?? []).length;
+
+/**
+ * A sum of `leaves` ones, nested in balance so that the node count grows with
+ * the leaf count while the depth grows with its logarithm. A flat chain of
+ * additions would exceed `maxDepth` at the same time as `maxAstNodes`, and the
+ * test could not say which limit the message should name.
+ */
+const balancedSum = (leaves: number): string => {
+  let terms: ReadonlyArray<string> = Array.from({ length: leaves }, () => "1");
+  while (terms.length > 1) {
+    const joined: Array<string> = [];
+    for (let index = 0; index < terms.length; index += 2)
+      joined.push(`(${terms[index]} + ${terms[index + 1]})`);
+    terms = joined;
+  }
+  return terms[0]!;
+};
+
+const buildListSource = (elements: number): string =>
+  `[${Array.from({ length: elements }, (_unused, index) => index).join(", ")}]`;
+
+const buildMapSource = (entries: number): string =>
+  `{${Array.from({ length: entries }, (_unused, index) => `"k${index}": ${index}`).join(", ")}}`;
+
+const callWith = (args: number): string =>
+  `size(${Array.from({ length: args }, () => "1").join(", ")})`;
+
+/**
+ * A literal wrapped in `levels` parentheses. Nesting is what the evaluator
+ * counts as depth: a chain of unary operators is flat to it, however long.
+ */
+const parenthesize = (levels: number): string => `${"(".repeat(levels)}true${")".repeat(levels)}`;
+
+describe("checkExpression", () => {
+  it.each([
+    ["an equality over the envelope", `event.kind == "github.pr.opened"`],
+    ["a membership test over refs", `"github:pr:o/r#87" in event.refs`],
+    ["a presence test on a loose payload", `has(event.payload.subject) && event.payload.x == 1`],
+    ["a bounded macro", `event.payload.labels.exists(label, label == "ci")`],
+  ])("passes %s and answers nothing else", (_what, source) => {
+    expect(Effect.runSync(checkExpression(source))).toBeUndefined();
+  });
+
+  it("refuses a syntax error", () => {
+    expect(failureMessage(checkExpression("event.kind =="))).not.toBe("");
+  });
+
+  it.each([
+    ["maxAstNodes", () => balancedSum(16384)],
+    ["maxDepth", () => parenthesize(200)],
+    ["maxListElements", () => buildListSource(10000)],
+    ["maxMapEntries", () => buildMapSource(10000)],
+    ["maxCallArguments", () => callWith(200)],
+  ])("refuses a source over %s, naming the limit and its value", (limit, build) => {
+    const message = failureMessage(checkExpression(build()));
+
+    expect(message).toContain(limit);
+    expect(numbersIn(message)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("refuses a call to a function nobody registered, naming the function", () => {
+    expect(failureMessage(checkExpression(`sendEmail("rogier")`))).toContain("sendEmail");
+  });
+});
+
+describe("parseExpression", () => {
+  it("passes a well-formed source", () => {
+    expect(Exit.isSuccess(Effect.runSyncExit(parseExpression(`event.kind == "x"`)))).toBe(true);
+  });
+
+  it("refuses a syntax error", () => {
+    expect(failureMessage(parseExpression("event.kind =="))).not.toBe("");
+  });
+
+  it("refuses a source over a structural limit, naming the limit", () => {
+    expect(failureMessage(parseExpression(buildListSource(10000)))).toContain("maxListElements");
+  });
+
+  it("answers, for a compiled source, what the source itself answers", () => {
+    const context = { event: { kind: "github.pr.opened", refs: ["github:pr:o/r#87"] } };
+    const source = `event.kind == "github.pr.opened" && "github:pr:o/r#87" in event.refs`;
+    const program = Effect.runSync(parseExpression(source));
+
+    expect(Effect.runSync(evaluateExpression(program, context))).toBe(true);
+    expect(Effect.runSync(evaluateExpression(program, context))).toBe(
+      Effect.runSync(evaluateExpression(source, context)),
+    );
+    // And a compiled program is called again with another context, which is
+    // what compiling it is for.
+    expect(
+      Effect.runSync(
+        evaluateExpression(program, { event: { kind: "github.pr.closed", refs: [] } }),
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses a source with what the evaluator said, which is what evaluating it says too", () => {
+    const source = "event.kind ==";
+
+    // A caller reading the refusal reads the same complaint whichever of the
+    // two it called, so compiling a source first tells it nothing new.
+    expect(failureMessage(parseExpression(source))).toContain(
+      readEvaluatorSummary(failureMessage(evaluateExpression(source, {}))),
+    );
+  });
+});
+
+describe("evaluateExpression over the wall-clock budget", () => {
+  /**
+   * A budget of zero, because an evaluation that reaches its budget is over
+   * it: every evaluation is then over budget whatever the clock did between
+   * two reads. The alternative - a slow expression against a short budget -
+   * depends on the machine, and the wrapper reports an overrun rather than
+   * interrupting one, so a test could not wait it out either.
+   */
+  const context = { event: { payload: { items: [0, 1, 2] } } };
+  const source = "event.payload.items[0] == 0";
+  const withBudget = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+    Effect.provideService(effect, ExpressionBudget, Duration.zero);
+
+  it("reports the overrun with the budget and the elapsed time, and remembers nothing", () => {
+    const first = failureMessage(withBudget(evaluateExpression(source, context)));
+
+    expect(first.toLowerCase()).toContain("budget");
+    expect(numbersIn(first)).toBeGreaterThanOrEqual(2);
+
+    // The wrapper does not retire an expression that went over: the same
+    // source runs again and reports again, because the router re-evaluates
+    // it on the next tick.
+    const second = failureMessage(withBudget(evaluateExpression(source, context)));
+    expect(second.toLowerCase()).toContain("budget");
+
+    // An overrun leaves the shared environment usable for everything else:
+    // the same source, on the shipped budget, answers.
+    expect(Effect.runSync(evaluateExpression(source, context))).toBe(true);
+  });
+});

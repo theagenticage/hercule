@@ -54,7 +54,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { AfterCommit, type Change } from "../db";
-import { eventsAfter, headOfLog } from "../events";
+import { readEventsAfter, readLogHead } from "../events";
 import { headOfTranscript, sessionExists, transcriptRowsAfter } from "../sessions";
 
 /**
@@ -249,9 +249,9 @@ const make = Effect.gen(function* () {
     );
 
   const eventSource: LogSource<Event> = {
-    after: (position, limit) => eventsAfter(sql, position, limit),
+    after: (position, limit) => readEventsAfter(sql, position, limit),
     positionOf: (item) => item.id,
-    head: headOfLog(sql),
+    head: readLogHead(sql),
     noun: "log",
     unreadable: LOG_UNREADABLE,
   };

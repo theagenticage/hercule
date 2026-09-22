@@ -16,7 +16,7 @@ import type { Profile } from "@hercule/contract";
 import {
   agentOn,
   profileNamed,
-  profileOf,
+  createProfile,
   WAIT_DEADLINE_MS,
   withAgentFleet as withFleet,
   type Arranged,
@@ -150,7 +150,7 @@ describe("security entries in the event log", () => {
   it("returns them to a session whose profile holds event.audit", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
-      const auditor = await profileOf(arranged, "auditor", ["event.read", "event.audit"]);
+      const auditor = await createProfile(arranged, "auditor", ["event.read", "event.audit"]);
       const { token } = await agentOn(arranged, auditor);
       const base = arranged.harness.base;
 

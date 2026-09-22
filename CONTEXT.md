@@ -312,8 +312,26 @@ A named poll cadence an event-source contribution declares (`notifications`, `re
 _Avoid_: poller, loop
 
 **Enrichment**:
-Post-ingest amendment of an event's `system`, `url`, or `refs` (append-only) by a sender rule or the triage agent. Gives the matcher one more idempotent look at that event; never re-delivers to consumers that already fired.
+Post-ingest amendment of an event's `system`, `url`, or `refs` (append-only) by a sender rule or the triage agent. Gives the Event Router one more idempotent look at that event; never re-delivers to consumers that already fired.
 _Avoid_: editing events, reprocessing
+
+**Event Router**:
+The one consumer of the event log. It walks the events past its own durable cursor, tests each one against every routing table, and calls the table's write for every route whose condition holds. It carries nothing to anyone: a delivery reads the rows a table wrote. One consumer and one cursor, so a restart re-delivers nothing and drops nothing.
+_Avoid_: matcher, dispatcher, event bus
+
+**Routing Table**:
+The routes one destination owns, one per live subscription today, one per enabled trigger later. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
+
+**Delivery**:
+The downstream consumer of one kind of row. It reads its own rows, whoever wrote them, and acts on the ones that can act now; idempotent, so a crash between a write and its delivery loses nothing.
+
+**Matched Input**:
+The Queued Input the Event Router writes for a holder session when a route's condition holds, marked with the subscription and the event. Unique per that pair, so a second pass over the same event writes nothing.
+_Avoid_: wake-up (keep that word for the one a restart lost, in text a person reads)
+
+**Expression**:
+A CEL source stored on a subscription or a trigger and evaluated against one event, or against a run's inputs and steps, answering whether it matches or producing a value. Checked when it is saved, and evaluated against the context it is handed and nothing else. `condition` is the stored field on a subscription; the concept is an expression.
+_Avoid_: rule, predicate string
 
 **Workflow**:
 A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. Editing a workflow never affects in-flight runs.

@@ -66,7 +66,7 @@ export const secretFields = (
   readonly description: string;
 }> => {
   // `Objects` is the node a struct derives to; anything else has no named
-  // properties to mark, and `configJsonSchema` refuses it separately.
+  // properties to mark, and `deriveConfigJsonSchema` refuses it separately.
   if (!SchemaAST.isObjects(schema.ast)) return [];
   return schema.ast.propertySignatures.flatMap(({ name, type }) => {
     if (typeof name !== "string" || !isSecret(type)) return [];
@@ -128,7 +128,7 @@ const unsupportedProperty = (property: JsonSchema.JsonSchema): string | undefine
  * refusal. Only a flat object of scalars renders, so anything deeper is caught
  * here, at load, rather than as an unrenderable form later.
  */
-export const configJsonSchema = (
+export const deriveConfigJsonSchema = (
   schema: Schema.Top,
 ): Result.Result<JsonSchema.JsonSchema, UnsupportedConfigSchema> => {
   const root = Schema.toJsonSchemaDocument(schema).schema;

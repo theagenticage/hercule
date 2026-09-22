@@ -21,7 +21,7 @@ import {
   instanceOf,
   inputsOf,
   profileNamed,
-  profileOf,
+  createProfile,
   readSession,
   spawn,
   spawned,
@@ -353,11 +353,11 @@ describe("placeSession from an Agent", () => {
   it("lets a session holding session.spawn spawn from an agent bounded by no more than itself", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
-        permissionProfileId: (await profileOf(arranged, "narrow", ["session.read"])).id,
+        permissionProfileId: (await createProfile(arranged, "narrow", ["session.read"])).id,
       });
       const { token } = await agentOn(
         arranged,
-        await profileOf(arranged, "spawner", ["session.spawn", "session.read"]),
+        await createProfile(arranged, "spawner", ["session.spawn", "session.read"]),
       );
 
       const response = await post(
@@ -379,7 +379,7 @@ describe("placeSession from an Agent", () => {
       });
       const { token } = await agentOn(
         arranged,
-        await profileOf(arranged, "spawner-2", ["session.spawn", "session.read"]),
+        await createProfile(arranged, "spawner-2", ["session.spawn", "session.read"]),
       );
 
       const response = await post(
@@ -401,11 +401,11 @@ describe("placeSession from an Agent", () => {
   it("refuses that same session an access mode more permissive than the agent's own", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
-        permissionProfileId: (await profileOf(arranged, "narrow-3", ["session.read"])).id,
+        permissionProfileId: (await createProfile(arranged, "narrow-3", ["session.read"])).id,
       });
       const { token } = await agentOn(
         arranged,
-        await profileOf(arranged, "spawner-3", ["session.spawn", "session.read"]),
+        await createProfile(arranged, "spawner-3", ["session.spawn", "session.read"]),
       );
 
       const response = await post(
@@ -427,11 +427,11 @@ describe("placeSession from an Agent", () => {
   it("lets that same session take the mode down from the agent's own", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
-        permissionProfileId: (await profileOf(arranged, "narrow-4", ["session.read"])).id,
+        permissionProfileId: (await createProfile(arranged, "narrow-4", ["session.read"])).id,
       });
       const { token } = await agentOn(
         arranged,
-        await profileOf(arranged, "spawner-4", ["session.spawn", "session.read"]),
+        await createProfile(arranged, "spawner-4", ["session.spawn", "session.read"]),
       );
 
       const response = await post(

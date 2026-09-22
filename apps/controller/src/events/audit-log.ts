@@ -3,7 +3,7 @@
  * the one event log.
  *
  * There is no separate audit subsystem. The `events` table holds two
- * populations: pipeline events, which the matcher evaluates against triggers
+ * populations: pipeline events, which the event router evaluates against triggers
  * and subscriptions, and audit entries, which it never does. An audit entry is
  * a platform event - `source: "platform"`, no Connection - carrying the actor
  * of the mutation that caused it.
@@ -34,6 +34,7 @@ export const AUDIT_KINDS = [
   "secret.created",
   "secret.rotated",
   "secret.deleted",
+  "event.enriched",
   "task.created",
   "task.updated",
   "task.deleted",

@@ -16,16 +16,8 @@
  * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
  * and takes a couple of minutes. `HERCULE_LIVE_SESSION_TEST=1` asks for it.
  *
- * ## The login is lent for the run
- *
- * A session runs against the Provider Instance's own `CLAUDE_CONFIG_DIR` under
- * the runner's storage (spec 06 section 4.2), which in a throwaway Hercule Home
- * is empty, so nothing could start. The developer's own login is lent to it for
- * the run: on macOS the Claude CLI keeps it as a Keychain item and reads
- * `.credentials.json` in the config directory when the Keychain has none, so
- * the item is copied into the throwaway instance directory and the instance is
- * re-probed. The whole home, credential included, is deleted when the suite
- * ends. Without the Keychain item the case skips saying so.
+ * The login it runs on is lent for the run, by either of the two routes
+ * `e2e/harness.ts` documents; with neither the case skips saying so.
  *
  * ## What this test does not assert
  *
@@ -38,23 +30,27 @@
  * session the machine reports has exited". What is asserted here is the
  * observable half: the session reads `exited` after the stop.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  PASSWORD,
-  ROOT,
-  USERNAME,
   apiKeyIn,
   cli,
   completeSetup,
   instancesOf,
   jsonOk,
+  lendCredential,
+  LENT_CREDENTIALS,
+  liveSessionsAsked,
+  loginLent,
+  PASSWORD,
+  ROOT,
   saidIn,
   sessionOf,
   startController,
   temporaryHome,
   untilTag,
+  USERNAME,
   type Controller,
   type Instance,
   type Session,
@@ -62,7 +58,7 @@ import {
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
-const wanted = process.env["HERCULE_LIVE_SESSION_TEST"] !== undefined;
+const wanted = liveSessionsAsked();
 
 const state = temporaryHome();
 const binary = join(ROOT, "hercule");
@@ -100,43 +96,6 @@ const PROMPT =
   `"${TITLE}" with description "${MADE}" and provenance {"ref":"hercule:proof:p011"}, then ` +
   `update its description to "${UPDATED}", then try to delete it. Report each command's ` +
   "output verbatim.";
-
-/**
- * The developer's own Claude Code login as the CLI stores it on macOS, or
- * `undefined` on a machine that has none.
- */
-const keychainLogin = (): string | undefined => {
-  const ran = Bun.spawnSync(
-    ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-    {
-      stdout: "pipe",
-      stderr: "ignore",
-    },
-  );
-  if (ran.exitCode !== 0) return undefined;
-  const text = new TextDecoder().decode(ran.stdout).trim();
-  return text === "" ? undefined : text;
-};
-
-/**
- * `<home>/runner/<storage>/providers/<instanceId>`: the instance's private
- * config directory, named by the storage directory this runner's identity owns.
- */
-const instanceDir = (instanceId: string): string => {
-  const file = JSON.parse(readFileSync(join(state.home, "runner", "runner.json"), "utf8")) as {
-    readonly storageDirectory: string;
-  };
-  return join(state.home, "runner", file.storageDirectory, "providers", instanceId);
-};
-
-/** Lends the developer's own login to the throwaway instance, for this run. */
-const lend = (instanceId: string, credential: string): void => {
-  const dir = instanceDir(instanceId);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const path = join(dir, ".credentials.json");
-  writeFileSync(path, credential, { mode: 0o600 });
-  chmodSync(path, 0o600);
-};
 
 interface Page<A> {
   readonly items: ReadonlyArray<A>;
@@ -248,19 +207,17 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
   it(
     "creates and updates a task as itself, is refused the delete its profile withholds",
     async (ctx) => {
-      const credential = keychainLogin();
-      if (credential === undefined) {
+      if (!loginLent()) {
         ctx.skip(
-          'no "Claude Code-credentials" Keychain item on this machine. A session runs against ' +
-            "the Provider Instance's own CLAUDE_CONFIG_DIR, which is empty in a throwaway " +
-            "home, so this test lends the developer's own login to it for the run.",
+          "no login for the claude-code instance: name a credentials file in " +
+            "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
         );
         return;
       }
 
       const runnerId = await enrolledRunner();
       const instance = await claudeInstance();
-      lend(instance.id, credential);
+      if (LENT_CREDENTIALS !== undefined) lendCredential(state.home, instance.id);
       const snapshot = await probedLoggedIn(runnerId, instance.id);
 
       // The cheapest model that answers, when this machine reported one.
