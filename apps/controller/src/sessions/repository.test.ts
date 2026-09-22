@@ -8,7 +8,7 @@
  * session's rows.
  */
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
@@ -87,7 +87,7 @@ const walk = (sessionId: string, limit: number) =>
   });
 
 /** The token hash a session row holds, read straight off the row. */
-const hashOf = (sessionId: string) =>
+const readTokenHash = (sessionId: string) =>
   Effect.map(
     Effect.flatMap(
       SqlClient.SqlClient,
@@ -246,47 +246,67 @@ describe("the transcript walk", () => {
   });
 });
 
-/**
- * Makes an exited session one whose transcript can still be picked up: the
- * machine it ran on is still enlisted, and it reported a provider-native
- * session. `resume` moves nothing without both.
- */
-const madeResumable = (sessionId: string) =>
+/** A session moved to `starting` under a token hash, as dispatch moves one. */
+const aStartedSession = (tokenHash: string) =>
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`
-      INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
-                           credential_hash, created_at, updated_at)
-      SELECT runner_id, 'a machine', 'online', 'active', 0, '[]', 'a hash', ${at}, ${at}
-      FROM sessions WHERE id = ${uuidFromString(sessionId)}
-    `;
-    yield* sql`
-      UPDATE sessions SET native_session_id = 'native-1'
-      WHERE id = ${uuidFromString(sessionId)}
-    `;
+    const sessions = yield* sessionRepository;
+    const sessionId = yield* aSession;
+    yield* sessions.started(sessionId, tokenHash, at);
+    const row = yield* sessions.one(sessionId);
+    if (Option.isNone(row)) return yield* Effect.die("the session was just written");
+    return { sessionId, runnerId: row.value.runnerId };
   });
 
-describe("the session's own credential across a resume", () => {
-  it("is gone the moment the session goes back on the queue", async () => {
-    // A resumed session is queued again, with no process to be the identity of,
-    // and it is put back there by the same call that would otherwise leave the
-    // dead process's token live until dispatch happened to overwrite it.
-    const held = await run(
+describe("the session's own credential", () => {
+  it("is cleared by every move to a status with no process behind it", async () => {
+    const hashes = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
-        const sessionId = yield* aSession;
-        yield* sessions.moved(sessionId, "starting", at);
-        yield* sessions.setTokenHash(sessionId, "hash-one");
-        yield* sessions.moved(sessionId, "exited", at);
-        yield* madeResumable(sessionId);
-        const before = yield* hashOf(sessionId);
-        yield* sessions.resume(sessionId, "{}", at);
-        return { before, after: yield* hashOf(sessionId) };
+        const exited = yield* aStartedSession("hash-exited");
+        yield* sessions.moved(exited.sessionId, "exited", at);
+        const queued = yield* aStartedSession("hash-queued");
+        yield* sessions.moved(queued.sessionId, "queued", at);
+        const retired = yield* aStartedSession("hash-retired");
+        yield* sessions.endOnRunner(retired.runnerId, at);
+        const reported = yield* aStartedSession("hash-reported");
+        yield* sessions.reportedGone(reported.runnerId, [], at);
+        const running = yield* aStartedSession("hash-running");
+        yield* sessions.moved(running.sessionId, "busy", at);
+        return {
+          exited: yield* readTokenHash(exited.sessionId),
+          queued: yield* readTokenHash(queued.sessionId),
+          retired: yield* readTokenHash(retired.sessionId),
+          reported: yield* readTokenHash(reported.sessionId),
+          running: yield* readTokenHash(running.sessionId),
+        };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(held.before).toBe("hash-one");
-    expect(held.after).toBeNull();
+    expect(hashes).toEqual({
+      exited: null,
+      queued: null,
+      retired: null,
+      reported: null,
+      // A process still holds this one.
+      running: "hash-running",
+    });
+  });
+
+  it("is refused by the table on a row with no process behind it", async () => {
+    // What makes the rule hold for a writer that does not exist yet: a write
+    // that leaves a hash on such a row fails instead of keeping it.
+    const refused = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessionId = yield* aSession;
+        return yield* Effect.flip(sql`
+          UPDATE sessions SET token_hash = 'a hash' WHERE id = ${uuidFromString(sessionId)}
+        `);
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(refused.cause._tag).toBe("ConstraintError");
+    expect(String(refused.cause.cause)).toContain("CHECK constraint failed: token_hash IS NULL");
   });
 });
 

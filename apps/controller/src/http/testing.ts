@@ -42,6 +42,7 @@ import { CredentialsLayer, hashToken } from "../credentials";
 import {
   cancelStrandedInputsAndReportLostWakeUps,
   EventRoutingInterval,
+  LostRunnerSweepInterval,
   SessionInputDeadline,
   WorkspaceSweepInterval,
 } from "../daemon";
@@ -233,6 +234,8 @@ export interface ServerOptions {
   readonly workspaceSweepInterval?: Duration.Duration;
   /** The shipped second is longer than a test that waits out several ticks can wait. */
   readonly eventRoutingInterval?: Duration.Duration;
+  /** The shipped minute is longer than a test that watches the sweep can wait. */
+  readonly lostRunnerSweepInterval?: Duration.Duration;
   /**
    * How long one evaluation of a condition may run before the wrapper reports
    * it. A test that wants every evaluation reported hands over a budget no
@@ -293,6 +296,7 @@ export const withServer = (
         named(SessionInputDeadline, options.inputDeadline);
         named(WorkspaceSweepInterval, options.workspaceSweepInterval);
         named(EventRoutingInterval, options.eventRoutingInterval);
+        named(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
         named(ExpressionBudget, options.expressionBudget);
         yield* listening;
         const base = yield* baseUrl;

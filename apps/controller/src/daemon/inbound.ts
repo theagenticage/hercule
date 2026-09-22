@@ -84,10 +84,16 @@ const make = Effect.gen(function* () {
   const ingesting = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       if (traffic.frame._tag === "sessionsReport") {
-        yield* sessions.bound(traffic.runnerId, traffic.frame.sessions);
+        const ended = yield* sessions.bound(traffic.runnerId, traffic.frame.sessions);
         // Once that write set is durable and not before: a `Map` does not roll
         // back, so a runner is not dispatchable on a report that never landed.
         yield* connections.markSessionsReported(traffic.runnerId, traffic.connection);
+        // A process the controller has already ended runs on without a token,
+        // and it blocks a resume of the same session on that runner. Nothing
+        // else stops it, so the runner is told to.
+        for (const id of ended) {
+          yield* connections.tell(traffic.runnerId, sessions.stopping(id));
+        }
         yield* forking("A runner's report could not be dispatched", dispatch(traffic.runnerId));
         return;
       }

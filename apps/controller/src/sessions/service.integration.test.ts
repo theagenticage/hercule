@@ -20,16 +20,16 @@ import { SessionSpec, type ModelSelection, type SessionStart } from "@hercule/pr
 import { homePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";
-import { mintUuid, uuidToString, withTransaction } from "../db";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
-import { SessionTokensLayer } from "../permissions";
+import { AuditLog, AuditLogLayer } from "../events";
+import { SessionTokens, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { gitCredentials } from "../workspaces";
 import type { GitCredential } from "../workspaces";
-import { type StoredInput } from "./inputs";
+import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 import { SessionService, SessionServiceLayer, type Starting } from "./service";
 
@@ -71,7 +71,7 @@ const layer = SessionServiceLayer.pipe(
   Layer.provideMerge(TestDatabase),
 );
 
-const run = <A, E>(effect: Effect.Effect<A, E, SessionService | SqlClient.SqlClient>) =>
+const run = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof layer>>) =>
   Effect.runPromise(Effect.provide(effect, layer));
 
 const at = "2026-09-07T10:00:00.000Z";
@@ -118,6 +118,8 @@ const aQueuedSession = (
     readonly storedSpec?: string;
     readonly checkoutBranch?: string;
     readonly githubConnectionId?: string;
+    /** A profile row that exists, for a case whose token has to resolve. */
+    readonly permissionProfileId?: string;
   },
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
@@ -126,7 +128,7 @@ const aQueuedSession = (
     yield* sessions.insert({
       id,
       title: "a session",
-      permissionProfileId: anId(),
+      permissionProfileId: options.permissionProfileId ?? anId(),
       agentId: undefined,
       instanceId: options.instanceId,
       runnerId,
@@ -222,7 +224,7 @@ const claiming = (
   });
 
 /** The token hash a session row holds, read straight off the row. */
-const hashOf = (sessionId: string) =>
+const readTokenHash = (sessionId: string) =>
   Effect.map(
     Effect.flatMap(
       SqlClient.SqlClient,
@@ -308,8 +310,8 @@ describe("SessionService.starting", () => {
           claimed,
           first,
           second,
-          firstHash: yield* hashOf(first),
-          secondHash: yield* hashOf(second),
+          firstHash: yield* readTokenHash(first),
+          secondHash: yield* readTokenHash(second),
         };
       }),
     );
@@ -567,7 +569,7 @@ describe("SessionService.starting", () => {
           yield* Fiber.interrupt(fiber);
           return {
             after: yield* Effect.map(rows.one(sessionId), Option.getOrUndefined),
-            hash: yield* hashOf(sessionId),
+            hash: yield* readTokenHash(sessionId),
           };
         }),
         gatedCredentialStack(entered, hold),
@@ -651,5 +653,178 @@ describe("the frame builders on SessionService", () => {
       requestId,
       decision: "allow_always",
     });
+  });
+});
+
+const HOUR_MS = 3_600_000;
+
+/**
+ * A session dispatched to this runner under a fresh token, and last heard
+ * about `heardAgoMs` before now. Its absolute timeout is one hour (`aSpec`).
+ */
+const aRunningSession = (
+  runnerId: string,
+  status: "starting" | "idle" | "busy",
+  heardAgoMs: number,
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sessionRepository;
+    const instanceId = yield* anInstance("an-adapter", {});
+    const sessionId = yield* aQueuedSession(runnerId, {
+      instanceId,
+      spec: aSpec(instanceId, "clever"),
+      permissionProfileId: yield* aProfile,
+    });
+    const [claim] = yield* claiming(runnerId, 1, () => Effect.succeed(undefined));
+    if (status !== "starting") yield* rows.moved(sessionId, status, at);
+    const heardAt = new Date(Date.now() - heardAgoMs).toISOString();
+    yield* sql`
+      UPDATE sessions SET last_activity_at = ${heardAt} WHERE id = ${uuidFromString(sessionId)}
+    `;
+    return { sessionId, tokenHash: hashToken(claim!.frame.token) };
+  });
+
+/** A profile row, which a session's token resolves through. */
+const aProfile = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const id = anId();
+  yield* sql`
+    INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
+    VALUES (${uuidFromString(id)}, ${`profile ${id}`}, '[]', 0, ${at}, ${at})
+  `;
+  return id;
+});
+
+/** The status a session row reads now. */
+const readStatus = (sessionId: string) =>
+  Effect.flatMap(sessionRepository, (rows) =>
+    Effect.map(rows.one(sessionId), (row) => Option.getOrThrow(row).status),
+  );
+
+/** `endOnLostRunners` as the daemon calls it: inside the caller's transaction. */
+const endingOnLostRunners = (connected: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const sessions = yield* SessionService;
+    yield* withTransaction(sql, sessions.endOnLostRunners(connected));
+  });
+
+describe("SessionService.endOnLostRunners", () => {
+  it("ends a session its lost runner has not reported past its absolute timeout", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const tokens = yield* SessionTokens;
+        const inputs = yield* inputRepository;
+        const log = yield* AuditLog;
+        const runnerId = anId();
+        const busy = yield* aRunningSession(runnerId, "busy", 2 * HOUR_MS);
+        // Resolved while the session runs, so the resolver holds the answer:
+        // the sweep has to drop that too, not only move the row.
+        const before = yield* tokens.resolve(busy.tokenHash);
+        const waiting = yield* inputs.insert({
+          sessionId: busy.sessionId,
+          source: "user",
+          actor: "user",
+          text: "for later",
+          at,
+        });
+
+        yield* endingOnLostRunners([]);
+
+        return {
+          runnerId,
+          sessionId: busy.sessionId,
+          before,
+          after: yield* tokens.resolve(busy.tokenHash),
+          status: yield* readStatus(busy.sessionId),
+          hash: yield* readTokenHash(busy.sessionId),
+          input: Option.getOrThrow(yield* inputs.one(busy.sessionId, waiting.id)),
+          audit: yield* log.listByKind("session.reconciled"),
+        };
+      }),
+    );
+
+    expect(Option.isSome(result.before)).toBe(true);
+    expect(result.status).toBe("exited");
+    expect(result.hash).toBeNull();
+    expect(Option.isNone(result.after)).toBe(true);
+    expect(result.input.status).toBe("cancelled");
+    expect(result.input.reason).toMatch(/runner was not heard from/);
+    expect(result.audit.map((row) => row.payload)).toEqual([
+      { sessionId: result.sessionId, runnerId: result.runnerId, reason: "runner_lost" },
+    ]);
+  });
+
+  it("ends a starting session and an idle one alike", async () => {
+    // `starting` is what a controller restart leaves behind when the runner
+    // never answered the start and never connects again.
+    const result = await run(
+      Effect.gen(function* () {
+        const runnerId = anId();
+        const starting = yield* aRunningSession(runnerId, "starting", 2 * HOUR_MS);
+        const idle = yield* aRunningSession(runnerId, "idle", 2 * HOUR_MS);
+        yield* endingOnLostRunners([]);
+        return {
+          starting: yield* readStatus(starting.sessionId),
+          startingHash: yield* readTokenHash(starting.sessionId),
+          idle: yield* readStatus(idle.sessionId),
+          idleHash: yield* readTokenHash(idle.sessionId),
+        };
+      }),
+    );
+
+    expect(result).toEqual({
+      starting: "exited",
+      startingHash: null,
+      idle: "exited",
+      idleHash: null,
+    });
+  });
+
+  it("leaves a session within its bound, and one on a connected runner, running", async () => {
+    // Within the bound the session can still run on a runner that is only out
+    // of reach. A connected runner reports its own exits.
+    const result = await run(
+      Effect.gen(function* () {
+        const tokens = yield* SessionTokens;
+        const recent = yield* aRunningSession(anId(), "busy", HOUR_MS / 2);
+        const connectedRunner = anId();
+        const connected = yield* aRunningSession(connectedRunner, "busy", 2 * HOUR_MS);
+        yield* endingOnLostRunners([connectedRunner]);
+        return {
+          recent: yield* readStatus(recent.sessionId),
+          recentToken: Option.isSome(yield* tokens.resolve(recent.tokenHash)),
+          connected: yield* readStatus(connected.sessionId),
+          connectedToken: Option.isSome(yield* tokens.resolve(connected.tokenHash)),
+        };
+      }),
+    );
+
+    expect(result).toEqual({
+      recent: "busy",
+      recentToken: true,
+      connected: "busy",
+      connectedToken: true,
+    });
+  });
+
+  it("bounds a session whose stored spec has no timeouts by the default of eight hours", async () => {
+    // A spec stored before the timeouts were on it.
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const withinDefault = yield* aRunningSession(anId(), "busy", 2 * HOUR_MS);
+        const pastDefault = yield* aRunningSession(anId(), "busy", 9 * HOUR_MS);
+        yield* sql`UPDATE sessions SET spec = json_remove(spec, '$.timeouts')`;
+        yield* endingOnLostRunners([]);
+        return {
+          withinDefault: yield* readStatus(withinDefault.sessionId),
+          pastDefault: yield* readStatus(pastDefault.sessionId),
+        };
+      }),
+    );
+
+    expect(result).toEqual({ withinDefault: "busy", pastDefault: "exited" });
   });
 });

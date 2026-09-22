@@ -258,6 +258,11 @@ const NO_SUCH_INPUT = "no such input on that session";
 
 const ALREADY_SENT = "that input has already gone to the machine";
 
+/** Why an input was cancelled on a session that `endOnLostRunners` ended. */
+const RUNNER_LOST =
+  "that session's runner was not heard from for longer than the session's absolute timeout, " +
+  "so the session was ended before this input was sent";
+
 /** Why a queued input never left, written on the row when its session ends. */
 const exitedWith = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
@@ -299,9 +304,8 @@ const make = Effect.gen(function* () {
   /**
    * One session's ingest state: where its sequence stands and what delta text
    * is held for it. Process memory - a restart re-reads the sequence from the
-   * rows and holds nothing. An entry is dropped when the session exits, so a
-   * session whose machine vanished holds one until the restart reconciliation
-   * of spec 06 section 4.1, which this build does not have.
+   * rows and holds nothing. An entry is dropped when the session exits, by
+   * whichever path ends it.
    */
   const tracking = new Map<string, Tracked>();
 
@@ -359,8 +363,8 @@ const make = Effect.gen(function* () {
 
   /**
    * The tail of any move to `exited`: queued inputs cancelled, the session's
-   * token forgotten, one announce per session. A reason is written on the rows
-   * where the machine gave one.
+   * token and ingest state forgotten, one announce per session. A reason is
+   * written on the rows where one is known.
    */
   const ending = (ids: ReadonlyArray<string>, reason?: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -379,6 +383,7 @@ const make = Effect.gen(function* () {
       // between the drop and the write becoming visible.
       yield* afterCommit(() => {
         tokens.forgetSessions(ids);
+        for (const id of ids) tracking.delete(id);
       });
     });
 
@@ -718,12 +723,12 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
+          // The move clears the token hash too. The token went out on a frame
+          // nobody took, so nothing holds it: a queued session is one nothing
+          // may call the API as. Forgotten after the commit, like any other
+          // drop, so a call in flight cannot cache the old row again before
+          // the write is visible.
           yield* sessions.moved(sessionId, "queued", yield* nowIso);
-          // The token went out on a frame nobody took, so nothing holds it:
-          // a queued session is one nothing may call the API as. Forgotten
-          // after the commit, like any other drop, so a call in flight
-          // cannot cache the old row again before the write is visible.
-          yield* sessions.setTokenHash(sessionId, null);
           yield* afterCommit(() => {
             tokens.forgetSessions([sessionId]);
           });
@@ -773,6 +778,37 @@ const make = Effect.gen(function* () {
       ),
 
     endForWorkspace,
+
+    /**
+     * Ends every running session on a lost runner: one that is not in
+     * `connected` and has not reported the session for longer than the
+     * session's absolute timeout (the repository method says why that is the
+     * bound). Without this, a session on a runner that never comes back keeps
+     * a live token for ever. Joins the caller's transaction, which is where
+     * `connected` was read. Nothing is sent to a runner, because none of these
+     * runners is connected.
+     */
+    endOnLostRunners: (connected: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        const ended = yield* sessions.endOnLostRunners(connected, at);
+        yield* ending(
+          ended.map((one) => one.sessionId),
+          RUNNER_LOST,
+        );
+        yield* Effect.forEach(
+          ended,
+          ({ sessionId, runnerId }) =>
+            audit.append({
+              kind: "session.reconciled",
+              actor: SYSTEM_ACTOR,
+              record: { topic: "session" as const, id: sessionId },
+              payload: { sessionId, runnerId, reason: "runner_lost" },
+              at,
+            }),
+          { discard: true },
+        );
+      }),
 
     /**
      * What the session runs under from here on, joining the caller's
@@ -923,11 +959,15 @@ const make = Effect.gen(function* () {
      * gap shows, since an unannounced disconnect tells the controller nothing.
      * One transaction, so a caller's dispatch outside it always sees the
      * settled result.
+     *
+     * The gap can also go the other way: the report lists a session that the
+     * controller has already ended while the runner was out of reach. The ids
+     * of those come back, for the caller to tell the runner to stop each one.
      */
     bound: (
       runnerId: string,
       bindings: ReadonlyArray<SessionBinding>,
-    ): Effect.Effect<void, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
@@ -963,6 +1003,10 @@ const make = Effect.gen(function* () {
                 at,
               }),
             { discard: true },
+          );
+          return yield* sessions.listExitedAmong(
+            runnerId,
+            bindings.map((binding) => binding.sessionId),
           );
         }),
       ),

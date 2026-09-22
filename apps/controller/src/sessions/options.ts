@@ -55,6 +55,12 @@ const DEFAULT_ABSOLUTE_TIMEOUT_MINUTES = 480;
 
 const MINUTE_MS = 60_000;
 
+/**
+ * The absolute timeout of a session whose stored spec carries none: one
+ * stored before the timeouts were on the spec, under the same default.
+ */
+export const DEFAULT_ABSOLUTE_TIMEOUT_MS = DEFAULT_ABSOLUTE_TIMEOUT_MINUTES * MINUTE_MS;
+
 /** The two clocks a session starts under, whole minutes turned into the milliseconds the wire carries. */
 export const timeoutsFrom = (controller: ScopeSettings<"controller">): SessionSpec["timeouts"] => ({
   inactivityMs:
