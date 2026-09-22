@@ -272,16 +272,25 @@ const make = Effect.gen(function* () {
      * queue under the document that picks that transcript up, and what it
      * holds leaves at the transition to idle its restart makes.
      *
-     * A session that has ended for good takes nothing and is not an error
-     * here: the row stays where a reader can see it never went through, and
-     * the caller's own sweep is what ends the claim behind it.
+     * A session on a machine that is holding no connection takes nothing
+     * either, and neither does one that has ended for good: the row stays
+     * where a reader can see it has not gone through, and the next caller
+     * tries again. For a session that has ended for good, the caller's own
+     * sweep is what ends the claim behind it.
      */
     deliverQueuedInput: (
       sessionId: string,
     ): Effect.Effect<void, NotFound | SqlError | SettingError | Schema.SchemaError> =>
       Effect.gen(function* () {
         const session = yield* one(sessionId);
-        if (session.status === "idle") return yield* flush(sessionId);
+        if (session.status === "idle") {
+          // A machine holding no connection cannot be told. Claiming a row for
+          // it only to put the row straight back would rewrite that row, and
+          // tell every client watching the session, once for every pass the
+          // machine stays away.
+          if (!(yield* connections.holdsConnection(session.runnerId))) return;
+          return yield* flush(sessionId);
+        }
         if (session.status !== "exited") return;
         const nativeSessionId = yield* Effect.catchIf(
           Effect.asSome(resumableNativeSession(session)),
@@ -294,10 +303,13 @@ const make = Effect.gen(function* () {
           session.modelSelection,
           nativeSessionId.value,
         );
-        yield* withTransaction(
+        const moved = yield* withTransaction(
           sql,
           Effect.flatMap(nowIso, (at) => sessions.resume(sessionId, resumeSpec, at)),
         );
+        // Another caller got there first and the session is already on its way
+        // back up. Dispatching again would place it twice.
+        if (!moved) return;
         // After the commit: dispatch tells a machine, and a transaction never
         // spans a wait on anything outside the database.
         yield* dispatch(session.runnerId);

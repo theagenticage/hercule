@@ -239,86 +239,74 @@ export interface FleetOptions {
   readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
 }
 
-/** A controller with one enlisted, connected, logged-in machine on it. */
+/**
+ * A controller with one enlisted, connected, logged-in machine on it.
+ *
+ * What the fleet itself needs is taken out of the options and the rest is
+ * handed to the controller as it stands, so an option the harness gains is one
+ * a caller can pass through here without this file changing.
+ */
 export const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
-  options: FleetOptions,
+  { facts, models, ...server }: FleetOptions,
 ): Promise<void> =>
-  withServer(
-    async (harness) => {
-      const token = await completeSetup(harness.base);
-      const joined = await send("POST", harness.base, "/api/v1/runners/join", {
+  withServer(async (harness) => {
+    const token = await completeSetup(harness.base);
+    const joined = await send("POST", harness.base, "/api/v1/runners/join", {
+      body: {},
+      token: await harness.joinToken(),
+    });
+    expect(joined.status, await joined.clone().text()).toBe(201);
+    const answer = (await joined.json()) as JoinAnswer;
+    const wire = await dial(harness.base, answer.credential, facts, models);
+    // A real runner reports what it holds right after its hello (empty, on a
+    // fresh connection); most callers want dispatch working from the first
+    // line of their test body rather than plumbing this through themselves.
+    // A test after the gap between hello and that report uses `reconnect`,
+    // which leaves the new connection to send its own.
+    wire.send({ _tag: "sessionsReport", sessions: [] });
+    const wires: Array<Wire> = [wire];
+    const reconnect = async (): Promise<Wire> => {
+      const again = await dial(harness.base, answer.credential, facts, models);
+      wires.push(again);
+      return again;
+    };
+    const instances = await probed(harness.base, token);
+    let machines = 1;
+    const enlist = async (): Promise<Enlisted> => {
+      const second = await send("POST", harness.base, "/api/v1/runners/join", {
         body: {},
         token: await harness.joinToken(),
       });
-      expect(joined.status, await joined.clone().text()).toBe(201);
-      const answer = (await joined.json()) as JoinAnswer;
-      const wire = await dial(harness.base, answer.credential, options.facts, options.models);
-      // A real runner reports what it holds right after its hello (empty, on a
-      // fresh connection); most callers want dispatch working from the first
-      // line of their test body rather than plumbing this through themselves.
-      // A test after the gap between hello and that report uses `reconnect`,
-      // which leaves the new connection to send its own.
-      wire.send({ _tag: "sessionsReport", sessions: [] });
-      const wires: Array<Wire> = [wire];
-      const reconnect = async (): Promise<Wire> => {
-        const again = await dial(harness.base, answer.credential, options.facts, options.models);
-        wires.push(again);
-        return again;
-      };
-      const instances = await probed(harness.base, token);
-      let machines = 1;
-      const enlist = async (): Promise<Enlisted> => {
-        const second = await send("POST", harness.base, "/api/v1/runners/join", {
-          body: {},
-          token: await harness.joinToken(),
-        });
-        expect(second.status, await second.clone().text()).toBe(201);
-        const enlisted = (await second.json()) as JoinAnswer;
-        const its = await dial(harness.base, enlisted.credential, options.facts, options.models);
-        its.send({ _tag: "sessionsReport", sessions: [] });
-        wires.push(its);
-        machines += 1;
-        // One snapshot per machine per instance, so a placement onto this one
-        // has an answer to place against only once its own probes are in.
-        await until("probed the machine it just enlisted", async () => {
-          const response = await get(harness.base, "/api/v1/providers", token);
-          const all = (await response.json()) as ReadonlyArray<ProviderInstance>;
-          return all.every((instance) => instance.snapshots.length >= machines) ? all : undefined;
-        });
-        return { runnerId: enlisted.runnerId, wire: its };
-      };
-      try {
-        await body({
-          harness,
-          token,
-          wire,
-          instances,
-          runnerId: answer.runnerId,
-          reconnect,
-          enlist,
-        });
-      } finally {
-        for (const one of wires) one.close();
-      }
-    },
-    {
-      plugins: options.plugins,
-      ...(options.inputDeadline === undefined ? {} : { inputDeadline: options.inputDeadline }),
-      ...(options.workspaceSweepInterval === undefined
-        ? {}
-        : { workspaceSweepInterval: options.workspaceSweepInterval }),
-      ...(options.eventMatchInterval === undefined
-        ? {}
-        : { eventMatchInterval: options.eventMatchInterval }),
-      ...(options.expressionBudget === undefined
-        ? {}
-        : { expressionBudget: options.expressionBudget }),
-      ...(options.evaluationErrorNotifier === undefined
-        ? {}
-        : { evaluationErrorNotifier: options.evaluationErrorNotifier }),
-    },
-  );
+      expect(second.status, await second.clone().text()).toBe(201);
+      const enlisted = (await second.json()) as JoinAnswer;
+      const its = await dial(harness.base, enlisted.credential, facts, models);
+      its.send({ _tag: "sessionsReport", sessions: [] });
+      wires.push(its);
+      machines += 1;
+      // One snapshot per machine per instance, so a placement onto this one
+      // has an answer to place against only once its own probes are in.
+      await until("probed the machine it just enlisted", async () => {
+        const response = await get(harness.base, "/api/v1/providers", token);
+        const all = (await response.json()) as ReadonlyArray<ProviderInstance>;
+        return all.every((instance) => instance.snapshots.length >= machines) ? all : undefined;
+      });
+      return { runnerId: enlisted.runnerId, wire: its };
+    };
+    try {
+      await body({
+        harness,
+        token,
+        wire,
+        instances,
+        runnerId: answer.runnerId,
+        reconnect,
+        enlist,
+      });
+    } finally {
+      for (const one of wires) one.close();
+    }
+  }, server);
 
 /** The provider instance a fixture's provider was opened as, by that provider's id. */
 export const instanceOf = (arranged: Arranged, providerId: string): string => {
@@ -462,6 +450,17 @@ export interface Agent {
   readonly session: Session;
   readonly token: string;
 }
+
+/**
+ * A session on a profile of its own, holding exactly these grants. The profile
+ * is made for the case, because a session's grants are the only way to bound
+ * what the agent inside it may do.
+ */
+export const agentHolding = async (
+  arranged: Arranged,
+  name: string,
+  grants: ReadonlyArray<string>,
+): Promise<Agent> => agentOn(arranged, await profileOf(arranged, name, grants));
 
 export const agentOn = async (arranged: Arranged, profile: Profile): Promise<Agent> => {
   const opened = await spawned(arranged, { prompt: "hello", permissionProfileId: profile.id });

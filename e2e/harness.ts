@@ -9,7 +9,16 @@
  * The processes are started with `Bun.spawn` rather than `spawnHercule`, which
  * inherits stdio: a test has to read what the command printed.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -66,6 +75,53 @@ function cleanEnv(): Record<string, string> {
 export function liveSessionsAsked(): boolean {
   const asked = process.env["HERCULE_LIVE_SESSION_TEST"];
   return asked !== undefined && asked !== "" && asked !== "0";
+}
+
+/**
+ * ## The login a live session runs on
+ *
+ * A session runs against the Provider Instance's own `CLAUDE_CONFIG_DIR` under
+ * the runner's storage (spec 06 section 4.2), which in a throwaway Hercule
+ * Home is empty, so nothing could start. There are two ways to give it a
+ * login, and a case that has neither skips saying so:
+ *
+ * - `HERCULE_E2E_CLAUDE_CREDENTIALS` names a file holding what the Claude CLI
+ *   stores as its credential. `lendCredential` copies it into the throwaway
+ *   instance directory as `.credentials.json`, and the caller re-probes the
+ *   instance; the whole home, credential included, is deleted when the suite
+ *   ends. Reading the developer's own login out of wherever their machine
+ *   keeps it is the caller's business, never this file's: a test that reaches
+ *   into a personal credential store takes a secret nobody handed it.
+ * - `ANTHROPIC_API_KEY` on the environment, which reaches the session through
+ *   the runner the controller starts for itself.
+ */
+export const LENT_CREDENTIALS = process.env["HERCULE_E2E_CLAUDE_CREDENTIALS"];
+
+/** Whether either of the two login routes is open for this run. */
+export function loginLent(): boolean {
+  return LENT_CREDENTIALS !== undefined || process.env["ANTHROPIC_API_KEY"] !== undefined;
+}
+
+/**
+ * `<home>/runner/<storage>/providers/<instanceId>`: the instance's private
+ * config directory, named by the storage directory this runner's identity
+ * owns. The runner writes `runner.json` as it enrols, so nothing may call this
+ * before it has.
+ */
+export function buildInstanceDir(home: string, instanceId: string): string {
+  const pin = JSON.parse(readFileSync(join(home, "runner", "runner.json"), "utf8")) as {
+    readonly storageDirectory: string;
+  };
+  return join(home, "runner", pin.storageDirectory, "providers", instanceId);
+}
+
+/** Lends the credential the caller named to the throwaway instance, for this run. */
+export function lendCredential(home: string, instanceId: string): void {
+  const dir = buildInstanceDir(home, instanceId);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, ".credentials.json");
+  writeFileSync(path, readFileSync(LENT_CREDENTIALS!, "utf8"), { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 /** What a finished command left behind. */

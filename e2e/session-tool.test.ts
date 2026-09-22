@@ -16,23 +16,8 @@
  * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
  * and takes a couple of minutes. `HERCULE_LIVE_SESSION_TEST=1` asks for it.
  *
- * ## The login is lent for the run
- *
- * A session runs against the Provider Instance's own `CLAUDE_CONFIG_DIR` under
- * the runner's storage (spec 06 section 4.2), which in a throwaway Hercule Home
- * is empty, so nothing could start. There are two ways to give it a login, the
- * same two `agent-session.test.ts` takes, and the case skips saying so when it
- * has neither:
- *
- * - `HERCULE_E2E_CLAUDE_CREDENTIALS` names a file holding what the Claude CLI
- *   stores as its credential. It is copied into the throwaway instance
- *   directory as `.credentials.json` and the instance is re-probed; the whole
- *   home, credential included, is deleted when the suite ends. Reading the
- *   developer's own login out of wherever their machine keeps it is the
- *   caller's business, never this file's: a test that reaches into a personal
- *   credential store takes a secret nobody handed it.
- * - `ANTHROPIC_API_KEY` on the environment, which reaches the session through
- *   the runner the controller starts for itself.
+ * The login it runs on is lent for the run, by either of the two routes
+ * `e2e/harness.ts` documents; with neither the case skips saying so.
  *
  * ## What this test does not assert
  *
@@ -45,24 +30,27 @@
  * session the machine reports has exited". What is asserted here is the
  * observable half: the session reads `exited` after the stop.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  PASSWORD,
-  ROOT,
-  USERNAME,
   apiKeyIn,
   cli,
   completeSetup,
   instancesOf,
   jsonOk,
+  lendCredential,
+  LENT_CREDENTIALS,
   liveSessionsAsked,
+  loginLent,
+  PASSWORD,
+  ROOT,
   saidIn,
   sessionOf,
   startController,
   temporaryHome,
   untilTag,
+  USERNAME,
   type Controller,
   type Instance,
   type Session,
@@ -108,29 +96,6 @@ const PROMPT =
   `"${TITLE}" with description "${MADE}" and provenance {"ref":"hercule:proof:p011"}, then ` +
   `update its description to "${UPDATED}", then try to delete it. Report each command's ` +
   "output verbatim.";
-
-/** The file a caller lent its Claude login through, where it lent one. */
-const lentCredentials = process.env["HERCULE_E2E_CLAUDE_CREDENTIALS"];
-
-/**
- * `<home>/runner/<storage>/providers/<instanceId>`: the instance's private
- * config directory, named by the storage directory this runner's identity owns.
- */
-const instanceDir = (instanceId: string): string => {
-  const file = JSON.parse(readFileSync(join(state.home, "runner", "runner.json"), "utf8")) as {
-    readonly storageDirectory: string;
-  };
-  return join(state.home, "runner", file.storageDirectory, "providers", instanceId);
-};
-
-/** Lends the credential the caller named to the throwaway instance, for this run. */
-const lendCredential = (instanceId: string): void => {
-  const dir = instanceDir(instanceId);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const path = join(dir, ".credentials.json");
-  writeFileSync(path, readFileSync(lentCredentials!, "utf8"), { mode: 0o600 });
-  chmodSync(path, 0o600);
-};
 
 interface Page<A> {
   readonly items: ReadonlyArray<A>;
@@ -242,7 +207,7 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
   it(
     "creates and updates a task as itself, is refused the delete its profile withholds",
     async (ctx) => {
-      if (lentCredentials === undefined && process.env["ANTHROPIC_API_KEY"] === undefined) {
+      if (!loginLent()) {
         ctx.skip(
           "no login for the claude-code instance: name a credentials file in " +
             "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
@@ -252,7 +217,7 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
 
       const runnerId = await enrolledRunner();
       const instance = await claudeInstance();
-      if (lentCredentials !== undefined) lendCredential(instance.id);
+      if (LENT_CREDENTIALS !== undefined) lendCredential(state.home, instance.id);
       const snapshot = await probedLoggedIn(runnerId, instance.id);
 
       // The cheapest model that answers, when this machine reported one.

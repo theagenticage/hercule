@@ -19,6 +19,7 @@ import {
   completeSetup,
   get,
   post,
+  readRefusal,
   send,
   USERNAME,
   withServer,
@@ -55,41 +56,6 @@ const SECOND_REF = "github:repo:octo/repo";
 
 /** An id shaped the way every Hercule id is, that nothing was created under. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
-
-interface ErrorBody {
-  readonly error: {
-    readonly code: string;
-    readonly message: string;
-    readonly details?: {
-      readonly grant?: string;
-      readonly issues?: ReadonlyArray<{ readonly path: ReadonlyArray<string> }>;
-    };
-  };
-}
-
-/** One refusal: its code, the grant it named, and everything it said. */
-interface Refusal {
-  readonly code: string;
-  readonly grant?: string;
-  readonly text: string;
-}
-
-const refusalOf = async (response: Response): Promise<Refusal> => {
-  const text = await response.clone().text();
-  // Read through a clone, so a case that goes on to read the issues out of the
-  // same response still finds a body there.
-  const body = (await response.clone().json()) as ErrorBody;
-  return {
-    code: body.error.code,
-    ...(body.error.details?.grant === undefined ? {} : { grant: body.error.details.grant }),
-    text,
-  };
-};
-
-const issuesOf = async (response: Response): Promise<ReadonlyArray<ReadonlyArray<string>>> => {
-  const body = (await response.json()) as ErrorBody;
-  return (body.error.details?.issues ?? []).map((issue) => issue.path);
-};
 
 const emit = (base: string, token: string, body: unknown): Promise<Response> =>
   post(base, "/api/v1/events/emit", body, token);
@@ -242,7 +208,7 @@ describe("POST /events/emit", () => {
         payload: PAYLOAD,
       });
 
-      const refusal = await refusalOf(response);
+      const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
       expect(refusal.text).toContain("acme.nothing.happened");
@@ -258,12 +224,11 @@ describe("POST /events/emit", () => {
         payload: { subject: { repo: 42 } },
       });
 
-      const refusal = await refusalOf(response);
+      const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
-      const paths = await issuesOf(response);
-      expect(paths.length).toBeGreaterThan(0);
-      expect(paths.flat()).toContain("subject");
+      expect(refusal.issues.length).toBeGreaterThan(0);
+      expect(refusal.issues.flat()).toContain("subject");
       expect(await eventsOfKind(base, token, KIND)).toEqual([]);
       expect(await manualEvents(sql)).toBe(0);
     });
@@ -277,7 +242,7 @@ describe("POST /events/emit", () => {
         refs: [REF, "not-an-external-ref"],
       });
 
-      const refusal = await refusalOf(response);
+      const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
       expect(refusal.text).toContain("not-an-external-ref");
@@ -293,7 +258,7 @@ describe("POST /events/emit", () => {
         connectionId: NOBODY,
       });
 
-      const refusal = await refusalOf(response);
+      const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
       expect(refusal.text).toContain(NOBODY);
@@ -349,7 +314,7 @@ describe("POST /events/emit", () => {
         refs: ["sentry:issue:123"],
       });
 
-      const refusal = await refusalOf(response);
+      const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
       const after = await readEvent(base, token, before.id);
@@ -365,7 +330,7 @@ describe("POST /events/emit", () => {
 
       const response = await emit(base, token, { kind: KIND, payload: PAYLOAD });
 
-      const refusal = await refusalOf(response);
+      const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(403);
       expect(refusal.code).toBe("forbidden");
       expect(refusal.grant).toBe("event.emit");
@@ -439,7 +404,7 @@ describe("POST /events/:id/enrich", () => {
 
       const response = await enrich(base, token, eventId + 1000, { system: "sentry" });
 
-      const refusal = await refusalOf(response);
+      const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
     });
@@ -460,7 +425,7 @@ describe("POST /events/:id/enrich", () => {
         refs: ["sentry:issue:123"],
       });
 
-      const refusal = await refusalOf(response);
+      const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
       const after = await readEvent(base, token, before.id);
@@ -477,7 +442,7 @@ describe("POST /events/:id/enrich", () => {
 
       const response = await enrich(base, token, eventId, { system: "sentry" });
 
-      const refusal = await refusalOf(response);
+      const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(403);
       expect(refusal.code).toBe("forbidden");
       expect(refusal.grant).toBe("event.emit");

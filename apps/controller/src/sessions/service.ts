@@ -315,15 +315,17 @@ const make = Effect.gen(function* () {
     sessionId: string,
     spec: string,
     at: string,
-  ): Effect.Effect<void, SqlError> =>
+  ): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
-      yield* sessions.resume(sessionId, spec, at);
+      const moved = yield* sessions.resume(sessionId, spec, at);
+      if (!moved) return false;
       // The resumed process numbers its events from the start, so what the
       // stored stream reached is not what they are judged against. Dropped
       // once the resume is durable, like any other invalidation.
       yield* afterCommit(() => {
         tracking.delete(sessionId);
       });
+      return true;
     });
 
   /**
@@ -811,12 +813,15 @@ const make = Effect.gen(function* () {
     /**
      * Puts a session whose harness is gone back on the queue, under the
      * document that picks its own transcript up, for a caller that is storing
-     * nothing else. Joins the caller's transaction.
+     * nothing else. Joins the caller's transaction, and answers whether it
+     * moved the session: a caller that reads `false` has a session somebody
+     * else has already put back, and has nothing left to do about it.
      */
-    resume: (sessionId: string, spec: string, at: string): Effect.Effect<void, SqlError> =>
+    resume: (sessionId: string, spec: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
-        yield* putBackOnQueue(sessionId, spec, at);
+        if (!(yield* putBackOnQueue(sessionId, spec, at))) return false;
         yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+        return true;
       }),
 
     /**

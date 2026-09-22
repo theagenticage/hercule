@@ -74,6 +74,17 @@ export interface EventKindDeclaration {
  * kind unique across plugins and lets a reader of the catalog find the owner of
  * a kind without a second column. The host refuses a kind that does not.
  */
+/**
+ * The two names an event source is identified by. They reach a column and the
+ * wire, so they are decoded rather than taken as the plugin wrote them. The
+ * kinds are not here: each declaration holds a live schema, which no schema
+ * of this kind can describe.
+ */
+export const EventSourceNames = Schema.Struct({
+  id: ProviderName,
+  connectionType: ProviderName,
+});
+
 export interface EventSourceDefinition {
   readonly id: string;
   readonly connectionType: string;

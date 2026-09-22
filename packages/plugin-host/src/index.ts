@@ -39,6 +39,7 @@ export {
 
 export {
   DeclaredCapabilities,
+  EventSourceNames,
   MAX_PROVIDER_NAME_LENGTH,
   ProviderDefinition,
   type EventKindDeclaration,

@@ -10,7 +10,9 @@
  * second row and nothing else.
  *
  * `session_inputs` gains the two columns saying what an input row came from,
- * and they are written together or not at all.
+ * and they are written together or not at all. Spec 08 calls a row written
+ * this way the effect row; in this database it is an input like any other,
+ * told apart by the subscription and the event it names.
  * The unique index over the pair is what makes a second pass over the same
  * entries harmless: a consumer that committed its input rows and stopped
  * before it advanced its cursor reads those entries again, and the second
@@ -45,7 +47,7 @@ export default Effect.gen(function* () {
   `;
 
   yield* sql`
-    CREATE UNIQUE INDEX session_inputs_effect ON session_inputs (subscription_id, event_id)
+    CREATE UNIQUE INDEX session_inputs_match ON session_inputs (subscription_id, event_id)
     WHERE subscription_id IS NOT NULL
   `;
 });

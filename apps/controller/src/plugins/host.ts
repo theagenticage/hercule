@@ -22,8 +22,8 @@ import {
   deriveConfigJsonSchema,
   ConnectionType,
   decodeAgainst,
+  EventSourceNames,
   HOST_API,
-  MAX_PROVIDER_NAME_LENGTH,
   PluginError,
   PluginManifest,
   ProviderDefinition,
@@ -138,6 +138,25 @@ const decodeConnectionType = Schema.decodeUnknownEffect(ConnectionType, {
   onExcessProperty: "error",
 });
 
+// The two names an event source is identified by. Its kinds are read one at a
+// time below, because each declaration holds a live schema.
+const decodeEventSourceNames = Schema.decodeUnknownEffect(EventSourceNames, { errors: "all" });
+
+/**
+ * One event kind as a plugin declares it, minus the schema: a name that no
+ * column would truncate, and a line saying what the event means. Both reach a
+ * column and the wire.
+ */
+const EventKindNaming = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_EVENT_KIND_LENGTH)),
+  description: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_PLUGIN_MESSAGE_LENGTH),
+  ),
+});
+
+const decodeEventKindNaming = Schema.decodeUnknownEffect(EventKindNaming, { errors: "all" });
+
 /**
  * The JSON Schema the catalog holds for one event kind. It is a whole document
  * rather than the root node alone: a schema carrying an identifier is emitted
@@ -149,29 +168,6 @@ const derivePayloadJsonSchema = (schema: Schema.Top): JsonSchema.JsonSchema => {
   return Object.keys(document.definitions).length === 0
     ? document.schema
     : { ...document.schema, $defs: document.definitions };
-};
-
-/**
- * Refuses a registered string that no column could hold as it stands. An id, a
- * kind name and a description all reach a column and the wire, so an empty or
- * an overlong one is refused here, where the plugin author is told, rather than
- * written as a row nothing reads back.
- */
-const requireLength = (
-  what: string,
-  value: string,
-  maximum: number,
-): Effect.Effect<void, PluginError> => {
-  if (value.length === 0) {
-    return Effect.fail(new PluginError({ message: `the ${what} cannot be empty` }));
-  }
-  return value.length > maximum
-    ? Effect.fail(
-        new PluginError({
-          message: `the ${what} is longer than ${String(maximum)} characters`,
-        }),
-      )
-    : Effect.void;
 };
 
 /**
@@ -390,15 +386,16 @@ const registrationHost = (
         eventSources: {
           register: (definition) =>
             Effect.gen(function* () {
-              yield* requireLength(`${EVENT_SOURCE} id`, definition.id, MAX_PROVIDER_NAME_LENGTH);
-              yield* requireLength(
-                `${EVENT_SOURCE} connection type`,
-                definition.connectionType,
-                MAX_PROVIDER_NAME_LENGTH,
+              const names = yield* Effect.mapError(
+                decodeEventSourceNames({
+                  id: definition.id,
+                  connectionType: definition.connectionType,
+                }),
+                asPluginError,
               );
               // The identity the catalog keys on, made the same way a
               // connection type's is: the plugin's id and the word it declared.
-              const id = `${manifest.id}/${definition.id}`;
+              const id = `${manifest.id}/${names.id}`;
               if (declared.some((row) => row.extensionPoint === EVENT_SOURCE && row.id === id)) {
                 return yield* Effect.fail(
                   new PluginError({
@@ -430,11 +427,14 @@ const registrationHost = (
                     new PluginError({ message: `the event kind ${kind} is declared twice` }),
                   );
                 }
-                yield* requireLength(`event kind name ${kind}`, kind, MAX_EVENT_KIND_LENGTH);
-                yield* requireLength(
-                  `description of the event kind ${kind}`,
-                  declaration.description,
-                  MAX_PLUGIN_MESSAGE_LENGTH,
+                // The kind's name is carried into the refusal, because a
+                // plugin declaring many kinds needs to be told which one.
+                yield* Effect.mapError(
+                  decodeEventKindNaming({ name: kind, description: declaration.description }),
+                  (error) =>
+                    new PluginError({
+                      message: `the event kind ${kind} is refused: ${fieldMessage(error)}`,
+                    }),
                 );
                 catalogued[kind] = {
                   description: declaration.description,
@@ -446,7 +446,7 @@ const registrationHost = (
                 owner: manifest.id,
                 extensionPoint: EVENT_SOURCE,
                 id,
-                definition: { connectionType: definition.connectionType, kinds: catalogued },
+                definition: { connectionType: names.connectionType, kinds: catalogued },
               });
             }),
         },

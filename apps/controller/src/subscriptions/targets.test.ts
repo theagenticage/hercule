@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
 import type { SubscriptionTarget } from "@hercule/contract";
 import { checkExpression } from "../expressions";
-import { expandTarget } from "./index";
+import { expandTarget } from "./targets";
 
 /** Whether the evaluator accepts a source, as `subscription.create` asks it. */
 const accepted = (source: string): boolean =>

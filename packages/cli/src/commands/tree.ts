@@ -149,7 +149,9 @@ const withoutNull = (ast: Ast): Ast => {
 
 /** Whether `null` is one of the values this field holds. */
 const isNullable = (ast: Ast): boolean =>
-  ast._tag === "Union" && ast.types !== undefined && ast.types.some((m) => m._tag === "Null");
+  ast._tag === "Union" &&
+  ast.types !== undefined &&
+  ast.types.some((member) => member._tag === "Null");
 
 /**
  * The element of a field that holds several values, or `undefined` for one that
@@ -361,7 +363,7 @@ const build = (): ReadonlyArray<Command> => {
         // not as a flag.
         positionals: [
           ...inPath.map((name) => params.get(name)!),
-          ...payload.filter((f) => f.positional),
+          ...payload.filter((field) => field.positional),
         ],
         payload: payload.filter((field) => !field.positional),
         query,

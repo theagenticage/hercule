@@ -510,8 +510,14 @@ const make = Effect.gen(function* () {
     /**
      * The one move out of `exited`, and so the one exception to `moved`'s rule
      * above: the session goes back on the queue for dispatch to place, under
-     * the spec its resumed harness is to be started with. The caller's read of
-     * `resumable` inside this same transaction is the licence for the write.
+     * the spec its resumed harness is to be started with. It answers whether
+     * it moved anything.
+     *
+     * The write carries the same predicate the caller read `resumable` by, so
+     * two callers reaching this at once cannot both resume: the second finds
+     * the session no longer exited and changes nothing, rather than knocking a
+     * session that has already started back onto the queue and taking its
+     * credential away from the process holding it.
      *
      * The token goes with the process that held it. A queued session has no
      * harness running, so there is nothing for a credential to be the identity
@@ -525,18 +531,23 @@ const make = Effect.gen(function* () {
      * again. Moving it anyway is harmless, because `runner_seq` is only a
      * dedupe key and the transcript reads back in `position` order.
      */
-    resume: (sessionId: string, spec: string, at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE sessions SET
-          status = 'queued',
-          spec = ${spec},
-          last_activity_at = ${at},
-          open_request = NULL,
-          token_hash = NULL,
-          stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
-                         WHERE session_id = sessions.id)
-        WHERE id = ${uuidFromString(sessionId)}
-      `),
+    resume: (sessionId: string, spec: string, at: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE sessions SET
+            status = 'queued',
+            spec = ${spec},
+            last_activity_at = ${at},
+            open_request = NULL,
+            token_hash = NULL,
+            stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
+                           WHERE session_id = sessions.id)
+          WHERE id = ${uuidFromString(sessionId)}
+            AND ${sql.literal(resumableWhere("sessions"))}
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * The hash of the session's own credential on the public API, or `null`

@@ -809,6 +809,8 @@ export const CLI = {
     },
     errors: {
       not_found: "no Connection has that id",
+      validation:
+        "no plugin declares that kind, or the payload does not fit the kind's schema, or a ref is not written <system>:<kind>:<identity>",
     },
   },
   "event.enrich": {
@@ -1963,7 +1965,7 @@ export const NOUNS = {
   },
   event: {
     summary: "The event log: external events and audit entries, under one envelope.",
-    flow: "hercule event list to see what came in, hercule event read for one entry in full.",
+    flow: "hercule event list to see what came in, hercule event read for one entry in full, hercule event emit to post one by hand, hercule event enrich to say what an entry is really about.",
   },
   subscription: {
     summary:

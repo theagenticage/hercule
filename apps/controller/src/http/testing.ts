@@ -381,6 +381,47 @@ export const send = (
         }),
   });
 
+/** The body every refusal the envelope writes has. */
+interface ErrorBody {
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+    readonly details?: {
+      readonly grant?: string;
+      readonly issues?: ReadonlyArray<{ readonly path: ReadonlyArray<string> }>;
+    };
+  };
+}
+
+/** One refusal, read out of the envelope the API writes it in. */
+export interface Refusal {
+  readonly code: string;
+  readonly message: string;
+  /** The grant a `forbidden` names; absent on every other refusal. */
+  readonly grant?: string;
+  /** The path of each issue a `validation` lists, in the order it listed them. */
+  readonly issues: ReadonlyArray<ReadonlyArray<string>>;
+  /** The whole body, for an assertion message that has to show what was said. */
+  readonly text: string;
+}
+
+/**
+ * What a response refused, and what it said. The body is read once and parsed
+ * here, so a caller may ask about the code, the grant and the issue paths
+ * without juggling clones of a stream that can only be read once.
+ */
+export const readRefusal = async (response: Response): Promise<Refusal> => {
+  const text = await response.text();
+  const body = JSON.parse(text) as ErrorBody;
+  return {
+    code: body.error.code,
+    message: body.error.message,
+    ...(body.error.details?.grant === undefined ? {} : { grant: body.error.details.grant }),
+    issues: (body.error.details?.issues ?? []).map((issue) => issue.path),
+    text,
+  };
+};
+
 /** A GET with a bearer token. */
 export const get = (base: string, path: string, token?: string): Promise<Response> =>
   send("GET", base, path, token === undefined ? {} : { token });

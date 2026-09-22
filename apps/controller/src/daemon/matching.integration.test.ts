@@ -22,7 +22,7 @@ import { get, post, type ServerHarness } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
 import { EvaluationErrorNotifier } from "../subscriptions";
 import {
-  agentOn,
+  agentHolding,
   at,
   framesOf,
   profileOf,
@@ -52,6 +52,13 @@ const PR_URL = "https://github.com/o/r/pull/87";
 
 /** A condition no evaluation can answer: the payload has no such path. */
 const UNRESOLVABLE = "event.payload.nothing.deeper == 1";
+
+/**
+ * The id of the row a test writes by hand. Canonical v7, because that is the
+ * only shape the store reads back: a v4 is refused, and the refusal lands on
+ * a delivery fiber nobody is waiting on.
+ */
+const STRANDED_INPUT_ID = "0199f0b7-0000-7000-8000-000000000000";
 
 /** A condition that calls a function nobody registered. */
 const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
@@ -123,8 +130,8 @@ const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(Effect.orDie(effect));
 
 /** A session on a profile that may subscribe and read back what it subscribed to. */
-const subscriber = async (arranged: Arranged, name: string): Promise<Agent> =>
-  agentOn(arranged, await profileOf(arranged, name, ["subscription.write", "subscription.read"]));
+const subscriber = (arranged: Arranged, name: string): Promise<Agent> =>
+  agentHolding(arranged, name, ["subscription.write", "subscription.read"]);
 
 /**
  * A session that exited leaving nothing to resume: its machine never reported
@@ -296,6 +303,7 @@ const caughtUp = (harness: ServerHarness): Promise<number> =>
 interface SubscriptionRow {
   readonly ended_at: string | null;
   readonly ended_reason: string | null;
+  readonly ended_actor: string | null;
   readonly condition: string;
 }
 
@@ -305,7 +313,7 @@ const subscriptionRow = async (
 ): Promise<SubscriptionRow | undefined> => {
   const rows = await run(
     harness.sql<SubscriptionRow>`
-      SELECT ended_at, ended_reason, condition FROM subscriptions
+      SELECT ended_at, ended_reason, ended_actor, condition FROM subscriptions
       WHERE id = unhex(replace(${id}, '-', ''))`,
   );
   return rows[0];
@@ -525,6 +533,9 @@ describe("the matcher's sweep", () => {
         return row?.ended_at === null ? undefined : row;
       });
       expect(ended.ended_reason, "the reason names the holder that ended").toMatch(/session/i);
+      expect(ended.ended_reason).toContain(gone.session.id);
+      // Nobody asked for this end, so the stamp is the system's own.
+      expect(ended.ended_actor).toBe("system");
 
       // A restart changes nothing: a subscription does not end because a
       // process exited.
@@ -558,7 +569,7 @@ describe("the matcher's sweep", () => {
           INSERT INTO session_inputs
             (id, session_id, source, actor, text, status, created_at, subscription_id, event_id)
           VALUES
-            (unhex(replace(${crypto.randomUUID()}, '-', '')),
+            (unhex(replace(${STRANDED_INPUT_ID}, '-', '')),
              unhex(replace(${agent.session.id}, '-', '')),
              'subscription', 'system', 'never delivered', 'queued', ${at},
              unhex(replace(${subscriptionId}, '-', '')), ${eventId + 1000})`,

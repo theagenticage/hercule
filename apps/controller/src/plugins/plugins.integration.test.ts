@@ -578,7 +578,7 @@ type JsonSchema = Record<string, unknown>;
  * a test that reads only the inline form would be asserting on the derivation
  * rather than on the block.
  */
-const resolved = (node: unknown, root: JsonSchema): JsonSchema => {
+const followRef = (node: unknown, root: JsonSchema): JsonSchema => {
   const schema = (node ?? {}) as JsonSchema;
   const ref = schema["$ref"];
   if (typeof ref !== "string") return schema;
@@ -662,7 +662,7 @@ describe("the event kinds the shipped github plugin declares", () => {
           const schema = declared!.schema;
           expect(schema["type"], kind).toBe("object");
           const properties = (schema["properties"] ?? {}) as Record<string, unknown>;
-          const subject = resolved(properties["subject"], schema);
+          const subject = followRef(properties["subject"], schema);
           expect(subject["type"], `${kind} subject`).toBe("object");
           expect(
             Object.keys((subject["properties"] ?? {}) as Record<string, unknown>),

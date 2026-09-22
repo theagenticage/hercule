@@ -83,13 +83,23 @@ const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref">, s
     "wait on an External Ref instead",
 };
 
-/** Why a credential that is nobody's session cannot register one. */
-const NEEDS_A_SESSION =
+/**
+ * Why a credential that is nobody's session cannot register one, and why a
+ * user credential listing subscriptions has to say whose.
+ *
+ * Each is two sentences and not one: the refusal carries a line of its own and
+ * a line on the field, and a reader shown the same sentence twice reads it
+ * twice to find out what is different about it.
+ */
+const NEEDS_A_SESSION = "a subscription needs a session holder";
+
+const NEEDS_A_SESSION_REPAIR =
   "a subscription is held by the session that registers it, and a user credential is no session; " +
   "call this with a session token";
 
-/** Why a user credential listing subscriptions has to say whose. */
-const NEEDS_A_HOLDER =
+const NEEDS_A_HOLDER = "a subscription listing needs a holder";
+
+const NEEDS_A_HOLDER_REPAIR =
   "a user credential holds no subscriptions of its own; name whose to list, as holder=session:<id>";
 
 const NO_SUCH_SUBSCRIPTION = "no live subscription has that id";
@@ -126,7 +136,7 @@ const make = Effect.gen(function* () {
         const { target } = yield* Effect.mapError(decodeCreate(input), validationOf);
         if (actor._tag !== "session") {
           return yield* Effect.fail(
-            validation([{ path: [], message: NEEDS_A_SESSION }], NEEDS_A_SESSION),
+            validation([{ path: ["holder"], message: NEEDS_A_SESSION_REPAIR }], NEEDS_A_SESSION),
           );
         }
         if (target.kind !== "ref") {
@@ -168,7 +178,7 @@ const make = Effect.gen(function* () {
             : undefined);
         if (whose === undefined) {
           return yield* Effect.fail(
-            validation([{ path: ["holder"], message: NEEDS_A_HOLDER }], NEEDS_A_HOLDER),
+            validation([{ path: ["holder"], message: NEEDS_A_HOLDER_REPAIR }], NEEDS_A_HOLDER),
           );
         }
         const listing = yield* refuseCursor(

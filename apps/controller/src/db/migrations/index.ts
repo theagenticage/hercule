@@ -29,7 +29,7 @@ import auditGrantOnUnrestricted from "./0018-audit-grant-on-unrestricted";
 import resourcesAndWorkspaces from "./0019-resources-and-workspaces";
 import agents from "./0020-agents";
 import subscriptions from "./0021-subscriptions";
-import eventCursorsAndEffectRows from "./0022-event-cursors-and-effect-rows";
+import eventCursorsAndMatchedInputs from "./0022-event-cursors-and-matched-inputs";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -53,7 +53,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [19, "resources-and-workspaces", Effect.succeed(resourcesAndWorkspaces)],
   [20, "agents", Effect.succeed(agents)],
   [21, "subscriptions", Effect.succeed(subscriptions)],
-  [22, "event-cursors-and-effect-rows", Effect.succeed(eventCursorsAndEffectRows)],
+  [22, "event-cursors-and-matched-inputs", Effect.succeed(eventCursorsAndMatchedInputs)],
 ];
 
 /** The schema version this binary carries: the highest embedded migration id. */
