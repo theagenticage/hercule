@@ -277,6 +277,12 @@ const make = Effect.gen(function* () {
      * where a reader can see it has not gone through, and the next caller
      * tries again. For a session that has ended for good, the caller's own
      * sweep is what ends the claim behind it.
+     *
+     * The row a match wrote is not the only one that gets here: a row a person
+     * typed that the runner refused, or whose session went idle without the
+     * controller seeing the transition, is tried again on every tick for as
+     * long as the session can take it. The check for a row on the wire is what
+     * keeps those retries to one row at a time.
      */
     deliverQueuedInput: (
       sessionId: string,

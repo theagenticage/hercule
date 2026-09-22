@@ -323,7 +323,7 @@ _Avoid_: matcher, dispatcher, event bus
 The routes one destination owns, one per live subscription today, one per enabled trigger later. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
 
 **Delivery**:
-The downstream consumer of the rows a routing table writes. Reads its own rows and acts on the ones that can act now; idempotent, so a crash between routing and delivery loses nothing.
+The downstream consumer of one kind of row. It reads its own rows, whoever wrote them, and acts on the ones that can act now; idempotent, so a crash between a write and its delivery loses nothing.
 
 **Matched Input**:
 The Queued Input the Event Router writes for a holder session when a route's condition holds, marked with the subscription and the event. Unique per that pair, so a second pass over the same event writes nothing.

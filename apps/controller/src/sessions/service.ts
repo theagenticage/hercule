@@ -858,9 +858,9 @@ const make = Effect.gen(function* () {
         }
       }),
 
-    /** The sessions holding an input a match produced that has not gone out yet. */
-    listSessionsAwaitingMatchedInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-      inputs.listSessionsAwaitingMatchedInput(),
+    /** The sessions holding a queued input that has not gone out yet. */
+    listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      inputs.listSessionsAwaitingInput(),
 
     /** Whether a row this session holds is out on the wire and unanswered. */
     holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>

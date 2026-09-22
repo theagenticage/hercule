@@ -1,6 +1,5 @@
 /**
- * The routes the sessions domain owns: one per live subscription, and the
- * delivery of the rows they write.
+ * The routes the sessions domain owns: one per live subscription.
  *
  * This is the only module that imports both subscriptions and sessions, which
  * is what keeps either of them from importing the other. It holds no rule
@@ -22,9 +21,7 @@ import {
   subscriptionRepository,
   type StoredSubscription,
 } from "../../subscriptions";
-import type { Delivery, Route, RoutingTable } from "../event-router";
-import { forking } from "../absorbing";
-import { Live } from "../live";
+import type { Route, RoutingTable } from "../event-router";
 import { renderEventInput } from "./render-event-input";
 
 /** One route per live subscription, held by the session that registered it. */
@@ -121,37 +118,3 @@ export const sessionRoutingTable: Effect.Effect<
     notifyEvaluationError: notifier.notifyEvaluationError,
   };
 });
-
-/**
- * The delivery of the inputs the table above wrote: every input a match has
- * produced and nothing has sent yet to the session it was stored for.
- *
- * It reads the rows rather than remembering what a pass just wrote, so a row
- * that outlived the attempt to deliver it - a controller killed between the
- * commit and the send, a machine that refused the frame, a session that was
- * busy and whose transition to idle was missed - is picked up by the next tick
- * instead of waiting for ever.
- *
- * One fiber per session: a delivery waits on a machine, and a machine that is
- * slow to answer must not hold up the sessions behind it or the next tick. The
- * fibers are children of the pipeline's own driver, which lives as long as the
- * controller does.
- */
-export const queuedInputDelivery: Effect.Effect<Delivery, never, SessionService | Live> =
-  Effect.gen(function* () {
-    const sessions = yield* SessionService;
-    const live = yield* Live;
-
-    return {
-      name: "queued matched inputs",
-      deliverWaiting: (): Effect.Effect<void, SqlError> =>
-        Effect.gen(function* () {
-          for (const sessionId of yield* sessions.listSessionsAwaitingMatchedInput()) {
-            yield* forking(
-              "A session could not be given what it was waiting for",
-              live.deliverQueuedInput(sessionId),
-            );
-          }
-        }),
-    };
-  });

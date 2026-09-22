@@ -51,12 +51,13 @@ export default Effect.gen(function* () {
     WHERE subscription_id IS NOT NULL
   `;
 
-  // Every tick asks which sessions hold a matched input nothing
-  // has sent yet. The index is partial over exactly that question, so it holds
-  // the few rows still owed and not the delivered history beside them: it stays
-  // the same size as the work outstanding while the table grows for ever.
+  // Every tick asks which sessions hold a queued input nothing has sent yet,
+  // whatever wrote it. The index is partial over exactly that question, so it
+  // holds the few rows still owed and not the delivered history beside them:
+  // it stays the same size as the work outstanding while the table grows for
+  // ever.
   yield* sql`
     CREATE INDEX session_inputs_awaiting ON session_inputs (session_id)
-    WHERE source = 'subscription' AND status = 'queued' AND sent_at IS NULL
+    WHERE status = 'queued' AND sent_at IS NULL
   `;
 });

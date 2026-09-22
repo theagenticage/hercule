@@ -1,162 +1,41 @@
 /**
  * The session routing table, running: the sweep of subscriptions nobody holds
- * any more, the delivery of the rows a match wrote, and what a condition that
- * cannot be evaluated does to the subscription it belongs to.
+ * any more, and what a condition that cannot be evaluated does to the
+ * subscription it belongs to.
  *
- * Everything here goes through the whole pipeline, because a delivery is only
- * a delivery when a frame crosses the runner socket.
+ * Everything here goes through the whole pipeline, because a match is only a
+ * match when the row it wrote reaches the session that was waiting for it.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration } from "effect";
-import {
-  at,
-  readSession,
-  report,
-  startFrames,
-  until,
-  WAIT_DEADLINE_MS,
-} from "../../sessions/testing";
+import { at, readSession, startFrames, until, WAIT_DEADLINE_MS } from "../../sessions/testing";
 import {
   caughtUp,
   emitted,
   exit,
   frameWhen,
   healthWhen,
-  inputFrames,
-  madeBusy,
   matchedInputRows,
   READS_RAW,
   buildRecordingNotifier,
   REF,
   rowsWhen,
   runEffect,
-  sentFrames,
   storeCondition,
   spawnStrandedAgent,
   STRANDED_INPUT_ID,
   subscribed,
   spawnSubscriber,
   subscriptionRow,
-  turnCompleted,
   UNKNOWN_FUNCTION,
   UNRESOLVABLE,
   readCursorAndHead,
-  waitOutSeveralTicks,
   withPipeline,
   type Notified,
 } from "../testing";
 
 /** A fleet, three sessions and several ticks fit inside this. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });
-
-describe("the delivery of a matched input", () => {
-  it("delivers to an idle session at once", async () => {
-    await withPipeline(async (arranged) => {
-      const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribed(arranged, agent, REF);
-      expect((await readSession(arranged, agent.session.id)).status).toBe("idle");
-
-      await emitted(arranged, [REF], "delivered at once");
-
-      const frame = await frameWhen(arranged, "delivered at once");
-      expect(frame.sessionId).toBe(agent.session.id);
-      const rows = await rowsWhen(
-        arranged.harness,
-        subscriptionId,
-        (found) => found[0]?.status === "delivered",
-      );
-      expect(rows[0]!.status).toBe("delivered");
-    });
-  });
-
-  it("keeps a busy session's rows waiting, and sends the oldest first at the boundary", async () => {
-    await withPipeline(async (arranged) => {
-      const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribed(arranged, agent, REF);
-      await madeBusy(arranged, agent, 2);
-
-      await emitted(arranged, [REF], "the older one");
-      await emitted(arranged, [REF], "the newer one");
-      const waiting = await rowsWhen(
-        arranged.harness,
-        subscriptionId,
-        (found) => found.length >= 2,
-      );
-      expect(waiting.map((row) => row.status)).toEqual(["queued", "queued"]);
-      // Neither row crosses the socket while the turn runs, however many ticks
-      // the pipeline makes in the meantime.
-      await waitOutSeveralTicks();
-      expect(sentFrames(arranged, "the older one")).toEqual([]);
-      expect(sentFrames(arranged, "the newer one")).toEqual([]);
-
-      // The boundary releases them, oldest first.
-      turnCompleted(arranged, agent.session.id, 3);
-      await frameWhen(arranged, "the newer one");
-      const sent = inputFrames(arranged).map((frame) => frame.input.text);
-      expect(sent.findIndex((text) => text.includes("the older one"))).toBeLessThan(
-        sent.findIndex((text) => text.includes("the newer one")),
-      );
-      const rows = await rowsWhen(arranged.harness, subscriptionId, (found) =>
-        found.every((row) => row.status === "delivered"),
-      );
-      expect(rows.map((row) => row.text.includes("the older one"))).toEqual([true, false]);
-    });
-  });
-
-  it("sends no second row while the first is on the wire and unanswered", async () => {
-    await withPipeline(async (arranged) => {
-      const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribed(arranged, agent, REF);
-      // The machine takes the frame and says nothing about it, so the turn it
-      // opened has not started as far as the controller knows.
-      arranged.wire.answering(() => undefined);
-
-      await emitted(arranged, [REF], "the older one");
-      await emitted(arranged, [REF], "the newer one");
-      await rowsWhen(arranged.harness, subscriptionId, (found) => found.length >= 2);
-
-      // The oldest row goes out, and the newer one stays behind it however
-      // many ticks pass: the runner takes one input per turn boundary, and a
-      // second row sent now is a row it has to hold.
-      await frameWhen(arranged, "the older one");
-      await waitOutSeveralTicks();
-      expect(sentFrames(arranged, "the newer one")).toEqual([]);
-
-      // The machine answers at last, which is what lets the next row go.
-      arranged.wire.release("opened");
-      await frameWhen(arranged, "the newer one");
-    });
-  });
-
-  it("resumes a session whose harness is gone but whose transcript is not, and opens its turn with the row", async () => {
-    await withPipeline(async (arranged) => {
-      const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribed(arranged, agent, REF);
-      await exit(arranged, agent, 2);
-      const ended = await readSession(arranged, agent.session.id);
-      expect(ended.status).toBe("exited");
-      expect(ended.resumable).toBe(true);
-
-      await emitted(arranged, [REF], "wake up");
-
-      // The session is told to start again, on its own native session.
-      const starts = await startFrames(arranged, agent.session.id, 2);
-      expect(starts[1]!.spec.continue).toMatchObject({ mode: "resume" });
-      await rowsWhen(arranged.harness, subscriptionId, (found) => found.length >= 1);
-
-      // The resumed harness reports it is up, and the turn opens with the row.
-      report(arranged.wire, 1, {
-        eventId: crypto.randomUUID(),
-        sessionId: agent.session.id,
-        at,
-        _tag: "session.started",
-        providerRefs: { nativeSessionId: "native-1" },
-      });
-      const frame = await frameWhen(arranged, "wake up");
-      expect(frame.sessionId).toBe(agent.session.id);
-    });
-  });
-});
 
 describe("the session routing table's sweep", () => {
   it("ends only the subscription whose holder is past resuming, and matches for the other two", async () => {

@@ -1,11 +1,12 @@
 /**
- * The routing tables the event router is handed, and the deliveries that read
- * what those tables write.
+ * The routing tables the event router is handed, and the deliveries that
+ * reconcile the rows waiting to go out.
  *
  * Each table is the only module that knows both the domain owning a claim and
  * the domain that answers it. The two lists below are what the pipeline is
  * made of today: one table per live subscription, and one delivery for the
- * rows it writes. A trigger table and its run delivery join them when
+ * queued inputs, which it reconciles whoever wrote them - a routing table, or
+ * a person typing. A trigger table and its run delivery join them when
  * workflows arrive.
  */
 import * as Effect from "effect/Effect";
@@ -14,7 +15,8 @@ import { SessionService } from "../../sessions";
 import { EvaluationErrorNotifier } from "../../subscriptions";
 import type { Delivery, RoutingTable } from "../event-router";
 import { Live } from "../live";
-import { queuedInputDelivery, sessionRoutingTable } from "./session-routing-table";
+import { queuedInputDelivery } from "./queued-input-delivery";
+import { sessionRoutingTable } from "./session-routing-table";
 
 /**
  * Every routing table one pass walks the log for. The enrichment use case
@@ -27,7 +29,7 @@ export const buildRoutingTables: Effect.Effect<
   SqlClient.SqlClient | SessionService | EvaluationErrorNotifier
 > = Effect.map(sessionRoutingTable, (table) => [table]);
 
-/** Every consumer of the rows those tables write. */
+/** Every consumer of the rows waiting to go out, whoever wrote them. */
 export const buildDeliveries: Effect.Effect<
   ReadonlyArray<Delivery>,
   never,

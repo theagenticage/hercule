@@ -207,21 +207,23 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The sessions holding an input a match produced that has not gone out
-     * yet. It is how a delivery is picked up again after a controller stopped
-     * between storing a row and sending it: the rows say what is owed, so
-     * nothing has to be remembered across a restart.
+     * The sessions holding a queued input that has not gone out yet, whatever
+     * wrote it. The rows say what is owed, so nothing has to be remembered
+     * across a restart: a row a controller stopped on between the commit and
+     * the send, and a row whose session went idle without the controller
+     * seeing the transition, are both picked up by the next caller. Who wrote
+     * the row makes no difference to that, so a person's typed input is
+     * answered here as well as a match's.
      *
      * A session that already has a row on the wire is left out. The runner
      * takes one input per turn boundary, so a second row sent before the turn
      * the first one opened has started is a row the runner has to hold.
      */
-    listSessionsAwaitingMatchedInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly session_id: Uint8Array }>`
           SELECT DISTINCT waiting.session_id FROM session_inputs AS waiting
-          WHERE waiting.source = 'subscription' AND waiting.status = 'queued'
-            AND waiting.sent_at IS NULL
+          WHERE waiting.status = 'queued' AND waiting.sent_at IS NULL
             AND NOT EXISTS (
               SELECT 1 FROM session_inputs AS onTheWire
               WHERE onTheWire.session_id = waiting.session_id
