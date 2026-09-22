@@ -21,7 +21,7 @@ const event = {
   refs: ["github:pr:o/r#87", "github:repo:o/r"],
   url: "https://github.com/o/r/pull/87",
   payload: {
-    subject: { repo: "o/r", number: 87, title: "Fix the flaky matcher test", state: "open" },
+    subject: { repo: "o/r", number: 87, title: "Fix the flaky routing test", state: "open" },
     additions: 42,
     labels: ["bug", "ci"],
   },

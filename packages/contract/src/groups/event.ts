@@ -2,7 +2,7 @@
  * The event log, read.
  *
  * One table holds two populations under one envelope: pipeline events, which
- * the matcher will evaluate against triggers, and audit entries, which it never
+ * the event router will evaluate against triggers, and audit entries, which it never
  * will. Both come back from `query`, told apart by `kind`, because the log is
  * also the audit log and the reason to open it is usually to read a security
  * entry beside the events around it. One population filter applies: the

@@ -824,7 +824,7 @@ const make = Effect.gen(function* () {
     /**
      * Stores the input one subscription's match produced, joining the caller's
      * transaction. `none` where that subscription and that event already have
-     * a row, which is how the same event reaching the matcher twice wakes the
+     * a row, which is how the same event reaching the event router twice wakes the
      * session once.
      *
      * The row is stored waiting, never claimed: what gets it to the session -
@@ -859,8 +859,8 @@ const make = Effect.gen(function* () {
       }),
 
     /** The sessions holding an input a match produced that has not gone out yet. */
-    listSessionsAwaitingMatches: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-      inputs.listSessionsAwaitingMatches(),
+    listSessionsAwaitingMatchedInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      inputs.listSessionsAwaitingMatchedInput(),
 
     queuedInput,
 

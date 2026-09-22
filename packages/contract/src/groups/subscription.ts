@@ -4,9 +4,9 @@
  *
  * A session names a Subscription Target - an External Ref, a run, a session or
  * a Permission Request - and the controller stores the CEL condition that
- * target expands into. When an event satisfies the condition, the matcher
+ * target expands into. When an event satisfies the condition, the event router
  * delivers it to the holder as Queued Input. The target is what a caller
- * writes and reads back; the condition is what the matcher evaluates, and it
+ * writes and reads back; the condition is what the event router evaluates, and it
  * is answered so the holder can see what it is really waiting for.
  *
  * The holder is always the session that asked. It is taken from the credential
@@ -177,7 +177,7 @@ export const SubscriptionHolderFromShorthand = markShorthandOnItself(
 );
 
 /**
- * Whether the matcher can still evaluate this subscription's condition.
+ * Whether the event router can still evaluate this subscription's condition.
  *
  * An evaluation that fails is a no-match and never an end: the condition is
  * evaluated again on the next event, and the failure is reported here so the
@@ -198,7 +198,7 @@ export type SubscriptionHealth = Schema.Schema.Type<typeof SubscriptionHealth>;
 export const Subscription = Schema.Struct({
   id: Id,
   target: SubscriptionTarget,
-  /** The CEL source the target expanded into, which is what the matcher reads. */
+  /** The CEL source the target expanded into, which is what the event router reads. */
   condition: Schema.String,
   holder: SubscriptionHolder,
   health: SubscriptionHealth,

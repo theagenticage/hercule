@@ -2,7 +2,7 @@
  * The log's rows, and the ways of walking it that are not a public read.
  *
  * `event.query` pages the log for a caller; the live socket follows it from a
- * position; the matcher walks the pipeline events past its cursor. All of them
+ * position; the event router walks the pipeline events past its cursor. All of them
  * answer with the same `Event`, built here from the same columns, so a record
  * pushed over the socket and the same record fetched over HTTP are the same
  * document field for field.

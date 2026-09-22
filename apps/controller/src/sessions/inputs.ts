@@ -206,7 +206,7 @@ const make = Effect.gen(function* () {
      * between storing a row and sending it: the rows say what is owed, so
      * nothing has to be remembered across a restart.
      */
-    listSessionsAwaitingMatches: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    listSessionsAwaitingMatchedInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly session_id: Uint8Array }>`
           SELECT DISTINCT session_id FROM session_inputs

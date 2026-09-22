@@ -231,11 +231,11 @@ export interface FleetOptions {
   readonly inputDeadline?: Duration.Duration;
   /** The shipped ten minutes is longer than a test that watches the sweep can wait. */
   readonly workspaceSweepInterval?: Duration.Duration;
-  /** The shipped second is longer than a test that waits out several passes can wait. */
-  readonly eventMatchInterval?: Duration.Duration;
+  /** The shipped second is longer than a test that waits out several ticks can wait. */
+  readonly eventRoutingInterval?: Duration.Duration;
   /** A budget no evaluation stays under, for a test about what an overrun does. */
   readonly expressionBudget?: Duration.Duration;
-  /** Where the matcher reports a condition it cannot evaluate. */
+  /** Where a routing table reports a condition it cannot evaluate. */
   readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
 }
 

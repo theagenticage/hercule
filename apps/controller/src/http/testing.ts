@@ -39,7 +39,7 @@ import { homePaths } from "@hercule/home";
 import { HerculeHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
-import { EventMatchInterval, SessionInputDeadline, WorkspaceSweepInterval } from "../daemon";
+import { EventRoutingInterval, SessionInputDeadline, WorkspaceSweepInterval } from "../daemon";
 import { ExpressionBudget } from "../expressions";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -226,8 +226,8 @@ export interface ServerOptions {
   readonly inputDeadline?: Duration.Duration;
   /** The shipped ten minutes is longer than a test that watches it can wait. */
   readonly workspaceSweepInterval?: Duration.Duration;
-  /** The shipped second is longer than a test that waits out several passes can wait. */
-  readonly eventMatchInterval?: Duration.Duration;
+  /** The shipped second is longer than a test that waits out several ticks can wait. */
+  readonly eventRoutingInterval?: Duration.Duration;
   /**
    * How long one evaluation of a condition may run before the wrapper reports
    * it. A test that wants every evaluation reported hands over a budget no
@@ -235,7 +235,7 @@ export interface ServerOptions {
    */
   readonly expressionBudget?: Duration.Duration;
   /**
-   * Where the matcher's report of a condition it cannot evaluate goes. The
+   * Where the report of a condition that cannot be evaluated goes. The
    * shipped one goes nowhere, which nothing can read.
    */
   readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
@@ -287,7 +287,7 @@ export const withServer = (
         named(ProviderLoginDeadline, options.loginDeadline);
         named(SessionInputDeadline, options.inputDeadline);
         named(WorkspaceSweepInterval, options.workspaceSweepInterval);
-        named(EventMatchInterval, options.eventMatchInterval);
+        named(EventRoutingInterval, options.eventRoutingInterval);
         named(ExpressionBudget, options.expressionBudget);
         yield* listening;
         const base = yield* baseUrl;

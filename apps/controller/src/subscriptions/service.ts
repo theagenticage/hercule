@@ -10,7 +10,7 @@
  * What is stored is the target as it was written and the condition it expands
  * into. The condition is checked before it is stored, because a condition the
  * evaluator refuses is a subscription that could never match and would say so
- * only from inside the matcher, long after the caller had gone.
+ * only from inside the event router, long after the caller had gone.
  *
  * A listing answers live subscriptions only: it is read to see what a session
  * is still waiting for, and to find the id to cancel.

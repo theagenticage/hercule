@@ -1,8 +1,8 @@
 /**
  * Telling somebody that a subscription's condition could not be evaluated.
  *
- * The matcher records the failure on the subscription row and calls this once
- * per run of failures. Who is told, and how, is not decided yet: a later
+ * The event router records the failure on the subscription row and calls this
+ * once per error. Who is told, and how, is not decided yet: a later
  * notification ticket replaces the body of the Layer below, and no call site
  * changes.
  */

@@ -60,7 +60,7 @@ const TURN_DEADLINE_MS = 240_000;
 /** Long enough for the runner to enrol and to probe a directory it was just handed. */
 const LOGIN_DEADLINE_MS = 120_000;
 
-/** Long enough for one matcher tick, the delivery, and the woken turn. */
+/** Long enough for one tick of the event pipeline, the delivery, and the woken turn. */
 const WAKE_DEADLINE_MS = 240_000;
 
 /** What the session waits for, and the event that arrives carrying it. */

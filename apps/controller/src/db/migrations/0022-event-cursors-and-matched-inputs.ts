@@ -51,7 +51,7 @@ export default Effect.gen(function* () {
     WHERE subscription_id IS NOT NULL
   `;
 
-  // Every pass of the matcher asks which sessions hold a matched input nothing
+  // Every tick asks which sessions hold a matched input nothing
   // has sent yet. The index is partial over exactly that question, so it holds
   // the few rows still owed and not the delivered history beside them: it stays
   // the same size as the work outstanding while the table grows for ever.

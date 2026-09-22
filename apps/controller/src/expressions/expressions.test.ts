@@ -166,7 +166,7 @@ describe("evaluateExpression over the wall-clock budget", () => {
     expect(numbersIn(first)).toBeGreaterThanOrEqual(2);
 
     // The wrapper does not retire an expression that went over: the same
-    // source runs again and reports again, because the matcher re-evaluates
+    // source runs again and reports again, because the router re-evaluates
     // it on the next tick.
     const second = failureMessage(withBudget(evaluateExpression(slow, context)));
     expect(second.toLowerCase()).toContain("budget");

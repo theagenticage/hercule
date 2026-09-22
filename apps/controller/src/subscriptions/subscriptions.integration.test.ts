@@ -7,8 +7,8 @@
  * and the only place a session token is ever minted is a start frame on the
  * runner socket.
  *
- * What the matcher does with a stored subscription is not here: this suite
- * runs no matcher.
+ * What the event router does with a stored subscription is not here: this
+ * suite runs no router.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
@@ -91,7 +91,7 @@ interface EndRow {
  * How a subscription ended, read from the table rather than from
  * `subscription.query`: whether a query answers an ended subscription at all
  * is not pinned anywhere, and what these criteria are about is the row the
- * matcher reads.
+ * event router reads.
  */
 const readEndRow = (arranged: Arranged, id: string): Promise<ReadonlyArray<EndRow>> =>
   Effect.runPromise(

@@ -5,7 +5,7 @@
  *
  * A listing is one keyset walk over `created_at` and the id, narrowed to one
  * holder, which `subscriptions_holder` serves. Only live rows are read here at
- * all: a listing says what a session is still waiting for, and the matcher
+ * all: a listing says what a session is still waiting for, and the event router
  * evaluates what is still waiting.
  */
 import * as Effect from "effect/Effect";
@@ -119,7 +119,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Every subscription still waiting, oldest first. This is what one pass of
-     * the matcher evaluates, so it is read whole rather than paged: a
+     * the event router evaluates, so it is read whole rather than paged: a
      * subscription left out of the read is an event that reaches nobody.
      */
     listLive: (): Effect.Effect<ReadonlyArray<StoredSubscription>, SqlError> =>

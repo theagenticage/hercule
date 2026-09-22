@@ -456,7 +456,7 @@ describe("POST /events/:id/enrich", () => {
       // The entry names only what was amended: `system` was not given.
       expect(entries[0]!.payload["system"]).toBeUndefined();
 
-      // The entry is an audit kind, so it is not one of the events the matcher
+      // The entry is an audit kind, so it is not one of the events the router
       // evaluates: the manual population still holds the one emit above.
       expect(await manualEvents(sql)).toBe(1);
       const entry = await readEvent(base, token, entries[0]!.id);

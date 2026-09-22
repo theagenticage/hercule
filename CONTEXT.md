@@ -312,12 +312,18 @@ A named poll cadence an event-source contribution declares (`notifications`, `re
 _Avoid_: poller, loop
 
 **Enrichment**:
-Post-ingest amendment of an event's `system`, `url`, or `refs` (append-only) by a sender rule or the triage agent. Gives the matcher one more idempotent look at that event; never re-delivers to consumers that already fired.
+Post-ingest amendment of an event's `system`, `url`, or `refs` (append-only) by a sender rule or the triage agent. Gives the Event Router one more idempotent look at that event; never re-delivers to consumers that already fired.
 _Avoid_: editing events, reprocessing
 
-**Matcher**:
-The one consumer of the event log that decides who gets an event: it walks the events past its own durable cursor, evaluates every live subscription's expression against each one, and writes the row that wakes the holder. One consumer and one cursor, so a restart re-delivers nothing and drops nothing.
-_Avoid_: router, dispatcher, event bus
+**Event Router**:
+The one consumer of the event log. It walks the events past its own durable cursor, tests each one against every routing table, and calls the table's write for every route whose condition holds. It carries nothing to anyone: a delivery reads the rows a table wrote. One consumer and one cursor, so a restart re-delivers nothing and drops nothing.
+_Avoid_: matcher, dispatcher, event bus
+
+**Routing Table**:
+The routes one destination owns, one per live subscription today, one per enabled trigger later. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
+
+**Delivery**:
+The downstream consumer of the rows a routing table writes. Reads its own rows and acts on the ones that can act now; idempotent, so a crash between routing and delivery loses nothing.
 
 **Expression**:
 A CEL source stored on a subscription or a trigger and evaluated against one event, or against a run's inputs and steps, answering whether it matches or producing a value. Checked when it is saved, and evaluated against the context it is handed and nothing else. `condition` is the stored field on a subscription; the concept is an expression.

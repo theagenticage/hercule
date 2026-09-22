@@ -39,8 +39,10 @@ import {
   InboundLayer,
   Live,
   LiveLayer,
-  Matcher,
-  MatcherLayer,
+  Enrichment,
+  EnrichmentLayer,
+  EventRouterLayer,
+  PipelineLayer,
   Placement,
   PlacementLayer,
   ProfileRemoval,
@@ -265,13 +267,13 @@ const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
 const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
   Effect.gen(function* () {
     const events = yield* EventService;
-    const matcher = yield* Matcher;
+    const enrichment = yield* Enrichment;
     return handlers
       .handle("query", ({ query }) => operation(events.query(query)))
       .handle("read", ({ params }) => operation(events.read(params)))
       .handle("emit", ({ payload }) => operation(events.emit(payload)))
       .handle("enrich", ({ params, payload }) =>
-        operation(matcher.enrichEvent({ id: params.id, ...payload })),
+        operation(enrichment.enrichEvent({ id: params.id, ...payload })),
       );
   }),
 );
@@ -444,7 +446,7 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * over the same rows the drivers act on. They reach the handlers from there.
  *
  * `EvaluationErrorNotifier` is left to the caller for the same reason from the
- * other side: a test reads what the matcher reported by handing over a
+ * other side: a test reads what a routing table reported by handing over a
  * listener of its own, which a layer provided in here could not be replaced by.
  */
 export const operationLayers = Layer.mergeAll(
@@ -467,10 +469,10 @@ export const operationLayers = Layer.mergeAll(
   RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
   RunnerJoinLayer,
   // The inbound driver reaches both dispatch and the live channel, placement
-  // reaches dispatch, and the matcher sends what it matched through that same
-  // live channel, so those three are layered under the group rather than merged
-  // beside it. The live channel reaches dispatch too, which is why it is
-  // provided first.
+  // reaches dispatch, and the delivery of what a routing table matched goes out
+  // through that same live channel, so those three are layered under the group
+  // rather than merged beside it. The live channel reaches dispatch too, which
+  // is why it is provided first.
   Layer.mergeAll(
     InboundLayer,
     PlacementLayer,
@@ -478,10 +480,14 @@ export const operationLayers = Layer.mergeAll(
     // appends to the event log and so may not be imported by it; the two meet
     // here, where the whole controller is assembled. The controller daemon's
     // enrichment use case writes through that same service, so it is layered
-    // over it rather than merged beside it.
-    MatcherLayer.pipe(
-      Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
-    ),
+    // over it rather than merged beside it. The clock and the enrichment both
+    // hand their work to one router, so the router is provided to the pair.
+    Layer.mergeAll(
+      PipelineLayer,
+      EnrichmentLayer.pipe(
+        Layer.provideMerge(EventServiceLayer.pipe(Layer.provide(EventKindCatalogLayer))),
+      ),
+    ).pipe(Layer.provideMerge(EventRouterLayer)),
   ).pipe(Layer.provideMerge(LiveLayer), Layer.provideMerge(DispatchLayer)),
   ProvisioningLayer,
   SubscriptionServiceLayer,

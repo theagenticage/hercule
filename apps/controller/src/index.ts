@@ -153,7 +153,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
     if (outcome.localRunner !== undefined) yield* outcome.localRunner.stop;
   }).pipe(
     Effect.provide(operationLayers),
-    // Where the matcher's report of a condition it cannot evaluate goes. The
+    // Where the report of a condition that cannot be evaluated goes. The
     // list above leaves it to whoever assembles the controller, so a test can
     // hand over a listener of its own.
     Effect.provide(EvaluationErrorNotifierLayer),

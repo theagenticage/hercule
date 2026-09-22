@@ -4,13 +4,13 @@
  * The holder is a session today and a run later, so it is stored as a kind and
  * an id rather than as one column per kind. No column is a foreign key, for the
  * reason migration 0010 gives: a subscription outlives the process of the
- * session that made it, and the matcher is what ends it when that session has
+ * session that made it, and the event router is what ends it when that session has
  * ended for good.
  *
  * `target` holds the target as the caller wrote it, as JSON, and `condition`
  * holds the expression it expanded into. Both are stored because they answer
  * different questions: the target is what a person reads, and the condition is
- * what the matcher evaluates.
+ * what the event router evaluates.
  *
  * Health is two nullable columns and no state column: both null is `ok`, so the
  * first failure of a run of failures is one conditional write
@@ -48,7 +48,7 @@ export default Effect.gen(function* () {
   `;
 
   // Every read of this table reads live rows: one holder's, which this index
-  // narrows, and the matcher's read of all of them, which walks the same index
+  // narrows, and the router's read of all of them, which walks the same index
   // rather than the table.
   yield* sql`
     CREATE INDEX subscriptions_holder ON subscriptions (holder_kind, holder_id, created_at, id)

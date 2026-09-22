@@ -1,7 +1,7 @@
 /**
  * What a Subscription Target expands into.
  *
- * A target is the only thing a caller names; the matcher evaluates the CEL
+ * A target is the only thing a caller names; the event router evaluates the CEL
  * source this expansion produces. The `ref` expansion is pinned exactly,
  * because the web app and the spec both quote it. The other three are asserted
  * on what a reader can check without re-writing the expansion here: the source

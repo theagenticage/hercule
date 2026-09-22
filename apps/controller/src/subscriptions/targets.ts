@@ -1,7 +1,7 @@
 /**
  * What a Subscription Target expands into.
  *
- * A caller names a target; the matcher evaluates an expression. The expansion
+ * A caller names a target; the event router evaluates an expression. The expansion
  * between the two lives here and nowhere else, so what a subscription waits on
  * and what a person reads on the row can never drift apart.
  *

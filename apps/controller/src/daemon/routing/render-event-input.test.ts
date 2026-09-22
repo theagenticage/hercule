@@ -2,7 +2,7 @@
  * What a matched event reads like when it arrives as a session's input.
  *
  * The text is the only part of a delivery a person or an agent ever reads, so
- * it is pinned here on its own, away from the fleet: one line that says what
+ * it is pinned on its own, away from the fleet: one line that says what
  * happened, and the payload underneath it as JSON the agent can act on without
  * another call.
  *
@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Event } from "@hercule/contract";
-import { renderEventInput } from "./matching";
+import { renderEventInput } from "./render-event-input";
 
 /** An envelope with the core's own fields already stamped. */
 const buildEvent = (fields: Partial<Event>): Event => ({
