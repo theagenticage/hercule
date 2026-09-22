@@ -307,14 +307,20 @@ const make = Effect.gen(function* () {
 
   /**
    * Puts a session whose harness is gone back on the queue, under the document
-   * that picks its own transcript up. Joins the caller's transaction and
-   * announces nothing: every caller writes more than this and announces once
-   * for the whole write set.
+   * that picks its own transcript up. Joins the caller's transaction, and
+   * answers whether it moved the session: a caller that reads `false` has a
+   * session somebody else has already put back, and has nothing left to do
+   * about it.
+   *
+   * A caller that writes more than this one move asks for no announcement and
+   * announces once for its whole write set; a caller for which this move is the
+   * whole write set asks for the announcement here.
    */
-  const putBackOnQueue = (
+  const resume = (
     sessionId: string,
     spec: string,
     at: string,
+    announceTheMove: boolean,
   ): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
       const moved = yield* sessions.resume(sessionId, spec, at);
@@ -325,6 +331,9 @@ const make = Effect.gen(function* () {
       yield* afterCommit(() => {
         tracking.delete(sessionId);
       });
+      if (announceTheMove) {
+        yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+      }
       return true;
     });
 
@@ -791,7 +800,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
         if (taking.resumeSpec !== undefined) {
-          yield* putBackOnQueue(taking.sessionId, taking.resumeSpec, taking.at);
+          yield* resume(taking.sessionId, taking.resumeSpec, taking.at, false);
         }
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
@@ -810,19 +819,7 @@ const make = Effect.gen(function* () {
         return created;
       }),
 
-    /**
-     * Puts a session whose harness is gone back on the queue, under the
-     * document that picks its own transcript up, for a caller that is storing
-     * nothing else. Joins the caller's transaction, and answers whether it
-     * moved the session: a caller that reads `false` has a session somebody
-     * else has already put back, and has nothing left to do about it.
-     */
-    resume: (sessionId: string, spec: string, at: string): Effect.Effect<boolean, SqlError> =>
-      Effect.gen(function* () {
-        if (!(yield* putBackOnQueue(sessionId, spec, at))) return false;
-        yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
-        return true;
-      }),
+    resume,
 
     /**
      * Stores the input one subscription's match produced, joining the caller's

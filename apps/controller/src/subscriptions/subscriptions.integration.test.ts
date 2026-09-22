@@ -16,7 +16,7 @@ import { del, get, post, readRefusal } from "../http/testing";
 import {
   agentHolding,
   agentOn,
-  profileOf,
+  createProfile,
   WAIT_DEADLINE_MS,
   withAgentFleet,
   type Arranged,
@@ -93,7 +93,7 @@ interface EndRow {
  * is not pinned anywhere, and what these criteria are about is the row the
  * matcher reads.
  */
-const endRowOf = (arranged: Arranged, id: string): Promise<ReadonlyArray<EndRow>> =>
+const readEndRow = (arranged: Arranged, id: string): Promise<ReadonlyArray<EndRow>> =>
   Effect.runPromise(
     Effect.orDie(
       arranged.harness.sql<EndRow>`
@@ -168,7 +168,7 @@ describe("subscription.create", () => {
 describe("subscription.query", () => {
   it("answers a session token naming no holder with that session's own, and nothing else", async () => {
     await withAgentFleet(async (arranged) => {
-      const profile = await profileOf(arranged, "subscribers", [
+      const profile = await createProfile(arranged, "subscribers", [
         "subscription.write",
         "subscription.read",
       ]);
@@ -194,7 +194,7 @@ describe("subscription.query", () => {
 
   it("answers a session token naming another session's holder with that holder's", async () => {
     await withAgentFleet(async (arranged) => {
-      const profile = await profileOf(arranged, "subscribers", [
+      const profile = await createProfile(arranged, "subscribers", [
         "subscription.write",
         "subscription.read",
       ]);
@@ -236,7 +236,7 @@ describe("subscription.cancel", () => {
       const response = await cancel(arranged, subscriptionId, agent.token);
       expect(response.status, await response.clone().text()).toBe(200);
 
-      const rows = await endRowOf(arranged, subscriptionId);
+      const rows = await readEndRow(arranged, subscriptionId);
       expect(rows).toHaveLength(1);
       expect(rows[0]!.ended_at).not.toBeNull();
       expect(rows[0]!.ended_reason).toBe("cancelled");
@@ -282,7 +282,7 @@ describe("subscription.cancel", () => {
 describe("whose subscription a session may cancel", () => {
   it("refuses another session's, leaving it live, and answers as for an unknown id", async () => {
     await withAgentFleet(async (arranged) => {
-      const profile = await profileOf(arranged, "subscribers", [
+      const profile = await createProfile(arranged, "subscribers", [
         "subscription.write",
         "subscription.read",
       ]);
@@ -314,7 +314,7 @@ describe("whose subscription a session may cancel", () => {
       expect(await page(arranged, agent.token)).toEqual([]);
       // The user's own stamp, not the holder's: the row says who ended it and
       // not merely who was waiting on it.
-      expect((await endRowOf(arranged, subscriptionId))[0]!.ended_actor).toBe("user");
+      expect((await readEndRow(arranged, subscriptionId))[0]!.ended_actor).toBe("user");
     });
   });
 });

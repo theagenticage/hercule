@@ -54,10 +54,10 @@ const balancedSum = (leaves: number): string => {
   return terms[0]!;
 };
 
-const listOf = (elements: number): string =>
+const buildListSource = (elements: number): string =>
   `[${Array.from({ length: elements }, (_unused, index) => index).join(", ")}]`;
 
-const mapOf = (entries: number): string =>
+const buildMapSource = (entries: number): string =>
   `{${Array.from({ length: entries }, (_unused, index) => `"k${index}": ${index}`).join(", ")}}`;
 
 const callWith = (args: number): string =>
@@ -86,8 +86,8 @@ describe("checkExpression", () => {
   it.each([
     ["maxAstNodes", () => balancedSum(16384)],
     ["maxDepth", () => parenthesize(200)],
-    ["maxListElements", () => listOf(10000)],
-    ["maxMapEntries", () => mapOf(10000)],
+    ["maxListElements", () => buildListSource(10000)],
+    ["maxMapEntries", () => buildMapSource(10000)],
     ["maxCallArguments", () => callWith(200)],
   ])("refuses a source over %s, naming the limit and its value", (limit, build) => {
     const message = failureMessage(checkExpression(build()));
@@ -111,7 +111,7 @@ describe("parseExpression", () => {
   });
 
   it("refuses a source over a structural limit, naming the limit", () => {
-    expect(failureMessage(parseExpression(listOf(10000)))).toContain("maxListElements");
+    expect(failureMessage(parseExpression(buildListSource(10000)))).toContain("maxListElements");
   });
 
   it("answers, for a compiled source, what the source itself answers", () => {

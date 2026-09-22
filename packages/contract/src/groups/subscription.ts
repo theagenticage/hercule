@@ -32,7 +32,7 @@ import {
 import { ExternalRef, Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { markShorthand } from "../shorthand";
+import { markShorthand, markShorthandOnItself } from "../shorthand";
 import { bounded } from "../strings";
 
 /**
@@ -159,24 +159,21 @@ const parseHolderShorthand = (text: string): SubscriptionHolder | undefined =>
  * The wire carries the written word here, so this codec is a field's own
  * schema and is marked with itself.
  */
-const HolderFromShorthand = Schema.String.check(
-  Schema.makeFilter((text: string) =>
-    parseHolderShorthand(text) === undefined
-      ? `${text} names no subscription holder: ${HOLDER_FORM}`
-      : undefined,
-  ),
-).pipe(
-  Schema.decodeTo(SubscriptionHolder, {
-    decode: SchemaGetter.transform(
-      (text: string) => parseHolderShorthand(text) as SubscriptionHolder,
+export const SubscriptionHolderFromShorthand = markShorthandOnItself(
+  Schema.String.check(
+    Schema.makeFilter((text: string) =>
+      parseHolderShorthand(text) === undefined
+        ? `${text} names no subscription holder: ${HOLDER_FORM}`
+        : undefined,
     ),
-    encode: SchemaGetter.transform((holder) => `${holder.kind}:${holder.id}`),
-  }),
-);
-
-export const SubscriptionHolderFromShorthand = markShorthand(
-  HolderFromShorthand,
-  HolderFromShorthand,
+  ).pipe(
+    Schema.decodeTo(SubscriptionHolder, {
+      decode: SchemaGetter.transform(
+        (text: string) => parseHolderShorthand(text) as SubscriptionHolder,
+      ),
+      encode: SchemaGetter.transform((holder) => `${holder.kind}:${holder.id}`),
+    }),
+  ),
 );
 
 /**

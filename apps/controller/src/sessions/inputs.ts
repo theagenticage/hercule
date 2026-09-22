@@ -108,7 +108,7 @@ const toInput = (row: InputRow): StoredInput => ({
  * belongs to: without it one session's cursor would silently hide rows on
  * another's list.
  */
-const scopeOf = (sessionId: string, direction: SortDirection): CursorScope => ({
+const buildCursorScope = (sessionId: string, direction: SortDirection): CursorScope => ({
   op: "input.query",
   field: `createdAt:${sessionId}`,
   direction,
@@ -227,7 +227,7 @@ const make = Effect.gen(function* () {
 
     list: (request: InputPageRequest): Effect.Effect<Page<StoredInput>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = scopeOf(request.sessionId, request.direction);
+        const scope = buildCursorScope(request.sessionId, request.direction);
         const after =
           request.cursor === undefined
             ? undefined

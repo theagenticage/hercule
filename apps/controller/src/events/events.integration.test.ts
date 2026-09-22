@@ -28,7 +28,7 @@ import {
 import { fixture, providerDefinition } from "../plugins/testing";
 import {
   agentOn,
-  profileOf,
+  createProfile,
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
   type Arranged,
@@ -160,7 +160,7 @@ const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =
 
 /** A session on a profile that reads the log and may not write to it. */
 const reader = async (arranged: Arranged): Promise<string> => {
-  const profile = await profileOf(arranged, "log-reader", ["event.read"]);
+  const profile = await createProfile(arranged, "log-reader", ["event.read"]);
   return (await agentOn(arranged, profile)).token;
 };
 

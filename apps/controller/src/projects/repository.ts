@@ -65,7 +65,7 @@ const SORT_COLUMN: Record<ProjectSortField, string> = {
   updatedAt: "updated_at",
 };
 
-const scopeOf = (field: ProjectSortField, direction: SortDirection): CursorScope => ({
+const buildCursorScope = (field: ProjectSortField, direction: SortDirection): CursorScope => ({
   op: "project.query",
   field,
   direction,
@@ -141,7 +141,7 @@ const make = Effect.gen(function* () {
     /** One page of the live projects, in the order the request asks for. */
     list: (request: ProjectPageRequest): Effect.Effect<Page<Project>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = scopeOf(request.field, request.direction);
+        const scope = buildCursorScope(request.field, request.direction);
         // Every sortable column of a project holds text.
         const after =
           request.cursor === undefined

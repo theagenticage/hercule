@@ -199,7 +199,7 @@ const toCheckout = (row: CheckoutRow): StoredCheckout => ({
   defaultBranch: row.default_branch,
 });
 
-const scopeOf = (direction: SortDirection): CursorScope => ({
+const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "workspace.query",
   field: "createdAt",
   direction,
@@ -503,7 +503,7 @@ const make = Effect.gen(function* () {
       request: WorkspacePageRequest,
     ): Effect.Effect<Page<StoredWorkspace>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = scopeOf(request.direction);
+        const scope = buildCursorScope(request.direction);
         const after =
           request.cursor === undefined
             ? undefined

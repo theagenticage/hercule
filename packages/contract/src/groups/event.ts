@@ -79,7 +79,7 @@ export const MAX_EVENT_SYSTEM_LENGTH = 64;
 export const MAX_EVENT_URL_LENGTH = 2048;
 
 /** What a manual emit hands over. Everything else on the envelope is the core's. */
-export const EmitPayload = Schema.Struct({
+export const EventEmitInput = Schema.Struct({
   kind: EventKind,
   payload: JsonObject,
   connectionId: Schema.optionalKey(Id),
@@ -87,25 +87,25 @@ export const EmitPayload = Schema.Struct({
   dedupKey: Schema.optionalKey(bounded(1, MAX_DEDUP_KEY_LENGTH)),
 });
 
-export type EmitPayload = Schema.Schema.Type<typeof EmitPayload>;
+export type EventEmitInput = Schema.Schema.Type<typeof EventEmitInput>;
 
 /** Where a manual emit lands in the log. */
-export const Emitted = Schema.Struct({ eventId: EventId });
+export const EventEmitted = Schema.Struct({ eventId: EventId });
 
-export type Emitted = Schema.Schema.Type<typeof Emitted>;
+export type EventEmitted = Schema.Schema.Type<typeof EventEmitted>;
 
 /**
  * What enrichment may amend. An omitted field is left as it was; `refs` is
  * added to and never taken from, so a later reader of an event never finds
  * fewer identities on it than an earlier one did.
  */
-export const EnrichPayload = Schema.Struct({
+export const EventEnrichInput = Schema.Struct({
   system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
   url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
   refs: Schema.optionalKey(Schema.Array(ExternalRef)),
 });
 
-export type EnrichPayload = Schema.Schema.Type<typeof EnrichPayload>;
+export type EventEnrichInput = Schema.Schema.Type<typeof EventEnrichInput>;
 
 export const event = HttpApiGroup.make("event")
   .add(
@@ -138,13 +138,13 @@ export const event = HttpApiGroup.make("event")
      * does; a filter that has to tell the two apart reads `event.source`.
      */
     HttpApiEndpoint.post("emit", "/events/emit", {
-      payload: EmitPayload,
-      success: Emitted,
+      payload: EventEmitInput,
+      success: EventEmitted,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.post("enrich", "/events/:id/enrich", {
       params: { id: Schema.FiniteFromString.pipe(Schema.decodeTo(EventId)) },
-      payload: EnrichPayload,
+      payload: EventEnrichInput,
       success: Event,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),

@@ -22,7 +22,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  EnrichPayload,
+  EventEnrichInput,
   EventId,
   validationOf,
   type Event,
@@ -37,8 +37,8 @@ import {
   advanceConsumerCursor,
   AuditLog,
   EventService,
-  headOfLog,
   readConsumerPosition,
+  readLogHead,
   readPipelineEvent,
   readPipelineEventsAfter,
 } from "../events";
@@ -53,7 +53,7 @@ import { absorbing, forking } from "./absorbing";
 import { Live } from "./live";
 
 /** One event named by its position in the log, and what is to be amended on it. */
-const EnrichInput = Schema.Struct({ id: EventId, ...EnrichPayload.fields });
+const EnrichInput = Schema.Struct({ id: EventId, ...EventEnrichInput.fields });
 
 type EnrichInput = Schema.Schema.Type<typeof EnrichInput>;
 
@@ -76,6 +76,15 @@ const MATCHER = "matcher";
  * microseconds; a full pass over a hundred subscriptions is milliseconds.
  */
 const EVENTS_PER_PASS = 100;
+
+/**
+ * How many passes one tick may make before it delivers what they matched.
+ *
+ * Ten passes are a thousand entries, which is far more than one second of any
+ * real log, so a burst is walked to its end inside one tick and the cap is
+ * reached only by an emitter writing faster than the matcher reads.
+ */
+const MAX_PASSES_PER_TICK = 10;
 
 /** How often the matcher looks for entries it has not read. */
 const EVENT_MATCH_INTERVAL: Duration.Duration = Duration.seconds(1);
@@ -155,27 +164,32 @@ const make = Effect.gen(function* () {
    * match like an idle one. Joins the caller's transaction.
    */
   const endSubscriptionsOfEndedHolders = (
-    standing: ReadonlyArray<StoredSubscription>,
+    liveSubscriptions: ReadonlyArray<StoredSubscription>,
   ): Effect.Effect<ReadonlySet<string>, SqlError> =>
     Effect.gen(function* () {
-      const holders = [...new Set(standing.map((one) => one.holder.id))];
-      const gone = new Set(yield* sessionRows.listEndedForGood(holders));
-      const ended = new Set<string>();
-      for (const one of standing.filter((subscription) => gone.has(subscription.holder.id))) {
-        const reason = buildHolderEndedReason(one.holder.id);
+      const holderIds = [
+        ...new Set(liveSubscriptions.map((subscription) => subscription.holder.id)),
+      ];
+      const endedHolderIds = new Set(yield* sessionRows.listEndedForGood(holderIds));
+      const endedSubscriptionIds = new Set<string>();
+      const subscriptionsOfEndedHolders = liveSubscriptions.filter((subscription) =>
+        endedHolderIds.has(subscription.holder.id),
+      );
+      for (const subscription of subscriptionsOfEndedHolders) {
+        const reason = buildHolderEndedReason(subscription.holder.id);
         // Nobody asked for this end, so the system is what stamps it.
         yield* subscriptions.end({
-          id: one.id,
+          id: subscription.id,
           at: yield* nowIso,
           reason,
           actor: SYSTEM_ACTOR,
         });
         // An input this subscription produced that nothing has delivered
         // yet is waiting for a session that will never take it.
-        yield* sessions.cancelMatchedInputs(one.id, reason);
-        ended.add(one.id);
+        yield* sessions.cancelMatchedInputs(subscription.id, reason);
+        endedSubscriptionIds.add(subscription.id);
       }
-      return ended;
+      return endedSubscriptionIds;
     });
 
   /**
@@ -191,7 +205,7 @@ const make = Effect.gen(function* () {
    * evaluated, and the failure is recorded on the row where a caller reads it.
    */
   const matchEvents = (
-    standing: ReadonlyArray<StoredSubscription>,
+    evaluableSubscriptions: ReadonlyArray<StoredSubscription>,
     batch: ReadonlyArray<Event>,
   ): Effect.Effect<ReadonlyArray<EvaluationFailure>, SqlError> =>
     Effect.gen(function* () {
@@ -200,8 +214,10 @@ const make = Effect.gen(function* () {
       if (batch.length === 0) return [];
       const newFailures: Array<EvaluationFailure> = [];
       /** Which subscriptions were in a run of failures when this pass began. */
-      const failing = new Map(
-        standing.map((one) => [one.id, one.healthErrorMessage !== null] as const),
+      const inFailureStreak = new Map(
+        evaluableSubscriptions.map(
+          (subscription) => [subscription.id, subscription.healthErrorMessage !== null] as const,
+        ),
       );
 
       /** Records one subscription's failure, and reports the streak it begins. */
@@ -216,7 +232,7 @@ const make = Effect.gen(function* () {
             yield* nowIso,
           );
           if (began) newFailures.push({ subscriptionId, message });
-          failing.set(subscriptionId, true);
+          inFailureStreak.set(subscriptionId, true);
         });
 
       /**
@@ -233,7 +249,7 @@ const make = Effect.gen(function* () {
         readonly subscription: StoredSubscription;
         readonly program: CompiledExpression;
       }> = [];
-      for (const subscription of standing) {
+      for (const subscription of evaluableSubscriptions) {
         const compiled = yield* Effect.result(parseExpression(subscription.condition));
         if (Result.isFailure(compiled)) {
           yield* recordFailure(subscription.id, compiled.failure.message);
@@ -251,9 +267,9 @@ const make = Effect.gen(function* () {
             yield* recordFailure(subscription.id, answer.failure.message);
             continue;
           }
-          if (failing.get(subscription.id) === true) {
+          if (inFailureStreak.get(subscription.id) === true) {
             yield* subscriptions.clearEvaluationFailure(subscription.id);
-            failing.set(subscription.id, false);
+            inFailureStreak.set(subscription.id, false);
           }
           // Only a condition that answers true has matched. A condition
           // answering a string or a number has not said yes to anything.
@@ -327,13 +343,15 @@ const make = Effect.gen(function* () {
   > = withTransaction(
     sql,
     Effect.gen(function* () {
-      const waiting = yield* subscriptions.listLive();
-      const ended = yield* endSubscriptionsOfEndedHolders(waiting);
-      const standing = waiting.filter((one) => !ended.has(one.id));
+      const liveSubscriptions = yield* subscriptions.listLive();
+      const endedSubscriptionIds = yield* endSubscriptionsOfEndedHolders(liveSubscriptions);
+      const evaluableSubscriptions = liveSubscriptions.filter(
+        (subscription) => !endedSubscriptionIds.has(subscription.id),
+      );
       const position = yield* readConsumerPosition(sql, MATCHER);
       const batch = yield* readPipelineEventsAfter(sql, position, EVENTS_PER_PASS);
-      const failures = yield* matchEvents(standing, batch);
-      const reached = batch.at(-1)?.id ?? (yield* headOfLog(sql));
+      const failures = yield* matchEvents(evaluableSubscriptions, batch);
+      const reached = batch.at(-1)?.id ?? (yield* readLogHead(sql));
       if (reached > position) yield* advanceConsumerCursor(sql, MATCHER, reached);
       return { failures, reachedTheEnd: batch.length < EVENTS_PER_PASS };
     }),
@@ -351,11 +369,17 @@ const make = Effect.gen(function* () {
    * released between them and nothing else writing is held off for the whole
    * burst.
    *
+   * The passes are capped all the same. An emitter that keeps writing a full
+   * batch between one pass and the next would hold the loop here for ever, and
+   * the rows the earlier passes committed would never be sent: the matcher owes
+   * delivery as much as it owes matching. At the cap the tick delivers what it
+   * has and returns, and the next tick reads on from the cursor.
+   *
    * The deliveries are left until the log is walked, rather than done per pass,
    * because one sweep of the rows still waiting covers every pass before it.
    */
   const matchNewEvents: Effect.Effect<void, SqlError> = Effect.gen(function* () {
-    while (true) {
+    for (let pass = 0; pass < MAX_PASSES_PER_TICK; pass++) {
       const { failures, reachedTheEnd } = yield* matchOnePass;
       yield* reportFailures(failures);
       if (reachedTheEnd) break;
@@ -377,11 +401,11 @@ const make = Effect.gen(function* () {
     eventId: number,
   ): Effect.Effect<ReadonlyArray<EvaluationFailure>, SqlError> =>
     Effect.gen(function* () {
-      const standing = yield* subscriptions.listLive();
-      if (standing.length === 0) return [];
+      const liveSubscriptions = yield* subscriptions.listLive();
+      if (liveSubscriptions.length === 0) return [];
       const event = yield* readPipelineEvent(sql, eventId);
       if (Option.isNone(event)) return [];
-      return yield* matchEvents(standing, [event.value]);
+      return yield* matchEvents(liveSubscriptions, [event.value]);
     });
 
   return {

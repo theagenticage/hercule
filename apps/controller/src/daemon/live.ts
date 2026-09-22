@@ -287,7 +287,11 @@ const make = Effect.gen(function* () {
           // A machine holding no connection cannot be told. Claiming a row for
           // it only to put the row straight back would rewrite that row, and
           // tell every client watching the session, once for every pass the
-          // machine stays away.
+          // machine stays away. With a connection the flush does go ahead, and
+          // it takes the session's oldest queued row whatever produced it: a
+          // row a person typed that a delivery did not finish is tried again on
+          // every pass while a matched row waits behind it. That is what a
+          // queue is, and the row nobody could deliver is the first one owed.
           if (!(yield* connections.holdsConnection(session.runnerId))) return;
           return yield* flush(sessionId);
         }
@@ -305,7 +309,7 @@ const make = Effect.gen(function* () {
         );
         const moved = yield* withTransaction(
           sql,
-          Effect.flatMap(nowIso, (at) => sessions.resume(sessionId, resumeSpec, at)),
+          Effect.flatMap(nowIso, (at) => sessions.resume(sessionId, resumeSpec, at, true)),
         );
         // Another caller got there first and the session is already on its way
         // back up. Dispatching again would place it twice.

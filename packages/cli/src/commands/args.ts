@@ -64,6 +64,9 @@ export const said = (field: Field): string =>
 export const coerce = (field: Field, text: string, help: string): unknown => {
   if (field.decodeShorthand !== undefined) {
     try {
+      // For a query field the derived client encodes the decoded value back to
+      // the written word, so the round trip costs nothing and the one codec
+      // still owns what the word means.
       return field.decodeShorthand(text);
     } catch (failure) {
       // The codec's own message says which forms the word may take. The error

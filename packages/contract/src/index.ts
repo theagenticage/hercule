@@ -266,26 +266,21 @@ export {
   WorkspaceStatus,
 } from "./groups/workspace";
 export {
-  EmitPayload,
-  Emitted,
-  EnrichPayload,
+  EventEmitInput,
+  EventEmitted,
+  EventEnrichInput,
   EVENT_SORT_FIELDS,
   Event,
   EventId,
-  MAX_DEDUP_KEY_LENGTH,
   MAX_EVENT_KIND_LENGTH,
-  MAX_EVENT_SYSTEM_LENGTH,
-  MAX_EVENT_URL_LENGTH,
 } from "./groups/event";
 export {
-  MAX_TARGET_ID_LENGTH,
   SUBSCRIPTION_SORT_FIELDS,
   Subscription,
   SubscriptionCreateInput,
   SubscriptionCreated,
   SubscriptionHealth,
   SubscriptionHolder,
-  SubscriptionHolderFromShorthand,
   SubscriptionTarget,
   SubscriptionTargetFromShorthand,
 } from "./groups/subscription";

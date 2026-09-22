@@ -23,6 +23,15 @@ export const markShorthand = <S extends Schema.Top>(
 ): S => schema.annotate({ [SHORTHAND]: shorthand }) as S;
 
 /**
+ * Marks a field whose wire form is the written word itself: its schema is the
+ * codec that reads the word, so the codec is marked with itself and a caller
+ * finds it where it finds every other shorthand. A query string carries the
+ * written word, which is where this happens.
+ */
+export const markShorthandOnItself = <S extends Schema.Codec<unknown, string>>(schema: S): S =>
+  markShorthand(schema, schema as unknown as Schema.Codec<S["Type"], string>);
+
+/**
  * Decodes one written word with the codec a field's schema carries, or
  * `undefined` for a field whose written text is its value.
  *

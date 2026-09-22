@@ -59,14 +59,14 @@ export const toEvent = (row: EventRow): Event => ({
 });
 
 /** The position of the newest entry, or zero for a log nothing has written to. */
-export const headOfLog = (sql: SqlClient.SqlClient): Effect.Effect<number, SqlError> =>
+export const readLogHead = (sql: SqlClient.SqlClient): Effect.Effect<number, SqlError> =>
   Effect.map(
     sql<{ readonly head: number | null }>`SELECT MAX(id) AS head FROM events`,
     (rows) => rows[0]?.head ?? 0,
   );
 
 /** The next entries after a position, oldest first, at most `limit` of them. */
-export const eventsAfter = (
+export const readEventsAfter = (
   sql: SqlClient.SqlClient,
   after: number,
   limit: number,

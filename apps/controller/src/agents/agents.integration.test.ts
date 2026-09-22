@@ -19,7 +19,7 @@ import {
   agentOn,
   at,
   profileNamed,
-  profileOf,
+  createProfile,
   report,
   sessionWhen,
   spawned,
@@ -326,7 +326,7 @@ describe("the agent over its five operations", () => {
       const profile = await profileNamed(arranged, "unrestricted");
       const { token } = await agentOn(
         arranged,
-        await profileOf(arranged, "no-agents", ["task.read"]),
+        await createProfile(arranged, "no-agents", ["task.read"]),
       );
       const base = arranged.harness.base;
 
@@ -498,7 +498,7 @@ describe("listing sessions by what spawned them", () => {
 describe("the permission profile an agent spawns under", () => {
   it("refuses to delete a profile an agent names, saying which agent", async () => {
     await withFleet(async (arranged) => {
-      const profile = await profileOf(arranged, "assessors", ["session.read"]);
+      const profile = await createProfile(arranged, "assessors", ["session.read"]);
       const agent = await agentFor(arranged, findInstanceId(arranged, "claude-provider"), {
         name: "the-assessor",
         permissionProfileId: profile.id,
@@ -531,7 +531,7 @@ describe("the permission profile an agent spawns under", () => {
    */
   it("refuses a spawn from an agent whose profile is gone", async () => {
     await withFleet(async (arranged) => {
-      const profile = await profileOf(arranged, "doomed", ["session.read"]);
+      const profile = await createProfile(arranged, "doomed", ["session.read"]);
       const agent = await agentFor(arranged, findInstanceId(arranged, "claude-provider"), {
         permissionProfileId: profile.id,
       });

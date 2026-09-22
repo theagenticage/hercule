@@ -34,7 +34,7 @@ import type { Fragment } from "effect/unstable/sql/Statement";
 import {
   bounded,
   DEFAULT_PAGE_LIMIT,
-  EmitPayload,
+  EventEmitInput,
   EVENT_SORT_FIELDS,
   EventId,
   Id,
@@ -46,7 +46,7 @@ import {
   Timestamp,
   validation,
   validationOf,
-  type Emitted,
+  type EventEmitted,
   type Event,
   type Forbidden,
   type NotFound,
@@ -93,7 +93,7 @@ const Identified = Schema.Struct({ id: EventId });
 export type Identified = Schema.Schema.Type<typeof Identified>;
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
-const decodeEmit = Schema.decodeUnknownEffect(EmitPayload, { errors: "all" });
+const decodeEmit = Schema.decodeUnknownEffect(EventEmitInput, { errors: "all" });
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 /** One page of the log, in the contract's shape. */
@@ -255,8 +255,11 @@ const make = Effect.gen(function* () {
      * nothing a caller can write makes a manual event look ingested.
      */
     emit: (
-      input: EmitPayload,
-    ): Effect.Effect<Emitted, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+      input: EventEmitInput,
+    ): Effect.Effect<
+      EventEmitted,
+      Unauthenticated | Forbidden | Validation | NotFound | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("event.emit");
         const decoded = yield* Effect.mapError(decodeEmit(input), validationOf);
@@ -286,7 +289,10 @@ const make = Effect.gen(function* () {
         // Without a key of the caller's own, every post is its own fact: two
         // identical posts are two things that happened, not one repeated.
         const dedupKey = decoded.dedupKey ?? crypto.randomUUID();
-        const refs = JSON.stringify(decoded.refs ?? []);
+        // Each ref once, as `amend` stores them: a caller that wrote one twice
+        // meant one identity, and the stored list is what a later reader
+        // compares against.
+        const refs = JSON.stringify([...new Set(decoded.refs ?? [])]);
 
         return yield* withTransaction(
           sql,

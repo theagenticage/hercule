@@ -387,7 +387,7 @@ export const profileNamed = async (arranged: Arranged, name: string): Promise<Pr
 };
 
 /** A profile of the test's own making, for a grant set no shipped one has. */
-export const profileOf = async (
+export const createProfile = async (
   arranged: Arranged,
   name: string,
   grants: ReadonlyArray<string>,
@@ -436,7 +436,7 @@ export const sessionWhen = (
  * The plaintext session token off a start frame. The frame is the only place
  * the plaintext is ever seen, which is exactly what the runner reads it from.
  */
-export const tokenOf = (frame: SessionStart): string => {
+export const readSessionToken = (frame: SessionStart): string => {
   const token: unknown = frame.token;
   expect(
     typeof token === "string" && token !== "",
@@ -460,11 +460,11 @@ export const agentHolding = async (
   arranged: Arranged,
   name: string,
   grants: ReadonlyArray<string>,
-): Promise<Agent> => agentOn(arranged, await profileOf(arranged, name, grants));
+): Promise<Agent> => agentOn(arranged, await createProfile(arranged, name, grants));
 
 export const agentOn = async (arranged: Arranged, profile: Profile): Promise<Agent> => {
   const opened = await spawned(arranged, { prompt: "hello", permissionProfileId: profile.id });
-  const token = tokenOf((await startFrames(arranged, opened.id, 1))[0]!);
+  const token = readSessionToken((await startFrames(arranged, opened.id, 1))[0]!);
   report(arranged.wire, 1, {
     eventId: crypto.randomUUID(),
     sessionId: opened.id,

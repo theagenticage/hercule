@@ -12,8 +12,8 @@
  */
 import type { SubscriptionTarget } from "@hercule/contract";
 
-/** The value as a CEL literal. */
-const literal = (value: string): string => JSON.stringify(value);
+/** The value as a CEL string literal, which is a JSON string. */
+const quoteAsCelString = (value: string): string => JSON.stringify(value);
 
 /**
  * The CEL source a target waits on.
@@ -26,13 +26,13 @@ const literal = (value: string): string => JSON.stringify(value);
 export const expandTarget = (target: SubscriptionTarget): string => {
   switch (target.kind) {
     case "ref":
-      return `${literal(target.ref)} in event.refs`;
+      return `${quoteAsCelString(target.ref)} in event.refs`;
     case "run":
-      return `event.kind.startsWith("run.") && event.payload.runId == ${literal(target.runId)}`;
+      return `event.kind.startsWith("run.") && event.payload.runId == ${quoteAsCelString(target.runId)}`;
     case "session":
       return (
         `event.kind.startsWith("session.") && ` +
-        `event.payload.sessionId == ${literal(target.sessionId)}`
+        `event.payload.sessionId == ${quoteAsCelString(target.sessionId)}`
       );
     case "request":
       // The decision on one Permission Request, which is the one thing a
@@ -40,7 +40,7 @@ export const expandTarget = (target: SubscriptionTarget): string => {
       // the kind the security document names for that decision.
       return (
         `event.kind == "permission.decided" && ` +
-        `event.payload.requestId == ${literal(target.requestId)}`
+        `event.payload.requestId == ${quoteAsCelString(target.requestId)}`
       );
   }
 };

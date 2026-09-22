@@ -22,7 +22,6 @@ import {
   deriveConfigJsonSchema,
   ConnectionType,
   decodeAgainst,
-  EventSourceNames,
   HOST_API,
   PluginError,
   PluginManifest,
@@ -38,9 +37,6 @@ import {
   type RegistrationHost,
 } from "@hercule/plugin-host";
 import {
-  issuesOf,
-  MAX_EVENT_KIND_LENGTH,
-  MAX_PLUGIN_MESSAGE_LENGTH,
   validationOf,
   type PluginRefusalReason,
   type PluginStatus,
@@ -54,6 +50,8 @@ import { Secrets, type SecretOwner } from "../secrets";
 // both live in the connections domain: everything they touch is there. This is
 // the only direction the two point in.
 import { ConnectionTypes, PluginConfigs, type RegisteredConnectionType } from "../connections";
+import { asPluginError, describeFieldIssues, truncateMessage } from "./errors";
+import { registerEventSourceContribution } from "./event-sources";
 import { pluginRepository, type NewContribution } from "./repository";
 
 /**
@@ -106,23 +104,6 @@ const exposed = (entry: Entry): LoadedPlugin => ({
 /** The extension points with a consumer; the column takes any name. */
 const PROVIDER = "provider";
 const CONNECTION_TYPE = "connection-type";
-const EVENT_SOURCE = "event-source";
-
-/**
- * Cutting a plugin's unbounded text where the message is made, rather than at
- * each reader, is what makes the published maximum true of every message.
- */
-const bounded = (message: string): string =>
-  message.length <= MAX_PLUGIN_MESSAGE_LENGTH
-    ? message
-    : `${message.slice(0, MAX_PLUGIN_MESSAGE_LENGTH - 3)}...`;
-
-const fieldMessage = (error: Schema.SchemaError): string =>
-  bounded(
-    issuesOf(error)
-      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-      .join("; "),
-  );
 
 // An excess key is refused rather than stripped: dropping a field the host does
 // not know would let an unserializable value look accepted.
@@ -138,44 +119,12 @@ const decodeConnectionType = Schema.decodeUnknownEffect(ConnectionType, {
   onExcessProperty: "error",
 });
 
-// The two names an event source is identified by. Its kinds are read one at a
-// time below, because each declaration holds a live schema.
-const decodeEventSourceNames = Schema.decodeUnknownEffect(EventSourceNames, { errors: "all" });
-
-/**
- * One event kind as a plugin declares it, minus the schema: a name that no
- * column would truncate, and a line saying what the event means. Both reach a
- * column and the wire.
- */
-const EventKindNaming = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_EVENT_KIND_LENGTH)),
-  description: Schema.String.check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(MAX_PLUGIN_MESSAGE_LENGTH),
-  ),
-});
-
-const decodeEventKindNaming = Schema.decodeUnknownEffect(EventKindNaming, { errors: "all" });
-
-/**
- * The JSON Schema the catalog holds for one event kind. It is a whole document
- * rather than the root node alone: a schema carrying an identifier is emitted
- * once as a definition and pointed at with a `$ref`, and a reader handed the
- * root by itself could not follow that reference.
- */
-const derivePayloadJsonSchema = (schema: Schema.Top): JsonSchema.JsonSchema => {
-  const document = Schema.toJsonSchemaDocument(schema);
-  return Object.keys(document.definitions).length === 0
-    ? document.schema
-    : { ...document.schema, $defs: document.definitions };
-};
-
 /**
  * One line either way, because this is shown to the user in Settings, where a
  * stack trace would say less than the sentence at the top of it.
  */
 const messageOf = (cause: Cause.Cause<PluginError>): string =>
-  bounded(
+  truncateMessage(
     Option.match(Cause.findErrorOption(cause), {
       onSome: (error) => error.message,
       onNone: () => {
@@ -193,11 +142,6 @@ const named = (what: string, value: string): Effect.Effect<void> =>
   value.length === 0
     ? Effect.die(new PluginError({ message: `A plugin ${what} cannot be empty.` }))
     : Effect.void;
-
-const asPluginError = (error: Schema.SchemaError): PluginError =>
-  new PluginError({
-    message: fieldMessage(error),
-  });
 
 /**
  * The claimed id is the useful half, but it is also the field most likely to be
@@ -217,7 +161,7 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
     Effect.catchTag("SchemaError", (error) =>
       Effect.die(
         new Error(
-          `The plugin ${nameOf(manifest, index)} has an invalid manifest: ${fieldMessage(error)}`,
+          `The plugin ${nameOf(manifest, index)} has an invalid manifest: ${describeFieldIssues(error)}`,
         ),
       ),
     ),
@@ -246,12 +190,12 @@ const inspect = (
   if (secretFields(manifest.configSchema).length > 0) {
     return Result.fail({
       kind: "unsupportedConfigSchema",
-      message: bounded(`the plugin's own config: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`),
+      message: truncateMessage(`the plugin's own config: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`),
     });
   }
   return Result.mapError(deriveConfigJsonSchema(manifest.configSchema), (error) => ({
     kind: "unsupportedConfigSchema",
-    message: bounded(error.message),
+    message: truncateMessage(error.message),
   }));
 };
 
@@ -385,70 +329,7 @@ const registrationHost = (
     ? {
         eventSources: {
           register: (definition) =>
-            Effect.gen(function* () {
-              const names = yield* Effect.mapError(
-                decodeEventSourceNames({
-                  id: definition.id,
-                  connectionType: definition.connectionType,
-                }),
-                asPluginError,
-              );
-              // The identity the catalog keys on, made the same way a
-              // connection type's is: the plugin's id and the word it declared.
-              const id = `${manifest.id}/${names.id}`;
-              if (declared.some((row) => row.extensionPoint === EVENT_SOURCE && row.id === id)) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the ${EVENT_SOURCE} contribution ${id} is registered twice`,
-                  }),
-                );
-              }
-              const catalogued: Record<
-                string,
-                { readonly description: string; readonly schema: JsonSchema.JsonSchema }
-              > = {};
-              for (const [kind, declaration] of Object.entries(definition.kinds)) {
-                // A kind is looked up by name alone, across every plugin, so it
-                // has to say who owns it, and the name in front of the first dot
-                // is what a reader takes the owner to be. Refused here, where
-                // the plugin author is told, rather than at the first emit,
-                // where the caller would be told about somebody else's mistake.
-                if (!kind.startsWith(`${manifest.id}.`)) {
-                  return yield* Effect.fail(
-                    new PluginError({
-                      message: `the event kind ${kind} does not begin with "${manifest.id}."`,
-                    }),
-                  );
-                }
-                // Two sources of one plugin claiming one kind would leave the
-                // last one registered answering for both.
-                if (kinds.has(kind)) {
-                  return yield* Effect.fail(
-                    new PluginError({ message: `the event kind ${kind} is declared twice` }),
-                  );
-                }
-                // The kind's name is carried into the refusal, because a
-                // plugin declaring many kinds needs to be told which one.
-                yield* Effect.mapError(
-                  decodeEventKindNaming({ name: kind, description: declaration.description }),
-                  (error) =>
-                    new PluginError({
-                      message: `the event kind ${kind} is refused: ${fieldMessage(error)}`,
-                    }),
-                );
-                catalogued[kind] = {
-                  description: declaration.description,
-                  schema: derivePayloadJsonSchema(declaration.schema),
-                };
-                kinds.set(kind, declaration.schema);
-              }
-              declared.push({
-                owner: manifest.id,
-                extensionPoint: EVENT_SOURCE,
-                id,
-                definition: { connectionType: names.connectionType, kinds: catalogued },
-              });
-            }),
+            registerEventSourceContribution(manifest.id, definition, declared, kinds),
         },
       }
     : {}),
@@ -612,7 +493,9 @@ const make = Effect.gen(function* () {
         }),
       );
     }).pipe(
-      Effect.catchTag("SchemaError", (error) => markErrored(id, "activate", fieldMessage(error))),
+      Effect.catchTag("SchemaError", (error) =>
+        markErrored(id, "activate", describeFieldIssues(error)),
+      ),
     );
 
   /**

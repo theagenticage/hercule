@@ -25,13 +25,13 @@ import {
   agentHolding,
   at,
   framesOf,
-  profileOf,
+  createProfile,
   readSession,
   report,
   sessionWhen,
   spawned,
   startFrames,
-  tokenOf,
+  readSessionToken,
   until,
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
@@ -141,9 +141,9 @@ const subscriber = (arranged: Arranged, name: string): Promise<Agent> =>
  * a provider-native session, so the transcript is gone.
  */
 const stranded = async (arranged: Arranged, name: string): Promise<Agent> => {
-  const profile = await profileOf(arranged, name, ["subscription.write", "subscription.read"]);
+  const profile = await createProfile(arranged, name, ["subscription.write", "subscription.read"]);
   const opened = await spawned(arranged, { prompt: "hello", permissionProfileId: profile.id });
-  const token = tokenOf((await startFrames(arranged, opened.id, 1))[0]!);
+  const token = readSessionToken((await startFrames(arranged, opened.id, 1))[0]!);
   return { session: opened, token };
 };
 
@@ -204,7 +204,7 @@ interface Health {
   readonly at?: string;
 }
 
-const healthOf = async (arranged: Arranged, agent: Agent, id: string): Promise<Health> => {
+const readHealth = async (arranged: Arranged, agent: Agent, id: string): Promise<Health> => {
   const response = await get(arranged.harness.base, "/api/v1/subscriptions", agent.token);
   expect(response.status, await response.clone().text()).toBe(200);
   const items = (
@@ -224,11 +224,11 @@ const healthWhen = (
   ready: (health: Health) => boolean,
 ): Promise<Health> =>
   until("reported the subscription's health", async () => {
-    const health = await healthOf(arranged, agent, id);
+    const health = await readHealth(arranged, agent, id);
     return ready(health) ? health : undefined;
   });
 
-const payloadOf = (title: string): unknown => ({
+const buildPayload = (title: string): unknown => ({
   subject: { repo: "o/r", number: 87, title, url: PR_URL },
 });
 
@@ -241,15 +241,15 @@ const emitted = async (
   const response = await post(
     arranged.harness.base,
     "/api/v1/events/emit",
-    { kind: KIND, payload: payloadOf(title), refs },
+    { kind: KIND, payload: buildPayload(title), refs },
     arranged.token,
   );
   expect(response.status, await response.clone().text()).toBe(200);
   return ((await response.json()) as { eventId: number }).eventId;
 };
 
-/** One effect row: which event it came from, and what the session will read. */
-interface EffectRow {
+/** One matched input: which event it came from, and what the session will read. */
+interface MatchedInputRow {
   readonly event_id: number;
   readonly source: string;
   readonly status: string;
@@ -258,12 +258,12 @@ interface EffectRow {
   readonly session: string;
 }
 
-const effectRows = (
+const matchedInputRows = (
   harness: ServerHarness,
   subscriptionId: string,
-): Promise<ReadonlyArray<EffectRow>> =>
+): Promise<ReadonlyArray<MatchedInputRow>> =>
   run(
-    harness.sql<EffectRow>`
+    harness.sql<MatchedInputRow>`
       SELECT event_id, source, status, text, reason, lower(hex(session_id)) AS session
       FROM session_inputs
       WHERE subscription_id = unhex(replace(${subscriptionId}, '-', ''))
@@ -273,10 +273,10 @@ const effectRows = (
 const rowsWhen = (
   harness: ServerHarness,
   subscriptionId: string,
-  ready: (rows: ReadonlyArray<EffectRow>) => boolean,
-): Promise<ReadonlyArray<EffectRow>> =>
-  until("wrote the effect rows", async () => {
-    const rows = await effectRows(harness, subscriptionId);
+  ready: (rows: ReadonlyArray<MatchedInputRow>) => boolean,
+): Promise<ReadonlyArray<MatchedInputRow>> =>
+  until("wrote the matched inputs", async () => {
+    const rows = await matchedInputRows(harness, subscriptionId);
     return ready(rows) ? rows : undefined;
   });
 
@@ -345,7 +345,7 @@ const frameWhen = (arranged: Arranged, text: string): Promise<SessionInput> =>
   until(`sent a frame carrying ${text}`, () => sentFrames(arranged, text)[0]);
 
 describe("the matcher's tick", () => {
-  it("writes one effect row for a matched subscription, and walks its cursor past the event", async () => {
+  it("writes one matched input for a matched subscription, and walks its cursor past the event", async () => {
     await withMatcher(async (arranged) => {
       const agent = await subscriber(arranged, "subscribers");
       const subscriptionId = await subscribed(arranged, agent, REF);
@@ -391,7 +391,7 @@ describe("the matcher's tick", () => {
             SELECT 1 UNION ALL SELECT value + 1 FROM counted WHERE value < ${BURST}
           )
           SELECT 'manual', NULL, 'github', ${KIND}, ${at}, ${at}, 'burst-' || value,
-                 ${JSON.stringify([REF])}, NULL, ${JSON.stringify(payloadOf("a burst"))},
+                 ${JSON.stringify([REF])}, NULL, ${JSON.stringify(buildPayload("a burst"))},
                  NULL, 'user'
           FROM counted`,
       );
@@ -415,7 +415,7 @@ describe("the matcher's tick", () => {
       await rowsWhen(arranged.harness, subscriptionId, (found) => found.length >= 1);
       const settled = await caughtUp(arranged.harness);
 
-      // The crash between the commit of the effect rows and the advance of
+      // The crash between the commit of the matched inputs and the advance of
       // the cursor, three times over.
       for (let pass = 0; pass < 3; pass++) {
         await run(
@@ -426,7 +426,7 @@ describe("the matcher's tick", () => {
           const seen = await walk(arranged.harness);
           return seen.position !== null && seen.position >= settled ? seen.position : undefined;
         });
-        const rows = await effectRows(arranged.harness, subscriptionId);
+        const rows = await matchedInputRows(arranged.harness, subscriptionId);
         expect(rows, `pass ${String(pass)}`).toHaveLength(1);
         expect(rows[0]!.event_id).toBe(eventId);
       }
@@ -435,7 +435,7 @@ describe("the matcher's tick", () => {
     });
   });
 
-  it("writes no row for an audit entry, whatever a subscription's condition says, and passes it", async () => {
+  it("writes no matched input for an audit entry, whatever a subscription's condition says, and passes it", async () => {
     await withMatcher(async (arranged) => {
       const agent = await subscriber(arranged, "subscribers");
       const subscriptionId = await subscribed(arranged, agent, REF);
@@ -444,7 +444,7 @@ describe("the matcher's tick", () => {
       await storeCondition(arranged.harness, subscriptionId, "true");
 
       // Creating a profile appends `profile.created`, which is an audit entry.
-      await profileOf(arranged, "leaves-an-entry", ["event.read"]);
+      await createProfile(arranged, "leaves-an-entry", ["event.read"]);
       const entries = await run(
         arranged.harness.sql<{
           readonly id: number;
@@ -456,7 +456,7 @@ describe("the matcher's tick", () => {
         const seen = await walk(arranged.harness);
         return seen.position !== null && seen.position >= entryId ? seen.position : undefined;
       });
-      expect(await effectRows(arranged.harness, subscriptionId)).toEqual([]);
+      expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
 
       // The same subscription does get a row for a pipeline event, so the
       // silence above is about the population and not about a dead matcher.
@@ -589,7 +589,7 @@ describe("the matcher's sweep", () => {
       await rowsWhen(arranged.harness, live, (rows) => rows.length >= 1);
       await rowsWhen(arranged.harness, sleeping, (rows) => rows.length >= 1);
       await startFrames(arranged, resumable.session.id, 2);
-      expect(await effectRows(arranged.harness, doomed)).toEqual([]);
+      expect(await matchedInputRows(arranged.harness, doomed)).toEqual([]);
     });
   });
 
@@ -601,7 +601,7 @@ describe("the matcher's sweep", () => {
       expect((await readSession(arranged, agent.session.id)).resumable).toBe(true);
 
       // A row the matcher wrote and nothing has delivered yet: what a crash
-      // between the effect row's commit and its delivery leaves behind.
+      // between the matched input's commit and its delivery leaves behind.
       const eventId = await emitted(arranged, [REF], "never delivered");
       await run(
         arranged.harness.sql`
@@ -649,7 +649,7 @@ describe("enrichment's second look", () => {
       // The second subscription is created after the event was matched, so
       // nothing it could match on has happened yet.
       const late = await subscribed(arranged, second, OTHER_REF);
-      expect(await effectRows(arranged.harness, late)).toEqual([]);
+      expect(await matchedInputRows(arranged.harness, late)).toEqual([]);
 
       const response = await post(
         arranged.harness.base,
@@ -666,7 +666,7 @@ describe("enrichment's second look", () => {
       // the event first arrived.
       expect(rows[0]!.text).toContain("https://github.com/o/r/pull/88");
       // The subscription that already matched gets nothing a second time.
-      expect(await effectRows(arranged.harness, early)).toHaveLength(1);
+      expect(await matchedInputRows(arranged.harness, early)).toHaveLength(1);
       // The second look is not a step through the log, so the cursor is never
       // put back to read the event again. It does move on: the audit entry the
       // enrichment stamped is one more entry for the next pass to walk past.
@@ -680,8 +680,8 @@ describe("enrichment's second look", () => {
         arranged.token,
       );
       expect(again.status, await again.clone().text()).toBe(200);
-      expect(await effectRows(arranged.harness, late)).toHaveLength(1);
-      expect(await effectRows(arranged.harness, early)).toHaveLength(1);
+      expect(await matchedInputRows(arranged.harness, late)).toHaveLength(1);
+      expect(await matchedInputRows(arranged.harness, early)).toHaveLength(1);
       expect((await walk(arranged.harness)).position).toBeGreaterThanOrEqual(before);
     });
   });
@@ -744,7 +744,7 @@ describe("a condition the matcher cannot evaluate", () => {
           const seen = await walk(arranged.harness);
           return seen.position !== null && seen.position >= second ? seen.position : undefined;
         });
-        expect(await effectRows(arranged.harness, subscriptionId)).toEqual([]);
+        expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
         expect(calls.filter((call) => call.subscriptionId === subscriptionId)).toHaveLength(1);
         expect(calls[0]!.message).toBe(failed.message);
 
@@ -782,7 +782,7 @@ describe("a condition the matcher cannot evaluate", () => {
       const rows = await rowsWhen(arranged.harness, working, (found) => found.length >= 1);
       expect(rows[0]!.event_id).toBe(eventId);
       await frameWhen(arranged, "still delivered");
-      expect(await effectRows(arranged.harness, failing)).toEqual([]);
+      expect(await matchedInputRows(arranged.harness, failing)).toEqual([]);
       const health = await healthWhen(arranged, broken, failing, (one) => one.state === "error");
       expect(health.message ?? "").toContain("shout");
       expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
@@ -807,7 +807,7 @@ describe("a condition the matcher cannot evaluate", () => {
         (one) => one.state === "error",
       );
       expect(health.message ?? "").toContain("raw");
-      expect(await effectRows(arranged.harness, subscriptionId)).toEqual([]);
+      expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
       expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
     });
   });
@@ -827,7 +827,7 @@ describe("a condition the matcher cannot evaluate", () => {
           (one) => one.state === "error",
         );
         expect(health.message ?? "").toContain("budget");
-        expect(await effectRows(arranged.harness, subscriptionId)).toEqual([]);
+        expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
         expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
       },
       // Every evaluation on this controller is over budget, which is the only

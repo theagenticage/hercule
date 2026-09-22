@@ -100,7 +100,7 @@ const SORT_COLUMN: Record<ConnectionSortField, string> = {
   label: "label",
 };
 
-const scopeOf = (field: ConnectionSortField, direction: SortDirection): CursorScope => ({
+const buildCursorScope = (field: ConnectionSortField, direction: SortDirection): CursorScope => ({
   op: "connection.query",
   field,
   direction,
@@ -213,7 +213,7 @@ const make = Effect.gen(function* () {
       request: ConnectionListRequest,
     ): Effect.Effect<Page<StoredConnection>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = scopeOf(request.field, request.direction);
+        const scope = buildCursorScope(request.field, request.direction);
         const after =
           request.cursor === undefined
             ? undefined

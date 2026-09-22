@@ -105,7 +105,7 @@ const effectiveCap = (override: number | null, facts: RunnerFacts | null): numbe
 const effectiveWatermark = (override: number | null): number =>
   override ?? DEFAULT_DISK_WATERMARK_BYTES;
 
-const scopeOf = (direction: SortDirection): CursorScope => ({
+const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "runner.query",
   field: "name",
   direction,
@@ -379,7 +379,7 @@ const make = Effect.gen(function* () {
 
     list: (request: RunnerPageRequest): Effect.Effect<Page<Runner>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = scopeOf(request.direction);
+        const scope = buildCursorScope(request.direction);
         const after =
           request.cursor === undefined
             ? undefined

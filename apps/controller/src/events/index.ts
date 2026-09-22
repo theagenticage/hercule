@@ -16,9 +16,9 @@ export {
 export { EventKindCatalog } from "./catalog";
 export {
   advanceConsumerCursor,
-  eventsAfter,
-  headOfLog,
   readConsumerPosition,
+  readEventsAfter,
+  readLogHead,
   readPipelineEvent,
   readPipelineEventsAfter,
 } from "./log";
