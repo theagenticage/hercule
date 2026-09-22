@@ -50,7 +50,7 @@ import { responseFor, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { OAuthCallbackRouteLayer } from "../connections";
-import { Inbound, Pipeline, Provisioning } from "../daemon";
+import { Inbound, Pipeline, Provisioning, sweepSessionsOnLostRunners } from "../daemon";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import { RunnerJoinRouteLayer, RunnerConnections, RunnerSocketRouteLayer } from "../runners";
@@ -193,6 +193,10 @@ export const serve = (bundle: WebBundle | undefined) =>
     // runner off `online` is the connection that put it there.
     const connections = yield* RunnerConnections;
     yield* Effect.orDie(connections.strandedByTheLastRun);
+    // After that move and not before: the sweep ends only sessions on a
+    // runner that is not connected, and until the move every runner the last
+    // run held still reads `online`.
+    yield* Effect.forkScoped(sweepSessionsOnLostRunners);
     // Forked before the listener binds, and the arrivals replay covers the rest
     // of the gap, so no machine says hello unheard. The tick is there because a
     // login expires and a harness is upgraded outside Hercule.

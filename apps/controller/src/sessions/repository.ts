@@ -38,6 +38,7 @@ import {
   type Page,
 } from "../db";
 import { readyWhere, resumableWhere } from "../workspaces";
+import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
 import type { StreamRow } from "./stream";
 
 /** A session as it is stored. `resumable` is derived at read; see above. */
@@ -479,6 +480,9 @@ const make = Effect.gen(function* () {
      * has two writers - ingest, and the spawn that could not reach its machine
      * - so a status read before a transaction proves nothing inside it. The
      * one move out of `exited` is `resume` below, and nothing else.
+     *
+     * A move to a status with no process behind it clears the token hash in
+     * the same write. The table refuses the row otherwise (migration 0023).
      */
     moved: (sessionId: string, status: SessionStatus, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -487,7 +491,9 @@ const make = Effect.gen(function* () {
           last_activity_at = ${at},
           started_at = CASE WHEN started_at IS NULL AND ${status} IN ('idle', 'busy') THEN ${at}
                             ELSE started_at END,
-          exited_at = CASE WHEN ${status} = 'exited' THEN ${at} ELSE exited_at END
+          exited_at = CASE WHEN ${status} = 'exited' THEN ${at} ELSE exited_at END,
+          token_hash = CASE WHEN ${status} IN ('starting', 'idle', 'busy') THEN token_hash
+                            ELSE NULL END
         WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
       `),
 
@@ -519,11 +525,9 @@ const make = Effect.gen(function* () {
      * session that has already started back onto the queue and taking its
      * credential away from the process holding it.
      *
-     * The token goes with the process that held it. A queued session has no
-     * harness running, so there is nothing for a credential to be the identity
-     * of, and leaving the old hash here would let a token that leaked before
-     * the exit act again from the moment the session is put back on the queue.
-     * Dispatch mints the resumed process one of its own.
+     * An exited row holds no token hash (migration 0023), so a token that
+     * leaked before the exit cannot act again once the session is back on the
+     * queue. Dispatch mints the resumed process one of its own.
      *
      * The base every reported sequence is counted from moves up to what the
      * stored stream reached, unconditionally: the controller cannot tell
@@ -539,7 +543,6 @@ const make = Effect.gen(function* () {
             spec = ${spec},
             last_activity_at = ${at},
             open_request = NULL,
-            token_hash = NULL,
             stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
                            WHERE session_id = sessions.id)
           WHERE id = ${uuidFromString(sessionId)}
@@ -548,17 +551,6 @@ const make = Effect.gen(function* () {
         `,
         (rows) => rows.length > 0,
       ),
-
-    /**
-     * The hash of the session's own credential on the public API, or `null`
-     * where the start it was minted for never reached the machine. Written by
-     * the same transaction as the move it belongs to, which is what decides
-     * whether the row may hold one at all.
-     */
-    setTokenHash: (sessionId: string, tokenHash: string | null): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE sessions SET token_hash = ${tokenHash} WHERE id = ${uuidFromString(sessionId)}
-      `),
 
     /**
      * The model and the per-model choices the session runs under from here on.
@@ -699,7 +691,8 @@ const make = Effect.gen(function* () {
             status = 'exited',
             last_activity_at = ${at},
             open_request = NULL,
-            exited_at = CASE WHEN exited_at IS NULL THEN ${at} ELSE exited_at END
+            token_hash = NULL,
+            exited_at = ${at}
           WHERE runner_id = ${key} AND status <> 'exited'
           RETURNING id
         `;
@@ -726,7 +719,8 @@ const make = Effect.gen(function* () {
             status = 'exited',
             last_activity_at = ${at},
             open_request = NULL,
-            exited_at = CASE WHEN exited_at IS NULL THEN ${at} ELSE exited_at END
+            token_hash = NULL,
+            exited_at = ${at}
           WHERE runner_id = ${uuidFromString(runnerId)}
             AND status IN ('starting', 'idle', 'busy')
             AND ${held.length === 0 ? sql`1 = 1` : sql`id NOT IN ${sql.in(held.map(uuidFromString))}`}
@@ -734,6 +728,72 @@ const make = Effect.gen(function* () {
         `,
         (rows) => rows.map((row) => uuidToString(row.id)),
       ),
+
+    /**
+     * Ends every running session on a lost runner: the runner is not one of
+     * `connected`, and nothing was heard about the session for longer than the
+     * session's own absolute timeout.
+     *
+     * The absolute timeout is the bound because a runner stops every session
+     * process at most that long after the process started, and
+     * `last_activity_at` is never earlier than the start. Past the bound the
+     * process is gone, or the runner is gone and can never report it. Before
+     * the bound, the session can still run on a runner that is only out of
+     * reach, and its token must keep working. One exception: a runner whose
+     * machine was suspended does not count the suspended time, so its process
+     * can outlive the bound. That runner lists the process in its report when
+     * it returns, and the controller then stops it (`listExitedAmong`).
+     *
+     * A spec stored before the timeouts were on it has no absolute timeout, so
+     * the default the runner applied to it at that time is the bound.
+     */
+    endOnLostRunners: (
+      connected: ReadonlyArray<string>,
+      at: string,
+    ): Effect.Effect<
+      ReadonlyArray<{ readonly sessionId: string; readonly runnerId: string }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly runner_id: Uint8Array }>`
+          UPDATE sessions SET
+            status = 'exited',
+            last_activity_at = ${at},
+            open_request = NULL,
+            token_hash = NULL,
+            exited_at = ${at}
+          WHERE status IN ('starting', 'idle', 'busy')
+            AND ${connected.length === 0 ? sql`1 = 1` : sql`runner_id NOT IN ${sql.in(connected.map(uuidFromString))}`}
+            AND (julianday(${at}) - julianday(last_activity_at)) * 86400000
+                > COALESCE(json_extract(spec, '$.timeouts.absoluteMs'), ${DEFAULT_ABSOLUTE_TIMEOUT_MS})
+          RETURNING id, runner_id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            sessionId: uuidToString(row.id),
+            runnerId: uuidToString(row.runner_id),
+          })),
+      ),
+
+    /**
+     * The sessions among `held` that this runner still runs and that the
+     * controller has already ended: what a runner's report lists and the rows
+     * say is `exited`. The runner is told to stop each one.
+     */
+    listExitedAmong: (
+      runnerId: string,
+      held: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      held.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly id: Uint8Array }>`
+              SELECT id FROM sessions
+              WHERE runner_id = ${uuidFromString(runnerId)} AND status = 'exited'
+                AND id IN ${sql.in(held.map(uuidFromString))}
+            `,
+            (rows) => rows.map((row) => uuidToString(row.id)),
+          ),
   };
 });
 

@@ -145,6 +145,8 @@ Passkeys and 2FA are post-v1. Nothing in v1 forecloses them: the login op is the
 
 *(Amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162).)* A resume mints a **fresh** session token for the same session id, carried on the `SessionStart` that carries the resume ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2); the token revoked when the session exited stays revoked. A session that is resumed in place ([./06-providers.md](./06-providers.md) section 4.1) therefore still holds exactly one live token, and a token never outlives the process it was minted for.
 
+*(Amended 2026-09-22, [#200](https://github.com/theagenticage/hercule/issues/200).)* A session row holds its token hash only while it is `starting`, `idle` or `busy`; the database refuses any other row that holds one, so every move out of those statuses clears the hash in the same write. A session whose runner never returns does not keep its token for ever: the controller ends it once its absolute timeout has passed with nothing heard about it ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.2).
+
 ## 6. Permission profiles
 
 Mechanism: every agent carries a **permission profile**, copied onto each Session at spawn (a Thread takes the `thread.profileId` setting, [./02-domain-model.md](./02-domain-model.md)); the session token carries the session's profile; enforcement sits at the service layer so it binds HTTP and in-process session callers alike ([ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)). Run and plugin actors are ungated ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). This section pins the content.

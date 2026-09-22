@@ -23,6 +23,7 @@ export { Enrichment, EnrichmentLayer } from "./enrich-event";
 export { EventRouter, EventRouterLayer } from "./event-router";
 export { Inbound, InboundLayer } from "./inbound";
 export { Live, LiveLayer, SessionInputDeadline } from "./live";
+export { LostRunnerSweepInterval, sweepSessionsOnLostRunners } from "./lost-runners";
 export { EventRoutingInterval, Pipeline, PipelineLayer } from "./pipeline";
 export { Placement, PlacementLayer } from "./placement";
 export { ProfileRemoval, ProfileRemovalLayer } from "./profile-removal";

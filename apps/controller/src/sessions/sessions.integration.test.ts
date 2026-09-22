@@ -3029,6 +3029,26 @@ describe("what a machine's report says it is no longer holding", () => {
     });
   });
 
+  it("tells the machine to stop a session it still holds that the controller has ended", async () => {
+    // A machine that was suspended past a session's bound comes back with the
+    // process still running: the controller ended the session while the
+    // machine was out of reach.
+    await withFleet(async (arranged) => {
+      const running = await busy(arranged, "outlived its bound");
+      const kept = await started(arranged, "still running on both sides");
+      holds(arranged.wire, arranged, [kept.id]);
+      await sessionWhen(arranged, running.id, (one) => one.status === "exited");
+      expect(framesOf<SessionStopFrame>(arranged.wire, "sessionStop")).toEqual([]);
+
+      holds(arranged.wire, arranged, [running.id, kept.id]);
+
+      const sent = await framesWhen<SessionStopFrame>(arranged.wire, "sessionStop", 1);
+      expect(sent).toEqual([{ _tag: "sessionStop", sessionId: running.id }]);
+      expect((await readSession(arranged, running.id)).status).toBe("exited");
+      expect((await readSession(arranged, kept.id)).status).toBe("idle");
+    });
+  });
+
   it("announces the session topic for each session it ended", async () => {
     await withFleet(async (arranged) => {
       const running = await busy(arranged, "mid-turn here");

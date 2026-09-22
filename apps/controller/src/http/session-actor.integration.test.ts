@@ -11,7 +11,7 @@
  * event log say made the change, and when the token stops working.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 import type { Session, Task } from "@hercule/contract";
 import {
   agentOn,
@@ -23,6 +23,7 @@ import {
   spawn,
   startFrames,
   readSessionToken,
+  until,
   WAIT_DEADLINE_MS,
   withAgentFleet as withFleet,
   type Agent,
@@ -267,6 +268,45 @@ describe("when a session token stops working", () => {
       expect(after.status).toBe(401);
       expect((await parseRefusal(after)).code).toBe("unauthenticated");
     });
+  });
+
+  it("dies with the session whose machine drops and never comes back", async () => {
+    await withFleet(
+      async (arranged) => {
+        const { session, token } = await worker(arranged);
+        expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
+
+        arranged.wire.close();
+        await until("marked the runner unreachable", async () => {
+          const response = await get(
+            arranged.harness.base,
+            `/api/v1/runners/${arranged.runnerId}`,
+            arranged.token,
+          );
+          const runner = (await response.json()) as { readonly connectivity: string };
+          return runner.connectivity === "unreachable" ? runner : undefined;
+        });
+        // Still alive before the bound: the machine can be out of reach while
+        // the session runs on, and the session still needs its token.
+        expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
+
+        // The machine stays silent, and nothing has been heard about the
+        // session for longer than its absolute timeout: eight hours, the
+        // shipped default.
+        await Effect.runPromise(
+          Effect.orDie(arranged.harness.sql`
+            UPDATE sessions SET last_activity_at = '2026-01-01T00:00:00.000Z'
+            WHERE id = unhex(replace(${session.id}, '-', ''))
+          `),
+        );
+
+        await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+        const after = await get(arranged.harness.base, "/api/v1/tasks", token);
+        expect(after.status).toBe(401);
+        expect((await parseRefusal(after)).code).toBe("unauthenticated");
+      },
+      { lostRunnerSweepInterval: Duration.millis(50) },
+    );
   });
 
   it("loses a grant the very next call after the profile is edited", async () => {

@@ -365,11 +365,15 @@ const AGENT_FACTS = {
 const AGENT_MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: [] }];
 
 /** A fleet whose one machine can run a session on any shipped profile. */
-export const withAgentFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
+export const withAgentFleet = (
+  body: (arranged: Arranged) => Promise<void>,
+  options: Omit<ServerOptions, "plugins"> = {},
+): Promise<void> =>
   withFleet(body, {
     plugins: [fixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin],
     facts: AGENT_FACTS,
     models: AGENT_MODELS,
+    ...options,
   });
 
 /** The instant every event a test reports carries. */
