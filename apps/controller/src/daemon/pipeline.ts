@@ -49,7 +49,7 @@ const make = Effect.gen(function* () {
     /**
      * What the pipeline does on its own, on its own interval. A tick that
      * fails is logged and the next one runs, because one bad tick must not
-     * stop the pipeline every later wake-up rides on.
+     * stop the pipeline every later matched input rides on.
      */
     driving: Effect.gen(function* () {
       const interval = yield* EventRoutingInterval;

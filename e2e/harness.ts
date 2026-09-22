@@ -108,7 +108,7 @@ export function loginLent(): boolean {
  * owns. The runner writes `runner.json` as it enrols, so nothing may call this
  * before it has.
  */
-export function buildInstanceDir(home: string, instanceId: string): string {
+function buildInstanceDir(home: string, instanceId: string): string {
   const pin = JSON.parse(readFileSync(join(home, "runner", "runner.json"), "utf8")) as {
     readonly storageDirectory: string;
   };
@@ -397,6 +397,14 @@ export function jsonOk<A>(ran: Ran): A {
   return jsonOf(ran) as A;
 }
 
+/** One page of a listing, as the CLI prints it with `--json`. */
+export interface Page<A> {
+  readonly items: ReadonlyArray<A>;
+}
+
+/** Long enough for the runner to enrol and to probe a directory it was just handed. */
+export const LOGIN_DEADLINE_MS = 120_000;
+
 /** What a runner reported about one Provider Instance when it last probed it. */
 export interface Snapshot {
   readonly auth: { readonly status: string; readonly message?: string };
@@ -425,6 +433,94 @@ export async function instancesOf(options: {
   if (!response.ok)
     throw new Error(`GET /api/v1/providers answered ${String(response.status)}: ${body}`);
   return JSON.parse(body) as ReadonlyArray<Instance>;
+}
+
+/**
+ * The controller's own runner, once it has enrolled and dialled in. It writes
+ * `runner.json` and its storage directory on the way, which is what the login
+ * is lent into, so nothing may read either before this answers.
+ */
+export async function waitForEnrolledRunner(options: {
+  readonly home: string;
+  readonly binary: string;
+}): Promise<string> {
+  const deadline = Date.now() + LOGIN_DEADLINE_MS;
+  for (;;) {
+    const ran = await cli(["runner", "list", "--json"], options);
+    const id = ran.code === 0 ? jsonOk<Page<{ readonly id: string }>>(ran).items[0]?.id : undefined;
+    if (id !== undefined && existsSync(join(options.home, "runner", "runner.json"))) return id;
+    if (Date.now() > deadline) throw new Error(`no runner dialled the controller:\n${ran.stdout}`);
+    await Bun.sleep(500);
+  }
+}
+
+/** The claude-code Provider Instance the controller seeds for itself. */
+export async function readClaudeInstance(options: {
+  readonly url: string;
+  readonly apiKey: string;
+}): Promise<Instance> {
+  const found = (await instancesOf(options)).find((one) => one.providerId === "claude-code");
+  if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
+  return found;
+}
+
+/**
+ * Probes the instance until a machine says its login works, and answers with
+ * that snapshot. Repeated rather than trusted once: a probe of a directory
+ * that was empty a moment ago has been seen to answer `unauthenticated`.
+ */
+export async function probeUntilLoggedIn(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly runnerId: string;
+  readonly instanceId: string;
+}): Promise<Snapshot> {
+  const deadline = Date.now() + LOGIN_DEADLINE_MS;
+  let last: string;
+  for (;;) {
+    const ran = await cli(
+      ["runner", "probe", options.runnerId, "--instance", options.instanceId, "--json"],
+      options,
+    );
+    if (ran.code === 0) {
+      const snapshot = jsonOk<Snapshot>(ran);
+      if (snapshot.auth.status === "ok") return snapshot;
+      last = `${snapshot.auth.status}: ${snapshot.auth.message ?? "no message"}`;
+    } else {
+      last = `${ran.stdout}\n${ran.stderr}`;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `the instance never probed ok within ${String(LOGIN_DEADLINE_MS / 1000)}s: ${last}`,
+      );
+    }
+    await Bun.sleep(2_000);
+  }
+}
+
+/** A runner, a Provider Instance and the login it runs on, all in place. */
+export interface LoggedInInstance {
+  readonly runnerId: string;
+  readonly instance: Instance;
+  readonly snapshot: Snapshot;
+}
+
+/**
+ * Everything a live session needs before it can be spawned: the enrolled
+ * runner, the claude-code instance, the lent credential where the caller named
+ * one, and a probe that says the login works.
+ */
+export async function prepareLoggedInInstance(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly url: string;
+  readonly apiKey: string;
+}): Promise<LoggedInInstance> {
+  const runnerId = await waitForEnrolledRunner(options);
+  const instance = await readClaudeInstance(options);
+  if (LENT_CREDENTIALS !== undefined) lendCredential(options.home, instance.id);
+  const snapshot = await probeUntilLoggedIn({ ...options, runnerId, instanceId: instance.id });
+  return { runnerId, instance, snapshot };
 }
 
 /** A session as the session operations answer it. */

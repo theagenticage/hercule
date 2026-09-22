@@ -38,6 +38,7 @@ interface Subscription {
   readonly condition: string;
   readonly holder: { readonly kind: string; readonly id: string };
   readonly health: { readonly state: string };
+  readonly lostWakeUp: unknown;
   readonly createdAt: string;
   readonly endedAt?: string | null;
 }
@@ -49,7 +50,11 @@ const createSubscription = (
 ): Promise<Response> => post(arranged.harness.base, "/api/v1/subscriptions", { target }, token);
 
 /** Registers one and hands back the id, refusing to continue if it did not take. */
-const registered = async (arranged: Arranged, target: unknown, token: string): Promise<string> => {
+const createSubscriptionOrFail = async (
+  arranged: Arranged,
+  target: unknown,
+  token: string,
+): Promise<string> => {
   const response = await createSubscription(arranged, target, token);
   expect(response.status, await response.clone().text()).toBe(200);
   return ((await response.json()) as { subscriptionId: string }).subscriptionId;
@@ -70,7 +75,7 @@ const listSubscriptions = async (
     token,
   );
 
-const page = async (
+const listPage = async (
   arranged: Arranged,
   token: string,
   holder?: string,
@@ -102,7 +107,7 @@ const readEndRow = (arranged: Arranged, id: string): Promise<ReadonlyArray<EndRo
     ),
   );
 
-const cancel = (arranged: Arranged, id: string, token: string): Promise<Response> =>
+const cancelSubscription = (arranged: Arranged, id: string, token: string): Promise<Response> =>
   del(arranged.harness.base, `/api/v1/subscriptions/${id}`, token);
 
 /**
@@ -117,15 +122,20 @@ describe("subscription.create", () => {
         "subscription.write",
         "subscription.read",
       ]);
-      const subscriptionId = await registered(arranged, { kind: "ref", ref: REF }, agent.token);
+      const subscriptionId = await createSubscriptionOrFail(
+        arranged,
+        { kind: "ref", ref: REF },
+        agent.token,
+      );
 
-      const items = await page(arranged, agent.token);
+      const items = await listPage(arranged, agent.token);
       const stored = items.find((one) => one.id === subscriptionId);
       expect(stored, "the subscription it just created").toBeDefined();
       expect(stored!.target).toEqual({ kind: "ref", ref: REF });
       expect(stored!.condition).toBe(REF_CONDITION);
       expect(stored!.holder).toEqual({ kind: "session", id: agent.session.id });
       expect(stored!.health).toEqual({ state: "ok" });
+      expect(stored!.lostWakeUp).toBeNull();
       expect(stored!.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
       expect(stored!.endedAt ?? null).toBeNull();
     });
@@ -174,14 +184,14 @@ describe("subscription.query", () => {
       ]);
       const mine = await agentOn(arranged, profile);
       const theirs = await agentOn(arranged, profile);
-      const own = await registered(arranged, { kind: "ref", ref: REF }, mine.token);
-      const other = await registered(
+      const own = await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, mine.token);
+      const other = await createSubscriptionOrFail(
         arranged,
         { kind: "ref", ref: "github:pr:o/r#88" },
         theirs.token,
       );
 
-      const items = await page(arranged, mine.token);
+      const items = await listPage(arranged, mine.token);
       expect(items.map((one) => one.id)).toEqual([own]);
       expect(items.map((one) => one.id)).not.toContain(other);
       const only = items[0]!;
@@ -200,14 +210,14 @@ describe("subscription.query", () => {
       ]);
       const mine = await agentOn(arranged, profile);
       const theirs = await agentOn(arranged, profile);
-      await registered(arranged, { kind: "ref", ref: REF }, mine.token);
-      const other = await registered(
+      await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, mine.token);
+      const other = await createSubscriptionOrFail(
         arranged,
         { kind: "ref", ref: "github:pr:o/r#88" },
         theirs.token,
       );
 
-      const items = await page(arranged, mine.token, theirs.session.id);
+      const items = await listPage(arranged, mine.token, theirs.session.id);
       expect(items.map((one) => one.id)).toEqual([other]);
       expect(items[0]!.holder).toEqual({ kind: "session", id: theirs.session.id });
     });
@@ -231,9 +241,13 @@ describe("subscription.cancel", () => {
         "subscription.write",
         "subscription.read",
       ]);
-      const subscriptionId = await registered(arranged, { kind: "ref", ref: REF }, agent.token);
+      const subscriptionId = await createSubscriptionOrFail(
+        arranged,
+        { kind: "ref", ref: REF },
+        agent.token,
+      );
 
-      const response = await cancel(arranged, subscriptionId, agent.token);
+      const response = await cancelSubscription(arranged, subscriptionId, agent.token);
       expect(response.status, await response.clone().text()).toBe(200);
 
       const rows = await readEndRow(arranged, subscriptionId);
@@ -249,10 +263,14 @@ describe("subscription.cancel", () => {
   it("answers a second cancel of the same subscription with not found", async () => {
     await withAgentFleet(async (arranged) => {
       const agent = await agentHolding(arranged, "subscribers", ["subscription.write"]);
-      const subscriptionId = await registered(arranged, { kind: "ref", ref: REF }, agent.token);
-      expect((await cancel(arranged, subscriptionId, agent.token)).status).toBe(200);
+      const subscriptionId = await createSubscriptionOrFail(
+        arranged,
+        { kind: "ref", ref: REF },
+        agent.token,
+      );
+      expect((await cancelSubscription(arranged, subscriptionId, agent.token)).status).toBe(200);
 
-      const again = await cancel(arranged, subscriptionId, agent.token);
+      const again = await cancelSubscription(arranged, subscriptionId, agent.token);
       const refused = await readRefusal(again);
       expect(again.status, refused.text).toBe(404);
       expect(refused.code).toBe("not_found");
@@ -264,9 +282,9 @@ describe("subscription.cancel", () => {
       const agent = await agentHolding(arranged, "subscribers", ["subscription.write"]);
       // One live subscription stands beside it, so not-found is an answer
       // about this id and not about an empty table.
-      await registered(arranged, { kind: "ref", ref: REF }, agent.token);
+      await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, agent.token);
 
-      const response = await cancel(arranged, ABSENT_ID, agent.token);
+      const response = await cancelSubscription(arranged, ABSENT_ID, agent.token);
       const refused = await readRefusal(response);
       expect(response.status, refused.text).toBe(404);
       expect(refused.code).toBe("not_found");
@@ -288,16 +306,20 @@ describe("whose subscription a session may cancel", () => {
       ]);
       const mine = await agentOn(arranged, profile);
       const theirs = await agentOn(arranged, profile);
-      const other = await registered(arranged, { kind: "ref", ref: REF }, theirs.token);
+      const other = await createSubscriptionOrFail(
+        arranged,
+        { kind: "ref", ref: REF },
+        theirs.token,
+      );
 
-      const response = await cancel(arranged, other, mine.token);
+      const response = await cancelSubscription(arranged, other, mine.token);
       const refused = await readRefusal(response);
       expect(response.status, refused.text).toBe(404);
       expect(refused.code).toBe("not_found");
 
       // Still waiting, and still its own holder's to cancel.
-      expect((await page(arranged, theirs.token)).map((one) => one.id)).toEqual([other]);
-      expect((await cancel(arranged, other, theirs.token)).status).toBe(200);
+      expect((await listPage(arranged, theirs.token)).map((one) => one.id)).toEqual([other]);
+      expect((await cancelSubscription(arranged, other, theirs.token)).status).toBe(200);
     });
   });
 
@@ -307,11 +329,15 @@ describe("whose subscription a session may cancel", () => {
         "subscription.write",
         "subscription.read",
       ]);
-      const subscriptionId = await registered(arranged, { kind: "ref", ref: REF }, agent.token);
+      const subscriptionId = await createSubscriptionOrFail(
+        arranged,
+        { kind: "ref", ref: REF },
+        agent.token,
+      );
 
-      const response = await cancel(arranged, subscriptionId, arranged.token);
+      const response = await cancelSubscription(arranged, subscriptionId, arranged.token);
       expect(response.status, await response.clone().text()).toBe(200);
-      expect(await page(arranged, agent.token)).toEqual([]);
+      expect(await listPage(arranged, agent.token)).toEqual([]);
       // The user's own stamp, not the holder's: the row says who ended it and
       // not merely who was waiting on it.
       expect((await readEndRow(arranged, subscriptionId))[0]!.ended_actor).toBe("user");

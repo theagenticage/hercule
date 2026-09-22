@@ -37,8 +37,17 @@ import {
   type Arranged,
 } from "../sessions/testing";
 
-/** Short enough that a test waits out several ticks without a sleep of its own. */
-export const TICK = Duration.millis(10);
+/** Short enough that a test waits out several ticks without a long sleep. */
+const TICK = Duration.millis(10);
+
+/**
+ * Waits out several ticks of the pipeline, for a case whose criterion is that
+ * nothing more went out. There is nothing to wait for, so the wait is a span
+ * of time: six ticks, which is long enough that a tick that would have sent
+ * something has run.
+ */
+export const waitOutSeveralTicks = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, Duration.toMillis(TICK) * 6));
 
 export const KIND = "github.pr.merged";
 export const REF = "github:pr:o/r#87";
@@ -133,25 +142,26 @@ export const withPipeline = (
     ...options,
   });
 
-export const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
+/** Runs one effect against the harness's database, failing the test if it fails. */
+export const runEffect = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(Effect.orDie(effect));
 
 /** A session on a profile that may subscribe and read back what it subscribed to. */
-export const subscriber = (arranged: Arranged, name: string): Promise<Agent> =>
+export const spawnSubscriber = (arranged: Arranged, name: string): Promise<Agent> =>
   agentHolding(arranged, name, ["subscription.write", "subscription.read"]);
 
 /**
  * A session that exited leaving nothing to resume: its machine never reported
  * a provider-native session, so the transcript is gone.
  */
-export const stranded = async (arranged: Arranged, name: string): Promise<Agent> => {
+export const spawnStrandedAgent = async (arranged: Arranged, name: string): Promise<Agent> => {
   const profile = await createProfile(arranged, name, ["subscription.write", "subscription.read"]);
   const opened = await spawned(arranged, { prompt: "hello", permissionProfileId: profile.id });
   const token = readSessionToken((await startFrames(arranged, opened.id, 1))[0]!);
   return { session: opened, token };
 };
 
-export const reportExit = (arranged: Arranged, sessionId: string, seq: number): void =>
+const reportExit = (arranged: Arranged, sessionId: string, seq: number): void =>
   report(arranged.wire, seq, {
     eventId: crypto.randomUUID(),
     sessionId,
@@ -208,34 +218,57 @@ export const subscribed = async (
 
 export interface Health {
   readonly state: string;
-  readonly kind?: string;
   readonly message?: string;
   readonly at?: string;
 }
 
-export const readHealth = async (arranged: Arranged, agent: Agent, id: string): Promise<Health> => {
+/** The wake-up a restart cancelled, as a subscription answers it. */
+export interface LostWakeUp {
+  readonly eventId: number;
+  readonly at: string;
+}
+
+/** One subscription, as its holder reads it back. */
+export interface ReadSubscription {
+  readonly id: string;
+  readonly health: Health;
+  readonly lostWakeUp: LostWakeUp | null;
+}
+
+export const readSubscription = async (
+  arranged: Arranged,
+  agent: Agent,
+  id: string,
+): Promise<ReadSubscription> => {
   const response = await get(arranged.harness.base, "/api/v1/subscriptions", agent.token);
   expect(response.status, await response.clone().text()).toBe(200);
-  const items = (
-    (await response.json()) as {
-      items: ReadonlyArray<{ readonly id: string; readonly health: Health }>;
-    }
-  ).items;
+  const items = ((await response.json()) as { items: ReadonlyArray<ReadSubscription> }).items;
   const found = items.find((one) => one.id === id);
   expect(found, `no subscription ${id} in the page`).toBeDefined();
-  return found!.health;
+  return found!;
 };
 
-export const healthWhen = (
+export const readHealth = async (arranged: Arranged, agent: Agent, id: string): Promise<Health> =>
+  (await readSubscription(arranged, agent, id)).health;
+
+export const subscriptionWhen = (
+  arranged: Arranged,
+  agent: Agent,
+  id: string,
+  ready: (subscription: ReadSubscription) => boolean,
+): Promise<ReadSubscription> =>
+  until("answered the subscription the holder was waiting on", async () => {
+    const found = await readSubscription(arranged, agent, id);
+    return ready(found) ? found : undefined;
+  });
+
+export const healthWhen = async (
   arranged: Arranged,
   agent: Agent,
   id: string,
   ready: (health: Health) => boolean,
 ): Promise<Health> =>
-  until("reported the subscription's health", async () => {
-    const health = await readHealth(arranged, agent, id);
-    return ready(health) ? health : undefined;
-  });
+  (await subscriptionWhen(arranged, agent, id, (one) => ready(one.health))).health;
 
 export const buildPayload = (title: string): unknown => ({
   subject: { repo: "o/r", number: 87, title, url: PR_URL },
@@ -271,7 +304,7 @@ export const matchedInputRows = (
   harness: ServerHarness,
   subscriptionId: string,
 ): Promise<ReadonlyArray<MatchedInputRow>> =>
-  run(
+  runEffect(
     harness.sql<MatchedInputRow>`
       SELECT event_id, source, status, text, reason, lower(hex(session_id)) AS session
       FROM session_inputs
@@ -293,7 +326,7 @@ export const rowsWhen = (
 export const readCursorAndHead = async (
   harness: ServerHarness,
 ): Promise<{ readonly position: number | null; readonly head: number }> => {
-  const rows = await run(
+  const rows = await runEffect(
     harness.sql<{ readonly position: number | null; readonly head: number | null }>`
       SELECT (SELECT position FROM event_cursors WHERE consumer = 'router') AS position,
              (SELECT MAX(id) FROM events) AS head`,
@@ -317,18 +350,18 @@ export interface SubscriptionRow {
   readonly ended_reason: string | null;
   readonly ended_actor: string | null;
   readonly condition: string;
-  readonly health_error_kind: string | null;
   readonly health_error_message: string | null;
+  readonly lost_wake_up_event_id: number | null;
 }
 
 export const subscriptionRow = async (
   harness: ServerHarness,
   id: string,
 ): Promise<SubscriptionRow | undefined> => {
-  const rows = await run(
+  const rows = await runEffect(
     harness.sql<SubscriptionRow>`
       SELECT ended_at, ended_reason, ended_actor, condition,
-             health_error_kind, health_error_message FROM subscriptions
+             health_error_message, lost_wake_up_event_id FROM subscriptions
       WHERE id = unhex(replace(${id}, '-', ''))`,
   );
   return rows[0];
@@ -345,7 +378,7 @@ export const storeCondition = (
   id: string,
   condition: string,
 ): Promise<unknown> =>
-  run(
+  runEffect(
     harness.sql`UPDATE subscriptions SET condition = ${condition}
                 WHERE id = unhex(replace(${id}, '-', ''))`,
   );

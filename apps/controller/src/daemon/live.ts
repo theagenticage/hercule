@@ -284,6 +284,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const session = yield* one(sessionId);
         if (session.status === "idle") {
+          // The runner takes one input per turn boundary. A row is already out
+          // there and unanswered, so the turn it opens has not started yet and
+          // a second row sent now is a row the runner has to hold. The next
+          // pass sends it, once the runner has reported what the first did.
+          if (yield* sessions.holdsInputOnTheWire(sessionId)) return;
           // A machine holding no connection cannot be told. Claiming a row for
           // it only to put the row straight back would rewrite that row, and
           // tell every client watching the session, once for every pass the

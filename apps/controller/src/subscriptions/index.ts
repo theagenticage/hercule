@@ -6,4 +6,4 @@
  */
 export { EvaluationErrorNotifier, EvaluationErrorNotifierLayer } from "./evaluation-errors";
 export { subscriptionRepository, type StoredSubscription } from "./repository";
-export { SubscriptionService, SubscriptionServiceLayer } from "./service";
+export { buildHolderEndedReason, SubscriptionService, SubscriptionServiceLayer } from "./service";

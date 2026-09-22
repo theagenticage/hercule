@@ -43,6 +43,7 @@ import {
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { checkExpression } from "../expressions";
 import { expandTarget } from "./targets";
 import { subscriptionRepository, type StoredSubscription } from "./repository";
 
@@ -51,17 +52,17 @@ const QueryInput = Schema.Struct({
   ...pageInput(SUBSCRIPTION_SORT_FIELDS),
 });
 
-export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
+type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
 const Identified = Schema.Struct({ id: Id });
 
-export type Identified = Schema.Schema.Type<typeof Identified>;
+type Identified = Schema.Schema.Type<typeof Identified>;
 
 const decodeCreate = Schema.decodeUnknownEffect(SubscriptionCreateInput);
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
-export interface SubscriptionPage {
+interface SubscriptionPage {
   readonly items: ReadonlyArray<Subscription>;
   readonly nextCursor?: string;
 }
@@ -71,6 +72,18 @@ const DEFAULT_DIRECTION: SortDirection = "desc";
 
 /** What ends a subscription the holder asked to end. */
 const CANCELLED = "cancelled";
+
+/**
+ * Why a subscription ended with the session that held it. The session is named
+ * because a holder reading the row has several sessions and needs to know
+ * which one this claim belonged to.
+ *
+ * It ends the inputs that subscription produced as well as the subscription
+ * itself, so both rows carry one sentence and a reader never has to join them.
+ */
+export const buildHolderEndedReason = (sessionId: string): string =>
+  `session ${sessionId}, which held this subscription, has exited and its transcript ` +
+  `cannot be picked up again`;
 
 /** Why a target this version cannot wait on is refused, one message per kind. */
 const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref">, string> = {
@@ -104,18 +117,17 @@ const NEEDS_A_HOLDER_REPAIR =
 
 const NO_SUCH_SUBSCRIPTION = "no live subscription has that id";
 
-/** How a stored row reads as health: no error recorded is `ok`. */
+/** How a stored row reads as health: no evaluation error recorded is `ok`. */
 const readHealth = (stored: StoredSubscription): SubscriptionHealth =>
-  stored.healthErrorMessage === null ||
-  stored.healthErrorAt === null ||
-  stored.healthErrorKind === null
+  stored.healthErrorMessage === null || stored.healthErrorAt === null
     ? { state: "ok" }
-    : {
-        state: "error",
-        kind: stored.healthErrorKind,
-        message: stored.healthErrorMessage,
-        at: stored.healthErrorAt,
-      };
+    : { state: "error", message: stored.healthErrorMessage, at: stored.healthErrorAt };
+
+/** The wake-up a restart cancelled, or null where none stands. */
+const readLostWakeUp = (stored: StoredSubscription): Subscription["lostWakeUp"] =>
+  stored.lostWakeUpEventId === null || stored.lostWakeUpAt === null
+    ? null
+    : { eventId: stored.lostWakeUpEventId, at: stored.lostWakeUpAt };
 
 const composeRecord = (stored: StoredSubscription): Subscription => ({
   id: stored.id,
@@ -123,6 +135,7 @@ const composeRecord = (stored: StoredSubscription): Subscription => ({
   condition: stored.condition,
   holder: stored.holder,
   health: readHealth(stored),
+  lostWakeUp: readLostWakeUp(stored),
   createdAt: stored.createdAt,
 });
 
@@ -150,6 +163,15 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(invalidState(ABSENT_TARGET_REASON[target.kind]));
         }
         const condition = expandTarget(target);
+        // A condition the evaluator refuses could never match, and the caller
+        // is the only one who can still choose another target. No expansion
+        // this version can produce is refused: every id it writes goes in as a
+        // quoted string literal, so nothing a caller writes can reach the
+        // grammar. The check stands for the sources a trigger stores later,
+        // which are written by hand.
+        yield* Effect.mapError(checkExpression(condition), (failure) =>
+          invalidState(failure.message),
+        );
         const subscriptionId = yield* withTransaction(
           sql,
           Effect.gen(function* () {

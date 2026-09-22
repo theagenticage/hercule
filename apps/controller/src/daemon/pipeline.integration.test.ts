@@ -17,10 +17,10 @@ import {
   matchedInputRows,
   REF,
   rowsWhen,
-  run,
+  runEffect,
   storeCondition,
   subscribed,
-  subscriber,
+  spawnSubscriber,
   readCursorAndHead,
   withPipeline,
 } from "./testing";
@@ -31,7 +31,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });
 describe("the event pipeline's tick", () => {
   it("writes one matched input for a matched subscription, and walks its cursor past the event", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "subscribers");
+      const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribed(arranged, agent, REF);
 
       const eventId = await emitted(arranged, [REF], "The lid does not close");
@@ -57,7 +57,7 @@ describe("the event pipeline's tick", () => {
 
   it("walks a burst wider than one batch to the end of the log, rather than one batch a tick", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "burst-holder");
+      const agent = await spawnSubscriber(arranged, "burst-holder");
       const subscriptionId = await subscribed(arranged, agent, REF);
       await caughtUp(arranged.harness);
 
@@ -66,7 +66,7 @@ describe("the event pipeline's tick", () => {
       // written to the table because `event.emit` is one call per event, and
       // the router would walk the early ones while the later ones were still
       // being posted.
-      await run(
+      await runEffect(
         arranged.harness.sql`
           INSERT INTO events
             (source, connection_id, system, kind, occurred_at, received_at,
@@ -93,7 +93,7 @@ describe("the event pipeline's tick", () => {
 
   it("writes nothing a second time, however often the cursor is rewound over the same events", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "subscribers");
+      const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribed(arranged, agent, REF);
       const eventId = await emitted(arranged, [REF], "The lid does not close");
       await rowsWhen(arranged.harness, subscriptionId, (found) => found.length >= 1);
@@ -102,7 +102,7 @@ describe("the event pipeline's tick", () => {
       // The crash between the commit of the matched inputs and the advance of
       // the cursor, three times over.
       for (let pass = 0; pass < 3; pass++) {
-        await run(
+        await runEffect(
           arranged.harness.sql`UPDATE event_cursors SET position = ${eventId - 1}
                                WHERE consumer = 'router'`,
         );
@@ -121,7 +121,7 @@ describe("the event pipeline's tick", () => {
 
   it("writes no matched input for an audit entry, whatever a subscription's condition says, and passes it", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "subscribers");
+      const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribed(arranged, agent, REF);
       // A condition that admits everything, so a row that is not written is
       // the population's doing and not the condition's.
@@ -129,7 +129,7 @@ describe("the event pipeline's tick", () => {
 
       // Creating a profile appends `profile.created`, which is an audit entry.
       await createProfile(arranged, "leaves-an-entry", ["event.read"]);
-      const entries = await run(
+      const entries = await runEffect(
         arranged.harness.sql<{
           readonly id: number;
         }>`SELECT id FROM events WHERE kind = 'profile.created' ORDER BY id DESC LIMIT 1`,

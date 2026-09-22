@@ -9,7 +9,7 @@
  * is in it, and nothing here queries inside it.
  *
  * The bounds are CHECK constraints, which SQLite cannot add later without
- * rebuilding the table. The 128 is `MAX_PROVIDER_NAME_LENGTH` written out - a
+ * rebuilding the table. The 128 is `MAX_CONTRIBUTION_NAME_LENGTH` written out - a
  * landed migration is frozen, so raising it takes a migration of its own.
  */
 import * as Effect from "effect/Effect";

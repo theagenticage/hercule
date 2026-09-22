@@ -145,22 +145,19 @@ describe("parseExpression", () => {
 
 describe("evaluateExpression over the wall-clock budget", () => {
   /**
-   * A full scan of ninety thousand pairs, against a budget of one
-   * millisecond, which takes a few milliseconds on any machine.
-   * The list comes from the context, which the parse-time limits do not bound,
-   * so a caller can make one evaluation run long; the budget is shrunk rather
-   * than the work grown, because the wrapper reports an overrun and cannot
-   * interrupt one, so the test must not wait one out.
+   * A budget of zero, because an evaluation that reaches its budget is over
+   * it: every evaluation is then over budget whatever the clock did between
+   * two reads. The alternative - a slow expression against a short budget -
+   * depends on the machine, and the wrapper reports an overrun rather than
+   * interrupting one, so a test could not wait it out either.
    */
-  const context = {
-    event: { payload: { items: Array.from({ length: 300 }, (_unused, index) => index) } },
-  };
-  const slow = "event.payload.items.exists(a, event.payload.items.exists(b, a + b == -1))";
+  const context = { event: { payload: { items: [0, 1, 2] } } };
+  const source = "event.payload.items[0] == 0";
   const withBudget = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E> =>
-    Effect.provideService(effect, ExpressionBudget, Duration.millis(1));
+    Effect.provideService(effect, ExpressionBudget, Duration.zero);
 
   it("reports the overrun with the budget and the elapsed time, and remembers nothing", () => {
-    const first = failureMessage(withBudget(evaluateExpression(slow, context)));
+    const first = failureMessage(withBudget(evaluateExpression(source, context)));
 
     expect(first.toLowerCase()).toContain("budget");
     expect(numbersIn(first)).toBeGreaterThanOrEqual(2);
@@ -168,13 +165,11 @@ describe("evaluateExpression over the wall-clock budget", () => {
     // The wrapper does not retire an expression that went over: the same
     // source runs again and reports again, because the router re-evaluates
     // it on the next tick.
-    const second = failureMessage(withBudget(evaluateExpression(slow, context)));
+    const second = failureMessage(withBudget(evaluateExpression(source, context)));
     expect(second.toLowerCase()).toContain("budget");
 
-    // An overrun leaves the shared environment usable for everything else.
-    // This one runs on the default budget: a first read of a list costs around
-    // a millisecond on a cold run, which says nothing about a budget and
-    // everything about the machine.
-    expect(Effect.runSync(evaluateExpression(`event.payload.items[0] == 0`, context))).toBe(true);
+    // An overrun leaves the shared environment usable for everything else:
+    // the same source, on the shipped budget, answers.
+    expect(Effect.runSync(evaluateExpression(source, context))).toBe(true);
   });
 });

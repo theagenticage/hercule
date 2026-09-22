@@ -31,24 +31,22 @@ import {
   apiKeyIn,
   cli,
   completeSetup,
-  instancesOf,
   jsonOk,
-  lendCredential,
-  LENT_CREDENTIALS,
   liveSessionsAsked,
+  LOGIN_DEADLINE_MS,
   loginLent,
   PASSWORD,
+  prepareLoggedInInstance,
   ROOT,
   startController,
   temporaryHome,
   untilTag,
   USERNAME,
   type Controller,
-  type Instance,
+  type Page,
   type Ran,
   type Row,
   type Session,
-  type Snapshot,
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
@@ -64,71 +62,11 @@ let apiKey: string;
 /** Long enough for a cold harness to start, connect and answer one prompt. */
 const TURN_DEADLINE_MS = 180_000;
 
-/** Long enough for the runner to enrol and to probe a directory it was just handed. */
-const LOGIN_DEADLINE_MS = 120_000;
-
-interface Page<A> {
-  readonly items: ReadonlyArray<A>;
-}
-
 /** An Agent as the agent operations answer it. */
 interface Agent {
   readonly id: string;
   readonly name: string;
 }
-
-/**
- * The controller's own runner, once it has enrolled and dialled in. It writes
- * `runner.json` and its storage directory on the way, which is what the login
- * is lent into, so nothing may read either before this answers.
- */
-const enrolledRunner = async (): Promise<string> => {
-  const deadline = Date.now() + LOGIN_DEADLINE_MS;
-  for (;;) {
-    const ran = await cli(["runner", "list", "--json"], { home: state.home, binary });
-    const id = ran.code === 0 ? jsonOk<Page<{ readonly id: string }>>(ran).items[0]?.id : undefined;
-    if (id !== undefined && existsSync(join(state.home, "runner", "runner.json"))) return id;
-    if (Date.now() > deadline) throw new Error(`no runner dialled the controller:\n${ran.stdout}`);
-    await Bun.sleep(500);
-  }
-};
-
-const claudeInstance = async (): Promise<Instance> => {
-  const found = (await instancesOf({ url, apiKey })).find(
-    (one) => one.providerId === "claude-code",
-  );
-  if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
-  return found;
-};
-
-/**
- * Probes the instance until a machine says its login works, and answers with
- * that snapshot. Repeated rather than trusted once: a probe of a directory
- * that was empty a moment ago has been seen to answer `unauthenticated`.
- */
-const probedLoggedIn = async (runnerId: string, instanceId: string): Promise<Snapshot> => {
-  const deadline = Date.now() + LOGIN_DEADLINE_MS;
-  let last: string;
-  for (;;) {
-    const ran = await cli(["runner", "probe", runnerId, "--instance", instanceId, "--json"], {
-      home: state.home,
-      binary,
-    });
-    if (ran.code === 0) {
-      const snapshot = jsonOk<Snapshot>(ran);
-      if (snapshot.auth.status === "ok") return snapshot;
-      last = `${snapshot.auth.status}: ${snapshot.auth.message ?? "no message"}`;
-    } else {
-      last = `${ran.stdout}\n${ran.stderr}`;
-    }
-    if (Date.now() > deadline) {
-      throw new Error(
-        `the instance never probed ok within ${String(LOGIN_DEADLINE_MS / 1000)}s: ${last}`,
-      );
-    }
-    await Bun.sleep(2_000);
-  }
-};
 
 /** The Agent every case here spawns from. */
 interface Ready {
@@ -146,10 +84,7 @@ let ready: Ready | undefined;
  * offer has been seen to answer with its own.
  */
 const prepare = async (): Promise<Ready> => {
-  const runnerId = await enrolledRunner();
-  const instance = await claudeInstance();
-  if (LENT_CREDENTIALS !== undefined) lendCredential(state.home, instance.id);
-  await probedLoggedIn(runnerId, instance.id);
+  const { instance } = await prepareLoggedInInstance({ home: state.home, binary, url, apiKey });
   const profiles = jsonOk<Page<{ readonly id: string; readonly name: string }>>(
     await cli(["profile", "list", "--json"], { home: state.home, binary }),
   ).items;

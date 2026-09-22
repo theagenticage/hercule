@@ -17,6 +17,7 @@ import { SYSTEM_ACTOR } from "../../actor";
 import { nowIso } from "../../db";
 import { SessionService, sessionRepository } from "../../sessions";
 import {
+  buildHolderEndedReason,
   EvaluationErrorNotifier,
   subscriptionRepository,
   type StoredSubscription,
@@ -25,11 +26,6 @@ import type { Delivery, Route, RoutingTable } from "../event-router";
 import { forking } from "../absorbing";
 import { Live } from "../live";
 import { renderEventInput } from "./render-event-input";
-
-/** Why a subscription was ended, for the row and for the inputs it produced. */
-const buildHolderEndedReason = (sessionId: string): string =>
-  `session ${sessionId}, which held this subscription, has exited and its transcript ` +
-  `cannot be picked up again`;
 
 /** One route per live subscription, held by the session that registered it. */
 export const sessionRoutingTable: Effect.Effect<
@@ -97,10 +93,10 @@ export const sessionRoutingTable: Effect.Effect<
         .map((subscription) => ({
           id: subscription.id,
           condition: subscription.condition,
-          inEvaluationError: subscription.healthErrorKind === "evaluation",
+          inEvaluationError: subscription.healthErrorMessage !== null,
           writeOnMatch: (event: Event): Effect.Effect<void, SqlError> =>
             Effect.gen(function* () {
-              const written = yield* sessions.takeMatchedInput({
+              const written = yield* sessions.storeMatchedInput({
                 sessionId: subscription.holder.id,
                 subscriptionId: subscription.id,
                 eventId: event.id,
@@ -109,7 +105,7 @@ export const sessionRoutingTable: Effect.Effect<
                 at: yield* nowIso,
               });
               // A lost wake-up says one event never reached this holder. A
-              // wake-up written after it is what makes that out of date, so
+              // matched input written after it is what makes that out of date, so
               // the error goes here and nowhere else. Nothing is written for
               // an event this subscription already has a row for, and nothing
               // about its health has changed either.

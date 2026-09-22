@@ -158,7 +158,7 @@ const mergeRefs = (
 ): ReadonlyArray<string> => [...new Set([...held, ...added])];
 
 /** What enrichment may amend on one event, already decoded. */
-export interface Amendment {
+interface Amendment {
   readonly id: number;
   readonly system?: string;
   readonly url?: string;

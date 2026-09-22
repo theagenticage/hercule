@@ -25,26 +25,20 @@ import {
   type Page,
 } from "../db";
 
-/**
- * The two errors a subscription can carry. An evaluation error is taken off by
- * the next event that evaluates cleanly; a lost wake-up stands until a wake-up
- * for this subscription is written. The column holds these spellings, so a row
- * is read without a mapping.
- */
-export type HealthErrorKind = "evaluation" | "lost-wake-up";
-
 /** A subscription as it is stored. */
 export interface StoredSubscription {
   readonly id: string;
   readonly holder: SubscriptionHolder;
   readonly target: SubscriptionTarget;
   readonly condition: string;
-  /** What stands between this subscription and its events, or null. */
+  /** What the evaluator said about the condition it could not evaluate, or null. */
   readonly healthErrorMessage: string | null;
-  /** When that error began, or null. */
+  /** When the evaluation error began, or null. */
   readonly healthErrorAt: string | null;
-  /** Which error it is, because the two end differently, or null. */
-  readonly healthErrorKind: HealthErrorKind | null;
+  /** The event of the wake-up a restart cancelled, or null. */
+  readonly lostWakeUpEventId: number | null;
+  /** When the restart cancelled it, or null. */
+  readonly lostWakeUpAt: string | null;
   readonly createdAt: string;
 }
 
@@ -87,13 +81,14 @@ interface SubscriptionRow {
   readonly condition: string;
   readonly health_error_message: string | null;
   readonly health_error_at: string | null;
-  readonly health_error_kind: HealthErrorKind | null;
+  readonly lost_wake_up_event_id: number | null;
+  readonly lost_wake_up_at: string | null;
   readonly created_at: string;
 }
 
 const COLUMNS =
   "id, holder_kind, holder_id, target, condition, health_error_message, health_error_at, " +
-  "health_error_kind, created_at";
+  "lost_wake_up_event_id, lost_wake_up_at, created_at";
 
 const toSubscription = (row: SubscriptionRow): StoredSubscription => ({
   id: uuidToString(row.id),
@@ -102,19 +97,10 @@ const toSubscription = (row: SubscriptionRow): StoredSubscription => ({
   condition: row.condition,
   healthErrorMessage: row.health_error_message,
   healthErrorAt: row.health_error_at,
-  healthErrorKind: row.health_error_kind,
+  lostWakeUpEventId: row.lost_wake_up_event_id,
+  lostWakeUpAt: row.lost_wake_up_at,
   createdAt: row.created_at,
 });
-
-/**
- * Why a subscription is in error after a restart. A wake-up that was sent and
- * never acknowledged is cancelled, and the pair of subscription and event can
- * never be written again, so the event is named: it is the one fact the holder
- * cannot get back from Hercule.
- */
-const buildLostWakeUpReason = (eventId: number): string =>
-  `the wake-up for event ${String(eventId)} was sent but not acknowledged before a restart ` +
-  `and was cancelled; the event will not be delivered again`;
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
   op: "subscription.query",
@@ -160,12 +146,6 @@ const make = Effect.gen(function* () {
      * error is recorded, so exactly one caller can be told it began the error,
      * and the second refreshes the message of an error that was already
      * standing while leaving the instant it began where it is.
-     *
-     * A lost wake-up is written over, and the caller is told the error began.
-     * A subscription whose condition cannot be evaluated can wake its holder
-     * for nothing at all, so that is the error the holder must act on, and the
-     * report of it must go out; the lost wake-up says one event was missed,
-     * which is moot until the condition works again.
      */
     recordEvaluationFailure: (
       id: string,
@@ -174,60 +154,52 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
         const began = yield* sql<{ readonly id: Uint8Array }>`
-          UPDATE subscriptions SET health_error_message = ${message}, health_error_at = ${at},
-                                   health_error_kind = 'evaluation'
+          UPDATE subscriptions SET health_error_message = ${message}, health_error_at = ${at}
           WHERE id = ${uuidFromString(id)} AND ended_at IS NULL
-            AND health_error_kind IS NOT 'evaluation'
+            AND health_error_message IS NULL
           RETURNING id`;
         if (began.length > 0) return true;
         yield* sql`
           UPDATE subscriptions SET health_error_message = ${message}
           WHERE id = ${uuidFromString(id)} AND ended_at IS NULL
-            AND health_error_kind = 'evaluation'`;
+            AND health_error_message IS NOT NULL`;
         return false;
       }),
+
+    /** Takes the recorded evaluation error off a subscription that evaluated cleanly. */
+    clearEvaluationFailure: (id: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE subscriptions
+            SET health_error_message = NULL, health_error_at = NULL
+            WHERE id = ${uuidFromString(id)}`,
+      ),
 
     /**
      * Records that the one wake-up this subscription produced for this event
      * was lost, so a reader of the subscription learns why nothing arrived.
+     * An older lost wake-up is written over: the newest one is the one the
+     * holder is still waiting on.
      *
      * A row already ended is left alone: a subscription nobody holds any more
-     * has no health to show. A standing evaluation error is left alone too,
-     * for the reason `recordEvaluationFailure` gives: a condition that cannot
-     * be evaluated is what the holder must act on first, and a missed event is
-     * moot while it stands.
+     * has nobody left to tell.
      */
     recordLostWakeUp: (id: string, eventId: number, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE subscriptions
-            SET health_error_message = ${buildLostWakeUpReason(eventId)},
-                health_error_at = ${at}, health_error_kind = 'lost-wake-up'
-            WHERE id = ${uuidFromString(id)} AND ended_at IS NULL
-              AND health_error_kind IS NOT 'evaluation'`,
-      ),
-
-    /**
-     * Takes the recorded evaluation error off a subscription that evaluated
-     * cleanly. A lost wake-up is left where it is: no evaluation says anything
-     * about an event that was already taken off the wire.
-     */
-    clearEvaluationFailure: (id: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(
-        sql`UPDATE subscriptions
-            SET health_error_message = NULL, health_error_at = NULL, health_error_kind = NULL
-            WHERE id = ${uuidFromString(id)} AND health_error_kind = 'evaluation'`,
+            SET lost_wake_up_event_id = ${eventId}, lost_wake_up_at = ${at}
+            WHERE id = ${uuidFromString(id)} AND ended_at IS NULL`,
       ),
 
     /**
      * Takes a lost wake-up off a subscription that has just been woken again.
-     * The message says one event was lost; a wake-up written after it is what
+     * The fact says one event was lost; a wake-up written after it is what
      * makes that out of date, and nothing else is.
      */
     clearLostWakeUp: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE subscriptions
-            SET health_error_message = NULL, health_error_at = NULL, health_error_kind = NULL
-            WHERE id = ${uuidFromString(id)} AND health_error_kind = 'lost-wake-up'`,
+            SET lost_wake_up_event_id = NULL, lost_wake_up_at = NULL
+            WHERE id = ${uuidFromString(id)}`,
       ),
 
     /**

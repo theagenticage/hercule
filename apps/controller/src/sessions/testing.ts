@@ -11,9 +11,7 @@
  * only that a session runs and carries a token.
  */
 import { expect } from "vitest";
-import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import type * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import {
   ControllerToRunner,
@@ -32,8 +30,15 @@ import {
 import type { Plugin } from "@hercule/plugin-host";
 import type { Input, Profile, Session } from "@hercule/contract";
 import { fixture, providerDefinition } from "../plugins/testing";
-import type { EvaluationErrorNotifier } from "../subscriptions";
-import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
+import {
+  completeSetup,
+  get,
+  post,
+  send,
+  withServer,
+  type ServerHarness,
+  type ServerOptions,
+} from "../http/testing";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
 
@@ -223,21 +228,15 @@ export interface Enlisted {
   readonly wire: Wire;
 }
 
-export interface FleetOptions {
+/**
+ * What a fleet takes beyond what the controller itself takes: the machine that
+ * dials in, and the plugins it runs, which a fleet cannot do without.
+ */
+export type FleetOptions = Omit<ServerOptions, "plugins"> & {
   readonly plugins: ReadonlyArray<Plugin>;
   readonly facts: RunnerFacts;
   readonly models: ReadonlyArray<ModelDescriptor>;
-  /** The shipped ten seconds is longer than a test that watches one give up can wait. */
-  readonly inputDeadline?: Duration.Duration;
-  /** The shipped ten minutes is longer than a test that watches the sweep can wait. */
-  readonly workspaceSweepInterval?: Duration.Duration;
-  /** The shipped second is longer than a test that waits out several ticks can wait. */
-  readonly eventRoutingInterval?: Duration.Duration;
-  /** A budget no evaluation stays under, for a test about what an overrun does. */
-  readonly expressionBudget?: Duration.Duration;
-  /** Where a routing table reports a condition it cannot evaluate. */
-  readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
-}
+};
 
 /**
  * A controller with one enlisted, connected, logged-in machine on it.

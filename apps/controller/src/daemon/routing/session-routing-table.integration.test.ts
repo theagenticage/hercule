@@ -22,24 +22,26 @@ import {
   exit,
   frameWhen,
   healthWhen,
+  inputFrames,
   madeBusy,
   matchedInputRows,
   READS_RAW,
   buildRecordingNotifier,
   REF,
   rowsWhen,
-  run,
+  runEffect,
   sentFrames,
   storeCondition,
-  stranded,
+  spawnStrandedAgent,
   STRANDED_INPUT_ID,
   subscribed,
-  subscriber,
+  spawnSubscriber,
   subscriptionRow,
   turnCompleted,
   UNKNOWN_FUNCTION,
   UNRESOLVABLE,
   readCursorAndHead,
+  waitOutSeveralTicks,
   withPipeline,
   type Notified,
 } from "../testing";
@@ -50,7 +52,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });
 describe("the delivery of a matched input", () => {
   it("delivers to an idle session at once", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "subscribers");
+      const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribed(arranged, agent, REF);
       expect((await readSession(arranged, agent.session.id)).status).toBe("idle");
 
@@ -67,9 +69,9 @@ describe("the delivery of a matched input", () => {
     });
   });
 
-  it("keeps a busy session's row waiting, and sends one row per boundary, oldest first", async () => {
+  it("keeps a busy session's rows waiting, and sends the oldest first at the boundary", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "subscribers");
+      const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribed(arranged, agent, REF);
       await madeBusy(arranged, agent, 2);
 
@@ -81,19 +83,19 @@ describe("the delivery of a matched input", () => {
         (found) => found.length >= 2,
       );
       expect(waiting.map((row) => row.status)).toEqual(["queued", "queued"]);
-      // Nothing crossed the socket while the turn was running.
+      // Neither row crosses the socket while the turn runs, however many ticks
+      // the pipeline makes in the meantime.
+      await waitOutSeveralTicks();
       expect(sentFrames(arranged, "the older one")).toEqual([]);
       expect(sentFrames(arranged, "the newer one")).toEqual([]);
 
-      // The first boundary takes the oldest row, and only that one.
+      // The boundary releases them, oldest first.
       turnCompleted(arranged, agent.session.id, 3);
-      await frameWhen(arranged, "the older one");
-      expect(sentFrames(arranged, "the newer one")).toEqual([]);
-
-      // The next boundary takes the next one.
-      await madeBusy(arranged, agent, 4);
-      turnCompleted(arranged, agent.session.id, 5);
       await frameWhen(arranged, "the newer one");
+      const sent = inputFrames(arranged).map((frame) => frame.input.text);
+      expect(sent.findIndex((text) => text.includes("the older one"))).toBeLessThan(
+        sent.findIndex((text) => text.includes("the newer one")),
+      );
       const rows = await rowsWhen(arranged.harness, subscriptionId, (found) =>
         found.every((row) => row.status === "delivered"),
       );
@@ -101,9 +103,34 @@ describe("the delivery of a matched input", () => {
     });
   });
 
+  it("sends no second row while the first is on the wire and unanswered", async () => {
+    await withPipeline(async (arranged) => {
+      const agent = await spawnSubscriber(arranged, "subscribers");
+      const subscriptionId = await subscribed(arranged, agent, REF);
+      // The machine takes the frame and says nothing about it, so the turn it
+      // opened has not started as far as the controller knows.
+      arranged.wire.answering(() => undefined);
+
+      await emitted(arranged, [REF], "the older one");
+      await emitted(arranged, [REF], "the newer one");
+      await rowsWhen(arranged.harness, subscriptionId, (found) => found.length >= 2);
+
+      // The oldest row goes out, and the newer one stays behind it however
+      // many ticks pass: the runner takes one input per turn boundary, and a
+      // second row sent now is a row it has to hold.
+      await frameWhen(arranged, "the older one");
+      await waitOutSeveralTicks();
+      expect(sentFrames(arranged, "the newer one")).toEqual([]);
+
+      // The machine answers at last, which is what lets the next row go.
+      arranged.wire.release("opened");
+      await frameWhen(arranged, "the newer one");
+    });
+  });
+
   it("resumes a session whose harness is gone but whose transcript is not, and opens its turn with the row", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "subscribers");
+      const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribed(arranged, agent, REF);
       await exit(arranged, agent, 2);
       const ended = await readSession(arranged, agent.session.id);
@@ -134,9 +161,9 @@ describe("the delivery of a matched input", () => {
 describe("the session routing table's sweep", () => {
   it("ends only the subscription whose holder is past resuming, and matches for the other two", async () => {
     await withPipeline(async (arranged) => {
-      const idle = await subscriber(arranged, "idle-holder");
-      const resumable = await subscriber(arranged, "resumable-holder");
-      const gone = await stranded(arranged, "gone-holder");
+      const idle = await spawnSubscriber(arranged, "idle-holder");
+      const resumable = await spawnSubscriber(arranged, "resumable-holder");
+      const gone = await spawnStrandedAgent(arranged, "gone-holder");
 
       const live = await subscribed(arranged, idle, REF);
       const sleeping = await subscribed(arranged, resumable, REF);
@@ -175,7 +202,7 @@ describe("the session routing table's sweep", () => {
 
   it("calls off an input still waiting for the holder it can no longer reach, with the same reason", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "resumable-holder");
+      const agent = await spawnSubscriber(arranged, "resumable-holder");
       const subscriptionId = await subscribed(arranged, agent, REF);
       await exit(arranged, agent, 2);
       expect((await readSession(arranged, agent.session.id)).resumable).toBe(true);
@@ -183,7 +210,7 @@ describe("the session routing table's sweep", () => {
       // A row a match wrote and nothing has delivered yet: what a crash
       // between the matched input's commit and its delivery leaves behind.
       const eventId = await emitted(arranged, [REF], "never delivered");
-      await run(
+      await runEffect(
         arranged.harness.sql`
           INSERT INTO session_inputs
             (id, session_id, source, actor, text, status, created_at, subscription_id, event_id)
@@ -196,7 +223,7 @@ describe("the session routing table's sweep", () => {
 
       // The machine is retired, so the transcript can no longer be picked up
       // and the holder has ended for good.
-      await run(
+      await runEffect(
         arranged.harness.sql`UPDATE runners SET lifecycle = 'retired'
                              WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
       );
@@ -221,7 +248,7 @@ describe("a condition the router cannot evaluate", () => {
     const calls: Array<Notified> = [];
     await withPipeline(
       async (arranged) => {
-        const agent = await subscriber(arranged, "subscribers");
+        const agent = await spawnSubscriber(arranged, "subscribers");
         const subscriptionId = await subscribed(arranged, agent, REF);
         await storeCondition(arranged.harness, subscriptionId, UNRESOLVABLE);
 
@@ -232,7 +259,6 @@ describe("a condition the router cannot evaluate", () => {
           subscriptionId,
           (health) => health.state === "error",
         );
-        expect(failed.kind).toBe("evaluation");
         expect(failed.message ?? "").not.toBe("");
         expect(failed.at ?? "").not.toBe("");
 
@@ -269,8 +295,8 @@ describe("a condition the router cannot evaluate", () => {
 
   it("is a no-match for that subscription alone: every other one is still evaluated and delivered", async () => {
     await withPipeline(async (arranged) => {
-      const broken = await subscriber(arranged, "broken-holder");
-      const sound = await subscriber(arranged, "sound-holder");
+      const broken = await spawnSubscriber(arranged, "broken-holder");
+      const sound = await spawnSubscriber(arranged, "sound-holder");
       const failing = await subscribed(arranged, broken, REF);
       const working = await subscribed(arranged, sound, REF);
       await storeCondition(arranged.harness, failing, UNKNOWN_FUNCTION);
@@ -282,7 +308,6 @@ describe("a condition the router cannot evaluate", () => {
       await frameWhen(arranged, "still delivered");
       expect(await matchedInputRows(arranged.harness, failing)).toEqual([]);
       const health = await healthWhen(arranged, broken, failing, (one) => one.state === "error");
-      expect(health.kind).toBe("evaluation");
       expect(health.message ?? "").toContain("shout");
       expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
     });
@@ -290,7 +315,7 @@ describe("a condition the router cannot evaluate", () => {
 
   it("is a no-match when it reads the original payload, which the context does not carry", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "raw-reader");
+      const agent = await spawnSubscriber(arranged, "raw-reader");
       const subscriptionId = await subscribed(arranged, agent, REF);
       await storeCondition(arranged.harness, subscriptionId, READS_RAW);
 
@@ -305,7 +330,6 @@ describe("a condition the router cannot evaluate", () => {
         subscriptionId,
         (one) => one.state === "error",
       );
-      expect(health.kind).toBe("evaluation");
       expect(health.message ?? "").toContain("raw");
       expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
       expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
@@ -315,7 +339,7 @@ describe("a condition the router cannot evaluate", () => {
   it("treats an evaluation over the wall-clock budget as a no-match, and says so on the subscription", async () => {
     await withPipeline(
       async (arranged) => {
-        const agent = await subscriber(arranged, "subscribers");
+        const agent = await spawnSubscriber(arranged, "subscribers");
         const subscriptionId = await subscribed(arranged, agent, REF);
 
         const eventId = await emitted(arranged, [REF], "over budget");
@@ -326,7 +350,6 @@ describe("a condition the router cannot evaluate", () => {
           subscriptionId,
           (one) => one.state === "error",
         );
-        expect(health.kind).toBe("evaluation");
         expect(health.message ?? "").toContain("budget");
         expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
         expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);

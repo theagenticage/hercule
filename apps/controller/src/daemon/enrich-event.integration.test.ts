@@ -19,9 +19,9 @@ import {
   readCursorAndHead,
   REF,
   rowsWhen,
-  stranded,
+  spawnStrandedAgent,
   subscribed,
-  subscriber,
+  spawnSubscriber,
   subscriptionRow,
   withPipeline,
 } from "./testing";
@@ -38,8 +38,8 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });
 describe("enrichment's second look", () => {
   it("writes a row for the subscription the added ref now matches, and for nothing else", async () => {
     await withPipeline(async (arranged) => {
-      const first = await subscriber(arranged, "first-holder");
-      const second = await subscriber(arranged, "second-holder");
+      const first = await spawnSubscriber(arranged, "first-holder");
+      const second = await spawnSubscriber(arranged, "second-holder");
       const early = await subscribed(arranged, first, REF);
       const eventId = await emitted(arranged, [REF], "the first match");
       await rowsWhen(arranged.harness, early, (rows) => rows.length >= 1);
@@ -87,7 +87,7 @@ describe("enrichment's second look", () => {
 
   it("gets the row it wrote to an idle session, on the pass after the enrichment", async () => {
     await withPipeline(async (arranged) => {
-      const agent = await subscriber(arranged, "late-holder");
+      const agent = await spawnSubscriber(arranged, "late-holder");
       const eventId = await emitted(arranged, [REF], "enriched into a match");
       await caughtUp(arranged.harness);
 
@@ -119,7 +119,7 @@ describe("enrichment's second look", () => {
   it("wakes no holder that has ended for good, and ends the subscription instead", async () => {
     await withPipeline(
       async (arranged) => {
-        const holder = await stranded(arranged, "gone-holder");
+        const holder = await spawnStrandedAgent(arranged, "gone-holder");
         const subscriptionId = await subscribed(arranged, holder, OTHER_REF);
         const eventId = await emitted(arranged, [REF], "for a holder that is gone");
         await exit(arranged, holder, 1);

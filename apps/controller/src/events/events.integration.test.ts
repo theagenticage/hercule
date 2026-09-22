@@ -159,7 +159,7 @@ const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =
   sharedWithFleet(body, { plugins: registry(), facts: FACTS, models: MODELS });
 
 /** A session on a profile that reads the log and may not write to it. */
-const reader = async (arranged: Arranged): Promise<string> => {
+const spawnLogReader = async (arranged: Arranged): Promise<string> => {
   const profile = await createProfile(arranged, "log-reader", ["event.read"]);
   return (await agentOn(arranged, profile)).token;
 };
@@ -297,7 +297,7 @@ describe("POST /events/emit", () => {
   it("refuses a credential that was never given event.emit, naming the grant", async () => {
     await withFleet(async (arranged) => {
       const base = arranged.harness.base;
-      const token = await reader(arranged);
+      const token = await spawnLogReader(arranged);
 
       const response = await emit(base, token, { kind: KIND, payload: PAYLOAD });
 
@@ -468,7 +468,7 @@ describe("POST /events/:id/enrich", () => {
     await withFleet(async (arranged) => {
       const base = arranged.harness.base;
       const eventId = await emitted(base, arranged.token, { kind: KIND, payload: PAYLOAD });
-      const token = await reader(arranged);
+      const token = await spawnLogReader(arranged);
 
       const response = await enrich(base, token, eventId, { system: "sentry" });
 

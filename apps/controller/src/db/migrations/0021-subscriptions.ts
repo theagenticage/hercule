@@ -12,20 +12,28 @@
  * different questions: the target is what a person reads, and the condition is
  * what the event router evaluates.
  *
- * Health is three nullable columns and no state column: all null is `ok`, so
- * the first failure of an evaluation error is one conditional write (`WHERE
- * health_error_kind IS NOT 'evaluation'`) instead of a counter that two
- * writers could disagree about. The check keeps the three whole, because one
- * column without the others would read as neither state.
+ * Two facts about a subscription can stand at the same time, and each has its
+ * own pair of columns.
  *
- * `health_error_kind` is there because the two errors a subscription can carry
- * have different lifetimes. An evaluation error is about the last event and is
- * taken off by the next event that evaluates cleanly. A lost wake-up is about
- * one event that will never be delivered again, and only a wake-up that does
- * arrive makes it out of date. Without the kind, a clean evaluation of any
- * unrelated event would wipe the lost wake-up seconds after a restart wrote
- * it, and the holder would never read it. The values are spelled as the API
- * spells them, so a row is read without a mapping.
+ * The first pair is the health: whether the router can evaluate the condition.
+ * It is written on the first evaluation that fails, refreshed while failures
+ * continue, and taken off by the next evaluation that is clean. Both columns
+ * are null while the condition works, so `ok` needs no state column and the
+ * first failure is one conditional write (`WHERE health_error_message IS
+ * NULL`) rather than a counter two writers could disagree about.
+ *
+ * The second pair is the last wake-up a restart cancelled: which event it
+ * carried, and when the restart found it. It is written by the boot step and
+ * taken off by the next wake-up this subscription produces.
+ *
+ * The two are two slots and not one, because they begin and end for different
+ * reasons and neither may hide the other. A clean evaluation of any unrelated
+ * event would wipe a lost wake-up seconds after a restart wrote it, and a
+ * condition that fails would bury it; the holder would never read either fact
+ * it needed.
+ *
+ * Each pair is kept whole by a check, because one column of a pair without the
+ * other reads as neither fact.
  *
  * A subscription is live while `ended_at` is null. `ended_reason` says what
  * ended it - a cancellation, or the holder ending for good - and `ended_actor`
@@ -47,20 +55,21 @@ export default Effect.gen(function* () {
       condition TEXT NOT NULL,
       health_error_message TEXT,
       health_error_at TEXT,
-      health_error_kind TEXT CHECK (health_error_kind IN ('evaluation', 'lost-wake-up')),
+      lost_wake_up_event_id INTEGER,
+      lost_wake_up_at TEXT,
       created_at TEXT NOT NULL,
       ended_at TEXT,
       ended_reason TEXT,
       ended_actor TEXT,
       actor TEXT NOT NULL,
-      CHECK ((health_error_message IS NULL) = (health_error_at IS NULL)
-             AND (health_error_message IS NULL) = (health_error_kind IS NULL))
+      CHECK ((health_error_message IS NULL) = (health_error_at IS NULL)),
+      CHECK ((lost_wake_up_event_id IS NULL) = (lost_wake_up_at IS NULL))
     )
   `;
 
-  // Every read of this table reads live rows: one holder's, which this index
-  // narrows, and the router's read of all of them, which walks the same index
-  // rather than the table.
+  // A listing answers one holder's live subscriptions, oldest first, which is
+  // exactly what this index holds. The router's own read takes every live row
+  // of the table and is not what the index is for.
   yield* sql`
     CREATE INDEX subscriptions_holder ON subscriptions (holder_kind, holder_id, created_at, id)
     WHERE ended_at IS NULL

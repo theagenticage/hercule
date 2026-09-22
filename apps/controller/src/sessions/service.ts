@@ -831,7 +831,7 @@ const make = Effect.gen(function* () {
      * sending it now, holding it for the end of a running turn, or starting
      * the session again - is decided after the write is durable.
      */
-    takeMatchedInput: (
+    storeMatchedInput: (
       matched: NewMatchedInput,
     ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.gen(function* () {
@@ -861,6 +861,10 @@ const make = Effect.gen(function* () {
     /** The sessions holding an input a match produced that has not gone out yet. */
     listSessionsAwaitingMatchedInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       inputs.listSessionsAwaitingMatchedInput(),
+
+    /** Whether a row this session holds is out on the wire and unanswered. */
+    holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      inputs.holdsInputOnTheWire(sessionId),
 
     queuedInput,
 

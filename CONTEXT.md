@@ -325,6 +325,10 @@ The routes one destination owns, one per live subscription today, one per enable
 **Delivery**:
 The downstream consumer of the rows a routing table writes. Reads its own rows and acts on the ones that can act now; idempotent, so a crash between routing and delivery loses nothing.
 
+**Matched Input**:
+The Queued Input the Event Router writes for a holder session when a route's condition holds, marked with the subscription and the event. Unique per that pair, so a second pass over the same event writes nothing.
+_Avoid_: wake-up (keep that word for the one a restart lost, in text a person reads)
+
 **Expression**:
 A CEL source stored on a subscription or a trigger and evaluated against one event, or against a run's inputs and steps, answering whether it matches or producing a value. Checked when it is saved, and evaluated against the context it is handed and nothing else. `condition` is the stored field on a subscription; the concept is an expression.
 _Avoid_: rule, predicate string

@@ -154,7 +154,7 @@ const make = Effect.gen(function* () {
      *
      * A consumer of the event log that committed its rows and stopped before
      * it recorded how far it had read reads those events again, so the unique
-     * pair - not the caller - is what keeps one fact to one wake-up. The row
+     * pair - not the caller - is what keeps one fact to one matched input. The row
      * is never claimed inside the insert: the session is told about it only
      * after the write is durable.
      */
@@ -211,14 +211,43 @@ const make = Effect.gen(function* () {
      * yet. It is how a delivery is picked up again after a controller stopped
      * between storing a row and sending it: the rows say what is owed, so
      * nothing has to be remembered across a restart.
+     *
+     * A session that already has a row on the wire is left out. The runner
+     * takes one input per turn boundary, so a second row sent before the turn
+     * the first one opened has started is a row the runner has to hold.
      */
     listSessionsAwaitingMatchedInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly session_id: Uint8Array }>`
-          SELECT DISTINCT session_id FROM session_inputs
-          WHERE source = 'subscription' AND status = 'queued' AND sent_at IS NULL
+          SELECT DISTINCT waiting.session_id FROM session_inputs AS waiting
+          WHERE waiting.source = 'subscription' AND waiting.status = 'queued'
+            AND waiting.sent_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM session_inputs AS onTheWire
+              WHERE onTheWire.session_id = waiting.session_id
+                AND onTheWire.status = 'queued' AND onTheWire.sent_at IS NOT NULL
+            )
         `,
         (rows) => rows.map((row) => uuidToString(row.session_id)),
+      ),
+
+    /**
+     * Whether a row this session holds is out on the wire and unanswered.
+     *
+     * The runner takes one input per turn boundary. A second row sent before
+     * the turn the first row opened has started is a row the runner has to
+     * hold, so a caller with a row still out sends nothing more until the
+     * runner has reported what that row did.
+     */
+    holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)}
+            AND status = 'queued' AND sent_at IS NOT NULL
+          LIMIT 1
+        `,
+        (rows) => rows.length > 0,
       ),
 
     /** Scoped by the session, so an id belonging to another one is simply not here. */

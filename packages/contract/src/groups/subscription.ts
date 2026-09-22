@@ -34,6 +34,7 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { markShorthand, markShorthandOnItself } from "../shorthand";
 import { bounded } from "../strings";
+import { EventId } from "./event";
 
 /**
  * The longest id a target may name. A target names one thing by its id, and an
@@ -177,29 +178,18 @@ export const SubscriptionHolderFromShorthand = markShorthandOnItself(
 );
 
 /**
- * What stands between this subscription and the events it waits for.
+ * Whether the event router can evaluate this subscription's condition.
  *
  * An evaluation that fails is a no-match and never an end: the condition is
  * evaluated again on the next event, and the failure is reported here so the
- * holder can see why nothing arrives. A lost wake-up is the other error: one
- * event matched, its input was sent, and a restart caught it unanswered, so
- * that one event is never delivered again.
- *
- * The two are told apart because they end differently. An evaluation error
- * goes as soon as one event evaluates cleanly; a lost wake-up stands until a
- * wake-up for this subscription is written.
- *
- * An evaluation error wins where both would stand. A subscription whose
- * condition cannot be evaluated can wake its holder for nothing at all, so
- * that is the error the holder must act on first; a missed event is moot until
- * the condition works again.
+ * holder can see why nothing arrives. It is set on the first failure,
+ * refreshed while failures continue, and cleared by the next clean evaluation.
  */
 export const SubscriptionHealth = Schema.Union([
   Schema.Struct({ state: Schema.Literal("ok") }),
   Schema.Struct({
     state: Schema.Literal("error"),
-    /** Which of the two errors this is, because they end differently. */
-    kind: Schema.Literals(["evaluation", "lost-wake-up"]),
+    /** What the evaluator said about the condition. */
     message: Schema.String,
     /** When this error began. */
     at: Timestamp,
@@ -215,6 +205,12 @@ export const Subscription = Schema.Struct({
   condition: Schema.String,
   holder: SubscriptionHolder,
   health: SubscriptionHealth,
+  /**
+   * The last wake-up a restart cancelled after it was sent and before it was
+   * acknowledged. That event will not be delivered again. It is cleared when a
+   * later wake-up for this subscription is written.
+   */
+  lostWakeUp: Schema.NullOr(Schema.Struct({ eventId: EventId, at: Timestamp })),
   createdAt: Timestamp,
 });
 
