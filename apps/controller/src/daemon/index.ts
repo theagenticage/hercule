@@ -17,6 +17,7 @@
  * event router is handed, and each of them is the only module that knows both
  * the domain that owns a claim and the domain that answers it.
  */
+export { cancelStrandedInputsAndReportLostWakeUps } from "./boot";
 export { DispatchLayer } from "./dispatch";
 export { Enrichment, EnrichmentLayer } from "./enrich-event";
 export { EventRouter, EventRouterLayer } from "./event-router";

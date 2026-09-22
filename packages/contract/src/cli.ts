@@ -856,7 +856,7 @@ export const CLI = {
 
   "subscription.query": {
     command: "subscription list",
-    help: "Lists what a session is waiting on. Each row carries the target, the condition that target expanded into, and whether the event router can still evaluate it. A session token that names no holder lists its own. Only live subscriptions are listed; a cancelled one is gone from here.",
+    help: "Lists what a session is waiting on. Each row carries the target, the condition that target expanded into, and its health: ok, an evaluation error while its condition cannot be evaluated, or a lost wake-up naming an event a restart kept from being delivered. A session token that names no holder lists its own. Only live subscriptions are listed; a cancelled one is gone from here.",
     examples: [
       { args: [] },
       { args: ["--holder", "session:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },

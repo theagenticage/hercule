@@ -12,11 +12,20 @@
  * different questions: the target is what a person reads, and the condition is
  * what the event router evaluates.
  *
- * Health is two nullable columns and no state column: both null is `ok`, so the
- * first failure of a run of failures is one conditional write
- * (`WHERE health_error_message IS NULL`) instead of a counter that two writers
- * could disagree about. The check keeps the pair whole, because one column
- * without the other would read as neither state.
+ * Health is three nullable columns and no state column: all null is `ok`, so
+ * the first failure of an evaluation error is one conditional write (`WHERE
+ * health_error_kind IS NOT 'evaluation'`) instead of a counter that two
+ * writers could disagree about. The check keeps the three whole, because one
+ * column without the others would read as neither state.
+ *
+ * `health_error_kind` is there because the two errors a subscription can carry
+ * have different lifetimes. An evaluation error is about the last event and is
+ * taken off by the next event that evaluates cleanly. A lost wake-up is about
+ * one event that will never be delivered again, and only a wake-up that does
+ * arrive makes it out of date. Without the kind, a clean evaluation of any
+ * unrelated event would wipe the lost wake-up seconds after a restart wrote
+ * it, and the holder would never read it. The values are spelled as the API
+ * spells them, so a row is read without a mapping.
  *
  * A subscription is live while `ended_at` is null. `ended_reason` says what
  * ended it - a cancellation, or the holder ending for good - and `ended_actor`
@@ -38,12 +47,14 @@ export default Effect.gen(function* () {
       condition TEXT NOT NULL,
       health_error_message TEXT,
       health_error_at TEXT,
+      health_error_kind TEXT CHECK (health_error_kind IN ('evaluation', 'lost-wake-up')),
       created_at TEXT NOT NULL,
       ended_at TEXT,
       ended_reason TEXT,
       ended_actor TEXT,
       actor TEXT NOT NULL,
-      CHECK ((health_error_message IS NULL) = (health_error_at IS NULL))
+      CHECK ((health_error_message IS NULL) = (health_error_at IS NULL)
+             AND (health_error_message IS NULL) = (health_error_kind IS NULL))
     )
   `;
 

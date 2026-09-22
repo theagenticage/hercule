@@ -71,7 +71,7 @@ import { AuditLog } from "../events";
 import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { gitIdentityOf, type GitCredential } from "../workspaces";
-import { inputRepository, type NewMatchedInput, type StoredInput } from "./inputs";
+import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
 import { sessionRecordComposer } from "./records";
 import {
   requireSession,
@@ -1172,11 +1172,18 @@ export const SessionServiceLayer: Layer.Layer<
  * layer before it runs a migration, so a query against a column a fresh
  * database does not have yet would fail there. Called explicitly, after
  * migrations and before anything is placed on a runner.
+ *
+ * It answers the wake-ups the cancelled rows carried. Who is told about a
+ * wake-up that is lost is not this domain's question: a subscription is not a
+ * word the sessions domain knows.
  */
-export const cancelStrandedInputs: Effect.Effect<void, SqlError, SqlClient.SqlClient> =
-  Effect.flatMap(inputRepository, (inputs) =>
-    inputs.cancelStranded(
-      "the controller restarted while this input was on its way to the runner; " +
-        "whether the harness took it is unknown",
-    ),
-  );
+export const cancelStrandedInputs: Effect.Effect<
+  ReadonlyArray<LostWakeUp>,
+  SqlError,
+  SqlClient.SqlClient
+> = Effect.flatMap(inputRepository, (inputs) =>
+  inputs.cancelStranded(
+    "the controller restarted while this input was on its way to the runner; " +
+      "whether the harness took it is unknown",
+  ),
+);

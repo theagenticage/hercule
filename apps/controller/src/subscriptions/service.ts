@@ -104,11 +104,18 @@ const NEEDS_A_HOLDER_REPAIR =
 
 const NO_SUCH_SUBSCRIPTION = "no live subscription has that id";
 
-/** How a stored row reads as health: no failure recorded is `ok`. */
+/** How a stored row reads as health: no error recorded is `ok`. */
 const readHealth = (stored: StoredSubscription): SubscriptionHealth =>
-  stored.healthErrorMessage === null || stored.healthErrorAt === null
+  stored.healthErrorMessage === null ||
+  stored.healthErrorAt === null ||
+  stored.healthErrorKind === null
     ? { state: "ok" }
-    : { state: "error", message: stored.healthErrorMessage, at: stored.healthErrorAt };
+    : {
+        state: "error",
+        kind: stored.healthErrorKind,
+        message: stored.healthErrorMessage,
+        at: stored.healthErrorAt,
+      };
 
 const composeRecord = (stored: StoredSubscription): Subscription => ({
   id: stored.id,

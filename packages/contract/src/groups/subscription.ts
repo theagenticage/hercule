@@ -177,18 +177,31 @@ export const SubscriptionHolderFromShorthand = markShorthandOnItself(
 );
 
 /**
- * Whether the event router can still evaluate this subscription's condition.
+ * What stands between this subscription and the events it waits for.
  *
  * An evaluation that fails is a no-match and never an end: the condition is
  * evaluated again on the next event, and the failure is reported here so the
- * holder can see why nothing arrives.
+ * holder can see why nothing arrives. A lost wake-up is the other error: one
+ * event matched, its input was sent, and a restart caught it unanswered, so
+ * that one event is never delivered again.
+ *
+ * The two are told apart because they end differently. An evaluation error
+ * goes as soon as one event evaluates cleanly; a lost wake-up stands until a
+ * wake-up for this subscription is written.
+ *
+ * An evaluation error wins where both would stand. A subscription whose
+ * condition cannot be evaluated can wake its holder for nothing at all, so
+ * that is the error the holder must act on first; a missed event is moot until
+ * the condition works again.
  */
 export const SubscriptionHealth = Schema.Union([
   Schema.Struct({ state: Schema.Literal("ok") }),
   Schema.Struct({
     state: Schema.Literal("error"),
+    /** Which of the two errors this is, because they end differently. */
+    kind: Schema.Literals(["evaluation", "lost-wake-up"]),
     message: Schema.String,
-    /** When the current run of failures began. */
+    /** When this error began. */
     at: Timestamp,
   }),
 ]);

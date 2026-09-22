@@ -9,6 +9,7 @@
  * order those calls are made in.
  */
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Event } from "@hercule/contract";
@@ -96,10 +97,10 @@ export const sessionRoutingTable: Effect.Effect<
         .map((subscription) => ({
           id: subscription.id,
           condition: subscription.condition,
-          inEvaluationError: subscription.healthErrorMessage !== null,
+          inEvaluationError: subscription.healthErrorKind === "evaluation",
           writeOnMatch: (event: Event): Effect.Effect<void, SqlError> =>
             Effect.gen(function* () {
-              yield* sessions.takeMatchedInput({
+              const written = yield* sessions.takeMatchedInput({
                 sessionId: subscription.holder.id,
                 subscriptionId: subscription.id,
                 eventId: event.id,
@@ -107,6 +108,12 @@ export const sessionRoutingTable: Effect.Effect<
                 text: renderEventInput(event),
                 at: yield* nowIso,
               });
+              // A lost wake-up says one event never reached this holder. A
+              // wake-up written after it is what makes that out of date, so
+              // the error goes here and nowhere else. Nothing is written for
+              // an event this subscription already has a row for, and nothing
+              // about its health has changed either.
+              if (Option.isSome(written)) yield* subscriptions.clearLostWakeUp(subscription.id);
             }),
         }));
     });

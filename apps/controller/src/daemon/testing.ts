@@ -208,6 +208,7 @@ export const subscribed = async (
 
 export interface Health {
   readonly state: string;
+  readonly kind?: string;
   readonly message?: string;
   readonly at?: string;
 }
@@ -316,6 +317,8 @@ export interface SubscriptionRow {
   readonly ended_reason: string | null;
   readonly ended_actor: string | null;
   readonly condition: string;
+  readonly health_error_kind: string | null;
+  readonly health_error_message: string | null;
 }
 
 export const subscriptionRow = async (
@@ -324,7 +327,8 @@ export const subscriptionRow = async (
 ): Promise<SubscriptionRow | undefined> => {
   const rows = await run(
     harness.sql<SubscriptionRow>`
-      SELECT ended_at, ended_reason, ended_actor, condition FROM subscriptions
+      SELECT ended_at, ended_reason, ended_actor, condition,
+             health_error_kind, health_error_message FROM subscriptions
       WHERE id = unhex(replace(${id}, '-', ''))`,
   );
   return rows[0];

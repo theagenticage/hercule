@@ -39,7 +39,12 @@ import { homePaths } from "@hercule/home";
 import { HerculeHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
-import { EventRoutingInterval, SessionInputDeadline, WorkspaceSweepInterval } from "../daemon";
+import {
+  cancelStrandedInputsAndReportLostWakeUps,
+  EventRoutingInterval,
+  SessionInputDeadline,
+  WorkspaceSweepInterval,
+} from "../daemon";
 import { ExpressionBudget } from "../expressions";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -57,7 +62,7 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
-import { cancelStrandedInputs, SessionServiceLayer } from "../sessions";
+import { SessionServiceLayer } from "../sessions";
 import { ResourceServiceLayer } from "../resources";
 import { EvaluationErrorNotifier, EvaluationErrorNotifierLayer } from "../subscriptions";
 import { SettingsLayer } from "../settings";
@@ -268,7 +273,7 @@ export const withServer = (
         // The boot's steps in the boot's order, so a request sees what a real
         // controller has. Held as one effect because reboot runs them again.
         const bootSteps = Effect.gen(function* () {
-          yield* cancelStrandedInputs;
+          yield* cancelStrandedInputsAndReportLostWakeUps;
           yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
           yield* seed;
           yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));

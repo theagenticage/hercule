@@ -232,6 +232,7 @@ describe("a condition the router cannot evaluate", () => {
           subscriptionId,
           (health) => health.state === "error",
         );
+        expect(failed.kind).toBe("evaluation");
         expect(failed.message ?? "").not.toBe("");
         expect(failed.at ?? "").not.toBe("");
 
@@ -281,6 +282,7 @@ describe("a condition the router cannot evaluate", () => {
       await frameWhen(arranged, "still delivered");
       expect(await matchedInputRows(arranged.harness, failing)).toEqual([]);
       const health = await healthWhen(arranged, broken, failing, (one) => one.state === "error");
+      expect(health.kind).toBe("evaluation");
       expect(health.message ?? "").toContain("shout");
       expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
     });
@@ -303,6 +305,7 @@ describe("a condition the router cannot evaluate", () => {
         subscriptionId,
         (one) => one.state === "error",
       );
+      expect(health.kind).toBe("evaluation");
       expect(health.message ?? "").toContain("raw");
       expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
       expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
@@ -323,6 +326,7 @@ describe("a condition the router cannot evaluate", () => {
           subscriptionId,
           (one) => one.state === "error",
         );
+        expect(health.kind).toBe("evaluation");
         expect(health.message ?? "").toContain("budget");
         expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
         expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);

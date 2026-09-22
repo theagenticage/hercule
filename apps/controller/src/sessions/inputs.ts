@@ -54,6 +54,12 @@ export interface NewInput {
   readonly sentAt?: string;
 }
 
+/** A wake-up that was sent, never acknowledged, and cannot be written again. */
+export interface LostWakeUp {
+  readonly subscriptionId: string;
+  readonly eventId: number;
+}
+
 /** An input a subscription's match produced, and the two things it came from. */
 export interface NewMatchedInput {
   readonly sessionId: string;
@@ -340,12 +346,29 @@ const make = Effect.gen(function* () {
      * Ends every row a restart caught on the wire: whether the harness took it
      * before the connection dropped is unknown, so it is neither delivered nor
      * resent - resending risks the message reaching the harness twice.
+     *
+     * It answers the wake-ups that ended with those rows. A row a match wrote
+     * names the subscription and the event it came from, and the pair can
+     * never be written again, so the caller has to be able to say on which
+     * subscription a wake-up was lost.
      */
-    cancelStranded: (reason: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
-        WHERE status = 'queued' AND sent_at IS NOT NULL
-      `),
+    cancelStranded: (reason: string): Effect.Effect<ReadonlyArray<LostWakeUp>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly subscription_id: Uint8Array | null;
+          readonly event_id: number | null;
+        }>`
+          UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
+          WHERE status = 'queued' AND sent_at IS NOT NULL
+          RETURNING subscription_id, event_id
+        `,
+        (rows) =>
+          rows.flatMap((row) =>
+            row.subscription_id === null || row.event_id === null
+              ? []
+              : [{ subscriptionId: uuidToString(row.subscription_id), eventId: row.event_id }],
+          ),
+      ),
   };
 });
 
