@@ -60,6 +60,9 @@ const UNRESOLVABLE = "event.payload.nothing.deeper == 1";
  */
 const STRANDED_INPUT_ID = "0199f0b7-0000-7000-8000-000000000000";
 
+/** More events than one pass reads, so the matcher has to pass again to finish. */
+const BURST = 250;
+
 /** A condition that calls a function nobody registered. */
 const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
 
@@ -368,6 +371,42 @@ describe("the matcher's tick", () => {
     });
   });
 
+  it("walks a burst wider than one batch to the end of the log, rather than one batch a tick", async () => {
+    await withMatcher(async (arranged) => {
+      const agent = await subscriber(arranged, "burst-holder");
+      const subscriptionId = await subscribed(arranged, agent, REF);
+      await caughtUp(arranged.harness);
+
+      // Two and a half batches, appended in one statement so the matcher finds
+      // them all waiting rather than a few per pass as they arrive. They are
+      // written to the table because `event.emit` is one call per event, and
+      // the matcher would walk the early ones while the later ones were still
+      // being posted.
+      await run(
+        arranged.harness.sql`
+          INSERT INTO events
+            (source, connection_id, system, kind, occurred_at, received_at,
+             dedup_key, refs, url, payload, raw, actor)
+          WITH RECURSIVE counted(value) AS (
+            SELECT 1 UNION ALL SELECT value + 1 FROM counted WHERE value < ${BURST}
+          )
+          SELECT 'manual', NULL, 'github', ${KIND}, ${at}, ${at}, 'burst-' || value,
+                 ${JSON.stringify([REF])}, NULL, ${JSON.stringify(payloadOf("a burst"))},
+                 NULL, 'user'
+          FROM counted`,
+      );
+
+      const rows = await rowsWhen(
+        arranged.harness,
+        subscriptionId,
+        (found) => found.length >= BURST,
+      );
+      expect(rows).toHaveLength(BURST);
+      const seen = await walk(arranged.harness);
+      expect(seen.position).toBe(seen.head);
+    });
+  });
+
   it("writes nothing a second time, however often the cursor is rewound over the same events", async () => {
     await withMatcher(async (arranged) => {
       const agent = await subscriber(arranged, "subscribers");
@@ -628,7 +667,10 @@ describe("enrichment's second look", () => {
       expect(rows[0]!.text).toContain("https://github.com/o/r/pull/88");
       // The subscription that already matched gets nothing a second time.
       expect(await effectRows(arranged.harness, early)).toHaveLength(1);
-      expect((await walk(arranged.harness)).position).toBe(before);
+      // The second look is not a step through the log, so the cursor is never
+      // put back to read the event again. It does move on: the audit entry the
+      // enrichment stamped is one more entry for the next pass to walk past.
+      expect((await walk(arranged.harness)).position).toBeGreaterThanOrEqual(before);
 
       // An enrichment that adds nothing writes nothing.
       const again = await post(
@@ -640,7 +682,7 @@ describe("enrichment's second look", () => {
       expect(again.status, await again.clone().text()).toBe(200);
       expect(await effectRows(arranged.harness, late)).toHaveLength(1);
       expect(await effectRows(arranged.harness, early)).toHaveLength(1);
-      expect((await walk(arranged.harness)).position).toBe(before);
+      expect((await walk(arranged.harness)).position).toBeGreaterThanOrEqual(before);
     });
   });
 

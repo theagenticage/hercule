@@ -123,11 +123,11 @@ export interface CompiledExpression {
 }
 
 /**
- * The compiled program, for a caller that holds one source and calls it
- * itself. It only parses: it does not type-check the source the way
- * `checkExpression` does, and it puts no wall-clock guard around the calls the
- * caller then makes. It is not the matcher's path - the matcher evaluates
- * through `evaluateExpression`, which is guarded.
+ * The compiled program, for a caller that evaluates one source against many
+ * contexts and does not want it read again for each of them. It only parses:
+ * it does not type-check the source the way `checkExpression` does. The guard
+ * is not lost by compiling: what a caller hands the program to is
+ * `evaluateExpression`, which takes a program as readily as a source.
  */
 export const parseExpression = (
   source: string,
@@ -154,6 +154,11 @@ export const checkExpression = (source: string): Effect.Effect<void, ExpressionE
 /**
  * One evaluation against one context, with a wall-clock guard.
  *
+ * The expression is a source or a program `parseExpression` made of one. The
+ * two answer alike, so a caller evaluating one source against many contexts
+ * compiles it once and hands the program over, and a caller with one context
+ * hands the source over and never mentions the compilation step.
+ *
  * The guard reports; it does not bound. The evaluator offers no timeout, no
  * fuel and no step budget, and evaluation is synchronous, so nothing on this
  * thread can stop an evaluation once it starts: the elapsed time is measured
@@ -170,7 +175,7 @@ export const checkExpression = (source: string): Effect.Effect<void, ExpressionE
  * have moved between two reads.
  */
 export const evaluateExpression = (
-  source: string,
+  expression: string | CompiledExpression,
   context: Record<string, unknown>,
 ): Effect.Effect<unknown, ExpressionError> =>
   Effect.gen(function* () {
@@ -179,7 +184,10 @@ export const evaluateExpression = (
     const value: unknown = yield* Effect.try({
       // The evaluator answers `any`; an answer is read by the caller that
       // knows what it asked for, so it leaves this domain as `unknown`.
-      try: (): unknown => environment.evaluate(source, context),
+      try: (): unknown =>
+        typeof expression === "string"
+          ? environment.evaluate(expression, context)
+          : expression(context),
       catch: (failure) =>
         new ExpressionError({
           message: `that expression could not be evaluated: ${readSummary(failure)}`,

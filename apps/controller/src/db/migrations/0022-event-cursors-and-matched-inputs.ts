@@ -50,4 +50,13 @@ export default Effect.gen(function* () {
     CREATE UNIQUE INDEX session_inputs_match ON session_inputs (subscription_id, event_id)
     WHERE subscription_id IS NOT NULL
   `;
+
+  // Every pass of the matcher asks which sessions hold a matched input nothing
+  // has sent yet. The index is partial over exactly that question, so it holds
+  // the few rows still owed and not the delivered history beside them: it stays
+  // the same size as the work outstanding while the table grows for ever.
+  yield* sql`
+    CREATE INDEX session_inputs_awaiting ON session_inputs (session_id)
+    WHERE source = 'subscription' AND status = 'queued' AND sent_at IS NULL
+  `;
 });

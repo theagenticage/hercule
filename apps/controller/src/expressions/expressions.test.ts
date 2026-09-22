@@ -27,6 +27,13 @@ const failureMessage = <A>(effect: Effect.Effect<A, ExpressionError>): string =>
   return error.message;
 };
 
+/**
+ * What the evaluator itself said about a source, without the sentence the
+ * wrapper puts around it. The wrapper says what the caller was doing - saving,
+ * compiling, evaluating - and the rest is the complaint about the source.
+ */
+const readEvaluatorSummary = (message: string): string => message.slice(message.indexOf(": ") + 2);
+
 /** How many numbers a message spells, which is how a named value is found. */
 const numbersIn = (message: string): number => (message.match(/\d+/g) ?? []).length;
 
@@ -105,6 +112,34 @@ describe("parseExpression", () => {
 
   it("refuses a source over a structural limit, naming the limit", () => {
     expect(failureMessage(parseExpression(listOf(10000)))).toContain("maxListElements");
+  });
+
+  it("answers, for a compiled source, what the source itself answers", () => {
+    const context = { event: { kind: "github.pr.opened", refs: ["github:pr:o/r#87"] } };
+    const source = `event.kind == "github.pr.opened" && "github:pr:o/r#87" in event.refs`;
+    const program = Effect.runSync(parseExpression(source));
+
+    expect(Effect.runSync(evaluateExpression(program, context))).toBe(true);
+    expect(Effect.runSync(evaluateExpression(program, context))).toBe(
+      Effect.runSync(evaluateExpression(source, context)),
+    );
+    // And a compiled program is called again with another context, which is
+    // what compiling it is for.
+    expect(
+      Effect.runSync(
+        evaluateExpression(program, { event: { kind: "github.pr.closed", refs: [] } }),
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses a source with what the evaluator said, which is what evaluating it says too", () => {
+    const source = "event.kind ==";
+
+    // A caller reading the refusal reads the same complaint whichever of the
+    // two it called, so compiling a source first tells it nothing new.
+    expect(failureMessage(parseExpression(source))).toContain(
+      readEvaluatorSummary(failureMessage(evaluateExpression(source, {}))),
+    );
   });
 });
 

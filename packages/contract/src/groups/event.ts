@@ -22,14 +22,7 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
-import {
-  EXTERNAL_REF_PATTERN,
-  ExternalRef,
-  Id,
-  MAX_EXTERNAL_REF_LENGTH,
-  NullableActor,
-  Timestamp,
-} from "../ids";
+import { ExternalRef, Id, NullableActor, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
@@ -85,28 +78,12 @@ export const MAX_EVENT_SYSTEM_LENGTH = 64;
 /** The longest source URL. It is where a person opens the event, not a document. */
 export const MAX_EVENT_URL_LENGTH = 2048;
 
-/**
- * A ref as the two write operations take it. It is the same grammar the
- * envelope's refs have, checked by a filter rather than by a pattern so that
- * the refusal quotes the ref the caller wrote: a pattern check reports the
- * position of the value and never the value, and a caller sending a list of
- * refs cannot act on a position alone.
- */
-const WrittenRef = Schema.String.check(
-  Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),
-  Schema.makeFilter((ref) =>
-    EXTERNAL_REF_PATTERN.test(ref)
-      ? undefined
-      : `${ref} is not an external ref: write <system>:<kind>:<identity>, lowercase system, no whitespace`,
-  ),
-);
-
 /** What a manual emit hands over. Everything else on the envelope is the core's. */
 export const EmitPayload = Schema.Struct({
   kind: EventKind,
   payload: JsonObject,
   connectionId: Schema.optionalKey(Id),
-  refs: Schema.optionalKey(Schema.Array(WrittenRef)),
+  refs: Schema.optionalKey(Schema.Array(ExternalRef)),
   dedupKey: Schema.optionalKey(bounded(1, MAX_DEDUP_KEY_LENGTH)),
 });
 
@@ -125,7 +102,7 @@ export type Emitted = Schema.Schema.Type<typeof Emitted>;
 export const EnrichPayload = Schema.Struct({
   system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
   url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
-  refs: Schema.optionalKey(Schema.Array(WrittenRef)),
+  refs: Schema.optionalKey(Schema.Array(ExternalRef)),
 });
 
 export type EnrichPayload = Schema.Schema.Type<typeof EnrichPayload>;

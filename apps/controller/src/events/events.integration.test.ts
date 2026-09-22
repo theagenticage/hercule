@@ -294,35 +294,6 @@ describe("POST /events/emit", () => {
     });
   });
 
-  /**
-   * The security entries are the population a session without `event.audit`
-   * cannot read at all, so the refusal has to hold for them by the same rule
-   * and not by luck: amending one would both rewrite what happened to the
-   * user's account and tell the caller it is there.
-   */
-  it("answers not_found for a security entry too, and leaves it as it was", async () => {
-    await withEvents(async ({ base, audit }, token) => {
-      // A login that cannot succeed is what writes one of these.
-      const refusedLogin = await send("POST", base, "/api/v1/auth/login", {
-        body: { username: USERNAME, password: "not the password" },
-      });
-      expect(refusedLogin.status).toBe(401);
-      const before = (await audit("auth.login.failed"))[0]!;
-
-      const response = await enrich(base, token, before.id, {
-        url: "https://example.test/rewritten",
-        refs: ["sentry:issue:123"],
-      });
-
-      const refusal = await readRefusal(response);
-      expect(response.status, refusal.text).toBe(404);
-      expect(refusal.code).toBe("not_found");
-      const after = await readEvent(base, token, before.id);
-      expect(after.url).toBeNull();
-      expect(after.refs).toEqual([]);
-    });
-  });
-
   it("refuses a credential that was never given event.emit, naming the grant", async () => {
     await withFleet(async (arranged) => {
       const base = arranged.harness.base;
@@ -431,6 +402,65 @@ describe("POST /events/:id/enrich", () => {
       const after = await readEvent(base, token, before.id);
       expect(after.system).toBe("platform");
       expect(after.refs).toEqual([]);
+    });
+  });
+
+  /**
+   * The security entries are the population a session without `event.audit`
+   * cannot read at all, so the refusal has to hold for them by the same rule
+   * and not by luck: amending one would both rewrite what happened to the
+   * user's account and tell the caller it is there.
+   */
+  it("answers not_found for a security entry too, and leaves it as it was", async () => {
+    await withEvents(async ({ base, audit }, token) => {
+      // A login that cannot succeed is what writes one of these.
+      const refusedLogin = await send("POST", base, "/api/v1/auth/login", {
+        body: { username: USERNAME, password: "not the password" },
+      });
+      expect(refusedLogin.status).toBe(401);
+      const before = (await audit("auth.login.failed"))[0]!;
+
+      const response = await enrich(base, token, before.id, {
+        url: "https://example.test/rewritten",
+        refs: ["sentry:issue:123"],
+      });
+
+      const refusal = await readRefusal(response);
+      expect(response.status, refusal.text).toBe(404);
+      expect(refusal.code).toBe("not_found");
+      const after = await readEvent(base, token, before.id);
+      expect(after.url).toBeNull();
+      expect(after.refs).toEqual([]);
+    });
+  });
+
+  it("stamps the amendment with the caller, as an audit entry beside the event", async () => {
+    await withEvents(async ({ base, sql, audit }, token) => {
+      const eventId = await emitted(base, token, { kind: KIND, payload: PAYLOAD, refs: [REF] });
+
+      await enriched(base, token, eventId, {
+        url: "https://sentry.io/issues/123",
+        refs: [SECOND_REF],
+      });
+
+      const entries = await audit("event.enriched");
+      expect(entries).toHaveLength(1);
+      // The event keeps the emitter as its actor, so who amended it is read
+      // here and nowhere else.
+      expect(entries[0]!.actor).toBe("user");
+      expect(entries[0]!.payload).toEqual({
+        eventId,
+        url: "https://sentry.io/issues/123",
+        refs: [SECOND_REF],
+      });
+      // The entry names only what was amended: `system` was not given.
+      expect(entries[0]!.payload["system"]).toBeUndefined();
+
+      // The entry is an audit kind, so it is not one of the events the matcher
+      // evaluates: the manual population still holds the one emit above.
+      expect(await manualEvents(sql)).toBe(1);
+      const entry = await readEvent(base, token, entries[0]!.id);
+      expect(entry.source).toBe("platform");
     });
   });
 

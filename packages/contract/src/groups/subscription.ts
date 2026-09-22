@@ -29,7 +29,7 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { EXTERNAL_REF_PATTERN, ExternalRef, Id, Timestamp } from "../ids";
+import { ExternalRef, Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { markShorthand } from "../shorthand";
@@ -67,6 +67,9 @@ const TARGET_FORMS =
   "write run:<run id>, session:<session id>, request:<permission request id>, " +
   "or an External Ref for a ref target: <system>:<kind>:<identity>";
 
+/** Whether one written word is an External Ref, by the schema that owns the grammar. */
+const isExternalRef = Schema.is(ExternalRef);
+
 /**
  * The target one token stands for, or `undefined` when it stands for none.
  *
@@ -88,7 +91,7 @@ const parseTargetShorthand = (text: string): SubscriptionTarget | undefined => {
     case "request":
       return { kind: "request", requestId: rest };
     default:
-      return EXTERNAL_REF_PATTERN.test(text) ? { kind: "ref", ref: text } : undefined;
+      return isExternalRef(text) ? { kind: "ref", ref: text } : undefined;
   }
 };
 

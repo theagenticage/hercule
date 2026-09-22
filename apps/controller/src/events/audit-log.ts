@@ -34,6 +34,7 @@ export const AUDIT_KINDS = [
   "secret.created",
   "secret.rotated",
   "secret.deleted",
+  "event.enriched",
   "task.created",
   "task.updated",
   "task.deleted",

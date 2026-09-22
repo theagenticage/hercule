@@ -31,17 +31,18 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { requireGrant, SYSTEM_ACTOR } from "../actor";
+import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import {
   advanceConsumerCursor,
+  AuditLog,
   EventService,
   headOfLog,
   readConsumerPosition,
   readPipelineEvent,
   readPipelineEventsAfter,
 } from "../events";
-import { evaluateExpression } from "../expressions";
+import { evaluateExpression, parseExpression, type CompiledExpression } from "../expressions";
 import { SessionService, sessionRepository } from "../sessions";
 import {
   EvaluationErrorNotifier,
@@ -138,6 +139,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const events = yield* EventService;
   const sessions = yield* SessionService;
+  const audit = yield* AuditLog;
   const sessionRows = yield* sessionRepository;
   const subscriptions = yield* subscriptionRepository;
   const notifier = yield* EvaluationErrorNotifier;
@@ -193,25 +195,60 @@ const make = Effect.gen(function* () {
     batch: ReadonlyArray<Event>,
   ): Effect.Effect<ReadonlyArray<EvaluationFailure>, SqlError> =>
     Effect.gen(function* () {
+      // Nothing happened, so nothing is judged: a pass with no entries must not
+      // move a subscription's health, which is a statement about events.
+      if (batch.length === 0) return [];
       const newFailures: Array<EvaluationFailure> = [];
       /** Which subscriptions were in a run of failures when this pass began. */
       const failing = new Map(
         standing.map((one) => [one.id, one.healthErrorMessage !== null] as const),
       );
+
+      /** Records one subscription's failure, and reports the streak it begins. */
+      const recordFailure = (
+        subscriptionId: string,
+        message: string,
+      ): Effect.Effect<void, SqlError> =>
+        Effect.gen(function* () {
+          const began = yield* subscriptions.recordEvaluationFailure(
+            subscriptionId,
+            message,
+            yield* nowIso,
+          );
+          if (began) newFailures.push({ subscriptionId, message });
+          failing.set(subscriptionId, true);
+        });
+
+      /**
+       * Every subscription whose condition compiled, with the program it
+       * compiled to. One source is read once for the whole batch rather than
+       * once per event: a pass reads up to a hundred entries, and parsing the
+       * same source a hundred times is work no event asked for.
+       *
+       * A source that cannot be parsed can never match, so it is a failure of
+       * its own subscription and of nothing else - the same as an evaluation
+       * that fails - and that subscription is left out of the batch.
+       */
+      const compiledSubscriptions: Array<{
+        readonly subscription: StoredSubscription;
+        readonly program: CompiledExpression;
+      }> = [];
+      for (const subscription of standing) {
+        const compiled = yield* Effect.result(parseExpression(subscription.condition));
+        if (Result.isFailure(compiled)) {
+          yield* recordFailure(subscription.id, compiled.failure.message);
+          continue;
+        }
+        compiledSubscriptions.push({ subscription, program: compiled.success });
+      }
+
       for (const event of batch) {
         const context = buildEvaluationContext(event);
         const text = renderEventInput(event);
-        for (const subscription of standing) {
-          const answer = yield* Effect.result(evaluateExpression(subscription.condition, context));
+        for (const { subscription, program } of compiledSubscriptions) {
+          const answer = yield* Effect.result(evaluateExpression(program, context));
           if (Result.isFailure(answer)) {
-            const message = answer.failure.message;
-            const began = yield* subscriptions.recordEvaluationFailure(
-              subscription.id,
-              message,
-              yield* nowIso,
-            );
-            if (began) newFailures.push({ subscriptionId: subscription.id, message });
-            failing.set(subscription.id, true);
+            yield* recordFailure(subscription.id, answer.failure.message);
             continue;
           }
           if (failing.get(subscription.id) === true) {
@@ -284,22 +321,45 @@ const make = Effect.gen(function* () {
    * a log full of entries nothing waits for is walked once rather than read
    * again on every pass.
    */
+  const matchOnePass: Effect.Effect<
+    { readonly failures: ReadonlyArray<EvaluationFailure>; readonly reachedTheEnd: boolean },
+    SqlError
+  > = withTransaction(
+    sql,
+    Effect.gen(function* () {
+      const waiting = yield* subscriptions.listLive();
+      const ended = yield* endSubscriptionsOfEndedHolders(waiting);
+      const standing = waiting.filter((one) => !ended.has(one.id));
+      const position = yield* readConsumerPosition(sql, MATCHER);
+      const batch = yield* readPipelineEventsAfter(sql, position, EVENTS_PER_PASS);
+      const failures = yield* matchEvents(standing, batch);
+      const reached = batch.at(-1)?.id ?? (yield* headOfLog(sql));
+      if (reached > position) yield* advanceConsumerCursor(sql, MATCHER, reached);
+      return { failures, reachedTheEnd: batch.length < EVENTS_PER_PASS };
+    }),
+  );
+
+  /**
+   * Everything the log holds past the cursor, in passes of `EVENTS_PER_PASS`,
+   * and then what those passes owe the world outside the database.
+   *
+   * A batch that came back full has left entries behind it, and waiting a whole
+   * interval for each of the next hundred would make a burst of a thousand
+   * events take ten intervals to reach the sessions waiting for it. So a full
+   * batch is followed by another pass at once, and the log is walked to its end
+   * at the speed of SQL. Each pass is its own transaction, so the write lock is
+   * released between them and nothing else writing is held off for the whole
+   * burst.
+   *
+   * The deliveries are left until the log is walked, rather than done per pass,
+   * because one sweep of the rows still waiting covers every pass before it.
+   */
   const matchNewEvents: Effect.Effect<void, SqlError> = Effect.gen(function* () {
-    const failures = yield* withTransaction(
-      sql,
-      Effect.gen(function* () {
-        const waiting = yield* subscriptions.listLive();
-        const ended = yield* endSubscriptionsOfEndedHolders(waiting);
-        const standing = waiting.filter((one) => !ended.has(one.id));
-        const position = yield* readConsumerPosition(sql, MATCHER);
-        const batch = yield* readPipelineEventsAfter(sql, position, EVENTS_PER_PASS);
-        const failures = yield* matchEvents(standing, batch);
-        const reached = batch.at(-1)?.id ?? (yield* headOfLog(sql));
-        if (reached > position) yield* advanceConsumerCursor(sql, MATCHER, reached);
-        return failures;
-      }),
-    );
-    yield* reportFailures(failures);
+    while (true) {
+      const { failures, reachedTheEnd } = yield* matchOnePass;
+      yield* reportFailures(failures);
+      if (reachedTheEnd) break;
+    }
     yield* deliverWaitingMatches;
   });
 
@@ -340,11 +400,27 @@ const make = Effect.gen(function* () {
         // Amending the log is writing to it, which is the grant an emit needs.
         yield* requireGrant("event.enrich");
         const decoded = yield* Effect.mapError(decodeEnrich(input), validationOf);
+        const actor = yield* currentStamp;
 
         const { amended, failures } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const amended = yield* events.amend(decoded);
+            // The stamp for an amendment is an audit entry and not a column on
+            // the event: the event's own actor is whoever emitted it, and it
+            // stays that, or the log would forget where the event came from.
+            // An event may be amended many times, and each amendment is its own
+            // fact with its own author, which one column could not hold either.
+            yield* audit.append({
+              kind: "event.enriched",
+              actor,
+              payload: {
+                eventId: decoded.id,
+                ...(decoded.system === undefined ? {} : { system: decoded.system }),
+                ...(decoded.url === undefined ? {} : { url: decoded.url }),
+                ...(decoded.refs === undefined ? {} : { refs: decoded.refs }),
+              },
+            });
             // A ref added here may be what a subscription has been waiting
             // for, so the matcher looks at this one event again. The rows that
             // look writes are sent by the next pass of the matcher, within one
@@ -382,5 +458,5 @@ export class Matcher extends Context.Service<Matcher, Effect.Success<typeof make
 export const MatcherLayer: Layer.Layer<
   Matcher,
   never,
-  SqlClient.SqlClient | EventService | SessionService | EvaluationErrorNotifier | Live
+  SqlClient.SqlClient | AuditLog | EventService | SessionService | EvaluationErrorNotifier | Live
 > = Layer.effect(Matcher)(make);
