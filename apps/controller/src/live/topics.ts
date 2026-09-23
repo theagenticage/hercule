@@ -1,28 +1,28 @@
 /**
- * What the controller holds for the clients watching a Live Topic, and what it
- * pushes to them once a transaction has committed.
+ * Live Topics: the subscriptions of the clients watching each topic, and the
+ * messages pushed to them after a transaction commits.
  *
- * One queue per subscription, grouped by topic. A subscription is taken out for
- * the length of the caller's scope and given back when that scope closes, which
- * is what the client ending its stream and the socket dropping both come down
- * to, so a connection that goes away leaves nothing behind.
+ * Each subscription has one queue, grouped by topic. A subscription lasts as
+ * long as the caller's scope, and is removed when that scope closes. That
+ * happens both when the client ends its stream and when the socket drops, so
+ * a closed connection leaves nothing behind.
  *
- * The two topic families are pushed differently. A mutable topic carries no
- * records, only the news that some changed, so a burst is collected for a short
- * window and announced as one message per way of changing: a screen refetches
- * once for three creates rather than three times, and the window is short enough
- * that nobody sees it.
+ * The two kinds of topic are pushed differently:
  *
- * The log carries the records themselves, and a committed transaction only ever
- * says that the log grew - never which rows. Each follower then reads forward
- * from its own position, so the log's own order is the only order there is:
- * nothing can arrive out of order, nothing can be delivered twice, and the
- * replay a subscription opens with is the same read as every push after it. Its
- * first message positions the client whether or not it missed anything; after
- * that it gets one delta per entry.
+ * - A mutable topic carries no records, only the news that some records
+ *   changed. A burst of changes is collected for a short window and sent as
+ *   one message per kind of change. So a screen refetches once for three
+ *   creates instead of three times, and the window is too short for anyone
+ *   to notice.
+ * - A log topic carries the records themselves. A commit only signals that
+ *   the log grew, never which rows. Each follower then reads forward from its
+ *   own position, so records arrive in log order, never twice, and the replay
+ *   at the start is the same read as every push after it. The first message
+ *   sets the client's position, even when it missed nothing; after that it
+ *   gets one delta per entry.
  *
- * A subscriber that stops reading is ended rather than queued for without
- * bound; the cursor it was last told is enough to come back on.
+ * A subscriber that stops reading is ended instead of queued for without
+ * limit. It can come back from the last cursor it received.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -58,46 +58,48 @@ import { readEventsAfter, readLogHead } from "../events";
 import { readTranscriptHead, sessionExists, readTranscriptRowsAfter } from "../sessions";
 
 /**
- * How long a burst of record changes is collected before it is announced, in
- * milliseconds. Long enough that a workflow touching a dozen tasks costs one
+ * How long a burst of record changes is collected before it is sent, in
+ * milliseconds. Long enough that a workflow touching a dozen tasks causes one
  * refetch, short enough that a person clicking a button sees the result as
- * immediate. Exported because a test that watches a push has to outwait it, and
- * a number written twice is a test that goes flaky when this one moves.
+ * immediate. Exported because tests that watch a push have to wait longer than
+ * this, and a copy of the number would make them flaky when this one changes.
  */
 export const COALESCE_WINDOW_MS = 50;
 
 const COALESCE_WINDOW = Duration.millis(COALESCE_WINDOW_MS);
 
 /**
- * How many messages may wait for one subscriber before the controller gives up
- * on it. A client that stops reading is either gone or too slow to catch up,
- * and either way holding the log for it costs the controller memory it cannot
- * reclaim. The subscription ends and the client comes back on its cursor.
+ * How many messages may wait for one subscriber before the controller ends
+ * the subscription. A client that stops reading is either gone or too slow to
+ * catch up, and either way buffering for it costs memory the controller cannot
+ * reclaim. The subscription ends, and the client can subscribe again from its
+ * cursor.
  */
 const SUBSCRIPTION_CAP = 1000;
 
-/** How much of the log one read walks forward at a time. */
+/** How many entries one read of the log returns at most. */
 const REPLAY_PAGE = 500;
 
-/** The ways a subscription ends other than the client letting it go. */
+/** The errors a subscription can end with, other than the client closing it. */
 export type LiveFailure = CapExceeded | Unauthenticated | Internal;
 
-/** One subscription's queue, which is also how it is ended. */
+/** One subscription's queue. Failing the queue ends the subscription. */
 export type LiveQueue = Queue.Queue<LiveMessage, LiveFailure>;
 
 interface Watcher {
   readonly topic: LiveTopic;
   readonly queue: LiveQueue;
-  /** Rings when the log has grown. Log subscriptions only. */
+  /** Receives a signal when the log has grown. Log subscriptions only. */
   readonly doorbell: Queue.Queue<void> | undefined;
-  /** How far down the log this subscription has read. Log subscriptions only. */
+  /** The last log position this subscription has read. Log subscriptions only. */
   cursor: number;
 }
 
-/** The log's own topic: the one that carries records rather than news of them. */
+/** The event log's topic, which carries records rather than news of changes. */
 const LOG_TOPIC: LiveTopic = "event";
 
-const TOO_SLOW = "this subscription was not being read; open it again to start over";
+const TOO_SLOW =
+  "this subscription fell too far behind because it was not being read; subscribe again from your last cursor";
 
 const LOG_UNREADABLE = "the event log could not be read";
 
@@ -109,9 +111,9 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const watchers = new Map<LiveTopic, Set<Watcher>>();
-  /** Which records changed since the last announcement, by topic and by kind. */
+  /** The ids of the records changed since the last flush, by topic and by kind. */
   const pending = new Map<MutableLiveTopic, Map<InvalidateKind, Set<string>>>();
-  /** Rings once whenever there is something pending; holds no more than that. */
+  /** Receives a signal when changes are pending. Holds at most one signal. */
   const wake = yield* Queue.dropping<void>(1);
 
   const listWatchers = (topic: LiveTopic): ReadonlySet<Watcher> => watchers.get(topic) ?? new Set();
@@ -124,10 +126,10 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Hands one message to one subscriber, and answers whether it is still there
-   * to hand the next one to. A subscriber that has stopped taking them is ended
-   * rather than queued for: the alternative is a queue that grows for a client
-   * that will never read it.
+   * Offers one message to one subscriber. Returns false when the subscription
+   * has ended. A subscriber whose queue is full is ended instead of queued
+   * for, because otherwise the queue would grow for a client that may never
+   * read it.
    */
   const offerTo = (watcher: Watcher, message: LiveMessage): Effect.Effect<boolean> =>
     Effect.gen(function* () {
@@ -143,7 +145,7 @@ const make = Effect.gen(function* () {
       return yield* Queue.offer(watcher.queue, message);
     });
 
-  /** Announces everything collected during the window, one message per kind. */
+  /** Sends everything collected during the window, one message per topic and kind. */
   const flush = Effect.gen(function* () {
     const collected = [...pending];
     pending.clear();
@@ -164,37 +166,37 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* Queue.take(wake);
         yield* Effect.sleep(COALESCE_WINDOW);
-        // Emptied before the window's contents are read, so a change recorded
-        // while this runs rings again rather than being announced by nobody.
+        // Clear the signal before reading the collected changes, so a change
+        // recorded during the flush signals again and is not lost.
         yield* Queue.clear(wake);
         yield* flush;
-        // The loop is the only thing that announces a record change, so it has
-        // to survive whatever one flush ran into, and say what that was.
+        // This loop is the only thing that sends record changes, so it must
+        // survive a failed flush, and log what went wrong.
       }).pipe(Effect.catchCause((cause) => Effect.logError("a live announcement failed", cause))),
     ),
   );
 
   /**
-   * A log a subscription can be pumped from: the event log for `event`, one
+   * A log a subscription can read from: the event log for `event`, or one
    * session's transcript for `session:<id>:stream`. Each has its own table and
-   * its own position column, so a follower is built from one of these rather
-   * than a table name, and the two follow - and refuse a cursor past their
-   * head - identically once each has one.
+   * position column, so a follower is built from one of these rather than
+   * from a table name. With it, both logs are followed the same way, and both
+   * reject a cursor past their end the same way.
    */
   interface LogSource<A> {
     readonly after: (position: number, limit: number) => Effect.Effect<ReadonlyArray<A>, SqlError>;
     readonly positionOf: (item: A) => number;
     readonly head: Effect.Effect<number, SqlError>;
-    /** What this log is called in a refused cursor's message: "log", "transcript". */
+    /** The log's name in the error message for an invalid cursor: "log" or "transcript". */
     readonly noun: string;
     readonly unreadable: string;
   }
 
   /**
    * Reads a log forward for one follower, for as long as it is subscribed. The
-   * first read is the client's replay, handed over as one message; every read
-   * after it carries the entries one at a time, each naming its own position,
-   * because that position is what the client comes back on.
+   * first read is the client's replay, sent as one message. After that, each
+   * entry is sent as its own message with its own position, because that
+   * position is the cursor the client resubscribes from.
    */
   const pump = <A extends Delta["items"][number]>(
     source: LogSource<A>,
@@ -202,10 +204,9 @@ const make = Effect.gen(function* () {
     doorbell: Queue.Queue<void>,
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
-      // The one message that positions the client carries whatever it missed,
-      // up to a page of it; everything after that is one entry at a time, so
-      // what the controller holds for a client that has stopped reading is
-      // counted in entries and not in pages of them.
+      // The first message carries what the client missed, up to one page.
+      // After that each entry is its own message, so the queue limit for a
+      // client that stops reading counts entries, not pages.
       let positioning = true;
       while (true) {
         let more = true;
@@ -236,9 +237,9 @@ const make = Effect.gen(function* () {
         yield* Queue.take(doorbell);
       }
     }).pipe(
-      // Whatever stopped it - the database, a row that will not decode - this
-      // fiber is the only thing feeding the subscription, so the client is told
-      // rather than left holding a stream that has quietly stopped.
+      // Whatever stopped this fiber, such as a database error or a row that
+      // fails to decode, it is the only thing feeding the subscription. So the
+      // client gets an error instead of a stream that silently stops.
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           yield* Effect.logError("a live subscription could not read its log", cause);
@@ -265,13 +266,13 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * A subscription to a log, replayed from `after` and followed from there.
-   * With no position given it starts at the head, because a client that names
-   * none is asking for what happens next. A position the log has not reached
-   * is refused rather than accepted into silence: it belongs to a different
-   * log, and honouring it would leave the client subscribed to nothing.
-   * Shared by `follow` and `followSession`, whose only difference is which log
-   * and whether a session behind it has to exist first.
+   * Opens a subscription to a log that replays from `after` and then follows
+   * new entries. Without `after`, it starts at the end of the log, because
+   * the client wants only what happens next.
+   *
+   * Fails with a validation error when `after` is past the end of the log.
+   * Such a cursor belongs to a different log, and accepting it would leave
+   * the client subscribed to nothing. Used by `follow` and `followSession`.
    */
   const followLog = <A extends Delta["items"][number]>(
     topic: LiveTopic,
@@ -287,20 +288,20 @@ const make = Effect.gen(function* () {
           createValidationError([
             {
               path: ["cursor"],
-              message: `this ${source.noun} has reached ${String(head)}, no further`,
+              message: `the cursor is past the end of this ${source.noun}, which is at ${String(head)}`,
             },
           ]),
         );
       }
       const doorbell = yield* Queue.dropping<void>(1);
       const watcher = yield* registerWatcher(topic, after ?? head, doorbell);
-      // Forked, so the client is handed its queue before the replay runs and
-      // reads what it is being sent while the rest of it is still being read.
+      // Forked, so the client gets its queue before the replay runs, and can
+      // read the first entries while the rest are still being read.
       yield* Effect.forkScoped(pump(source, watcher, doorbell));
       return watcher.queue;
     });
 
-  /** Takes out a subscription for the length of the current scope. */
+  /** Registers a subscription for the life of the current scope, and returns it. */
   const registerWatcher = (
     topic: LiveTopic,
     cursor: number,
@@ -324,22 +325,22 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    /** A subscription to a mutable topic, which carries news and no records. */
+    /** Opens a subscription to a mutable topic, which carries news of changes and no records. */
     subscribe: (topic: MutableLiveTopic): Effect.Effect<LiveQueue, never, Scope.Scope> =>
       Effect.map(registerWatcher(topic, 0, undefined), (watcher) => watcher.queue),
 
-    /** A subscription to the event log, replayed from `after` and followed from there. */
+    /** Opens a subscription to the event log, replayed from `after` and then followed. */
     follow: (
       after: number | undefined,
     ): Effect.Effect<LiveQueue, Validation | Internal, Scope.Scope> =>
       followLog(LOG_TOPIC, eventSource, after),
 
     /**
-     * A subscription to one session's transcript, replayed from `after` and
-     * followed from there - `follow` above, mirrored at the session's own
-     * table. The topic is derived from the session id rather than taken, so
-     * no caller can hand in a pair that does not match. Refused `not_found` for a session that was never written, so a
-     * stale sidebar tab cannot open a watcher for nothing.
+     * Opens a subscription to one session's transcript, replayed from `after`
+     * and then followed, like `follow` above. The topic is built from the
+     * session id rather than passed in, so a caller cannot pass a topic and id
+     * that do not match. Fails with not_found for an unknown session, so a
+     * stale sidebar tab cannot open a subscription to nothing.
      */
     followSession: (
       sessionId: string,
@@ -361,9 +362,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * A subscription to one session's ephemeral token taps: held exactly as a
-     * mutable topic is, since there is nothing to replay, but refused
-     * `not_found` the same way `followSession` is.
+     * Opens a subscription to one session's token taps. It works like a
+     * mutable topic, since there is nothing to replay, and fails with
+     * not_found for an unknown session, like `followSession`.
      */
     tapSession: (sessionId: string): Effect.Effect<LiveQueue, NotFound | Internal, Scope.Scope> =>
       Effect.gen(function* () {
@@ -380,26 +381,29 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** How many subscriptions this controller is holding for a topic. */
+    /** Returns the number of open subscriptions to a topic. */
     subscriberCount: (topic: LiveTopic): Effect.Effect<number> =>
       Effect.sync(() => watchers.get(topic)?.size ?? 0),
 
     /**
-     * Ends one subscription with a reason of the caller's. The subscription
-     * gives itself back when its own scope closes over the failure, so there is
-     * nothing to forget here.
+     * Ends one subscription with the given error. The subscription removes
+     * itself when its scope closes on the error, so there is nothing else to
+     * clean up here.
      */
     end: (queue: LiveQueue, reason: LiveFailure): Effect.Effect<void> =>
       Effect.asVoid(Queue.fail(queue, reason)),
 
     /**
-     * What the last committed transaction changed, told to whoever is watching
-     * - and, for `tap`, what was never a transaction at all. Nothing here reads
-     * the database for a log topic: a follower is only told that it grew, and
-     * reads it for itself. `tap` is the one exception, because there is
-     * nothing stored for a follower to read: the item is the whole of what
-     * happened, so it rides the announcement directly, to every current
-     * subscriber, with no coalescing window - a token feels live or it does not.
+     * Publishes the changes of a committed transaction to the subscribers,
+     * plus any `tap` changes, which never go through a transaction.
+     *
+     * - Mutable topic changes are collected and sent after the coalescing
+     *   window.
+     * - For a log topic, nothing here reads the database: each follower is
+     *   signalled that the log grew, and reads the new entries itself.
+     * - A `tap` item is sent directly to every current subscriber, with no
+     *   window. Nothing is stored for a follower to read, and tokens only feel
+     *   live when they arrive at once.
      */
     publish: (changes: ReadonlyArray<Change>): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -455,10 +459,11 @@ export class LiveTopics extends Context.Service<LiveTopics, Effect.Success<typeo
 ) {}
 
 /**
- * The topics, and the controller's ear for what a transaction committed. They
- * are one layer because they are one object: what a mutation announces is what
- * a subscriber is told, and a controller holding subscriptions but hearing
- * nothing would be a socket that never pushes.
+ * Provides both the Live Topics and the `AfterCommit` hook that feeds them.
+ * They are one layer because they are one object: what a commit publishes is
+ * what subscribers receive. Wired separately, a controller could hold
+ * subscriptions but never hear about commits, and the socket would never
+ * push.
  */
 export const LiveTopicsLayer: Layer.Layer<LiveTopics | AfterCommit, never, SqlClient.SqlClient> =
   Layer.effect(AfterCommit)(

@@ -1,10 +1,10 @@
 /**
- * The event log over HTTP: `GET /events` and `GET /events/{id}`.
+ * Tests the event log over HTTP: `GET /events` and `GET /events/{id}`.
  *
- * Every row these tests read was written by a request in the same test - a
- * task created through `POST /tasks`, a login refused through
- * `POST /auth/login` - because the log is only worth reading if what the API
- * did is what it holds.
+ * Every row these tests read was written by a request in the same test, such
+ * as a task created through `POST /tasks` or a failed login through
+ * `POST /auth/login`, because the log is only useful if it holds what the API
+ * actually did.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
@@ -12,7 +12,7 @@ import { Event, type Task } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { completeSetup, get, post, send, USERNAME, withServer } from "./testing";
 
-/** One page of the log, as the wire hands it back. */
+/** One page of the log, as the API returns it. */
 interface EventPage {
   readonly items: ReadonlyArray<Record<string, unknown>>;
   readonly nextCursor?: string;
@@ -30,7 +30,7 @@ const createTask = async (base: string, token: string, title: string): Promise<T
   return (await response.json()) as Task;
 };
 
-/** A login that cannot succeed, which is what writes an `auth.login.failed` row. */
+/** Sends a login that cannot succeed, which writes an `auth.login.failed` row. */
 const failLogin = async (base: string): Promise<void> => {
   const response = await send("POST", base, "/api/v1/auth/login", {
     body: { username: USERNAME, password: "not the password" },
@@ -38,7 +38,7 @@ const failLogin = async (base: string): Promise<void> => {
   expect(response.status).toBe(401);
 };
 
-/** An instant strictly between two batches of writes, for `since` and `until`. */
+/** Returns a timestamp strictly between two batches of writes, for `since` and `until`. */
 const captureInstantBetween = async (): Promise<string> => {
   await new Promise((resolve) => setTimeout(resolve, 10));
   const now = new Date().toISOString();
@@ -48,7 +48,7 @@ const captureInstantBetween = async (): Promise<string> => {
 
 const listKinds = (page: EventPage): ReadonlyArray<unknown> => page.items.map((item) => item.kind);
 
-/** The titles of the tasks a page of `task.created` rows describes. */
+/** Returns the task titles from a page of `task.created` rows. */
 const listTitles = (page: EventPage): ReadonlyArray<string | undefined> =>
   page.items.map((item) => (item.payload as { task?: { title?: string } }).task?.title);
 
@@ -56,7 +56,7 @@ const listIds = (page: EventPage): ReadonlyArray<number> =>
   page.items.map((item) => item.id as number);
 
 describe("the event log over HTTP", () => {
-  it("returns both populations from one unfiltered call, told apart only by kind", async () => {
+  it("returns pipeline events and audit entries from one unfiltered call, told apart only by kind", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "a task the log should hold");
@@ -68,8 +68,8 @@ describe("the event log over HTTP", () => {
       expect(created).toBeDefined();
       expect(failed).toBeDefined();
 
-      // Nothing but `kind` separates the two populations: same source, same
-      // absent connection, same envelope.
+      // Only `kind` tells the two apart: same source, no connection, same
+      // fields.
       expect(created).toMatchObject({ source: "platform", connectionId: null });
       expect(failed).toMatchObject({ source: "platform", connectionId: null });
 
@@ -129,7 +129,7 @@ describe("the event log over HTTP", () => {
     });
   });
 
-  it("filters by connectionId, which no platform row carries", async () => {
+  it("filters by connectionId, which no platform row has", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "a task through no connection");
@@ -146,12 +146,12 @@ describe("the event log over HTTP", () => {
     });
   });
 
-  it("finds a row that did arrive through a connection, and hands its id back", async () => {
+  it("finds a row that arrived through a connection, and returns its connection id", async () => {
     await withServer(async ({ base, sql }) => {
       const token = await completeSetup(base);
-      // No operation writes a connection yet, so the row is written straight
-      // to the table: the filter and the id it hands back are the reader's
-      // either way, and ingest lands on top of them.
+      // No operation writes a connection event yet, so the row is written
+      // straight to the table. The filter and the returned id are the
+      // reader's job either way, and ingest will build on them.
       const connectionId = "0199e0e7-1111-7000-8000-0000000000ab";
       await Effect.runPromise(
         Effect.orDie(
@@ -182,7 +182,7 @@ describe("the event log over HTTP", () => {
     });
   });
 
-  it("reads one row by its integer id, and answers not_found for one nobody has", async () => {
+  it("reads one row by its integer id, and fails with not_found for an unknown id", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "readable");
@@ -228,7 +228,7 @@ describe("the event log's order and paging", () => {
     });
   });
 
-  it("walks seven rows at limit 2, returning each exactly once", async () => {
+  it("pages through seven rows at limit 2, returning each exactly once", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       for (let index = 0; index < 7; index++) {
@@ -255,7 +255,7 @@ describe("the event log's order and paging", () => {
 });
 
 describe("a failed login in the log", () => {
-  it("stamps auth.login.failed with a null actor, and no row claims the user", async () => {
+  it("records auth.login.failed with a null actor, and no row names the user", async () => {
     await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
       await failLogin(base);
@@ -265,13 +265,13 @@ describe("a failed login in the log", () => {
       const row = page.items[0]!;
       expect(row.actor).toBeNull();
 
-      // The contract's Event decodes the null; nothing about the row is
-      // special-cased on the way out.
+      // The contract's Event decodes the null; the row is not special-cased
+      // on the way out.
       const decoded = Schema.decodeUnknownExit(Event)(row);
       expect(decoded._tag).toBe("Success");
 
-      // Read through the writer as well, so a row that never reached the log
-      // cannot pass by the reader answering an empty page.
+      // Also read through the writer, so the test cannot pass just because
+      // the row was never written and the reader returned an empty page.
       const written = await audit("auth.login.failed");
       expect(written).toHaveLength(1);
       expect(written[0]?.actor).toBeNull();

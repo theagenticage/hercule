@@ -35,7 +35,7 @@ import { toPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
 import type { NewContribution } from "./repository";
 
-/** The extension point this registers into; the column takes any name. */
+/** The name of the extension point this module registers into. */
 const WORKFLOW_ACTION = "workflow-action";
 
 /**

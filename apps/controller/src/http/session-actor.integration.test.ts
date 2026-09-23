@@ -1,14 +1,16 @@
 /**
- * The session actor over a real socket: an agent inside a session calling the
- * public API with the token the controller minted for it.
+ * Tests the session actor over a real socket: an agent inside a session
+ * calling the public API with the token the controller minted for it.
  *
- * Nothing here is arranged behind the API. A machine is enlisted over the real
- * runner socket, the user spawns a session on a named permission profile, and
- * the token the test then presents is the one the controller put on that
- * session's `sessionStart` frame - the same string the runner would inject into
- * the agent's environment. What is asserted is what the agent gets back: which
- * calls succeed, which are refused and by what name, what the task and the
- * event log say made the change, and when the token stops working.
+ * Nothing is set up behind the API. A runner joins over the real runner
+ * socket, the user spawns a session on a named permission profile, and the
+ * test then uses the token the controller put on that session's
+ * `sessionStart` frame, the same string the runner would put in the agent's
+ * environment. The tests check what the agent gets back:
+ *
+ * - which calls succeed, and which fail and with which grant named;
+ * - which actor the task and the event log record for the change;
+ * - when the token stops working.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
@@ -32,14 +34,14 @@ import {
 import { del, get, post, send } from "./testing";
 
 /**
- * Three, because the longest case here waits for the fleet to be probed, then
- * for a session to start, and then for it to exit. A wait longer than the
- * timeout never gets to give up, and the failure would name the test rather
- * than the move that never came.
+ * Three waits, because the longest test waits for the fleet to be probed,
+ * then for a session to start, and then for it to exit. If the test timeout
+ * were shorter than the waits, a wait would never get to fail, and the error
+ * would name the test instead of the step that never happened.
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
-/** One refusal, read as the code, the message and the grant it names. */
+/** One error response, read as its code, message and the grant it names. */
 interface Refusal {
   readonly code: string;
   readonly message: string;
@@ -61,7 +63,7 @@ const parseRefusal = async (response: Response): Promise<Refusal> => {
   };
 };
 
-/** A worker: the shipped profile with task read, create and update, and no delete. */
+/** Spawns a worker: the built-in profile with task read, create and update, and no delete. */
 const createWorkerAgent = async (arranged: Arranged): Promise<Agent> =>
   spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
 
@@ -104,16 +106,16 @@ const listEventsOfKind = async (
 };
 
 describe("the token the controller mints for a session", () => {
-  it("rides on the start frame, and is never the plaintext the session row holds", async () => {
+  it("is sent on the start frame, and the session row never holds it in plain text", async () => {
     await withFleet(async (arranged) => {
       const { token } = await createWorkerAgent(arranged);
 
-      // The token works, which is the only proof that the hash the row holds
-      // was taken from this string.
+      // The token works, which is the only proof that the hash in the row was
+      // computed from this string.
       const mine = await get(arranged.harness.base, "/api/v1/tasks", token);
       expect(mine.status, await mine.clone().text()).toBe(200);
 
-      // And the plaintext is nowhere in the row: what is kept is a hash.
+      // And the plain text is nowhere in the row: only a hash is kept.
       const rows = await Effect.runPromise(
         Effect.orDie(arranged.harness.sql`SELECT * FROM sessions`),
       );
@@ -121,13 +123,13 @@ describe("the token the controller mints for a session", () => {
     });
   });
 
-  it("is replaced by a fresh one when the session is resumed, killing the old one", async () => {
+  it("is replaced by a new one when the session is resumed, which invalidates the old one", async () => {
     await withFleet(async (arranged) => {
       const { session, token } = await createWorkerAgent(arranged);
       await exitSession(arranged, session);
 
       // Input to an exited session with a transcript resumes it in place: the
-      // same session id, started again, under a token of its own.
+      // same session id, started again, with a new token.
       const resumed = await post(
         arranged.harness.base,
         `/api/v1/sessions/${session.id}/input`,
@@ -160,7 +162,7 @@ describe("the token the controller mints for a session", () => {
 });
 
 describe("what a session token may reach", () => {
-  it("creates and updates a task on the worker profile, and is refused the delete by name", async () => {
+  it("creates and updates a task on the worker profile, and is forbidden the delete, with the grant named", async () => {
     await withFleet(async (arranged) => {
       const { token } = await createWorkerAgent(arranged);
       const base = arranged.harness.base;
@@ -185,15 +187,15 @@ describe("what a session token may reach", () => {
         grant: "task.delete",
       });
 
-      // Refused, and nothing happened: the task is still there.
+      // Forbidden, and nothing happened: the task is still there.
       expect((await readTask(base, token, task.id)).id).toBe(task.id);
     });
   });
 
-  it("is refused before the body is decoded, so a malformed one still gets 403", async () => {
+  it("is forbidden before the body is decoded, so a malformed body still gets 403", async () => {
     await withFleet(async (arranged) => {
-      // A profile that reads tasks and nothing else, so the operation whose
-      // body could be malformed is one this session may not reach.
+      // A profile that can only read tasks, so the operation with the
+      // malformed body is one this session may not call.
       const reader = await createProfile(arranged, "reader", ["task.read"]);
       const { token } = await spawnAgentUnder(arranged, reader);
       const base = arranged.harness.base;
@@ -212,8 +214,8 @@ describe("what a session token may reach", () => {
         grant: "task.update",
       });
 
-      // The same body from the user, who holds the grant, is the 400 the
-      // refusal above was standing in front of.
+      // The same body from the user, who has the grant, gets the 400 that the
+      // 403 above came before.
       const asUser = await send("PATCH", base, `/api/v1/tasks/${task.id}`, {
         body: "{ this is not json",
         token: arranged.token,
@@ -222,7 +224,7 @@ describe("what a session token may reach", () => {
     });
   });
 
-  it("answers 401 to a token no session holds", async () => {
+  it("returns 401 for a token that belongs to no session", async () => {
     await withFleet(async (arranged) => {
       await createWorkerAgent(arranged);
       const response = await get(
@@ -237,7 +239,7 @@ describe("what a session token may reach", () => {
 });
 
 describe("when a session token stops working", () => {
-  it("dies with the session the machine reports has exited", async () => {
+  it("stops working when the runner reports that the session exited", async () => {
     await withFleet(async (arranged) => {
       const { session, token } = await createWorkerAgent(arranged);
       expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
@@ -250,7 +252,7 @@ describe("when a session token stops working", () => {
     });
   });
 
-  it("dies with the session a retired runner's machine can no longer run", async () => {
+  it("stops working when the session's runner is retired", async () => {
     await withFleet(async (arranged) => {
       const { session, token } = await createWorkerAgent(arranged);
       expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
@@ -270,7 +272,7 @@ describe("when a session token stops working", () => {
     });
   });
 
-  it("dies with the session whose machine drops and never comes back", async () => {
+  it("stops working when the session's runner disconnects and never comes back", async () => {
     await withFleet(
       async (arranged) => {
         const { session, token } = await createWorkerAgent(arranged);
@@ -286,13 +288,13 @@ describe("when a session token stops working", () => {
           const runner = (await response.json()) as { readonly connectivity: string };
           return runner.connectivity === "unreachable" ? runner : undefined;
         });
-        // Still alive before the bound: the machine can be out of reach while
-        // the session runs on, and the session still needs its token.
+        // Still valid before the timeout: the runner can be unreachable while
+        // the session keeps running, and the session still needs its token.
         expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
 
-        // The machine stays silent, and nothing has been heard about the
+        // The runner stays silent, and nothing has been heard about the
         // session for longer than its absolute timeout: eight hours, the
-        // shipped default.
+        // default.
         await Effect.runPromise(
           Effect.orDie(arranged.harness.sql`
             UPDATE sessions SET last_activity_at = '2026-01-01T00:00:00.000Z'
@@ -309,7 +311,7 @@ describe("when a session token stops working", () => {
     );
   });
 
-  it("loses a grant the very next call after the profile is edited", async () => {
+  it("loses a grant on the very next call after the profile is edited", async () => {
     await withFleet(async (arranged) => {
       const profile = await readProfileNamed(arranged, "worker");
       const { token } = await spawnAgentUnder(arranged, profile);
@@ -328,15 +330,15 @@ describe("when a session token stops working", () => {
       expect(after.status).toBe(403);
       expect(await parseRefusal(after)).toMatchObject({ code: "forbidden", grant: "task.create" });
 
-      // What the profile still grants is still reachable, so the refusal is the
-      // edit and not the token having been dropped wholesale.
+      // What the profile still grants still works, so the 403 is caused by the
+      // edit, not by the token having stopped working.
       expect((await get(base, "/api/v1/tasks", token)).status).toBe(200);
     });
   });
 });
 
 describe("a session may not spawn a Thread", () => {
-  it("refuses a session actor's spawn by naming session.spawn, and lets the user through", async () => {
+  it("forbids a session actor's spawn, naming session.spawn, and allows the user's", async () => {
     await withFleet(async (arranged) => {
       const { token } = await createWorkerAgent(arranged);
 
@@ -347,23 +349,24 @@ describe("a session may not spawn a Thread", () => {
         token,
       );
       expect(refused.status).toBe(403);
-      // The profile does not hold the grant, so the refusal is the static one
-      // naming it; the Thread rule of the case below never comes into it.
+      // The profile does not have the grant, so the error comes from the
+      // static grant check and names it; the Thread rule tested below is
+      // never reached.
       expect(await parseRefusal(refused)).toMatchObject({
         code: "forbidden",
         grant: "session.spawn",
       });
 
-      // The same call by the user, which is whose Thread it would be.
+      // The same call by the user, whose Thread it would be, succeeds.
       const mine = await spawnSession(arranged, { prompt: "and one of my own" });
       expect(mine.status, await mine.clone().text()).toBe(200);
     });
   });
 
-  it("refuses it even on a profile that holds session.spawn", async () => {
+  it("forbids it even on a profile that has session.spawn", async () => {
     await withFleet(async (arranged) => {
-      // The assistant profile holds `session.spawn`, so the static grant check
-      // passes and the refusal has to come from the operation itself.
+      // The assistant profile has `session.spawn`, so the static grant check
+      // passes, and the error must come from the operation itself.
       const { token } = await spawnAgentUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
@@ -376,8 +379,8 @@ describe("a session may not spawn a Thread", () => {
         token,
       );
       expect(refused.status).toBe(403);
-      // The profile does not hold the grant, so the refusal is the static one
-      // naming it; the Thread rule of the case below never comes into it.
+      // The error still names `session.spawn`, but here it comes from the
+      // Thread rule in the spawn operation, not from the static grant check.
       expect(await parseRefusal(refused)).toMatchObject({
         code: "forbidden",
         grant: "session.spawn",
@@ -387,18 +390,18 @@ describe("a session may not spawn a Thread", () => {
 });
 
 describe("a session forking a session", () => {
-  it("may fork one on its own profile, and not one bounded by another's grants", async () => {
+  it("may fork a session on its own profile, but not one on another profile", async () => {
     await withFleet(async (arranged) => {
-      // The assistant profile is the shipped one that holds `session.spawn`,
-      // which is what `session.continue` asks for.
+      // The assistant profile is the built-in one with `session.spawn`, which
+      // `session.continue` requires.
       const assistant = await readProfileNamed(arranged, "assistant");
       const mine = await spawnAgentUnder(arranged, assistant);
       const base = arranged.harness.base;
 
-      // Two parents to choose between, each exited with a transcript on a live
-      // machine and so forkable: one on this session's own profile, one on a
-      // narrower profile that is not its to reach into. Neither is the
-      // session doing the asking, whose own token dies when it exits.
+      // Two possible parents, each exited with a transcript on a connected
+      // runner, so both can be forked: one on this session's own profile, and
+      // one on a narrower profile it may not use. Neither is the calling
+      // session, whose token stops working when it exits.
       const sibling = await spawnAgentUnder(arranged, assistant);
       const stranger = await createWorkerAgent(arranged);
       await exitSession(arranged, sibling.session);
@@ -428,8 +431,8 @@ describe("a session forking a session", () => {
   });
 });
 
-describe("what the record says made the change", () => {
-  it("stamps a session's task and its event log rows session:<id>, where the user's say user", async () => {
+describe("which actor a change records", () => {
+  it("records session:<id> on a session's task and event log rows, and user on the user's", async () => {
     await withFleet(async (arranged) => {
       const { session, token } = await createWorkerAgent(arranged);
       const base = arranged.harness.base;
@@ -452,7 +455,7 @@ describe("what the record says made the change", () => {
         [stamp, stamp],
       );
 
-      // The same two operations by the user, on a task of the user's own.
+      // The same two operations by the user, on the user's own task.
       const theirs = await createTask(base, arranged.token, {
         title: "the user's task",
         provenance: [{ ref: "github:issue:owner/repo#44" }],

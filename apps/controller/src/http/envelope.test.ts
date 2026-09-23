@@ -24,7 +24,7 @@ const parseResponseBody = (response: HttpServerResponse.HttpServerResponse): unk
 };
 
 describe("findApiError", () => {
-  it("turns a payload that will not decode into validation, one issue per field", () => {
+  it("converts a payload that fails to decode into a validation error, with one issue per field", () => {
     const error = findApiError(Cause.die(createSchemaError("Payload", { username: "" })));
 
     expect(error?.error.code).toBe("validation");
@@ -45,17 +45,17 @@ describe("findApiError", () => {
     );
   });
 
-  it("says nothing about a schema library", () => {
+  it("does not mention the schema library in the error", () => {
     const body = JSON.stringify(findApiError(Cause.die(createSchemaError("Payload", {}))));
     expect(body.toLowerCase()).not.toContain("schema");
     expect(body.toLowerCase()).not.toContain("effect");
   });
 
-  it("calls a response the controller cannot encode its own bug, not the caller's", () => {
+  it("treats a response the controller cannot encode as an internal error, not the caller's fault", () => {
     expect(findApiError(Cause.die(createSchemaError("Body", {})))?.error.code).toBe("internal");
   });
 
-  it("answers a path no route matched with not_found", () => {
+  it("returns not_found for a path no route matched", () => {
     const cause = Cause.fail(
       new HttpServerError.HttpServerError({
         reason: new HttpServerError.RouteNotFound({ request }),
@@ -70,13 +70,13 @@ describe("findApiError", () => {
     expect(JSON.stringify(error)).not.toContain("disk");
   });
 
-  it("leaves an interrupted request alone, so a client that hung up is not a 500", () => {
+  it("leaves an interrupted request alone, so a client that disconnected does not get a 500", () => {
     expect(findApiError(Cause.interrupt())).toBeUndefined();
   });
 });
 
 describe("buildErrorResponse", () => {
-  it("derives the status from the code and puts nothing beside the envelope", () => {
+  it("derives the status from the code, and writes only the envelope in the body", () => {
     const response = buildErrorResponse(createForbiddenError("secret.write"));
     expect(response.status).toBe(403);
     expect(parseResponseBody(response)).toEqual({

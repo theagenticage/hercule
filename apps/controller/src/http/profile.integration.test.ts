@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Profile } from "@hercule/contract";
 import { completeSetup, post, send, withServer } from "./testing";
 
-/** Permission profiles over a real socket. */
+/** Tests permission profiles over a real socket. */
 const listProfiles = async (base: string, token: string, query = ""): Promise<Profile[]> => {
   const response = await send("GET", base, `/api/v1/profiles${query}`, { token });
   expect(response.status).toBe(200);
@@ -10,7 +10,7 @@ const listProfiles = async (base: string, token: string, query = ""): Promise<Pr
 };
 
 describe("permission profiles over HTTP", () => {
-  it("lists the three profiles Hercule ships, by name", async () => {
+  it("lists the three built-in profiles, by name", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const items = await listProfiles(base, token);
@@ -19,7 +19,7 @@ describe("permission profiles over HTTP", () => {
     });
   });
 
-  it("creates, reads, edits and deletes one the user made", async () => {
+  it("creates, reads, edits and deletes a profile the user made", async () => {
     await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
 
@@ -60,7 +60,7 @@ describe("permission profiles over HTTP", () => {
     });
   });
 
-  it("refuses a second profile with a name one already holds", async () => {
+  it("rejects a second profile with a name that is already used", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await post(base, "/api/v1/profiles", { name: "worker", grants: [] }, token);
@@ -69,7 +69,7 @@ describe("permission profiles over HTTP", () => {
     });
   });
 
-  it("refuses a grant outside the vocabulary, before anything is written", async () => {
+  it("rejects an unknown grant, before anything is written", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await post(
@@ -84,7 +84,7 @@ describe("permission profiles over HTTP", () => {
     });
   });
 
-  it("edits a shipped profile but refuses to delete one", async () => {
+  it("allows editing a built-in profile, but not deleting one", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const worker = (await listProfiles(base, token)).find((one) => one.name === "worker");
@@ -105,7 +105,7 @@ describe("permission profiles over HTTP", () => {
     });
   });
 
-  it("answers not_found for an id nobody has, and 401 with no credential", async () => {
+  it("fails with not_found for an unknown id, and with 401 without a credential", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const missing = "0199e0e7-9999-7000-8000-000000000000";

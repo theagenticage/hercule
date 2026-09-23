@@ -1,10 +1,11 @@
 /**
- * The web bundle over the same socket as the API: what a browser gets for a
- * page, for a fingerprinted file, and for everything neither of those.
+ * Tests the web bundle served on the same socket as the API: what a browser
+ * gets for a page, for a fingerprinted file, and for anything else.
  *
  * The bundle here is a temporary directory rather than `vite build`'s output,
- * so the test says what it means - one page, one fingerprinted file - and needs
- * no build to run. That the binary embeds the real thing is `e2e/web.test.ts`.
+ * so the test controls exactly what is in it (one page, one fingerprinted
+ * file) and needs no build to run. `e2e/web.test.ts` checks that the binary
+ * embeds the real bundle.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,7 +37,7 @@ afterAll(() => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-/** The controller with the bundle mounted; every request here is a browser's. */
+/** Runs `body` against a controller serving the test bundle; every request here is a browser's. */
 const withBundle = (body: (base: string) => Promise<void>): Promise<void> =>
   withServer(async ({ base }) => body(base), { bundle });
 
@@ -60,7 +61,7 @@ describe("the page", () => {
     });
   });
 
-  it("serves the setup link before setup completes, token and all", async () => {
+  it("serves the setup link, with its token, before setup completes", async () => {
     await withBundle(async (base) => {
       const setup = await fetch(`${base}/setup?token=a-setup-token`);
       expect(setup.status).toBe(200);
@@ -68,7 +69,7 @@ describe("the page", () => {
     });
   });
 
-  it("carries the content security policy and refuses type sniffing", async () => {
+  it("sends the content security policy, and disables content type sniffing", async () => {
     await withBundle(async (base) => {
       const page = await fetch(`${base}/`);
       const chunk = await fetch(`${base}${CHUNK_PATH}`);
@@ -82,9 +83,9 @@ describe("the page", () => {
           directive.includes("unsafe-inline"),
         ),
       ).toEqual(["style-src 'self' 'unsafe-inline'"]);
-      // The one relaxation, and the shape of it: the ports a runner's identity
-      // listener will settle for, named one by one. A wildcard port here would
-      // hand anything that runs in the page every service on the reader's
+      // The one exception, and exactly how far it goes: the ports a runner's
+      // identity listener may use, listed one by one. A wildcard port would
+      // let any script in the page reach every service on the user's
       // machine, WebSockets included.
       expect(CONTENT_SECURITY_POLICY).toContain(
         "connect-src 'self' http://127.0.0.1:4939 http://127.0.0.1:4940",
@@ -96,7 +97,7 @@ describe("the page", () => {
     });
   });
 
-  it("answers a HEAD with the headers and no body", async () => {
+  it("responds to a HEAD with the headers and no body", async () => {
     await withBundle(async (base) => {
       const response = await fetch(`${base}/`, { method: "HEAD" });
       expect(response.status).toBe(200);
@@ -105,7 +106,7 @@ describe("the page", () => {
     });
   });
 
-  it("answers any other method on a page path 404, not the page", async () => {
+  it("returns 404, not the page, for any other method on a page path", async () => {
     await withBundle(async (base) => {
       const response = await fetch(`${base}/settings/profile`, { method: "POST" });
       expect(response.status).toBe(404);
@@ -125,7 +126,7 @@ describe("the fingerprinted files", () => {
     });
   });
 
-  it("answers a missing one 404 rather than handing back the page", async () => {
+  it("returns 404 for a missing one rather than the page", async () => {
     await withBundle(async (base) => {
       const response = await fetch(`${base}/assets/index-gone.js`);
       expect(response.status).toBe(404);
@@ -146,7 +147,7 @@ describe("the API beside it", () => {
     });
   });
 
-  it("still answers its own operations", async () => {
+  it("still serves its own operations", async () => {
     await withBundle(async (base) => {
       const response = await fetch(`${base}/api/v1/setup`);
       expect(response.status).toBe(200);
@@ -156,7 +157,7 @@ describe("the API beside it", () => {
 });
 
 describe("without a bundle", () => {
-  it("answers every non-API path 404, as a checkout that was never built does", async () => {
+  it("returns 404 for every non-API path, like a checkout that was never built", async () => {
     await withServer(async ({ base }) => {
       const response = await fetch(`${base}/settings/profile`);
       expect(response.status).toBe(404);
@@ -166,10 +167,11 @@ describe("without a bundle", () => {
 });
 
 describe("a generated bundle a test runner cannot evaluate", () => {
-  it("reads as no bundle rather than as a failure to start", async () => {
-    // `./bundle.ts` names build output through Bun's own import attributes, so
-    // this runner cannot load it whether or not a build has run - which is the
-    // stale-bundle situation, reached here through the effect the listener uses.
+  it("is treated as no bundle rather than as a failure to start", async () => {
+    // `./bundle.ts` refers to build output through Bun's own import
+    // attributes, so this test runner cannot load it, whether or not a build
+    // has run. That is the same as a stale bundle, tested here through the
+    // effect the listener uses.
     expect(await Effect.runPromise(webBundle)).toBeUndefined();
   });
 });

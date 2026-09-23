@@ -1,16 +1,16 @@
 /**
- * The credential the live socket connects with.
+ * Tickets: the credential a client uses to open the live socket.
  *
- * A browser cannot set a header on a WebSocket handshake, and the 30-day bearer
- * token must never ride in a URL, so a client trades its token over ordinary
- * authenticated HTTP for a short-lived string and presents that in the socket's
- * first frame. The string is good once and for five minutes.
+ * A browser cannot set a header on a WebSocket handshake, and the 30-day
+ * bearer token must never appear in a URL. So a client exchanges its token,
+ * over normal authenticated HTTP, for a short-lived ticket, and sends the
+ * ticket in the socket's first frame. A ticket works once, for five minutes.
  *
- * The tickets live in memory and nowhere else. A ticket is worthless a restart
- * later, so persisting one would only put a live credential in the database;
- * and hashing a value that already lives in this process guards nothing that
- * reaching this process does not already give away. Issuing one sweeps the
- * expired entries, so a map of tickets nobody ever spent cannot grow.
+ * Tickets are kept in memory only. A ticket is useless after a restart, so
+ * storing it would only put a live credential in the database. Hashing it
+ * would not help either: anyone who can read this process's memory already
+ * has everything the hash would protect. Issuing a ticket deletes the expired
+ * ones, so unused tickets cannot pile up.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -21,7 +21,7 @@ import { createUnauthenticatedError, type Unauthenticated } from "@hercule/contr
 import { CurrentActor, NO_CREDENTIAL, type UserActor } from "../actor";
 import { mintToken } from "../credentials";
 
-/** How long a ticket stays good. Long enough to dial, short enough to lose. */
+/** How long a ticket stays valid: long enough to connect, short enough to be low risk if leaked. */
 const WS_TICKET_LIFETIME_MS = 5 * 60 * 1000;
 
 interface Held {
@@ -30,40 +30,42 @@ interface Held {
 }
 
 /**
- * Why an agent inside a session is refused a live connection.
+ * The error message when a session actor asks for a ticket.
  *
- * It is a 401 where every other refusal of a session actor on an operation the
- * user alone may make is a 403, because `auth.wsTicket` requires only that a
- * credential resolved: there is no grant on it for the 403 to name, and the
- * contract's `forbidden` cannot be built without one. The message is what tells
- * the caller apart from one presenting nothing.
+ * This is a 401, although other user-only operations reject a session actor
+ * with a 403. `auth.wsTicket` requires only that a credential resolved, so
+ * there is no grant for a 403 to name, and the contract's `forbidden` error
+ * needs one. The message tells this case apart from a caller that sent no
+ * credential.
  */
-const SESSION_HAS_NO_SOCKET = "a live connection is the user's own";
+const SESSION_HAS_NO_SOCKET =
+  "only the user can open a live connection; a session reads what it needs through the API";
 
 const make = Effect.sync(() => {
   const held = new Map<string, Held>();
 
   return {
     /**
-     * `auth.wsTicket`: a fresh ticket for whoever is calling. The actor is
-     * captured here, so the socket the ticket opens is that caller's socket and
-     * not merely somebody's.
+     * Implements `auth.wsTicket`: returns a new ticket for the calling user.
+     * Fails with unauthenticated when there is no credential, or the caller
+     * is a session. The actor is stored with the ticket, so the socket it
+     * opens belongs to that caller.
      */
     issue: (): Effect.Effect<string, Unauthenticated> =>
       Effect.gen(function* () {
-        // Any credential of any kind reaches this, so there is no grant to
-        // check and `requireGrant` would only ever answer yes. What is left to
-        // enforce is that somebody was resolved at all, and it is enforced here
-        // rather than only in the transport gate, because that is what binds a
-        // caller who reaches no transport.
+        // Any credential may call this, so there is no grant to check, and
+        // `requireGrant` would always pass. What remains is to check that a
+        // credential resolved at all. That is checked here, not only in the
+        // transport gate, so it also holds for a caller that does not come
+        // through a transport.
         const actor = yield* CurrentActor;
         if (actor._tag === "none") {
           return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
         }
-        // The socket is the user's screens. A session reads what it needs
-        // through the API and holds no live topic in this build, and the
-        // connection sweep can re-check only a user credential, so a socket
-        // opened as a session would be one nothing could ever take away.
+        // The socket serves the user's screens. A session reads what it needs
+        // through the API and has no live topics yet. Also, the connection
+        // sweep can re-check only a user credential, so a socket opened by a
+        // session could never be closed by it.
         if (actor._tag === "session") {
           return yield* Effect.fail(createUnauthenticatedError(SESSION_HAS_NO_SOCKET));
         }
@@ -77,9 +79,8 @@ const make = Effect.sync(() => {
       }),
 
     /**
-     * Who this ticket was issued for, spending it in the process. A ticket that
-     * was never issued, has already been spent, or has run out reads the same:
-     * nobody.
+     * Uses up a ticket and returns the user it was issued for. Returns `none`
+     * for a ticket that was never issued, was already used, or has expired.
      */
     consume: (ticket: string): Effect.Effect<Option.Option<UserActor>> =>
       Effect.gen(function* () {

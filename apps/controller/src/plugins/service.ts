@@ -2,10 +2,11 @@
  * The `plugin.*` operations, and `workflowAction.query`, which lists the
  * workflow actions that the core and the plugins registered.
  *
- * A plugin as a caller sees it joins what the user decided (enabled, config)
- * with what this boot found (status, catalog rows); only the first survives a
- * restart. The set is fixed by the binary, so a listing is the whole set with
- * no filter and no paging, and reading one is that listing narrowed.
+ * A plugin, as a caller sees it, combines the user's settings (enabled,
+ * config) with what this boot found (status, catalog rows). Only the settings
+ * survive a restart. The set of plugins is fixed by the binary, so a listing
+ * returns the whole set with no filter or paging, and reading one plugin
+ * filters that listing.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -39,8 +40,9 @@ type MoveKind =
   | "plugin.stateReset";
 
 /**
- * The credential failures are here because the grant check runs inside the
- * method, so a built-in caller reaching no transport is refused as a request is.
+ * The errors of a lifecycle change. The credential errors are included
+ * because the grant check runs inside the method, so a built-in caller that
+ * does not come through a transport is checked like a request.
  */
 type MoveError =
   Unauthenticated | Forbidden | NotFound | Validation | SqlError | Schema.SchemaError;
@@ -73,7 +75,7 @@ const make = Effect.gen(function* () {
     );
   });
 
-  /** One plugin, without the grant check: a move has already been checked once. */
+  /** Reads one plugin without a grant check, for callers that already checked it. Fails with not found. */
   const readPluginOrFail = (
     id: string,
   ): Effect.Effect<PluginDetail, NotFound | SqlError | Schema.SchemaError> =>
@@ -85,8 +87,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * A refused plugin has no code running and no catalog rows, so there is
-   * nothing for any move to act on.
+   * Reads a plugin that a lifecycle change can act on. Fails with a
+   * validation error for a `refused` plugin, which has no code running and no
+   * catalog rows, so there is nothing to change.
    */
   const readMovablePluginOrFail = (
     id: string,
@@ -103,8 +106,10 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * For a move that ends in a start. A plugin whose `register` or teardown
-   * failed cannot start again in this process; only a restart clears either.
+   * Reads a plugin for a lifecycle change that ends by starting it. Fails
+   * with a validation error when the plugin's `register` or teardown failed,
+   * because it cannot start again in this process; only a restart clears
+   * either.
    */
   const readRestartablePluginOrFail = (
     id: string,
@@ -117,9 +122,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The write set and its audit entry in one transaction, so the log never
-   * claims what the database rolled back. Naming the plugin as a record is what
-   * tells a live subscriber to refetch it.
+   * Writes a lifecycle change and its audit entry in one transaction, so the
+   * log never records a change the database rolled back. The entry names the
+   * plugin as its record, which tells live subscribers to refetch it.
    */
   const writeMove = (
     id: string,
@@ -187,10 +192,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Stopped before the flag is written, so nothing is still running once its
-     * contributions read as a disabled plugin's. The one move a plugin needing
-     * a restart still accepts: turning it off is the answer to leftover
-     * machinery.
+     * Disables a plugin. It is stopped before the flag is written, so nothing
+     * is still running once its contributions read as disabled. This is the
+     * one change allowed for a plugin that needs a restart, because turning it
+     * off is how to deal with parts a failed teardown left running.
      */
     disable: (id: string): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {
@@ -207,10 +212,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Stores a config and restarts the plugin on it: there is no hot
-     * reconfigure, so a plugin never observes its config changing while it
-     * runs. Validated before anything is stopped or written, so a rejected form
-     * leaves a running plugin running.
+     * Stores a config and restarts the plugin with it. There is no live
+     * reconfigure, so a plugin never sees its config change while it runs.
+     * The config is validated before anything is stopped or written, so an
+     * invalid form leaves a running plugin running.
      */
     configure: (id: string, input: PluginConfigureInput): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {
@@ -249,8 +254,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Throws away everything a plugin stored and starts it over. Allowed while
-     * inactive or errored too: leftover state is a plausible cause of both.
+     * Deletes everything a plugin stored and restarts it. Also allowed while
+     * the plugin is inactive or errored, because leftover state is a likely
+     * cause of either.
      */
     resetState: (id: string): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {

@@ -1,10 +1,10 @@
 /**
- * The clock around `SessionService.endOnLostRunners`: what it hands the rule,
- * and when the first pass runs. The rule itself is tested through the
+ * Tests the sweep around `SessionService.endOnLostRunners`: what it passes to
+ * the rule, and when the first pass runs. The rule itself is tested with the
  * sessions service.
  *
- * The service is a stand-in that records each call, because the question here
- * is only what the clock asks for and when.
+ * The service is a stub that records each call, because these tests only
+ * check what the sweep calls and when.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Layer } from "effect";
@@ -16,7 +16,7 @@ import { sweepSessionsOnLostRunners } from "./lost-runners";
 
 const at = "2026-09-22T10:00:00.000Z";
 
-/** A runner row at this connectivity, which is all the clock reads about a runner. */
+/** Builds a runner row with this connectivity, the only field the sweep reads. */
 const insertRunner = (connectivity: "online" | "unreachable") =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -31,7 +31,7 @@ const insertRunner = (connectivity: "online" | "unreachable") =>
   });
 
 describe("sweepSessionsOnLostRunners", () => {
-  it("runs its first pass at once, and hands the rule the connected runners only", async () => {
+  it("runs its first pass at once, and passes only the connected runners to the rule", async () => {
     const passes: Array<ReadonlyArray<string>> = [];
     const recording = Layer.succeed(SessionService, {
       endOnLostRunners: (connected: ReadonlyArray<string>) =>
@@ -44,8 +44,8 @@ describe("sweepSessionsOnLostRunners", () => {
       Effect.gen(function* () {
         const online = yield* insertRunner("online");
         yield* insertRunner("unreachable");
-        // The shipped interval is a minute, so a second pass cannot run in
-        // this test: what is seen is the pass at start.
+        // The default interval is a minute, so no second pass runs during this
+        // test: the call seen is the first pass.
         const sweeping = yield* Effect.forkChild(sweepSessionsOnLostRunners);
         while (passes.length === 0) yield* Effect.yieldNow;
         yield* Fiber.interrupt(sweeping);

@@ -1,17 +1,16 @@
 /**
- * The event router: the one consumer of the event log.
+ * The event router: the only consumer of the event log.
  *
- * It walks the pipeline events past its own durable cursor and tests each one
- * against every routing table it is handed. It polls rather than listens, and
- * it keeps how far it has read in the database, so a controller that was
- * killed and started again reads on from where it stopped instead of waiting
- * to be told about entries that arrived while it was gone.
+ * It reads the pipeline events after its cursor and tests each one against
+ * every routing table it receives. It polls instead of waiting to be notified,
+ * and it stores its cursor in the database. So a controller that was killed
+ * and restarted continues from where it stopped, including the events that
+ * arrived while it was down.
  *
- * It carries nothing to anyone. A route that matches writes a row, and the
- * downstream consumer of that row - a delivery - reads it. So this module
- * knows the log, the cursor and the expressions, and no domain that owns a
- * destination: a routing table stands between the two, and is the only thing
- * that knows both.
+ * The router does not deliver anything itself. A route that matches writes a
+ * row, and a delivery reads that row later. So this module knows the log, the
+ * cursor and the expressions, but none of the domains that own a destination.
+ * A routing table sits between the two and is the only thing that knows both.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -41,14 +40,14 @@ export interface Route {
   readonly writeOnMatch: (event: Event) => Effect.Effect<void, SqlError>;
 }
 
-/** A table of routes one destination owns, prepared inside the routing transaction. */
+/** The routes of one kind of destination, prepared inside the routing transaction. */
 export interface RoutingTable {
   /**
-   * Sweeps entries nobody can answer any more, then answers the live routes.
-   * Joins the caller's transaction.
+   * Ends the routes whose destination is gone for good, then returns the live
+   * routes. Joins the caller's transaction.
    */
   readonly prepare: () => Effect.Effect<ReadonlyArray<Route>, SqlError>;
-  /** Answers true when this failure began an error on the route's health. */
+  /** Records a failed evaluation. Returns true when this failure put the route's health into error. */
   readonly recordEvaluationFailure: (
     routeId: string,
     message: string,
@@ -61,34 +60,34 @@ export interface RoutingTable {
   readonly notifyEvaluationError: (routeId: string, message: string) => Effect.Effect<void>;
 }
 
-/** The downstream consumer of one kind of row a routing table writes. */
+/** Reads and delivers one kind of row that a routing table writes. */
 export interface Delivery {
   readonly name: string;
   readonly deliverWaiting: () => Effect.Effect<void, SqlError>;
 }
 
 /**
- * What a pass owes the world outside the database: the reports of the routes
- * whose health went to error. It is a value rather than a call, because the
- * pass produces it inside a transaction and nothing may be told until that
- * transaction has committed.
+ * The notifications a pass must send outside the database: one for each route
+ * whose health went to error. The pass returns them as an effect instead of
+ * running them, because the pass runs inside a transaction, and nobody may be
+ * notified until that transaction has committed.
  */
 type PendingReports = Effect.Effect<void>;
 
-/** One routing table's routes, and which of them cannot be evaluated. */
+/** One routing table's routes, and which of them are in an evaluation error. */
 interface PreparedTable {
   readonly table: RoutingTable;
   readonly routes: ReadonlyArray<Route>;
   /**
-   * Which routes are in an evaluation error, as this pass has found them so
-   * far. A route that evaluates cleanly has its health cleared only where the
-   * set holds it, so a pass over a hundred entries writes nothing about a
-   * route that was healthy all along.
+   * The ids of the routes in an evaluation error, as far as this pass knows so
+   * far. A route that evaluates cleanly has its health cleared only if its id
+   * is in this set, so a pass over a hundred events writes nothing for a route
+   * that was healthy all along.
    */
   readonly inEvaluationError: Set<string>;
 }
 
-/** One route's condition, compiled, beside the prepared table that owns it. */
+/** A route with its compiled condition, and the prepared table it belongs to. */
 interface CompiledRoute {
   readonly owner: PreparedTable;
   readonly route: Route;
@@ -99,34 +98,38 @@ interface CompiledRoute {
 const ROUTER = "router";
 
 /**
- * How many entries one pass reads.
+ * How many events one pass reads.
  *
- * This is the only bound the pass has, and it bounds the entry count alone.
- * The routes a pass evaluates are read whole and unpaged, and the wall-clock
- * guard on one evaluation reports an overrun after the fact rather than
- * stopping it, so the time one pass takes is bounded by nothing: it grows with
- * the number of live routes and with what one expression does. The only hard
- * bound anywhere is the parse-time limit on the source of an expression. A
- * pass holds the database's one write lock the whole time it runs, so
- * everything else writing waits behind it. Real evaluations take microseconds;
- * a full pass over a hundred routes is milliseconds.
+ * This is the only limit on a pass, and it limits the number of events only.
+ * Nothing limits how long a pass takes:
+ *
+ * - the pass reads all routes, without paging;
+ * - the time guard on an evaluation reports an overrun after it happens, and
+ *   does not stop it;
+ * - the only hard limit is the maximum length of an expression's source,
+ *   checked at parse time.
+ *
+ * So the time grows with the number of live routes and the cost of each
+ * expression. A pass holds the database's single write lock the whole time,
+ * so every other write waits for it. In practice an evaluation takes
+ * microseconds, and a full pass over a hundred routes takes milliseconds.
  */
 const EVENTS_PER_PASS = 100;
 
 /**
  * How many passes one tick may make.
  *
- * Ten passes are a thousand entries, which is far more than one second of any
- * real log, so a burst is walked to its end inside one tick and the cap is
- * reached only by an emitter writing faster than the router reads.
+ * Ten passes read a thousand events, far more than any real log gets in one
+ * second. So a burst is read to its end within one tick, and the cap is
+ * reached only when an emitter writes faster than the router reads.
  */
 const MAX_PASSES_PER_TICK = 10;
 
 /**
- * The envelope a condition is evaluated against. The original payload the
- * source system sent is left out: a condition is written against the fields
- * Hercule normalizes, and a condition reading an unnormalized field would
- * break the moment the source changed its own shape.
+ * Builds the context a condition is evaluated against: the event without its
+ * raw payload. Conditions are written against the normalized fields only,
+ * because a condition that read the raw payload would break as soon as the
+ * source system changed its format.
  */
 const buildEvaluationContext = (event: Event): Record<string, unknown> => {
   const envelope: Record<string, unknown> = { ...event };
@@ -137,7 +140,7 @@ const buildEvaluationContext = (event: Event): Record<string, unknown> => {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  /** Every table swept and read inside this transaction. */
+  /** Prepares every table inside the caller's transaction. */
   const prepareTables = (
     tables: ReadonlyArray<RoutingTable>,
   ): Effect.Effect<ReadonlyArray<PreparedTable>, SqlError> =>
@@ -152,30 +155,29 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Evaluates these events against these routes and writes what every route
-   * that matched owes, answering the reports the failures owe.
+   * Evaluates each event against each route, and writes a row for every
+   * match. Returns the notifications for routes whose health went to error,
+   * for the caller to run after its commit.
    *
-   * Joins the caller's transaction and waits on nothing but SQL and this
-   * thread's own CPU: the evaluator is synchronous and reaches nothing outside
-   * the context it is given.
+   * Joins the caller's transaction and waits on nothing but SQL and CPU: the
+   * evaluator is synchronous and reads nothing outside the context it gets.
    *
-   * A condition that cannot be used is a no-match for its own route and
-   * nothing else: every other route is still evaluated, and the failure is
-   * recorded on the route's health, where a caller reads it. A source that
-   * does not compile is such a failure, and is recorded the same way as one
-   * that fails while it runs.
+   * A condition that fails counts as no match for its own route only. Every
+   * other route is still evaluated, and the error is recorded on the route's
+   * health, where callers can read it. A condition that does not parse is
+   * recorded the same way as one that fails while it runs.
    */
   const routeEvents = (
     prepared: ReadonlyArray<PreparedTable>,
     batch: ReadonlyArray<Event>,
   ): Effect.Effect<PendingReports, SqlError> =>
     Effect.gen(function* () {
-      // Nothing happened, so nothing is judged: a pass with no entries must not
-      // move a route's health, which is a statement about events.
+      // A route's health is about how it handled events, so a pass with no
+      // events must not change it.
       if (batch.length === 0) return Effect.void;
       const reports: Array<Effect.Effect<void>> = [];
 
-      /** Records one route's failure, and keeps the report it owes. */
+      /** Records one route's failure, and keeps its notification if the route just went to error. */
       const recordFailure = (
         owner: PreparedTable,
         routeId: string,
@@ -188,10 +190,9 @@ const make = Effect.gen(function* () {
         });
 
       /**
-       * Every route whose condition compiled, with the program it compiled to.
-       * One source is read once for the whole batch rather than once per
-       * event: a pass reads up to a hundred entries, and parsing the same
-       * source a hundred times is work no event asked for.
+       * Every route whose condition parsed, with its compiled program. Each
+       * condition is parsed once for the whole batch rather than once per
+       * event, because a pass reads up to a hundred events.
        */
       const compiled: Array<CompiledRoute> = [];
       for (const owner of prepared) {
@@ -217,8 +218,8 @@ const make = Effect.gen(function* () {
             yield* owner.table.clearEvaluationFailure(route.id);
             owner.inEvaluationError.delete(route.id);
           }
-          // Only a condition that answers true has matched. A condition
-          // answering a string or a number has not said yes to anything.
+          // Only a condition that evaluates to `true` matches. A string or a
+          // number is not a match, even a truthy one.
           if (answer.success !== true) continue;
           yield* route.writeOnMatch(event);
         }
@@ -227,22 +228,23 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * One pass: the tables as they stand, the entries past the cursor, and what
-   * every route that matched writes.
+   * Runs one pass: prepares the tables, reads the next batch of events after
+   * the cursor, writes a row for every match, and moves the cursor. Returns
+   * the pending notifications, and whether the pass reached the end of the
+   * log.
    *
-   * Everything the pass decides is one transaction, so a pass that fails part
-   * way writes nothing at all, and a route created or withdrawn while the pass
-   * runs is either wholly before it or wholly after it - never half seen,
-   * which is how an event could be walked past for a route that existed all
-   * along. Nothing in that transaction waits on anything but SQL and CPU:
-   * reading the entries and storing the rows are SQL, and compiling and
-   * evaluating a condition are this thread's own work. Telling anything
-   * outside the database happens after the commit.
+   * The whole pass is one transaction, which gives two guarantees:
    *
-   * The cursor moves even where nothing matched, and even where the batch came
-   * back empty - to the end of the log as it stood inside the transaction - so
-   * a log full of entries nothing waits for is walked once rather than read
-   * again on every pass.
+   * - a pass that fails part way writes nothing at all;
+   * - a route created or removed during the pass is seen either fully or not
+   *   at all, so no event is skipped for a route that existed all along.
+   *
+   * Nothing in the transaction waits on anything but SQL and CPU. Notifying
+   * anything outside the database happens after the commit.
+   *
+   * The cursor moves even when nothing matched. When the batch is empty, it
+   * moves to the end of the log as read inside the transaction. So events that
+   * no route wants are read once, not on every pass.
    */
   const routeOnePass = (
     tables: ReadonlyArray<RoutingTable>,
@@ -265,23 +267,21 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Everything the log holds past the cursor, in passes of
-     * `EVENTS_PER_PASS`, and then what those passes owe the world outside the
-     * database.
+     * Routes every event after the cursor, in passes of `EVENTS_PER_PASS`, and
+     * sends each pass's notifications after its commit.
      *
-     * A batch that came back full has left entries behind it, and waiting a
-     * whole interval for each of the next hundred would make a burst of a
-     * thousand events take ten intervals to reach the sessions waiting for it.
-     * So a full batch is followed by another pass at once, and the log is
-     * walked to its end at the speed of SQL. Each pass is its own transaction,
-     * so the write lock is released between them and nothing else writing is
-     * held off for the whole burst.
+     * A full batch means more events are waiting. Waiting a whole interval
+     * before each next batch would make a burst of a thousand events take ten
+     * intervals to reach the sessions waiting for it. So a full batch is
+     * followed by another pass at once. Each pass is its own transaction, so
+     * the write lock is released between passes and other writes are not held
+     * off for the whole burst.
      *
-     * The passes are capped all the same. An emitter that keeps writing a full
-     * batch between one pass and the next would hold the loop here for ever,
-     * and the rows the earlier passes committed would never be read by a
-     * delivery. At the cap the router returns, the tick delivers what the
-     * passes wrote, and the next tick reads on from the cursor.
+     * The number of passes is still capped. An emitter that keeps writing a
+     * full batch between passes would otherwise keep the loop here forever,
+     * and no delivery would ever read the rows the earlier passes wrote. At
+     * the cap the router returns, the tick delivers what the passes wrote, and
+     * the next tick continues from the cursor.
      */
     routeNewEvents: (tables: ReadonlyArray<RoutingTable>): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -293,21 +293,20 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * One more look at one event, for a route that may have been created, or a
-     * ref that may have been added, since the router walked past it.
+     * Routes one event again, for a route that may have been created, or a
+     * ref that may have been added, since the router first read the event.
      *
-     * The cursor is not touched: this is not a step through the log, and moving
-     * it would either skip entries or read them again. What a route writes is
-     * unique per route and event, so whatever matched the first time gets
-     * nothing a second time.
+     * The cursor does not move: this is not a step through the log, and moving
+     * it would skip events or read them twice. Each route writes at most one
+     * row per event, so a route that matched the first time writes nothing
+     * new.
      *
-     * The tables are prepared as they are for a pass, sweep and all: a route
-     * nobody can answer any more is not a route, and an event must no more
-     * reach it here than it would on a pass.
+     * The tables are prepared exactly as for a pass, including ending routes
+     * whose destination is gone, so an event cannot reach such a route here
+     * either.
      *
-     * Joins the caller's transaction and writes rows only. It answers the
-     * reports the look owes, which the caller runs once its transaction has
-     * committed.
+     * Joins the caller's transaction and only writes rows. Returns the pending
+     * notifications, which the caller runs after its transaction commits.
      */
     rerouteEvent: (
       eventId: number,
@@ -323,7 +322,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The one consumer of the event log. */
+/** The only consumer of the event log. */
 export class EventRouter extends Context.Service<EventRouter, Effect.Success<typeof make>>()(
   "hercule/controller/daemon/EventRouter",
 ) {}

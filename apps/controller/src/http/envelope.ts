@@ -1,22 +1,23 @@
 /**
- * One error envelope on the wire, for every failure the transport can
+ * The error envelope: one response format for every failure the transport can
  * produce.
  *
- * A failing operation answers `{ error: { code, message, details? } }` and
+ * A failing operation returns `{ error: { code, message, details? } }` and
  * nothing else. The service layer already fails with the contract's error
- * classes and the derived route encodes those itself; what is left for this
- * module is everything the route does not encode:
+ * classes, and the derived route encodes those itself. This module handles
+ * everything the route does not encode:
  *
  * - a request the derived route could not decode, which Effect's HttpApi
- *   raises as a defect carrying `HttpApiSchemaError`: `validation`, with the
- *   schema library's issue tree flattened into the neutral `{ path, message }`
- *   shape the contract names (the wire contract names no schema library);
+ *   raises as a defect with an `HttpApiSchemaError`: returned as `validation`,
+ *   with the schema library's issue tree flattened into the neutral
+ *   `{ path, message }` format the contract defines (the wire contract does
+ *   not depend on a schema library);
  * - a path no route matched: `not_found`;
- * - anything else, which is a bug rather than something the caller can act on:
- *   `internal`, with the detail logged and never returned.
+ * - anything else, which is a bug rather than something the caller can act
+ *   on: `internal`, with the detail logged and never returned.
  *
- * A client that hung up is left alone: the interrupt keeps its own response
- * (499), so an aborted request is not reported as a server error.
+ * A request the client aborted is left alone: the interrupt keeps its own
+ * response (499), so it is not reported as a server error.
  */
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -32,11 +33,11 @@ import {
   type ApiError,
 } from "@hercule/contract";
 
-/** The eight error classes all carry `error`; this is what puts one on the wire. */
+/** Builds the HTTP response for a contract error, with the status its code maps to. */
 export const buildErrorResponse = (error: ApiError): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe({ error: error.error }, { status: ERROR_STATUS[error.error.code] });
 
-/** Which part of the request failed to decode, in the caller's words. */
+/** The name, in an error message, of each part of a request or response that can fail to decode. */
 const PART: Record<HttpApiSchemaError["kind"], string> = {
   Payload: "request body",
   Query: "query string",
@@ -47,11 +48,12 @@ const PART: Record<HttpApiSchemaError["kind"], string> = {
 };
 
 /**
- * The error a cause answers with, or `undefined` when the cause is not this
- * module's to answer - an interrupt, which the server renders itself.
+ * Returns the contract error to respond with for a cause, or `undefined` for
+ * an interrupt, which the server responds to itself.
  *
- * Pure, and the whole of the mapping: the wrapper around the app turns what
- * comes back into a response and logs the ones the caller cannot act on.
+ * This function has no side effects and holds the whole mapping.
+ * `withEnvelope` turns the result into a response, and logs the errors the
+ * caller cannot act on.
  */
 export const findApiError = (cause: Cause.Cause<unknown>): ApiError | undefined => {
   let internalDetail: string | undefined;
@@ -82,8 +84,8 @@ export const findApiError = (cause: Cause.Cause<unknown>): ApiError | undefined 
 };
 
 /**
- * Answers every request with the envelope. Wraps the whole application, so it
- * covers the routes it did not match as well as the ones it did.
+ * Converts every failure of `app` into an envelope response. It wraps the
+ * whole application, so it also covers requests that matched no route.
  */
 export const withEnvelope = <E, R>(
   app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,

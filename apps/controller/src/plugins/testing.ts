@@ -1,7 +1,7 @@
 /**
- * The running host and the fixture plugin every plugin test builds on. Written
- * out per file these drifted apart, so a test that varies nothing still had to
- * be read for what it had changed.
+ * Test helpers shared by every plugin test: a running host and a configurable
+ * fixture plugin. When each file had its own copy, the copies drifted apart,
+ * and a reader had to check what each file had changed.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +27,7 @@ import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { ConnectionTypesLayer } from "../connections";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 
-/** One provider definition, the only contribution shape with a consumer. */
+/** Builds a provider definition that supports everything natively. */
 export const buildProviderDefinition = (
   id: string,
   defaultConfig: Schema.Json = {},
@@ -56,17 +56,17 @@ export const buildProviderDefinition = (
 
 const homes: Array<string> = [];
 
-// Registered on the suite of whichever file imported this, which is the only
-// scope that knows when the last stack it made is finished with.
+// Registered on the suite of the file that imports this module, which is the
+// only scope that knows when its last stack is no longer used.
 afterAll(() => {
   for (const home of homes) rmSync(home, { recursive: true, force: true });
   homes.length = 0;
 });
 
 /**
- * Real everything over a `:memory:` database, down to the master key file: a
- * plugin's secrets are rows in the one secrets table, so the encryption is part
- * of what is under test.
+ * Builds the real plugin services on a `:memory:` database, including a real
+ * master key file. A plugin's secrets are rows in the secrets table, so the
+ * encryption is part of what is tested.
  */
 export const buildPluginStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
@@ -83,19 +83,19 @@ export const buildPluginStack = () => {
   );
 };
 
-/** The actor every call runs as, which is what a request through the API is. */
+/** The actor every call runs as, the same as a request through the API. */
 export const USER: Actor = {
   _tag: "user",
   userId: "0199f0b7-0000-7000-8000-000000000000",
   credential: { kind: "login", id: "0199f0b7-0001-7000-8000-000000000000", tokenHash: "x" },
 };
 
-/** The actor a test runs its body as. */
+/** Runs an effect as `USER`. */
 export const asUser = Effect.provideService(CurrentActor, USER);
 
 export interface Fixture {
   readonly plugin: Plugin;
-  /** `activate` and `deactivate`, in the order the plugin observed them. */
+  /** The `activate` and `deactivate` calls, in the order the plugin received them. */
   readonly calls: Array<string>;
   readonly contexts: Array<ActivationContext>;
   readonly hosts: Array<RegistrationHost>;
@@ -104,18 +104,18 @@ export interface Fixture {
 }
 
 /**
- * Does what the options say and remembers everything it was handed. Every
- * default is the plugin that comes up and stays up, so a test names only what
- * it is varying.
+ * Creates a fixture plugin that behaves as the options say, and records every
+ * call it receives. By default the plugin starts and stays up, so a test sets
+ * only the options it varies.
  */
 export const createPluginFixture = (options: {
   readonly id: string;
   readonly hostApi?: number;
   readonly capabilities?: ReadonlyArray<PluginCapability>;
   readonly configSchema?: Schema.Top;
-  /** Registered in order; the default is one provider named after the plugin. */
+  /** The providers to register, in order. By default, one provider named after the plugin. */
   readonly definitions?: ReadonlyArray<ProviderDefinition>;
-  /** Fails after registering, which is where a plugin's own work would go. */
+  /** A message to fail `register` with, after registering, where a plugin's own work would go. */
   readonly registerFails?: string;
   /** How many `activate` calls fail before the first one that succeeds. */
   readonly activateFailures?: number;

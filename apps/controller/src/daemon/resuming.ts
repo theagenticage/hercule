@@ -1,11 +1,10 @@
 /**
- * Whether a session's transcript can be picked up again, and the
- * provider-native session to pick up.
+ * Checks whether a session's transcript can be resumed, and returns the
+ * provider-native session to resume.
  *
- * It is one answer read from three places - the session's row, the working area
- * it ran in and the machine that holds its native state - so it is given once
- * here rather than twice: resuming a session in place and forking off it ask
- * exactly the same question.
+ * The check reads three places: the session's row, the workspace it ran in,
+ * and the runner that holds its native state. Resuming a session in place and
+ * forking from it ask exactly the same question, so the check lives here once.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -21,25 +20,29 @@ import { WorkspaceService } from "../workspaces";
 const STILL_LIVE = "that session is still live; stop it first";
 
 /**
- * The one way an exited session can be past resuming that is not about its
- * machine: it never reported a provider-native session, so there is no
- * transcript left anywhere to pick up.
+ * The error message for the one reason an exited session cannot be resumed
+ * that is not about its runner: it never reported a provider-native session,
+ * so there is no transcript to resume.
  */
 const NO_TRANSCRIPT =
   "that session left no provider-native session, so its transcript is gone and there is " +
   "nothing to resume";
 
-/** Why a thread cannot be picked up again: the files it worked in are gone. */
+/** Returns the error message for a session whose workspace is gone. */
 const describeWorkspaceGone = (status: string): string =>
   `that session's workspace is ${status}, so there is nothing left to resume it in`;
 
 /**
- * The one gate onto a session's transcript - resuming it in place, or forking
- * off it - and the provider-native session that comes out of it. Each refusal
- * names its own reason (spec 06 section 5): the session is still live, the
- * transcript is gone, or the machine is - retired, on its way out and taking
- * no new placement even though the transcript is still there, or no longer
- * logged in to the instance the session runs against.
+ * Builds the check that every resume and fork goes through. The check returns
+ * the session's provider-native session id, or fails with an invalid state
+ * error that gives the reason (spec 06 section 5):
+ *
+ * - the session is still live;
+ * - the session left no transcript;
+ * - its workspace is gone;
+ * - its runner is retired, or is draining and takes no new sessions even
+ *   though the transcript is still there;
+ * - its runner is no longer logged in to the session's provider instance.
  */
 export const resumable: Effect.Effect<
   (session: StoredSession) => Effect.Effect<string, InvalidState | SqlError | Schema.SchemaError>,
@@ -57,9 +60,10 @@ export const resumable: Effect.Effect<
       if (session.nativeSessionId === null)
         return yield* Effect.fail(createInvalidStateError(NO_TRANSCRIPT));
       if (!session.resumable) {
-        // A thread's transcript is keyed to the working area it ran in, so a
-        // workspace that is gone is a session that cannot be picked up - and
-        // the user needs to read which one it was, not a word about machines.
+        // A transcript belongs to the workspace it ran in, so a session whose
+        // workspace is gone cannot be resumed. The error then names the
+        // workspace status, not the runner, because that is what the user
+        // needs to know.
         const status =
           session.workspaceId === null
             ? undefined
@@ -69,16 +73,15 @@ export const resumable: Effect.Effect<
         }
         return yield* Effect.fail(createInvalidStateError(RETIRED));
       }
-      // `resumable` says the transcript is still there; this says the machine
-      // will not open it. Whether it can be reached right now is dispatch's to
-      // decide: unreachable queues the session rather than refusing it.
+      // The transcript is still there, but a draining runner takes no new
+      // sessions. Whether the runner is connected right now is for dispatch to
+      // decide: a disconnected runner gets the session queued, not rejected.
       const machine = yield* runners.read(session.runnerId);
       if (Option.isSome(machine) && machine.value.lifecycle !== "active") {
         return yield* Effect.fail(createInvalidStateError(DRAINING));
       }
-      // The stored snapshot's word, asked of the one machine holding the native
-      // state rather than of the fleet, because the transcript is only where it
-      // already is.
+      // Check the snapshot of the runner that holds the native state, not of
+      // the whole fleet, because the transcript exists only on that runner.
       const snapshots = yield* instances.snapshotsOf(session.instanceId);
       if (!snapshots.some((one) => isLoggedIn(one) && one.runnerId === session.runnerId)) {
         return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));

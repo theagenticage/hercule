@@ -1,14 +1,13 @@
 /**
- * The live channel to a session's machine: the operations whose effect reaches
- * the harness holding that session, and the delivery every one of them goes out
- * through. `session.update` is here too - it sends nothing itself, but the
- * selection it settles rides the next frame, and what it may be set to is the
- * machine's own catalog to say.
+ * The session operations that reach the harness running a session on its
+ * runner, and the delivery they all send through. `session.update` is here
+ * too: it sends nothing itself, but the model selection it sets goes out with
+ * the next frame, and the allowed values come from the runner's model catalog.
  *
- * A row is stored or claimed first and sent afterwards, never the other way
- * round: what the machine is told about has to be something a caller can read
- * back, edit or call off, and what the machine says it did is written where the
- * caller reads it. No transaction spans the wait for that answer.
+ * A row is always stored or claimed first and sent afterwards, never the other
+ * way round. Anything the runner is told about must be something a caller can
+ * read back, edit or cancel, and the runner's reply is written where the
+ * caller reads it. No transaction stays open while waiting for that reply.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -85,13 +84,13 @@ const decodeRespond = Schema.decodeUnknownEffect(RespondInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
 /**
- * How long the controller waits for a runner to say what it did with an input.
- * Long enough for a harness to take a message, short enough that a caller
- * blocked on the answer is not left there.
+ * How long the controller waits for a runner to report what it did with an
+ * input. Long enough for a harness to accept a message, short enough that a
+ * caller waiting on the reply is not left hanging.
  */
 const SESSION_INPUT_DEADLINE: Duration.Duration = Duration.seconds(10);
 
-/** Tests hand over a deadline they can wait out. */
+/** The input deadline. Tests override it with a shorter one. */
 export const SessionInputDeadline = Context.Reference<Duration.Duration>(
   "hercule/controller/daemon/SessionInputDeadline",
   { defaultValue: (): Duration.Duration => SESSION_INPUT_DEADLINE },
@@ -104,7 +103,7 @@ const GONE = "that session's runner is no longer connected";
 const NOT_WAITING =
   "that input is no longer waiting: it was sent, delivered or cancelled in the meantime";
 
-const REFUSED = "that session's runner would not take the input";
+const REFUSED = "that session's runner rejected the input";
 
 const NOT_BUSY = "only a busy session can be steered";
 
@@ -114,15 +113,16 @@ const STEERING_UNSUPPORTED =
 const NO_OPEN_REQUEST = "that session is not waiting on a decision";
 
 /**
- * The harness has moved on: the request this answer names is not the one it is
- * parked on, so applying it would answer a question nobody asked.
+ * The harness has moved on: the answer is for a request other than the one it
+ * is waiting on now, so applying it would answer the wrong question.
  */
 const STALE_REQUEST = "that request is not the one this session is waiting on";
 
 /**
- * Both ways an input can fail to reach the harness - no connection, and no
- * answer in time - read the same to a caller, and put the row back to
- * waiting for the next transition to idle, or a hand steer, to try again.
+ * The message for an input that did not reach the harness, either because the
+ * runner is not connected or because no reply came in time. Both cases look
+ * the same to the caller. The row goes back to waiting, and the next change to
+ * idle, or a manual steer, tries again.
  */
 const NOT_DELIVERED =
   "that session's runner did not take the input; it stays queued for the next turn";
@@ -145,10 +145,14 @@ const make = Effect.gen(function* () {
   const { dispatch } = yield* Dispatch;
 
   /**
-   * The machine's catalog is read only where there are picks to judge against
-   * it: with none there is nothing validation could refuse, and a plain turn
-   * should not be held to a lookup it never needed. The read is the snapshot
-   * row alone, so this stays inside the transaction that writes what it decides.
+   * Returns the model selection to use: the given model, or the session's
+   * current one, with the given options merged over the current options.
+   * Current options are kept only when the model does not change. Fails with
+   * a validation error if the runner's catalog does not offer an option.
+   *
+   * The catalog is read only when options are given. Without options there is
+   * nothing to validate, and a plain turn should not wait on a lookup. The
+   * read is one snapshot row, so it can stay inside the caller's transaction.
    */
   const resolveModelSelection = (
     session: StoredSession,
@@ -167,10 +171,10 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Sends one stored input to the machine holding the session and waits for the
-   * machine to say what it did with it. `none` where there is no connection or
-   * nothing came back in time; the wait is outside any transaction. The caller
-   * has already claimed the row before this runs.
+   * Sends one stored input to the session's runner and waits for the runner's
+   * result. Returns `none` when the runner is not connected or does not reply
+   * in time. The caller has already claimed the row, and the wait happens
+   * outside any transaction.
    */
   const deliverTo = (
     session: StoredSession,
@@ -190,15 +194,20 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Sends a row that is already claimed - on the wire, `sent_at` set - and
-   * settles what became of it: a delivery the machine reports is recorded and
-   * handed back; a refusal or silence is left where the session service puts
-   * it, and fails with the same reason. The idle path, a steer and the flush
-   * all reach the machine through this and nothing else does.
+   * Sends a row that is already claimed (its `sent_at` is set) and records the
+   * result.
    *
-   * The model is read here, after the row is claimed, rather than earlier by
-   * the caller: a `session.update` landing between the caller's own read and
-   * the claim would otherwise ride a frame it never applied to.
+   * - If the runner reports a delivery, it is recorded and returned.
+   * - If the runner rejects the input or does not reply, the session service
+   *   records that, and this fails with an invalid state error with the same
+   *   reason.
+   *
+   * The idle path, a steer and the flush all send inputs through this
+   * function, and nothing else does.
+   *
+   * The session, and so its model selection, is read here after the claim,
+   * not earlier by the caller. Otherwise a `session.update` that lands
+   * between the caller's read and the claim would be missing from the frame.
    */
   const deliverClaimed = (
     row: StoredInput,
@@ -217,9 +226,10 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The document a session picking its own transcript up goes back on the
-   * queue with. Read back rather than built again, so the continuation runs
-   * under exactly what the session ran under before its harness went.
+   * Builds the spec a session is queued with when it resumes its own
+   * transcript, and returns it as JSON. The spec is built from the stored spec
+   * rather than from scratch, so the resumed session runs under exactly what
+   * it ran under before its harness exited.
    */
   const buildResumeSpec = (
     sessionId: string,
@@ -238,12 +248,12 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Sends what one transition to idle releases: the oldest row still waiting,
-   * claimed the instant it is found, so a second transition landing before the
-   * machine answers cannot also take it - the claim is what a row's turn
-   * actually was for, so there is no boundary to count and nothing to catch up
-   * on. A refusal or silence is left where `deliverClaimed` puts it: back to
-   * waiting, for the next transition to send.
+   * Sends the session's oldest waiting input, after the session goes idle.
+   *
+   * The row is claimed as soon as it is found, so a second change to idle
+   * that arrives before the runner replies cannot also send it. If the runner
+   * rejects the input or does not reply, `deliverClaimed` puts the row back to
+   * waiting, and the next change to idle sends it.
    */
   const flush = (sessionId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -261,28 +271,31 @@ const make = Effect.gen(function* () {
     flush,
 
     /**
-     * Gets a row somebody else stored to the session it was stored for.
+     * Delivers the queued inputs of a session, after some other caller stored
+     * them.
      *
-     * The row is already durable when this runs, so nothing here can be sent
-     * for a write that rolls back. What happens next is the session's status,
-     * and it is the same three outcomes an input a person types gets: an idle
-     * session is sent the oldest row it holds; a session on a running turn is
-     * left alone, because its rows leave at the turn's boundary; a session
-     * whose harness has gone but whose transcript has not goes back on the
-     * queue under the document that picks that transcript up, and what it
-     * holds leaves at the transition to idle its restart makes.
+     * The rows are already committed when this runs, so nothing is sent for a
+     * write that could roll back. What happens depends on the session's
+     * status, exactly as for an input a person types:
      *
-     * A session on a machine that is holding no connection takes nothing
-     * either, and neither does one that has ended for good: the row stays
-     * where a reader can see it has not gone through, and the next caller
-     * tries again. For a session that has ended for good, the caller's own
-     * sweep is what ends the claim behind it.
+     * - an idle session is sent its oldest queued input;
+     * - an exited session whose transcript can still be resumed goes back on
+     *   the queue with a resume spec, and its inputs are sent when it becomes
+     *   idle after the restart;
+     * - a session with any other status, such as busy, is left alone, because
+     *   its inputs are sent when it next becomes idle.
      *
-     * The row a match wrote is not the only one that gets here: a row a person
-     * typed that the runner refused, or whose session went idle without the
-     * controller seeing the transition, is tried again on every tick for as
-     * long as the session can take it. The check for a row on the wire is what
-     * keeps those retries to one row at a time.
+     * A session whose runner is not connected gets nothing, and neither does a
+     * session that has ended for good. The row stays queued, where a reader can
+     * see it was not delivered, and the next caller tries again. For a session
+     * that has ended for good, the session routing table's sweep ends the
+     * subscription that wrote the input.
+     *
+     * Inputs from a subscription match are not the only ones that get here. An
+     * input a person typed that the runner rejected, or whose session went
+     * idle without the controller seeing it, is retried on every tick for as
+     * long as the session can take it. The check for an input already sent and
+     * unanswered keeps those retries to one row at a time.
      */
     deliverQueuedInput: (
       sessionId: string,
@@ -290,19 +303,18 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const session = yield* one(sessionId);
         if (session.status === "idle") {
-          // The runner takes one input per turn boundary. A row is already out
-          // there and unanswered, so the turn it opens has not started yet and
-          // a second row sent now is a row the runner has to hold. The next
-          // pass sends it, once the runner has reported what the first did.
+          // The runner takes one input per turn. An input is already sent and
+          // unanswered, so its turn has not started yet, and a second input
+          // sent now would have to be held by the runner. The next pass sends
+          // it, once the runner has reported what it did with the first.
           if (yield* sessions.holdsInputOnTheWire(sessionId)) return;
-          // A machine holding no connection cannot be told. Claiming a row for
-          // it only to put the row straight back would rewrite that row, and
-          // tell every client watching the session, once for every pass the
-          // machine stays away. With a connection the flush does go ahead, and
-          // it takes the session's oldest queued row whatever produced it: a
-          // row a person typed that a delivery did not finish is tried again on
-          // every pass while a matched row waits behind it. That is what a
-          // queue is, and the row nobody could deliver is the first one owed.
+          // A runner that is not connected cannot be sent anything. Claiming a
+          // row only to put it straight back would rewrite the row, and notify
+          // every client watching the session, on every pass while the runner
+          // is away. With a connection, the flush sends the session's oldest
+          // queued row, whoever wrote it. So a typed input whose delivery
+          // failed is retried first, and a matched input waits behind it, as
+          // in any queue.
           if (!(yield* connections.holdsConnection(session.runnerId))) return;
           return yield* flush(sessionId);
         }
@@ -322,18 +334,22 @@ const make = Effect.gen(function* () {
           sql,
           Effect.flatMap(nowIso, (at) => sessions.resume(sessionId, resumeSpec, at, true)),
         );
-        // Another caller got there first and the session is already on its way
-        // back up. Dispatching again would place it twice.
+        // Another caller already resumed the session. Dispatching again would
+        // place it twice.
         if (!moved) return;
-        // After the commit: dispatch tells a machine, and a transaction never
-        // spans a wait on anything outside the database.
+        // After the commit: dispatch sends a frame to the runner, and a
+        // transaction never waits on anything outside the database.
         yield* dispatch(session.runnerId);
       }),
 
     /**
-     * What the session runs under from here on. The stored `spec` is left
-     * alone: it is the document the runner was started with, and a resume or
-     * a fork reads the session's own `modelSelection` instead.
+     * Changes the model selection the session uses from its next turn on.
+     * Returns the updated session. Fails if the session has exited or an
+     * option is not offered.
+     *
+     * The stored `spec` does not change: it is what the runner was started
+     * with, and a resume or a fork reads the session's `modelSelection`
+     * instead.
      */
     update: (input: UpdateInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -356,23 +372,23 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * One turn's input. Stored first, so the answer names a row the caller can
-     * edit or cancel. An idle session has no transition to idle coming, so its
-     * row is inserted already claimed - on the wire the instant it exists,
-     * never visible to a cancel or a flush as merely waiting - and delivered
-     * here rather than left for a flush that will never run; every other
-     * status queues, and steering one is `input.steer`'s to do.
+     * Sends one turn's input to a session. The input is stored first, so the
+     * result holds an input id the caller can edit or cancel.
      *
-     * A session whose harness is gone but whose transcript is not is resumed by
-     * this call: the row is stored waiting, the session goes back on the queue
-     * under a spec that names its provider-native session, and dispatch
-     * places it exactly as it places a spawn. What the user typed leaves at the
-     * transition to idle the machine's `session.started` makes, like a spawn's
-     * own prompt.
+     * - An idle session will not change to idle again, so no flush would send
+     *   its input. The row is inserted already claimed, so a cancel or a flush
+     *   never sees it as waiting, and it is delivered here.
+     * - A session with any other status gets the input queued. Steering it
+     *   into a running turn is what `input.steer` does.
+     * - An exited session whose transcript can be resumed is resumed by this
+     *   call. The row is stored as waiting, the session goes back on the queue
+     *   with a spec that holds its provider-native session id, and dispatch
+     *   places it like a spawn. The input is sent when the runner's
+     *   `session.started` makes the session idle, like a spawn's prompt.
      *
-     * What it did is always the machine's own word for it, never the status the
-     * controller read: an input that opened a turn and one that was folded into
-     * a turn already running are told apart by the adapter alone.
+     * The result always comes from the runner, never from the status the
+     * controller read: only the adapter knows whether the input started a turn
+     * or was folded into a turn already running.
      */
     input: (input: InputInput): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
@@ -381,11 +397,11 @@ const make = Effect.gen(function* () {
           decodeInput(input),
           createDecodeValidationError,
         );
-        // The row is read, the picks are judged and both writes happen in one
-        // transaction: two submissions landing together are serialised rather
-        // than merging their picks over the same stale row, and a pick the
-        // model does not offer rolls the whole thing back, leaving neither a
-        // rewritten selection nor an input row behind.
+        // Reading the session, validating the options and both writes happen
+        // in one transaction. So two inputs sent at the same time run one after
+        // the other instead of merging their options over the same stale row,
+        // and an option the model does not offer rolls everything back,
+        // leaving neither a changed selection nor an input row.
         const { session, row } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -408,19 +424,21 @@ const make = Effect.gen(function* () {
             return { session, row: created };
           }),
         );
-        // Outside the transaction: dispatch may tell the machine, and a
-        // transaction never spans a wait on anything outside the database.
+        // Outside the transaction: dispatch may send a frame to the runner,
+        // and a transaction never waits on anything outside the database.
         if (session.status === "exited") yield* dispatch(session.runnerId);
         if (session.status !== "idle") return { inputId: row.id, result: "queued" };
         return yield* deliverClaimed(row);
       }),
 
     /**
-     * Folds a still-queued row into the turn a busy session is already
-     * running, reusing the same delivery `session.input`'s idle path uses. A
-     * row that is not there to steer - on another session, already left, on
-     * the wire, or behind a provider that cannot fold a turn open - is refused
-     * before anything is sent.
+     * Sends a queued input into the turn a busy session is running, through
+     * the same delivery as `session.input` uses for an idle session. Fails
+     * before anything is sent when:
+     *
+     * - the input belongs to another session, or is no longer queued;
+     * - the session is not busy;
+     * - the session's provider does not support steering.
      */
     steer: (input: InputIdentified): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
@@ -430,32 +448,32 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const session = yield* one(id);
-        // The row is looked up before the session's own status is judged, so an
-        // id belonging to another session reads not_found rather than whatever
-        // this session's status happens to be.
+        // Look the row up before checking the session's status, so an input id
+        // from another session fails with not_found, whatever this session's
+        // status is.
         const row = yield* sessions.queuedInput(id, inputId);
         if (session.status !== "busy") return yield* Effect.fail(createInvalidStateError(NOT_BUSY));
         const { definition } = yield* resolved(session.instanceId);
         if (definition.declared.steering !== "native") {
           return yield* Effect.fail(createInvalidStateError(STEERING_UNSUPPORTED));
         }
-        // The claim is the guard against a second steer, or the flush, taking
-        // the same row: only one caller's conditional update finds it still
-        // waiting, whatever the read a moment ago said - and its own answer,
-        // not that stale read, is what gets sent, in case a rewrite landed in
-        // between.
+        // The claim stops a second steer, or the flush, from sending the same
+        // row: only one caller's conditional update still finds it waiting,
+        // whatever the read above returned. The claimed row, not that earlier
+        // read, is what gets sent, in case the input was edited in between.
         const claimed = yield* sessions.claimInput(row.id);
         if (Option.isNone(claimed)) return yield* Effect.fail(createInvalidStateError(NOT_WAITING));
         return yield* deliverClaimed(claimed.value);
       }),
 
     /**
-     * Ends the turn the session is running.
+     * Ends the turn the session is running. Returns the session. Fails if the
+     * session has exited or its runner is not connected.
      *
-     * Only a session whose harness is gone refuses. The status the controller
-     * holds lags the machine's own stream, so "no turn is running" here is a
-     * guess about a moment that has already passed; the adapter knows, and its
-     * interrupt is a no-op where there is nothing to end.
+     * An idle session is not rejected. The controller's status lags behind the
+     * runner's stream, so "no turn is running" would be a guess about a moment
+     * that has already passed. The adapter knows, and its interrupt does
+     * nothing when there is no turn to end.
      */
     interrupt: (input: Identified): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -483,11 +501,14 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Answers the request the session's harness is parked on.
+     * Answers the request the session's harness is waiting on. Returns the
+     * session.
      *
-     * Everything is refused before anything crosses the wire, because an answer
-     * that lands on the wrong question is the one mistake this operation must
-     * never make.
+     * Every check runs before anything is sent to the runner, because an
+     * answer applied to the wrong request is the one mistake this operation
+     * must never make. It fails when the session has exited, has no open
+     * request, is waiting on a different request, or the decision is not one
+     * the request accepts.
      */
     respond: (input: RespondInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -508,7 +529,7 @@ const make = Effect.gen(function* () {
             createValidationError([
               {
                 path: ["decision"],
-                message: `that request takes ${open.decisions.join(", ")}`,
+                message: `that request accepts only ${open.decisions.join(", ")}`,
               },
             ]),
           );
@@ -534,12 +555,12 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Ends the harness. The session moves to `exited` when the machine reports
-     * the exit, not here: this build has no way to end a session the machine
-     * never confirms is gone.
+     * Stops the session's harness. Returns the session. The session moves to
+     * `exited` when the runner reports the exit, not here: there is no way yet
+     * to end a session whose exit the runner never confirms.
      *
-     * A queued session has no harness to tell: it is ended directly, with
-     * nothing sent to the runner, since it was never told about it either.
+     * A queued session has no harness yet, and its runner was never told
+     * about it, so it is ended directly without sending anything.
      */
     stop: (input: Identified): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -589,16 +610,17 @@ const make = Effect.gen(function* () {
 });
 
 /**
- * Two kinds of method, and wiring one where the other belongs is a mistake
- * nothing else would catch.
+ * The live session operations. The service has two kinds of method, and using
+ * one where the other belongs is a mistake nothing else would catch:
  *
- * `update`, `input`, `steer`, `interrupt`, `respond` and `stop` are operations:
- * each checks its own grant and decodes its own input, and a route handler
- * calls it directly. `flush` and `deliverQueuedInput` check none: both send a
- * row that is already stored - the first when a session goes idle, the second
- * when something else has just stored one - so the grant was checked when the
- * row was stored, and putting either on a route would serve it to anyone who
- * can reach the API.
+ * - `update`, `input`, `steer`, `interrupt`, `respond` and `stop` are
+ *   operations. Each checks its own grant and decodes its own input, and a
+ *   route handler calls it directly.
+ * - `flush` and `deliverQueuedInput` check no grant. Both send a row that is
+ *   already stored: `flush` when a session goes idle, `deliverQueuedInput`
+ *   when something else has just stored a row. The grant was checked when the
+ *   row was stored, so putting either on a route would let anyone who can
+ *   reach the API call it.
  */
 export class Live extends Context.Service<Live, Effect.Success<typeof make>>()(
   "hercule/controller/daemon/Live",

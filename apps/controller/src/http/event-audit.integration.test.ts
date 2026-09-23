@@ -1,15 +1,16 @@
 /**
- * Who may read a security entry: `event.query` and `event.read` over a real
- * socket, against a log whose rows were written by real requests.
+ * Tests who may read a security entry: `event.query` and `event.read` over a
+ * real socket, on a log whose rows were written by real requests.
  *
- * The log holds two populations behind one `event.read` grant. The security
- * kinds - the audit kinds of the families the shipped agent profiles withhold -
- * are the exception: they are returned only to an actor that also holds
- * `event.audit`, which neither `assistant` nor `worker` has. What is asserted
- * here is what each caller gets back: the worker session sees its own work in
- * the log and none of the security entries, and asking for one by id is told
- * there is no such entry; the user and a profile holding `event.audit` see
- * everything.
+ * The `event.read` grant covers the whole log, with one exception: the
+ * security kinds. These are the audit kinds of the families the built-in
+ * agent profiles do not grant. They are returned only to an actor that also
+ * has `event.audit`, which neither `assistant` nor `worker` has. The tests
+ * check what each caller gets:
+ *
+ * - a worker session sees its own work in the log and none of the security
+ *   entries, and reading one by id fails with not found;
+ * - the user, and a profile with `event.audit`, see everything.
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Profile } from "@hercule/contract";
@@ -23,12 +24,12 @@ import {
 } from "../sessions/testing";
 import { completeSetup, get, post, send, withServer, PASSWORD, USERNAME } from "./testing";
 
-/** The fleet is stood up before every case, and a session started on it. */
+/** Long enough to start a fleet and a session for each test. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 const SECRET_OWNER = "connection/0198e4b0-0000-7000-8000-000000000001";
 
-/** One page of the log, as the wire hands it back. */
+/** One page of the log, as the API returns it. */
 interface EventPage {
   readonly items: ReadonlyArray<Record<string, unknown>>;
 }
@@ -41,14 +42,14 @@ const listEvents = async (base: string, token: string, query = ""): Promise<Even
 
 const listKinds = (page: EventPage): ReadonlyArray<unknown> => page.items.map((item) => item.kind);
 
-/** The error code a refusal names. */
+/** Returns the error code of an error response. */
 const readErrorCode = async (response: Response): Promise<string> =>
   ((await response.json()) as { readonly error: { readonly code: string } }).error.code;
 
 /**
- * Writes one row of each population through the API, as the user: a task the
- * agent profiles may read, and one security entry per family the profiles
- * withhold.
+ * Writes entries of both kinds through the API, as the user: a task the agent
+ * profiles may read, and one security entry for each family the profiles do
+ * not grant.
  */
 const writeTheLog = async (arranged: Arranged): Promise<void> => {
   const base = arranged.harness.base;
@@ -84,10 +85,10 @@ const writeTheLog = async (arranged: Arranged): Promise<void> => {
   expect(password.status, await password.clone().text()).toBe(200);
 };
 
-/** The kinds the log holds that no actor without `event.audit` may see. */
+/** The security kinds in the log, which only an actor with `event.audit` may see. */
 const SECURITY_KINDS = ["auth.login.failed", "secret.created", "user.passwordChanged"] as const;
 
-/** One security entry's id, read by the user, who may see it. */
+/** Returns the id of one security entry, read as the user, who may see it. */
 const readSecurityEntryId = async (arranged: Arranged, kind: string): Promise<number> => {
   const page = await listEvents(arranged.harness.base, arranged.token, `?kind=${kind}`);
   expect(listKinds(page), kind).toEqual([kind]);
@@ -95,7 +96,7 @@ const readSecurityEntryId = async (arranged: Arranged, kind: string): Promise<nu
 };
 
 describe("security entries in the event log", () => {
-  it("keeps them off a worker session's page, and leaves the rest of the log on it", async () => {
+  it("leaves them out of a worker session's page, and keeps the rest of the log in it", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
       const { token } = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
@@ -104,23 +105,23 @@ describe("security entries in the event log", () => {
       const page = await listEvents(base, token, "?limit=500");
       for (const kind of SECURITY_KINDS) expect(listKinds(page), kind).not.toContain(kind);
 
-      // The rest of the log is untouched: a worker still reads the entries its
-      // own work is recorded in.
+      // The rest of the log is unaffected: a worker still reads the entries
+      // that record its own work.
       expect(listKinds(page)).toContain("task.created");
 
-      // Asking for a security kind by name is the same answer, not a way round
-      // the filter.
+      // Filtering by a security kind returns the same result; it is not a way
+      // around the filter.
       for (const kind of SECURITY_KINDS) {
         expect((await listEvents(base, token, `?kind=${kind}`)).items, kind).toEqual([]);
       }
 
-      // And the user, on the same log, sees every one of them.
+      // The user, on the same log, sees all of them.
       const theirs = await listEvents(base, arranged.token, "?limit=500");
       for (const kind of SECURITY_KINDS) expect(listKinds(theirs), kind).toContain(kind);
     });
   });
 
-  it("answers a worker session's read of one with a not-found, and the user's with the entry", async () => {
+  it("fails a worker session's read of one with not_found, and returns the entry to the user", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
       const { token } = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
@@ -138,8 +139,8 @@ describe("security entries in the event log", () => {
         expect((await mine.json()) as Record<string, unknown>).toMatchObject({ id, kind });
       }
 
-      // What is withheld is the security kind and nothing else: the same
-      // session reads a non-security entry by id.
+      // Only security kinds are hidden: the same session can read a
+      // non-security entry by id.
       const created = await listEvents(base, token, "?kind=task.created");
       const id = created.items[0]!.id as number;
       const readable = await get(base, `/api/v1/events/${String(id)}`, token);

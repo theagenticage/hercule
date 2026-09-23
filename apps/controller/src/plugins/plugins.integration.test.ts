@@ -1,7 +1,7 @@
 /**
- * The plugin routes over a real socket. The controller boots a registry of
- * fixture plugins through the real host, so what a request reads back is what a
- * real boot left behind.
+ * Tests the plugin routes over a real socket. The controller boots a registry
+ * of fixture plugins through the real host, so a request reads what a real
+ * boot left behind.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -26,7 +26,7 @@ import {
 import { registry as shipped } from "./registry";
 import { createPluginFixture, buildProviderDefinition } from "./testing";
 
-/** A plugin as the API hands it back. */
+/** A plugin as the API returns it. */
 interface PluginDetail {
   readonly id: string;
   readonly displayName: string;
@@ -48,9 +48,9 @@ interface PluginDetail {
 }
 
 /**
- * Built afresh per test, because a fixture counts the starts it was given and a
- * shared registry would hand the second test a plugin the first had already
- * nursed back to health.
+ * Builds the fixture registry. It is built fresh for each test, because a
+ * fixture counts its activations, and a shared registry would give the second
+ * test a plugin the first test had already brought back to health.
  */
 const buildPlugins = (): ReadonlyArray<Plugin> =>
   [
@@ -69,7 +69,7 @@ const buildPlugins = (): ReadonlyArray<Plugin> =>
     createPluginFixture({ id: "flaky", activateFailures: 1 }),
   ].map((built) => built.plugin);
 
-/** The three ways a plugin is turned away before any of its code runs. */
+/** The plugins that get the `refused` status in the three ways possible, before any of their code runs. */
 const REFUSED = ["outdated", "greedy", "unrenderable"] as const;
 
 const withPlugins = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
@@ -98,7 +98,7 @@ const configurePlugin = (
 ): Promise<Response> =>
   send("PUT", base, `/api/v1/plugins/${id}/config`, { body: { config }, token });
 
-/** The paths and methods of every plugin route, for the sweeps over all of them. */
+/** The write routes and their audit kinds, for tests that cover all of them. */
 const WRITES = [
   { verb: "enable", audit: "plugin.enabled" },
   { verb: "disable", audit: "plugin.disabled" },
@@ -106,7 +106,7 @@ const WRITES = [
   { verb: "reset-state", audit: "plugin.stateReset" },
 ] as const;
 
-/** The catalog rows as the database holds them, keyed by owner and row id. */
+/** Reads the catalog rows from the database, keyed by owner and row id. */
 const readPersistedDefinitions = async (
   sql: ServerHarness["sql"],
 ): Promise<ReadonlyMap<string, unknown>> => {
@@ -123,7 +123,7 @@ const readPersistedDefinitions = async (
 };
 
 describe("GET /plugins", () => {
-  it("hands back every compiled-in plugin, in registry order, with what each one is", async () => {
+  it("returns every compiled-in plugin in registry order, with its details", async () => {
     await withPlugins(async ({ base }) => {
       const token = await completeSetup(base);
 
@@ -184,7 +184,7 @@ describe("GET /plugins", () => {
     });
   });
 
-  it("carries the plugin's config schema as JSON Schema", async () => {
+  it("includes the plugin's config schema as JSON Schema", async () => {
     await withPlugins(async ({ base }) => {
       const token = await completeSetup(base);
       const plugins = await listPlugins(base, token);
@@ -203,7 +203,7 @@ describe("GET /plugins", () => {
     });
   });
 
-  it("carries each contribution as the catalog stored it", async () => {
+  it("includes each contribution as the catalog stored it", async () => {
     await withPlugins(async ({ base, sql }) => {
       const token = await completeSetup(base);
       const plugins = await listPlugins(base, token);
@@ -232,7 +232,7 @@ describe("GET /plugins", () => {
 });
 
 describe("GET /plugins/{id}", () => {
-  it("answers with the same plugin the listing carries", async () => {
+  it("returns the same plugin as the listing", async () => {
     await withPlugins(async ({ base }) => {
       const token = await completeSetup(base);
       const plugins = await listPlugins(base, token);
@@ -243,11 +243,11 @@ describe("GET /plugins/{id}", () => {
     });
   });
 
-  it("answers not_found for a plugin this binary does not hold", async () => {
+  it("fails with not_found for a plugin this binary does not include", async () => {
     await withPlugins(async ({ base }) => {
       const token = await completeSetup(base);
-      // The same shape of request for a plugin that is installed, so what the
-      // refusal below says is about the id and not about the route.
+      // The same request for an installed plugin succeeds, so the error below
+      // is about the id and not about the route.
       expect((await get(base, "/api/v1/plugins/alpha", token)).status).toBe(200);
 
       const response = await get(base, "/api/v1/plugins/gamma", token);
@@ -258,7 +258,7 @@ describe("GET /plugins/{id}", () => {
 });
 
 describe("the plugin routes with no credential", () => {
-  it("answers 401 to every one of them, and changes nothing", async () => {
+  it("returns 401 for every route, and changes nothing", async () => {
     await withPlugins(async ({ base }) => {
       const token = await completeSetup(base);
 
@@ -288,8 +288,8 @@ describe("the plugin routes with no credential", () => {
   });
 });
 
-describe("the five moves a user makes from Settings", () => {
-  it("each answers with the plugin as the move left it", async () => {
+describe("the five lifecycle changes a user makes from Settings", () => {
+  it("each returns the plugin as the change left it", async () => {
     await withPlugins(async ({ base }) => {
       const token = await completeSetup(base);
 
@@ -331,7 +331,7 @@ describe("the five moves a user makes from Settings", () => {
     });
   });
 
-  it("each appends its own audit row, stamped with the user", async () => {
+  it("each appends its own audit row, with the user as the actor", async () => {
     await withPlugins(async ({ base, audit }) => {
       const token = await completeSetup(base);
 
@@ -356,12 +356,12 @@ describe("the five moves a user makes from Settings", () => {
   });
 });
 
-describe("what a live subscriber is told about a plugin", () => {
-  it("names the plugin once per move, whichever of the five it was", async () => {
+describe("what a live subscriber receives about a plugin", () => {
+  it("names the plugin once per lifecycle change, whichever of the five it was", async () => {
     await withPlugins(async (harness) => {
       const token = await completeSetup(harness.base);
-      // The boot's own activation failure is a plugin change too, and it is
-      // still in flight when the listener comes up.
+      // The activation failure during boot is also a plugin change, and it
+      // may still be in flight when the listener starts.
       await waitForLiveToSettle();
       const ticket = await fetchTicket(harness.base, token);
 
@@ -380,10 +380,10 @@ describe("what a live subscriber is told about a plugin", () => {
           const plugins = yield* collectMessages(client, { topic: "plugin" });
           yield* Effect.promise(() => expectHeld(harness.live, 1, "plugin"));
 
-          // One subscription across all five, and each announcement is waited
-          // for before the next move is made: changes are collected for a
-          // short window before they are announced, so two moves made back to
-          // back would arrive as one message naming both plugins.
+          // One subscription for all five changes, and each message is awaited
+          // before the next change is made. Changes are collected for a short
+          // window before they are sent, so two changes made back to back
+          // would arrive as one message naming both plugins.
           for (const [index, [id, makeMove]] of moves.entries()) {
             const response = yield* Effect.promise(makeMove);
             expect(response.status, `${id}: ${yield* Effect.promise(() => response.text())}`).toBe(
@@ -411,8 +411,8 @@ describe("what a live subscriber is told about a plugin", () => {
   });
 });
 
-describe("a move the plugin's state does not allow", () => {
-  it("refuses a config the plugin's schema rejects, naming the field", async () => {
+describe("a lifecycle change the plugin's state does not allow", () => {
+  it("rejects a config the plugin's schema rejects, naming the field", async () => {
     await withPlugins(async ({ base }) => {
       const token = await completeSetup(base);
 
@@ -440,7 +440,7 @@ describe("a move the plugin's state does not allow", () => {
     });
   });
 
-  it("refuses a config carrying a key the plugin does not declare", async () => {
+  it("rejects a config with a key the plugin does not declare", async () => {
     await withPlugins(async ({ base }) => {
       const token = await completeSetup(base);
 
@@ -454,7 +454,7 @@ describe("a move the plugin's state does not allow", () => {
     });
   });
 
-  it("refuses a retry of a plugin that is running, so Retry is never a second Enable", async () => {
+  it("rejects a retry of a plugin that is running, so Retry never works as a second Enable", async () => {
     await withPlugins(async ({ base, audit }) => {
       const token = await completeSetup(base);
 
@@ -465,7 +465,7 @@ describe("a move the plugin's state does not allow", () => {
     });
   });
 
-  it("refuses every write on a plugin that was never loaded, however it was turned away", async () => {
+  it("rejects every write on a refused plugin, whatever the reason it was refused", async () => {
     await withPlugins(async ({ base, audit }) => {
       const token = await completeSetup(base);
 
@@ -492,12 +492,12 @@ describe("a move the plugin's state does not allow", () => {
 });
 
 /**
- * The registry a release ships, over the same routes. Every test above boots a
- * registry of fixtures; this one boots what the binary boots, because what it
- * asserts is that a shipped plugin arrives whole.
+ * Tests the registry a release ships, over the same routes. The tests above
+ * boot a registry of fixtures; these boot the real registry, because they
+ * check that a shipped plugin arrives complete.
  */
 describe("the shipped registry over the routes", () => {
-  it("carries the github plugin with its connections capability and its connection type", async () => {
+  it("includes the github plugin with its connections capability and its connection type", async () => {
     await withServer(
       async ({ base }) => {
         const token = await completeSetup(base);
@@ -516,7 +516,7 @@ describe("the shipped registry over the routes", () => {
     );
   });
 
-  it("loads a plugin whose manifest asks for connections, rather than turning it away", async () => {
+  it("loads a plugin whose manifest asks for connections, rather than refusing it", async () => {
     const asking = createPluginFixture({
       id: "asking",
       capabilities: ["providers", "connections"],
@@ -537,12 +537,12 @@ describe("the shipped registry over the routes", () => {
 });
 
 /**
- * The kind catalog the pipeline validates an emit against. It is an ordinary
- * contribution, so what is asserted here is the row a boot leaves behind and
- * what a second boot does to it, read both from the table and over the route.
+ * Tests the event kind catalog that an emit is validated against. It is an
+ * ordinary contribution, so these tests check the row a boot writes and what
+ * a second boot does to it, read both from the table and through the route.
  */
 
-/** The spec 08 section 5.1 roster, spelled out because the roster is the claim. */
+/** The event kinds from spec 08 section 5.1, written out because the list itself is what is tested. */
 const GITHUB_KINDS = [
   "github.notification",
   "github.issue.opened",
@@ -561,7 +561,7 @@ const GITHUB_KINDS = [
   "github.pr.checks-completed",
 ] as const;
 
-/** The block every payload carries, so a ref and a url derive the same way. */
+/** The subject block every payload has, so a ref and a URL are derived the same way. */
 const SUBJECT_FIELDS = ["repo", "number", "title", "author", "state", "url"] as const;
 
 interface ContributionRow {
@@ -587,10 +587,10 @@ const readContributionRows = (
 type JsonSchema = Record<string, unknown>;
 
 /**
- * A JSON Schema node, with a reference into the document's own definitions
- * followed. A schema shared by fifteen kinds is written once and pointed at, so
- * a test that reads only the inline form would be asserting on the derivation
- * rather than on the block.
+ * Returns a JSON Schema node, following a `$ref` into the document's own
+ * definitions. A schema shared by fifteen kinds is written once and referred
+ * to, so a test that read only the inline form would test the derivation
+ * rather than the block.
  */
 const followRef = (node: unknown, root: JsonSchema): JsonSchema => {
   const schema = (node ?? {}) as JsonSchema;
@@ -601,7 +601,7 @@ const followRef = (node: unknown, root: JsonSchema): JsonSchema => {
   return defs[name] ?? {};
 };
 
-/** A plugin contributing one event source, for the cases about registration. */
+/** Builds a plugin that contributes one event source, for the registration tests. */
 const buildEventSourcePlugin = (kinds: ReadonlyArray<string>): Plugin => ({
   manifest: {
     id: "acme",
@@ -630,7 +630,7 @@ const buildEventSourcePlugin = (kinds: ReadonlyArray<string>): Plugin => ({
 });
 
 describe("the event kinds the shipped github plugin declares", () => {
-  it("writes one event-source row naming the connection type and the whole roster", async () => {
+  it("writes one event-source row with the connection type and every event kind", async () => {
     await withServer(
       async ({ base, sql }) => {
         const token = await completeSetup(base);
@@ -648,7 +648,7 @@ describe("the event kinds the shipped github plugin declares", () => {
         expect(definition.connectionType).toBe("github/github");
         expect(Object.keys(definition.kinds).sort()).toEqual([...GITHUB_KINDS].sort());
 
-        // The same row over the route a client reads the catalog with.
+        // The same row, through the route a client reads the catalog with.
         const found = (await listPlugins(base, token)).find((plugin) => plugin.id === "github");
         const contribution = found?.contributions.find(
           (one) => one.extensionPoint === "event-source",
@@ -660,7 +660,7 @@ describe("the event kinds the shipped github plugin declares", () => {
     );
   });
 
-  it("declares each kind with a description and a payload schema carrying the subject", async () => {
+  it("declares each kind with a description and a payload schema that includes the subject", async () => {
     await withServer(
       async ({ sql }) => {
         const rows = await readContributionRows(sql, "event-source");
@@ -688,7 +688,7 @@ describe("the event kinds the shipped github plugin declares", () => {
     );
   });
 
-  it("leaves the same row behind when the controller boots a second time", async () => {
+  it("leaves the same row when the controller boots a second time", async () => {
     await withServer(
       async ({ sql, reboot }) => {
         const before = await readContributionRows(sql, "event-source");
@@ -704,7 +704,7 @@ describe("the event kinds the shipped github plugin declares", () => {
 });
 
 describe("an event source whose kind is not namespaced", () => {
-  it("refuses the registration, naming the kind, and writes no row", async () => {
+  it("marks the plugin errored, naming the kind, and writes no row", async () => {
     await withServer(
       async ({ base, sql }) => {
         const token = await completeSetup(base);
@@ -719,7 +719,7 @@ describe("an event source whose kind is not namespaced", () => {
     );
   });
 
-  it("takes the same kind once it carries the plugin id", async () => {
+  it("accepts the same kind once it starts with the plugin id", async () => {
     await withServer(
       async ({ base, sql }) => {
         const token = await completeSetup(base);

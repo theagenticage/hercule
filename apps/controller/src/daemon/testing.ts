@@ -1,17 +1,17 @@
 /**
- * The harness the event pipeline's integration suites share: a real
- * controller, a real machine on the runner socket, and the arrangements a
- * subscription and an event need.
+ * Test helpers shared by the event pipeline's integration tests: a real
+ * controller, a fake runner on the runner socket, and helpers to set up
+ * subscriptions and events.
  *
- * Everything here runs against the real controller, because a delivery is only
- * a delivery when a frame crosses that socket. The pipeline is never called by
- * hand: its tick runs with the interval shrunk to a few milliseconds, which is
- * the same loop `hercule serve` forks, and each case waits for what the tick
- * did rather than for a clock.
+ * Everything runs against the real controller, because a delivery only counts
+ * when a frame crosses the socket. Tests never call the pipeline directly: its
+ * tick runs with the interval shortened to a few milliseconds, in the same
+ * loop `hercule serve` starts, and each test waits for the tick's result
+ * rather than for a fixed time.
  *
- * Two things are read from the tables rather than through an operation,
- * because no operation answers them: the router's own cursor row, and which
- * subscription and event an input row was written for.
+ * Two things are read straight from the tables, because no operation returns
+ * them: the router's cursor row, and the subscription and event an input row
+ * was written for.
  */
 import { expect } from "vitest";
 import { Duration, Effect, Layer } from "effect";
@@ -37,14 +37,13 @@ import {
   type Arranged,
 } from "../sessions/testing";
 
-/** Short enough that a test waits out several ticks without a long sleep. */
+/** The tick interval in tests: short enough to wait several ticks without a long sleep. */
 const TICK = Duration.millis(10);
 
 /**
- * Waits out several ticks of the pipeline, for a case whose criterion is that
- * nothing more went out. There is nothing to wait for, so the wait is a span
- * of time: six ticks, which is long enough that a tick that would have sent
- * something has run.
+ * Waits six pipeline ticks, for tests that check that nothing more was sent.
+ * There is no result to wait for, so the test waits a fixed time, long enough
+ * for any tick that would have sent something to have run.
  */
 export const waitOutSeveralTicks = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, Duration.toMillis(TICK) * 6));
@@ -54,26 +53,26 @@ export const REF = "github:pr:o/r#87";
 export const OTHER_REF = "github:pr:o/r#88";
 export const PR_URL = "https://github.com/o/r/pull/87";
 
-/** A condition no evaluation can answer: the payload has no such path. */
+/** A condition that always fails to evaluate: the payload has no such path. */
 export const UNRESOLVABLE = "event.payload.nothing.deeper == 1";
 
 /**
- * The id of the row a test writes by hand. Canonical v7, because that is the
- * only shape the store reads back: a v4 is refused, and the refusal lands on
- * a delivery fiber nobody is waiting on.
+ * The id of the input row a test inserts directly. It must be a UUID v7,
+ * because the store reads back only v7 ids. A v4 id would fail on a delivery
+ * fiber that no test is waiting on.
  */
 export const STRANDED_INPUT_ID = "0199f0b7-0000-7000-8000-000000000000";
 
-/** More events than one pass reads, so the router has to pass again to finish. */
+/** More events than one pass reads, so the router needs more than one pass. */
 export const BURST = 250;
 
-/** A condition that calls a function nobody registered. */
+/** A condition that calls a function that does not exist. */
 export const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
 
 /**
- * A condition reading the original payload the source system sent. The router
- * does not put it in the context at all, so this must fail rather than answer
- * that there is none.
+ * A condition that reads the raw payload from the source system. The router
+ * leaves the raw payload out of the context, so this condition must fail to
+ * evaluate, not evaluate as if the value were null.
  */
 export const READS_RAW = "event.raw != null";
 
@@ -99,15 +98,16 @@ export const buildPlugins = (): ReadonlyArray<Plugin> => [
   github,
 ];
 
-/** What one call of the evaluation-error stub was told. */
+/** The arguments of one call to the evaluation-error stub. */
 export interface Notified {
   readonly subscriptionId: string;
   readonly message: string;
 }
 
 /**
- * The stub that the notification ticket will fill in. It records instead of
- * doing nothing, so "once per error" is something a test can read.
+ * Returns an evaluation-error notifier that records each call in `calls`.
+ * Until notifications are built the real notifier does nothing, and this one
+ * lets a test check that a notification happens once per error.
  */
 export const buildRecordingNotifier = (
   calls: Array<Notified>,
@@ -120,11 +120,12 @@ export const buildRecordingNotifier = (
   });
 
 /**
- * A controller whose pipeline ticks fast enough for a test to wait it out.
+ * Runs `body` against a controller whose pipeline ticks every few
+ * milliseconds.
  *
- * A case about what one request does on its own hands over an interval no test
- * outlives, which stops the tick from running at all: what is then observed is
- * the request's own work and nothing else's.
+ * A test about what one request does by itself passes an interval longer than
+ * any test, so the tick never runs, and the test sees only the request's own
+ * work.
  */
 export const withPipeline = (
   body: (arranged: Arranged) => Promise<void>,
@@ -146,13 +147,13 @@ export const withPipeline = (
 export const runEffect = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(Effect.orDie(effect));
 
-/** A session on a profile that may subscribe and read back what it subscribed to. */
+/** Spawns a session on a profile that may create and read subscriptions. */
 export const spawnSubscriber = (arranged: Arranged, name: string): Promise<Agent> =>
   spawnAgentWithGrants(arranged, name, ["subscription.write", "subscription.read"]);
 
 /**
- * A session that exited leaving nothing to resume: its machine never reported
- * a provider-native session, so the transcript is gone.
+ * Spawns a session that cannot be resumed once it exits: the fake runner never
+ * reports a provider-native session for it, so it has no transcript.
  */
 export const spawnStrandedAgent = async (arranged: Arranged, name: string): Promise<Agent> => {
   const profile = await createProfile(arranged, name, ["subscription.write", "subscription.read"]);
@@ -173,7 +174,7 @@ const reportExit = (arranged: Arranged, sessionId: string, seq: number): void =>
     reason: "stopped",
   });
 
-/** Ends a session the way its machine ends one, and answers the ended row. */
+/** Reports the session's exit from the fake runner, and waits until the session is exited. */
 export const exitSession = async (arranged: Arranged, agent: Agent, seq: number): Promise<void> => {
   reportExit(arranged, agent.session.id, seq);
   await waitForSession(arranged, agent.session.id, (one) => one.status === "exited");
@@ -198,7 +199,7 @@ export const reportTurnCompleted = (arranged: Arranged, sessionId: string, seq: 
     state: "completed",
   });
 
-/** Puts a session on a running turn, so an input has to wait for a boundary. */
+/** Starts a turn on the session, so a new input has to wait for the turn to end. */
 export const makeBusy = async (arranged: Arranged, agent: Agent, seq: number): Promise<void> => {
   reportTurnStarted(arranged, agent.session.id, seq);
   await waitForSession(arranged, agent.session.id, (one) => one.status === "busy");
@@ -225,13 +226,13 @@ export interface Health {
   readonly at?: string;
 }
 
-/** The wake-up a restart cancelled, as a subscription answers it. */
+/** A wake-up that a restart cancelled, as the subscription list returns it. */
 export interface LostWakeUp {
   readonly eventId: number;
   readonly at: string;
 }
 
-/** One subscription, as its holder reads it back. */
+/** One subscription, as its holder reads it through the API. */
 export interface ReadSubscription {
   readonly id: string;
   readonly health: Health;
@@ -260,7 +261,7 @@ export const waitForSubscription = (
   id: string,
   ready: (subscription: ReadSubscription) => boolean,
 ): Promise<ReadSubscription> =>
-  waitUntil("answered the subscription the holder was waiting on", async () => {
+  waitUntil("reached the subscription state the test waits for", async () => {
     const found = await readSubscription(arranged, agent, id);
     return ready(found) ? found : undefined;
   });
@@ -277,7 +278,7 @@ export const buildPayload = (title: string): unknown => ({
   subject: { repo: "o/r", number: 87, title, url: PR_URL },
 });
 
-/** One manual event, through the operation a person calls. */
+/** Emits one manual event through the API. Returns its event id. */
 export const emitManualEvent = async (
   arranged: Arranged,
   refs: ReadonlyArray<string>,
@@ -293,7 +294,7 @@ export const emitManualEvent = async (
   return ((await response.json()) as { eventId: number }).eventId;
 };
 
-/** One matched input: which event it came from, and what the session will read. */
+/** One matched input row: the event it came from, and the text the session receives. */
 export interface MatchedInputRow {
   readonly event_id: number;
   readonly source: string;
@@ -325,7 +326,7 @@ export const waitForMatchedInputRows = (
     return ready(rows) ? rows : undefined;
   });
 
-/** The router's cursor, beside the position of the newest entry in the log. */
+/** Reads the router's cursor and the id of the newest event in the log. */
 export const readCursorAndHead = async (
   harness: ServerHarness,
 ): Promise<{ readonly position: number | null; readonly head: number }> => {
@@ -338,8 +339,9 @@ export const readCursorAndHead = async (
 };
 
 /**
- * The cursor once it has reached the end of the log. Read together with the
- * head in one statement, so the pair can never be half a tick apart.
+ * Waits until the router's cursor reaches the end of the log, and returns it.
+ * The cursor and the newest event id are read in one statement, so they
+ * always come from the same moment.
  */
 export const waitUntilCaughtUp = (harness: ServerHarness): Promise<number> =>
   waitUntil("walked the log to its end", async () => {
@@ -347,7 +349,7 @@ export const waitUntilCaughtUp = (harness: ServerHarness): Promise<number> =>
     return seen.position !== null && seen.position === seen.head ? seen.position : undefined;
   });
 
-/** One subscription's stored row, which is where an ended one is read. */
+/** One subscription's stored row, read straight from the table. */
 export interface SubscriptionRow {
   readonly ended_at: string | null;
   readonly ended_reason: string | null;
@@ -371,10 +373,9 @@ export const readSubscriptionRow = async (
 };
 
 /**
- * Rewrites a stored condition. `subscription.create` stores only what it
- * expanded from a target, so a condition that fails is arranged on the row the
- * router reads rather than asked for through an operation that would refuse
- * it.
+ * Overwrites a subscription's stored condition. `subscription.create` stores
+ * only conditions it builds from a target, so a test that needs a failing
+ * condition writes it straight into the row the router reads.
  */
 export const storeCondition = (
   harness: ServerHarness,
@@ -389,7 +390,7 @@ export const storeCondition = (
 export const listInputFrames = (arranged: Arranged): ReadonlyArray<SessionInput> =>
   listFrames<SessionInput>(arranged.wire, "sessionInput");
 
-/** Whether a frame carrying this text has crossed the socket. */
+/** Lists the input frames sent so far whose text contains `text`. */
 export const listFramesCarrying = (arranged: Arranged, text: string): ReadonlyArray<SessionInput> =>
   listInputFrames(arranged).filter((frame) => frame.input.text.includes(text));
 

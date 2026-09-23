@@ -1,11 +1,10 @@
 /**
- * The routes the sessions domain owns: one per live subscription.
+ * The routing table for sessions: one route per live subscription.
  *
- * This is the only module that imports both subscriptions and sessions, which
- * is what keeps either of them from importing the other. It holds no rule
- * about a session and no rule about a subscription: every decision here is a
- * call to the service or the repository that owns it, and this file is the
- * order those calls are made in.
+ * This is the only module that imports both subscriptions and sessions, so
+ * neither of them has to import the other. It holds no rules of its own about
+ * sessions or subscriptions. Every decision is a call to the service or
+ * repository that owns it, and this file only sets the order of those calls.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -36,12 +35,13 @@ export const sessionRoutingTable: Effect.Effect<
   const notifier = yield* EvaluationErrorNotifier;
 
   /**
-   * Ends every subscription whose holder session has ended for good.
+   * Ends every subscription whose holder session has ended for good. Returns
+   * the ids of the subscriptions it ended.
    *
-   * It is the first thing a pass does, so an event is never evaluated against
-   * a claim nobody is left to answer. A process that merely exited ends
-   * nothing: a session whose transcript can still be picked up is woken by a
-   * match like an idle one.
+   * A pass runs this first, so no event is evaluated against a subscription
+   * whose holder is gone. A session whose process merely exited still counts
+   * as a holder: its transcript can still be resumed, so a match wakes it like
+   * an idle session.
    */
   const sweepEndedHolders = (
     live: ReadonlyArray<StoredSubscription>,
@@ -52,15 +52,15 @@ export const sessionRoutingTable: Effect.Effect<
       const swept = new Set<string>();
       for (const subscription of live.filter((one) => endedHolderIds.has(one.holder.id))) {
         const reason = buildHolderEndedReason(subscription.holder.id);
-        // Nobody asked for this end, so the system is what stamps it.
+        // No user or session asked for this end, so the system is the actor.
         yield* subscriptions.end({
           id: subscription.id,
           at: yield* nowIso,
           reason,
           actor: SYSTEM_ACTOR,
         });
-        // An input this subscription produced that nothing has delivered
-        // yet is waiting for a session that will never take it.
+        // Any input from this subscription that is not delivered yet would
+        // wait forever for a session that will never take it.
         yield* sessions.cancelMatchedInputs(subscription.id, reason);
         swept.add(subscription.id);
       }
@@ -76,10 +76,10 @@ export const sessionRoutingTable: Effect.Effect<
     );
 
   /**
-   * The subscriptions still waiting, as routes. The condition is handed over
-   * as it is stored: the router compiles it, and a source that no longer
-   * compiles is a failure of that one subscription, recorded the same way as
-   * one that fails while it runs.
+   * Ends the subscriptions whose holder is gone, then returns the live
+   * subscriptions as routes. The condition is passed on as stored: the router
+   * parses it, and a condition that no longer parses is recorded as an error
+   * of that one subscription, like one that fails while it runs.
    */
   const prepare = (): Effect.Effect<ReadonlyArray<Route>, SqlError> =>
     Effect.gen(function* () {
@@ -101,11 +101,11 @@ export const sessionRoutingTable: Effect.Effect<
                 text: renderEventInput(event),
                 at: yield* nowIso,
               });
-              // A lost wake-up says one event never reached this holder. A
-              // matched input written after it is what makes that out of date, so
-              // the error goes here and nowhere else. Nothing is written for
-              // an event this subscription already has a row for, and nothing
-              // about its health has changed either.
+              // A lost wake-up records that one event never reached this
+              // holder. A matched input written after it makes that record out
+              // of date, so this is the one place that clears it. When the
+              // subscription already has a row for this event, nothing is
+              // written, and its health does not change either.
               if (Option.isSome(written)) yield* subscriptions.clearLostWakeUp(subscription.id);
             }),
         }));

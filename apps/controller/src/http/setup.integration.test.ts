@@ -1,6 +1,6 @@
 /**
- * `setup.complete` over a real socket: what a single-use setup token is worth
- * when more than one caller presents it at the same moment.
+ * Tests `setup.complete` over a real socket, when several callers send the
+ * same single-use setup token at the same moment.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -13,7 +13,7 @@ const completeSetupAs = (base: string, username: string) =>
   });
 
 describe("setup.complete over HTTP", () => {
-  it("finishes first run once, however many callers race with the same token", async () => {
+  it("completes first-run setup once, however many callers race with the same token", async () => {
     await withServer(async ({ base, audit, sql }) => {
       const responses = await Promise.all(
         ["alice", "bob", "carol", "dave"].map((username) => completeSetupAs(base, username)),
@@ -21,8 +21,9 @@ describe("setup.complete over HTTP", () => {
 
       const accepted = responses.filter((response) => response.status === 200);
       expect(accepted).toHaveLength(1);
-      // The losers are refused by whichever guard sees them first: the gate,
-      // once the token hash is cleared, or the claim on the completion stamp.
+      // The other callers are rejected by whichever check sees them first: the
+      // token check, once the token hash is cleared, or the claim on the
+      // completion timestamp.
       for (const refused of responses.filter((response) => response.status !== 200)) {
         expect([401, 409]).toContain(refused.status);
       }

@@ -1,16 +1,18 @@
 /**
- * Paging and sorting over a real socket.
+ * Tests paging and sorting over a real socket.
  *
- * These are the claims a service-level test cannot make, because each one is
- * about what survives the trip through a URL query: that `sort` arrives at all,
- * that an unknown field is refused rather than ignored, and that a cursor from
- * somewhere else is a `validation` error rather than a page whose boundary
- * means nothing.
+ * A service-level test cannot check these, because each one is about what
+ * survives the trip through a URL query:
+ *
+ * - `sort` arrives at all;
+ * - an unknown sort field is rejected rather than ignored;
+ * - a cursor from somewhere else is a `validation` error, not a page with a
+ *   meaningless boundary.
  */
 import { describe, expect, it } from "vitest";
 import { completeSetup, post, send, withServer } from "./testing";
 
-/** The listing's names, in the order the server returned them. */
+/** Returns the listing's names, in the order the server returned them. */
 const listApiKeyNames = async (
   base: string,
   token: string,
@@ -22,7 +24,7 @@ const listApiKeyNames = async (
   return body.items.map((item) => item.name);
 };
 
-/** A cursor a listing handed back, or `undefined` on the last page. */
+/** Returns a listing's next cursor, or `undefined` on the last page. */
 const readNextCursor = async (base: string, token: string, path: string): Promise<string> => {
   const response = await send("GET", base, path, { token });
   expect(response.status).toBe(200);
@@ -31,11 +33,11 @@ const readNextCursor = async (base: string, token: string, path: string): Promis
   return body.nextCursor;
 };
 
-/** The error envelope's code, whatever the status was. */
+/** Returns the error envelope's code, whatever the status was. */
 const readErrorCode = async (response: Response): Promise<string> =>
   ((await response.json()) as { error?: { code?: string } }).error?.code ?? "no envelope";
 
-/** Three keys, minted in order, so a listing has something to order. */
+/** Mints three API keys in order, so a listing has something to sort. */
 const mintThreeKeys = async (base: string, token: string): Promise<void> => {
   for (const name of ["a", "b", "c"]) {
     const minted = await post(base, "/api/v1/api-keys", { name }, token);
@@ -44,17 +46,18 @@ const mintThreeKeys = async (base: string, token: string): Promise<void> => {
 };
 
 describe("sort over the wire", () => {
-  it("reverses the default order when asked, and refuses what it cannot sort on", async () => {
+  it("reverses the default order when asked, and rejects a field it cannot sort on", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await mintThreeKeys(base, token);
 
-      // Newest first is the default for credentials; `sort` has to be able to
-      // say otherwise, and to be seen doing it.
+      // Newest first is the default for credentials; `sort` must be able to
+      // change it, visibly.
       expect(await listApiKeyNames(base, token, "")).toEqual(["c", "b", "a"]);
       expect(await listApiKeyNames(base, token, "?sort=createdAt:asc")).toEqual(["a", "b", "c"]);
       expect(await listApiKeyNames(base, token, "?sort=createdAt:desc")).toEqual(["c", "b", "a"]);
-      // No direction: the service's own default, not a refusal.
+      // No direction: the service's default applies, and the request does not
+      // fail.
       expect(await listApiKeyNames(base, token, "?sort=createdAt")).toEqual(["c", "b", "a"]);
 
       const unknownField = await send("GET", base, "/api/v1/api-keys?sort=bogus:asc", { token });
@@ -94,7 +97,7 @@ describe("sort over the wire", () => {
 });
 
 describe("a cursor that is not this listing's", () => {
-  /** What the old loose cursor check let through, straight into a 500. */
+  /** A cursor the old, looser cursor check let through, which then caused a 500. */
   const dashes = Buffer.from(JSON.stringify(["x", "-".repeat(36)]), "utf8").toString("base64url");
 
   it("is a validation error, not a crash", async () => {
@@ -108,7 +111,7 @@ describe("a cursor that is not this listing's", () => {
     });
   });
 
-  it("is refused when it came from another listing", async () => {
+  it("is rejected when it came from another listing", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await mintThreeKeys(base, token);
@@ -117,8 +120,8 @@ describe("a cursor that is not this listing's", () => {
         token,
       });
       expect(stored.status).toBe(200);
-      // Two secrets now, and the seed leaves three shipped profiles, so both of
-      // these listings have a second page at limit 1.
+      // Two secrets now, and three built-in profiles, so both listings have a
+      // second page at limit 1.
       const fromSecrets = await readNextCursor(base, token, "/api/v1/secrets?limit=1");
       const fromProfiles = await readNextCursor(base, token, "/api/v1/profiles?limit=1");
 
@@ -130,7 +133,7 @@ describe("a cursor that is not this listing's", () => {
     });
   });
 
-  it("is refused when it was issued under a different sort", async () => {
+  it("is rejected when it was issued under a different sort", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await mintThreeKeys(base, token);
@@ -145,22 +148,22 @@ describe("a cursor that is not this listing's", () => {
       expect(replayed.status).toBe(400);
       expect(await readErrorCode(replayed)).toBe("validation");
 
-      // The same cursor under the sort that issued it still walks.
+      // The same cursor still works with the sort that issued it.
       expect(await listApiKeyNames(base, token, `?limit=1&cursor=${descending}`)).toEqual(["b"]);
     });
   });
 });
 
 describe("bounds on what a caller may send", () => {
-  it("refuses a huge username before it can be authenticated or audited", async () => {
+  it("rejects a huge username before it can be authenticated or audited", async () => {
     await withServer(async ({ base, audit }) => {
       await completeSetup(base);
       const response = await post(base, "/api/v1/auth/login", {
         username: "x".repeat(20_000),
         password: "correct horse battery staple",
       });
-      // 400, not 401: the request never reached the credential check, so
-      // nothing wrote the username into the log that is kept for 90 days.
+      // 400, not 401: the request never reached the credential check, so the
+      // username was not written into the log, which is kept for 90 days.
       expect(response.status).toBe(400);
       expect(await readErrorCode(response)).toBe("validation");
       expect(await audit("auth.login.failed")).toHaveLength(0);

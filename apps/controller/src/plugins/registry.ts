@@ -1,8 +1,9 @@
 /**
- * The one static registry: installed means listed here and compiled in.
+ * The static plugin registry. A plugin is installed when it is listed here and
+ * compiled in.
  *
- * There is no discovery and no install step, so this file is the whole
- * inventory, and its order is the order Settings > Plugins lists them in.
+ * There is no discovery and no install step, so this file lists every plugin,
+ * in the order Settings > Plugins shows them.
  */
 import type { Plugin } from "@hercule/plugin-host";
 import { claudeCode } from "@hercule/plugin-claude-code";

@@ -1,15 +1,16 @@
 /**
- * The bind warning.
+ * The warning printed when the controller binds outside its supported
+ * network perimeter.
  *
- * Hercule's supported perimeter is a LAN or a tailnet, and it serves plain HTTP.
- * Binding somewhere that is neither loopback nor a tailnet address is allowed -
- * it is the user's network - but it is said out loud, once, at startup. Hercule
- * warns; it never refuses.
+ * Hercule is meant to run on a LAN or a tailnet, and it serves plain HTTP.
+ * Binding to an address that is neither loopback nor a tailnet address is
+ * allowed, because it is the user's network, but Hercule prints a warning
+ * once at startup. It warns and never refuses to start.
  *
- * "Tailnet" is Tailscale's CGNAT range `100.64.0.0/10` and its IPv6 range
- * `fd7a:115c:a1e0::/48`; those two ranges are pinned here. A wildcard bind
- * warns as well: it includes every interface the machine has, which is exactly
- * what the warning is about.
+ * "Tailnet" means Tailscale's CGNAT range `100.64.0.0/10` and its IPv6 range
+ * `fd7a:115c:a1e0::/48`; those two ranges are hard-coded here. A wildcard bind
+ * warns as well, because it includes every interface the machine has, which is
+ * exactly what the warning is about.
  */
 
 const isLoopback = (host: string): boolean =>
@@ -23,7 +24,7 @@ const isTailscaleV4 = (host: string): boolean => {
   return Number.isInteger(second) && second >= 64 && second <= 127;
 };
 
-/** `fd7a:115c:a1e0::/48`: the first three groups pin the prefix. */
+/** `fd7a:115c:a1e0::/48`: the first three groups fix the prefix. */
 const isTailscaleV6 = (host: string): boolean =>
   host
     .replace(/^\[|\]$/g, "")
@@ -31,8 +32,8 @@ const isTailscaleV6 = (host: string): boolean =>
     .startsWith("fd7a:115c:a1e0:");
 
 /**
- * The line to print before binding, or `undefined` when the bind is inside the
- * supported perimeter.
+ * Returns the warning to print before binding, or `undefined` when the
+ * address is inside the supported perimeter.
  */
 export const buildPerimeterWarning = (host: string, port: number): string | undefined => {
   if (isLoopback(host) || isTailscaleV4(host) || isTailscaleV6(host)) return undefined;

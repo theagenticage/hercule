@@ -1,15 +1,15 @@
 /**
- * How long a live-socket ticket stays good.
+ * Tests how long a live socket ticket stays valid.
  *
- * The rest of the ticket's behaviour - who may fetch one, and that it is spent
- * on first use - is visible from the wire and tested there. Its lifetime is not:
- * the real controller runs on the real clock, and no integration test can wait
- * five minutes. So this one drives the store directly on a `TestClock` and moves
- * time rather than passing it.
+ * The rest of the ticket's behaviour, such as who may get one and that it
+ * works only once, is tested through the API. Its lifetime cannot be: the
+ * real controller uses the real clock, and no integration test can wait five
+ * minutes. So this test calls the service directly with a `TestClock` and
+ * moves time forward.
  *
- * Both sides of the boundary matter. A ticket that dies early breaks a client on
- * a slow network; one that outlives its window is a bearer credential lying
- * around in memory.
+ * Both sides of the limit matter. A ticket that expires early breaks a client
+ * on a slow network; one that lasts too long is a bearer credential left in
+ * memory.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
@@ -23,7 +23,7 @@ const USER: Actor = {
   credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
 };
 
-/** An agent inside a session, which is the one caller a ticket is refused to. */
+/** An agent inside a session, the only kind of caller that cannot get a ticket. */
 const AGENT: Actor = {
   _tag: "session",
   sessionId: "0199e0e7-0002-7000-8000-000000000000",
@@ -47,7 +47,7 @@ const runAs =
 const run = runAs(USER);
 
 describe("a ticket's lifetime", () => {
-  it("still resolves a moment before five minutes are up", async () => {
+  it("is still valid just before five minutes have passed", async () => {
     const actor = await run(
       Effect.gen(function* () {
         const tickets = yield* WsTickets;
@@ -60,7 +60,7 @@ describe("a ticket's lifetime", () => {
     expect(Option.getOrNull(actor)).toEqual(USER);
   });
 
-  it("resolves nobody once five minutes have passed", async () => {
+  it("is no longer valid once five minutes have passed", async () => {
     const actor = await run(
       Effect.gen(function* () {
         const tickets = yield* WsTickets;
@@ -91,10 +91,10 @@ describe("a ticket's lifetime", () => {
 });
 
 describe("who a ticket is issued to", () => {
-  it("refuses an agent inside a session, because the socket is the user's screens", async () => {
+  it("rejects an agent inside a session, because the socket serves the user's screens", async () => {
     // A 401 rather than the 403 a session actor gets elsewhere: this operation
-    // names no grant, so there is none for a refusal to point at. What the
-    // message says is the part that matters to whoever reads it.
+    // has no grant for a 403 to name. So the message is what tells the caller
+    // what went wrong.
     const refusal = await runAs(AGENT)(
       Effect.flip(Effect.flatMap(WsTickets, (tickets) => tickets.issue())),
     );

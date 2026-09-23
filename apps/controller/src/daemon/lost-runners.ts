@@ -1,13 +1,14 @@
 /**
- * The clock that ends the sessions of lost runners.
+ * The periodic sweep that ends the sessions of lost runners.
  *
  * Only a runner can report that a session has exited. A runner that never
- * connects again - a machine that was wiped, or one that was lost while the
- * controller was down - reports nothing, and its sessions would keep their
- * tokens for ever. The rule is `SessionService.endOnLostRunners`; this reads
- * which runners are connected, which is the runners domain's, and runs the
- * rule once when the controller starts and then on an interval, because the
- * rule depends on how much time has passed.
+ * connects again, such as a wiped machine or one lost while the controller was
+ * down, reports nothing, and its sessions would keep their tokens forever.
+ *
+ * The rule itself is `SessionService.endOnLostRunners`. This module reads
+ * which runners are connected from the runners domain, and runs the rule once
+ * when the controller starts and then on an interval, because the rule
+ * depends on how much time has passed.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -20,27 +21,30 @@ import { SessionService } from "../sessions";
 import { absorbFailures } from "./absorbing";
 
 /**
- * How often the sweep runs. The bound it applies is a session's absolute
- * timeout: whole minutes, and eight hours by default. So one more minute of
- * delay on top of it changes little.
+ * How often the sweep runs. The limit the sweep applies is a session's
+ * absolute timeout, which is a whole number of minutes and eight hours by
+ * default. So up to one more minute of delay changes little.
  */
 const LOST_RUNNER_SWEEP_INTERVAL: Duration.Duration = Duration.minutes(1);
 
-/** Tests hand over an interval they can wait out. */
+/** The sweep interval. Tests override it with a shorter one. */
 export const LostRunnerSweepInterval = Context.Reference<Duration.Duration>(
   "hercule/controller/daemon/LostRunnerSweepInterval",
   { defaultValue: (): Duration.Duration => LOST_RUNNER_SWEEP_INTERVAL },
 );
 
 /**
- * The first pass runs at once: the controller can have been down for longer
- * than the bound, and a token must not stay live for one more interval
- * because of that. A pass that fails is logged and the next one runs.
+ * Ends the sessions of lost runners, then repeats every interval. Never
+ * returns.
  *
- * The read of the connected runners and the write are one transaction, so a
- * runner that connects during the pass is either seen as connected or
- * connects after its sessions were ended. In the second case its report
- * lists what it still runs, and the controller stops those processes.
+ * The first pass runs at once: the controller may have been down for longer
+ * than the timeout, and a token must not stay valid for one more interval
+ * because of that. A pass that fails is logged, and the next one runs.
+ *
+ * Reading the connected runners and ending the sessions are one transaction.
+ * So a runner that connects during the pass is either seen as connected, or
+ * connects after its sessions were ended. In the second case, its sessions
+ * report lists what it still runs, and the controller stops those processes.
  */
 export const sweepSessionsOnLostRunners: Effect.Effect<
   never,

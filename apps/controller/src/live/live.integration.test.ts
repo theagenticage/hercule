@@ -1,31 +1,34 @@
 /**
- * The live socket against the real controller: how a connection is opened, what
- * it is allowed to ask for, and what the controller keeps hold of afterwards.
+ * Tests the live socket against the real controller: how a connection is
+ * opened, what it may ask for, and what the controller keeps afterwards.
  *
- * This drives a real WebSocket against a real listener with a real RPC client
- * built from the published contract group, because the whole point of the
- * socket is the wire. A hand-rolled frame would only re-test the RPC codec.
+ * The tests use a real WebSocket, a real listener and a real RPC client built
+ * from the published contract group, because the socket is tested on the
+ * wire. Hand-written frames would only test the RPC codec again.
  *
- * Four things matter here and nothing else does yet. A connection is nobody
- * until `hello` succeeds, and a ticket is spent the moment it does, so a stolen
- * or replayed one buys nothing. The vocabulary the socket accepts is closed: an
- * unknown Live Topic and a cursor on a mutable one are both refused, because the
- * client that sent them has a bug and silence would hide it. Every refusal
- * arrives as one of the contract's own errors and leaves the connection up, so a
- * client that mis-asks once can go on working. And a subscription the client
- * lets go of leaves nothing behind on the controller.
+ * The tests check four things about connections:
  *
- * What a subscription then carries is here too: a mutable topic's
+ * - A connection has no actor until `hello` succeeds, and the ticket is used
+ *   up at that moment, so a stolen or replayed ticket is useless.
+ * - The socket accepts a fixed set of values: an unknown Live Topic and a
+ *   cursor on a mutable topic both fail, because the client that sent them
+ *   has a bug, and ignoring it would hide the bug.
+ * - Every error is one of the contract's errors and leaves the connection
+ *   open, so a client that makes one bad request can keep working.
+ * - A subscription the client closes leaves nothing behind on the
+ *   controller.
+ *
+ * They also check what a subscription receives: a mutable topic's
  * invalidations, which name the changed records and nothing else, and the
- * `event` log's deltas, which carry the records themselves with the cursor a
- * reconnecting client replays from. Both are driven by ordinary HTTP calls
- * against the same controller, because a push that does not agree with what
- * `GET /tasks` and `GET /events` answer is worse than no push at all.
+ * `event` log's deltas, which carry the records themselves, with the cursor a
+ * reconnecting client replays from. Both are triggered by ordinary HTTP calls
+ * to the same controller, because a push that disagrees with `GET /tasks` or
+ * `GET /events` is worse than no push at all.
  *
- * And a connection is not trusted for ever: the credential behind it can be
- * revoked, the log it reads needs the grant reading the log needs, a subscriber
- * that stops reading is ended rather than buffered without bound, and the
- * greeting happens once.
+ * Finally, a connection is not trusted forever: its credential can be
+ * revoked, reading the log needs the same grant as over HTTP, a subscriber
+ * that stops reading is ended rather than buffered without limit, and `hello`
+ * works only once.
  */
 import { describe, expect, it } from "vitest";
 import type * as Duration from "effect/Duration";
@@ -84,9 +87,10 @@ import {
 } from "../sessions/testing";
 
 /**
- * Whether the listener will upgrade a plain dial of the socket at all. A dial
- * that neither opens nor errors answers "hung", so a handler that stops
- * answering reads as a failed assertion rather than as a timed-out suite.
+ * Checks whether the listener upgrades a plain connection to the socket at
+ * all. A connection that neither opens nor errors returns "hung", so a handler
+ * that stops responding shows up as a failed assertion rather than a timed-out
+ * suite.
  */
 const dial = (base: string): Promise<"open" | "refused" | "hung"> =>
   new Promise((resolve) => {
@@ -99,17 +103,17 @@ const dial = (base: string): Promise<"open" | "refused" | "hung"> =>
     setTimeout(() => resolve("hung"), 2000);
   });
 
-/** Runs a subscription to its first item, which is all a refusal needs. */
+/** Runs a subscription until its first item, which is enough to see an error. */
 const readFirstItem = (client: LiveClient, payload: { topic: string; cursor?: string }) =>
   Stream.runHead(client.subscribe(payload));
 
 /**
- * What a call answered with, refusal or not, and never later than `limit`.
+ * Returns the result of a call, success or error, waiting at most `limit`.
  *
- * A call the controller ought to refuse but does not would, flipped, throw its
- * own success as a defect and say nothing about what happened; and one that is
- * meant to fail but instead waits for a push that never comes would hang out
- * the whole suite. Both read here as a value the assertion can name.
+ * With `Effect.flip`, a call that should fail but succeeds would throw its
+ * success as a defect, which says nothing useful. And a call that should fail
+ * but instead waits for a push that never comes would hang the whole suite.
+ * Here both become a value the assertion can show.
  */
 const awaitOutcome = <A, E>(
   effect: Effect.Effect<A, E>,
@@ -120,29 +124,29 @@ const awaitOutcome = <A, E>(
     onFailure: (error): unknown => error,
   });
 
-/** The value, asserted present, so a test reads past an index without a cast. */
+/** Asserts that a value is present and returns it, so a test can use an indexed value without a cast. */
 const expectPresent = <T>(value: T | undefined): T => {
   expect(value).toBeDefined();
   return value as T;
 };
 
-/** The deltas a collector saw, which is every message on an append-only topic. */
+/** Returns the deltas a collector received, which is every message on an append-only topic. */
 const listDeltas = (collected: Collected): ReadonlyArray<Delta> =>
   collected.received.filter((message): message is Delta => message._tag === "delta");
 
 /**
- * A delta's items, narrowed to `Event`: the only one of `Delta`'s item shapes
- * with a numeric `id`, which is what tells the three apart on a topic that only
+ * Returns a delta's items as `Event`s: the only item type in `Delta` with a
+ * numeric `id`, which is how the three types are told apart. A topic only
  * ever carries one of them.
  */
 const listEventItems = (delta: Delta): ReadonlyArray<Event> =>
   delta.items.filter((item): item is Event => "id" in item);
 
-/** A delta's items, narrowed to `TranscriptRow`: the only shape with `position`. */
+/** Returns a delta's items as `TranscriptRow`s: the only item type with `position`. */
 const listTranscriptItems = (delta: Delta): ReadonlyArray<TranscriptRow> =>
   delta.items.filter((item): item is TranscriptRow => "position" in item);
 
-/** A delta's items, narrowed to `TapItem`: the only shape with `streamKind`. */
+/** Returns a delta's items as `TapItem`s: the only item type with `streamKind`. */
 const listTapItems = (delta: Delta): ReadonlyArray<TapItem> =>
   delta.items.filter((item): item is TapItem => "streamKind" in item);
 
@@ -165,14 +169,14 @@ const deleteTask = async (base: string, token: string, id: string): Promise<void
   expect(response.status).toBe(200);
 };
 
-/** The log as `GET /events` answers it, oldest first. */
+/** Lists the log as `GET /events` returns it, oldest first. */
 const listLogEvents = async (base: string, token: string): Promise<ReadonlyArray<Event>> => {
   const response = await get(base, "/api/v1/events?sort=id:asc&limit=500", token);
   expect(response.status).toBe(200);
   return ((await response.json()) as { items: ReadonlyArray<Event> }).items;
 };
 
-/** One entry of the log, read back the way any other client reads it. */
+/** Reads one log entry through the API, as any other client does. */
 const readEvent = async (base: string, token: string, id: number): Promise<Event> => {
   const response = await get(base, `/api/v1/events/${String(id)}`, token);
   expect(response.status).toBe(200);
@@ -180,18 +184,18 @@ const readEvent = async (base: string, token: string, id: number): Promise<Event
 };
 
 describe("opening a live connection", () => {
-  it("is not there at all until Hercule is set up", async () => {
+  it("is not available at all until Hercule is set up", async () => {
     await withServer(async ({ base }) => {
-      // Nothing on the socket is reachable before the password exists - a
-      // ticket needs a credential, and there is no user to hold one - so the
-      // controller refuses the upgrade rather than holding the connection.
+      // Nothing on the socket is reachable before the password exists: a
+      // ticket needs a credential, and there is no user to have one. So the
+      // controller rejects the upgrade rather than keeping the connection.
       expect(await dial(base)).toBe("refused");
       await completeSetup(base);
       expect(await dial(base)).toBe("open");
     });
   });
 
-  it("greets a ticket holder with the version the API answers with", async () => {
+  it("accepts hello with a ticket, and returns the same version as the API", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const identity = await get(base, "/api/v1/controller", token);
@@ -199,8 +203,8 @@ describe("opening a live connection", () => {
       const { version } = (await identity.json()) as { version: string };
       const ticket = await fetchTicket(base, token);
 
-      // The handshake carries nothing: no header, no query string, no ticket in
-      // the URL. The credential rides in the first frame instead.
+      // The handshake carries nothing: no header, no query string, no ticket
+      // in the URL. The credential is sent in the first frame instead.
       expect(buildSocketUrl(base)).not.toContain(ticket);
       expect(new URL(buildSocketUrl(base)).search).toBe("");
 
@@ -213,7 +217,7 @@ describe("opening a live connection", () => {
     });
   });
 
-  it("spends the ticket on the first hello, so a replay of it is nobody", async () => {
+  it("uses up the ticket on the first hello, so replaying it fails", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -234,7 +238,7 @@ describe("opening a live connection", () => {
     });
   });
 
-  it("refuses a ticket that was never issued", async () => {
+  it("rejects a ticket that was never issued", async () => {
     await withServer(async ({ base }) => {
       await completeSetup(base);
 
@@ -250,7 +254,7 @@ describe("opening a live connection", () => {
     });
   });
 
-  it("greets one connection and leaves the others where they were", async () => {
+  it("authenticates only the connection that said hello", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -259,9 +263,8 @@ describe("opening a live connection", () => {
         Effect.gen(function* () {
           yield* greeted.hello({ v: 1, ticket });
 
-          // A second socket, opened while the first one is authenticated, is
-          // still nobody: the greeting belongs to a connection, not to the
-          // controller.
+          // A second socket, opened while the first one is authenticated, has
+          // no actor: a hello belongs to a connection, not to the controller.
           yield* Effect.scoped(
             Effect.gen(function* () {
               const stranger = yield* RpcClient.make(live);
@@ -275,7 +278,7 @@ describe("opening a live connection", () => {
     });
   });
 
-  it("refuses a protocol version it does not speak", async () => {
+  it("rejects a protocol version it does not support", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -292,7 +295,7 @@ describe("opening a live connection", () => {
     });
   });
 
-  it("answers nothing before hello: neither a ping nor a subscription", async () => {
+  it("rejects every call before hello, both a ping and a subscription", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -305,8 +308,8 @@ describe("opening a live connection", () => {
           const subscription = yield* Effect.flip(readFirstItem(client, { topic: "task" }));
           expect(subscription).toBeInstanceOf(Unauthenticated);
 
-          // And the connection was never the problem: the same one works once
-          // the ticket has been presented.
+          // The connection itself was never the problem: the same one works
+          // once the ticket has been sent.
           yield* client.hello({ v: 1, ticket });
           expect(yield* client.ping({})).toEqual({});
         }),
@@ -316,7 +319,7 @@ describe("opening a live connection", () => {
 });
 
 describe("the keepalive", () => {
-  it("answers a ping on a connection past hello", async () => {
+  it("answers a ping on a connection after hello", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -333,7 +336,7 @@ describe("the keepalive", () => {
 });
 
 describe("what a subscription may ask for", () => {
-  it("refuses a topic that is not a Live Topic", async () => {
+  it("rejects a topic that is not a Live Topic", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -351,7 +354,7 @@ describe("what a subscription may ask for", () => {
     });
   });
 
-  it("refuses a cursor on a mutable topic, which has nothing to replay", async () => {
+  it("rejects a cursor on a mutable topic, which has nothing to replay", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -367,7 +370,7 @@ describe("what a subscription may ask for", () => {
     });
   });
 
-  it("keeps the connection up after a refusal, so a client can ask again", async () => {
+  it("keeps the connection open after an error, so a client can try again", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -379,8 +382,8 @@ describe("what a subscription may ask for", () => {
           const refused = yield* Effect.flip(readFirstItem(client, { topic: "nonsense" }));
           expect(refused).toBeInstanceOf(Validation);
 
-          // The same connection: a ping still answers, and a good subscription
-          // is accepted and held.
+          // The same connection: a ping still works, and a valid subscription
+          // is accepted and kept.
           expect(yield* client.ping({})).toEqual({});
           const held = yield* Effect.forkChild(
             Stream.runDrain(client.subscribe({ topic: "task" })),
@@ -393,8 +396,8 @@ describe("what a subscription may ask for", () => {
   });
 });
 
-describe("letting a subscription go", () => {
-  it("drops it when the client ends the stream", async () => {
+describe("closing a subscription", () => {
+  it("removes it when the client ends the stream", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -416,7 +419,7 @@ describe("letting a subscription go", () => {
     });
   });
 
-  it("drops it when the socket closes without the client saying anything", async () => {
+  it("removes it when the socket closes without the client unsubscribing", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -429,15 +432,15 @@ describe("letting a subscription go", () => {
         }),
       );
 
-      // The scope closed the socket. Nothing is held for a connection that is
-      // gone, whether or not it unsubscribed first.
+      // The scope closed the socket. Nothing is kept for a closed connection,
+      // whether or not it unsubscribed first.
       await expectHeld(reader, 0);
     });
   });
 });
 
-describe("what a task subscription is told", () => {
-  it("names the task on a create, an update and a delete, and tells no other topic", async () => {
+describe("what a task subscription receives", () => {
+  it("names the task on a create, an update and a delete, and notifies no other topic", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -480,8 +483,8 @@ describe("what a task subscription is told", () => {
             kind: "deleted",
           });
 
-          // A topic nothing happened on hears nothing: an invalidation is not
-          // a broadcast.
+          // A topic with no changes receives nothing: an invalidation is not a
+          // broadcast.
           expect(runs.received).toEqual([]);
 
           yield* Fiber.interrupt(tasks.fiber);
@@ -512,8 +515,8 @@ describe("what a task subscription is told", () => {
           const doomed = expectPresent(created[0]);
           yield* Effect.promise(() => deleteTask(base, token, doomed.id));
 
-          // Two messages and no more: the window holds a create and a delete,
-          // and each kind is announced once.
+          // Two messages and no more: the window holds three creates and a
+          // delete, and each kind is sent once.
           expect(
             yield* Effect.promise(() => waitWithin(1000, () => tasks.received.length >= 2)),
           ).toBe(true);
@@ -533,7 +536,7 @@ describe("what a task subscription is told", () => {
           expect([...createdIds].sort()).toEqual([...created.map((task) => task.id)].sort());
           expect((deletes[0] as { ids: ReadonlyArray<string> }).ids).toEqual([doomed.id]);
 
-          // No message repeats an id, whatever the window swept up.
+          // No message repeats an id, whatever the window collected.
           for (const message of tasks.received) {
             const ids = (message as { ids: ReadonlyArray<string> }).ids;
             expect(new Set(ids).size).toBe(ids.length);
@@ -546,8 +549,8 @@ describe("what a task subscription is told", () => {
   });
 });
 
-describe("what an event subscription is told", () => {
-  it("opens at the head of the log and pushes what is appended after it", async () => {
+describe("what an event subscription receives", () => {
+  it("starts at the end of the log and pushes what is appended after it", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -559,8 +562,8 @@ describe("what an event subscription is told", () => {
           yield* client.hello({ v: 1, ticket });
           const events = yield* collectMessages(client, { topic: "event" });
 
-          // The first item positions the client and hands it nothing: a
-          // subscriber with no cursor is asking for what happens next.
+          // The first message sets the client's position and has no items: a
+          // subscriber without a cursor wants only what happens next.
           expect(
             yield* Effect.promise(() => waitWithin(1000, () => events.received.length >= 1)),
           ).toBe(true);
@@ -581,7 +584,8 @@ describe("what an event subscription is told", () => {
           expect(item.kind).toBe("task.created");
           expect(pushed.cursor).toBe(String(item.id));
 
-          // The record on the socket is the record over HTTP, field for field.
+          // The record on the socket matches the record over HTTP, field for
+          // field.
           expect(item).toEqual(yield* Effect.promise(() => readEvent(base, token, item.id)));
 
           yield* Fiber.interrupt(events.fiber);
@@ -590,7 +594,7 @@ describe("what an event subscription is told", () => {
     });
   });
 
-  it("replays from a cursor, hands back nothing at the head, and refuses a cursor that is not one", async () => {
+  it("replays from a cursor, returns nothing at the end of the log, and rejects an invalid cursor", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       for (const title of ["one", "two", "three", "four", "five"]) {
@@ -621,8 +625,8 @@ describe("what an event subscription is told", () => {
           expect(caught.cursor).toBe(String(newest.id));
           yield* Fiber.interrupt(replay.fiber);
 
-          // A client already at the head has missed nothing, and is told so
-          // rather than told the log again.
+          // A client already at the end has missed nothing, and gets an empty
+          // replay rather than the log again.
           const current = yield* collectMessages(client, {
             topic: "event",
             cursor: String(newest.id),
@@ -647,7 +651,7 @@ describe("what an event subscription is told", () => {
     });
   });
 
-  it("reads the log for a credential that may read the log, and needs no grant for the mutable topics", async () => {
+  it("needs the log-reading grant for the event topic, and no grant for the mutable topics", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -663,8 +667,8 @@ describe("what an event subscription is told", () => {
           expect(expectPresent(events.received[0])._tag).toBe("delta");
           yield* Fiber.interrupt(events.fiber);
 
-          // The eight mutable topics carry no records, so being greeted is the
-          // whole of what they ask for: each one is accepted and held.
+          // The eight mutable topics carry no records, so a successful hello is
+          // all they need: each one is accepted and kept.
           for (const topic of MUTABLE_LIVE_TOPICS) {
             const held = yield* collectMessages(client, { topic });
             yield* Effect.promise(() => expectHeld(reader, 1, topic));
@@ -676,7 +680,7 @@ describe("what an event subscription is told", () => {
     });
   });
 
-  it("ends a subscriber that stops reading rather than queueing for it without bound", async () => {
+  it("ends a subscriber that stops reading rather than queueing for it without limit", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -685,8 +689,8 @@ describe("what an event subscription is told", () => {
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
 
-          // A subscriber that crawls: it takes a delta and then spends long
-          // enough on it that the controller cannot hand it the next thousand.
+          // A very slow subscriber: it takes a delta and then spends so long on
+          // it that the controller cannot deliver the next thousand.
           const seen: Array<Delta> = [];
           const slow = yield* Effect.forkChild(
             Stream.runForEach(client.subscribe({ topic: "event" }), (message) =>
@@ -698,8 +702,8 @@ describe("what an event subscription is told", () => {
           );
           yield* Effect.promise(() => expectHeld(reader, 1, "event"));
 
-          // Past the cap of a thousand queued deltas, and by enough that the
-          // crawl cannot be what saved it.
+          // Well past the limit of a thousand queued deltas, by enough that the
+          // slow reads cannot keep the queue under it.
           yield* Effect.promise(async () => {
             for (let batch = 0; batch < 45; batch++) {
               await Promise.all(
@@ -715,11 +719,11 @@ describe("what an event subscription is told", () => {
           expect((failure as CapExceeded).error.code).toBe("cap_exceeded");
           expect((failure as CapExceeded).error.details).toMatchObject({ cap: 1000 });
 
-          // The controller is holding nothing for it any more.
+          // The controller no longer keeps anything for it.
           yield* Effect.promise(() => expectHeld(reader, 0, "event"));
 
-          // And the client can come back where it left off: what it missed is
-          // still the log, replayed from its last cursor.
+          // And the client can resume where it left off: what it missed is
+          // still in the log, replayed from its last cursor.
           const last = expectPresent(seen[seen.length - 1]);
           const again = yield* collectMessages(client, {
             topic: "event",
@@ -738,12 +742,12 @@ describe("what an event subscription is told", () => {
 });
 
 describe("a connection whose credential is gone", () => {
-  it("stops answering a login bearer that logged out, and pushes nothing more", async () => {
+  it("stops responding to a login token that logged out, and pushes nothing more", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
-      // A second credential, so the test can still write once the first one is
-      // revoked. It is never the connection's; the connection is the bearer's.
+      // A second credential, so the test can still write after the first one
+      // is revoked. The connection uses only the login token.
       const minted = await post(base, "/api/v1/api-keys", { name: "a writing key" }, token);
       expect(minted.status).toBe(200);
       const other = ((await minted.json()) as { token: string }).token;
@@ -763,12 +767,12 @@ describe("a connection whose credential is gone", () => {
           expect(refused).toBeInstanceOf(Unauthenticated);
           expect((refused as Unauthenticated).error.code).toBe("unauthenticated");
 
-          // The connection is closed, not merely refused once: nothing on it
-          // answers afterwards.
+          // The connection is closed, not just one call rejected: nothing on it
+          // works afterwards.
           expect(yield* Effect.exit(client.ping({}))).toMatchObject({ _tag: "Failure" });
 
-          // And what it was subscribed to reaches it no more. The mutation
-          // needs a live credential of its own, which is what the key is for.
+          // And its subscriptions no longer reach it. The change below needs a
+          // valid credential of its own, which is what the key is for.
           const before = tasks.received.length;
           yield* Effect.promise(() => createTask(base, other, "after the logout"));
           yield* Effect.promise(() => waitWithin(500, () => tasks.received.length > before));
@@ -778,7 +782,7 @@ describe("a connection whose credential is gone", () => {
     });
   });
 
-  it("stops answering an API key that was revoked", async () => {
+  it("stops responding to an API key that was revoked", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const minted = await post(base, "/api/v1/api-keys", { name: "a socket key" }, token);
@@ -806,12 +810,12 @@ describe("a connection whose credential is gone", () => {
 });
 
 describe("what a connection may hold", () => {
-  it("refuses a ticket whose credential was revoked before it was spent", async () => {
+  it("rejects a ticket whose credential was revoked before it was used", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
-      // The ticket is good for five minutes, which is five minutes longer than
-      // the credential that fetched it is guaranteed to last.
+      // The ticket is valid for five minutes, but the credential that fetched
+      // it is not guaranteed to last that long.
       expect((await post(base, "/api/v1/auth/logout", {}, token)).status).toBe(200);
 
       await onSocket(base, (client) =>
@@ -823,7 +827,7 @@ describe("what a connection may hold", () => {
     });
   });
 
-  it("refuses a position the log has not reached, rather than watching nothing", async () => {
+  it("rejects a cursor past the end of the log, rather than subscribing to nothing", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -839,8 +843,8 @@ describe("what a connection may hold", () => {
           expect(refused).toBeInstanceOf(Validation);
           yield* Effect.promise(() => expectHeld(reader, 0, "event"));
 
-          // The client is told, and is still there to be told: it can drop the
-          // cursor it was holding and follow the log from where it is now.
+          // The client gets an error and stays connected: it can drop its
+          // cursor and follow the log from where it is now.
           expect(yield* client.ping({})).toEqual({});
           const followed = yield* collectMessages(client, { topic: "event" });
           expect(
@@ -854,8 +858,8 @@ describe("what a connection may hold", () => {
   });
 });
 
-describe("greeting a connection twice", () => {
-  it("refuses the second hello and leaves the connection as it was", async () => {
+describe("saying hello twice on one connection", () => {
+  it("rejects the second hello and leaves the connection as it was", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -871,8 +875,8 @@ describe("greeting a connection twice", () => {
           expect(refused).toBeInstanceOf(InvalidState);
           expect((refused as InvalidState).error.code).toBe("invalid_state");
 
-          // The connection kept everything it had: it still answers, and what
-          // it was watching still reaches it.
+          // The connection kept everything: it still responds, and its
+          // subscriptions still reach it.
           expect(yield* client.ping({})).toEqual({});
           yield* Effect.promise(() => expectHeld(reader, 1, "task"));
           const task = yield* Effect.promise(() => createTask(base, token, "still watched"));
@@ -892,8 +896,8 @@ describe("greeting a connection twice", () => {
   });
 });
 
-describe("what a runner subscription is told", () => {
-  /** What a runner in this test says about the machine it is on. */
+describe("what a runner subscription receives", () => {
+  /** The facts the runner in this test reports about its machine. */
   const FACTS: RunnerFacts = {
     os: "darwin",
     arch: "arm64",
@@ -905,7 +909,7 @@ describe("what a runner subscription is told", () => {
     identityPort: 4939,
   };
 
-  /** Enlists a machine the way one enlists: a minted token, spent on the join. */
+  /** Joins a runner the normal way: mints a join token and uses it to join. */
   const enlist = async (harness: {
     readonly base: string;
     readonly joinToken: () => Promise<string>;
@@ -919,10 +923,10 @@ describe("what a runner subscription is told", () => {
   };
 
   /**
-   * A machine's end of the runner socket, open and greeted. Only what a runner
-   * says is needed here: what the controller answers is the socket suite's
-   * business, and what matters on this one is that the row's changes reach a
-   * watching client.
+   * Opens the runner's end of the runner socket and says hello. Only what the
+   * runner sends matters here: the controller's replies are tested in the
+   * runner socket suite, and this suite checks that changes to the runner row
+   * reach a watching client.
    */
   const connectMachine = async (
     base: string,
@@ -942,7 +946,7 @@ describe("what a runner subscription is told", () => {
     };
   };
 
-  /** The ids one invalidation named, whatever kind it was. */
+  /** Returns the ids one invalidation named, whatever its kind. */
   const listInvalidatedIds = (message: LiveMessage): ReadonlyArray<string> =>
     message._tag === "invalidate" ? message.ids : [];
 
@@ -960,7 +964,7 @@ describe("what a runner subscription is told", () => {
           yield* Effect.promise(() => expectHeld(harness.live, 1, "runner"));
           yield* Effect.promise(() => expectHeld(harness.live, 1, "task"));
 
-          // A machine enlisting is a runner appearing in the fleet.
+          // A runner joining is a runner appearing in the fleet.
           const joined = yield* Effect.promise(() => enlist(harness));
           expect(
             yield* Effect.promise(() => waitWithin(1000, () => fleet.received.length >= 1)),
@@ -981,7 +985,7 @@ describe("what a runner subscription is told", () => {
             facts: FACTS,
           });
 
-          // The row is online now, which is a change a fleet screen has to see.
+          // The row is online now, which a fleet screen has to show.
           expect(
             yield* Effect.promise(() => waitWithin(2000, () => fleet.received.length >= 2)),
           ).toBe(true);
@@ -1020,7 +1024,7 @@ describe("what a runner subscription is told", () => {
             joined.runnerId,
           );
 
-          // A topic none of this happened on hears nothing.
+          // A topic with none of these changes receives nothing.
           expect(tasks.received).toEqual([]);
 
           runner.close();
@@ -1030,7 +1034,7 @@ describe("what a runner subscription is told", () => {
       );
     });
   });
-  it("tells a watcher about a hello that changed nothing but the row", async () => {
+  it("notifies a watcher about a hello that changed only the row's version and facts", async () => {
     await withServer(async (harness) => {
       const { base } = harness;
       const token = await completeSetup(base);
@@ -1059,9 +1063,9 @@ describe("what a runner subscription is told", () => {
             yield* Effect.promise(() => waitWithin(2000, () => fleet.received.length >= 2)),
           ).toBe(true);
 
-          // A machine that dials again inside the silence window never left
-          // `online`, so nothing about its state changed - but its hello
-          // rewrote the version and the facts the row shows.
+          // A runner that reconnects within the silence window never left
+          // `online`, so its state did not change, but its hello rewrote the
+          // version and facts the row shows.
           const second = yield* Effect.promise(() => connectMachine(base, joined.credential));
           const seenBefore = fleet.received.length;
           greet(second.say, "0.2.0");
@@ -1083,14 +1087,13 @@ describe("what a runner subscription is told", () => {
 });
 
 /**
- * A fleet minimal enough to spawn one session and drive its transcript: one
- * provider, one machine that answers hello and probes and otherwise says
- * nothing on its own. Placement, access modes and input are `sessions.
- * integration.test.ts`'s business, not this suite's - all that is needed here
- * is a session that exists and a wire to report events into it, so its two
- * live topics have something to carry. The fleet mechanics themselves -
- * `Wire`, `dial`, `withFleet` - are shared with that suite; only the fixture
- * is this one's own.
+ * The smallest fleet that can spawn one session and write its transcript: one
+ * provider, and one runner that answers hello and probes and sends nothing
+ * else on its own. Placement, access modes and input are tested in
+ * `sessions.integration.test.ts`. This suite only needs a session that exists
+ * and a wire to report its events on, so its two live topics have something
+ * to carry. The fleet helpers (`Wire`, `dial`, `withFleet`) are shared with
+ * that suite; only the fixture is this suite's own.
  */
 const SESSION_TOPIC_FACTS: RunnerFacts = {
   os: "darwin",
@@ -1124,7 +1127,7 @@ interface StreamRow {
   readonly tag: string;
 }
 
-/** `session_stream`'s own rows for one session, read the way the sessions suite does. */
+/** Reads one session's rows from `session_stream`, as the sessions suite does. */
 const readStreamRows = (harness: ServerHarness, id: string): Promise<ReadonlyArray<StreamRow>> =>
   Effect.runPromise(
     Effect.orDie(
@@ -1148,8 +1151,8 @@ const waitForStreamRows = (
 
 const AT = "2026-09-08T10:00:00.000Z";
 
-describe("what a session's stream subscription is told", () => {
-  it("opens at the empty head with no cursor, and pushes each row written after as a TranscriptRow cursored on its position", async () => {
+describe("what a session's stream subscription receives", () => {
+  it("starts at the empty end without a cursor, and pushes each later row as a TranscriptRow with its position as the cursor", async () => {
     await withSessionTopicFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
       await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
@@ -1160,9 +1163,9 @@ describe("what a session's stream subscription is told", () => {
           yield* client.hello({ v: 1, ticket });
           const stream = yield* collectMessages(client, { topic: `session:${session.id}:stream` });
 
-          // No rows exist yet, so the first message positions the client at
-          // the empty head and hands it nothing - exactly what `event` does
-          // for a subscriber with no cursor.
+          // No rows exist yet, so the first message sets the client's position
+          // at the empty end and has no items, exactly as `event` does for a
+          // subscriber without a cursor.
           expect(
             yield* Effect.promise(() => waitWithin(1000, () => stream.received.length >= 1)),
           ).toBe(true);
@@ -1248,7 +1251,7 @@ describe("what a session's stream subscription is told", () => {
     });
   });
 
-  it("refuses a position the transcript has not reached, the same way event does", async () => {
+  it("rejects a cursor past the end of the transcript, the same way event does", async () => {
     await withSessionTopicFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
       await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
@@ -1274,13 +1277,13 @@ describe("what a session's stream subscription is told", () => {
     });
   });
 
-  it("refuses a session id that was never spawned with not_found", async () => {
+  it("fails with not_found for a session id that was never spawned", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
-      // A UUIDv7, the shape a real session id has, so this exercises the
-      // sessions table lookup rather than short-circuiting on the shape check
-      // a `crypto.randomUUID()` v4 id would fail before ever reaching it.
+      // A UUID v7, like a real session id, so this tests the sessions table
+      // lookup. A `crypto.randomUUID()` v4 id would fail the format check
+      // before reaching the lookup.
       const stranger = Bun.randomUUIDv7();
 
       await onSocket(base, (client) =>
@@ -1297,7 +1300,7 @@ describe("what a session's stream subscription is told", () => {
   });
 });
 
-describe("what a session's tap subscription is told", () => {
+describe("what a session's tap subscription receives", () => {
   it("pushes a content delta as one TapItem before the row it eventually coalesces into exists", async () => {
     await withSessionTopicFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
@@ -1338,9 +1341,9 @@ describe("what a session's tap subscription is told", () => {
             items: [{ turnId: "t1", itemId: "i1", streamKind: "assistant_text", delta: "He" }],
           });
 
-          // The delta is short of the item boundary and the 4KB flush, so
-          // stream.ts's coalescing rule has written nothing for it: the row
-          // the tap's item eventually becomes does not exist yet.
+          // The delta is before the item boundary and under the 4KB flush, so
+          // the coalescing rule in stream.ts has written nothing for it yet:
+          // the row the tap item will end up in does not exist yet.
           expect(
             yield* Effect.promise(() => readStreamRows(arranged.harness, session.id)),
           ).toHaveLength(1);
@@ -1360,8 +1363,8 @@ describe("what a session's tap subscription is told", () => {
           );
           expect(rows[1]!.tag).toBe("content.delta");
 
-          // The item boundary flushed the row, but that is not itself a tap:
-          // the tap saw the delta once, before the row it flushed into.
+          // The item boundary flushed the row, but that is not a tap itself:
+          // the tap received the delta once, before the row was written.
           expect(tap.received).toHaveLength(1);
 
           yield* Fiber.interrupt(tap.fiber);
@@ -1370,7 +1373,7 @@ describe("what a session's tap subscription is told", () => {
     });
   });
 
-  it("refuses a cursor on tap, which never replays", async () => {
+  it("rejects a cursor on tap, which never replays", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -1389,7 +1392,7 @@ describe("what a session's tap subscription is told", () => {
     });
   });
 
-  it("refuses a session id that was never spawned with not_found, the same as stream does", async () => {
+  it("fails with not_found for a session id that was never spawned, the same as stream does", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -1429,9 +1432,9 @@ describe("what a session's tap subscription is told", () => {
             expectHeld(arranged.harness.live, 1, `session:${session.id}:tap`),
           );
 
-          // Five deltas on the same item, well under the 4KB flush and short of
-          // an item or turn boundary: the coalescing rule holds every one of
-          // these in its buffer and writes nothing for them.
+          // Five deltas on the same item, well under the 4KB flush and before
+          // an item or turn boundary: the coalescing rule keeps them all in its
+          // buffer and writes nothing for them.
           for (let index = 0; index < 5; index++) {
             reportEvent(arranged.wire, 2 + index, {
               eventId: crypto.randomUUID(),
@@ -1457,8 +1460,8 @@ describe("what a session's tap subscription is told", () => {
             "chunk-4",
           ]);
 
-          // Long enough that a row, if the coalescing rule were about to write
-          // one, would already be there.
+          // Long enough that a row would already be there if the coalescing
+          // rule were going to write one.
           yield* Effect.sleep("200 millis");
           expect(
             yield* Effect.promise(() => readStreamRows(arranged.harness, session.id)),

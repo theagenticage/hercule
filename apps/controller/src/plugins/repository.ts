@@ -1,7 +1,8 @@
 /**
- * The three plugin tables. The set is a handful of rows, so both listings read
- * the whole table, and the two JSON columns are decoded rather than parsed, so
- * an unreadable row is a typed failure and not a defect mid-listing.
+ * The repository for the three plugin tables. There are only a handful of
+ * plugins, so both listings read the whole table. The two JSON columns are
+ * decoded with a schema rather than parsed, so an unreadable row is a typed
+ * failure and not a defect in the middle of a listing.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -9,7 +10,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
-/** What the user decided about one plugin. */
+/** The user's settings for one plugin. */
 export interface PluginState {
   readonly enabled: boolean;
   readonly config: Schema.Json;
@@ -21,14 +22,15 @@ export interface Contribution {
   readonly id: string;
   readonly definition: Schema.Json;
   /**
-   * A contribution outlives its owner being disabled, so a picker can say what
-   * is missing. This is the stored flag and nothing else: a plugin whose
-   * teardown failed still reads `true`, so a resolver reads the host's fact too.
+   * Whether the owning plugin is enabled. A contribution stays in the catalog
+   * while its plugin is disabled, so a picker can show what is missing. This
+   * is only the stored flag: a plugin whose teardown failed still reads
+   * `true`, so a resolver must also check the host's status.
    */
   readonly ownerEnabled: boolean;
 }
 
-/** Typed loosely: the host has decoded it, so what reaches here is JSON by construction. */
+/** A catalog row to write. `definition` is typed loosely: the host has already decoded it, so it is JSON. */
 export interface NewContribution {
   readonly owner: string;
   readonly extensionPoint: string;
@@ -39,7 +41,11 @@ export interface NewContribution {
 /** The `config` and `definition` columns: JSON text holding a JSON value. */
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
-/** Boot writes a row in the transaction that lists the plugin, so a missing one is a broken database. */
+/**
+ * Returns a plugin's stored state, or dies when it has none. Boot writes the
+ * row in the same transaction that lists the plugin, so a missing row means
+ * the database is broken.
+ */
 export const readStoredStateOrDie = (
   state: PluginState | undefined,
   id: string,
@@ -52,7 +58,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    /** A row per registry plugin. Rows already there hold what the user decided. */
+    /** Inserts a row for each registry plugin that has none. Existing rows keep the user's settings. */
     ensure: (ids: ReadonlyArray<string>, at: string): Effect.Effect<void, SqlError> =>
       Effect.forEach(
         ids,
@@ -64,7 +70,7 @@ const make = Effect.gen(function* () {
         { discard: true },
       ),
 
-    /** Records what the user decided about one plugin. */
+    /** Stores whether one plugin is enabled. */
     setEnabled: (id: string, enabled: boolean, at: string): Effect.Effect<void, SqlError> =>
       sql`UPDATE plugins SET enabled = ${enabled ? 1 : 0}, updated_at = ${at} WHERE id = ${id}`.pipe(
         Effect.asVoid,
@@ -76,7 +82,7 @@ const make = Effect.gen(function* () {
         UPDATE plugins SET config = ${JSON.stringify(config)}, updated_at = ${at} WHERE id = ${id}
       `.pipe(Effect.asVoid),
 
-    /** What the user decided, per plugin id. */
+    /** Returns the user's settings for every plugin, by plugin id. */
     states: (): Effect.Effect<ReadonlyMap<string, PluginState>, SqlError | Schema.SchemaError> =>
       Effect.gen(function* () {
         const rows = yield* sql<{
@@ -94,7 +100,7 @@ const make = Effect.gen(function* () {
         return states;
       }),
 
-    /** What the user decided about one plugin. */
+    /** Returns the user's settings for one plugin. */
     state: (id: string): Effect.Effect<PluginState, SqlError | Schema.SchemaError> =>
       Effect.gen(function* () {
         const rows = yield* sql<{
@@ -111,8 +117,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Replaces the whole catalog. Registration is pure, so what this boot
-     * produced is the whole truth and there is nothing to diff against.
+     * Replaces the whole catalog. Registration has no side effects, so what
+     * this boot registered is complete, and there is nothing to diff against.
      */
     rewriteCatalog: (
       contributions: ReadonlyArray<NewContribution>,
@@ -132,7 +138,7 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** Ordered, so a listing reads the same on every boot however rows were written. */
+    /** Returns every catalog row by owner, in a fixed order, so a listing is the same on every boot. */
     contributions: (): Effect.Effect<
       ReadonlyMap<string, ReadonlyArray<Contribution>>,
       SqlError | Schema.SchemaError
@@ -167,7 +173,7 @@ const make = Effect.gen(function* () {
         return byOwner;
       }),
 
-    /** One plugin's stored value under a key, or nothing stored under it. */
+    /** Returns one plugin's stored value under a key, or `none` when nothing is stored. */
     kvGet: (
       pluginId: string,
       key: string,
@@ -190,13 +196,13 @@ const make = Effect.gen(function* () {
     kvDelete: (pluginId: string, key: string): Effect.Effect<void, SqlError> =>
       sql`DELETE FROM plugin_kv WHERE plugin_id = ${pluginId} AND key = ${key}`.pipe(Effect.asVoid),
 
-    /** The keys one plugin stores, ordered so a listing reads the same twice. */
+    /** Returns the keys one plugin stores, sorted, so a listing is always in the same order. */
     kvKeys: (pluginId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       sql<{ readonly key: string }>`
         SELECT key FROM plugin_kv WHERE plugin_id = ${pluginId} ORDER BY key
       `.pipe(Effect.map((rows) => rows.map((row) => row.key))),
 
-    /** Everything one plugin stored. What Reset plugin state means. */
+    /** Deletes everything one plugin stored. This is what "Reset plugin state" does. */
     kvWipe: (pluginId: string): Effect.Effect<void, SqlError> =>
       sql`DELETE FROM plugin_kv WHERE plugin_id = ${pluginId}`.pipe(Effect.asVoid),
   };

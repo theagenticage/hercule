@@ -1,10 +1,10 @@
 /**
- * `secret.*` and `controller.read` over a real socket, through everything a
- * request passes through in production.
+ * Tests `secret.*` and `controller.read` over a real socket, through
+ * everything a request passes through in production.
  *
- * The claim these tests exist for is the one the unit tests cannot make: that
- * no value reaches the wire. Every response body is searched for the value that
- * was stored, and for the word `value` itself.
+ * These tests check what the unit tests cannot: that no secret value is ever
+ * sent in a response. Every response body is searched for the stored value,
+ * and for the word `value` itself.
  */
 import { describe, expect, it } from "vitest";
 import { VERSION } from "@hercule/home/version";
@@ -16,7 +16,7 @@ const VALUE = "ghp_a-real-looking-token";
 const buildSecretsPath = (owner: string, name: string) => `/api/v1/secrets/${owner}/${name}`;
 
 describe("secret.*", () => {
-  it("stores, lists, rotates and removes, and never puts a value on the wire", async () => {
+  it("stores, lists, rotates and removes a secret, and never returns its value", async () => {
     await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
 
@@ -38,9 +38,9 @@ describe("secret.*", () => {
       expect(listed.status).toBe(200);
       expect(listedText).not.toContain(VALUE);
       expect(listedText).not.toContain("value");
-      // The controller's own signing key is a secrets row too. It is visible as
-      // a reference and refused as a write, which is the whole of what the API
-      // may do with it.
+      // The controller's own signing key is a secrets row too. The API may list
+      // it as a reference, and rejects any write to it; nothing else is
+      // allowed.
       expect(JSON.parse(listedText)).toMatchObject({
         items: [
           { ownerKind: "connection", name: "api-token" },
@@ -62,7 +62,7 @@ describe("secret.*", () => {
       const empty = await send("GET", base, "/api/v1/secrets?ownerKind=connection", { token });
       expect(await empty.json()).toEqual({ items: [] });
 
-      // One row per mutation, all stamped with the user.
+      // One audit row per change, each with the user as the actor.
       expect(await audit("secret.created")).toHaveLength(1);
       expect(await audit("secret.rotated")).toHaveLength(1);
       const deleted = await audit("secret.deleted");
@@ -72,7 +72,7 @@ describe("secret.*", () => {
     });
   });
 
-  it("answers 404 for a name nobody stored", async () => {
+  it("returns 404 for a name that was never stored", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await send("DELETE", base, buildSecretsPath(OWNER, "absent"), { token });
@@ -82,7 +82,7 @@ describe("secret.*", () => {
     });
   });
 
-  it("refuses a write to the core owner: that is the controller's own key material", async () => {
+  it("rejects a write to the core owner, which is the controller's own key material", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await send("PUT", base, buildSecretsPath("core/controller", "signing-key"), {
@@ -95,7 +95,7 @@ describe("secret.*", () => {
     });
   });
 
-  it("refuses an owner id holding the separator the encryption is bound with", async () => {
+  it("rejects an owner id that contains the separator the encryption binding uses", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await send("PUT", base, buildSecretsPath("plugin/a%7Cb", "k"), {
@@ -119,7 +119,7 @@ describe("secret.*", () => {
 });
 
 describe("controller.read", () => {
-  it("answers with the identity and the version baked into the binary", async () => {
+  it("returns the controller's identity and the version built into the binary", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await send("GET", base, "/api/v1/controller", { token });

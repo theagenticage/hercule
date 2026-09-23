@@ -1,7 +1,7 @@
 /**
- * Retiring a machine: what it costs the fleet, the sessions it was hosting and
- * the working areas it held, in one write set, and what has to be said to the
- * machine once that write set is durable.
+ * Retiring a runner: marks it retired and ends the sessions it hosted and the
+ * workspaces it held, in one transaction, then tells the runner what to stop
+ * once that transaction has committed.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -22,42 +22,40 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Ends a machine's membership of the fleet. It finishes nothing: the
-     * sessions it was hosting end with it and the working areas it held are
-     * gone, because they were directories on a disk this controller will never
-     * reach again.
+     * Removes a runner from the fleet. Returns the retired runner. It does not
+     * wait for work to finish: the sessions it hosted end with it, and its
+     * workspaces are marked lost, because they are directories on a disk this
+     * controller will never reach again.
      */
     retireRunner: (input: RetireInput): Effect.Effect<RunnerDetail, MoveError> =>
-      // The commit and the close are one step: a client hanging up between
-      // them would leave the row retired with its daemon still holding on,
-      // pinging a controller that will never have it back.
+      // The commit and the hang-up must not be split. If the client
+      // disconnected between them, the row would be retired while the runner
+      // stayed connected, pinging a controller that will never take it back.
       Effect.uninterruptible(
         Effect.gen(function* () {
           const { detail, toStop } = yield* withTransaction(
             sql,
             Effect.gen(function* () {
-              // The instant comes back with the row, so the working areas are
-              // lost at the instant the machine was retired at.
+              // `retire` returns its timestamp, so the workspaces are marked lost
+              // at the same instant the runner was retired.
               const { at, ...detail } = yield* runners.retire(input);
-              // Without `force` this ends only what is queued, since the row's
-              // half already refused a machine with a session running; with it,
-              // both kinds. Either way a retired runner never dispatches again,
-              // so nothing else would ever end these.
+              // Without `force`, `retire` has already rejected a runner with a
+              // running session, so this ends only queued sessions. With
+              // `force`, it ends both. Either way a retired runner never
+              // dispatches again, so nothing else would ever end them.
               const toStop = yield* sessions.endOnRunner(detail.id);
               yield* workspaces.lostOnRunner(detail.id, at);
               return { detail, toStop };
             }),
           );
-          // After the commit: a session the row now reads exited still had a
-          // live harness on the machine, which needs its own word to stop - the
-          // queued ones never had a frame to begin with, so they get none now
-          // either.
+          // After the commit: a session now marked exited may still have a
+          // running harness on the runner, which needs a stop frame. Queued
+          // sessions were never sent to the runner, so they get no frame.
           for (const sessionId of toStop) {
             yield* connections.tell(detail.id, sessions.stopping(sessionId));
           }
-          // After the commit too: a socket closed for a retirement that then
-          // rolled back would be a runner told to stop by a controller that
-          // still has it.
+          // Also after the commit: closing the socket for a retirement that then
+          // rolled back would disconnect a runner the controller still has.
           yield* connections.hangUp(detail.id);
           return detail;
         }),

@@ -1,11 +1,11 @@
 /**
- * What a plugin contributing a source of events registers: the row the
- * catalog holds for the source, and the live schema of every kind it declares.
+ * Registers a plugin's event source: the catalog row for the source, and the
+ * schema of every event kind it declares.
  *
- * It sits beside the host rather than inside it because the host's registration
- * surface is a list of extension points, and the whole of what one of them
- * takes belongs in one place. A leaf: the host calls this, and this calls
- * nothing of the host's.
+ * This lives next to the host rather than inside it, because the host
+ * registers one extension point after another, and everything about one
+ * extension point belongs in one place. It is a leaf: the host calls it, and
+ * it calls nothing in the host.
  */
 import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
@@ -28,17 +28,17 @@ export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType
   readonly schema: Schema.Top;
 }
 
-/** The extension point this registers into; the column takes any name. */
+/** The name of the extension point this module registers into. */
 const EVENT_SOURCE = "event-source";
 
-// The two names an event source is identified by. Its kinds are read one at a
-// time below, because each declaration holds a live schema.
+// Decodes the two names that identify an event source. Its kinds are decoded
+// one at a time below, because each declaration holds a schema object.
 const decodeEventSourceNames = Schema.decodeUnknownEffect(EventSourceNames, { errors: "all" });
 
 /**
- * One event kind as a plugin declares it, minus the schema: a name that no
- * column would truncate, and a line saying what the event means. Both reach a
- * column and the wire.
+ * One event kind as a plugin declares it, without the schema: a name short
+ * enough for its column, and a one-line description of the event. Both are
+ * stored and sent to clients.
  */
 const EventKindHeader = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_EVENT_KIND_LENGTH)),
@@ -57,10 +57,11 @@ const decodeEventKindHeader = Schema.decodeUnknownEffect(EventKindHeader, { erro
  * a name is invalid, a kind is declared twice, or a kind has the name of a
  * core kind.
  *
- * Both collections are the registration pass's own, handed in and appended to,
- * because a pass registers every plugin before any of it is stored: a duplicate
- * is caught against the array rather than against the primary key, where it
- * would take every other plugin's rows with it.
+ * Both collections belong to the registration pass, which passes them in for
+ * this function to append to. A pass registers every plugin before anything
+ * is stored, so a duplicate is caught in the array. If it were caught by the
+ * primary key instead, the failed insert would also lose every other
+ * plugin's rows.
  */
 export const registerEventSourceContribution = (
   pluginId: string,
@@ -73,8 +74,8 @@ export const registerEventSourceContribution = (
       decodeEventSourceNames({ id: definition.id, connectionType: definition.connectionType }),
       toPluginError,
     );
-    // The identity the catalog keys on, made the same way a connection type's
-    // is: the plugin's id and the word it declared.
+    // The catalog id, built like a connection type's: the plugin's id and the
+    // id the source declared.
     const id = `${pluginId}/${names.id}`;
     if (declared.some((row) => row.extensionPoint === EVENT_SOURCE && row.id === id)) {
       return yield* Effect.fail(
@@ -86,11 +87,11 @@ export const registerEventSourceContribution = (
       { readonly description: string; readonly schema: JsonSchema.JsonSchema }
     > = {};
     for (const [kind, declaration] of Object.entries(definition.kinds)) {
-      // A kind is looked up by name alone, across every plugin, so it has to
-      // say who owns it, and the name in front of the first dot is what a
-      // reader takes the owner to be. Refused here, where the plugin author is
-      // told, rather than at the first emit, where the caller would be told
-      // about somebody else's mistake.
+      // A kind is looked up by name alone, across every plugin, so the name
+      // must show its owner, and readers take the part before the first dot
+      // as the owner. It is checked here, where the plugin author sees the
+      // error, rather than at the first emit, where the caller would see an
+      // error about someone else's mistake.
       if (!kind.startsWith(`${pluginId}.`)) {
         return yield* Effect.fail(
           new PluginError({
@@ -107,20 +108,20 @@ export const registerEventSourceContribution = (
           }),
         );
       }
-      // Two sources of one plugin claiming one kind would leave the last one
-      // registered answering for both.
+      // If two sources of one plugin declared the same kind, the last one
+      // registered would silently replace the first.
       if (kinds.has(kind)) {
         return yield* Effect.fail(
           new PluginError({ message: `the event kind ${kind} is declared twice` }),
         );
       }
-      // The kind's name is carried into the refusal, because a plugin
-      // declaring many kinds needs to be told which one.
+      // The error message includes the kind's name, because a plugin that
+      // declares many kinds needs to know which one is invalid.
       yield* Effect.mapError(
         decodeEventKindHeader({ name: kind, description: declaration.description }),
         (error) =>
           new PluginError({
-            message: `the event kind ${kind} is refused: ${describeFieldIssues(error)}`,
+            message: `the event kind ${kind} is invalid: ${describeFieldIssues(error)}`,
           }),
       );
       catalogued[kind] = {

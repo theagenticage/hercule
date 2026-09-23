@@ -1,27 +1,30 @@
 /**
- * The live socket: the contract's RPC group, served at `GET /ws` beside the
- * API's own routes.
+ * The live socket: the contract's `live` RPC group, served at `GET /ws` next
+ * to the API routes.
  *
- * A connection is nobody until `hello` succeeds. The ticket it presents is
- * spent there and the caller it resolved to is remembered for the length of the
- * connection, on the per-connection record the RPC server already keeps, so it
- * goes away with the connection and there is no map to clean up. The greeting
- * is claimed before the ticket is looked up, so two `hello` frames sent at once
- * cannot both win: swapping the caller under subscriptions that are already
- * open would leave the connection reading as somebody it was not opened as.
+ * A connection has no actor until `hello` succeeds. `hello` uses up the
+ * ticket, and the resolved user is kept for the life of the connection on the
+ * per-connection record the RPC server already has, so it goes away with the
+ * connection and there is no map to clean up. The greeting is claimed before
+ * the ticket is looked up, so two `hello` frames sent at once cannot both
+ * succeed. Otherwise the second one could change the actor under
+ * subscriptions that are already open.
  *
- * Being greeted is not permanent. A socket outlives a request by hours, and the
- * credential behind it can be logged out or revoked in that time. Every call on
- * the connection resolves that credential again, and because a client that
- * stops calling would otherwise keep reading for ever, a sweep does the same
- * for every connection that is holding a subscription. Either way, a connection
- * whose credential is gone loses what it had open and is refused from then on.
+ * A successful `hello` is not permanent. A socket can stay open for hours,
+ * and its credential can be logged out or revoked in that time. So:
  *
- * Every refusal is one of the contract's errors and belongs to the one request
- * that earned it. That is why the payload schemas are wider than the values
- * they accept: a payload the transport itself cannot decode comes back as an
- * untyped defect, so the vocabulary `v`, `topic` and `cursor` accept is checked
- * here, where a `validation` can be raised for it and the connection stays up.
+ * - every call on the connection resolves the credential again;
+ * - a sweep re-checks every connection with an open subscription, because a
+ *   client that stops calling would otherwise keep receiving data forever.
+ *
+ * A connection whose credential is gone loses its subscriptions, and every
+ * later call fails.
+ *
+ * Every failure is one of the contract's errors, for the one request that
+ * caused it. That is why the payload schemas accept more than the valid
+ * values: a payload the transport cannot decode becomes an untyped defect. So
+ * the values of `v`, `topic` and `cursor` are validated here, where a
+ * `validation` error can be returned and the connection stays open.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -55,13 +58,13 @@ import { Credentials } from "../credentials";
 import { WsTickets } from "./tickets";
 import { LiveTopics, type LiveQueue } from "./topics";
 
-/** Where the socket lives. The handshake carries no query string. */
+/** The socket's path. The handshake has no query string. */
 const LIVE_SOCKET_PATH = "/ws";
 
 /**
- * How often a connection that has stopped calling has its credential looked at
- * again. Short enough that a revocation takes effect while the person who asked
- * for it is still watching.
+ * How often the sweep re-checks the credentials of connections with open
+ * subscriptions. Short enough that a revocation takes effect while the person
+ * who revoked it is still watching.
  */
 const REVOCATION_SWEEP = Duration.seconds(30);
 
@@ -71,13 +74,14 @@ const TICKET_REFUSED = "the ticket is not valid";
 const CREDENTIAL_GONE = "the credential this connection was opened with is no longer valid";
 const UNREADABLE = "the credential behind this connection could not be checked";
 
-/** A position in a log, as a client hands one back: a decimal, and nothing else. */
+/** A cursor as a client sends it: decimal digits only. */
 const CURSOR = /^\d+$/;
 
 /**
- * A cursor from the wire, decoded to the position it names - `undefined` for
- * one not given, which is what asks to follow from the head. Shared by `event`
- * and `session:<id>:stream`, the two topics a position means anything on.
+ * Parses a cursor from the wire into a log position. Returns `undefined` when
+ * no cursor was given, which means "follow from the head". Fails with a
+ * validation error when the cursor is not a whole number. Used by `event` and
+ * `session:<id>:stream`, the two topics that have positions.
  */
 const parsePosition = (raw: string | undefined): Effect.Effect<number | undefined, Validation> => {
   if (raw === undefined) return Effect.succeed(undefined);
@@ -85,7 +89,7 @@ const parsePosition = (raw: string | undefined): Effect.Effect<number | undefine
   if (!CURSOR.test(raw) || !Number.isSafeInteger(cursor)) {
     return Effect.fail(
       createValidationError([
-        { path: ["cursor"], message: "a position in the log is a whole number" },
+        { path: ["cursor"], message: "cursor must be a whole number: a position in the log" },
       ]),
     );
   }
@@ -93,12 +97,12 @@ const parsePosition = (raw: string | undefined): Effect.Effect<number | undefine
 };
 
 /**
- * What the controller holds for one greeted connection: who it is, and what it
- * has open, so that all of it can be ended at once when the credential behind
- * it goes away.
+ * What the controller keeps for one connection: its actor, and its open
+ * subscriptions, so they can all be ended at once when its credential goes
+ * away.
  *
- * `actor` is undefined while a `hello` is still being answered, which is what
- * makes the greeting a claim rather than a check.
+ * `actor` is undefined until a `hello` succeeds. `greeting` is true while a
+ * `hello` is being handled, so a second `hello` fails instead of racing it.
  */
 interface Connection {
   actor: UserActor | undefined;
@@ -108,19 +112,19 @@ interface Connection {
 }
 
 /**
- * The connection's own record, kept on the connection. Present from the moment
- * a `hello` starts being answered; carrying an actor is what "authenticated"
- * means here.
+ * The connection's record, stored on the connection. It exists from the
+ * moment the first `hello` starts. The connection is authenticated when the
+ * record has an actor.
  */
 class Greeted extends Context.Service<Greeted, Connection>()("hercule/controller/live/Greeted") {}
 
 const decodeSchemaTopic = Schema.decodeUnknownEffect(LiveTopic);
 
 /**
- * The schema only proves the wire shape - a flat literal or `session:<id>:kind`
- * - and a pattern check cannot itself carry the literal precision `LiveTopic`
- * is typed with, so a value that decoded is asserted into it here, the one
- * place a session topic's string is trusted to be the shape it matched.
+ * Decodes a topic from the wire. The schema checks the shape (a fixed name or
+ * `session:<id>:kind`), but a pattern check cannot produce the exact template
+ * type `LiveTopic` has. So a decoded value is cast to `LiveTopic` here, the
+ * one place that trusts a session topic string to match its pattern.
  */
 const decodeTopic = (raw: unknown) =>
   Effect.map(decodeSchemaTopic(raw), (topic) => topic as LiveTopic);
@@ -131,13 +135,13 @@ const handlers = live.toLayer(
     const topics = yield* LiveTopics;
     const credentials = yield* Credentials;
 
-    /** The connections holding a subscription, which are the ones still reading. */
+    /** The connections with at least one open subscription, which the sweep re-checks. */
     const watching = new Set<Connection>();
 
     /**
-     * Whether the credential a connection was opened with still resolves. The
-     * token itself was never kept - only the hash it resolved through - which
-     * is all a second lookup needs.
+     * Checks whether the connection's credential is still valid. Fails with an
+     * internal error when the lookup fails. The token itself is never kept,
+     * only its hash, which is all the lookup needs.
      */
     const isCredentialLive = (actor: UserActor): Effect.Effect<boolean, Internal> =>
       Effect.mapError(credentials.stillLive(actor.credential), () =>
@@ -145,9 +149,10 @@ const handlers = live.toLayer(
       );
 
     /**
-     * Takes everything away from a connection whose credential has gone. A
-     * subscription is a standing read, and it stops when the permission to read
-     * stops rather than at the next thing the client happens to ask for.
+     * Ends every subscription of a connection whose credential is gone, and
+     * marks the connection so later calls fail. A subscription is an ongoing
+     * read, so it must stop as soon as the permission to read stops, not at
+     * the client's next call.
      */
     const revoke = (connection: Connection): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -164,9 +169,9 @@ const handlers = live.toLayer(
       Effect.forever(
         Effect.gen(function* () {
           yield* Effect.sleep(REVOCATION_SWEEP);
-          // Several connections usually share one credential - a tab per
-          // screen - and every read here queues behind the controller's writes,
-          // so each credential is looked up once per round.
+          // Several connections often share one credential (one per browser
+          // tab), and every read here waits behind the controller's writes, so
+          // each credential is looked up once per round.
           const resolved = new Map<string, boolean>();
           for (const connection of [...watching]) {
             const actor = connection.actor;
@@ -174,8 +179,8 @@ const handlers = live.toLayer(
             const hash = actor.credential.tokenHash;
             let alive = resolved.get(hash);
             if (alive === undefined) {
-              // A database that will not answer is not grounds for logging
-              // anybody out; the round after this one asks again.
+              // A failed database read is no reason to log anyone out; the next
+              // round checks again.
               alive = yield* Effect.catchCause(isCredentialLive(actor), (cause) =>
                 Effect.as(
                   Effect.logError("a live connection's credential could not be re-checked", cause),
@@ -191,9 +196,10 @@ const handlers = live.toLayer(
     );
 
     /**
-     * The connection behind a call, or the reason there is none. Every call
-     * re-resolves the credential, so a client that keeps talking learns at once
-     * that it has been logged out.
+     * Returns the connection and actor of a call. Fails with unauthenticated
+     * when the connection has not said hello or its credential is gone. Every
+     * call re-checks the credential, so an active client learns at once that
+     * it has been logged out.
      */
     const identifyCaller = (
       client: Rpc.ServerClient,
@@ -214,10 +220,10 @@ const handlers = live.toLayer(
       });
 
     /**
-     * Takes out a subscription and remembers it on the connection, so it can be
+     * Opens a subscription and records it on the connection, so it can be
      * ended when the connection's credential goes. The connection is checked
-     * again once the subscription exists, because a revocation that ran while it
-     * was being taken out would have swept a set this queue was not yet in.
+     * again after the subscription is open, because a revocation that ran
+     * while it was opening would have missed it.
      */
     const holdSubscription = <E, R>(
       connection: Connection,
@@ -256,9 +262,8 @@ const handlers = live.toLayer(
           if (connection.actor !== undefined || connection.greeting) {
             return yield* Effect.fail(createInvalidStateError(HELLO_ONCE));
           }
-          // Claimed before anything is looked up, and given back if this
-          // greeting does not succeed, so a client whose first try was refused
-          // can try again.
+          // Claim the greeting before any lookup, and release it if this
+          // `hello` fails, so a client whose first try failed can try again.
           connection.greeting = true;
           return yield* Effect.ensuring(
             Effect.gen(function* () {
@@ -273,9 +278,9 @@ const handlers = live.toLayer(
                 );
               }
               const actor = yield* tickets.consume(payload.ticket);
-              // A ticket outlives the credential that fetched it by up to five
-              // minutes, so the greeting checks that credential rather than
-              // trusting what the ticket was minted for.
+              // A ticket can outlive the credential that requested it by up to
+              // five minutes, so check that credential again instead of
+              // trusting the ticket.
               if (Option.isNone(actor) || !(yield* isCredentialLive(actor.value))) {
                 return yield* Effect.fail(createUnauthenticatedError(TICKET_REFUSED));
               }
@@ -308,17 +313,17 @@ const handlers = live.toLayer(
                 ]),
               );
             }
-            // A tap is transcript content before it is a row, so it needs
-            // exactly what reading the transcript over HTTP needs - the same
-            // operation the `:stream` topic below names.
+            // A tap carries transcript content before it is stored, so it needs
+            // the same grant as reading the transcript over HTTP, like the
+            // `:stream` topic below.
             yield* Effect.provideService(requireGrant("transcript.read"), CurrentActor, actor);
             return yield* holdSubscription(connection, topics.tapSession(session.sessionId));
           }
 
           if (session?.kind === "stream") {
             const cursor = yield* parsePosition(payload.cursor);
-            // The transcript's deltas are the transcript, so this stream needs
-            // what reading it over HTTP needs.
+            // The stream's deltas are the transcript, so it needs the same grant
+            // as reading the transcript over HTTP.
             yield* Effect.provideService(requireGrant("transcript.read"), CurrentActor, actor);
             return yield* holdSubscription(
               connection,
@@ -337,13 +342,13 @@ const handlers = live.toLayer(
                 ]),
               );
             }
-            // A mutable topic carries no records, so being greeted is the whole
-            // of what it asks for.
+            // A mutable topic carries no records, so a successful `hello` is all
+            // it needs.
             return yield* holdSubscription(connection, topics.subscribe(topic));
           }
           const cursor = yield* parsePosition(payload.cursor);
-          // The log's deltas are the log, so this stream needs what reading the
-          // log over HTTP needs.
+          // The deltas are the event log, so this stream needs the same grant
+          // as reading the log over HTTP.
           yield* Effect.provideService(requireGrant("event.query"), CurrentActor, actor);
           return yield* holdSubscription(connection, topics.follow(cursor));
         }),
@@ -354,8 +359,9 @@ const handlers = live.toLayer(
 );
 
 /**
- * The socket, as a route on the current router. JSON framing, because a
- * WebSocket frames its own messages and the client is a browser.
+ * Serves the live socket as a route on the current router. Uses JSON
+ * serialization, because a WebSocket already frames its messages and the
+ * client is a browser.
  */
 export const LiveSocketLayer: Layer.Layer<
   never,

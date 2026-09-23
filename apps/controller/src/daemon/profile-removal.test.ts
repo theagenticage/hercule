@@ -1,10 +1,9 @@
 /**
- * Deleting a permission profile: what the other domains still hold decides
- * whether the row may go.
+ * Tests deleting a permission profile, which depends on whether sessions or
+ * agents in other domains still use it.
  *
- * The rows a session and an agent would be spawned from are written straight to
- * their tables: what the delete reads is the row, and spawning a session for
- * real would take the whole fleet.
+ * Session and agent rows are inserted straight into their tables: the delete
+ * only reads those rows, and spawning a real session would need a whole fleet.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
@@ -41,7 +40,7 @@ const USER: Actor = {
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(effect.pipe(Effect.provideService(CurrentActor, USER), Effect.provide(layer)));
 
-/** Runs a call that is expected to fail, and hands the test its error. */
+/** Runs a call that is expected to fail, and returns its error. */
 const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
     effect.pipe(Effect.flip, Effect.provideService(CurrentActor, USER), Effect.provide(layer)),
@@ -49,11 +48,11 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
 
 const READER: ReadonlyArray<Grant> = ["task.read", "run.read"];
 
-/** The message a refusal carried, as the test reads it. */
+/** Returns the message of an error. */
 const readRefusalMessage = (error: unknown): string =>
   (error as { readonly error: { readonly message: string } }).error.message;
 
-/** A session carrying this profile, in the status given. */
+/** Inserts a session on this profile, with the given status. */
 const insertSession = (profileId: string, status: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) => {
     const id = mintUuid();
@@ -67,7 +66,7 @@ const insertSession = (profileId: string, status: string) =>
     `;
   });
 
-/** An agent that spawns its sessions under this profile. */
+/** Inserts an agent that spawns its sessions under this profile. */
 const insertAgent = (profileId: string, name: string, at: string) =>
   Effect.flatMap(agentRepository, (agents) =>
     agents.insert({
@@ -84,7 +83,7 @@ const insertAgent = (profileId: string, name: string, at: string) =>
   );
 
 describe("profile.delete", () => {
-  it("deletes one the user made, and stamps it", async () => {
+  it("deletes a profile the user created, and records the actor", async () => {
     const { remaining, entries } = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -103,7 +102,7 @@ describe("profile.delete", () => {
     expect(entries[0]?.payload).toMatchObject({ name: "reviewer" });
   });
 
-  it("refuses to delete a shipped profile", async () => {
+  it("rejects deleting a built-in profile", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const store = yield* PermissionProfiles;
@@ -117,7 +116,7 @@ describe("profile.delete", () => {
     expect(readRefusalMessage(error)).toContain("Hercule ships");
   });
 
-  it("answers not_found for an id nobody has", async () => {
+  it("fails with not_found for an unknown id", async () => {
     const error = await runError(
       Effect.flatMap(ProfileRemoval, (removal) =>
         removal.deleteProfile({ id: "0199e0e7-9999-7000-8000-000000000000" }),
@@ -126,7 +125,7 @@ describe("profile.delete", () => {
     expect(error).toMatchObject({ error: { code: "not_found" } });
   });
 
-  it("refuses one a session that has not exited is still bounded by", async () => {
+  it("rejects deleting a profile that a session that has not exited still uses", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -137,13 +136,13 @@ describe("profile.delete", () => {
       }),
     );
 
-    // The session copied these grants at spawn and is held to them while it
-    // runs; deleting the row would end its credential without a word.
+    // The session copied these grants at spawn and keeps them while it runs.
+    // Deleting the profile would silently break its credential.
     expect(error).toMatchObject({ error: { code: "invalid_state" } });
     expect(readRefusalMessage(error)).toContain("session");
   });
 
-  it("deletes one whose only session has exited", async () => {
+  it("deletes a profile whose only session has exited", async () => {
     const remaining = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -158,7 +157,7 @@ describe("profile.delete", () => {
     expect(remaining).toEqual([]);
   });
 
-  it("refuses one an agent still spawns under, naming the oldest such agent", async () => {
+  it("rejects deleting a profile an agent still uses, and names the oldest such agent", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -175,8 +174,8 @@ describe("profile.delete", () => {
   });
 
   /**
-   * A profile carried by a live session and named by an agent gets the session
-   * refusal: the session is the one the user has to act on first.
+   * When a live session and an agent both use the profile, the error is about
+   * the session, because the user has to deal with the session first.
    */
   it("names the session before the agent when both hold the profile", async () => {
     const error = await runError(

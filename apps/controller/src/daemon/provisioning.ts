@@ -1,12 +1,14 @@
 /**
- * The working areas the fleet holds: the two operations a user asks for by
- * name, provision and dispose, what a machine that has just dialled in is still
- * owed, and the sweep that takes away what nothing needs any more.
+ * Workspaces on the fleet:
  *
- * Every row is written and committed before its machine is told, because a
- * transaction never spans a wait on a machine. The sweep decides and the
- * machine deletes: one that is not connected keeps its disk and is left for the
- * next pass rather than having it changed behind its back.
+ * - the two workspace operations a user calls, provision and dispose;
+ * - resending pending provisioning to a runner that has just connected;
+ * - the sweep that removes workspaces nothing needs any more.
+ *
+ * Every row is committed before its runner is told, because a transaction
+ * never waits on a runner. The sweep decides and the runner deletes the
+ * files. The sweep skips a runner that is not connected, so its files are not
+ * changed behind its back; a later pass handles them.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -46,7 +48,7 @@ type WorkspaceError = Unauthenticated | Forbidden | Validation | NotFound | Inva
 /** How often the controller looks for workspaces nothing needs any more. */
 const WORKSPACE_SWEEP_INTERVAL: Duration.Duration = Duration.minutes(10);
 
-/** Tests hand over an interval they can wait out. */
+/** The sweep interval. Tests override it with a shorter one. */
 export const WorkspaceSweepInterval = Context.Reference<Duration.Duration>(
   "hercule/controller/daemon/WorkspaceSweepInterval",
   { defaultValue: (): Duration.Duration => WORKSPACE_SWEEP_INTERVAL },
@@ -60,9 +62,9 @@ const make = Effect.gen(function* () {
   /** One pass of the expiry sweep. */
   const sweep = Effect.gen(function* () {
     for (const candidate of yield* workspaces.expiredCandidates()) {
-      // The check and the write are one transaction: a session starting in a
-      // workspace between the two would otherwise have its directory swept out
-      // from under it.
+      // The check and the write are one transaction. Otherwise a session that
+      // starts in the workspace between the two would have its directory
+      // deleted while it runs.
       const gone = yield* withTransaction(
         sql,
         Effect.gen(function* () {
@@ -86,8 +88,9 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * The repo's own workspace on one machine, cloned fresh under that
-     * machine's own storage.
+     * Provisions the main workspace of a repo resource on one runner: a fresh
+     * clone under the runner's own storage. Returns the workspace row, before
+     * the runner has finished the clone.
      */
     provisionWorkspace: (
       input: WorkspaceProvisionInput,
@@ -102,20 +105,20 @@ const make = Effect.gen(function* () {
             runnerId: decoded.runnerId,
           }),
         );
-        // After the commit. A machine that is not listening is told again when
-        // it dials in, from the rows this just wrote.
+        // After the commit. A runner that is not connected receives the frame
+        // when it connects, rebuilt from the rows just written.
         yield* connections.tell(decoded.runnerId, frame);
         return workspace;
       }),
 
-    /** Takes a workspace away: the row says so, then the machine is told. */
+    /** Disposes of a workspace: marks the row gone, then tells the runner to delete it. */
     disposeWorkspace: (input: Identified): Effect.Effect<Record<string, never>, WorkspaceError> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.dispose");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        // The refusal and the write are one transaction, so a session that
-        // starts in the workspace while this runs is either refused or is not
-        // there yet.
+        // The check and the write are one transaction, so a session that starts
+        // in the workspace at the same time is either rejected or starts after
+        // the dispose.
         const { runnerId, frame } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -126,21 +129,20 @@ const make = Effect.gen(function* () {
             };
           }),
         );
-        // After the commit: a transaction never spans a wait on a machine.
+        // After the commit: a transaction never waits on a runner.
         yield* connections.tell(runnerId, frame);
         return {};
       }),
 
     /**
-     * What the controller does about workspaces on its own: it tells a machine
-     * that has just dialled in what it still owes, and it sweeps what nothing
-     * needs any more.
+     * Runs forever. Resends pending provisioning frames to each runner that
+     * connects, and sweeps expired workspaces on an interval.
      */
     driving: Effect.all(
       [
         Stream.runForEach(connections.arrivals, (runnerId) =>
           forkAndAbsorbFailures(
-            "A machine could not be told what it still owes",
+            "Resending pending provisioning to a runner failed",
             resendProvisioning(runnerId),
           ),
         ),

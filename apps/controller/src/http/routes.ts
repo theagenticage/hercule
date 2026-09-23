@@ -1,12 +1,13 @@
 /**
  * The derived routes: one line per operation.
  *
- * A handler calls its service method - its domain's service, or a controller
- * daemon use case where carrying the operation out reaches a machine - and does
- * nothing else. What it does add is the one thing the service layer must not:
- * turning a failure that is not one of the contract's errors - a database that
- * will not answer, a bug - into `internal`, so the error channel on the wire
- * stays the closed enum while the service keeps its honest one.
+ * A handler calls its service method and does nothing else. The method is on
+ * its domain's service, or on a controller daemon use case when the operation
+ * reaches a runner. The one thing a handler adds is what the service layer
+ * must not do: it converts any failure that is not one of the contract's
+ * errors, such as a database error or a bug, into `internal`. So the errors
+ * on the wire stay the contract's fixed set, while the service keeps its
+ * precise error types.
  *
  * Every group is handled here, because Effect's HttpApi builds routes for a
  * whole API or for none.
@@ -83,8 +84,8 @@ const isApiError = (error: unknown): error is ApiError =>
   API_ERRORS.some((constructor) => error instanceof constructor);
 
 /**
- * What a handler wraps its service call in: the contract's errors pass through
- * and everything else becomes a logged `internal`.
+ * Wraps a handler's service call: the contract's errors pass through, and
+ * every other failure is logged and becomes `internal`.
  */
 export const withApiErrors = <A, E, R>(
   self: Effect.Effect<A, E, R>,
@@ -151,8 +152,9 @@ const settingsRoutes = HttpApiBuilder.group(api, "settings", (handlers) =>
 const profileRoutes = HttpApiBuilder.group(api, "profile", (handlers) =>
   Effect.gen(function* () {
     const profiles = yield* Profiles;
-    // A profile is deleted only once no session and no agent still holds it,
-    // and both of those are other domains' rows, so the delete is a layer up.
+    // A profile can be deleted only when no session or agent still uses it.
+    // Both are other domains' rows, so the delete is a controller daemon use
+    // case.
     const removal = yield* ProfileRemoval;
     return handlers
       .handle("query", ({ query }) => withApiErrors(profiles.query(query)))
@@ -178,8 +180,9 @@ const secretRoutes = HttpApiBuilder.group(api, "secret", (handlers) =>
 );
 
 /**
- * The connection service is not in `operationLayers`: it reads the plugin host,
- * and the host a request must see is the one the boot registered into.
+ * The connection service is not in `operationLayers`: it reads the plugin
+ * host, and a request must see the host instance that the boot registered
+ * plugins into.
  */
 const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
   Effect.gen(function* () {
@@ -258,8 +261,8 @@ const resourceRoutes = HttpApiBuilder.group(api, "resource", (handlers) =>
 const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
   Effect.gen(function* () {
     const workspaces = yield* WorkspaceService;
-    // Making a working area and taking one away are more than their rows: the
-    // machine holding the directory has to be told.
+    // Provisioning and disposing of a workspace do more than write rows: the
+    // runner holding the directory has to be told.
     const provisioning = yield* Provisioning;
     return handlers
       .handle("query", ({ query }) => withApiErrors(workspaces.query(query)))
@@ -342,11 +345,11 @@ const eventKindRoutes = HttpApiBuilder.group(api, "eventKind", (handlers) =>
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
-    // Two of this group's operations are about a machine's provider instances,
-    // which are this service's, not the runner service's.
+    // Two of this group's operations are about a runner's provider instances,
+    // which belong to the provider service, not the runner service.
     const providers = yield* ProviderService;
-    // Retiring a machine is more than its row: the sessions it was hosting and
-    // the working areas it held go with it, and it is told so.
+    // Retiring a runner does more than update its row: the sessions it hosted
+    // and the workspaces it held end with it, and the runner is told.
     const retirement = yield* Retirement;
     return handlers
       .handle("query", ({ query }) => withApiErrors(runners.query(query)))
@@ -411,12 +414,13 @@ const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
 const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
   Effect.gen(function* () {
     const sessions = yield* SessionService;
-    // Opening a session is more than its row: what it runs under, which machine
-    // hosts it and the working area it starts in are settled a layer up.
+    // Spawning a session does more than write its row: what it runs under,
+    // which runner hosts it and which workspace it starts in are decided by a
+    // controller daemon use case.
     const placement = yield* Placement;
-    // So is everything whose effect reaches the machine holding it, and
-    // `session.update`, whose selection rides the next frame and whose picks
-    // are judged against that machine's own catalog.
+    // So is every operation that reaches the session's runner, and
+    // `session.update`, whose model selection goes out with the next frame
+    // and whose options are validated against that runner's model catalog.
     const live = yield* Live;
     return handlers
       .handle("query", ({ query }) => withApiErrors(sessions.query(query)))
@@ -440,10 +444,10 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
 );
 
 /**
- * A session's inputs are the session's own state, so they are served by the
- * session service; the group is separate because the operations are `input.*`.
- * Steering is the exception: it puts a row on the wire, which is the controller
- * daemon's.
+ * A session's inputs are part of the session's state, so the session service
+ * serves them; the group is separate because the operations are `input.*`.
+ * Steering is the exception: it sends a row to the runner, which is the
+ * controller daemon's job.
  */
 const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
   Effect.gen(function* () {
@@ -462,8 +466,8 @@ const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
 );
 
 /**
- * A transcript is the session's own stream, so it is served by the session
- * service; the group is separate because the operation is `transcript.read`.
+ * A transcript is the session's own stream, so the session service serves
+ * it; the group is separate because the operation is `transcript.read`.
  */
 const transcriptRoutes = HttpApiBuilder.group(api, "transcript", (handlers) =>
   Effect.gen(function* () {
@@ -493,21 +497,22 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer));
 
 /**
- * Every service an operation resolves, and the controller daemon beside them:
- * the listener forks the controller daemon's drivers, so they are built here
- * rather than a second time somewhere else. One list, because a controller
- * booting with a layer this list has and its own does not is a controller
- * missing an operation, and nothing would say so until a request asked for it.
+ * Every service an operation uses, together with the controller daemon. The
+ * listener starts the controller daemon's drivers, so they are built here
+ * rather than a second time elsewhere. It is one list because otherwise a
+ * controller could boot without a layer an operation needs, and nothing would
+ * show it until a request used that operation.
  *
- * Six are deliberately absent. `Plugins`, `ProviderService`, `SessionService`,
- * `WorkspaceService`, `RunnerConnections` and `ProviderProbes` must be the
- * instances the boot built: a second one would hold no plugins, no connections,
- * none of the ingest state a session's stream is coalesced in, and would write
- * over the same rows the drivers act on. They reach the handlers from there.
+ * Six services are left out on purpose: `Plugins`, `ProviderService`,
+ * `SessionService`, `WorkspaceService`, `RunnerConnections` and
+ * `ProviderProbes`. They must be the instances the boot built. A second
+ * instance would have no plugins, no connections and none of the state a
+ * session's stream is coalesced in, and would write over the same rows the
+ * drivers use. The handlers get them from the boot.
  *
- * `EvaluationErrorNotifier` is left to the caller for the same reason from the
- * other side: a test reads what a routing table reported by handing over a
- * listener of its own, which a layer provided in here could not be replaced by.
+ * `EvaluationErrorNotifier` is left to the caller for a related reason: a
+ * test checks what a routing table reported by passing in its own notifier,
+ * which a layer provided here would prevent.
  */
 export const operationLayers = Layer.mergeAll(
   SetupLayer,
@@ -517,31 +522,31 @@ export const operationLayers = Layer.mergeAll(
   SecretLayer,
   ControllerLayer,
   SettingsOperationsLayer,
-  // The controller daemon's profile-removal use case reaches the profile
-  // service, so that one is layered under it rather than merged beside it.
+  // The controller daemon's profile removal uses the profile service, so the
+  // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
   TaskServiceLayer,
   AgentServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
-  // The controller daemon's retirement use case reaches the runner service, so
-  // that one is layered under it rather than merged beside it.
+  // The controller daemon's retirement uses the runner service, so the runner
+  // service is provided to it rather than merged next to it.
   RetirementLayer.pipe(Layer.provideMerge(RunnerServiceLayer)),
   RunnerJoinLayer,
-  // The inbound driver reaches both dispatch and the live channel, placement
-  // reaches dispatch, and the delivery of what a routing table matched goes out
-  // through that same live channel, so those three are layered under the group
-  // rather than merged beside it. The live channel reaches dispatch too, which
-  // is why it is provided first.
+  // The inbound driver uses both dispatch and `Live`, placement uses dispatch,
+  // and matched inputs are delivered through `Live` too. So those are
+  // provided to the group rather than merged next to it. `Live` also uses
+  // dispatch, which is why dispatch is provided last, under `Live`.
   Layer.mergeAll(
     InboundLayer,
     PlacementLayer,
-    // The events service reads what kinds exist from the plugins domain, which
-    // appends to the event log and so may not be imported by it; the two meet
-    // here, where the whole controller is assembled. The controller daemon's
-    // enrichment use case writes through that same service, so it is layered
-    // over it rather than merged beside it. The clock and the enrichment both
-    // hand their work to one router, so the router is provided to the pair.
+    // The events service reads the registered event kinds from the plugins
+    // domain. The plugins domain appends to the event log, so the events
+    // domain cannot import it; the two are wired together here, where the
+    // whole controller is assembled. Enrichment writes through the events
+    // service, so the events service is provided to it rather than merged
+    // next to it. The pipeline and enrichment share one router, so the router
+    // is provided to both.
     Layer.mergeAll(
       PipelineLayer,
       EnrichmentLayer.pipe(
@@ -559,7 +564,7 @@ export const operationLayers = Layer.mergeAll(
   WsTicketsLayer,
 );
 
-/** Every group's handlers. What `HttpApiBuilder.layer(api)` needs to build routes. */
+/** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */
 export const handlerLayers = Layer.mergeAll(
   setupRoutes,
   authRoutes,
