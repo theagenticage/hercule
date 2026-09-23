@@ -28,8 +28,8 @@ import { Authenticated } from "../security";
 import { Prompt, SessionInputOutcome } from "./session";
 
 /**
- * Where an input came from. Only `user` is written in this build; the rest are
- * the domain's own vocabulary, stored so the subscription and scheduled-wake
+ * Where an input came from. Only `user` is written in this build. The other
+ * values are already in the schema, so the subscription and scheduled-wake
  * features need no migration.
  */
 export const INPUT_SOURCES = ["user", "subscription", "heartbeat", "reminder"] as const;
@@ -38,7 +38,7 @@ export const InputSource = Schema.Literals(INPUT_SOURCES);
 
 export type InputSource = Schema.Schema.Type<typeof InputSource>;
 
-/** Terminal at `delivered` or `cancelled`; the queue is what is still `queued`. */
+/** `delivered` and `cancelled` are final. The queue is the set of rows still `queued`. */
 export const INPUT_STATUSES = ["queued", "delivered", "cancelled"] as const;
 
 export const InputStatus = Schema.Literals(INPUT_STATUSES);
@@ -61,22 +61,22 @@ export const Input = Schema.Struct({
   delivery: Schema.NullOr(Delivery),
   createdAt: Timestamp,
   deliveredAt: Schema.NullOr(Timestamp),
-  /** Set while the row is out on the wire and unanswered; null otherwise. */
+  /** Set while the row has been sent to the runner and no reply has arrived; null otherwise. */
   sentAt: Schema.NullOr(Timestamp),
-  /** Why a delivery did not go through, on a row still queued or ended by one; null otherwise. */
+  /** Why a delivery failed, on a row that is still queued or that the failure ended; null otherwise. */
   reason: Schema.NullOr(Schema.String),
 });
 
 export type Input = Schema.Schema.Type<typeof Input>;
 
-/** Declared apart from the payload so a service can spread it beside the two ids. */
+/** Declared separately from the payload, so a service can spread these fields next to the two ids. */
 export const INPUT_UPDATE_FIELDS = { text: Prompt } as const;
 
 export const InputUpdatePayload = closedStruct(INPUT_UPDATE_FIELDS);
 
 export type InputUpdatePayload = Schema.Schema.Type<typeof InputUpdatePayload>;
 
-/** The one order an input list has: the order the caller sent them in. */
+/** The only order of an input list: the order the inputs were sent in. */
 export const INPUT_SORT_FIELDS = ["createdAt"] as const;
 
 export const input = HttpApiGroup.make("input")

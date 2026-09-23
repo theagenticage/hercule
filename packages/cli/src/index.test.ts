@@ -134,7 +134,7 @@ describe("hercule session input --help", () => {
     }
     expect(at, MARKERS.join(" then ")).toEqual([...at].sort((a, b) => a - b));
     expect(at[0]).toBeGreaterThan(0);
-    expect(out.slice(0, at[0]).join("\n")).toContain("opens a turn on an idle session");
+    expect(out.slice(0, at[0]).join("\n")).toContain("On an idle session it starts a turn");
   });
 
   it("renders the example as a piped shell line", async () => {
@@ -804,7 +804,9 @@ describe("failures", () => {
       ),
     ).toBe(2);
     expect(fetch.calls).toEqual([]);
-    expect(io.stderr.join("\n")).toContain("--provenance: A provenance entry names at least one");
+    expect(io.stderr.join("\n")).toContain(
+      "--provenance: A provenance entry must include at least one",
+    );
     expect(io.stderr.join("\n")).toContain("run `hercule task create --help`");
   });
 

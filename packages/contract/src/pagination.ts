@@ -6,12 +6,12 @@
  * `validation` error rather than a silently ignored parameter.
  *
  * `sort` travels as one query parameter, `sort=<field>[:<asc|desc>]`, because a
- * URL query carries strings and nothing else: a nested object has no encoding
- * every client agrees on, and the one the derived client picks would be dropped
- * as an unknown parameter rather than refused. The decoded value is still the
- * `{ field, direction }` pair the spec names, so callers see a shape and only
- * the wire sees the string. Direction is optional; each operation's service
- * declares its own default order.
+ * URL query carries only strings: a nested object has no encoding every client
+ * agrees on, and the one the derived client picks would be silently dropped as
+ * an unknown parameter rather than rejected. The decoded value is still the
+ * `{ field, direction }` pair from the spec, so callers work with an object and
+ * only the wire carries the string. The direction is optional; each
+ * operation's service declares its own default order.
  */
 import { Schema, SchemaGetter } from "effect";
 
@@ -40,9 +40,9 @@ export const sortParam = <const Fields extends ReadonlyArray<string>>(fields: Fi
   type Sort = typeof sort.Encoded;
   return Schema.String.pipe(
     Schema.decodeTo(sort, {
-      // The split is unchecked on purpose: what comes out of it is handed to
-      // the struct above, which is what turns an unknown field or an unknown
-      // direction into an issue pointing at that half of the parameter.
+      // The split does not validate on purpose: its result is decoded by the
+      // struct above, which turns an unknown field or direction into an issue
+      // that points at that half of the parameter.
       decode: SchemaGetter.transform((text: string): Sort => {
         const colon = text.indexOf(":");
         return (
@@ -59,9 +59,9 @@ export const sortParam = <const Fields extends ReadonlyArray<string>>(fields: Fi
 };
 
 /**
- * The sort fields one operation's query schema declares, for a client that has
- * to render or validate them (the CLI's `--sort`). Empty when the operation
- * does not page.
+ * Returns the sort fields an operation's query schema declares, for a client
+ * that has to show or validate them (the CLI's `--sort`). Returns an empty
+ * list when the operation does not page.
  */
 export const readSortFields = (query: unknown): ReadonlyArray<string> => {
   const ast = (

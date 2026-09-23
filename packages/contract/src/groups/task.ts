@@ -1,14 +1,14 @@
 /**
  * Tasks: units of human intent.
  *
- * The row is thin on purpose. There is one fixed status axis with no state
- * machine, bare-string labels with no registry, and no assignee, subtask or
- * comment; everything a richer task engine would hard-code is a workflow's to
- * say. What the core does own is the shape below, the append-only provenance
- * that lets a repeated signal find its existing task, and the full-text query.
+ * The row is deliberately minimal. There is one fixed status field with no
+ * state machine, plain-string labels with no registry, and no assignee,
+ * subtask or comment; anything a richer task engine would hard-code is left to
+ * workflows. The core owns the shape below, the append-only provenance that
+ * lets a repeated signal find its existing task, and the full-text query.
  *
- * Delete is soft. A deleted task answers `not_found` on read, is excluded from
- * `query` and from search, and there is no include-deleted option.
+ * Delete is soft. Reading a deleted task fails with `not_found`, it is left
+ * out of `query` and search, and there is no option to include deleted tasks.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -34,27 +34,29 @@ export const MAX_SEARCH_TEXT_LENGTH = 512;
 
 /**
  * The most labels one task carries. Labels are a flat namespace with no
- * registry, so nothing else limits how many an edit can pile onto a row, and
- * every one of them is re-read on every page and copied into a `task.updated`
- * payload the log keeps for 90 days. Far more than anyone reads at a glance.
+ * registry, so nothing else limits how many an edit can add to a row, and
+ * every one of them is read on every page and copied into a `task.updated`
+ * payload the log keeps for 90 days. The limit is far more than anyone reads
+ * at a glance.
  */
 export const MAX_TASK_LABELS = 64;
 
 /**
- * The most provenance entries one call may append. The record itself grows over
- * a task's life and is not bounded - that is what it is for - so what this
- * bounds is one write.
+ * The most provenance entries one call may append. The record itself grows
+ * over a task's life and has no limit - that is its purpose - so this limits
+ * only a single write.
  */
 export const MAX_PROVENANCE_APPEND = 32;
 
 /**
- * The most values one filter field takes. A filter is `any-of` within a field,
- * and a list longer than this is not a filter but a query the caller should
- * have split; four statuses and a handful of labels is what the screens ask.
+ * The most values one filter field takes. A filter matches any of the values
+ * within a field, and a longer list than this is not a filter but a query the
+ * caller should have split; the screens ask for four statuses and a handful of
+ * labels.
  */
 export const MAX_FILTER_VALUES = 64;
 
-/** The fixed status axis. Every transition between these is legal. */
+/** The fixed set of statuses. Every transition between them is allowed. */
 export const TASK_STATUSES = ["open", "in-progress", "done", "cancelled"] as const;
 
 export const TaskStatus = Schema.Literals(TASK_STATUSES);
@@ -62,9 +64,8 @@ export const TaskStatus = Schema.Literals(TASK_STATUSES);
 export type TaskStatus = Schema.Schema.Type<typeof TaskStatus>;
 
 /**
- * How much this matters. Rendered as bars and weight, never as colour. The
- * order is the one a reader ranks them in, so a client rendering a chooser
- * takes it as it is.
+ * How much this matters. Shown as bars and font weight, never as colour. The
+ * list is in ranking order, so a client that shows a picker uses it as is.
  */
 export const TASK_PRIORITIES = ["urgent", "high", "normal", "low"] as const;
 
@@ -104,10 +105,10 @@ const CoreStampedField = Schema.Never.annotate({
 });
 
 /**
- * A provenance entry as a caller writes it. `at` and `actor` are declared and
- * uninhabited rather than left out: an excess property is dropped in silence,
- * and a caller who thinks they stamped an entry with someone else's actor
- * deserves to be told they did not.
+ * A provenance entry as a caller writes it. `at` and `actor` are declared with
+ * a schema no value matches, rather than left out: an unknown property would
+ * be silently dropped, and a caller who thinks they set someone else's actor
+ * on an entry should be told that they did not.
  */
 const ProvenanceInput = Schema.Struct({
   ref: Schema.optionalKey(ExternalRef),
@@ -118,7 +119,7 @@ const ProvenanceInput = Schema.Struct({
 }).check(
   Schema.makeFilter((entry) =>
     entry.ref === undefined && entry.eventId === undefined && entry.runId === undefined
-      ? "A provenance entry names at least one of ref, eventId and runId."
+      ? "A provenance entry must include at least one of ref, eventId and runId."
       : undefined,
   ),
 );
@@ -135,19 +136,19 @@ export const Task = Schema.Struct({
   provenance: Schema.Array(ProvenanceEntry),
   createdAt: Timestamp,
   updatedAt: Timestamp,
-  /** Moves only when `status` does. */
+  /** Changes only when `status` changes. */
   statusChangedAt: Timestamp,
-  /** Set by a delete, and so absent from everything a caller can still read. */
+  /** Set by a delete. A deleted task is never returned, so a caller never sees this field. */
   deletedAt: Schema.optionalKey(Timestamp),
 });
 
 export type Task = Schema.Schema.Type<typeof Task>;
 
 /**
- * What narrows a task listing. Within one field the values are any-of; across
- * fields the filter is and. There is no `or` across fields and no negation.
- * `text` is full text over the title and the description; a label and a ref are
- * never reached through it.
+ * The filters of `task.query`. Within one field, a task matches any of the
+ * values; across fields, a task must match every field. There is no `or`
+ * across fields and no negation. `text` is a full-text search over the title
+ * and the description; it never matches labels or refs.
  */
 export const TaskFilter = Schema.Struct({
   refs: Schema.optionalKey(atMost(ExternalRef, MAX_FILTER_VALUES)),
@@ -163,8 +164,8 @@ export type TaskFilter = Schema.Schema.Type<typeof TaskFilter>;
 export const TASK_SORT_FIELDS = ["updatedAt", "createdAt", "priority", "status"] as const;
 
 /**
- * What creating a task takes. The service decodes it as well, so an in-process
- * caller is held to the same shape a request is.
+ * The payload of `task.create`. The service decodes it too, so an in-process
+ * caller must send the same shape as a request.
  */
 export const TaskCreateInput = Schema.Struct({
   title: TaskTitle,
@@ -186,13 +187,13 @@ const TASK_UPDATE_FIELDS = {
   /** `null` detaches the task from its project. */
   projectId: Schema.optionalKey(Schema.NullOr(Id)),
   /**
-   * Labels move one at a time. The user and a triage agent write the same
-   * task, and a whole-array replace would silently undo whichever of them
-   * read the task first.
+   * Labels are added and removed one at a time. The user and a triage agent
+   * write the same task, and replacing the whole array would silently undo
+   * the change of whichever of them read the task first.
    */
   addLabels: Schema.optionalKey(atMost(Label, MAX_TASK_LABELS)),
   removeLabels: Schema.optionalKey(atMost(Label, MAX_TASK_LABELS)),
-  /** Appends. Provenance is never edited and never removed. */
+  /** Entries to append. Provenance is never edited and never removed. */
   provenance: Schema.optionalKey(atMost(ProvenanceInput, MAX_PROVENANCE_APPEND)),
 };
 
@@ -209,7 +210,7 @@ export const refuseEmptyTaskUpdate = Schema.makeFilter(
       (field) => update[field as keyof typeof TASK_UPDATE_FIELDS] !== undefined,
     )
       ? undefined
-      : "A task update must name at least one field to change. Add each field to change, such as title or status.",
+      : "A task update must include at least one field to change. Add each field to change, such as title or status.",
 );
 
 /**

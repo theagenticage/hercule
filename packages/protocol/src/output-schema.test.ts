@@ -1,11 +1,12 @@
 /**
- * The output-schema subset: what a schema may say if one schema is to mean the
- * same thing on all three harnesses.
+ * Tests the output-schema subset: what a schema may contain if it is to mean
+ * the same thing on all three harnesses.
  *
- * The lint answers issues, never a boolean: each case below names the one
- * thing wrong with an otherwise acceptable schema, and asserts the lint says
- * where it is and what rule it broke. A schema the lint accepts is the whole
- * subset in one document, so "accepted" is not proven by the trivial case.
+ * The lint returns issues, never a boolean: each case below has exactly one
+ * thing wrong with an otherwise valid schema, and checks that the issue gives
+ * where the mistake is and which rule it broke. The accepted schema uses the
+ * whole subset in one document, so acceptance is not only tested with a
+ * trivial case.
  */
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
@@ -27,7 +28,7 @@ const ACCEPTED = {
   required: ["verdict", "confidence", "notes", "author"],
   properties: {
     verdict: { type: "string", enum: ["accept", "dismiss"] },
-    // Nullable, written the one way the subset allows.
+    // Nullable, written the only way the subset allows.
     confidence: { type: ["number", "null"], description: "How sure." },
     notes: {
       type: "array",
@@ -49,8 +50,8 @@ const ACCEPTED = {
 };
 
 /**
- * One broken schema per row, each broken in exactly one way, with the pieces
- * its issue has to name: where it is, and what it broke.
+ * One invalid schema per row, each with exactly one mistake, and the text its
+ * issue has to include: where the mistake is, and which rule it broke.
  */
 const REJECTED: ReadonlyArray<{
   readonly what: string;
@@ -259,14 +260,14 @@ describe("lintOutputSchema", () => {
     expect(lintOutputSchema(ACCEPTED)).toEqual([]);
   });
 
-  // The two schemas every live proof runs on. A fixture the lint refuses
-  // would be a proof run against a document Hercule would never have sent.
+  // The two schemas every live test uses. If the lint rejected a fixture, the
+  // test would run against a document Hercule would never send.
   it("accepts both shared fixtures, the impossible one included", () => {
     expect(lintOutputSchema(FIXTURE_SCHEMA)).toEqual([]);
     expect(lintOutputSchema(IMPOSSIBLE_SCHEMA)).toEqual([]);
   });
 
-  it.each(REJECTED)("refuses $what, saying where and what", ({ schema, names }) => {
+  it.each(REJECTED)("rejects $what, and gives where and which rule", ({ schema, names }) => {
     const issues = lintOutputSchema(schema);
     expect(issues).toHaveLength(1);
     for (const name of names) expect(issues[0]).toContain(name);
@@ -274,14 +275,14 @@ describe("lintOutputSchema", () => {
 });
 
 /**
- * The bound is on the schema itself rather than on one caller's field, so both
- * ends refuse an oversized document: the controller before a row is written
- * and the runner before a harness is started.
+ * The size limit is part of the schema itself rather than one caller's field,
+ * so both sides reject an oversized document: the controller before a row is
+ * written and the runner before a harness is started.
  */
 describe("the size bound on a schema", () => {
   const decode = Schema.decodeUnknownResult(OutputSchema);
 
-  /** A schema whose JSON is `length` characters, give or take the padding. */
+  /** Builds a schema whose JSON is about `length` characters long. */
   const buildSchemaOfLength = (length: number): Record<string, unknown> => ({
     type: "object",
     additionalProperties: false,
@@ -289,7 +290,7 @@ describe("the size bound on a schema", () => {
     properties: { verdict: { type: "string", description: "x".repeat(length) } },
   });
 
-  it("takes a schema at the bound", () => {
+  it("accepts a schema at the limit", () => {
     const schema = buildSchemaOfLength(
       MAX_OUTPUT_SCHEMA_LENGTH - JSON.stringify(buildSchemaOfLength(0)).length,
     );
@@ -297,7 +298,7 @@ describe("the size bound on a schema", () => {
     expect(decode(schema)._tag).toBe("Success");
   });
 
-  it("refuses one past it, saying what the bound is", () => {
+  it("rejects a schema one character longer, and gives the limit", () => {
     const refused = decode(buildSchemaOfLength(MAX_OUTPUT_SCHEMA_LENGTH));
     expect(refused._tag).toBe("Failure");
     expect(JSON.stringify(refused)).toContain(String(MAX_OUTPUT_SCHEMA_LENGTH));

@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
 /**
- * Write `apps/controller/src/http/bundle.ts`: the web bundle in `apps/web/dist`
- * as the imports that embed it in the binary.
+ * Writes `apps/controller/src/http/bundle.ts`: one import per file of the web
+ * bundle in `apps/web/dist`, which embeds the bundle in the binary.
  *
  * A compiled binary has no `dist/` on disk, so every file has to be named in
- * source before `bun build --compile` runs. `with { type: "file" }` is what
- * embeds one: it makes the file part of the executable and hands the importer
- * the path it lives at inside it. The names are Vite's, fingerprints and all,
- * so the list is generated after each `vite build` rather than written by hand.
+ * source before `bun build --compile` runs. `with { type: "file" }` embeds a
+ * file: it makes the file part of the executable and gives the importer the
+ * file's path inside it. Vite chooses the file names, including their content
+ * hashes, so the list is generated after each `vite build` rather than
+ * written by hand.
  *
- * With no `dist/` the module says there is no bundle, and the controller serves
- * the API alone. That is the state of a fresh checkout, which must typecheck
+ * Without `dist/`, the generated module exports no bundle, and the controller
+ * serves the API alone. That is the state of a fresh checkout, which must typecheck
  * and test without anyone having run a web build.
  */
 import { existsSync, readdirSync } from "node:fs";
@@ -20,7 +21,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const dist = `${root}apps/web/dist`;
 const module = `${root}apps/controller/src/http/bundle.ts`;
 
-/** Every file under `dist/`, as the path a browser asks for it under. */
+/** Every file under `dist/`, as the URL path a browser requests it at. */
 const urlPaths = existsSync(dist)
   ? readdirSync(dist, { recursive: true, withFileTypes: true })
       .filter((entry) => entry.isFile())

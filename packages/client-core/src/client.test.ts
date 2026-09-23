@@ -144,7 +144,7 @@ describe("createClient", () => {
     assert.deepStrictEqual(error.issues, [
       {
         path: ["provenance", "0"],
-        message: "A provenance entry names at least one of ref, eventId and runId.",
+        message: "A provenance entry must include at least one of ref, eventId and runId.",
       },
     ]);
     assert.strictEqual(seen.length, 0);

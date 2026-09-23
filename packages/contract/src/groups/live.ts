@@ -9,20 +9,26 @@
  * `ping` is an app-level keepalive, because a browser cannot send a WebSocket
  * ping frame.
  *
- * Nothing here is reachable that HTTP cannot answer, except one thing that is
- * never stored anywhere: a mutable topic pushes an invalidation naming the
- * changed records and the client refetches them over HTTP; an append-only
- * topic pushes the records themselves, with a cursor to resume from except for
- * `session:<id>:tap`, whose token deltas are never persisted and never replay.
- * That is why one streaming method carries a union rather than two methods
- * carrying one shape each.
+ * Everything sent here can also be read over HTTP, except for one thing that
+ * is never stored:
+ *
+ * - a mutable topic pushes an invalidation with the ids of the changed records,
+ *   and the client refetches them over HTTP;
+ * - an append-only topic pushes the records themselves, with a cursor to
+ *   resume from;
+ * - `session:<id>:tap` pushes token deltas, which are never stored and never
+ *   replayed, so it has no cursor.
+ *
+ * That is why one streaming method returns a union, rather than two methods
+ * returning one shape each.
  *
  * `hello`'s `v` and `subscribe`'s `topic` are declared wider than the values
  * they accept, and the handler narrows them. A payload the transport cannot
  * decode comes back as an untyped defect rather than one of the contract's
- * errors, so every version and every topic name is a value the handler gets to
- * see and answer for, and only a frame whose JSON types are wrong - which no
- * client built from this contract can send - fails before it.
+ * errors. Declaring them wide means the handler sees every version and every
+ * topic name and can return a proper error. Only a frame with the wrong JSON
+ * types - which no client built from this contract can send - fails before
+ * the handler.
  */
 import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
@@ -40,12 +46,12 @@ import {
 import { Event } from "./event";
 import { TranscriptRow } from "./transcript";
 
-/** The protocol version `hello` agrees on. One conversation, one version. */
+/** The protocol version `hello` agrees on. A connection uses one version throughout. */
 export const LIVE_PROTOCOL_VERSION = 1;
 
 /**
- * Topics whose records are mutable: the push names the changed ids and the
- * client refetches them over HTTP.
+ * Topics whose records are mutable: the push holds the changed ids and the
+ * client refetches the records over HTTP.
  */
 export const MUTABLE_LIVE_TOPICS = [
   "task",
@@ -69,10 +75,10 @@ export const LIVE_TOPICS = [...MUTABLE_LIVE_TOPICS, ...APPEND_ONLY_LIVE_TOPICS] 
 
 /**
  * The two per-session append-only topics: `stream` is the durable coalesced
- * transcript, keyed and replayed exactly as `event` is; `tap` is the ephemeral
- * token deltas, which never persists and never replays. Parameterized by the
- * session id, so - unlike the flat topics above - they are a shape rather than
- * an enumerable list.
+ * transcript, keyed and replayed exactly as `event` is; `tap` carries the
+ * ephemeral token deltas, which are never stored and never replayed. They
+ * include the session id, so unlike the topics above they are a pattern rather
+ * than a fixed list.
  */
 export const SESSION_TOPIC_KINDS = ["stream", "tap"] as const;
 
@@ -82,10 +88,10 @@ export type SessionTopicKind = (typeof SESSION_TOPIC_KINDS)[number];
 export type SessionLiveTopic = `session:${string}:${SessionTopicKind}`;
 
 /**
- * The one pattern a session topic matches - on the wire and when one is pulled
- * apart - so the schema that decodes it and the parser that reads its id and
- * kind can never disagree about what counts as one. The id excludes `:`, which
- * is what makes the split unambiguous.
+ * The pattern a session topic matches. Both the schema that decodes a session
+ * topic and the parser that reads its id and kind use it, so the two can never
+ * disagree about what a session topic is. The id cannot contain `:`, which
+ * makes the split unambiguous.
  */
 const SESSION_TOPIC_PATTERN = /^session:([^:]+):(stream|tap)$/;
 
@@ -110,12 +116,12 @@ export type AppendOnlyLiveTopic = (typeof APPEND_ONLY_LIVE_TOPICS)[number] | Ses
 
 export type LiveTopic = MutableLiveTopic | AppendOnlyLiveTopic;
 
-/** Whether a topic replays from a cursor rather than nudging a refetch. */
+/** Checks whether a topic replays from a cursor rather than asking the client to refetch. */
 export const isAppendOnlyLiveTopic = (topic: LiveTopic): topic is AppendOnlyLiveTopic =>
   (APPEND_ONLY_LIVE_TOPICS as ReadonlyArray<string>).includes(topic) ||
   SESSION_TOPIC_PATTERN.test(topic);
 
-/** A session topic's id and kind, or nothing when the topic is not one. */
+/** Parses a session topic into its session id and kind. Returns `undefined` when the topic is not a session topic. */
 export const parseSessionTopic = (
   topic: string,
 ): { readonly sessionId: string; readonly kind: SessionTopicKind } | undefined => {
@@ -124,15 +130,15 @@ export const parseSessionTopic = (
   return { sessionId: match[1]!, kind: match[2] as SessionTopicKind };
 };
 
-/** The one session's durable transcript, as a topic name. */
+/** Builds the topic name of a session's durable transcript. */
 export const buildSessionStreamTopic = (sessionId: string): SessionLiveTopic =>
   `session:${sessionId}:stream`;
 
-/** The one session's ephemeral token taps, as a topic name. */
+/** Builds the topic name of a session's ephemeral token deltas. */
 export const buildSessionTapTopic = (sessionId: string): SessionLiveTopic =>
   `session:${sessionId}:tap`;
 
-/** Which way a record changed, as the audit kinds spell it. */
+/** How a record changed, spelled as in the audit kinds. */
 export const InvalidateKind = Schema.Literals(["created", "updated", "deleted"]);
 
 export type InvalidateKind = Schema.Schema.Type<typeof InvalidateKind>;
@@ -147,9 +153,9 @@ export const Invalidate = Schema.Struct({
 export type Invalidate = Schema.Schema.Type<typeof Invalidate>;
 
 /**
- * One token delta, as `session:<id>:tap` pushes it: the same fields
- * `content.delta` carries, minus the envelope a tap never needs (it is not
- * stored, so it has no session id, instant or provenance of its own).
+ * One token delta, as `session:<id>:tap` pushes it: the same fields as
+ * `content.delta`, without the envelope. A tap is not stored, so it needs no
+ * session id, timestamp or provenance of its own.
  */
 export const TapItem = Schema.Struct({
   turnId: Schema.String,
@@ -163,9 +169,9 @@ export type TapItem = Schema.Schema.Type<typeof TapItem>;
 /**
  * An append-only topic's push: the records themselves and, for a topic that
  * replays, the position to resume from. The cursor is opaque to the client,
- * which stores it and echoes it back and never parses it. `session:<id>:tap`
- * carries none: it is never persisted per token and never replays, so there is
- * no position for it to resume from.
+ * which stores it, sends it back and never parses it. `session:<id>:tap` has
+ * no cursor: its deltas are never stored and never replayed, so there is no
+ * position to resume from.
  */
 export const Delta = Schema.Struct({
   _tag: Schema.Literal("delta"),
@@ -175,14 +181,14 @@ export const Delta = Schema.Struct({
 
 export type Delta = Schema.Schema.Type<typeof Delta>;
 
-/** What a subscription's stream carries, whichever family its topic is in. */
+/** A message on a subscription's stream, for either kind of topic. */
 export const LiveMessage = Schema.Union([Delta, Invalidate]);
 
 export type LiveMessage = Schema.Schema.Type<typeof LiveMessage>;
 
 export const HelloResult = Schema.Struct({
   v: Schema.Literal(LIVE_PROTOCOL_VERSION),
-  /** What the controller answers `controller.read` with, so a client can see skew. */
+  /** The version `controller.read` returns, so a client can detect a version mismatch. */
   serverVersion: Schema.NonEmptyString,
 });
 

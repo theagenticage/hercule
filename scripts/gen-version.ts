@@ -1,30 +1,33 @@
 /**
- * Write `packages/home/src/version.ts`.
+ * Writes `packages/home/src/version.ts`.
  *
  * The version is baked in at build time: a compiled binary has no
  * `package.json` on disk to read. It is generated into
- * `@hercule/home` because that is the one leaf every role links: the dispatcher
- * prints it for `hercule --version` and the controller answers it from
- * `controller.read`, and neither may depend on the other.
+ * `@hercule/home` because that is the one package every role links and that
+ * depends on nothing else: the dispatcher prints it for `hercule --version`
+ * and the controller returns it from `controller.read`, and neither may
+ * depend on the other.
  *
- * The Claude Code version is baked in beside it: the SDK talks to the CLI it
- * was built against and anything newer, so its own `claudeCodeVersion` is the
- * floor a machine is held to, written down here and nowhere else.
+ * The Claude Code version is baked in next to it: the SDK works with the CLI
+ * version it was built against and anything newer, so its own
+ * `claudeCodeVersion` is the minimum version a machine must run. It is
+ * recorded here and nowhere else.
  *
- * Codex has no SDK to read a version off, so its release is a literal here: a
- * devDependency on `@openai/codex` would drag a per-platform binary into
- * `node_modules` for one string. pi is a literal for the same reason.
+ * Codex has no SDK to read a version from, so its release is written here as a
+ * literal: a devDependency on `@openai/codex` would pull a per-platform binary
+ * into `node_modules` for one string. pi's release is a literal for the same
+ * reason.
  */
 import { fileURLToPath } from "node:url";
 import { $ } from "bun";
 
-/** The Codex release this build's generated types and its installer both pin. */
+/** The Codex release that this build's generated types and its installer both use. */
 const CODEX_RELEASE = "0.154.0";
 
 /**
  * The pi release this build's adapter was verified against. pi is pre-1.0 and
- * has broken its RPC mode between releases, so this is both the least a machine
- * may run and the most anyone has tested.
+ * has broken its RPC mode between releases, so this is both the oldest version
+ * a machine may run and the newest anyone has tested.
  */
 const PI_RELEASE = "0.85.1";
 

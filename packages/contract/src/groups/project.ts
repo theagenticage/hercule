@@ -4,7 +4,7 @@
  * A project carries no behaviour. It has no default connection, no status and
  * nothing derived: a task points at one through `projectId`, and a resource
  * joins any number of them. Delete is soft, as it is for a task, and a task
- * keeps its `projectId` when the project it names is deleted.
+ * keeps its `projectId` when its project is deleted.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -30,7 +30,7 @@ export const Project = Schema.Struct({
   description: Schema.optionalKey(ProjectDescription),
   createdAt: Timestamp,
   updatedAt: Timestamp,
-  /** Set by a delete, and so absent from everything a caller can still read. */
+  /** Set by a delete. A deleted project is never returned, so a caller never sees this field. */
   deletedAt: Schema.optionalKey(Timestamp),
 });
 
@@ -40,8 +40,8 @@ export type Project = Schema.Schema.Type<typeof Project>;
 export const PROJECT_SORT_FIELDS = ["name", "createdAt", "updatedAt"] as const;
 
 /**
- * What creating a project takes. The service decodes it as well, so an
- * in-process caller is held to the same shape a request is.
+ * The payload of `project.create`. The service decodes it too, so an
+ * in-process caller must send the same shape as a request.
  */
 export const ProjectCreateInput = Schema.Struct({
   name: ProjectName,
@@ -50,10 +50,10 @@ export const ProjectCreateInput = Schema.Struct({
 
 export type ProjectCreateInput = Schema.Schema.Type<typeof ProjectCreateInput>;
 
-/** What editing a project takes. An absent field is left as it was. */
+/** The payload of `project.update`. A field left out is not changed. */
 export const ProjectUpdateInput = Schema.Struct({
   name: Schema.optionalKey(ProjectName),
-  /** `null` takes the description off again, which nothing else can do. */
+  /** `null` removes the description; no other value does. */
   description: Schema.optionalKey(Schema.NullOr(ProjectDescription)),
 });
 

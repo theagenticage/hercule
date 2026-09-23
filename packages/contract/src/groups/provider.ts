@@ -1,6 +1,7 @@
 /**
- * The instance id, not the provider id, is what everything routes on: one
- * provider can hold several accounts kept apart by their config directories.
+ * Provider instances. Everything routes on the instance id, not the provider
+ * id: one provider can have several accounts, kept apart by their config
+ * directories.
  * `displayName`, `binaryName` and `declared` come from the registering plugin
  * at read time, not from the stored row.
  */
@@ -22,8 +23,9 @@ import { Authenticated } from "../security";
 import { bounded } from "../strings";
 
 /**
- * The longest name a provider instance may carry. It is a contribution's own
- * bound because the controller names an instance after its provider.
+ * The longest name a provider instance may carry. It is the same limit as a
+ * contribution's name, because the controller names the default instance
+ * after its provider.
  */
 export const MAX_PROVIDER_INSTANCE_NAME_LENGTH = MAX_CONTRIBUTION_NAME_LENGTH;
 
@@ -36,9 +38,9 @@ export { DeclaredCapabilities } from "@hercule/plugin-host";
 export { ModelDescriptor, ModelOption, SnapshotAuth } from "@hercule/protocol";
 
 /**
- * How the harness version a runner reported stands against the version this
- * build was tested with. `unknown` is a machine that reported nothing, or a
- * provider nobody has pinned a floor for.
+ * How the harness version a runner reported compares with the versions this
+ * build was tested with. `unknown` means the machine reported no version, or
+ * the provider has no minimum version set.
  */
 export const VersionVerdict = Schema.Literals(["unknown", "below-floor", "ok", "above-tested-max"]);
 
@@ -56,10 +58,10 @@ export const CapabilitySnapshot = Schema.Struct({
 export type CapabilitySnapshot = Schema.Schema.Type<typeof CapabilitySnapshot>;
 
 /**
- * One secret-valued config field of a provider, in the plugin's own words, and
- * whether this instance has one stored. The value is written through
- * `secret.set` and never read back: an instance says that a credential is
- * there, never what it is.
+ * One secret config field of a provider, described in the plugin's own words,
+ * and whether this instance has a value stored for it. The value is written
+ * through `secret.set` and never read back: an instance shows that a
+ * credential is there, never what it is.
  */
 export const ProviderSecretField = Schema.Struct({
   name: Schema.String,
@@ -76,7 +78,7 @@ export const ProviderInstance = Schema.Struct({
   name: ProviderInstanceName,
   config: Schema.Json,
   displayName: Schema.String,
-  /** The harness's name on a machine's `PATH`, which is how facts name it. */
+  /** The harness's executable name on a machine's `PATH`, which is how Runner Facts refer to it. */
   binaryName: Schema.String,
   declared: DeclaredCapabilities,
   /** Empty where the provider's plugin marked no field secret. */
@@ -88,7 +90,7 @@ export const ProviderInstance = Schema.Struct({
 
 export type ProviderInstance = Schema.Schema.Type<typeof ProviderInstance>;
 
-/** What opening an instance takes. The config is read against the provider's own schema. */
+/** The payload of `provider.create`. The config is validated against the provider's own schema. */
 export const ProviderInstanceCreateInput = Schema.Struct({
   providerId: Schema.String,
   name: ProviderInstanceName,
@@ -97,7 +99,7 @@ export const ProviderInstanceCreateInput = Schema.Struct({
 
 export type ProviderInstanceCreateInput = Schema.Schema.Type<typeof ProviderInstanceCreateInput>;
 
-/** What editing an instance takes. An absent field is left as it was. */
+/** The payload of `provider.update`. A field left out is not changed. */
 export const ProviderInstanceUpdateInput = Schema.Struct({
   name: Schema.optionalKey(ProviderInstanceName),
   config: Schema.optionalKey(Schema.Json),
@@ -106,18 +108,18 @@ export const ProviderInstanceUpdateInput = Schema.Struct({
 export type ProviderInstanceUpdateInput = Schema.Schema.Type<typeof ProviderInstanceUpdateInput>;
 
 /**
- * Which machine a login runs on. A vendor credential belongs to exactly one
- * machine, because refresh-token rotation makes two live copies of one log each
- * other out.
+ * The machine a login runs on. A vendor credential belongs to exactly one
+ * machine, because with refresh-token rotation, two live copies of one login
+ * log each other out.
  */
 export const ProviderLoginInput = Schema.Struct({ runnerId: Id });
 
 export type ProviderLoginInput = Schema.Schema.Type<typeof ProviderLoginInput>;
 
 /**
- * The code the user pasted back out of the browser they opened the URL in. One
- * line by construction: it is written to the vendor's stdin, where a second
- * line would be read as a second answer to whatever it asks next.
+ * The code the user copied from the browser they opened the URL in. It must
+ * be a single line: it is written to the vendor CLI's stdin, where a second
+ * line would be read as the answer to its next question.
  */
 export const ProviderLoginCodeInput = Schema.Struct({
   runnerId: Id,

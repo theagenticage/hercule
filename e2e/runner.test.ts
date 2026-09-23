@@ -1,10 +1,10 @@
 /**
- * Enlisting a machine out of the release binary.
+ * Tests enrolling a machine through the release binary.
  *
- * The join is the one command an operator runs on a machine that holds nothing
- * yet, so the only honest test of it is the shipped binary against a shipped
- * controller: the token is minted by the ops CLI, the command goes through
- * argv, and what it leaves behind is a real file in a real home.
+ * The join is the only command an operator runs on a machine that has nothing
+ * installed yet, so the only real test of it is the shipped binary against a
+ * shipped controller: the CLI creates the token, the command goes through
+ * argv, and it leaves a real file in a real home.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,10 +27,10 @@ const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;
-/** The key `hercule login` wrote, which is what reads the fleet back. */
+/** The key `hercule login` wrote, which the test uses to read the fleet. */
 let apiKey: string;
 
-/** Mints a single-use join token, the way an operator on the controller does. */
+/** Creates a single-use join token, the way an operator on the controller does. */
 const mintToken = async (): Promise<string> => {
   const ran = await runCli(["runner", "join-token", "create", "--json"], {
     home: state.home,
@@ -54,7 +54,7 @@ interface Listed {
   } | null;
 }
 
-/** The runners the controller has enlisted. */
+/** Lists the runners the controller has enrolled. */
 const listRunners = async (): Promise<ReadonlyArray<Listed>> => {
   const response = await fetch(`${url}/api/v1/runners`, {
     headers: { authorization: `Bearer ${apiKey}` },
@@ -91,7 +91,7 @@ afterAll(async () => {
 });
 
 describe("hercule runner join through the binary", () => {
-  it("enlists the machine, prints the name it was given and writes runner.json", async () => {
+  it("enrols the machine, prints the name it was given and writes runner.json", async () => {
     const machine = createTemporaryHome();
     try {
       const before = new Set((await listRunners()).map((one) => one.id));
@@ -117,7 +117,7 @@ describe("hercule runner join through the binary", () => {
     }
   }, 60_000);
 
-  it("fails on a token nobody minted, saying so and leaving the home empty", async () => {
+  it("fails on a token nobody created, says so, and leaves the home empty", async () => {
     const machine = createTemporaryHome();
     try {
       const before = (await listRunners()).length;
@@ -127,7 +127,7 @@ describe("hercule runner join through the binary", () => {
         binary,
       });
       expect(ran.code).not.toBe(0);
-      // What it printed has to be about the token the controller refused, so a
+      // The output has to be about the token the controller rejected, so a
       // command that never reached the controller cannot pass this.
       expect(`${ran.stdout}${ran.stderr}`).toMatch(/token|unauthenticated|unauthori[sz]ed|401/i);
       expect(existsSync(join(machine.home, "runner", "runner.json"))).toBe(false);
@@ -151,9 +151,9 @@ describe("hercule runner join through the binary", () => {
 });
 
 describe("the runner the controller starts for itself", () => {
-  it("is online with what it probed, and answers on the loopback port it reported", async () => {
-    // The controller spawned its child while it was booting, so what is waited
-    // for here is the join and the first hello finishing, not the process.
+  it("is online with what it probed, and responds on the loopback port it reported", async () => {
+    // The controller started its child while booting, so this waits for the
+    // join and the first hello to finish, not for the process.
     const deadline = Date.now() + 10_000;
     let online = (await listRunners()).filter((one) => one.connectivity === "online");
     while (online.length === 0 && Date.now() < deadline) {
@@ -167,9 +167,9 @@ describe("the runner the controller starts for itself", () => {
     expect(local.facts!.os.length).toBeGreaterThan(0);
     expect(local.facts!.arch.length).toBeGreaterThan(0);
 
-    // The port it reported is the one it is really listening on, and the runner
-    // behind it is the row that reported it: that pairing is the whole of what
-    // makes "this machine" answerable from a browser.
+    // The port it reported is the one it is really listening on, and the
+    // runner behind it is the row that reported it: that pairing is what lets
+    // a browser find out which runner is "this machine".
     const identity = await fetch(`http://127.0.0.1:${String(local.facts!.identityPort)}/identity`);
     const said = await identity.text();
     expect(identity.status, said).toBe(200);
@@ -178,9 +178,9 @@ describe("the runner the controller starts for itself", () => {
 });
 
 describe("retiring a joined runner through the binary", () => {
-  it("joins reserved, retires the daemon out of the fleet, and re-enlists beside it", async () => {
+  it("joins as reserved, retires the daemon from the fleet, and enrols again next to it", async () => {
     const machine = createTemporaryHome();
-    /** The daemon, once started: awaited only after the retire has landed. */
+    /** The daemon, once started: awaited only after the retire has taken effect. */
     let daemon: Promise<Ran> | undefined;
     /** The runner it is hosting, so a failed run can still stop the daemon. */
     let runnerId = "";
@@ -203,8 +203,8 @@ describe("retiring a joined runner through the binary", () => {
       expect(runner.reserved, "--reserved is what the fleet reads back").toBe(true);
       expect(runner.lifecycle).toBe("active");
 
-      // The daemon is long-lived, so the promise is held rather than awaited:
-      // the retire below is what is supposed to end it.
+      // The daemon is long-lived, so the promise is kept rather than awaited:
+      // the retire below is supposed to end it.
       daemon = runCli(["runner"], { home: machine.home, binary });
 
       const deadline = Date.now() + 30_000;
@@ -232,8 +232,8 @@ describe("retiring a joined runner through the binary", () => {
       expect(afterRetire, "the retired runner stays in the fleet").toBeDefined();
       expect(afterRetire!.lifecycle).toBe("retired");
 
-      // The same machine home, a fresh token: a new runner beside the old row
-      // rather than in place of it.
+      // The same machine home and a new token: a new runner next to the old
+      // row rather than in place of it.
       const rejoined = await runCli(["runner", "join", url, "--token", await mintToken()], {
         home: machine.home,
         binary,
@@ -246,9 +246,9 @@ describe("retiring a joined runner through the binary", () => {
       expect(fresh[0]!.lifecycle).toBe("active");
       expect(fleet.map((one) => one.id)).toContain(runner.id);
     } finally {
-      // A daemon still running here is one this test failed before retiring.
-      // Retire it anyway, so the leftover process cannot outlive the case and
-      // hold up the controller the suite stops afterwards.
+      // A daemon still running here means this test failed before retiring
+      // it. Retire it anyway, so the leftover process cannot outlive the case
+      // and block the controller the suite stops afterwards.
       if (daemon !== undefined) {
         await runCli(["runner", "retire", runnerId, "--force", "true"], {
           home: state.home,

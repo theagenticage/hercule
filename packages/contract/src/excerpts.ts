@@ -3,8 +3,8 @@
  * of what the author wrote, a list of names, or a message from a library. An
  * error response has one message per problem, so messages that repeated a long
  * value in full could make the response as large as the request, once per
- * problem. The workflow validators and the check of a subscription's condition
- * build their messages with these helpers.
+ * problem. The workflow validators and the validation of a subscription's
+ * condition build their messages with these helpers.
  */
 
 /**

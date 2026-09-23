@@ -1,11 +1,15 @@
 /**
  * The grant vocabulary.
  *
- * A grant is part of the wire contract: a 403 names the missing grant in
- * `details.grant`, `profile.create` takes a list of them, and the CLI's
- * `--help` prints the grant an operation needs. It therefore lives here rather
- * than only inside the controller. `grants.test.ts` asserts this list is the
- * same list the controller enforces, so the two can never drift.
+ * A grant is part of the wire contract:
+ *
+ * - a 403 response puts the missing grant in `details.grant`;
+ * - `profile.create` takes a list of grants;
+ * - the CLI's `--help` prints the grant an operation needs.
+ *
+ * So the vocabulary lives here rather than only inside the controller.
+ * `grants.test.ts` checks that this list is the same list the controller
+ * enforces, so the two can never drift apart.
  */
 import { Schema } from "effect";
 
@@ -34,10 +38,10 @@ export const GRANT_FAMILIES = {
   credential: ["read", "write"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
-/** One grant family: the coarse operation area a grant names. */
+/** A grant family: the broad area of operations a grant covers. */
 export type GrantFamily = keyof typeof GRANT_FAMILIES;
 
-/** One grant, family-dot-verb: what a 403 names and an escalation asks for. */
+/** A grant, written `<family>.<verb>`. A 403 response reports the missing grant, and an escalation asks for one. */
 export type Grant = {
   [F in GrantFamily]: `${F}.${(typeof GRANT_FAMILIES)[F][number]}`;
 }[GrantFamily];

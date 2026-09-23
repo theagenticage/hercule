@@ -1,13 +1,14 @@
 /**
  * Password login, logout, and the live socket's ticket.
  *
- * `auth.login` mints the 30-day rolling bearer token the web app holds and
- * `hercule login` trades for an API key. `auth.logout` revokes the login bearer
- * token it was called with; an API key or a session token is `validation`,
- * because revoking those is `apiKey.revoke` and ending the session.
+ * `auth.login` creates the 30-day rolling bearer token that the web app holds
+ * and that `hercule login` exchanges for an API key. `auth.logout` revokes the
+ * login bearer token it was called with. Calling it with an API key or a
+ * session token fails with `validation`, because those are revoked with
+ * `apiKey.revoke` and by ending the session.
  *
  * `auth.wsTicket` is the one credential that is not a token: a short-lived
- * single-use string the caller trades for an authenticated WebSocket. It exists
+ * single-use string the caller exchanges for an authenticated WebSocket. It exists
  * because a browser cannot set a header on a WebSocket handshake, and putting
  * the 30-day bearer in the URL would leak it into every log the request passes.
  */
@@ -30,7 +31,7 @@ export const LoginResult = Schema.Struct({
   expiresAt: Timestamp,
 });
 
-/** What the live socket presents at `hello`. Good once, and not for long. */
+/** What the live socket presents at `hello`. Valid once, and only for a short time. */
 export const WsTicket = Schema.Struct({
   ticket: Schema.NonEmptyString,
 });

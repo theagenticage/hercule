@@ -1,25 +1,25 @@
 #!/usr/bin/env bun
 /**
- * The web app's first paint, weighed against its budget.
+ * Checks the size of the web app's first paint against its budget.
  *
  * The budget is on the JavaScript a browser must have before it can show
  * anything: the entry module plus everything `index.html` preloads beside it.
  * Every route is a chunk of its own and is fetched when it is first visited, so
- * a screen added later costs nothing here - which is the point of measuring the
+ * a screen added later costs nothing here. That is why the check measures the
  * entry rather than the whole directory.
  *
  * CSS and fonts are outside the budget. They are one stylesheet and a fixed set
- * of subsets that no amount of application code moves.
+ * of font subsets, and application code does not change their size.
  *
- * The same pass refuses a development build. React ships two builds behind an
- * export condition, the development one is what a stray `NODE_ENV` selects,
- * and it is both slower and far larger - a difference the budget alone would
- * absorb rather than report.
+ * The same check rejects a development build. React ships two builds behind an
+ * export condition, a stray `NODE_ENV` selects the development one, and it is
+ * both slower and far larger - a difference the budget alone might absorb
+ * rather than report.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/** The most the first paint may weigh, gzipped. */
+/** The largest the first paint may be, gzipped. */
 const BUDGET_BYTES = 250 * 1024;
 
 const dist = fileURLToPath(new URL("../apps/web/dist", import.meta.url));
@@ -31,7 +31,7 @@ if (!existsSync(dist)) {
 
 const html = readFileSync(`${dist}/index.html`, "utf8");
 
-/** What the page fetches before it can render: the entry module and its preloads. */
+/** The files the page fetches before it can render: the entry module and its preloads. */
 const firstPaint = new Set(
   [
     ...html.matchAll(/<script[^>]*\ssrc="([^"]+\.js)"/g),
@@ -40,13 +40,13 @@ const firstPaint = new Set(
 );
 
 if (firstPaint.size === 0) {
-  console.error("check-bundle-budget: index.html names no script; the build produced no entry.");
+  console.error("check-bundle-budget: index.html has no script; the build produced no entry.");
   process.exit(1);
 }
 
 const readDistFile = (urlPath: string) => readFileSync(`${dist}${urlPath}`);
 
-/** What only React's development build contains. */
+/** Strings that only React's development build contains. */
 const DEVELOPMENT_MARKERS = ["jsx-dev-runtime", "Invalid hook call"];
 
 const shipped = [...firstPaint];
@@ -54,7 +54,7 @@ for (const marker of DEVELOPMENT_MARKERS) {
   const carrier = shipped.find((urlPath) => readDistFile(urlPath).includes(marker));
   if (carrier !== undefined) {
     console.error(
-      `check-bundle-budget: ${carrier} carries "${marker}", so this is a development build. ` +
+      `check-bundle-budget: ${carrier} contains "${marker}", so this is a development build. ` +
         `Build with NODE_ENV=production, or find what unset it.`,
     );
     process.exit(1);
@@ -82,7 +82,7 @@ for (const chunk of chunks) {
 }
 
 // Summed over what the page fetches, not over what the directory holds: a
-// first-paint chunk emitted outside `/assets/` still has to be paid for.
+// first-paint chunk emitted outside `/assets/` still counts.
 const total = shipped.reduce(
   (sum, urlPath) => sum + Bun.gzipSync(readDistFile(urlPath)).byteLength,
   0,

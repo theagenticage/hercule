@@ -1,8 +1,8 @@
 /**
- * The shorthand a person and an agent type: `hercule subscription create
- * run:r_3`, or a bare External Ref. The schema is the whole of the parsing, in
- * both directions, so a command line and a stored target can never disagree
- * about what a token means.
+ * Tests the shorthand a person or an agent types: `hercule subscription create
+ * run:r_3`, or a bare External Ref. The schema does all of the parsing and
+ * formatting, so a command line and a stored target can never disagree about
+ * what a token means.
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Schema } from "effect";
@@ -17,7 +17,7 @@ const decodeOrFail = (input: string): unknown => {
   return exit.value;
 };
 
-/** The text a refusal carries, or a thrown report that it did not refuse. */
+/** Returns the error text of a failed decode. Throws when the input decodes. */
 const readRefusal = (input: string): string => {
   const exit = decode(input);
   if (Exit.isSuccess(exit)) throw new Error(`${input} decoded to ${JSON.stringify(exit.value)}`);
@@ -44,7 +44,7 @@ describe("SubscriptionTargetFromShorthand", () => {
     }
   });
 
-  it("refuses a token that is none of the four forms, and names all four", () => {
+  it("rejects a token that matches none of the four forms, and lists all four", () => {
     for (const nonsense of ["nonsense", "run:"]) {
       const message = readRefusal(nonsense);
       for (const form of ["run:", "session:", "request:", "ref"]) {

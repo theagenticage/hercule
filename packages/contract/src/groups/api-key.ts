@@ -13,10 +13,10 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
 
-/** An API key as it is listed: everything about it except the token. */
 /** What a user may call a key. */
 const KeyName = bounded(1, 128);
 
+/** An API key as it is listed: everything about it except the token. */
 export const ApiKey = Schema.Struct({
   id: Id,
   name: KeyName,
@@ -27,7 +27,7 @@ export const ApiKey = Schema.Struct({
 
 export type ApiKey = Schema.Schema.Type<typeof ApiKey>;
 
-/** What minting answers with. `token` is shown here and nowhere else. */
+/** What `apiKey.create` returns. `token` is shown here and nowhere else. */
 export const MintedApiKey = Schema.Struct({
   id: Id,
   name: KeyName,

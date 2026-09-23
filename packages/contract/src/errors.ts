@@ -1,16 +1,21 @@
 /**
- * The one error envelope.
+ * The error envelope.
  *
- * Every failing operation answers with `{ error: { code, message, details? } }`
- * and nothing else. `code` is a closed enum, the HTTP status is derived from
- * the code, `details` is typed per code, and `message` is for people and is
- * never parsed. The wire contract names no schema library: a decode failure is
- * mapped into `validation`'s neutral `issues` list by the transport.
+ * Every failed operation responds with `{ error: { code, message, details? } }`
+ * and nothing else:
  *
- * One error per response. The order the checks run in - `unauthenticated`,
- * the static grant check, `validation`, `not_found`, entity-dependent
- * `forbidden`, business rules, `internal` - is the service layer's and the
- * request middleware's, not this module's.
+ * - `code` is a closed enum, and the HTTP status is derived from it;
+ * - `details` has a type per code;
+ * - `message` is for people and is never parsed.
+ *
+ * The wire contract does not depend on a schema library: the transport
+ * converts a decode failure into the library-neutral `issues` list of a
+ * `validation` error.
+ *
+ * A response carries one error. The service layer and the request middleware
+ * decide the order of the checks, not this module: `unauthenticated`, the
+ * static grant check, `validation`, `not_found`, entity-dependent `forbidden`,
+ * business rules, then `internal`.
  */
 import { Schema, SchemaIssue } from "effect";
 import { GrantSchema, type Grant } from "./grants";
@@ -41,7 +46,7 @@ export const ERROR_STATUS = {
   internal: 500,
 } as const satisfies Record<ErrorCode, number>;
 
-/** One thing wrong with an input, in schema-library-free vocabulary. */
+/** One thing wrong with an input, in terms that do not depend on a schema library. */
 export const Issue = Schema.Struct({
   path: Schema.Array(Schema.String),
   message: Schema.String,
@@ -49,7 +54,7 @@ export const Issue = Schema.Struct({
 
 export type Issue = Schema.Schema.Type<typeof Issue>;
 
-/** What a `cap_exceeded` names: a byte size or an item count against its cap. */
+/** The details of a `cap_exceeded` error: a byte size or an item count, and its cap. */
 export const CapDetails = Schema.Union([
   Schema.Struct({ size: Schema.Int, cap: Schema.Int }),
   Schema.Struct({ count: Schema.Int, cap: Schema.Int }),
@@ -80,7 +85,7 @@ export class Forbidden extends Schema.Error<Forbidden>("hercule/Forbidden")(
   { description: "Forbidden", httpApiStatus: ERROR_STATUS.forbidden },
 ) {}
 
-/** The input is wrong. The one code that reports everything wrong at once. */
+/** The input is invalid. The only error that reports every problem at once. */
 export class Validation extends Schema.Error<Validation>("hercule/Validation")(
   {
     error: Schema.Struct({
@@ -148,7 +153,7 @@ export class Internal extends Schema.Error<Internal>("hercule/Internal")(
   { description: "Internal", httpApiStatus: ERROR_STATUS.internal },
 ) {}
 
-/** Every error the API can answer with. */
+/** Every error the API can return. */
 export type ApiError =
   | Unauthenticated
   | Forbidden
@@ -251,9 +256,10 @@ export const listSchemaIssues = (
  * Lists the issues of a Schema decode failure, one entry per problem, with the
  * schema library's messages.
  *
- * The wire vocabulary names no schema library, and this is the one place the
- * two meet: the transport decodes a request with it and a service decodes an
- * in-process call with it, so the same bad input reads the same either way.
+ * The wire contract does not depend on a schema library, and this function is
+ * where the two connect. The transport uses it for a request, and a service
+ * uses it for an in-process call, so the same invalid input produces the same
+ * issues either way.
  */
 export const listDecodeIssues = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
   listSchemaIssues(error.issue);

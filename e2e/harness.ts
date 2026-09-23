@@ -1,10 +1,10 @@
 /**
  * The end-to-end harness: a real controller process, driven by the real CLI.
  *
- * Nothing here imports Hercule code. The point of these tests is that the thing
- * an operator runs works, so the controller is started the way `hercule serve`
- * starts it and every command goes through `argv`, stdin, stdout and the exit
- * code - the same surface a shell sees.
+ * Nothing here imports Hercule code. These tests check that what an operator
+ * runs actually works, so the controller is started the way `hercule serve`
+ * starts it, and every command goes through `argv`, stdin, stdout and the exit
+ * code - the same interface a shell sees.
  *
  * The processes are started with `Bun.spawn` rather than `spawnOwnBinary`, which
  * inherits stdio: a test has to read what the command printed.
@@ -29,15 +29,15 @@ export const ROOT = dirname(import.meta.dirname);
 const ENTRYPOINT = join(ROOT, "packages/hercule/src/main.ts");
 
 /**
- * The release binary if one has been built, and `undefined` - the dispatcher's
- * own source - if not.
+ * Returns the path of the release binary if one has been built, or `undefined`
+ * to run the dispatcher's own source.
  *
- * The suites that are only honest as a release say so themselves and refuse to
- * run without `./hercule`, and do not call this. A suite that exercises the
- * controller's own surface rather than the packaging is the same program either
- * way: it runs the release under `pnpm test:binary`, which is the only command
- * that runs it, and the dispatcher's source when it is run on its own with no
- * build behind it.
+ * Suites that only make sense against a release binary check for `./hercule`
+ * themselves and do not run without it; they do not call this. A suite that
+ * tests the controller itself rather than the packaging works the same either
+ * way: it runs the release binary under `pnpm test:binary`, which is the only
+ * command that runs it, and the dispatcher's source when it is run on its own
+ * without a build.
  */
 export function findReleaseBinary(): string | undefined {
   const built = join(ROOT, "hercule");
@@ -45,15 +45,15 @@ export function findReleaseBinary(): string | undefined {
 }
 
 /**
- * The Bun that is running this test. Under `pnpm test` that is `bun`, but a
+ * The Bun executable running this test. Under `pnpm test` that is `bun`, but a
  * vitest started by node would give a node path, which cannot run the
  * dispatcher.
  */
 const BUN = process.execPath.endsWith("/bun") ? process.execPath : "bun";
 
 /**
- * The environment a spawned Hercule sees: this process's, minus every `HERCULE_`
- * variable. A developer with `HERCULE_HOME` or `HERCULE_TOKEN` set in their shell
+ * Builds the environment a spawned Hercule sees: this process's environment,
+ * without any `HERCULE_` variable. A developer with `HERCULE_HOME` or `HERCULE_TOKEN` set in their shell
  * must not change what these tests exercise.
  */
 function buildCleanEnv(): Record<string, string> {
@@ -66,11 +66,11 @@ function buildCleanEnv(): Record<string, string> {
 }
 
 /**
- * Whether the cases that spend a real model token were asked for.
+ * Checks whether the cases that spend real model tokens were requested.
  *
- * Set to anything but `0` or the empty string is a yes, so a shell that exports
- * `HERCULE_LIVE_SESSION_TEST` can turn it off again with a `0` rather than having
- * to unset it.
+ * Any value other than `0` or the empty string turns them on, so a shell that
+ * exports `HERCULE_LIVE_SESSION_TEST` can turn them off again with `0` rather
+ * than having to unset it.
  */
 export function isLiveSessionTestEnabled(): boolean {
   const asked = process.env["HERCULE_LIVE_SESSION_TEST"];
@@ -83,30 +83,30 @@ export function isLiveSessionTestEnabled(): boolean {
  * A session runs against the Provider Instance's own `CLAUDE_CONFIG_DIR` under
  * the runner's storage (spec 06 section 4.2), which in a throwaway Hercule
  * Home is empty, so nothing could start. There are two ways to give it a
- * login, and a case that has neither skips saying so:
+ * login, and a case that has neither is skipped with a message:
  *
  * - `HERCULE_E2E_CLAUDE_CREDENTIALS` names a file holding what the Claude CLI
  *   stores as its credential. `lendCredential` copies it into the throwaway
  *   instance directory as `.credentials.json`, and the caller re-probes the
  *   instance; the whole home, credential included, is deleted when the suite
- *   ends. Reading the developer's own login out of wherever their machine
- *   keeps it is the caller's business, never this file's: a test that reaches
- *   into a personal credential store takes a secret nobody handed it.
+ *   ends. Reading the developer's own login from wherever their machine keeps
+ *   it is up to the caller, never this file: a test that reads a personal
+ *   credential store takes a secret nobody gave it.
  * - `ANTHROPIC_API_KEY` on the environment, which reaches the session through
  *   the runner the controller starts for itself.
  */
 export const LENT_CREDENTIALS = process.env["HERCULE_E2E_CLAUDE_CREDENTIALS"];
 
-/** Whether either of the two login routes is open for this run. */
+/** Checks whether either of the two login routes is available for this run. */
 export function isLoginAvailable(): boolean {
   return LENT_CREDENTIALS !== undefined || process.env["ANTHROPIC_API_KEY"] !== undefined;
 }
 
 /**
- * `<home>/runner/<storage>/providers/<instanceId>`: the instance's private
- * config directory, named by the storage directory this runner's identity
- * owns. The runner writes `runner.json` as it enrols, so nothing may call this
- * before it has.
+ * Returns `<home>/runner/<storage>/providers/<instanceId>`: the instance's
+ * private config directory, inside the storage directory of this runner. The
+ * runner writes `runner.json` as it enrols, so nothing may call this before
+ * then.
  */
 function buildInstanceDir(home: string, instanceId: string): string {
   const pin = JSON.parse(readFileSync(join(home, "runner", "runner.json"), "utf8")) as {
@@ -115,7 +115,7 @@ function buildInstanceDir(home: string, instanceId: string): string {
   return join(home, "runner", pin.storageDirectory, "providers", instanceId);
 }
 
-/** Lends the credential the caller named to the throwaway instance, for this run. */
+/** Copies the credential the caller named into the throwaway instance, for this run. */
 export function lendCredential(home: string, instanceId: string): void {
   const dir = buildInstanceDir(home, instanceId);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -124,7 +124,7 @@ export function lendCredential(home: string, instanceId: string): void {
   chmodSync(path, 0o600);
 }
 
-/** What a finished command left behind. */
+/** The result of a finished command. */
 export interface Ran {
   readonly code: number;
   readonly stdout: string;
@@ -132,27 +132,28 @@ export interface Ran {
 }
 
 /**
- * A port to try. Nothing reserves it: `bind.port` rejects 0, so the kernel
- * cannot hand the controller an ephemeral port, and probing one by binding and
- * closing would only move the race. `startController` treats a bind failure as
- * an ordinary outcome and picks another number instead.
+ * Picks a port to try. Nothing reserves it: `bind.port` rejects 0, so the
+ * kernel cannot give the controller an ephemeral port, and probing one by
+ * binding and closing it would only move the race. `startController` treats a
+ * bind failure as an ordinary outcome and picks another number instead.
  */
 function pickCandidatePort(): number {
   return 20_000 + Math.floor(Math.random() * 40_000);
 }
 
 /**
- * A temporary Hercule Home, removed when the suite ends.
+ * Creates a temporary Hercule Home, and returns it with a function that
+ * removes it.
  *
- * With a `gitconfig`, the directory is also fit to hand a process as `HOME`:
- * it holds none of the git configuration the developer running the suite has -
- * no `.gitconfig` but the one written here, no `.git-credentials`, no `gh`
+ * With a `gitconfig`, the directory can also be given to a process as `HOME`:
+ * it holds none of the git configuration of the developer running the suite -
+ * no `.gitconfig` except the one written here, no `.git-credentials`, no `gh`
  * login.
  *
- * `Library` is linked back to the real home on macOS. The master key lives in
+ * On macOS, `Library` is linked back to the real home. The master key is in
  * the login keychain, which `security` finds under `$HOME/Library/Keychains`,
- * so a home without it is a controller that cannot boot; git reads nothing
- * under `Library`, so the scrub still holds.
+ * so without it the controller cannot boot; git reads nothing under
+ * `Library`, so the isolation still holds.
  */
 export function createTemporaryHome(gitconfig?: string): { home: string; remove: () => void } {
   const home = mkdtempSync(join(tmpdir(), "hercule-e2e-"));
@@ -171,10 +172,10 @@ export function createTemporaryHome(gitconfig?: string): { home: string; remove:
 }
 
 /**
- * The environment a test runs `git` in: the `HOME` it was handed and nothing of
- * the developer's - no system configuration, and no terminal to be prompted on
- * - plus one fixed identity, so a commit made here needs no configuration of
- * its own to succeed.
+ * Builds the environment a test runs `git` in: the given `HOME` and nothing of
+ * the developer's - no system configuration, and no terminal to prompt on -
+ * plus one fixed identity, so a commit made here needs no configuration of its
+ * own to succeed.
  */
 export function buildGitEnv(home: string): Record<string, string> {
   return {
@@ -189,28 +190,28 @@ export function buildGitEnv(home: string): Record<string, string> {
   };
 }
 
-/** A controller process that is up and answering. */
+/** A controller process that is running and responding. */
 export interface Controller {
   readonly url: string;
   /** The port it bound, so a restart can ask for the same one. */
   readonly port: number;
   /** Everything the process has printed on stdout and stderr, in order. */
   output: () => string;
-  /** SIGTERM, then the exit code it left with. */
+  /** Sends SIGTERM, then returns the exit code. */
   stop: () => Promise<number>;
 }
 
 /**
- * Start `hercule serve` against a home, and resolve once it answers.
+ * Starts `hercule serve` against a home, and resolves once it responds.
  *
- * Readiness is the unauthenticated `setup.read`, not a line of output: the
- * listener is what the tests need, and the log line is printed just before it
- * would be reachable anyway.
+ * Readiness is checked with the unauthenticated `setup.read`, not a line of
+ * output: the tests need the listener, and the log line is printed just
+ * before the listener is reachable anyway.
  *
- * With no `port`, a number is picked and the start is retried on another if the
- * bind loses to whatever else on the machine took it in the meantime. With a
+ * With no `port`, a number is picked, and the start is retried on another
+ * port if something else on the machine took it in the meantime. With a
  * `port` - a restart on the port the first run bound - a bind failure is the
- * test's answer, so it is reported rather than retried.
+ * result the test gets, so it is reported rather than retried.
  */
 export async function startController(options: {
   readonly home: string;
@@ -219,10 +220,10 @@ export async function startController(options: {
   /** The compiled binary to run instead of the dispatcher's source. */
   readonly binary?: string | undefined;
   /**
-   * What the controller - and the runner it starts for itself - sees beyond the
-   * clean environment. A suite that has to say what `HOME` is, because git on
-   * that machine must find no configuration of the developer's own, has no
-   * other way to say it.
+   * Extra environment for the controller - and the runner it starts for
+   * itself - on top of the clean environment. A suite that has to set `HOME`,
+   * because git must find none of the developer's own configuration, sets it
+   * here.
    */
   readonly env?: Readonly<Record<string, string>> | undefined;
 }): Promise<Controller> {
@@ -244,13 +245,13 @@ export async function startController(options: {
       if (!/in use/.test(last.message)) throw last;
     }
   }
-  throw last ?? new Error("hercule serve never started");
+  throw last ?? new Error("hercule serve did not start");
 }
 
 /** How long `stop` waits, at most, for the output of a process that has exited. */
 const OUTPUT_DRAIN_BOUND_MS = 5_000;
 
-/** One attempt: spawn on this port and wait for it to answer. */
+/** Makes one attempt: spawns on this port and waits for it to respond. */
 async function startControllerOnPort(
   command: ReadonlyArray<string>,
   home: string,
@@ -286,7 +287,7 @@ async function startControllerOnPort(
     } catch {
       // Not listening yet.
     }
-    if (Date.now() > deadline) throw new Error(`hercule serve never answered:\n${readOutput()}`);
+    if (Date.now() > deadline) throw new Error(`hercule serve did not respond:\n${readOutput()}`);
     await Bun.sleep(50);
   }
 
@@ -310,8 +311,9 @@ async function startControllerOnPort(
 }
 
 /**
- * Run the CLI once, the way a shell would: arguments in `argv`, content on
- * stdin, and nothing shared with the caller but the environment it is given.
+ * Runs the CLI once, the way a shell would: arguments in `argv`, content on
+ * stdin, and nothing shared with the caller except the environment it is
+ * given.
  */
 export async function runCli(
   args: ReadonlyArray<string>,
@@ -344,9 +346,9 @@ export const USERNAME = "rogier";
 export const PASSWORD = "correct horse battery staple";
 
 /**
- * The API key `hercule login` wrote into a home, for the requests no command
- * expresses. Reading the file is the only way to get one: the key is printed
- * nowhere, by design.
+ * Returns the API key `hercule login` wrote into a home, for the requests no
+ * command covers. Reading the file is the only way to get it: by design, the
+ * key is never printed.
  */
 export function readApiKey(home: string): string {
   const credentials = JSON.parse(readFileSync(join(home, "credentials.json"), "utf8")) as {
@@ -356,10 +358,9 @@ export function readApiKey(home: string): string {
 }
 
 /**
- * Take a fresh controller through first run, the way an operator does: read the
- * setup URL it wrote into its home, and hand that token back to the CLI. The
- * caller asserts the exit code, because a suite that means to fail here says so
- * itself.
+ * Takes a fresh controller through first run, the way an operator does: reads
+ * the setup URL it wrote into its home, and passes that token to the CLI. The
+ * caller checks the exit code, because some suites expect this to fail.
  */
 export async function completeSetup(options: {
   readonly home: string;
@@ -391,7 +392,7 @@ export async function completeSetup(options: {
   );
 }
 
-/** The CLI's `--json` output, parsed. Fails loudly with the command's own output. */
+/** Parses the CLI's `--json` output. Throws with the command's own output when it is not JSON. */
 export function parseJsonOutput(ran: Ran): unknown {
   try {
     return JSON.parse(ran.stdout || ran.stderr);
@@ -401,9 +402,9 @@ export function parseJsonOutput(ran: Ran): unknown {
 }
 
 /**
- * The CLI's `--json` output of a command that was meant to succeed. A non-zero
- * exit is the command's own output, raised: a test that reports "not JSON"
- * about an error envelope says nothing about what went wrong.
+ * Parses the `--json` output of a command that was meant to succeed. Throws
+ * with the command's own output on a non-zero exit: a test that reports "not
+ * JSON" about an error envelope says nothing about what went wrong.
  */
 export function parseJsonOutputOrFail<A>(ran: Ran): A {
   if (ran.code !== 0) {
@@ -412,12 +413,12 @@ export function parseJsonOutputOrFail<A>(ran: Ran): A {
   return parseJsonOutput(ran) as A;
 }
 
-/** One page of a listing, as the CLI prints it with `--json`. */
+/** One page of a list, as the CLI prints it with `--json`. */
 export interface Page<A> {
   readonly items: ReadonlyArray<A>;
 }
 
-/** Long enough for the runner to enrol and to probe a directory it was just handed. */
+/** Long enough for the runner to enrol and to probe a directory it was just given. */
 export const LOGIN_DEADLINE_MS = 120_000;
 
 /** What a runner reported about one Provider Instance when it last probed it. */
@@ -426,7 +427,7 @@ export interface Snapshot {
   readonly models: ReadonlyArray<{ readonly slug: string }>;
 }
 
-/** A Provider Instance as `provider.query` answers it. */
+/** A Provider Instance as `provider.query` returns it. */
 export interface Instance {
   readonly id: string;
   readonly providerId: string;
@@ -434,8 +435,8 @@ export interface Instance {
 }
 
 /**
- * Every Provider Instance, over HTTP rather than through the CLI: the snapshots
- * are what these tests wait on, and waiting is a loop, not a command.
+ * Lists every Provider Instance, over HTTP rather than through the CLI: these
+ * tests wait on the snapshots, and waiting is a loop, not a command.
  */
 export async function listInstances(options: {
   readonly url: string;
@@ -446,14 +447,14 @@ export async function listInstances(options: {
   });
   const body = await response.text();
   if (!response.ok)
-    throw new Error(`GET /api/v1/providers answered ${String(response.status)}: ${body}`);
+    throw new Error(`GET /api/v1/providers returned ${String(response.status)}: ${body}`);
   return JSON.parse(body) as ReadonlyArray<Instance>;
 }
 
 /**
- * The controller's own runner, once it has enrolled and dialled in. It writes
- * `runner.json` and its storage directory on the way, which is what the login
- * is lent into, so nothing may read either before this answers.
+ * Waits for the controller's own runner to enrol and connect, and returns it.
+ * On the way, the runner writes `runner.json` and its storage directory, which
+ * the login is copied into, so nothing may read either before this returns.
  */
 export async function waitForEnrolledRunner(options: {
   readonly home: string;
@@ -467,12 +468,13 @@ export async function waitForEnrolledRunner(options: {
         ? parseJsonOutputOrFail<Page<{ readonly id: string }>>(ran).items[0]?.id
         : undefined;
     if (id !== undefined && existsSync(join(options.home, "runner", "runner.json"))) return id;
-    if (Date.now() > deadline) throw new Error(`no runner dialled the controller:\n${ran.stdout}`);
+    if (Date.now() > deadline)
+      throw new Error(`no runner connected to the controller:\n${ran.stdout}`);
     await Bun.sleep(500);
   }
 }
 
-/** The claude-code Provider Instance the controller seeds for itself. */
+/** Returns the claude-code Provider Instance the controller creates for itself. */
 export async function readClaudeInstance(options: {
   readonly url: string;
   readonly apiKey: string;
@@ -483,9 +485,10 @@ export async function readClaudeInstance(options: {
 }
 
 /**
- * Probes the instance until a machine says its login works, and answers with
- * that snapshot. Repeated rather than trusted once: a probe of a directory
- * that was empty a moment ago has been seen to answer `unauthenticated`.
+ * Probes the instance until a machine reports that its login works, and
+ * returns that snapshot. The probe is repeated rather than trusted once: a
+ * probe of a directory that was empty a moment ago has been seen to return
+ * `unauthenticated`.
  */
 export async function probeUntilLoggedIn(options: {
   readonly home: string;
@@ -516,7 +519,7 @@ export async function probeUntilLoggedIn(options: {
   }
 }
 
-/** A runner, a Provider Instance and the login it runs on, all in place. */
+/** A runner, a Provider Instance and the login it runs on, all ready. */
 export interface LoggedInInstance {
   readonly runnerId: string;
   readonly instance: Instance;
@@ -524,9 +527,9 @@ export interface LoggedInInstance {
 }
 
 /**
- * Everything a live session needs before it can be spawned: the enrolled
- * runner, the claude-code instance, the lent credential where the caller named
- * one, and a probe that says the login works.
+ * Prepares everything a live session needs before it can be spawned: the
+ * enrolled runner, the claude-code instance, the copied credential when the
+ * caller named one, and a probe that confirms the login works.
  */
 export async function prepareLoggedInInstance(options: {
   readonly home: string;
@@ -541,7 +544,7 @@ export async function prepareLoggedInInstance(options: {
   return { runnerId, instance, snapshot };
 }
 
-/** A session as the session operations answer it. */
+/** A session as the session operations return it. */
 export interface Session {
   readonly id: string;
   readonly status: string;
@@ -550,7 +553,7 @@ export interface Session {
   readonly nativeSessionId: string | null;
 }
 
-/** Where a session got to, read back the way an operator reads it. */
+/** Reads a session's current state, the way an operator reads it. */
 export async function readSession(options: {
   readonly home: string;
   readonly binary: string;
@@ -570,7 +573,7 @@ export interface Row {
   readonly event: { readonly _tag: string; readonly [key: string]: unknown };
 }
 
-/** A session's whole transcript, in order. */
+/** Reads a session's whole transcript, in order. */
 export async function readTranscript(options: {
   readonly home: string;
   readonly binary: string;
@@ -585,8 +588,8 @@ export async function readTranscript(options: {
 }
 
 /**
- * Waits until a session's transcript holds `tag`, and says what it held instead
- * - and where the session got to - when it never does.
+ * Waits until a session's transcript contains `tag`. When it never does,
+ * throws with what the transcript contained instead, and the session's state.
  */
 export async function waitForTranscriptTag(options: {
   readonly home: string;
@@ -611,7 +614,7 @@ export async function waitForTranscriptTag(options: {
   }
 }
 
-/** Everything a session said, as one string: the coalesced assistant text. */
+/** Returns everything a session said, as one string: the coalesced assistant text. */
 export function collectAssistantText(rows: ReadonlyArray<Row>): string {
   return rows
     .flatMap((row) =>

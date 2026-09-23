@@ -6,8 +6,8 @@ const Support = Schema.Literals(["native", "unsupported"]);
 
 /**
  * Static facts about the pinned harness version behind a provider. Every value
- * is a fact, never a fallback: what an unsupported mode degrades to is the
- * controller's policy, so nothing here says it.
+ * is a fact, never a fallback: the controller decides what an unsupported mode
+ * falls back to, so nothing here records it.
  */
 export const DeclaredCapabilities = Schema.Struct({
   /** `unsupported` means input to a busy session is queued by the controller. */
@@ -23,16 +23,16 @@ export const DeclaredCapabilities = Schema.Struct({
 export type DeclaredCapabilities = Schema.Schema.Type<typeof DeclaredCapabilities>;
 
 /**
- * The longest name a contribution may carry. Ids and display names reach both
- * columns and the wire, so an overrun is refused at registration rather than
- * written as a row nothing can read back.
+ * The longest name a contribution may have. Ids and display names are stored in
+ * database columns and sent over the wire, so a name that is too long is
+ * rejected at registration rather than written as a row nothing can read back.
  */
 export const MAX_CONTRIBUTION_NAME_LENGTH = 128;
 
 /**
  * The name of one contribution: a provider, an event source, or whatever a
- * later extension point contributes. One bound for all of them, because they
- * all reach the same columns.
+ * later extension point contributes. One limit for all of them, because they
+ * are all stored in the same columns.
  */
 const ContributionName = Schema.String.check(
   Schema.isMinLength(1),
@@ -53,14 +53,14 @@ export const ContributionWord = ContributionName.check(
 );
 
 /**
- * A provider's static self-description, which is the whole of what a provider
- * plugin contributes. `defaultConfig` is the value the plugin's own function
- * already returned: a function would not survive the crossing into the catalog.
+ * A provider's static self-description, which is all a provider plugin
+ * contributes. `defaultConfig` is a value rather than a function, because a
+ * function cannot be stored in the catalog.
  */
 export const ProviderDefinition = Schema.Struct({
   id: ContributionName,
   displayName: ContributionName,
-  /** The harness's own name on `PATH`, which is what joins a runner's facts to an instance. */
+  /** The harness's executable name on `PATH`, which links a runner's facts to an instance. */
   binaryName: ContributionName,
   /** Several accounts of one harness, kept apart by per-instance config dirs. */
   supportsMultipleInstances: Schema.Boolean,
@@ -73,10 +73,10 @@ export const ProviderDefinition = Schema.Struct({
 export type ProviderDefinition = Schema.Schema.Type<typeof ProviderDefinition>;
 
 /**
- * One event kind, as the plugin that emits it declares it: what the payload of
- * such an event must be, and one line saying what the event means. The host
- * derives JSON Schema from the schema for the catalog and keeps the schema
- * itself, which is what an emitted payload is read against.
+ * One event kind, as the plugin that emits it declares it: the schema of the
+ * event's payload, and one line describing what the event means. The host
+ * derives JSON Schema from the schema for the catalog, and keeps the schema
+ * itself to validate emitted payloads.
  */
 export interface EventKindDeclaration {
   readonly description: string;
@@ -84,10 +84,10 @@ export interface EventKindDeclaration {
 }
 
 /**
- * The two names an event source is identified by. They reach a column and the
- * wire, so they are decoded rather than taken as the plugin wrote them. The
- * kinds are not here: each declaration holds a live schema, which no schema
- * of this kind can describe.
+ * The two names that identify an event source. They are stored in a column and
+ * sent over the wire, so the host decodes them rather than trusting the
+ * plugin. The kinds are not here: each declaration holds a live schema, which
+ * a schema like this one cannot validate.
  */
 export const EventSourceNames = Schema.Struct({
   id: ContributionWord,
@@ -95,14 +95,15 @@ export const EventSourceNames = Schema.Struct({
 });
 
 /**
- * What a plugin contributes as a source of events: the bare word it calls
- * itself, the Connection type its events arrive through, and every kind it can
- * emit. The host qualifies the bare word with the plugin's id, so two plugins
- * may each call themselves `github` and still name two different sources.
+ * What a plugin contributes as a source of events: its unqualified id, the
+ * Connection type its events arrive through, and every kind it can emit. The
+ * host prefixes the id with the plugin's id, so two plugins may each call
+ * their source `github` and still have two different sources.
  *
- * Each kind's name carries the plugin's id as its first segment, which makes a
- * kind unique across plugins and lets a reader of the catalog find the owner of
- * a kind without a second column. The host refuses a kind that does not.
+ * Each kind's name must start with the plugin's id as its first segment. That
+ * makes a kind unique across plugins, and lets a reader of the catalog find
+ * the owner of a kind without a second column. The host rejects a kind that
+ * does not start with the plugin's id.
  */
 export interface EventSourceDefinition {
   readonly id: string;

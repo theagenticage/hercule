@@ -19,16 +19,17 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
 };
 
 /**
- * Which role owns this invocation, and the arguments that role receives.
+ * Decides which role handles this invocation, and returns the role and the
+ * arguments it receives.
  *
  * `hercule serve` is the controller; `hercule runner`, `hercule runner --local`,
  * `hercule runner join` and `hercule runner set-controller` are the runner. Every
  * other verb, `hercule runner join-token create` included, is the CLI. The role
  * keeps the global options; only the verb is consumed.
  *
- * `--home <dir>` and `-c key=value` may precede the verb, so the verb is
- * wherever `parseGlobalOptions` found it - the same parser the role runs on the
- * same line, rather than a second copy of the rule here.
+ * `--home <dir>` and `-c key=value` may come before the verb, so the verb is
+ * wherever `parseGlobalOptions` found it. The role runs the same parser on the
+ * same line, so there is no second copy of the rule here.
  */
 function route(
   argv: readonly string[],
@@ -39,19 +40,19 @@ function route(
   switch (options.rest[0]) {
     case "serve":
       return { role: "controller", args: withoutVerb };
-    // git runs this one, per request, and what answers it is the runner's own
-    // socket rather than the public API. The action git names is what the role
-    // acts on; with none named the word itself rides along, so a bare
+    // git runs this command for each request, and the runner's own socket
+    // handles it rather than the public API. The role acts on the action git
+    // gives. With no action, the verb itself is passed along, so a bare
     // `hercule git-credential` cannot be read as `hercule runner` and start a daemon.
     case "git-credential":
       return { role: "runner", args: subcommand === undefined ? argv : withoutVerb };
     case "runner":
-      // A bridge for as long as `hercule runner` names the daemon as well as the
-      // noun: help for either is one screen, and the CLI is what renders it.
+      // Needed as long as `hercule runner` is both the daemon and a CLI noun:
+      // help for either is one screen, and the CLI renders it.
       if (subcommand === "--help" || subcommand === "-h") return { role: "cli", args: argv };
       // The daemon forms take no subcommand, and `join` and `set-controller`
-      // write the runner's own files rather than calling an operation; the
-      // rest, `runner join-token create` among them, are CLI verbs.
+      // write the runner's own files rather than calling an operation. The
+      // rest, such as `runner join-token create`, are CLI verbs.
       return subcommand === undefined ||
         subcommand.startsWith("-") ||
         subcommand === "join" ||

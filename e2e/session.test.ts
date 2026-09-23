@@ -1,18 +1,18 @@
 /**
- * One real Claude Code session, out of the release binary: spawned by the CLI,
- * hosted by the runner the controller starts for itself, and read back as a
- * transcript.
+ * Tests one real Claude Code session through the release binary: spawned by
+ * the CLI, hosted by the runner the controller starts for itself, and read
+ * back as a transcript.
  *
- * Opt-in, for the same reason the adapter's own live test is: it spends the
- * developer's tokens and takes a minute. `HERCULE_LIVE_SESSION_TEST=1` asks for
- * it.
+ * Opt-in, for the same reason as the adapter's own live test: it spends the
+ * developer's tokens and takes a minute. Set `HERCULE_LIVE_SESSION_TEST=1` to
+ * run it.
  *
  * A session runs against the instance's own `CLAUDE_CONFIG_DIR` under the
  * runner's storage (spec 06 section 4.2), which in a throwaway Hercule Home is
- * empty. The developer's own `~/.claude` login cannot be borrowed into it - on
- * macOS it is a Keychain item keyed by that directory - so the credential this
- * test needs is `ANTHROPIC_API_KEY` on the environment. Without a logged-in
- * instance the case skips, saying which of the two is missing.
+ * empty. The developer's own `~/.claude` login cannot be copied into it - on
+ * macOS it is a Keychain item keyed by that directory - so this test needs
+ * `ANTHROPIC_API_KEY` in the environment. Without a logged-in instance, the
+ * case is skipped with a message stating which of the two is missing.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -36,7 +36,7 @@ import {
   type Session,
 } from "./harness";
 
-/** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
+/** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
 const state = createTemporaryHome();
@@ -46,15 +46,15 @@ let controller: Controller;
 let url: string;
 let apiKey: string;
 
-/** Long enough for a cold harness to start, connect and answer one short prompt. */
+/** Long enough for a cold harness to start, connect and reply to one short prompt. */
 const TURN_DEADLINE_MS = 120_000;
 
-/** Long enough for a machine to have probed the instance and said it is logged in. */
+/** Long enough for a machine to probe the instance and report that it is logged in. */
 const LOGIN_DEADLINE_MS = 60_000;
 
 /**
- * The Claude instance once a machine has probed it, or `undefined` if no
- * machine ever reported a usable login for it.
+ * Waits for a machine to probe the Claude instance, and returns it. Returns
+ * `undefined` if no machine reported a usable login for it in time.
  */
 const waitForLoggedInInstance = async (): Promise<Instance | undefined> => {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
@@ -113,7 +113,7 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
         return;
       }
 
-      // The cheapest model that answers, when this machine reported one.
+      // The cheapest model that works, when this machine reported one.
       const slugs = instance.snapshots.flatMap((snapshot) =>
         snapshot.models.map((model) => model.slug),
       );
@@ -128,8 +128,8 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
 
       const rows = await waitForTag(session.id, "turn.completed");
 
-      // The turn is bracketed: a completion the controller could not pair with
-      // a start would not be a turn at all.
+      // The turn has a start and a completion: a completion the controller
+      // could not pair with a start would not be a turn at all.
       const started = rows.findIndex((row) => row.event._tag === "turn.started");
       const completed = rows.findIndex((row) => row.event._tag === "turn.completed");
       expect(started, rows.map((row) => row.event._tag).join(", ")).toBeGreaterThanOrEqual(0);
@@ -142,15 +142,15 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
         "completed",
       );
 
-      // The turn is over, so the session is idle again and the binding the
-      // harness came up under is on the record.
+      // The turn is over, so the session is idle again and the record holds
+      // the binding the harness started with.
       const after = await read(session.id);
       expect(after.status).toBe("idle");
       expect(after.nativeSessionId).not.toBeNull();
     },
-    // The wait for a logged-in instance, the wait for the turn, and the CLI
-    // calls between them: a case whose timeout is only its longest wait has
-    // nothing left for the others.
+    // The timeout covers the wait for a logged-in instance, the wait for the
+    // turn, and the CLI calls between them: a timeout that only covers the
+    // longest wait leaves no time for the others.
     LOGIN_DEADLINE_MS + TURN_DEADLINE_MS + 60_000,
   );
 
@@ -170,9 +170,9 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
 
       expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
       expect(ran.stdout).toContain("hercule transcript read");
-      // The wait for a logged-in instance plus the spawn behind it, not the wait
-      // alone: a case whose timeout is its own first wait has nothing left for
-      // what it is actually testing.
+      // The timeout covers the wait for a logged-in instance plus the spawn
+      // after it: a timeout that only covers the first wait leaves no time for
+      // what the case actually tests.
     },
     LOGIN_DEADLINE_MS + 30_000,
   );

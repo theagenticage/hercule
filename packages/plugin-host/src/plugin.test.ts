@@ -27,7 +27,7 @@ const definition: ProviderDefinition = {
 };
 
 describe("registerProvider", () => {
-  it("hands the definition to the surface the host granted", async () => {
+  it("passes the definition to the service the host granted", async () => {
     const registered: Array<ProviderDefinition> = [];
 
     await Effect.runPromise(
@@ -47,10 +47,10 @@ describe("registerProvider", () => {
     expect(registered).toEqual([definition]);
   });
 
-  it("fails the plugin's own registration, naming the capability, when the surface is absent", async () => {
-    // A typed failure rather than a defect or a silent skip: that is what puts
-    // the reason in front of the user instead of a plugin that boots fine and
-    // contributes nothing.
+  it("fails the plugin's registration, with the capability in the message, when the service is absent", async () => {
+    // A typed failure rather than a defect or a silent skip, so the user sees
+    // the reason, instead of a plugin that starts fine and contributes
+    // nothing.
     const failure = await Effect.runPromise(Effect.flip(registerProvider({}, definition)));
 
     expect(failure).toBeInstanceOf(PluginError);

@@ -5,7 +5,7 @@ import { api } from "./api";
 import { ALL_GRANTS } from "./grants";
 import { ALL_OPERATIONS, isOperationId, OPERATIONS, type OperationId } from "./operations";
 
-/** Every endpoint in the declaration, named the way the operation table names it. */
+/** Lists every endpoint in the declaration, with its id written the way the operation table writes it. */
 const listDeclaredEndpoints = (): ReadonlyArray<{ id: string; method: string; path: string }> => {
   const found: Array<{ id: string; method: string; path: string }> = [];
   HttpApi.reflect(api, {
@@ -22,7 +22,7 @@ const listDeclaredEndpoints = (): ReadonlyArray<{ id: string; method: string; pa
 };
 
 describe("the operation table", () => {
-  it("names only grants that exist in the vocabulary", () => {
+  it("requires only grants that exist in the vocabulary", () => {
     const markers = new Set(["unauthenticated", "setup-token", "authenticated"]);
     const grants = new Set<string>(ALL_GRANTS);
     for (const operation of ALL_OPERATIONS) {
@@ -33,7 +33,7 @@ describe("the operation table", () => {
     }
   });
 
-  it("routes every operation under the versioned prefix, with a plural noun", () => {
+  it("routes every operation under the versioned prefix", () => {
     for (const operation of ALL_OPERATIONS) {
       expect(operation.path.startsWith("/api/v1/"), operation.id).toBe(true);
     }
@@ -100,7 +100,7 @@ describe("the HttpApi declaration", () => {
 
 /**
  * The Task, Project, Event, Runner, Plugin, Session and Controller operations:
- * the operation table row and the endpoint that answers it.
+ * the operation table row and the endpoint that serves it.
  */
 const NEW_OPERATIONS = [
   { id: "task.query", requires: "task.read", method: "GET", path: "/api/v1/tasks" },
@@ -205,7 +205,7 @@ describe("the operations with an explicit row", () => {
     });
   });
 
-  it.each(NEW_OPERATIONS)("answers $id from one endpoint on $method $path", (operation) => {
+  it.each(NEW_OPERATIONS)("serves $id from exactly one endpoint on $method $path", (operation) => {
     const endpoints = listDeclaredEndpoints().filter((endpoint) => endpoint.id === operation.id);
     expect(endpoints).toEqual([
       { id: operation.id, method: operation.method, path: operation.path },

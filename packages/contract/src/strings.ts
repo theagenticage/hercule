@@ -4,9 +4,9 @@
  *
  * Every string and every list a caller controls has a maximum, declared here
  * rather than left to the transport: an unbounded field is an unbounded write,
- * and the audit log keeps what it is told for at least 90 days. The bound
- * belongs in the contract so the refusal is one `validation` error before any
- * handler runs, identical for every client.
+ * and the audit log keeps what it records for at least 90 days. The bound
+ * belongs in the contract so that a value that is too long fails with one
+ * `validation` error before any handler runs, the same for every client.
  */
 import { Schema } from "effect";
 
@@ -37,10 +37,10 @@ export const MAX_PASSWORD_LENGTH = 1024;
  */
 export const NewPassword = Schema.String.check(
   Schema.isMinLength(MIN_PASSWORD_LENGTH, {
-    message: `A password is at least ${String(MIN_PASSWORD_LENGTH)} characters.`,
+    message: `A password must be at least ${String(MIN_PASSWORD_LENGTH)} characters.`,
   }),
   Schema.isMaxLength(MAX_PASSWORD_LENGTH, {
-    message: `A password is at most ${String(MAX_PASSWORD_LENGTH)} characters.`,
+    message: `A password must be at most ${String(MAX_PASSWORD_LENGTH)} characters.`,
   }),
 );
 
@@ -48,15 +48,15 @@ export const NewPassword = Schema.String.check(
 export const MAX_USERNAME_LENGTH = 64;
 
 /**
- * A password being presented. Only the maximum applies: refusing a short one
- * before checking it would tell an anonymous caller the policy, and the answer
- * to a wrong password is `unauthenticated` either way. An empty field is not a
- * policy, so what it says is what a person needs to do about it.
+ * A password presented at login. Only the maximum applies: rejecting a short
+ * password before checking it would tell an anonymous caller the policy, and a
+ * wrong password fails with `unauthenticated` either way. An empty field
+ * reveals no policy, so its message tells the person what to do.
  */
 export const PresentedPassword = Schema.String.check(
   Schema.isMinLength(1, { message: "Enter your password." }),
   Schema.isMaxLength(MAX_PASSWORD_LENGTH, {
-    message: `A password is at most ${String(MAX_PASSWORD_LENGTH)} characters.`,
+    message: `A password must be at most ${String(MAX_PASSWORD_LENGTH)} characters.`,
   }),
 );
 
@@ -64,7 +64,7 @@ export const PresentedPassword = Schema.String.check(
 export const Username = Schema.String.check(
   Schema.isMinLength(1, { message: "Enter your username." }),
   Schema.isMaxLength(MAX_USERNAME_LENGTH, {
-    message: `A username is at most ${String(MAX_USERNAME_LENGTH)} characters.`,
+    message: `A username must be at most ${String(MAX_USERNAME_LENGTH)} characters.`,
   }),
 );
 
@@ -84,13 +84,13 @@ export const SecretValue = bounded(1, MAX_SECRET_VALUE_LENGTH);
 /**
  * The longest IANA zone name. The longest the zone database carries is under
  * half of this; the bound is here because the value is caller-controlled text
- * that every `settings.read` hands back.
+ * that every `settings.read` returns.
  */
 export const MAX_TIMEZONE_LENGTH = 64;
 
 /**
- * An IANA zone name. Which names exist is the runtime's to say and changes with
- * the zone database, so the contract bounds the length and the client that
- * offers the field picks from the list its own runtime knows.
+ * An IANA zone name. The runtime decides which names exist, and the list
+ * changes with the zone database. So the contract only bounds the length, and
+ * a client that offers the field picks from the list its own runtime knows.
  */
 export const Timezone = bounded(1, MAX_TIMEZONE_LENGTH);

@@ -10,28 +10,31 @@ export class InvalidOptionError extends Schema.TaggedError<InvalidOptionError>()
 export interface GlobalOptions {
   /** `--home <dir>` / `--home=<dir>` / `HERCULE_HOME`; the last one on the line wins. */
   readonly home: string | undefined;
-  /** `-c key=value`, in the order given; a repeated key is decided by the last one. */
+  /** `-c key=value`, in the order given; for a repeated key, the last one wins. */
   readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
   /** Everything that is not a global option, in order. */
   readonly rest: ReadonlyArray<string>;
   /**
-   * Where `rest[0]` sat in `argv`, or `argv.length` when there is no such
-   * token. The dispatcher routes on the verb and hands the role the rest of the
-   * line untouched, so it needs the position and not just the token.
+   * The position of `rest[0]` in `argv`, or `argv.length` when there is no
+   * such token. The dispatcher routes on the verb and passes the rest of the
+   * line to the role unchanged, so it needs the position and not just the
+   * token.
    */
   readonly verbIndex: number;
 }
 
 /**
- * Split `argv` into the global options and the arguments the role reads.
+ * Splits `argv` into the global options and the arguments the role reads.
+ * Fails with `InvalidOptionError` when `--home` or `-c` has a missing or
+ * malformed value.
  *
  * `--home <dir>` locates the config file and `-c key=value` overrides any
  * bootstrap key; both may appear anywhere on the line, because the dispatcher
- * hands them to the role along with the role's own arguments.
+ * passes them to the role along with the role's own arguments.
  *
- * Pure, and free of the database by construction: the dispatcher routes on it,
- * the CLI resolves its home with it, and the runner will too - and neither the
- * dispatcher nor the runner links controller state.
+ * Pure, and independent of the database: the dispatcher routes on it, and the
+ * CLI and the runner resolve their home with it. Neither the dispatcher nor
+ * the runner links controller state.
  */
 export function parseGlobalOptions(
   argv: ReadonlyArray<string>,
@@ -71,7 +74,7 @@ export function parseGlobalOptions(
         return Result.fail(
           new InvalidOptionError({
             option: `-c ${assignment}`,
-            message: "an override is written key=value",
+            message: "write an override as key=value",
           }),
         );
       }

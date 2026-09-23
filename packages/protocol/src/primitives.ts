@@ -1,27 +1,28 @@
 /**
  * The pieces both halves of the catalogue are built from.
  *
- * They sit in a leaf of their own rather than in `index.ts` because the
+ * They are in a module of their own rather than in `index.ts`, because the
  * session schemas need them and `index.ts` needs the session frames to build
- * its unions; a shared leaf is what keeps that from being a cycle.
+ * its unions. A shared module with no imports of its own avoids an import
+ * cycle.
  */
 import { Schema } from "effect";
 
 /**
- * The longest a peer's statement about itself may be. Exported because the
- * producing side has to cut to it: one long fact would otherwise make a whole
- * hello unsendable.
+ * The longest fact a peer may report about itself. Exported because the sender
+ * has to truncate to it: one long fact would otherwise make a whole hello
+ * impossible to send.
  */
 export const MAX_FACT_LENGTH = 512;
 
-/** A name, a version or a path a peer states about itself, and never a document. */
+/** A name, a version or a path a peer reports about itself, and never a document. */
 export const Fact = Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH));
 
 /**
- * A provider instance's id. Narrower than a fact because the runner makes a
- * directory of it: the credential a login writes, and the provider home a
- * session runs against, must land under the instance's own home and nowhere a
- * path could climb out to.
+ * A provider instance's id. Stricter than a fact, because the runner uses it as
+ * a directory name: the credential a login writes, and the provider home a
+ * session runs against, must stay under the instance's own home, with no way
+ * for the path to escape it.
  */
 export const InstanceId = Schema.String.check(
   Schema.isLengthBetween(1, 64),
@@ -29,10 +30,10 @@ export const InstanceId = Schema.String.check(
 );
 
 /**
- * A session's id. Narrow for the same reason an instance's is: the runner makes
- * a directory of it for a workspace-less session and removes that directory
- * when the session exits, so an id that could climb out of the scratch root
- * would be a path traversal with an `rm -rf` behind it.
+ * A session's id. Strict for the same reason as an instance's: the runner uses
+ * it as a directory name for a session without a workspace, and removes that
+ * directory when the session exits. An id that could escape the scratch root
+ * would be a path traversal followed by an `rm -rf`.
  */
 export const SessionId = Schema.String.check(
   Schema.isLengthBetween(1, 64),
@@ -40,11 +41,11 @@ export const SessionId = Schema.String.check(
 );
 
 /**
- * An id a machine makes a directory of, or removes one by: a workspace, a
- * resource's cache, a checkout. Narrow for the reason a session's id is: these
- * are joined into paths under the runner's storage directory and a dispose
- * removes what they name, so a segment that could climb out of that root would
- * be a path traversal with an `rm -rf` behind it.
+ * An id a machine uses as a directory name, or to remove a directory: a
+ * workspace, a resource's cache, a checkout. Strict for the same reason as a
+ * session's id: these ids are joined into paths under the runner's storage
+ * directory, and a dispose removes those paths. A segment that could escape
+ * that root would be a path traversal followed by an `rm -rf`.
  */
 export const StorageId = Schema.String.check(
   Schema.isLengthBetween(1, 64),
@@ -53,10 +54,9 @@ export const StorageId = Schema.String.check(
 
 /**
  * Where one checkout sits inside a multi-repo workspace: one path segment with
- * no separator in it, and none of the three names a directory cannot be called
- * - `.` and `..` are the workspace and what is above it, and `.git` is git's
- * own. A repository may well be called `.github`, so a leading dot on its own
- * is no reason to refuse one.
+ * no separator, and not one of three reserved names. `.` and `..` are the
+ * workspace and its parent, and `.git` belongs to git. A repository may well be
+ * called `.github`, so a leading dot alone is no reason to reject a name.
  */
 export const Subdirectory = Schema.String.check(
   Schema.isLengthBetween(1, 64),
@@ -66,12 +66,12 @@ export const Subdirectory = Schema.String.check(
   }),
 );
 
-/** A position. Counting starts at one: a connection that acked nothing sends no ack. */
+/** A sequence number. Counting starts at one: a connection that has acknowledged nothing sends no ack. */
 export const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
 /**
- * The envelope every replayable runner event carries. `sessionEvent` is the
- * first frame to extend it; the shape was fixed before that so the wire was
+ * The envelope every replayable runner event has. `sessionEvent` is the first
+ * frame to extend it; the shape was fixed earlier, so the wire format was
  * settled before the first event needed it.
  */
 export const Sequenced = Schema.Struct({ seq: Seq });
@@ -79,10 +79,10 @@ export const Sequenced = Schema.Struct({ seq: Seq });
 export type Sequenced = Schema.Schema.Type<typeof Sequenced>;
 
 /**
- * What a secret is stored under: the same bound the secrets table holds its
- * names to, because these keys are those names. `|` is the separator in the
- * associated data that binds a stored value to its owner, so no name carries
- * one.
+ * The name a secret is stored under, with the same limits as the secrets
+ * table's names, because these keys are those names. `|` is the separator in
+ * the associated data that binds a stored value to its owner, so no name may
+ * contain one.
  */
 const SecretName = Schema.String.check(
   Schema.isLengthBetween(1, 256),
@@ -90,12 +90,12 @@ const SecretName = Schema.String.check(
 );
 
 /**
- * The secret-valued config fields of one provider instance, by the name the
+ * The secret config fields of one provider instance, keyed by the name the
  * plugin gave each. The controller decrypts them as it builds the frame, so
- * plaintext exists on the wire and in the runner's memory for that one
+ * the plaintext exists on the wire and in the runner's memory for that one
  * operation and nowhere else: never on the machine's disk, never in a log.
- * Always on the frame: an instance with no credential stored carries `{}`, so
- * a runner reads one shape rather than two spellings of the same state.
+ * The field is always present: an instance with no credential stored sends
+ * `{}`, so a runner handles one shape rather than two forms of the same state.
  */
 export const InstanceSecrets = Schema.Record(SecretName, Schema.String);
 

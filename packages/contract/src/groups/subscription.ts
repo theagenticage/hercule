@@ -2,21 +2,21 @@
  * Subscriptions: a session's standing claim on something that has not happened
  * yet.
  *
- * A session names a Subscription Target - an External Ref, a run, a session or
+ * A session gives a Subscription Target - an External Ref, a run, a session or
  * a Permission Request - and the controller stores the CEL condition that
  * target expands into. When an event satisfies the condition, the event router
- * delivers it to the holder as Queued Input. The target is what a caller
- * writes and reads back; the condition is what the event router evaluates, and it
- * is answered so the holder can see what it is really waiting for.
+ * delivers it to the holder as Queued Input. The caller writes and reads back
+ * the target; the event router evaluates the condition. The condition is
+ * returned too, so the holder can see what it is really waiting for.
  *
  * The holder is always the session that asked. It is taken from the credential
  * and never from the payload, so a subscription cannot be planted on another
  * session.
  *
  * A target and a holder are both written as one token, `<kind>:<id>`, because
- * that is how an agent types them into a terminal. The codecs below are the
- * whole of that parsing, in both directions, so a command line and a stored
- * row can never disagree about what a token means.
+ * that is how an agent types them into a terminal. The codecs below do all of
+ * that parsing and formatting, so a command line and a stored row can never
+ * disagree about what a token means.
  */
 import { Schema, SchemaGetter } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -37,22 +37,22 @@ import { bounded } from "../strings";
 import { EventId } from "./event";
 
 /**
- * The longest id a target may name. A target names one thing by its id, and an
- * id is a word, not a document.
+ * The longest id a target may hold. A target refers to one thing by its id, and
+ * an id is a word, not a document.
  */
 export const MAX_TARGET_ID_LENGTH = 512;
 
 /**
- * The id of the thing a target waits on. It is not the `Id` schema: a run id
- * and a Permission Request id are written by systems this version does not
- * have yet, and refusing a shape before the thing exists would refuse it for
- * the wrong reason.
+ * The id of the thing a target waits on. It is not the `Id` schema: run ids
+ * and Permission Request ids come from systems this version does not have
+ * yet, and rejecting an id format before those systems exist would reject it
+ * for the wrong reason.
  */
 const TargetId = bounded(1, MAX_TARGET_ID_LENGTH);
 
 /**
- * What a subscription waits on, as it travels on the wire. The shorthand that
- * reads it from one written word is marked on the export below.
+ * What a subscription waits on, in its wire form. The shorthand codec that
+ * parses it from one typed word is attached to the export below.
  */
 const TargetValue = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("ref"), ref: ExternalRef }),
@@ -63,21 +63,22 @@ const TargetValue = Schema.Union([
 
 export type SubscriptionTarget = Schema.Schema.Type<typeof TargetValue>;
 
-/** Every form a target may be written in, as a refusal has to name them. */
+/** Every form a target may be written in, for the error message. */
 const TARGET_FORMS =
   "write run:<run id>, session:<session id>, request:<permission request id>, " +
   "or an External Ref for a ref target: <system>:<kind>:<identity>";
 
-/** Whether one written word is an External Ref, by the schema that owns the grammar. */
+/** Checks whether a typed word is an External Ref, using the schema that owns the grammar. */
 const isExternalRef = Schema.is(ExternalRef);
 
 /**
- * The target one token stands for, or `undefined` when it stands for none.
+ * Parses one token into a target. Returns `undefined` when the token is not a
+ * valid target.
  *
- * A prefix wins over the ref grammar, so a system that called itself `run`
- * could not be subscribed to by its refs. No system does, and a prefix that
- * silently became a ref would be worse: the subscription would wait on
- * something the caller never named.
+ * A known prefix takes precedence over the ref grammar, so refs of a system
+ * called `run` could not be subscribed to. No such system exists, and a prefix
+ * that silently became a ref would be worse: the subscription would wait on
+ * something the caller never asked for.
  */
 const parseTargetShorthand = (text: string): SubscriptionTarget | undefined => {
   const colon = text.indexOf(":");
@@ -110,20 +111,20 @@ const writeTargetShorthand = (target: SubscriptionTarget): string => {
 };
 
 /**
- * A target as a person and an agent type it. The refusal names every accepted
- * form, because a token that parses as none of them gives the writer no clue
- * which one they were close to.
+ * A target as a person or an agent types it. The error message lists every
+ * accepted form, because a token that matches none of them gives no clue which
+ * form the writer meant.
  */
 export const SubscriptionTargetFromShorthand = Schema.String.check(
   Schema.makeFilter((text: string) =>
     parseTargetShorthand(text) === undefined
-      ? `${text} names no Subscription Target: ${TARGET_FORMS}`
+      ? `${text} is not a valid Subscription Target: ${TARGET_FORMS}`
       : undefined,
   ),
 ).pipe(
   Schema.decodeTo(TargetValue, {
-    // The check above has already refused every token this cannot read, so the
-    // cast is over a case that cannot arrive.
+    // The check above has already rejected every token this cannot parse, so
+    // the cast never sees `undefined`.
     decode: SchemaGetter.transform(
       (text: string) => parseTargetShorthand(text) as SubscriptionTarget,
     ),
@@ -133,12 +134,12 @@ export const SubscriptionTargetFromShorthand = Schema.String.check(
 
 /**
  * What a subscription waits on, as every payload and every record carries it.
- * The wire carries the whole target; the shorthand is marked on it, so a
- * terminal can take the one word instead and decode it here.
+ * The wire carries the whole target object; the shorthand codec is attached to
+ * it, so a terminal can accept the one-word form instead and decode it here.
  */
 export const SubscriptionTarget = markShorthand(TargetValue, SubscriptionTargetFromShorthand);
 
-/** Who holds a subscription. Only a session may, and v1 has no second kind. */
+/** Who holds a subscription. Only a session can; v1 has no other kind of holder. */
 export const SubscriptionHolder = Schema.Struct({
   kind: Schema.Literal("session"),
   id: Id,
@@ -153,18 +154,18 @@ const parseHolderShorthand = (text: string): SubscriptionHolder | undefined =>
 
 /**
  * A holder as a query string carries it, in the same `<kind>:<id>` shorthand a
- * target uses, so a holder is one spelling everywhere. The id itself is
- * checked by the struct, so a malformed id is reported as an id and not as an
- * unreadable token.
+ * target uses, so a holder is written the same way everywhere. The struct
+ * validates the id itself, so a malformed id is reported as an invalid id and
+ * not as an unreadable token.
  *
- * The wire carries the written word here, so this codec is a field's own
- * schema and is marked with itself.
+ * The query string carries the typed word, so this codec is the field's own
+ * schema and is annotated with itself.
  */
 export const SubscriptionHolderFromShorthand = markShorthandOnItself(
   Schema.String.check(
     Schema.makeFilter((text: string) =>
       parseHolderShorthand(text) === undefined
-        ? `${text} names no subscription holder: ${HOLDER_FORM}`
+        ? `${text} is not a valid subscription holder: ${HOLDER_FORM}`
         : undefined,
     ),
   ).pipe(
@@ -180,16 +181,16 @@ export const SubscriptionHolderFromShorthand = markShorthandOnItself(
 /**
  * Whether the event router can evaluate this subscription's condition.
  *
- * An evaluation that fails is a no-match and never an end: the condition is
- * evaluated again on the next event, and the failure is reported here so the
- * holder can see why nothing arrives. It is set on the first failure,
+ * An evaluation that fails counts as no match and never ends the
+ * subscription: the condition is evaluated again on the next event, and the
+ * failure is reported here so the holder can see why nothing arrives. It is set on the first failure,
  * refreshed while failures continue, and cleared by the next clean evaluation.
  */
 export const SubscriptionHealth = Schema.Union([
   Schema.Struct({ state: Schema.Literal("ok") }),
   Schema.Struct({
     state: Schema.Literal("error"),
-    /** What the evaluator said about the condition. */
+    /** The evaluator's error message about the condition. */
     message: Schema.String,
     /** When this error began. */
     at: Timestamp,
@@ -216,10 +217,10 @@ export const Subscription = Schema.Struct({
 
 export type Subscription = Schema.Schema.Type<typeof Subscription>;
 
-/** A listing is a history of what a session is waiting for, and is walked by age. */
+/** The list is sorted by age only. */
 export const SUBSCRIPTION_SORT_FIELDS = ["createdAt"] as const;
 
-/** What creating a subscription takes. The holder comes from the credential. */
+/** The payload of `subscription.create`. The holder comes from the credential. */
 export const SubscriptionCreateInput = Schema.Struct({ target: SubscriptionTarget });
 
 export type SubscriptionCreateInput = Schema.Schema.Type<typeof SubscriptionCreateInput>;

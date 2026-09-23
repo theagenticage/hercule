@@ -1,29 +1,29 @@
 /**
- * Resources, workspaces and checkouts out of the shipped program: a repo
+ * Tests resources, workspaces and checkouts through the shipped program: a repo
  * recorded, its main workspace cloned on the machine the controller runs for
- * itself, and a thread's own worktree made off the cache that clone seeded.
+ * itself, and a thread's own worktree made from the cache that clone filled.
  *
- * Nothing here reaches GitHub. The repository is a bare one in a temporary
- * directory, and the resource names it the way a user would - `https://` -
- * because the controller refuses a `file://` remote outright (`isClonableRemote`
+ * Nothing here contacts GitHub. The repository is a bare one in a temporary
+ * directory, and the resource refers to it the way a user would - `https://` -
+ * because the controller rejects a `file://` remote outright (`isClonableRemote`
  * in `apps/controller/src/resources/remote.ts` takes `https://` and git's
  * `user@host:owner/repo` and nothing else).
  *
  * Both cases need the machine to reach that remote - `ensureCache` fetches it
- * every time and a failed fetch fails the workspace - so git's own
- * `url.<base>.insteadOf` is written into the machine's `HOME` up front, which is
- * what makes the https spelling resolve to the bare repository beside it.
- * D-20a: nothing is adopted, so no folder of the user's is read at all, and the
- * checkout beside the bare repository is here to prove exactly that.
+ * every time, and a failed fetch fails the workspace - so git's own
+ * `url.<base>.insteadOf` is written into the machine's `HOME` first, which
+ * makes the https URL resolve to the bare repository next to it. Hercule never
+ * adopts a folder the user already has, so it never reads one; the checkout
+ * next to the bare repository is here to prove that.
  *
  * The worktree case is the only one that needs a session, and no fake provider
  * ships, so it runs a real one and is opt-in under `HERCULE_LIVE_SESSION_TEST`
  * like `e2e/session.test.ts`. The rest run everywhere.
  *
- * The suite is in vitest's `binary` project, so `pnpm test:binary` is what runs
- * it and `pnpm test` does not. It runs the release binary where one has been
- * built and the dispatcher's source where none has: what it exercises is the
- * controller's own surface, which is the same program either way.
+ * The suite is in vitest's `binary` project, so `pnpm test:binary` runs it and
+ * `pnpm test` does not. It runs the release binary if one has been built, and
+ * the dispatcher's source otherwise: it tests the controller itself, which
+ * behaves the same either way.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -45,11 +45,11 @@ import {
 } from "./harness";
 
 const state = createTemporaryHome();
-/** The bare remote, a checkout of it the user has, and the `HOME` that joins them. */
+/** Holds the bare remote and the user's own checkout of it. */
 const world = createTemporaryHome();
 const binary = findReleaseBinary();
 
-/** How the resource spells the repository; it resolves to `bare` through `HOME`. */
+/** The URL the resource uses for the repository; it resolves to `bare` through `HOME`. */
 const REMOTE = "https://hercule.test/acme/web";
 
 /**
@@ -67,7 +67,7 @@ const gitHome = createTemporaryHome("[init]\n\tdefaultBranch = main\n");
 let controller: Controller;
 let url: string;
 let apiKey: string;
-/** The machine the controller starts for itself, which is where everything lands. */
+/** The runner the controller starts for itself, where every workspace is made. */
 let runnerId: string;
 
 /** How long a clone, a fetch and a worktree may take on a cold machine. */
@@ -76,13 +76,13 @@ const PROVISION_DEADLINE_MS = 60_000;
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
   runCli(args, { home: state.home, binary, stdin });
 
-/** Fails with the command's own output rather than on an undefined field. */
+/** Parses a command's JSON output. Fails with the command's own output, rather than later on an undefined field. */
 const expectJsonOutput = <A>(ran: Ran): A => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
   return parseJsonOutput(ran) as A;
 };
 
-/** git, run by the test on its own files, with nothing of the developer's in it. */
+/** Runs git on the test's own files, with none of the developer's configuration. */
 const runGit = (args: ReadonlyArray<string>, cwd: string): string => {
   const ran = Bun.spawnSync(["git", ...args], { cwd, env: buildGitEnv(gitHome.home) });
   if (ran.exitCode !== 0) {
@@ -127,7 +127,7 @@ interface Snapshot {
   readonly auth: { readonly status: string };
 }
 
-/** Reads a workspace back until it stops being made, or says what it still reads. */
+/** Reads a workspace until it is no longer provisioning, and returns it. Throws when it is still provisioning at the deadline. */
 const waitForSettledWorkspace = async (id: string): Promise<Workspace> => {
   const deadline = Date.now() + PROVISION_DEADLINE_MS;
   for (;;) {
@@ -143,10 +143,11 @@ const waitForSettledWorkspace = async (id: string): Promise<Workspace> => {
 };
 
 /**
- * Whether any machine has reported a logged-in provider instance. A thread is
- * refused without one - `session.spawn` resolves an instance, a machine and a
- * model catalog before it writes anything - and this build carries no provider
- * that answers without a vendor login, so the worktree case says so and skips.
+ * Checks whether any machine has reported a logged-in provider instance. A
+ * thread cannot be spawned without one - `session.spawn` resolves an
+ * instance, a machine and a model catalog before it writes anything - and this
+ * build has no provider that works without a vendor login, so the worktree
+ * case is skipped with a message.
  */
 const isAnyInstanceLoggedIn = async (): Promise<boolean> => {
   const response = await fetch(`${url}/api/v1/providers`, {
@@ -160,8 +161,8 @@ const isAnyInstanceLoggedIn = async (): Promise<boolean> => {
 };
 
 beforeAll(async () => {
-  // A bare repository with one commit on `main`, and a working copy of it the
-  // user has beside it, which Hercule must never touch.
+  // A bare repository with one commit on `main`, and the user's own working
+  // copy of it next to it, which Hercule must never touch.
   runGit(["init", "--bare", "--initial-branch=main", bare], world.home);
   const seed = join(world.home, "seed");
   mkdirSync(seed);
@@ -172,8 +173,8 @@ beforeAll(async () => {
   runGit(["push", bare, "main"], seed);
   runGit(["clone", "--", bare, checkout], world.home);
   runGit(["remote", "set-url", "origin", REMOTE], checkout);
-  // The machine clones and fetches the https spelling, which resolves to the
-  // bare repository beside it through git's own rewrite.
+  // The machine clones and fetches the https URL, which git's own rewrite
+  // resolves to the bare repository next to it.
   appendFileSync(
     join(gitHome.home, ".gitconfig"),
     `[url "file://${bare}"]\n\tinsteadOf = ${REMOTE}\n`,
@@ -197,8 +198,8 @@ beforeAll(async () => {
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
   apiKey = readApiKey(state.home);
 
-  // The controller's own machine, once it has dialled in: a workspace is made
-  // on a machine, so there is nothing to test until one is there.
+  // Wait for the controller's own machine to connect: a workspace is made on
+  // a machine, so there is nothing to test until one is there.
   const deadline = Date.now() + 30_000;
   for (;;) {
     const fleet = expectJsonOutput<{ items: ReadonlyArray<{ id: string; connectivity: string }> }>(
@@ -223,22 +224,22 @@ afterAll(async () => {
 });
 
 describe("a repo, its main workspace and a thread's worktree, through the CLI", () => {
-  /** The resource the whole suite stands on, recorded by the first case. */
+  /** The resource the whole suite uses, recorded by the first case. */
   let resourceId = "";
 
-  it("records the repo under the canonical form of the remote it was spelled with", async () => {
+  it("records the repo under the canonical form of the remote it was given", async () => {
     const resource = expectJsonOutput<Resource>(
       await runLoggedInCli(["resource", "create", "--kind", "repo", "--remote", REMOTE, "--json"]),
     );
     expect(resource.kind).toBe("repo");
     expect(resource.remote).toBe(REMOTE);
-    // What a second spelling of this repository would collide on: the scheme
-    // and the case are not part of the identity.
+    // The identity a second spelling of this repository would conflict with:
+    // the scheme and the case are not part of it.
     expect(resource.canonicalRemote).toBe("hercule.test/acme/web");
     resourceId = resource.id;
   }, 30_000);
 
-  it("clones the repo as its main workspace, touching the user's own checkout not at all", async () => {
+  it("clones the repo as its main workspace, without touching the user's own checkout", async () => {
     const before = runGit(["status", "--porcelain=v1", "--untracked-files=all"], checkout);
     const head = runGit(["rev-parse", "HEAD"], checkout);
 
@@ -253,8 +254,8 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
         "--json",
       ]),
     );
-    // The command answers before the machine has done anything: provisioning is
-    // the machine's, and the row is what the caller polls.
+    // The command returns before the machine has done anything: the machine
+    // does the provisioning, and the caller polls the row.
     expect(answered.status).toBe("provisioning");
     expect(answered.kind).toBe("primary");
     expect(answered.runnerId).toBe(runnerId);
@@ -268,14 +269,14 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
     expect(only!.branch).toBe("main");
     expect(only!.branches).toContain("main");
 
-    // AD-5 under D-20a: the user's own checkout of this repository is not
-    // Hercule's and is never read or written - it reads exactly as it did, on the
-    // commit it was on.
+    // The user's own checkout of this repository does not belong to Hercule
+    // and is never read or written: it is exactly as it was, on the same
+    // commit.
     expect(runGit(["status", "--porcelain=v1", "--untracked-files=all"], checkout)).toBe(before);
     expect(runGit(["rev-parse", "HEAD"], checkout)).toBe(head);
   }, 120_000);
 
-  it("refuses a second main workspace of the same repo on the same machine", async () => {
+  it("rejects a second main workspace of the same repo on the same machine", async () => {
     const ran = await runLoggedInCli([
       "workspace",
       "provision",
@@ -326,17 +327,17 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
       expect(workspace.kind).toBe("ephemeral");
       const [only] = workspace.checkouts;
       expect(only!.form).toBe("worktree");
-      // The thread's branch is the session's own, and nothing else's: the tail of
-      // the session id is what tells two threads in one repo apart.
+      // The thread's branch belongs to the session alone: the end of the
+      // session id tells two threads in one repo apart.
       expect(only!.branch).toBe(`hercule/run-${spawned.id.slice(-8)}`);
-      // It starts where `main` is, so the worktree came off the cache the clone
-      // seeded rather than from a repository nobody could reach.
+      // It starts where `main` is, so the worktree came from the cache the
+      // clone filled rather than from a repository nobody could reach.
       expect(only!.branches).toContain(only!.branch!);
-      // The workspace knows which thread is in it: `sessionIds` is what the
-      // sidebar groups on and what the reaper reads before disposing anything.
+      // The workspace records which thread is in it: the sidebar groups by
+      // `sessionIds`, and the reaper reads it before disposing anything.
       expect(workspace.sessionIds).toContain(spawned.id);
 
-      // The thread is the test's, so it does not outlive it.
+      // The thread belongs to the test, so it must not outlive it.
       const stopped = await runLoggedInCli(["session", "stop", spawned.id, "--json"]);
       expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
     },

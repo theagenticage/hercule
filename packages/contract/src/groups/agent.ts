@@ -8,9 +8,9 @@
  * never reads back through the Agent afterwards (ADR 0030), so an edit changes
  * only the sessions spawned after the edit.
  *
- * `unenforced` reports what a provider will ignore. A provider may store a
- * spec field it does not act on, and the record names that field, so the
- * caller does not learn it from the harness's behaviour.
+ * `unenforced` lists what a provider ignores. A provider may store a spec field
+ * it does not act on, and the record lists that field, so the caller does not
+ * have to discover it from the harness's behaviour.
  */
 import { Schema } from "effect";
 import { AccessMode, DisallowedTool, ModelSelection } from "@hercule/protocol";
@@ -29,7 +29,7 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
 
-/** The tool vocabulary is the protocol's; the API hands it out unchanged. */
+/** The tool vocabulary comes from the runner protocol; the API returns it unchanged. */
 export { DisallowedTool };
 
 /** The longest agent name. */
@@ -78,11 +78,11 @@ export type Agent = Schema.Schema.Type<typeof Agent>;
 export const AGENT_SORT_FIELDS = ["createdAt"] as const;
 
 /**
- * What creating an agent takes. The model and its options are two fields here
+ * The payload of `agent.create`. The model and its options are two fields here
  * and one `ModelSelection` on the record. A choice belongs to the model that
- * offers it, so `options` may only be named beside a `model`, and the service
- * folds the two into the selection it stores. Every other command spells a
- * model the same way: `--model <slug> --options <json>`.
+ * offers it, so `options` is only allowed together with `model`, and the
+ * service combines the two into the selection it stores. Every other command
+ * takes a model the same way: `--model <slug> --options <json>`.
  */
 export const AgentCreateInput = Schema.Struct({
   name: AgentName,
@@ -90,16 +90,16 @@ export const AgentCreateInput = Schema.Struct({
   instanceId: Id,
   permissionProfileId: Id,
   accessMode: Schema.optionalKey(AccessMode),
-  /** Absent runs its sessions on whatever the instance offers by default. */
+  /** When absent, its sessions run on the instance's default model. */
   model: Schema.optionalKey(ModelSlug),
-  /** The choices that model opens with. Refused if no `model` is beside them. */
+  /** The choices that model opens with. Rejected when `model` is absent. */
   options: Schema.optionalKey(ModelSelection.fields.options),
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
 });
 
 export type AgentCreateInput = Schema.Schema.Type<typeof AgentCreateInput>;
 
-/** What editing an agent takes. An absent field is left as it was. */
+/** The payload of `agent.update`. A field left out is not changed. */
 export const AgentUpdateInput = Schema.Struct({
   name: Schema.optionalKey(AgentName),
   systemPrompt: Schema.optionalKey(SystemPrompt),
@@ -107,12 +107,12 @@ export const AgentUpdateInput = Schema.Struct({
   permissionProfileId: Schema.optionalKey(Id),
   accessMode: Schema.optionalKey(AccessMode),
   /**
-   * `null` puts the agent back on the instance's default model. A model named
-   * here replaces the stored choices with the `options` beside it, or with no
-   * choices at all, because the stored choices belonged to the old model.
+   * `null` puts the agent back on the instance's default model. A model given
+   * here replaces the stored choices with the `options` given with it, or with
+   * no choices at all, because the stored choices belonged to the old model.
    */
   model: Schema.optionalKey(Schema.NullOr(ModelSlug)),
-  /** The choices of the model named beside them. Options alone are refused. */
+  /** The choices for the model given with them. Options without a model are rejected. */
   options: Schema.optionalKey(ModelSelection.fields.options),
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
 });
@@ -120,9 +120,9 @@ export const AgentUpdateInput = Schema.Struct({
 export type AgentUpdateInput = Schema.Schema.Type<typeof AgentUpdateInput>;
 
 /**
- * What an agent listing may be narrowed by. The profile is the one field:
- * deleting a Permission Profile is refused while an Agent names it, and the
- * caller has to be able to find that Agent.
+ * The filters of `agent.query`. The profile is the only one: deleting a
+ * Permission Profile fails while an Agent uses it, and the caller has to be
+ * able to find that Agent.
  */
 export const AgentFilter = Schema.Struct({
   /** Only the Agents that spawn their sessions under this Permission Profile. */

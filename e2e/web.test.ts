@@ -1,12 +1,12 @@
 /**
- * The web app out of the release binary: a browser pointed at a machine running
- * `hercule` gets the app, on the same port and origin as the API.
+ * Tests the web app served by the release binary: a browser pointed at a
+ * machine running `hercule` gets the app, on the same port and origin as the
+ * API.
  *
- * This is the one test that proves the bundle is embedded rather than read off
- * disk, so it runs what a release ships. It runs a binary that is already
- * there rather than building one: a build rewrites `apps/web/dist` and the
- * generated file list, which is not something to do underneath the rest of the
- * suite. `pnpm build:binary` first, then `pnpm test:binary`.
+ * This is the only test that proves the bundle is embedded rather than read
+ * from disk, so it runs what a release ships. It runs an existing binary
+ * rather than building one: a build rewrites `apps/web/dist` and the generated
+ * file list, which should not happen while the rest of the suite runs. `pnpm build:binary` first, then `pnpm test:binary`.
  *
  * It stops before setup completes, which is when a first-run browser arrives.
  */
@@ -32,14 +32,14 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  // The binary may have been missing, in which case nothing was started - and
-  // the temporary home still has to go.
+  // The binary may have been missing, in which case nothing was started, but
+  // the temporary home still has to be removed.
   await controller?.stop().catch(() => -1);
   state.remove();
 });
 
 describe("the binary serving the web app", () => {
-  it("answers the root with the page", async () => {
+  it("serves the page at the root", async () => {
     const response = await fetch(`${url}/`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
@@ -53,21 +53,22 @@ describe("the binary serving the web app", () => {
     expect(page).not.toMatch(/<script(?![^>]*\ssrc=)/);
   });
 
-  it("answers the setup link with the page, before setup completes", async () => {
+  it("serves the page at the setup link, before setup completes", async () => {
     const setup = await fetch(`${url}/setup?token=whatever`);
     expect(setup.status).toBe(200);
     expect(setup.headers.get("content-type")).toBe("text/html; charset=utf-8");
 
-    // The gate is unchanged: the API still says first run has not happened.
+    // The gate is unchanged: the API still reports that first run has not happened.
     const state = await fetch(`${url}/api/v1/setup`);
     expect(await state.json()).toEqual({ complete: false });
   });
 
-  it("serves every script the page asks for, each cached the way it ships", async () => {
+  it("serves every script the page requests, each with the right cache headers", async () => {
     const page = await (await fetch(`${url}/`)).text();
     const sources = [...page.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]!);
-    // The entry module and its chunks are fingerprinted; the theme's pre-paint
-    // script keeps its name, so for it "cached forever" would be wrong.
+    // The entry module and its chunks have content hashes in their names; the
+    // theme's pre-paint script keeps its name, so caching it forever would be
+    // wrong.
     expect(sources.some((source) => /^\/assets\//.test(source))).toBe(true);
     expect(sources).toContain("/theme-init.js");
 
@@ -90,15 +91,15 @@ describe("the binary serving the web app", () => {
 
     for (const source of sources) {
       const chunk = await (await fetch(`${url}${source}`)).text();
-      // Two marks of a development build, in the code that ships rather than
-      // in the page that names it: React's development-only invariant, and the
-      // development JSX runtime the production build never links.
+      // Two signs of a development build, in the shipped code rather than in
+      // the page that loads it: React's development-only invariant, and the
+      // development JSX runtime the production build never includes.
       expect(chunk, source).not.toContain("Invalid hook call");
       expect(chunk, source).not.toContain("jsx-dev-runtime");
     }
   });
 
-  it("keeps the JSON error envelope on the API beside it", async () => {
+  it("keeps the JSON error envelope on the API next to it", async () => {
     const response = await fetch(`${url}/api/v1/nope`);
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({

@@ -12,7 +12,7 @@ const decode = (schema: unknown, input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(schema as Schema.Codec<unknown, unknown>)(input))
     ._tag;
 
-/** One endpoint of a group, by the identifier the group declares it under. */
+/** Returns the endpoint a group declares under `identifier`. Throws when there is none. */
 const findEndpoint = (group: unknown, identifier: string): Record<string, unknown> => {
   const endpoints = (group as { endpoints: Record<string, unknown> }).endpoints;
   const endpoint = endpoints[identifier];
@@ -21,8 +21,9 @@ const findEndpoint = (group: unknown, identifier: string): Record<string, unknow
 };
 
 /**
- * What an endpoint validates its JSON request body against. `payload` is a map
- * from content type to the schemas declared for it; the API speaks JSON only.
+ * Returns the schema an endpoint validates its JSON request body against.
+ * `payload` is a map from content type to the schemas declared for it; the
+ * API accepts only JSON.
  */
 const readPayloadSchema = (group: unknown, identifier: string): unknown => {
   const byContentType = findEndpoint(group, identifier)["payload"] as Map<
