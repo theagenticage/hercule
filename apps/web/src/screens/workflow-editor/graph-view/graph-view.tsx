@@ -286,17 +286,20 @@ function ArrowMarker({ id }: { readonly id: string }): JSX.Element {
  * Places the drawing in the pane. On its own, it draws the drawing at the
  * legible zoom and never smaller, and a small drawing larger, as
  * `placeDrawing` says. It places the drawing again when the pane changes
- * size and when the graph gains or loses a node, and not at each keystroke
- * that changes a label or an id, so that a place the author panned to stays.
- * "Fit to view" is the author asking to see all of the drawing, so it makes
- * the drawing as small as it must be to fit.
+ * size and when the structure changes: a node or an edge comes or goes, or
+ * an edge joins other nodes. A new structure can have a new shape, and the old place
+ * can cut the new shape at the pane's edge. It does not place the drawing
+ * again at each keystroke that changes a label or an id, so that a place the
+ * author panned to stays. "Fit to view" is the author asking to see all of
+ * the drawing, so it makes the drawing as small as it must be to fit.
  */
 function DrawingPlacement({
   size,
-  nodeCount,
+  structure,
 }: {
   readonly size: Size;
-  readonly nodeCount: number;
+  /** Which nodes the edges join. Ids and labels are not part of it. */
+  readonly structure: string;
 }): JSX.Element {
   const { setViewport } = useReactFlow();
   const paneWidth = useStore((state) => state.width);
@@ -307,7 +310,7 @@ function DrawingPlacement({
   });
   useEffect(() => {
     placeInPane();
-  }, [paneWidth, paneHeight, nodeCount]);
+  }, [paneWidth, paneHeight, structure]);
   const fitToView = () => {
     if (paneWidth === 0 || paneHeight === 0) return;
     void setViewport(
@@ -389,7 +392,17 @@ export function GraphView({
         data: { edge, route, markerId },
       };
     });
-    return { nodes, edges: routes, size: layout.size, nodeCount: graph.nodes.length };
+    // The structure names each node by its place in the list, not by its id,
+    // so a rename keeps it. A count of the nodes and the edges is not enough:
+    // an edge into an entry step removes the edge from the trigger into it.
+    const nodePlaces = new Map(graph.nodes.map((node, place) => [node.id, place]));
+    const structure = [
+      graph.nodes.length,
+      ...graph.edges.map(
+        (edge) => `${String(nodePlaces.get(edge.from))}>${String(nodePlaces.get(edge.to))}`,
+      ),
+    ].join(" ");
+    return { nodes, edges: routes, size: layout.size, structure };
   }, [graph, markerId]);
 
   return (
@@ -416,7 +429,7 @@ export function GraphView({
         elementsSelectable={false}
         proOptions={{ hideAttribution: true }}
       >
-        <DrawingPlacement size={drawing.size} nodeCount={drawing.nodeCount} />
+        <DrawingPlacement size={drawing.size} structure={drawing.structure} />
       </ReactFlow>
     </div>
   );

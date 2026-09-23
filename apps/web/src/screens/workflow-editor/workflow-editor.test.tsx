@@ -24,7 +24,7 @@
  */
 import { createRef, useState, type ComponentProps, type Ref } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { findUniqueOffset } from "@hercule/client-core/workflow-source/testing";
 import type { Issue } from "@hercule/contract";
@@ -187,6 +187,19 @@ const LINEAR_SOURCE = [
   "    to: review",
   "",
 ].join("\n");
+
+/**
+ * `LINEAR_SOURCE` without its edge. Each step is then an entry step, so the
+ * trigger leads into both steps, and the graph is a branch, not a row.
+ */
+const BRANCHED_SOURCE = LINEAR_SOURCE.replace("edges:\n  - from: open_task\n    to: review\n", "");
+
+/**
+ * Where the graph library shows the drawing in the pane: the offset and the
+ * zoom of its viewport, as its style gives them.
+ */
+const readDrawingPlace = (): string =>
+  document.querySelector<HTMLElement>(".react-flow__viewport")?.style.transform ?? "";
 
 /** An answer of the controller about `source` that names `issues`. */
 const buildAnswer = (
@@ -1007,5 +1020,46 @@ describe("the graph", () => {
 
     expect(await within(graph).findByText("max 2")).toBeDefined();
     expect(within(graph).getByTitle("steps.review.output.again")).toBeDefined();
+  });
+
+  it("places the drawing again when an edge changes its shape, as when the source opens", async () => {
+    // The graph has three nodes and two edges before the change and after it.
+    // Only the nodes that the edges join are different: the branch becomes a row.
+    const findGraphNode = (id: string) =>
+      within(screen.getByRole("region", { name: "Workflow graph" })).findByText(id);
+    renderGraphOf(LINEAR_SOURCE);
+    await findGraphNode("open_task");
+    const rowPlace = readDrawingPlace();
+    cleanup();
+    const { update } = renderGraphOf(BRANCHED_SOURCE);
+    await findGraphNode("open_task");
+    const branchPlace = readDrawingPlace();
+    expect(branchPlace).not.toBe(rowPlace);
+
+    update({ source: LINEAR_SOURCE });
+
+    await waitFor(() => {
+      expect(readDrawingPlace()).toBe(rowPlace);
+    });
+  });
+
+  it("keeps the place of the drawing when a step is renamed or a condition changes", async () => {
+    const user = userEvent.setup();
+    const { update } = renderGraphOf(LOOP_SOURCE);
+    const graph = screen.getByRole("region", { name: "Workflow graph" });
+    await within(graph).findByText("implement");
+    const placed = readDrawingPlace();
+    // The author moves the drawing away from the place it opened at.
+    await user.click(within(graph).getByRole("button", { name: "Fit to view" }));
+    const fitted = readDrawingPlace();
+    expect(fitted).not.toBe(placed);
+
+    const renamed = LOOP_SOURCE.replaceAll("open_pr", "open_change");
+    update({ source: renamed });
+    expect(await within(graph).findByText("open_change")).toBeDefined();
+    update({ source: renamed.replace("approved == false", "approved != true") });
+    expect(await within(graph).findByText("steps.review.output.approved != true")).toBeDefined();
+
+    expect(readDrawingPlace()).toBe(fitted);
   });
 });
