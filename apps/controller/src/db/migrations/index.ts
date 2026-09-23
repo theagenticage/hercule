@@ -31,6 +31,7 @@ import agents from "./0020-agents";
 import subscriptions from "./0021-subscriptions";
 import eventCursorsAndMatchedInputs from "./0022-event-cursors-and-matched-inputs";
 import sessionTokenOnlyWhileRunning from "./0023-session-token-only-while-running";
+import workflowsAndTriggers from "./0024-workflows-and-triggers";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -56,6 +57,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [21, "subscriptions", Effect.succeed(subscriptions)],
   [22, "event-cursors-and-matched-inputs", Effect.succeed(eventCursorsAndMatchedInputs)],
   [23, "session-token-only-while-running", Effect.succeed(sessionTokenOnlyWhileRunning)],
+  [24, "workflows-and-triggers", Effect.succeed(workflowsAndTriggers)],
 ];
 
 /** The schema version this binary carries: the highest embedded migration id. */

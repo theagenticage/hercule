@@ -75,6 +75,99 @@ const shellPattern = {
     "Screens import presentation from @hercule/ui or apps/web/src/screens/, never from the shell.",
 };
 
+/** The folder of the workflow editor, the one module that holds its libraries. */
+const workflowEditor = "apps/web/src/screens/workflow-editor";
+
+/**
+ * The selectors of a dynamic `import()` whose source matches a regular
+ * expression: a source written as a string, and a source written as a
+ * template literal, whose text before its first `${}` is matched.
+ * `no-restricted-imports` sees static imports only, so a fence also rejects
+ * an `import()` that matches these selectors. A regular expression here writes a slash as `\x2F`,
+ * because the selector syntax ends a regular expression at a slash.
+ */
+const buildImportCalls = (source, message) => [
+  { selector: `ImportExpression[source.value=${source}]`, message },
+  { selector: `ImportExpression[source.quasis.0.value.raw=${source}]`, message },
+];
+
+/**
+ * Each library of the workflow editor sits behind a facade of the editor's
+ * own, so that it can be replaced there without a change anywhere else. A
+ * fence rejects an import of the library's packages everywhere but in its facade, in a
+ * static import and in a dynamic `import()` alike.
+ */
+const fenceLibrary = (scopes, message) => ({
+  pattern: { group: scopes.map((scope) => `${scope}/*`), message },
+  calls: buildImportCalls(`/^(${scopes.join("|")})\\x2F/`, message),
+});
+const codeMirrorFence = fenceLibrary(
+  ["@codemirror", "@lezer"],
+  `The editor library is imported only in ${workflowEditor}/text-editor/, so that it can be replaced there alone. Use the TextEditor of that folder.`,
+);
+const reactFlowFence = fenceLibrary(
+  ["@xyflow"],
+  `The graph library is imported only in ${workflowEditor}/graph-view/, so that it can be replaced there alone. Use the GraphView of that folder.`,
+);
+const dagreFence = fenceLibrary(
+  ["@dagrejs"],
+  `The layout engine is imported only in ${workflowEditor}/graph-view/layout.ts, so that it can be replaced there alone. Use computeGraphLayout from that file.`,
+);
+const editorLibraryFences = [codeMirrorFence, reactFlowFence, dagreFence];
+const editorLibraryPatterns = editorLibraryFences.map((fence) => fence.pattern);
+const editorLibraryCalls = editorLibraryFences.flatMap((fence) => fence.calls);
+
+/** The workflow editor is one module: the rest of the app reaches it through its index only. */
+const workflowEditorFenceMessage =
+  "The workflow editor is reached through its folder's index only, so its insides can change without a change anywhere else. Import from the folder.";
+const workflowEditorFencePattern = {
+  group: ["**/workflow-editor/*"],
+  message: workflowEditorFenceMessage,
+};
+const workflowEditorFenceCalls = buildImportCalls(
+  "/workflow-editor\\x2F/",
+  workflowEditorFenceMessage,
+);
+
+/**
+ * The web app reads a workflow's YAML only through @hercule/client-core, so a
+ * text is parsed once, and the same way the controller parses it.
+ */
+const yamlMessage =
+  "Parse a workflow's text with parseWorkflowSourceWithRanges from @hercule/client-core, which parses it once and as the controller does.";
+const yamlPath = { name: "yaml", message: yamlMessage };
+const yamlPattern = { group: ["yaml/*"], message: yamlMessage };
+const yamlCalls = buildImportCalls("/^yaml(\\x2F|$)/", yamlMessage);
+
+/**
+ * The imports a browser file may not make. `allowed` is the fence of the one
+ * library that a facade of the workflow editor may import, and `more` are
+ * patterns that only some files are held to.
+ */
+const browserImports = ({ allowed, more = [] } = {}) => [
+  "error",
+  {
+    paths: [...bannedInTheBrowser, yamlPath],
+    patterns: [
+      effectPattern,
+      routeLocalPattern,
+      workflowEditorFencePattern,
+      yamlPattern,
+      ...editorLibraryFences.filter((fence) => fence !== allowed).map((fence) => fence.pattern),
+      ...more,
+    ],
+  },
+];
+
+/** The dynamic imports and calls a browser file may not make, beside `browserImports`. */
+const browserSyntax = ({ allowed } = {}) => [
+  "error",
+  ...bannedChildProcessCalls,
+  ...workflowEditorFenceCalls,
+  ...yamlCalls,
+  ...editorLibraryFences.filter((fence) => fence !== allowed).flatMap((fence) => fence.calls),
+];
+
 export default tseslint.config(
   {
     // The generated files are build output that happens to be TypeScript.
@@ -102,8 +195,11 @@ export default tseslint.config(
       },
     },
     rules: {
-      "no-restricted-imports": ["error", { paths: [...bannedEverywhere, ...bannedChildProcess] }],
-      "no-restricted-syntax": ["error", ...bannedChildProcessCalls],
+      "no-restricted-imports": [
+        "error",
+        { paths: [...bannedEverywhere, ...bannedChildProcess], patterns: editorLibraryPatterns },
+      ],
+      "no-restricted-syntax": ["error", ...bannedChildProcessCalls, ...editorLibraryCalls],
     },
   },
   {
@@ -125,10 +221,8 @@ export default tseslint.config(
       "react-hooks/exhaustive-deps": "error",
       "react-hooks/incompatible-library": "error",
       "react-hooks/unsupported-syntax": "error",
-      "no-restricted-imports": [
-        "error",
-        { paths: bannedInTheBrowser, patterns: [effectPattern, routeLocalPattern] },
-      ],
+      "no-restricted-imports": browserImports(),
+      "no-restricted-syntax": browserSyntax(),
     },
   },
   {
@@ -136,19 +230,34 @@ export default tseslint.config(
     // it. Only the two layout routes below mount the shell.
     files: ["apps/web/src/routes/**/*.tsx"],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        { paths: bannedInTheBrowser, patterns: [effectPattern, routeLocalPattern, shellPattern] },
-      ],
+      "no-restricted-imports": browserImports({ more: [shellPattern] }),
     },
   },
   {
     files: ["apps/web/src/routes/_shell.tsx", "apps/web/src/routes/_shell/settings.tsx"],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        { paths: bannedInTheBrowser, patterns: [effectPattern, routeLocalPattern] },
-      ],
+      "no-restricted-imports": browserImports(),
+    },
+  },
+  {
+    files: [`${workflowEditor}/text-editor/**/*.{ts,tsx}`],
+    rules: {
+      "no-restricted-imports": browserImports({ allowed: codeMirrorFence }),
+      "no-restricted-syntax": browserSyntax({ allowed: codeMirrorFence }),
+    },
+  },
+  {
+    files: [`${workflowEditor}/graph-view/**/*.{ts,tsx}`],
+    rules: {
+      "no-restricted-imports": browserImports({ allowed: reactFlowFence }),
+      "no-restricted-syntax": browserSyntax({ allowed: reactFlowFence }),
+    },
+  },
+  {
+    files: [`${workflowEditor}/graph-view/layout.ts`],
+    rules: {
+      "no-restricted-imports": browserImports({ allowed: dagreFence }),
+      "no-restricted-syntax": browserSyntax({ allowed: dagreFence }),
     },
   },
   {
@@ -156,8 +265,11 @@ export default tseslint.config(
     // are tooling that never ships inside the binary.
     files: ["packages/hercule/src/spawn.ts", "scripts/**/*.ts"],
     rules: {
-      "no-restricted-imports": ["error", { paths: bannedEverywhere }],
-      "no-restricted-syntax": "off",
+      "no-restricted-imports": [
+        "error",
+        { paths: bannedEverywhere, patterns: editorLibraryPatterns },
+      ],
+      "no-restricted-syntax": ["error", ...editorLibraryCalls],
     },
   },
   {

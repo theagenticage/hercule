@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Schema } from "effect";
-import { ExternalRef } from "./index";
+import { Cause, Effect, Schema } from "effect";
+import { ExternalRef, Id, listDecodeIssues } from "./index";
 
 const decode = (input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(ExternalRef)(input))._tag;
@@ -16,5 +16,17 @@ describe("the External Ref grammar", () => {
     expect(decode("GitHub:issue:x")).toBe("Failure");
     expect(decode("github:issue")).toBe("Failure");
     expect(decode("github:issue:a b")).toBe("Failure");
+  });
+});
+
+describe("the id grammar", () => {
+  it("describes an id in words in its error message, instead of showing the regex", () => {
+    const failed = Schema.decodeUnknownExit(Id)("1234");
+    expect(failed._tag).toBe("Failure");
+    if (failed._tag !== "Failure") return;
+    const error = Cause.squash(failed.cause) as Schema.SchemaError;
+    expect(listDecodeIssues(error)).toEqual([
+      { path: [], message: "Expected a canonical lowercase UUIDv7" },
+    ]);
   });
 });

@@ -135,6 +135,11 @@ export interface LiveStub {
    * `subscribe` call. Asking about a topic nothing is watching throws.
    */
   cursorOf(topic: string): string | undefined;
+  /**
+   * Closes the app's socket from the server side, as a network failure would.
+   * The app then reconnects on its own schedule.
+   */
+  drop(): void;
 }
 
 /**
@@ -153,6 +158,26 @@ afterEach(async () => {
 /** The page's text with its whitespace collapsed, the way a reader sees it. */
 export const reading = (element: HTMLElement | null = document.body): string =>
   (element?.textContent ?? "").replace(/\s+/g, " ").trim();
+
+/**
+ * Checks that the elements appear on the page in the given order, and fails
+ * the test otherwise. Tests use it, for example, to check that Cancel comes
+ * before Confirm.
+ */
+export const expectInDocumentOrder = (elements: readonly HTMLElement[]): void => {
+  elements.forEach((element, index) => {
+    const before = elements[index - 1];
+    if (before === undefined) return;
+    expect(before.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+};
+
+/** Returns the names of the sidebar links marked as the current page. */
+export const readCurrentNavItems = (): readonly (string | null)[] =>
+  within(screen.getByRole("navigation", { name: "Hercule" }))
+    .getAllByRole("link")
+    .filter((link) => link.getAttribute("aria-current") === "page")
+    .map((link) => link.textContent);
 
 /**
  * Clicks a row inside the open menu - the Radix popover, read as
@@ -225,6 +250,11 @@ export const renderApp = async ({
       if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
       const call = socket.calls("subscribe").find((frame) => frame.id === held.requestId);
       return (call?.payload as { cursor?: string } | undefined)?.cursor;
+    },
+    drop: () => {
+      const socket = sockets.at(-1);
+      if (socket === undefined) throw new Error("the app has not opened a socket");
+      socket.drop();
     },
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

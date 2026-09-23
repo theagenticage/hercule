@@ -19,7 +19,6 @@ import { Route as ShellIntakeRouteImport } from './routes/_shell/intake'
 import { Route as ShellNotificationsRouteImport } from './routes/_shell/notifications'
 import { Route as ShellRunsRouteImport } from './routes/_shell/runs'
 import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
-import { Route as ShellWorkflowsRouteImport } from './routes/_shell/workflows'
 import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/timezone'
 import { Route as ShellConnectionsIndexRouteImport } from './routes/_shell/connections/index'
 import { Route as ShellFleetIndexRouteImport } from './routes/_shell/fleet/index'
@@ -38,6 +37,9 @@ import { Route as ShellSettingsThreadsRouteImport } from './routes/_shell/settin
 import { Route as ShellTasksIndexRouteImport } from './routes/_shell/tasks/index'
 import { Route as ShellThreadsSessionIdRouteImport } from './routes/_shell/threads/$sessionId'
 import { Route as ShellThreadsNewRouteImport } from './routes/_shell/threads/new'
+import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell/workflows/index'
+import { Route as ShellWorkflowsWorkflowIdRouteImport } from './routes/_shell/workflows/$workflowId'
+import { Route as ShellWorkflowsNewRouteImport } from './routes/_shell/workflows/new'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -86,11 +88,6 @@ const ShellRunsRoute = ShellRunsRouteImport.update({
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellWorkflowsRoute = ShellWorkflowsRouteImport.update({
-  id: '/workflows',
-  path: '/workflows',
   getParentRoute: () => ShellRoute,
 } as any)
 const OnboardingTimezoneRoute = OnboardingTimezoneRouteImport.update({
@@ -184,6 +181,22 @@ const ShellThreadsNewRoute = ShellThreadsNewRouteImport.update({
   path: '/threads/new',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellWorkflowsIndexRoute = ShellWorkflowsIndexRouteImport.update({
+  id: '/workflows/',
+  path: '/workflows/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellWorkflowsWorkflowIdRoute =
+  ShellWorkflowsWorkflowIdRouteImport.update({
+    id: '/workflows/$workflowId',
+    path: '/workflows/$workflowId',
+    getParentRoute: () => ShellRoute,
+  } as any)
+const ShellWorkflowsNewRoute = ShellWorkflowsNewRouteImport.update({
+  id: '/workflows/new',
+  path: '/workflows/new',
+  getParentRoute: () => ShellRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -195,7 +208,6 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof ShellNotificationsRoute
   '/runs': typeof ShellRunsRoute
   '/settings': typeof ShellSettingsRouteWithChildren
-  '/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
   '/settings/assistants': typeof ShellSettingsAssistantsRoute
@@ -209,11 +221,14 @@ export interface FileRoutesByFullPath {
   '/settings/threads': typeof ShellSettingsThreadsRoute
   '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
   '/threads/new': typeof ShellThreadsNewRoute
+  '/workflows/$workflowId': typeof ShellWorkflowsWorkflowIdRoute
+  '/workflows/new': typeof ShellWorkflowsNewRoute
   '/connections/': typeof ShellConnectionsIndexRoute
   '/fleet/': typeof ShellFleetIndexRoute
   '/sessions/': typeof ShellSessionsIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/tasks/': typeof ShellTasksIndexRoute
+  '/workflows/': typeof ShellWorkflowsIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -223,7 +238,6 @@ export interface FileRoutesByTo {
   '/intake': typeof ShellIntakeRoute
   '/notifications': typeof ShellNotificationsRoute
   '/runs': typeof ShellRunsRoute
-  '/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/': typeof ShellIndexRoute
   '/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
@@ -238,11 +252,14 @@ export interface FileRoutesByTo {
   '/settings/threads': typeof ShellSettingsThreadsRoute
   '/threads/$sessionId': typeof ShellThreadsSessionIdRoute
   '/threads/new': typeof ShellThreadsNewRoute
+  '/workflows/$workflowId': typeof ShellWorkflowsWorkflowIdRoute
+  '/workflows/new': typeof ShellWorkflowsNewRoute
   '/connections': typeof ShellConnectionsIndexRoute
   '/fleet': typeof ShellFleetIndexRoute
   '/sessions': typeof ShellSessionsIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/tasks': typeof ShellTasksIndexRoute
+  '/workflows': typeof ShellWorkflowsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -255,7 +272,6 @@ export interface FileRoutesById {
   '/_shell/notifications': typeof ShellNotificationsRoute
   '/_shell/runs': typeof ShellRunsRoute
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
-  '/_shell/workflows': typeof ShellWorkflowsRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
@@ -270,11 +286,14 @@ export interface FileRoutesById {
   '/_shell/settings/threads': typeof ShellSettingsThreadsRoute
   '/_shell/threads/$sessionId': typeof ShellThreadsSessionIdRoute
   '/_shell/threads/new': typeof ShellThreadsNewRoute
+  '/_shell/workflows/$workflowId': typeof ShellWorkflowsWorkflowIdRoute
+  '/_shell/workflows/new': typeof ShellWorkflowsNewRoute
   '/_shell/connections/': typeof ShellConnectionsIndexRoute
   '/_shell/fleet/': typeof ShellFleetIndexRoute
   '/_shell/sessions/': typeof ShellSessionsIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/tasks/': typeof ShellTasksIndexRoute
+  '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -288,7 +307,6 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/runs'
     | '/settings'
-    | '/workflows'
     | '/onboarding/timezone'
     | '/fleet/$runnerId'
     | '/settings/assistants'
@@ -302,11 +320,14 @@ export interface FileRouteTypes {
     | '/settings/threads'
     | '/threads/$sessionId'
     | '/threads/new'
+    | '/workflows/$workflowId'
+    | '/workflows/new'
     | '/connections/'
     | '/fleet/'
     | '/sessions/'
     | '/settings/'
     | '/tasks/'
+    | '/workflows/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -316,7 +337,6 @@ export interface FileRouteTypes {
     | '/intake'
     | '/notifications'
     | '/runs'
-    | '/workflows'
     | '/onboarding/timezone'
     | '/'
     | '/fleet/$runnerId'
@@ -331,11 +351,14 @@ export interface FileRouteTypes {
     | '/settings/threads'
     | '/threads/$sessionId'
     | '/threads/new'
+    | '/workflows/$workflowId'
+    | '/workflows/new'
     | '/connections'
     | '/fleet'
     | '/sessions'
     | '/settings'
     | '/tasks'
+    | '/workflows'
   id:
     | '__root__'
     | '/_shell'
@@ -347,7 +370,6 @@ export interface FileRouteTypes {
     | '/_shell/notifications'
     | '/_shell/runs'
     | '/_shell/settings'
-    | '/_shell/workflows'
     | '/onboarding/timezone'
     | '/_shell/'
     | '/_shell/fleet/$runnerId'
@@ -362,11 +384,14 @@ export interface FileRouteTypes {
     | '/_shell/settings/threads'
     | '/_shell/threads/$sessionId'
     | '/_shell/threads/new'
+    | '/_shell/workflows/$workflowId'
+    | '/_shell/workflows/new'
     | '/_shell/connections/'
     | '/_shell/fleet/'
     | '/_shell/sessions/'
     | '/_shell/settings/'
     | '/_shell/tasks/'
+    | '/_shell/workflows/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -446,13 +471,6 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof ShellSettingsRouteImport
-      parentRoute: typeof ShellRoute
-    }
-    '/_shell/workflows': {
-      id: '/_shell/workflows'
-      path: '/workflows'
-      fullPath: '/workflows'
-      preLoaderRoute: typeof ShellWorkflowsRouteImport
       parentRoute: typeof ShellRoute
     }
     '/onboarding/timezone': {
@@ -581,6 +599,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellThreadsNewRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/workflows/': {
+      id: '/_shell/workflows/'
+      path: '/workflows'
+      fullPath: '/workflows/'
+      preLoaderRoute: typeof ShellWorkflowsIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/workflows/$workflowId': {
+      id: '/_shell/workflows/$workflowId'
+      path: '/workflows/$workflowId'
+      fullPath: '/workflows/$workflowId'
+      preLoaderRoute: typeof ShellWorkflowsWorkflowIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/workflows/new': {
+      id: '/_shell/workflows/new'
+      path: '/workflows/new'
+      fullPath: '/workflows/new'
+      preLoaderRoute: typeof ShellWorkflowsNewRouteImport
+      parentRoute: typeof ShellRoute
+    }
   }
 }
 
@@ -621,15 +660,17 @@ interface ShellRouteChildren {
   ShellNotificationsRoute: typeof ShellNotificationsRoute
   ShellRunsRoute: typeof ShellRunsRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
-  ShellWorkflowsRoute: typeof ShellWorkflowsRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellFleetRunnerIdRoute: typeof ShellFleetRunnerIdRoute
   ShellThreadsSessionIdRoute: typeof ShellThreadsSessionIdRoute
   ShellThreadsNewRoute: typeof ShellThreadsNewRoute
+  ShellWorkflowsWorkflowIdRoute: typeof ShellWorkflowsWorkflowIdRoute
+  ShellWorkflowsNewRoute: typeof ShellWorkflowsNewRoute
   ShellConnectionsIndexRoute: typeof ShellConnectionsIndexRoute
   ShellFleetIndexRoute: typeof ShellFleetIndexRoute
   ShellSessionsIndexRoute: typeof ShellSessionsIndexRoute
   ShellTasksIndexRoute: typeof ShellTasksIndexRoute
+  ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
@@ -639,15 +680,17 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellNotificationsRoute: ShellNotificationsRoute,
   ShellRunsRoute: ShellRunsRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
-  ShellWorkflowsRoute: ShellWorkflowsRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellFleetRunnerIdRoute: ShellFleetRunnerIdRoute,
   ShellThreadsSessionIdRoute: ShellThreadsSessionIdRoute,
   ShellThreadsNewRoute: ShellThreadsNewRoute,
+  ShellWorkflowsWorkflowIdRoute: ShellWorkflowsWorkflowIdRoute,
+  ShellWorkflowsNewRoute: ShellWorkflowsNewRoute,
   ShellConnectionsIndexRoute: ShellConnectionsIndexRoute,
   ShellFleetIndexRoute: ShellFleetIndexRoute,
   ShellSessionsIndexRoute: ShellSessionsIndexRoute,
   ShellTasksIndexRoute: ShellTasksIndexRoute,
+  ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
 }
 
 const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)

@@ -8,12 +8,25 @@
  * nothing of the host's.
  */
 import * as Effect from "effect/Effect";
-import * as JsonSchema from "effect/JsonSchema";
+import type * as JsonSchema from "effect/JsonSchema";
 import * as Schema from "effect/Schema";
 import { EventSourceNames, PluginError, type EventSourceDefinition } from "@hercule/plugin-host";
 import { MAX_EVENT_KIND_LENGTH, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
+import { isCoreEventKind, type DeclaredEventKindWithConnectionType } from "../events";
 import { asPluginError, describeFieldIssues } from "./errors";
+import { deriveCatalogJsonSchema } from "./json-schema";
 import type { NewContribution } from "./repository";
+
+/**
+ * An event kind a plugin registered at boot, with the id of that plugin and
+ * the schema that emitted payloads are decoded against. `connectionType` is
+ * always set, because a plugin's events always arrive through a Connection.
+ */
+export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType {
+  readonly pluginId: string;
+  readonly connectionType: string;
+  readonly schema: Schema.Top;
+}
 
 /** The extension point this registers into; the column takes any name. */
 const EVENT_SOURCE = "event-source";
@@ -38,21 +51,11 @@ const EventKindHeader = Schema.Struct({
 const decodeEventKindHeader = Schema.decodeUnknownEffect(EventKindHeader, { errors: "all" });
 
 /**
- * The JSON Schema the catalog holds for one event kind. It is a whole document
- * rather than the root node alone: a schema carrying an identifier is emitted
- * once as a definition and pointed at with a `$ref`, and a reader handed the
- * root by itself could not follow that reference.
- */
-const derivePayloadJsonSchema = (schema: Schema.Top): JsonSchema.JsonSchema => {
-  const document = Schema.toJsonSchemaDocument(schema);
-  return Object.keys(document.definitions).length === 0
-    ? document.schema
-    : { ...document.schema, $defs: document.definitions };
-};
-
-/**
- * Registers one event source: the row the catalog holds for it, and every kind
- * it declares, in the map an emit is later read against.
+ * Registers one event source. Adds its catalog row to `declared`, and adds
+ * each of its kinds to `kinds`, which is the map used to decode emitted
+ * payloads and to look up the kind of a trigger. Fails with a `PluginError` if
+ * a name is invalid, a kind is declared twice, or a kind has the name of a
+ * core kind.
  *
  * Both collections are the registration pass's own, handed in and appended to,
  * because a pass registers every plugin before any of it is stored: a duplicate
@@ -63,7 +66,7 @@ export const registerEventSourceContribution = (
   pluginId: string,
   definition: EventSourceDefinition,
   declared: Array<NewContribution>,
-  kinds: Map<string, Schema.Top>,
+  kinds: Map<string, RegisteredEventKind>,
 ): Effect.Effect<void, PluginError> =>
   Effect.gen(function* () {
     const names = yield* Effect.mapError(
@@ -95,6 +98,15 @@ export const registerEventSourceContribution = (
           }),
         );
       }
+      // A trigger refers to a kind by its name only. A plugin kind with the
+      // name of a core kind would make that name ambiguous.
+      if (isCoreEventKind(kind)) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the event kind ${kind} is already declared by the core. A trigger refers to a kind by its name only, so it could not tell the two kinds apart. Give the kind another name.`,
+          }),
+        );
+      }
       // Two sources of one plugin claiming one kind would leave the last one
       // registered answering for both.
       if (kinds.has(kind)) {
@@ -113,9 +125,15 @@ export const registerEventSourceContribution = (
       );
       catalogued[kind] = {
         description: declaration.description,
-        schema: derivePayloadJsonSchema(declaration.schema),
+        schema: deriveCatalogJsonSchema(declaration.schema),
       };
-      kinds.set(kind, declaration.schema);
+      kinds.set(kind, {
+        kind,
+        pluginId,
+        connectionType: names.connectionType,
+        description: declaration.description,
+        schema: declaration.schema,
+      });
     }
     declared.push({
       owner: pluginId,

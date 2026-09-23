@@ -17,7 +17,7 @@ import { expandTarget } from "./targets";
 
 /** Whether the evaluator accepts a source, as `subscription.create` asks it. */
 const accepted = (source: string): boolean =>
-  Exit.isSuccess(Effect.runSyncExit(checkExpression(source)));
+  Exit.isSuccess(Effect.runSyncExit(checkExpression(source, "event")));
 
 describe("expandTarget", () => {
   it("expands a ref target into the membership test the spec pins", () => {

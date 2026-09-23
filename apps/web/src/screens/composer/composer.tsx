@@ -23,7 +23,7 @@ import {
   sessionsQuery,
   workspacesQuery,
 } from "../../app/queries";
-import { messageOf } from "../save-status";
+import { readErrorMessage } from "../save-status";
 import { AccessModeSelector } from "./access-mode-selector";
 import { AttachButton, SendButton, StopButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
@@ -189,7 +189,7 @@ export function Composer({
         </div>
         {model.error === null ? null : (
           <p className="text-fine text-fail" role="alert">
-            {messageOf(model.error)}
+            {readErrorMessage(model.error)}
           </p>
         )}
       </div>

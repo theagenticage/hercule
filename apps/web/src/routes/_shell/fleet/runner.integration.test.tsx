@@ -13,6 +13,8 @@ import { ageOf, formatStamp } from "@hercule/client-core";
 import type { ProviderSecretField, Session } from "@hercule/contract";
 import {
   envelope,
+  expectInDocumentOrder,
+  readCurrentNavItems,
   reading,
   renderApp,
   stubApi,
@@ -203,6 +205,16 @@ const around = (message: HTMLElement, field: HTMLElement): HTMLElement => {
 const action = (name: RegExp) => screen.getByRole("button", { name });
 
 describe("Runner", () => {
+  // A runner's page is under the Fleet path, so the sidebar highlights Fleet.
+  it("highlights Fleet in the sidebar", async () => {
+    await open(MOSS);
+    await waitFor(() => {
+      expect(reading()).toContain(MOSS.name);
+    });
+
+    expect(readCurrentNavItems()).toEqual(["Fleet"]);
+  });
+
   it("says what the machine is, where it stands and what it may run", async () => {
     await open(MOSS);
 
@@ -506,6 +518,8 @@ describe("Runner > retiring", () => {
 
     await user.click(await screen.findByRole("button", { name: /^retire$/i }));
     expect(writesTo(api, ONLINE.id)).toEqual([]);
+    // Cancel comes before Confirm.
+    expectInDocumentOrder([action(/^cancel$/i), action(/^confirm$/i)]);
 
     // Backing out leaves the machine as it was.
     await user.click(action(/^cancel$/i));

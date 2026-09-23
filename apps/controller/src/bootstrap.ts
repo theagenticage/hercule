@@ -28,7 +28,12 @@ import {
   type DatabaseError,
   type SchemaVersionError,
 } from "./db";
-import { ConnectionService, ConnectionServiceLayer, ConnectionTypesLayer } from "./connections";
+import {
+  ConnectionService,
+  ConnectionServiceLayer,
+  ConnectionTypes,
+  ConnectionTypesLayer,
+} from "./connections";
 import { cancelStrandedInputsAndReportLostWakeUps } from "./daemon";
 import { AuditLog, AuditLogLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
@@ -226,6 +231,7 @@ export type ControllerServices =
   | JoinTokens
   | Plugins
   | PluginHost
+  | ConnectionTypes
   | RunnerConnections
   | ProviderProbes
   | ProviderService

@@ -297,6 +297,19 @@ describe("createLive", () => {
     );
   });
 
+  it("stops calling a status listener after it is removed", async () => {
+    const { fetch } = ticketServer();
+    const started = supervisor(fetch);
+    const statuses: Array<string> = [];
+    const stopListening = started.onStatus((status) => statuses.push(status));
+
+    stopListening();
+    started.start();
+    await settle();
+
+    assert.deepStrictEqual(statuses, ["idle"]);
+  });
+
   it("stops for good and reports unauthenticated when the ticket is refused", async () => {
     const { fetch, count } = refusingFetch();
     const started = supervisor(fetch);
@@ -670,6 +683,17 @@ describe("queryKeysFor", () => {
 
     // A push naming no machine means every one of them moved.
     assert.deepStrictEqual(queryKeysFor("runner", []), [["runners"], ["runner"]]);
+  });
+
+  it("maps a workflow push to the listing and the page of each workflow id in it", () => {
+    assert.deepStrictEqual(queryKeysFor("workflow", ["w1", "w2"]), [
+      queryKeys.workflows(),
+      queryKeys.workflow("w1"),
+      queryKeys.workflow("w2"),
+    ]);
+
+    // A push with no ids means any workflow may have changed.
+    assert.deepStrictEqual(queryKeysFor("workflow", []), [["workflows"], ["workflow"]]);
   });
 
   it("maps a session push to the listing, each session's own page, and each session's queued-input list", () => {

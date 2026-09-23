@@ -31,7 +31,7 @@ import { AgentService, AgentServiceLayer } from "../agents";
 import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
-import { EventService, EventServiceLayer } from "../events";
+import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
 import { Controller, ControllerLayer } from "../controller";
 import {
@@ -66,6 +66,7 @@ import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { Setup, SetupLayer } from "../setup";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { User, UserLayer } from "../users";
+import { WorkflowService, WorkflowServiceLayer } from "../workflows";
 
 const API_ERRORS = [
   Unauthenticated,
@@ -288,6 +289,52 @@ const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) 
   }),
 );
 
+const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
+  Effect.gen(function* () {
+    const workflows = yield* WorkflowService;
+    return handlers
+      .handle("query", ({ query }) => operation(workflows.query(query)))
+      .handle("read", ({ params }) => operation(workflows.read(params)))
+      .handle("create", ({ payload }) => operation(workflows.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(workflows.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(workflows.delete(params)))
+      .handle("validate", ({ payload }) => operation(workflows.validate(payload)));
+  }),
+);
+
+/**
+ * A trigger is declared in its workflow's YAML, and its row is written together
+ * with the workflow, so the workflow service lists triggers. The routes are a
+ * separate group only because the operation is `trigger.query`.
+ */
+const triggerRoutes = HttpApiBuilder.group(api, "trigger", (handlers) =>
+  Effect.gen(function* () {
+    const workflows = yield* WorkflowService;
+    return handlers.handle("query", ({ query }) => operation(workflows.queryTriggers(query)));
+  }),
+);
+
+/**
+ * The action catalog belongs to the plugins domain, because plugins and the
+ * core register their actions into it at boot. The routes are a separate group
+ * only because the operation is `workflowAction.query`.
+ */
+const workflowActionRoutes = HttpApiBuilder.group(api, "workflowAction", (handlers) =>
+  Effect.gen(function* () {
+    const plugins = yield* Plugins;
+    return handlers.handle("query", () => operation(plugins.queryWorkflowActions()));
+  }),
+);
+
+const eventKindRoutes = HttpApiBuilder.group(api, "eventKind", (handlers) =>
+  Effect.gen(function* () {
+    const eventKinds = yield* EventKinds;
+    return handlers.handle("query", () => operation(eventKinds.query()));
+  }),
+);
+
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
@@ -433,6 +480,15 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 );
 
 /**
+ * Builds the `EventKinds` service. The events domain lists the event kinds that
+ * the plugins domain registered. The plugins domain already imports the events
+ * domain to append to the event log, so the events domain cannot import the
+ * plugins domain. The two are wired together here, where the whole controller
+ * is assembled.
+ */
+const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer));
+
+/**
  * Every service an operation resolves, and the controller daemon beside them:
  * the listener forks the controller daemon's drivers, so they are built here
  * rather than a second time somewhere else. One list, because a controller
@@ -491,6 +547,10 @@ export const operationLayers = Layer.mergeAll(
   ).pipe(Layer.provideMerge(LiveLayer), Layer.provideMerge(DispatchLayer)),
   ProvisioningLayer,
   SubscriptionServiceLayer,
+  EventKindsOperationLayer,
+  // The workflow service validates each trigger against the same list of event
+  // kinds that `eventKind.query` returns.
+  WorkflowServiceLayer.pipe(Layer.provide(EventKindsOperationLayer)),
   LiveTopicsLayer,
   WsTicketsLayer,
 );
@@ -513,6 +573,10 @@ export const handlerLayers = Layer.mergeAll(
   connectionRoutes,
   eventRoutes,
   subscriptionRoutes,
+  workflowRoutes,
+  triggerRoutes,
+  workflowActionRoutes,
+  eventKindRoutes,
   runnerRoutes,
   pluginRoutes,
   providerRoutes,

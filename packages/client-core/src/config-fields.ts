@@ -8,8 +8,8 @@
  * because a plugin whose schema goes beyond that is refused at load and carries
  * no schema at all.
  */
-import type { Issue, PluginConfigureInput } from "@hercule/contract";
-import { ApiError } from "./errors";
+import type { PluginConfigureInput } from "@hercule/contract";
+import { readValidationIssues } from "./errors";
 
 /** What one setting is, and which widget renders it. */
 export type ConfigFieldKind = "string" | "number" | "integer" | "boolean" | "enum" | "stringList";
@@ -153,16 +153,13 @@ export const configIssues = (
   prefix?: string,
 ): ConfigIssues => {
   if (error === null || error === undefined) return { perField: {}, rest: false };
-  if (!(error instanceof ApiError) || error.code !== "validation") {
-    return { perField: {}, rest: true };
-  }
-  const issues = asRecord(error.details)?.["issues"];
-  if (!Array.isArray(issues)) return { perField: {}, rest: true };
+  const issues = readValidationIssues(error);
+  if (issues === undefined) return { perField: {}, rest: true };
 
   const rendered = new Set(fields.map((field) => field.name));
   const perField: Record<string, string> = {};
   let rest = false;
-  for (const issue of issues as ReadonlyArray<Issue>) {
+  for (const issue of issues) {
     const [head, next] = issue.path;
     const field = prefix === undefined ? head : head === prefix ? next : undefined;
     if (field !== undefined && rendered.has(field)) perField[field] ??= issue.message;

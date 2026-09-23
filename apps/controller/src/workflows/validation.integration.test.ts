@@ -1,0 +1,2193 @@
+/**
+ * Integration tests for workflow validation, run against a real controller over
+ * HTTP. They cover the graph, expressions, actions and their params, agent
+ * steps and output schemas, triggers, inputs, the warning about a run with no
+ * end, and the two catalogs the editor offers choices from (workflow actions
+ * and event kinds).
+ *
+ * A workflow is rejected when `workflow.create` fails with a Validation error
+ * and `workflow.validate` reports errors. Each invalid fixture has one kind of
+ * mistake and is valid in every other way, so its errors must be at exactly
+ * the fixture's `paths`.
+ *
+ * Each invalid fixture is sent to both `workflow.create` and
+ * `workflow.validate`. The two must report the same errors, because the editor
+ * shows the result of `workflow.validate` while the author types, and the
+ * author trusts that the save agrees. The create is sent first, so that if it
+ * wrongly succeeds, the test fails on that before it checks
+ * `workflow.validate`.
+ *
+ * The controller has these plugins:
+ * - A local GitHub plugin, for its event kind and its Connection type.
+ * - A mail plugin, for a Connection of the wrong type.
+ * - A provider, for an Agent.
+ * - A notes plugin that declares one workflow action.
+ */
+import { describe, expect, it, vi } from "vitest";
+import { Effect, Schema } from "effect";
+import {
+  STARTER_WORKFLOW_SOURCE,
+  type Issue,
+  type WorkflowIssues,
+  type WorkflowSaveResult,
+} from "@hercule/contract";
+import { HOST_API, registerConnectionType, type Plugin } from "@hercule/plugin-host";
+import { lintOutputSchema } from "@hercule/protocol";
+import { get, post, readRefusal } from "../http/testing";
+import { NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID, notesPlugin } from "../plugins/testing";
+import { agentOn, profileNamed, WAIT_DEADLINE_MS, withAgentFleet } from "../sessions/testing";
+import {
+  ABSENT_ID,
+  ACCEPTED_GITHUB_TOKEN,
+  buildFileTaskSource,
+  buildTaskStep,
+  createAgent,
+  createConnection,
+  createWorkflow,
+  DUPLICATE_STEP_ID_SOURCE,
+  expectNothingStored,
+  KEBAB_CASE_STEP_ID_SOURCE,
+  readIssues,
+  SYNTAX_ERROR_SOURCE,
+  updateWorkflow,
+  withSetUpController,
+  WRONG_KIND_SOURCE,
+  type SetUpController,
+} from "./testing";
+
+/**
+ * The permission test waits up to WAIT_DEADLINE_MS three times: once for the
+ * agent fleet to be ready, and once for each of the two sessions it starts.
+ */
+vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
+
+/**
+ * A plugin with a second Connection type, `mail/mail`, and no event source.
+ * The tests use a mail Connection where a GitHub Connection is required, to
+ * check that a Connection of the wrong type is rejected.
+ */
+const localMailPlugin: Plugin = {
+  manifest: {
+    id: "mail",
+    displayName: "Mail",
+    hostApi: HOST_API,
+    capabilities: ["connections"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    registerConnectionType(host, {
+      type: "mail",
+      displayName: "Mail",
+      setup: [{ kind: "credentials", fields: [{ name: "password", label: "App password" }] }],
+      validate: () => Effect.succeed({ displayName: "me@example.com" }),
+    }),
+  activate: () => Effect.succeed(Effect.void),
+};
+
+/** The ids of the built-in actions. A step can use them with no plugin enabled. */
+const BUILT_IN_ACTION_IDS = ["task.create", "task.query", "task.update"];
+
+/** The event kinds the core emits. A trigger on one of them takes no Connection. */
+const CORE_EVENT_KINDS = [
+  "cron.tick",
+  "run.cancelled",
+  "run.completed",
+  "run.failed",
+  "task.created",
+  "task.updated",
+];
+
+/** Ids of records on the test controller that a fixture can refer to. */
+interface FixtureContext {
+  readonly agentId: string;
+  readonly githubConnectionId: string;
+  readonly mailConnectionId: string;
+}
+
+/** A controller after setup, with an Agent and one Connection of each type. */
+interface ArrangedController extends SetUpController, FixtureContext {}
+
+/**
+ * Starts a controller with the mail and notes plugins, an Agent and one
+ * Connection of each type, and runs `body` against it.
+ */
+const withArrangedController = (
+  body: (controller: ArrangedController) => Promise<void>,
+): Promise<void> =>
+  withSetUpController(
+    async (controller) => {
+      const { base, token } = controller;
+      await body({
+        ...controller,
+        agentId: await createAgent(base, token),
+        githubConnectionId: await createConnection(base, token, "github/github", {
+          pat: ACCEPTED_GITHUB_TOKEN,
+        }),
+        mailConnectionId: await createConnection(base, token, "mail/mail", {
+          password: "an-app-password",
+        }),
+      });
+    },
+    [localMailPlugin, notesPlugin],
+  );
+
+const validateWorkflow = (base: string, token: string, body: unknown): Promise<Response> =>
+  post(base, "/api/v1/workflows/validate", body, token);
+
+/** Checks that `workflow.validate` succeeded, and returns the errors and warnings it found. */
+const readValidateResult = async (response: Response): Promise<WorkflowIssues> => {
+  expect(response.status, await response.clone().text()).toBe(200);
+  const result = (await response.json()) as WorkflowIssues;
+  expect(Object.keys(result).sort()).toEqual(["errors", "warnings"]);
+  return result;
+};
+
+/** Returns the paths sorted, so two lists of the same paths compare equal in any order. */
+const sortIssuePaths = (
+  paths: ReadonlyArray<ReadonlyArray<string>>,
+): ReadonlyArray<ReadonlyArray<string>> =>
+  [...paths].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+
+/** A workflow source that must be rejected, and the path of each error it must produce. */
+interface InvalidFixture {
+  readonly description: string;
+  readonly build: (context: FixtureContext) => string;
+  readonly paths: ReadonlyArray<ReadonlyArray<string>>;
+}
+
+/**
+ * Checks that `workflow.create` and `workflow.validate` both reject the
+ * fixture's source, with errors at exactly the fixture's paths. Returns the
+ * errors that `workflow.validate` reports.
+ */
+const expectErrorsAt = async (
+  controller: ArrangedController,
+  fixture: InvalidFixture,
+): Promise<ReadonlyArray<Issue>> => {
+  const { base, token } = controller;
+  const source = fixture.build(controller);
+
+  const response = await createWorkflow(base, token, { source });
+  expect(response.status, `${fixture.description}: ${await response.clone().text()}`).toBe(400);
+  const error = await readRefusal(response);
+  expect(error.code, fixture.description).toBe("validation");
+  expect(sortIssuePaths(error.issues), fixture.description).toEqual(sortIssuePaths(fixture.paths));
+
+  const result = await readValidateResult(await validateWorkflow(base, token, { source }));
+  expect(sortIssuePaths(result.errors.map((issue) => issue.path)), fixture.description).toEqual(
+    sortIssuePaths(fixture.paths),
+  );
+  return result.errors;
+};
+
+/** Checks that `workflow.create` saves the source and `workflow.validate` finds no errors in it. */
+const expectAccepted = async (
+  controller: ArrangedController,
+  description: string,
+  source: string,
+): Promise<void> => {
+  const { base, token } = controller;
+  const response = await createWorkflow(base, token, { source });
+  expect([200, 201], `${description}: ${await response.clone().text()}`).toContain(response.status);
+  const result = await readValidateResult(await validateWorkflow(base, token, { source }));
+  expect(result.errors, description).toEqual([]);
+};
+
+/** Returns the issue at `path`, and fails the test if there is none. */
+const findIssueAt = (issues: ReadonlyArray<Issue>, path: ReadonlyArray<string>): Issue => {
+  const found = issues.find((issue) => JSON.stringify(issue.path) === JSON.stringify(path));
+  expect(found, `an issue at ${JSON.stringify(path)} in ${JSON.stringify(issues)}`).toBeDefined();
+  return found!;
+};
+
+const disablePlugin = async (base: string, token: string, id: string): Promise<void> => {
+  const response = await post(base, `/api/v1/plugins/${id}/disable`, {}, token);
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
+/** The smallest valid workflow: one step that creates a task. */
+const FILE_TASK_SOURCE = buildFileTaskSource("File a task");
+
+/* ------------------------------------------------------------------------ */
+/* Errors found when the source is parsed, before any other validation.      */
+/* ------------------------------------------------------------------------ */
+
+const PARSE_ERROR_FIXTURES: ReadonlyArray<InvalidFixture> = [
+  { description: "a YAML syntax error", build: () => SYNTAX_ERROR_SOURCE, paths: [[]] },
+  {
+    description: "a step kind that does not exist",
+    build: () => WRONG_KIND_SOURCE,
+    paths: [["steps", "0", "kind"]],
+  },
+  {
+    description: "two steps with one id",
+    build: () => DUPLICATE_STEP_ID_SOURCE,
+    paths: [["steps", "1", "id"]],
+  },
+  {
+    description: "a step id that is not snake_case",
+    build: () => KEBAB_CASE_STEP_ID_SOURCE,
+    paths: [["steps", "0", "id"]],
+  },
+];
+
+/* ------------------------------------------------------------------------ */
+/* The graph.                                                                */
+/* ------------------------------------------------------------------------ */
+
+const EDGE_TO_NO_NODE: InvalidFixture = {
+  description: "an edge to a node that does not exist",
+  build: () => `name: An edge to no step
+steps:
+${buildTaskStep("plan")}
+${buildTaskStep("implement")}
+edges:
+  - from: plan
+    to: implement
+  - from: plan
+    to: ship
+`,
+  paths: [["edges", "1", "to"]],
+};
+
+const EDGE_FROM_NO_NODE: InvalidFixture = {
+  description: "an edge from a node that does not exist",
+  build: () => `name: An edge from no step
+steps:
+${buildTaskStep("plan")}
+${buildTaskStep("implement")}
+edges:
+  - from: plan
+    to: implement
+  - from: ghost
+    to: implement
+`,
+  paths: [["edges", "1", "from"]],
+};
+
+const EDGE_INTO_SIGNAL: InvalidFixture = {
+  description: "an edge into a signal trigger",
+  build: () => `name: An edge into a signal
+triggers:
+  - id: task_changed
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.plan.output.id
+steps:
+${buildTaskStep("plan", "terminal: true")}
+edges:
+  - from: plan
+    to: task_changed
+`,
+  paths: [["edges", "0", "to"]],
+};
+
+/**
+ * The cycle is implement -> review -> fix -> implement. The edges are listed
+ * out of order: a walk from implement takes edge 2 first, but the lowest edge
+ * index in the cycle is 1. The error is expected at edge 1.
+ */
+const UNCAPPED_CYCLE: InvalidFixture = {
+  description: "a cycle with no capped edge",
+  build: () => `name: A loop with no end
+steps:
+${buildTaskStep("plan")}
+${buildTaskStep("implement")}
+${buildTaskStep("review")}
+${buildTaskStep("fix")}
+edges:
+  - from: plan
+    to: implement
+  - from: fix
+    to: implement
+  - from: implement
+    to: review
+  - from: review
+    to: fix
+`,
+  paths: [["edges", "1"]],
+};
+
+const JOIN_ALL_IN_CYCLE: InvalidFixture = {
+  description: "a step with join all inside a cycle",
+  build: () => `name: A barrier inside a loop
+steps:
+${buildTaskStep("plan")}
+${buildTaskStep("implement", "join: all")}
+${buildTaskStep("review")}
+edges:
+  - from: plan
+    to: implement
+  - from: implement
+    to: review
+  - from: review
+    to: implement
+    maxTraversals: 3
+`,
+  paths: [["steps", "1", "join"]],
+};
+
+const EDGE_FROM_START_TRIGGER: InvalidFixture = {
+  description: "an edge from a start trigger",
+  build: () => `name: An edge from a start trigger
+triggers:
+  - id: on_create
+    kind: start
+    source:
+      kind: task.created
+steps:
+${buildTaskStep("plan")}
+edges:
+  - from: on_create
+    to: plan
+`,
+  paths: [["edges", "0", "from"]],
+};
+
+/**
+ * Builds a workflow where step `poll` follows `plan` and has an edge back to
+ * itself, capped at `maxTraversals` when it is given.
+ */
+const buildSelfLoopSource = (maxTraversals: number | undefined): string => `name: Poll until done
+steps:
+${buildTaskStep("plan")}
+${buildTaskStep("poll")}
+edges:
+  - from: plan
+    to: poll
+  - from: poll
+    to: poll${maxTraversals === undefined ? "" : `\n    maxTraversals: ${String(maxTraversals)}`}
+`;
+
+const UNCAPPED_SELF_LOOP: InvalidFixture = {
+  description: "a step with an edge to itself and no maxTraversals",
+  build: () => buildSelfLoopSource(undefined),
+  paths: [["edges", "1"]],
+};
+
+const GRAPH_ERROR_FIXTURES: ReadonlyArray<InvalidFixture> = [
+  EDGE_TO_NO_NODE,
+  EDGE_FROM_NO_NODE,
+  EDGE_INTO_SIGNAL,
+  UNCAPPED_CYCLE,
+  JOIN_ALL_IN_CYCLE,
+];
+
+const CAPPED_CYCLE_SOURCE = `name: A loop with one capped edge
+steps:
+${buildTaskStep("plan")}
+${buildTaskStep("implement", "join: any")}
+${buildTaskStep("review", "join: any")}
+edges:
+  - from: plan
+    to: implement
+  - from: implement
+    to: review
+  - from: review
+    to: implement
+    condition: 'steps.review.output.id != ""'
+    maxTraversals: 3
+`;
+
+describe("the graph rules", () => {
+  it("rejects an edge from or to a missing node, an edge into a signal trigger, a cycle with no maxTraversals, and join: all in a cycle, each at its path", async () => {
+    await withArrangedController(async (controller) => {
+      for (const fixture of GRAPH_ERROR_FIXTURES) await expectErrorsAt(controller, fixture);
+      await expectNothingStored(controller.base, controller.token);
+    });
+  });
+
+  it("lists every step of a cycle with no maxTraversals in the error message", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, UNCAPPED_CYCLE);
+      for (const stepId of ["implement", "review", "fix"]) {
+        expect(issue!.message).toContain(stepId);
+      }
+    });
+  });
+
+  it("accepts a cycle with one capped edge and join: any on its steps", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(controller, "a capped cycle", CAPPED_CYCLE_SOURCE);
+    });
+  });
+
+  it("rejects an edge from a start trigger, with a message that a start trigger cannot have edges", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, EDGE_FROM_START_TRIGGER);
+      expect(issue!.message).toContain("start trigger");
+      expect(issue!.message).toContain("cannot have edges");
+    });
+  });
+
+  it("rejects a step with an edge to itself and no maxTraversals, naming the step, and accepts it with maxTraversals", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, UNCAPPED_SELF_LOOP);
+      expect(issue!.message).toContain('"poll" leads into itself');
+
+      await expectAccepted(controller, "a capped loop of one step", buildSelfLoopSource(5));
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Where a run begins.                                                       */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Builds the review loop from the workflows spec:
+ * - implement -> open_pr -> review -> implement, capped.
+ * - The `checks_failed` signal sends the run back to implement.
+ * - The `pr_merged` signal leads to the terminal step `task_done`.
+ *
+ * Every step in the loop has an incoming edge, so no step starts the run
+ * unless `implementEntryLine` gives implement `entry: true`. `task_done` is
+ * listed first so that implement is at index 1, not 0.
+ */
+const buildReviewLoopSource = (agentId: string, implementEntryLine: string): string =>
+  `name: Implement until merged
+triggers:
+  - id: checks_failed
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.open_pr.output.id
+  - id: pr_merged
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.open_pr.output.id
+steps:
+${buildTaskStep("task_done", "terminal: true")}
+  - id: implement
+    kind: agent
+    agent: ${agentId}
+    prompt: Implement the change.${implementEntryLine}
+${buildTaskStep("open_pr")}
+  - id: review
+    kind: agent
+    agent: ${agentId}
+    prompt: Review the change.
+edges:
+  - from: implement
+    to: open_pr
+  - from: open_pr
+    to: review
+  - from: review
+    to: implement
+    maxTraversals: 3
+  - from: checks_failed
+    to: implement
+    maxTraversals: 3
+  - from: pr_merged
+    to: task_done
+`;
+
+const REVIEW_LOOP_WITHOUT_ENTRY: InvalidFixture = {
+  description: "a loop with no step that starts the run",
+  build: ({ agentId }) => buildReviewLoopSource(agentId, ""),
+  paths: [["steps", "1"]],
+};
+
+/**
+ * `file_task` has no incoming edge, so it starts the run. `close_out` runs only
+ * after the signal, so it needs no `entry: true`.
+ */
+const SIGNAL_ONLY_STEP_SOURCE = `name: Close out when the task changes
+triggers:
+  - id: task_changed
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.file_task.output.id
+steps:
+${buildTaskStep("file_task")}
+${buildTaskStep("close_out", "terminal: true")}
+edges:
+  - from: task_changed
+    to: close_out
+`;
+
+const LINEAR_SOURCE = `name: Three steps in a line
+steps:
+${buildTaskStep("plan")}
+${buildTaskStep("implement")}
+${buildTaskStep("ship")}
+edges:
+  - from: plan
+    to: implement
+  - from: implement
+    to: ship
+`;
+
+/**
+ * plan -> ship, and a capped loop retry -> wait -> retry with no edge into it
+ * from outside. plan starts the run, so no path reaches the loop.
+ */
+const UNREACHED_LOOP: InvalidFixture = {
+  description: "a loop that no path reaches",
+  build: () => `name: A loop nothing reaches
+steps:
+${buildTaskStep("plan")}
+${buildTaskStep("ship")}
+${buildTaskStep("retry")}
+${buildTaskStep("wait")}
+edges:
+  - from: plan
+    to: ship
+  - from: retry
+    to: wait
+  - from: wait
+    to: retry
+    maxTraversals: 3
+`,
+  paths: [
+    ["steps", "2"],
+    ["steps", "3"],
+  ],
+};
+
+/**
+ * Both steps have an edge from the signal trigger, and there is no edge
+ * between steps. So no step starts the run. No step is a better place for the
+ * error than another, so the error is at the first step.
+ */
+const EVERY_STEP_AFTER_A_SIGNAL: InvalidFixture = {
+  description: "a workflow where every step waits for a signal",
+  build: () => `name: Every step waits for a signal
+triggers:
+  - id: task_changed
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.file_task.output.id
+steps:
+${buildTaskStep("file_task")}
+${buildTaskStep("close_out", "terminal: true")}
+edges:
+  - from: task_changed
+    to: file_task
+  - from: task_changed
+    to: close_out
+`,
+  paths: [["steps", "0"]],
+};
+
+describe("where a run begins", () => {
+  it("rejects the review loop with an error at implement that suggests entry: true, and no error at the step only a signal reaches", async () => {
+    await withArrangedController(async (controller) => {
+      const { base, token } = controller;
+      const source = REVIEW_LOOP_WITHOUT_ENTRY.build(controller);
+
+      const savedIssues = await readIssues(await createWorkflow(base, token, { source }));
+      expect(findIssueAt(savedIssues, ["steps", "1"]).message).toContain("entry: true");
+      // task_done is reached only from the pr_merged signal, and needs no entry.
+      expect(savedIssues.map((issue) => issue.path)).not.toContainEqual(["steps", "0"]);
+
+      const result = await readValidateResult(await validateWorkflow(base, token, { source }));
+      expect(result.errors).toEqual(savedIssues);
+      await expectNothingStored(base, token);
+    });
+  });
+
+  it("accepts the review loop once implement has entry: true", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(
+        controller,
+        "the loop with an entry step",
+        buildReviewLoopSource(controller.agentId, "\n    entry: true"),
+      );
+    });
+  });
+
+  it("rejects each step of a loop that no path reaches, suggesting entry: true", async () => {
+    await withArrangedController(async (controller) => {
+      const issues = await expectErrorsAt(controller, UNREACHED_LOOP);
+      for (const issue of issues) expect(issue.message).toContain("entry: true");
+    });
+  });
+
+  it("rejects a workflow where every step waits for a signal, with an error at the first step that suggests entry: true", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, EVERY_STEP_AFTER_A_SIGNAL);
+      expect(issue!.message).toContain("entry: true");
+    });
+  });
+
+  it("accepts a step reached only from a signal trigger, and a linear workflow, with no entry: true anywhere", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(controller, "a step after a signal", SIGNAL_ONLY_STEP_SOURCE);
+      await expectAccepted(controller, "a linear workflow", LINEAR_SOURCE);
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Expressions, and the variables each field may read.                       */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Builds a workflow with a valid expression in every field that takes one:
+ * - a start trigger's filter and input mapping
+ * - a signal trigger's filter, both sides of its correlation, and an output
+ * - a step condition and an edge condition
+ * - templates in a prompt and in a string param, including an escaped `{{`
+ */
+const buildEveryExpressionFieldSource = (agentId: string): string => `name: Every expression site
+inputs:
+  - name: pr_number
+    schema:
+      type: integer
+    required: false
+triggers:
+  - id: on_create
+    kind: start
+    source:
+      kind: task.created
+      filter: 'event.payload.priority == "high"'
+    inputs:
+      pr_number: event.payload.number
+  - id: task_changed
+    kind: signal
+    source:
+      kind: task.updated
+      filter: has(event.payload.changes)
+    correlation:
+      event: event.payload.taskId
+      run: steps.file_task.output.id
+    outputs:
+      status: event.payload.changes.status
+steps:
+  - id: file_task
+    kind: action
+    action: task.create
+    condition: has(inputs.pr_number)
+    params:
+      title: "Review pull request {{ inputs.pr_number }}"
+      description: "Write {{ '{{' }} where a template starts."
+  - id: review
+    kind: agent
+    agent: ${agentId}
+    terminal: true
+    prompt: |
+      Review pull request {{ inputs.pr_number }}.
+      The task is {{ steps.file_task.output.id }}.
+      Write {{ '{{' }} where a template starts.
+edges:
+  - from: file_task
+    to: review
+    condition: 'steps.file_task.output.id != ""'
+  - from: task_changed
+    to: review
+    maxTraversals: 3
+`;
+
+/**
+ * The same fields, each reading a variable that the field may not read:
+ * `steps` or `inputs` where only `event` is available, and `event` where only
+ * `inputs` and `steps` are.
+ */
+const WRONG_VARIABLES: InvalidFixture = {
+  description: "expressions that read a variable their field may not read",
+  build: ({ agentId }) => `name: Expressions that read the wrong variables
+inputs:
+  - name: pr_number
+    schema:
+      type: integer
+    required: false
+triggers:
+  - id: on_create
+    kind: start
+    source:
+      kind: task.created
+      filter: 'steps.file_task.output.id == "x"'
+    inputs:
+      pr_number: inputs.pr_number
+  - id: task_changed
+    kind: signal
+    source:
+      kind: task.updated
+      filter: 'steps.file_task.output.id != ""'
+    correlation:
+      event: inputs.pr_number
+      run: event.payload.taskId
+    outputs:
+      status: steps.file_task.output.id
+steps:
+  - id: file_task
+    kind: action
+    action: task.create
+    condition: 'event.kind == "task.created"'
+    params:
+      title: "Review {{ event.payload.title }}"
+      description: Filed by a workflow.
+  - id: review
+    kind: agent
+    agent: ${agentId}
+    terminal: true
+    prompt: "Review {{ event.payload.title }}."
+edges:
+  - from: file_task
+    to: review
+    condition: 'event.kind == "task.updated"'
+  - from: task_changed
+    to: review
+    maxTraversals: 3
+`,
+  paths: [
+    ["triggers", "0", "source", "filter"],
+    ["triggers", "0", "inputs", "pr_number"],
+    ["triggers", "1", "source", "filter"],
+    ["triggers", "1", "correlation", "event"],
+    ["triggers", "1", "correlation", "run"],
+    ["triggers", "1", "outputs", "status"],
+    ["steps", "0", "condition"],
+    ["steps", "0", "params", "title"],
+    ["steps", "1", "prompt"],
+    ["edges", "0", "condition"],
+  ],
+};
+
+const SYNTAX_ERRORS: InvalidFixture = {
+  description: "expressions that are not CEL",
+  build: ({ agentId }) => `name: Expressions that are not CEL
+triggers:
+  - id: on_create
+    kind: start
+    source:
+      kind: task.created
+      filter: 'event.payload.number >'
+steps:
+  - id: review
+    kind: agent
+    agent: ${agentId}
+    prompt: "Review {{ inputs.pr_number + }}."
+`,
+  paths: [
+    ["triggers", "0", "source", "filter"],
+    ["steps", "0", "prompt"],
+  ],
+};
+
+const UNCLOSED_TEMPLATES: InvalidFixture = {
+  description: "templates that are not closed",
+  build: ({ agentId }) => `name: Templates that are not closed
+steps:
+  - id: file_task
+    kind: action
+    action: task.create
+    params:
+      title: "Review {{ inputs.pr_number"
+      description: Filed by a workflow.
+  - id: review
+    kind: agent
+    agent: ${agentId}
+    prompt: "Review {{ steps.file_task.output.id"
+edges:
+  - from: file_task
+    to: review
+`,
+  paths: [
+    ["steps", "0", "params", "title"],
+    ["steps", "1", "prompt"],
+  ],
+};
+
+/**
+ * A start filter, a signal filter, a step condition and an edge condition, each
+ * with a type other than bool. A value that is not a bool is never true, so
+ * the condition could never pass.
+ */
+const CONDITIONS_THAT_ARE_NOT_BOOL: InvalidFixture = {
+  description: "filters and conditions whose type is not bool",
+  build: () => `name: Conditions that never say yes
+triggers:
+  - id: on_create
+    kind: start
+    source:
+      kind: task.created
+      filter: size(event.payload.labels)
+  - id: task_changed
+    kind: signal
+    source:
+      kind: task.updated
+      filter: "'changed'"
+    correlation:
+      event: event.payload.taskId
+      run: steps.file_task.output.id
+steps:
+${buildTaskStep("file_task", "condition: \"'yes'\"")}
+${buildTaskStep("close_out", "terminal: true")}
+edges:
+  - from: file_task
+    to: close_out
+    condition: 1 + 1
+  - from: task_changed
+    to: close_out
+    maxTraversals: 3
+`,
+  paths: [
+    ["triggers", "0", "source", "filter"],
+    ["triggers", "1", "source", "filter"],
+    ["steps", "0", "condition"],
+    ["edges", "0", "condition"],
+  ],
+};
+
+const EXPRESSION_ERROR_FIXTURES: ReadonlyArray<InvalidFixture> = [
+  WRONG_VARIABLES,
+  SYNTAX_ERRORS,
+  UNCLOSED_TEMPLATES,
+  CONDITIONS_THAT_ARE_NOT_BOOL,
+];
+
+describe("the expressions", () => {
+  it("accepts a valid expression in every field that takes one, and an escaped {{ in a template", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(
+        controller,
+        "every expression field",
+        buildEveryExpressionFieldSource(controller.agentId),
+      );
+    });
+  });
+
+  it("rejects each expression that reads a variable its field may not read, such as steps in a start filter or event in an edge condition", async () => {
+    await withArrangedController(async (controller) => {
+      await expectErrorsAt(controller, WRONG_VARIABLES);
+    });
+  });
+
+  it("rejects a filter or condition whose type is not bool, with a message that names the type and asks for true or false", async () => {
+    await withArrangedController(async (controller) => {
+      const issues = await expectErrorsAt(controller, CONDITIONS_THAT_ARE_NOT_BOOL);
+      expect(findIssueAt(issues, ["steps", "0", "condition"]).message).toContain("string");
+      expect(findIssueAt(issues, ["edges", "0", "condition"]).message).toContain("int");
+      for (const issue of issues) expect(issue.message).toContain("true or false");
+    });
+  });
+
+  it("rejects a CEL syntax error in a filter or a template, and a template that is not closed, each at its path", async () => {
+    await withArrangedController(async (controller) => {
+      await expectErrorsAt(controller, SYNTAX_ERRORS);
+      await expectErrorsAt(controller, UNCLOSED_TEMPLATES);
+      await expectNothingStored(controller.base, controller.token);
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Actions and their params.                                                 */
+/* ------------------------------------------------------------------------ */
+
+const UNKNOWN_ACTION: InvalidFixture = {
+  description: "an action that does not exist",
+  build: () => `name: An action nobody declared
+steps:
+${buildTaskStep("file_task")}
+  - id: follow_up
+    kind: action
+    action: task.creat
+    params:
+      title: Follow up
+      description: The second task.
+edges:
+  - from: file_task
+    to: follow_up
+`,
+  paths: [["steps", "1", "action"]],
+};
+
+const MISSING_REQUIRED_PARAM: InvalidFixture = {
+  description: "a param the action requires, left out",
+  build: () => `name: A task with no description
+steps:
+  - id: file_task
+    kind: action
+    action: task.create
+    params:
+      title: Only a title
+`,
+  paths: [["steps", "0", "params"]],
+};
+
+const UNKNOWN_PARAM: InvalidFixture = {
+  description: "a param the action does not take",
+  build: () => `name: A task with a colour
+steps:
+${buildTaskStep("file_task", "  colour: red")}
+`,
+  paths: [["steps", "0", "params", "colour"]],
+};
+
+const WRONG_TYPE_PARAM: InvalidFixture = {
+  description: "a literal param of the wrong type",
+  build: () => `name: Labels as a number
+steps:
+${buildTaskStep("file_task", "  labels: 42")}
+`,
+  paths: [["steps", "0", "params", "labels"]],
+};
+
+/**
+ * Templates nested inside a param's value: one reads `event`, which a step may
+ * not read, and one is not closed. Each must get an error at its own path.
+ */
+const INVALID_NESTED_TEMPLATES: InvalidFixture = {
+  description: "nested templates in a param that read the wrong variable or are not closed",
+  build: () => `name: Templates deep in the params
+steps:
+${buildTaskStep(
+  "file_task",
+  '  labels: ["triage", "{{ inputs.label"]',
+  "  provenance:",
+  '    - eventId: "{{ event.id }}"',
+)}
+`,
+  paths: [
+    ["steps", "0", "params", "labels", "1"],
+    ["steps", "0", "params", "provenance", "0", "eventId"],
+  ],
+};
+
+/** A task.update step with a task id but no field to change. */
+const UPDATE_WITHOUT_CHANGE: InvalidFixture = {
+  description: "a task.update step with no field to change",
+  build: () => `name: An update that changes nothing
+steps:
+  - id: touch_task
+    kind: action
+    action: task.update
+    params:
+      taskId: ${ABSENT_ID}
+`,
+  paths: [["steps", "0", "params"]],
+};
+
+/** A template under a key that a provenance entry does not have. */
+const TEMPLATE_UNDER_UNKNOWN_KEY: InvalidFixture = {
+  description: "a template under a key that the input schema does not have",
+  build: () => `name: A template under no field
+steps:
+${buildTaskStep("file_task", "  provenance:", "    - eventId: 5", '      bogus: "{{ inputs.a }}"')}
+`,
+  paths: [["steps", "0", "params", "provenance", "0", "bogus"]],
+};
+
+/** A template in `at`, a provenance entry field that the core sets itself. */
+const TEMPLATE_IN_CORE_SET_FIELD: InvalidFixture = {
+  description: "a template in a field that the core sets",
+  build: () => `name: A template the core would overwrite
+steps:
+${buildTaskStep("file_task", "  provenance:", "    - eventId: 5", '      at: "{{ inputs.at }}"')}
+`,
+  paths: [["steps", "0", "params", "provenance", "0", "at"]],
+};
+
+const ACTION_ERROR_FIXTURES: ReadonlyArray<InvalidFixture> = [
+  UNKNOWN_ACTION,
+  MISSING_REQUIRED_PARAM,
+  UNKNOWN_PARAM,
+  WRONG_TYPE_PARAM,
+  INVALID_NESTED_TEMPLATES,
+  UPDATE_WITHOUT_CHANGE,
+  TEMPLATE_UNDER_UNKNOWN_KEY,
+  TEMPLATE_IN_CORE_SET_FIELD,
+];
+
+/**
+ * Templates nested inside a param's value: a list item, and `eventId`, a
+ * number field of a provenance entry. A template's value is known only at run
+ * time, so validation cannot check its type.
+ */
+const NESTED_TEMPLATES_SOURCE = `name: Templates deep in the params
+steps:
+${buildTaskStep(
+  "file_task",
+  '  labels: ["triage", "{{ inputs.label }}"]',
+  "  provenance:",
+  '    - eventId: "{{ inputs.eventId }}"',
+)}
+`;
+
+/**
+ * An array field and an enum field, each set to a template. A template's value
+ * is known only at run time, so validation cannot check its type.
+ */
+const TEMPLATES_FOR_ANY_TYPE_SOURCE = `name: Templates for fields of every type
+inputs:
+  - name: labels
+    schema:
+      type: array
+      items:
+        type: string
+    required: false
+  - name: priority
+    schema:
+      type: string
+    required: false
+steps:
+${buildTaskStep("file_task", '  labels: "{{ inputs.labels }}"', '  priority: "{{ inputs.priority }}"')}
+`;
+
+const PLUGIN_ACTION_SOURCE = `name: A note from a plugin
+steps:
+  - id: append_note
+    kind: action
+    action: ${NOTE_APPEND_ACTION_ID}
+    params:
+      text: The review is done.
+`;
+
+describe("the actions", () => {
+  it("rejects an unknown action, and lists every available action in the message", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, UNKNOWN_ACTION);
+      for (const actionId of [...BUILT_IN_ACTION_IDS, NOTE_APPEND_ACTION_ID]) {
+        expect(issue!.message).toContain(actionId);
+      }
+    });
+  });
+
+  it("accepts task.create", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(controller, "task.create", FILE_TASK_SOURCE);
+    });
+  });
+
+  it("accepts a plugin's action by its qualified id while the plugin is enabled, and rejects it once the plugin is disabled", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(controller, "the notes action", PLUGIN_ACTION_SOURCE);
+
+      await disablePlugin(controller.base, controller.token, "notes");
+      await expectErrorsAt(controller, {
+        description: "the notes action with its plugin disabled",
+        build: () => PLUGIN_ACTION_SOURCE,
+        paths: [["steps", "0", "action"]],
+      });
+    });
+  });
+
+  it("rejects a missing required param, an unknown param and a literal of the wrong type, each at its path", async () => {
+    await withArrangedController(async (controller) => {
+      for (const fixture of [MISSING_REQUIRED_PARAM, UNKNOWN_PARAM, WRONG_TYPE_PARAM]) {
+        await expectErrorsAt(controller, fixture);
+      }
+      await expectNothingStored(controller.base, controller.token);
+    });
+  });
+
+  it("accepts a template string for a param of any type", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(controller, "templates", TEMPLATES_FOR_ANY_TYPE_SOURCE);
+    });
+  });
+
+  it("accepts a template nested inside a param's value, such as a number field of a provenance entry", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(controller, "nested templates", NESTED_TEMPLATES_SOURCE);
+    });
+  });
+
+  it("rejects a nested template that reads the wrong variable or is not closed, each at its own path", async () => {
+    await withArrangedController(async (controller) => {
+      const issues = await expectErrorsAt(controller, INVALID_NESTED_TEMPLATES);
+      expect(
+        findIssueAt(issues, ["steps", "0", "params", "provenance", "0", "eventId"]).message,
+      ).toContain("event");
+      expect(findIssueAt(issues, ["steps", "0", "params", "labels", "1"]).message).toContain(
+        "no closing }}",
+      );
+    });
+  });
+
+  it("rejects a template under a key the input schema does not have, and in a field the core sets, each at its path", async () => {
+    await withArrangedController(async (controller) => {
+      const [unknownKey] = await expectErrorsAt(controller, TEMPLATE_UNDER_UNKNOWN_KEY);
+      expect(unknownKey!.message).toContain("Remove the field");
+      const [coreSetField] = await expectErrorsAt(controller, TEMPLATE_IN_CORE_SET_FIELD);
+      expect(coreSetField!.message).toContain("The core sets this field");
+    });
+  });
+
+  it("rejects a task.update step with no field to change, as the task.update operation would", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, UPDATE_WITHOUT_CHANGE);
+      expect(issue!.message).toContain("at least one field to change");
+    });
+  });
+
+  it("explains each invalid param in one short message, without repeating a long value or doubling a full stop", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      const longRef = "x".repeat(5000);
+      const source = `name: Values a task cannot take
+steps:
+${buildTaskStep(
+  "file_task",
+  "  provenance:",
+  `    - ref: ${longRef}`,
+  "    - {}",
+  "    - eventId: 7",
+  "      at: 2026-09-23T10:00:00.000Z",
+)}
+`;
+      const issues = await readIssues(await createWorkflow(base, token, { source }));
+      expect(issues.length).toBeGreaterThanOrEqual(3);
+      for (const issue of issues) {
+        expect(issue.message.length, issue.message).toBeLessThan(400);
+        expect(issue.message, issue.message).not.toMatch(/[^.]\.\.(?!\.)/);
+      }
+      expect(
+        findIssueAt(issues, ["steps", "0", "params", "provenance", "2", "at"]).message,
+      ).toContain("The core sets this field");
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Agents and output schemas.                                                */
+/* ------------------------------------------------------------------------ */
+
+const UNKNOWN_AGENT: InvalidFixture = {
+  description: "an agent step whose Agent does not exist",
+  build: () => `name: An Agent that does not exist
+steps:
+  - id: review
+    kind: agent
+    agent: ${ABSENT_ID}
+    prompt: Review the pull request.
+`,
+  paths: [["steps", "0", "agent"]],
+};
+
+/**
+ * An output schema with two lint errors: `verdict` uses `format`, a keyword
+ * outside the strict subset, and `notes` is an object without
+ * `additionalProperties: false`.
+ */
+const LINT_FAILING_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["verdict", "notes"],
+  properties: {
+    verdict: { type: "string", format: "uri" },
+    notes: { type: "object" },
+  },
+};
+
+const CLEAN_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["verdict"],
+  properties: { verdict: { type: "string", enum: ["approve", "reject"] } },
+};
+
+/**
+ * Builds a workflow with an agent step at index 1 that has `outputSchema`.
+ * JSON is valid YAML, so the schema is written into the source as JSON.
+ */
+const buildOutputSchemaSource = (agentId: string, outputSchema: unknown): string =>
+  `name: A review with a verdict
+steps:
+${buildTaskStep("file_task")}
+  - id: review
+    kind: agent
+    agent: ${agentId}
+    prompt: Review the pull request.
+    outputSchema: ${JSON.stringify(outputSchema)}
+edges:
+  - from: file_task
+    to: review
+`;
+
+/** The path prefix of every lint error on the agent step that `buildOutputSchemaSource` builds. */
+const OUTPUT_SCHEMA_PATH = ["steps", "1", "outputSchema"];
+
+describe("the agent steps", () => {
+  it("rejects an agent step whose Agent does not exist", async () => {
+    await withArrangedController(async (controller) => {
+      await expectErrorsAt(controller, UNKNOWN_AGENT);
+    });
+  });
+
+  it("reports one error under outputSchema for each finding of the strict-subset lint", async () => {
+    await withArrangedController(async ({ base, token, agentId }) => {
+      const findings = lintOutputSchema(LINT_FAILING_OUTPUT_SCHEMA);
+      // Two findings, so the count shows one error per finding, not one per schema.
+      expect(findings).toHaveLength(2);
+      const source = buildOutputSchemaSource(agentId, LINT_FAILING_OUTPUT_SCHEMA);
+
+      const response = await createWorkflow(base, token, { source });
+      expect(response.status, await response.clone().text()).toBe(400);
+      const error = await readRefusal(response);
+      expect(error.code).toBe("validation");
+      expect(error.issues).toHaveLength(findings.length);
+      for (const path of error.issues) {
+        expect(path.slice(0, OUTPUT_SCHEMA_PATH.length)).toEqual(OUTPUT_SCHEMA_PATH);
+      }
+
+      const result = await readValidateResult(await validateWorkflow(base, token, { source }));
+      expect(result.errors.map((issue) => issue.path)).toEqual(error.issues);
+    });
+  });
+
+  it("accepts an existing Agent with an output schema that passes the lint", async () => {
+    await withArrangedController(async (controller) => {
+      expect(lintOutputSchema(CLEAN_OUTPUT_SCHEMA)).toEqual([]);
+      await expectAccepted(
+        controller,
+        "a clean output schema",
+        buildOutputSchemaSource(controller.agentId, CLEAN_OUTPUT_SCHEMA),
+      );
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Triggers.                                                                 */
+/* ------------------------------------------------------------------------ */
+
+/** Builds a workflow with one trigger, from the YAML lines that go under its `- id:` line. */
+const buildOneTriggerSource = (name: string, ...triggerLines: ReadonlyArray<string>): string =>
+  `name: ${name}
+triggers:
+  - id: on_event
+${triggerLines.map((line) => `    ${line}`).join("\n")}
+steps:
+${buildTaskStep("file_task")}
+`;
+
+/** A start trigger on the GitHub plugin's kind, from any GitHub Connection. */
+const GITHUB_LABEL_TRIGGER_SOURCE = buildOneTriggerSource(
+  "Labels from any Connection",
+  "kind: start",
+  "source:",
+  "  kind: github.pr.labeled",
+  "  connectionId: any",
+);
+
+const UNKNOWN_EVENT_KIND: InvalidFixture = {
+  description: "an event kind that no one emits",
+  build: () =>
+    buildOneTriggerSource(
+      "A kind nobody emits",
+      "kind: start",
+      "source:",
+      "  kind: github.pr.labelled",
+      "  connectionId: any",
+    ),
+  paths: [["triggers", "0", "source", "kind"]],
+};
+
+const PLUGIN_KIND_WITHOUT_CONNECTION: InvalidFixture = {
+  description: "a plugin event kind with no connectionId",
+  build: () =>
+    buildOneTriggerSource(
+      "Labels from no Connection",
+      "kind: start",
+      "source:",
+      "  kind: github.pr.labeled",
+    ),
+  paths: [["triggers", "0", "source", "connectionId"]],
+};
+
+const CORE_KIND_WITH_CONNECTION: InvalidFixture = {
+  description: "a core event kind with a connectionId",
+  build: () =>
+    buildOneTriggerSource(
+      "Tasks from any Connection",
+      "kind: start",
+      "source:",
+      "  kind: task.created",
+      "  connectionId: any",
+    ),
+  paths: [["triggers", "0", "source", "connectionId"]],
+};
+
+const ABSENT_CONNECTION: InvalidFixture = {
+  description: "a Connection that does not exist",
+  build: () =>
+    buildOneTriggerSource(
+      "Labels from a missing Connection",
+      "kind: start",
+      "source:",
+      "  kind: github.pr.labeled",
+      `  connectionId: ${ABSENT_ID}`,
+    ),
+  paths: [["triggers", "0", "source", "connectionId"]],
+};
+
+const WRONG_TYPE_CONNECTION: InvalidFixture = {
+  description: "a Connection of a different type than the event kind needs",
+  build: ({ mailConnectionId }) =>
+    buildOneTriggerSource(
+      "Labels from a mail Connection",
+      "kind: start",
+      "source:",
+      "  kind: github.pr.labeled",
+      `  connectionId: ${mailConnectionId}`,
+    ),
+  paths: [["triggers", "0", "source", "connectionId"]],
+};
+
+const CRON_WITHOUT_SCHEDULE: InvalidFixture = {
+  description: "a cron trigger with no schedule",
+  build: () =>
+    buildOneTriggerSource("Ticks with no schedule", "kind: start", "source:", "  kind: cron.tick"),
+  paths: [["triggers", "0", "schedule"]],
+};
+
+/** Two invalid cron schedules: plain words, and an hour past 23. */
+const INVALID_SCHEDULES: InvalidFixture = {
+  description: "cron schedules that are not valid",
+  build: () => `name: Schedules no clock can keep
+triggers:
+  - id: in_words
+    kind: start
+    source:
+      kind: cron.tick
+    schedule: every morning
+  - id: hour_out_of_range
+    kind: start
+    source:
+      kind: cron.tick
+    schedule: "0 25 * * *"
+steps:
+${buildTaskStep("file_task")}
+`,
+  paths: [
+    ["triggers", "0", "schedule"],
+    ["triggers", "1", "schedule"],
+  ],
+};
+
+/**
+ * A schedule with six fields. Some cron parsers read the first field as
+ * seconds, which workflows do not support.
+ */
+const SCHEDULE_WITH_SECONDS: InvalidFixture = {
+  description: "a cron schedule with a field for seconds",
+  build: () =>
+    buildOneTriggerSource(
+      "Ticks each second",
+      "kind: start",
+      "source:",
+      "  kind: cron.tick",
+      'schedule: "0 0 9 * * 1-5"',
+    ),
+  paths: [["triggers", "0", "schedule"]],
+};
+
+const INVALID_TIMEZONE: InvalidFixture = {
+  description: "a timezone that does not exist",
+  build: () =>
+    buildOneTriggerSource(
+      "Ticks in no timezone",
+      "kind: start",
+      "source:",
+      "  kind: cron.tick",
+      'schedule: "0 9 * * 1-5"',
+      "timezone: Mars/Olympus_Mons",
+    ),
+  paths: [["triggers", "0", "timezone"]],
+};
+
+const SCHEDULE_ON_NON_CRON_KIND: InvalidFixture = {
+  description: "a schedule on a kind that is not cron.tick",
+  build: () =>
+    buildOneTriggerSource(
+      "A schedule on tasks",
+      "kind: start",
+      "source:",
+      "  kind: task.created",
+      'schedule: "0 9 * * *"',
+    ),
+  paths: [["triggers", "0", "schedule"]],
+};
+
+const UNDECLARED_INPUT_MAPPING: InvalidFixture = {
+  description: "a mapping of an input the workflow does not declare",
+  build: () => `name: A mapping of no input
+inputs:
+  - name: task_id
+    schema:
+      type: string
+    required: false
+triggers:
+  - id: on_create
+    kind: start
+    source:
+      kind: task.created
+    inputs:
+      ghost: event.payload.id
+steps:
+${buildTaskStep("file_task")}
+`,
+  paths: [["triggers", "0", "inputs", "ghost"]],
+};
+
+/**
+ * A required input with no default. The first start trigger maps it and the
+ * second does not, so the error is at the second. The signal trigger maps no
+ * input either, but it starts no run, so it needs no inputs.
+ */
+const UNMAPPED_REQUIRED_INPUT: InvalidFixture = {
+  description: "a required input that one start trigger does not map",
+  build: () => `name: A required input left unmapped
+inputs:
+  - name: pr_url
+    schema:
+      type: string
+    required: true
+triggers:
+  - id: on_label
+    kind: start
+    source:
+      kind: github.pr.labeled
+      connectionId: any
+    inputs:
+      pr_url: event.payload.subject.url
+  - id: on_create
+    kind: start
+    source:
+      kind: task.created
+  - id: task_changed
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.file_task.output.id
+steps:
+${buildTaskStep("file_task", "terminal: true")}
+`,
+  paths: [["triggers", "1", "inputs"]],
+};
+
+/**
+ * A signal trigger on cron.tick. The Scheduler never sends cron.tick to a live
+ * run, so the signal could never fire.
+ */
+const SIGNAL_ON_CRON_TICK: InvalidFixture = {
+  description: "a signal trigger on cron.tick",
+  build: () => `name: Waits for a tick
+triggers:
+  - id: next_tick
+    kind: signal
+    source:
+      kind: cron.tick
+    correlation:
+      event: event.id
+      run: steps.file_task.output.id
+steps:
+${buildTaskStep("file_task", "terminal: true")}
+`,
+  paths: [["triggers", "0", "source", "kind"]],
+};
+
+const TRIGGER_ERROR_FIXTURES: ReadonlyArray<InvalidFixture> = [
+  UNKNOWN_EVENT_KIND,
+  PLUGIN_KIND_WITHOUT_CONNECTION,
+  CORE_KIND_WITH_CONNECTION,
+  ABSENT_CONNECTION,
+  WRONG_TYPE_CONNECTION,
+  CRON_WITHOUT_SCHEDULE,
+  INVALID_SCHEDULES,
+  INVALID_TIMEZONE,
+  SCHEDULE_ON_NON_CRON_KIND,
+  UNDECLARED_INPUT_MAPPING,
+  UNMAPPED_REQUIRED_INPUT,
+];
+
+/**
+ * Builds a valid workflow with:
+ * - a plugin event kind with `connectionId: any`, and with a Connection id
+ * - a trigger on each core event kind
+ * - a required input with a default, which a trigger may leave unmapped
+ */
+const buildEveryTriggerSource = (githubConnectionId: string): string =>
+  `name: Every way a trigger names its events
+inputs:
+  - name: pr_url
+    schema:
+      type: string
+    required: true
+    default: ""
+triggers:
+  - id: any_label
+    kind: start
+    source:
+      kind: github.pr.labeled
+      connectionId: any
+  - id: work_label
+    kind: start
+    source:
+      kind: github.pr.labeled
+      connectionId: ${githubConnectionId}
+    inputs:
+      pr_url: event.payload.subject.url
+  - id: weekday_morning
+    kind: start
+    source:
+      kind: cron.tick
+    schedule: "0 9 * * 1-5"
+    timezone: Europe/Amsterdam
+  - id: on_run_completed
+    kind: start
+    source:
+      kind: run.completed
+  - id: on_run_failed
+    kind: start
+    source:
+      kind: run.failed
+  - id: on_run_cancelled
+    kind: start
+    source:
+      kind: run.cancelled
+  - id: on_task_created
+    kind: start
+    source:
+      kind: task.created
+  - id: on_task_updated
+    kind: start
+    source:
+      kind: task.updated
+steps:
+${buildTaskStep("file_task")}
+`;
+
+describe("the trigger rules", () => {
+  it("rejects each invalid trigger at its path", async () => {
+    await withArrangedController(async (controller) => {
+      for (const fixture of TRIGGER_ERROR_FIXTURES) await expectErrorsAt(controller, fixture);
+      await expectNothingStored(controller.base, controller.token);
+    });
+  });
+
+  it("rejects a schedule with six fields, with a message that a schedule has five fields and none for seconds", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, SCHEDULE_WITH_SECONDS);
+      expect(issue!.message).toContain("six fields");
+      expect(issue!.message).toContain("seconds");
+    });
+  });
+
+  it("lists only a few unmapped inputs in each message, so the response stays small with many inputs and several start triggers", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      const inputNames = Array.from(
+        { length: 1000 },
+        (_, index) => `input_${String(index)}_${"x".repeat(30)}`,
+      );
+      const source = [
+        "name: Many inputs that no trigger maps",
+        "inputs:",
+        ...inputNames.flatMap((name) => [
+          `  - name: ${name}`,
+          "    schema: { type: string }",
+          "    required: true",
+        ]),
+        "triggers:",
+        ...Array.from({ length: 5 }, (_, index) => [
+          `  - id: on_create_${String(index)}`,
+          "    kind: start",
+          "    source:",
+          "      kind: task.created",
+        ]).flat(),
+        "steps:",
+        buildTaskStep("file_task"),
+        "",
+      ].join("\n");
+
+      const saved = await createWorkflow(base, token, { source });
+      expect(saved.status).toBe(400);
+      const error = await readRefusal(saved);
+      expect(error.issues).toHaveLength(5);
+      // Each message lists five inputs and a count of the rest. A message that
+      // listed every input would make the response about 200 kB.
+      expect(error.text.length).toBeLessThan(10_000);
+      expect(error.text).toContain("and 995 more");
+
+      const checked = await validateWorkflow(base, token, { source });
+      expect((await checked.text()).length).toBeLessThan(10_000);
+    });
+  });
+
+  it("rejects a signal trigger on cron.tick, with a message that explains why it could never fire", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, SIGNAL_ON_CRON_TICK);
+      expect(issue!.message).toContain("never to signal a running run");
+    });
+  });
+
+  it("includes the trigger id and the input name in the error when a start trigger leaves a required input unmapped", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, UNMAPPED_REQUIRED_INPUT);
+      expect(issue!.message).toContain("on_create");
+      expect(issue!.message).toContain("pr_url");
+    });
+  });
+
+  it("accepts connectionId any or a Connection id for a plugin event kind, every core event kind, and an unmapped required input with a default", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(
+        controller,
+        "every trigger",
+        buildEveryTriggerSource(controller.githubConnectionId),
+      );
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Inputs.                                                                   */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Builds a workflow whose second input is a GitHub Connection with
+ * `defaultConnectionId` as its default.
+ */
+const buildConnectionInputSource = (defaultConnectionId: string): string =>
+  `name: Acts through one GitHub account
+inputs:
+  - name: title
+    schema:
+      type: string
+    required: false
+  - name: account
+    connection:
+      type: github/github
+    required: false
+    default: ${defaultConnectionId}
+steps:
+${buildTaskStep("file_task")}
+`;
+
+const ABSENT_CONNECTION_DEFAULT: InvalidFixture = {
+  description: "a Connection input whose default Connection does not exist",
+  build: () => buildConnectionInputSource(ABSENT_ID),
+  paths: [["inputs", "1", "default"]],
+};
+
+const WRONG_TYPE_CONNECTION_DEFAULT: InvalidFixture = {
+  description: "a Connection input whose default is a Connection of another type",
+  build: ({ mailConnectionId }) => buildConnectionInputSource(mailConnectionId),
+  paths: [["inputs", "1", "default"]],
+};
+
+/** A Connection input of a type that no plugin registered: `github/gh` is a typo. */
+const UNKNOWN_CONNECTION_TYPE: InvalidFixture = {
+  description: "a Connection input of a type no plugin registered",
+  build: () => `name: Acts through an account of no type
+inputs:
+  - name: account
+    connection:
+      type: github/gh
+    required: false
+steps:
+${buildTaskStep("file_task")}
+`,
+  paths: [["inputs", "0", "connection", "type"]],
+};
+
+const INPUT_ERROR_FIXTURES: ReadonlyArray<InvalidFixture> = [
+  ABSENT_CONNECTION_DEFAULT,
+  WRONG_TYPE_CONNECTION_DEFAULT,
+];
+
+describe("the inputs", () => {
+  it("rejects a Connection input whose default Connection does not exist or has the wrong type", async () => {
+    await withArrangedController(async (controller) => {
+      for (const fixture of INPUT_ERROR_FIXTURES) await expectErrorsAt(controller, fixture);
+      await expectNothingStored(controller.base, controller.token);
+    });
+  });
+
+  it("rejects a Connection input whose type no plugin registered, and lists the known types", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, UNKNOWN_CONNECTION_TYPE);
+      expect(issue!.message).toContain("github/github");
+    });
+  });
+
+  it("rejects a Connection input whose type belongs to a disabled plugin, and tells the user to enable the plugin", async () => {
+    await withArrangedController(async (controller) => {
+      const source = `name: Acts through a mail account
+inputs:
+  - name: account
+    connection:
+      type: mail/mail
+    required: false
+steps:
+${buildTaskStep("file_task")}
+`;
+      await expectAccepted(controller, "a mail Connection input", source);
+
+      await disablePlugin(controller.base, controller.token, "mail");
+      const [issue] = await expectErrorsAt(controller, {
+        description: "a mail Connection input with the mail plugin disabled",
+        build: () => source,
+        paths: [["inputs", "0", "connection", "type"]],
+      });
+      expect(issue!.message).toContain("Enable the plugin that declares this type");
+    });
+  });
+
+  it("accepts a Connection input whose default is a Connection of its type", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(
+        controller,
+        "a GitHub default",
+        buildConnectionInputSource(controller.githubConnectionId),
+      );
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Input names and signal output names.                                      */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Builds a workflow with two inputs and two signal outputs. The first of each
+ * is named `prUrl`, which is always valid. The second input is named
+ * `inputName` and the second output `outputName`: these are the names under
+ * test.
+ */
+const buildInputAndOutputNamesSource = (inputName: string, outputName: string): string =>
+  `name: Names an expression reads
+inputs:
+  - name: prUrl
+    schema:
+      type: string
+    required: false
+  - name: ${inputName}
+    schema:
+      type: string
+    required: false
+triggers:
+  - id: on_create
+    kind: start
+    source:
+      kind: task.created
+  - id: pr_merged
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.file_task.output.id
+    outputs:
+      prUrl: event.payload.url
+      ${outputName}: event.payload.url
+steps:
+${buildTaskStep("file_task", "terminal: true")}
+`;
+
+const NAMES_THAT_ARE_NOT_IDENTIFIERS: InvalidFixture = {
+  description: "an input name and a signal output name that are not CEL identifiers",
+  build: () => buildInputAndOutputNamesSource("pr-url", "pr-url"),
+  paths: [
+    ["inputs", "1", "name"],
+    ["triggers", "1", "outputs", "pr-url"],
+  ],
+};
+
+describe("input names and signal output names", () => {
+  it("rejects an input name and a signal output name that are not CEL identifiers, and explains that an expression could not read them", async () => {
+    await withArrangedController(async (controller) => {
+      const issues = await expectErrorsAt(controller, NAMES_THAT_ARE_NOT_IDENTIFIERS);
+      for (const issue of issues) expect(issue.message).toMatch(/expression/i);
+    });
+  });
+
+  it("accepts prUrl and pr_url as an input name and as a signal output name", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(
+        controller,
+        "readable names",
+        buildInputAndOutputNamesSource("pr_url", "pr_url"),
+      );
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* The warning about a run with no end.                                      */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Builds a workflow with a signal trigger and a step after it. Pass
+ * `terminal: true` as `terminalLine` to make that step end the run.
+ */
+const buildSignalWorkflowSource = (terminalLine: string): string =>
+  `name: Waits for the task to change
+triggers:
+  - id: task_changed
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.file_task.output.id
+steps:
+${buildTaskStep("file_task")}
+${buildTaskStep("follow_up", ...(terminalLine === "" ? [] : [terminalLine]))}
+edges:
+  - from: task_changed
+    to: follow_up
+`;
+
+const readWorkflowSaveResult = async (response: Response): Promise<WorkflowSaveResult> => {
+  expect([200, 201], await response.clone().text()).toContain(response.status);
+  return (await response.json()) as WorkflowSaveResult;
+};
+
+/** Checks that the only warning is the one for a run that only cancellation can end. */
+const expectOnlyCancellationWarning = (warnings: ReadonlyArray<Issue>): void => {
+  expect(warnings.map((warning) => warning.path)).toEqual([["steps"]]);
+  expect(warnings[0]!.message).toMatch(/cancel/i);
+};
+
+describe("the warning about a run with no end", () => {
+  it("saves a workflow with a signal trigger and no terminal step, and create, update and validate each return one warning", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      const source = buildSignalWorkflowSource("");
+
+      const created = await readWorkflowSaveResult(await createWorkflow(base, token, { source }));
+      expectOnlyCancellationWarning(created.warnings);
+
+      const updated = await readWorkflowSaveResult(
+        await updateWorkflow(base, token, created.workflow.id, { source }),
+      );
+      expectOnlyCancellationWarning(updated.warnings);
+
+      const checked = await readValidateResult(await validateWorkflow(base, token, { source }));
+      expect(checked.errors).toEqual([]);
+      expectOnlyCancellationWarning(checked.warnings);
+    });
+  });
+
+  it("returns no warning for a workflow with no signal trigger, or with a terminal step", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      for (const source of [FILE_TASK_SOURCE, buildSignalWorkflowSource("terminal: true")]) {
+        const created = await readWorkflowSaveResult(await createWorkflow(base, token, { source }));
+        expect(created.warnings, source).toEqual([]);
+
+        const updated = await readWorkflowSaveResult(
+          await updateWorkflow(base, token, created.workflow.id, { source }),
+        );
+        expect(updated.warnings, source).toEqual([]);
+
+        const checked = await readValidateResult(await validateWorkflow(base, token, { source }));
+        expect(checked, source).toEqual({ errors: [], warnings: [] });
+      }
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* workflow.validate compared with workflow.create.                          */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Every invalid fixture in this file. The output schema fixture has no
+ * `paths`, because the lint decides its error paths. The tests below compare
+ * create with validate, so they do not need `paths`.
+ */
+const EVERY_INVALID_FIXTURE: ReadonlyArray<Pick<InvalidFixture, "description" | "build">> = [
+  ...PARSE_ERROR_FIXTURES,
+  ...GRAPH_ERROR_FIXTURES,
+  REVIEW_LOOP_WITHOUT_ENTRY,
+  ...EXPRESSION_ERROR_FIXTURES,
+  ...ACTION_ERROR_FIXTURES,
+  UNKNOWN_AGENT,
+  {
+    description: "an output schema that fails the lint",
+    build: ({ agentId }) => buildOutputSchemaSource(agentId, LINT_FAILING_OUTPUT_SCHEMA),
+  },
+  ...TRIGGER_ERROR_FIXTURES,
+  ...INPUT_ERROR_FIXTURES,
+  NAMES_THAT_ARE_NOT_IDENTIFIERS,
+  EDGE_FROM_START_TRIGGER,
+  UNCAPPED_SELF_LOOP,
+  UNREACHED_LOOP,
+  SIGNAL_ON_CRON_TICK,
+  UNKNOWN_CONNECTION_TYPE,
+  EVERY_STEP_AFTER_A_SIGNAL,
+  SCHEDULE_WITH_SECONDS,
+];
+
+/** A definition object whose step uses an action that does not exist. */
+const UNKNOWN_ACTION_DEFINITION = {
+  name: "An action nobody declared",
+  steps: [
+    {
+      id: "file_task",
+      kind: "action",
+      action: "task.creat",
+      params: { title: "Look at the failures", description: "Filed by a workflow." },
+    },
+  ],
+};
+
+describe("workflow.validate", () => {
+  // The Workflows screen opens a new workflow with this source. The author
+  // must see a graph and no errors before typing anything.
+  it("finds no errors or warnings in the starter workflow source", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      expect(
+        await readValidateResult(
+          await validateWorkflow(base, token, { source: STARTER_WORKFLOW_SOURCE }),
+        ),
+      ).toEqual({ errors: [], warnings: [] });
+    });
+  });
+
+  it("stores nothing, whether the input is valid or not", async () => {
+    await withArrangedController(async (controller) => {
+      const { base, token } = controller;
+      // Include a valid source with a trigger, so that a stored workflow or a
+      // stored trigger row would show up in its list.
+      for (const source of [
+        buildEveryTriggerSource(controller.githubConnectionId),
+        ...EVERY_INVALID_FIXTURE.map((fixture) => fixture.build(controller)),
+      ]) {
+        await readValidateResult(await validateWorkflow(base, token, { source }));
+      }
+      await expectNothingStored(base, token);
+    });
+  });
+
+  it("returns, for every invalid fixture, the same errors that create fails with", async () => {
+    await withArrangedController(async (controller) => {
+      const { base, token } = controller;
+      for (const fixture of EVERY_INVALID_FIXTURE) {
+        const source = fixture.build(controller);
+        const result = await readValidateResult(await validateWorkflow(base, token, { source }));
+
+        const response = await createWorkflow(base, token, { source });
+        expect(response.status, `${fixture.description}: ${await response.clone().text()}`).toBe(
+          400,
+        );
+        expect(result.errors, fixture.description).not.toEqual([]);
+        expect(result.errors, fixture.description).toEqual(await readIssues(response));
+      }
+      await expectNothingStored(base, token);
+    });
+  });
+
+  it("validates a definition object the same way create does", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      const result = await readValidateResult(
+        await validateWorkflow(base, token, { definition: UNKNOWN_ACTION_DEFINITION }),
+      );
+      expect(result.errors.map((issue) => issue.path)).toEqual([["steps", "0", "action"]]);
+
+      const response = await createWorkflow(base, token, {
+        definition: UNKNOWN_ACTION_DEFINITION,
+      });
+      expect(result.errors).toEqual(await readIssues(response));
+    });
+  });
+
+  it("fails with a Validation error when both source and definition are sent, or neither", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      for (const body of [
+        { source: FILE_TASK_SOURCE, definition: UNKNOWN_ACTION_DEFINITION },
+        {},
+      ]) {
+        const response = await validateWorkflow(base, token, body);
+        expect(response.status, await response.clone().text()).toBe(400);
+        expect((await readRefusal(response)).code).toBe("validation");
+      }
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* The catalogs the editor offers choices from.                              */
+/* ------------------------------------------------------------------------ */
+
+/** One action in the list that `workflowAction.query` returns. */
+interface WorkflowActionItem {
+  readonly id: string;
+  readonly displayName: string;
+  readonly description: string;
+  readonly inputSchema: {
+    readonly type?: unknown;
+    readonly properties?: Record<string, unknown>;
+    readonly required?: ReadonlyArray<string>;
+  };
+}
+
+/** One event kind in the list that `eventKind.query` returns. */
+interface EventKindItem {
+  readonly kind: string;
+  readonly description: string;
+  readonly connectionRequired: boolean;
+}
+
+const listWorkflowActions = async (
+  base: string,
+  token: string,
+): Promise<ReadonlyArray<WorkflowActionItem>> => {
+  const response = await get(base, "/api/v1/workflow-actions", token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as ReadonlyArray<WorkflowActionItem>;
+};
+
+const listEventKinds = async (
+  base: string,
+  token: string,
+): Promise<ReadonlyArray<EventKindItem>> => {
+  const response = await get(base, "/api/v1/event-kinds", token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as ReadonlyArray<EventKindItem>;
+};
+
+const findActionById = (
+  actions: ReadonlyArray<WorkflowActionItem>,
+  id: string,
+): WorkflowActionItem => {
+  const found = actions.find((action) => action.id === id);
+  expect(found, id).toBeDefined();
+  return found!;
+};
+
+describe("workflowAction.query", () => {
+  it("returns the built-in actions and the actions of enabled plugins, each with its input as JSON Schema", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      const actions = await listWorkflowActions(base, token);
+      expect(actions.map((action) => action.id).sort()).toEqual(
+        [...BUILT_IN_ACTION_IDS, NOTE_APPEND_ACTION_ID].sort(),
+      );
+      for (const action of actions) {
+        expect(Object.keys(action).sort(), action.id).toEqual([
+          "description",
+          "displayName",
+          "id",
+          "inputSchema",
+        ]);
+        expect(action.displayName.trim(), action.id).not.toBe("");
+        expect(action.description.trim(), action.id).not.toBe("");
+        expect(action.inputSchema.type, action.id).toBe("object");
+      }
+
+      const noteAppend = findActionById(actions, NOTE_APPEND_ACTION_ID);
+      expect(noteAppend.displayName).toBe(NOTE_APPEND_ACTION.displayName);
+      expect(noteAppend.description).toBe(NOTE_APPEND_ACTION.description);
+      expect(Object.keys(noteAppend.inputSchema.properties ?? {}).sort()).toEqual([
+        "pinned",
+        "text",
+      ]);
+      expect(noteAppend.inputSchema.required).toEqual(["text"]);
+
+      // A built-in action's input schema is the input schema of its operation.
+      const taskCreate = findActionById(actions, "task.create");
+      expect(Object.keys(taskCreate.inputSchema.properties ?? {})).toEqual(
+        expect.arrayContaining(["title", "description"]),
+      );
+      expect(taskCreate.inputSchema.required).toEqual(
+        expect.arrayContaining(["title", "description"]),
+      );
+    });
+  });
+
+  it("leaves out the actions of a plugin once it is disabled", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      await disablePlugin(base, token, "notes");
+      const actions = await listWorkflowActions(base, token);
+      expect(actions.map((action) => action.id).sort()).toEqual(BUILT_IN_ACTION_IDS);
+    });
+  });
+});
+
+describe("eventKind.query", () => {
+  it("returns the core event kinds as needing no Connection, and each plugin event kind as needing one", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      const kinds = await listEventKinds(base, token);
+      expect(kinds.map((item) => item.kind).sort()).toEqual(
+        [...CORE_EVENT_KINDS, "github.pr.labeled"].sort(),
+      );
+      for (const item of kinds) {
+        expect(Object.keys(item).sort(), item.kind).toEqual([
+          "connectionRequired",
+          "description",
+          "kind",
+        ]);
+        expect(item.description.trim(), item.kind).not.toBe("");
+        expect(item.connectionRequired, item.kind).toBe(item.kind === "github.pr.labeled");
+      }
+      expect(kinds.find((item) => item.kind === "github.pr.labeled")?.description).toBe(
+        "The labels on a pull request changed.",
+      );
+    });
+  });
+
+  // A disabled plugin emits no events, so a trigger on one of its event kinds
+  // could never start a run. So the kind is left out of the list and rejected,
+  // the same as an action of a disabled plugin.
+  it("leaves out the event kinds of a plugin once it is disabled, and rejects a trigger that uses one", async () => {
+    await withArrangedController(async (controller) => {
+      const { base, token } = controller;
+      await expectAccepted(controller, "the GitHub kind", GITHUB_LABEL_TRIGGER_SOURCE);
+
+      await disablePlugin(base, token, "github");
+      const kinds = await listEventKinds(base, token);
+      expect(kinds.map((item) => item.kind).sort()).toEqual(CORE_EVENT_KINDS);
+      await expectErrorsAt(controller, {
+        description: "the GitHub kind with its plugin disabled",
+        build: () => GITHUB_LABEL_TRIGGER_SOURCE,
+        paths: [["triggers", "0", "source", "kind"]],
+      });
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* The grant that validation and the catalogs need.                          */
+/* ------------------------------------------------------------------------ */
+
+describe("the grant that validation and the catalogs need", () => {
+  it("requires the workflow.read grant for workflow.validate, workflowAction.query and eventKind.query", async () => {
+    await withAgentFleet(async (arranged) => {
+      const base = arranged.harness.base;
+      const reads: ReadonlyArray<readonly [string, (token: string) => Promise<Response>]> = [
+        [
+          "workflow.validate",
+          (token) => validateWorkflow(base, token, { source: FILE_TASK_SOURCE }),
+        ],
+        ["workflowAction.query", (token) => get(base, "/api/v1/workflow-actions", token)],
+        ["eventKind.query", (token) => get(base, "/api/v1/event-kinds", token)],
+      ];
+
+      // The shipped worker profile has no workflow grant at all.
+      const workerSession = await agentOn(arranged, await profileNamed(arranged, "worker"));
+      for (const [operation, read] of reads) {
+        const response = await read(workerSession.token);
+        const error = await readRefusal(response);
+        expect(response.status, `${operation}: ${error.text}`).toBe(403);
+        expect(error.code, operation).toBe("forbidden");
+        expect(error.grant, operation).toBe("workflow.read");
+      }
+
+      // The shipped assistant profile has workflow.read.
+      const assistantSession = await agentOn(arranged, await profileNamed(arranged, "assistant"));
+      for (const [operation, read] of reads) {
+        const response = await read(assistantSession.token);
+        expect(response.status, `${operation}: ${await response.clone().text()}`).toBe(200);
+      }
+    });
+  });
+});

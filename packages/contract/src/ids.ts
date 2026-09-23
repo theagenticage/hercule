@@ -12,10 +12,14 @@ export const Id = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, {
     title: "uuidv7",
     description: "a canonical lowercase UUIDv7",
+    // The error message describes an id in words instead of showing the regex.
+    expected: "a canonical lowercase UUIDv7",
   }),
 );
 
 export type Id = Schema.Schema.Type<typeof Id>;
+
+export const isId = Schema.is(Id);
 
 /** An instant on the wire: ISO-8601 UTC with milliseconds. */
 export const Timestamp = Schema.String.check(
@@ -79,12 +83,13 @@ export const ExternalRef = Schema.String.check(
   // A filter rather than a pattern check, so that the refusal quotes the ref
   // the caller wrote: a pattern check reports the position of the value and
   // never the value, and a caller sending a list of refs cannot act on a
-  // position alone.
+  // position alone. The ref comes last, so a client that truncates a long
+  // message still shows the instruction.
   Schema.makeFilter((ref) =>
     EXTERNAL_REF_PATTERN.test(ref)
       ? undefined
-      : `${ref} is not an external ref: write <system>:<kind>:<identity>, ` +
-        `lowercase system, no whitespace`,
+      : "Write an external ref as <system>:<kind>:<identity>, with a lowercase system and no whitespace. " +
+        `Invalid value: ${ref}`,
   ),
 );
 

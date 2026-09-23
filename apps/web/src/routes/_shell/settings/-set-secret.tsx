@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, FormCard, Input, Select } from "@hercule/ui";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
 import type { OwnerKind } from "@hercule/contract";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
  * The owner kinds a user may write. `core` is the controller's own key
@@ -115,7 +115,7 @@ export function SetSecret({ client }: { readonly client: HerculeClient }): JSX.E
           </Button>
           <SaveStatus
             saved={set.isSuccess}
-            failure={set.error === null ? null : messageOf(set.error)}
+            failure={set.error === null ? null : readErrorMessage(set.error)}
           />
         </div>
       </FormCard>

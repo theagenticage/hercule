@@ -301,8 +301,12 @@ An origin of external events. GitHub and Gmail are event-source plugins in v1; c
 _Avoid_: integration, provider
 
 **Platform Event**:
-An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`, `task.created`, `task.updated`). Flows through the same pipeline as external events.
+An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`, `run.cancelled`, `task.created`, `task.updated`). Flows through the same pipeline as external events.
 _Avoid_: internal event, system event
+
+**Core Kind**:
+An event kind the core declares rather than a plugin: `cron.tick`, which the Scheduler emits, and the kinds of the Platform Events. A trigger on a core kind names no Connection, because its events arrive through none. No plugin can declare a kind with the name of a core kind.
+_Avoid_: built-in kind, system kind, internal kind
 
 **Event**:
 A fact that happened, emitted by an event source ("issue #42 was labelled ready-for-agent").
@@ -342,8 +346,20 @@ A workflow's rule for when events enter it. Two kinds: a start trigger (static c
 _Avoid_: rule, hook
 
 **Step**:
-One node of an execution plan's graph. Two kinds in v1: an action step (invokes a plugin-contributed workflow action) and an agent step (drives a session and may declare an output schema for the graph to route on). A step may be re-entered; each entry is an **iteration**.
+One node of an execution plan's graph. Two kinds in v1: an action step (calls a Workflow Action) and an agent step (drives a session and may declare an output schema for the graph to route on). A step may be re-entered; each entry is an **iteration**.
 _Avoid_: stage, job
+
+**Workflow Action**:
+What an action step calls: one piece of work with a declared input and output, in the action catalog. A plugin declares one under a bare word and it is named by its qualified id (`github/pr.merge`); the core declares the Built-in Actions. A step writes the action's input as `params`, and the action's answer is the step's output. A step cannot name the action of a plugin that does not run.
+_Avoid_: action (bare, where a Bound Action could be meant), tool, command, task (reserved for Task)
+
+**Built-in Action**:
+A Workflow Action the core declares: an operation of the public API, with the operation's id (`task.create`), an input drawn from the operation's input, and the operation's output, so a step reaches nothing that an API request cannot. Owned by `core` in the catalog and never disabled.
+_Avoid_: core action, native action, system action
+
+**Entry Step**:
+A step where a run begins: a step with `entry: true`, or a step that no edge leads into. A run starts every entry step. A step that only a signal trigger leads into is not one, because it waits for its signal. A workflow in which an edge leads into every step needs `entry: true` on the step where a run begins.
+_Avoid_: start step, root step, first step
 
 **Join**:
 How a step with several incoming edges behaves: an *any* join runs a new iteration for every incoming edge that fires (the default); an *all* join runs once, when every incoming edge has fired or can no longer fire.

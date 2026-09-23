@@ -79,7 +79,12 @@ export const CONTENT_SECURITY_POLICY = [
   `connect-src 'self' ${IDENTITY_PORTS}`,
   "img-src 'self' data:",
   "font-src 'self'",
-  "style-src 'self'",
+  // CodeMirror, the workflow YAML editor, adds its base styles in a `<style>`
+  // element when it starts. `style-src 'self'` blocks that element, and the
+  // editor renders unstyled. Allowing inline styles is safe here: an inline
+  // style cannot load anything from another origin, because `img-src` and
+  // `font-src` allow only this origin. `script-src` still blocks inline scripts.
+  "style-src 'self' 'unsafe-inline'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

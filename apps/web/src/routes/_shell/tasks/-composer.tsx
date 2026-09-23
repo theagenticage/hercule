@@ -113,11 +113,11 @@ export function TaskComposer({
         </p>
       )}
       <div className="flex items-center gap-2 pt-1">
-        <Button type="submit" variant="form" disabled={pending}>
-          Create
-        </Button>
         <Button type="button" onClick={onCancel}>
           Cancel
+        </Button>
+        <Button type="submit" variant="form" disabled={pending}>
+          Create
         </Button>
       </div>
     </form>

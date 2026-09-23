@@ -57,7 +57,23 @@ export type FieldRow =
        */
       readonly resolves?: OperationId;
     }
-  | { readonly stdin: true; readonly flag: string; readonly help: string };
+  | {
+      readonly stdin: true;
+      readonly flag: string;
+      readonly help: string;
+      /**
+       * Makes the command always read this field from stdin, even though the
+       * operation lets it be absent. Use it when the operation's alternative
+       * to this field is hidden from the command line, so this field is the
+       * only way to pass the value.
+       */
+      readonly required?: true;
+    }
+  /**
+   * Leaves the field off the command line. Give the reason in a comment, as
+   * for a hidden operation.
+   */
+  | { readonly hidden: true };
 
 /**
  * An operation with no command at all, or the command with everything the help
@@ -899,6 +915,206 @@ export const CLI = {
       not_found:
         "nothing here to end: no subscription has that id, or it has ended already, or another session holds it; the three answer alike",
     },
+  },
+
+  "workflow.query": {
+    command: "workflow list",
+    help: "Lists the workflows, most recently changed first, and shows whether each one is enabled. Each workflow's name and description come from its source. Use it to find the id that `hercule workflow read` and `hercule workflow update` take.",
+    examples: [{ args: [] }, { args: ["--enabled", "true"] }],
+    fields: {
+      enabled: {
+        flag: "enabled",
+        help: "Only enabled workflows (true) or only disabled ones (false).",
+      },
+    },
+  },
+  "workflow.read": {
+    command: "workflow read",
+    help: "Prints a workflow's YAML source exactly as it was saved, and nothing else. Comments and blank lines are kept. Save it to a file, edit it, and send it back with `hercule workflow update`. With --json the output also shows whether the workflow is enabled, and when it was created and last updated.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--json"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The workflow's id, or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+    },
+  },
+  "workflow.create": {
+    command: "workflow create",
+    help: "Creates a workflow from the YAML read from stdin, and stores the YAML byte for byte. An invalid source is rejected with one line per error, each giving its path in the definition, and nothing is stored. A new workflow is disabled: its triggers match no events until you enable it with `hercule workflow update <id> --enabled true`.",
+    examples: [
+      {
+        args: [],
+        stdin: [
+          "# Files a task every weekday morning.",
+          "name: Morning failures",
+          "triggers:",
+          "  - id: weekday_morning",
+          "    kind: start",
+          "    source:",
+          "      kind: cron.tick",
+          '    schedule: "0 9 * * 1-5"',
+          "steps:",
+          "  - id: file_task",
+          "    kind: action",
+          "    action: task.create",
+          "    params:",
+          "      title: Look at the overnight failures",
+          "      description: Filed by a workflow.",
+        ].join("\n"),
+      },
+    ],
+    fields: {
+      source: {
+        stdin: true,
+        flag: "source",
+        help: "The workflow's YAML source. It is stored exactly as sent, including comments and blank lines.",
+        required: true,
+      },
+      // The `definition` object is for programs that build a workflow in code.
+      // On the command line a workflow is always YAML text read from stdin.
+      definition: { hidden: true },
+    },
+    errors: {
+      validation:
+        "the source is not a valid workflow: each printed line gives a path in the definition and the problem there, and a YAML syntax error gives its line and column; nothing was stored",
+    },
+  },
+  "workflow.update": {
+    command: "workflow update",
+    help: "Replaces a workflow's YAML source, or enables or disables the workflow. Enabling or disabling leaves the source unchanged. An invalid new source is rejected and the stored workflow does not change. When the source changes, each trigger that keeps its id also keeps its status.",
+    examples: [
+      { args: ["1f3a9c2e", "--enabled", "true"] },
+      {
+        args: ["1f3a9c2e", "--source-stdin"],
+        stdin: [
+          "name: Morning failures",
+          "steps:",
+          "  - id: file_task",
+          "    kind: action",
+          "    action: task.create",
+          "    params:",
+          "      title: Look at the overnight failures",
+          "      description: Filed by a workflow.",
+        ].join("\n"),
+      },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The workflow's id, or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      source: {
+        stdin: true,
+        flag: "source",
+        help: "The new YAML source, stored exactly as sent.",
+      },
+      // The `definition` object is for programs that build a workflow in code.
+      // On the command line a workflow is always YAML text read from stdin.
+      definition: { hidden: true },
+      enabled: {
+        flag: "enabled",
+        help: "true enables the workflow's triggers, false disables them; the source does not change.",
+      },
+    },
+    errors: {
+      validation:
+        "the new source is not a valid workflow: each printed line gives a path in the definition and the problem there; the stored workflow did not change",
+    },
+  },
+  "workflow.delete": {
+    command: "workflow delete",
+    help: "Deletes a workflow and its triggers. Its source is deleted too, so save it first with `hercule workflow read` if you might need it again.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The workflow's id, or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+    },
+  },
+  "workflow.validate": {
+    command: "workflow validate",
+    help: "Validates the YAML read from stdin the same way `hercule workflow create` does, but stores nothing. Prints one line per error and per warning, each giving its path in the definition. If there are none it prints valid, and saving the same source will succeed with no warnings. Exits with 1 if there are errors, like a rejected save, and with 0 if there are only warnings or none. List the actions a step can call with `hercule workflow-action list`, and the event kinds a trigger can listen for with `hercule event-kind list`.",
+    examples: [
+      {
+        args: [],
+        stdin: [
+          "name: Morning failures",
+          "triggers:",
+          "  - id: weekday_morning",
+          "    kind: start",
+          "    source:",
+          "      kind: cron.tick",
+          '    schedule: "0 9 * * 1-5"',
+          "steps:",
+          "  - id: file_task",
+          "    kind: action",
+          "    action: task.create",
+          "    params:",
+          "      title: Look at the overnight failures",
+          "      description: Filed by a workflow.",
+        ].join("\n"),
+      },
+    ],
+    fields: {
+      source: {
+        stdin: true,
+        flag: "source",
+        help: "The workflow's YAML source, validated exactly as sent.",
+        required: true,
+      },
+      // The `definition` object is for programs that build a workflow in code.
+      // On the command line a workflow is always YAML text read from stdin.
+      definition: { hidden: true },
+    },
+  },
+
+  "trigger.query": {
+    command: "trigger list",
+    help: "Lists the triggers of every workflow, newest first. Each row shows the event kind the trigger listens for, and whether a start trigger is active or paused. Triggers are defined in their workflow's source, so change one with `hercule workflow update`.",
+    examples: [
+      { args: [] },
+      { args: ["--workflow", "1f3a9c2e"] },
+      { args: ["--kind", "start", "--event-kind", "cron.tick"] },
+      { args: ["--status", "paused"] },
+    ],
+    fields: {
+      workflowId: {
+        flag: "workflow",
+        help: "Only the triggers of this workflow, by its id or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      kind: {
+        flag: "kind",
+        help: "start for triggers that start runs, signal for triggers that resume a live run.",
+      },
+      eventKind: {
+        flag: "event-kind",
+        help: "Only the triggers on this event kind, such as cron.tick or github.pr.labeled.",
+      },
+      status: {
+        flag: "status",
+        help: "Only start triggers that are active or paused; signal triggers have no status.",
+      },
+    },
+  },
+
+  "workflowAction.query": {
+    command: "workflow-action list",
+    help: "Lists every action a workflow step can call right now, with the params each one takes. An optional param ends in ?, and --json prints the params as JSON Schema. A built-in action has the id of the operation it calls. A plugin's action is named <plugin>/<word>, and is listed only while the plugin is running.",
+    examples: [{ args: [] }, { args: ["--json"] }],
+    fields: {},
+  },
+
+  "eventKind.query": {
+    command: "event-kind list",
+    help: "Lists every event kind a workflow trigger can listen for right now. A kind that needs a Connection comes from a plugin, and a trigger on it sets a Connection id or any; a trigger on a core kind sets no Connection. A plugin's kinds are listed only while the plugin is running.",
+    examples: [{ args: [] }],
+    fields: {},
   },
 
   "runner.query": {
@@ -1971,6 +2187,21 @@ export const NOUNS = {
     summary:
       "Subscriptions: the standing claims sessions hold on events that have not happened yet.",
     flow: "hercule subscription create starts a wait, hercule subscription list shows what a session waits on, hercule subscription cancel ends one.",
+  },
+  workflow: {
+    summary:
+      "Workflows: automations written as YAML - what starts them, the steps they run, and where those steps run.",
+    flow: "hercule workflow validate checks a source from stdin, hercule workflow create stores one, hercule workflow read prints its source, hercule workflow update replaces the source or enables the workflow, hercule workflow delete removes it.",
+  },
+  trigger: {
+    summary:
+      "Triggers: the parts of a workflow's source that decide which events start a run or resume one.",
+  },
+  "workflow-action": {
+    summary: "Workflow actions: what an action step in a workflow can call.",
+  },
+  "event-kind": {
+    summary: "Event kinds: the events a workflow trigger can listen for.",
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",

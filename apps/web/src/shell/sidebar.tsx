@@ -98,7 +98,13 @@ function HerculeFace({
             key={item.to}
             item={item}
             counts={counts}
-            active={item.section === true ? pathname.startsWith("/settings") : pathname === item.to}
+            active={
+              item.section === true
+                ? pathname.startsWith("/settings")
+                : // A page under a screen's path, such as one workflow's page,
+                  // highlights that screen's item.
+                  pathname === item.to || pathname.startsWith(`${item.to}/`)
+            }
           />
         ),
       )}

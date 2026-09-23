@@ -7,7 +7,13 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { reading, renderApp, stubApi, type Handler } from "../../../app/testing";
+import {
+  expectInDocumentOrder,
+  reading,
+  renderApp,
+  stubApi,
+  type Handler,
+} from "../../../app/testing";
 
 interface Contribution {
   readonly extensionPoint: string;
@@ -417,8 +423,11 @@ describe("Settings > Plugins > reset", () => {
     await user.click(await screen.findByRole("button", { name: "Reset plugin state" }));
 
     expect(writesTo(api, CONFIGURABLE.id)).toEqual([]);
+    // Cancel comes before Confirm.
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), confirm]);
 
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await user.click(confirm);
 
     await waitFor(() => {
       expect(writesTo(api, CONFIGURABLE.id).map((call) => call.path)).toEqual([

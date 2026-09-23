@@ -11,7 +11,13 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hercule/client-core";
-import { reading, renderApp, stubApi, type Handler } from "../../../app/testing";
+import {
+  expectInDocumentOrder,
+  reading,
+  renderApp,
+  stubApi,
+  type Handler,
+} from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";
 
@@ -155,7 +161,9 @@ describe("Settings > Secrets", () => {
     const row = await rowFor(PAT);
     await user.click(within(row).getByRole("button", { name: "Rotate" }));
     await user.type(await screen.findByLabelText("New value"), VALUE);
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    const save = screen.getByRole("button", { name: "Save" });
+    expectInDocumentOrder([within(row).getByRole("button", { name: "Cancel" }), save]);
+    await user.click(save);
 
     await waitFor(() => {
       expect(writes(api)).toHaveLength(1);
@@ -209,8 +217,11 @@ describe("Settings > Secrets", () => {
 
     expect(reading(row)).toContain("Delete this secret? Its value cannot be recovered.");
     expect(writes(api)).toEqual([]);
+    // Cancel comes before Confirm.
+    const cancel = within(row).getByRole("button", { name: "Cancel" });
+    expectInDocumentOrder([cancel, within(row).getByRole("button", { name: "Confirm" })]);
 
-    await user.click(within(row).getByRole("button", { name: "Cancel" }));
+    await user.click(cancel);
 
     expect(writes(api)).toEqual([]);
     expect(screen.getByText(TOKENS.name)).toBeDefined();

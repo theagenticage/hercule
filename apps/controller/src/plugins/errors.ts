@@ -8,24 +8,29 @@
  */
 import type * as Schema from "effect/Schema";
 import { PluginError } from "@hercule/plugin-host";
-import { listDecodeIssues, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
+import {
+  truncateText,
+  formatIssue,
+  listDecodeIssues,
+  MAX_PLUGIN_MESSAGE_LENGTH,
+} from "@hercule/contract";
 
 /**
- * Cutting a plugin's unbounded text where the message is made, rather than at
- * each reader, is what makes the published maximum true of every message.
+ * Truncates a message to `MAX_PLUGIN_MESSAGE_LENGTH` characters, ending it with
+ * "..." if it was cut.
+ *
+ * A plugin's text has no length limit. Truncating here, where the message is
+ * built, rather than in each reader, keeps every message within the published
+ * maximum.
  */
 export const truncateMessage = (message: string): string =>
   message.length <= MAX_PLUGIN_MESSAGE_LENGTH
     ? message
-    : `${message.slice(0, MAX_PLUGIN_MESSAGE_LENGTH - 3)}...`;
+    : truncateText(message, MAX_PLUGIN_MESSAGE_LENGTH - 3);
 
 /** Every issue a decode found, as one line naming the field each one is about. */
 export const describeFieldIssues = (error: Schema.SchemaError): string =>
-  truncateMessage(
-    listDecodeIssues(error)
-      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-      .join("; "),
-  );
+  truncateMessage(listDecodeIssues(error).map(formatIssue).join("; "));
 
 /** The same, as the failure the registration surfaces declare. */
 export const asPluginError = (error: Schema.SchemaError): PluginError =>

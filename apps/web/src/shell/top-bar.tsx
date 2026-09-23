@@ -70,8 +70,21 @@ export function TopBar({ settings }: { readonly settings: SettingsState }): JSX.
 }
 
 /**
- * Whether the screen on screen renders its own chrome. The deepest match is
- * the screen itself, so a layout above it never answers for it.
+ * Checks whether the current screen draws its own top bar. Only the deepest
+ * route match counts, because that match is the screen itself; the layouts
+ * above it do not decide.
+ *
+ * A screen that failed to load, or found nothing, shows an error or an empty
+ * state instead of its own header. The shell's top bar then shows the title,
+ * as it does for every other screen.
  */
-export const ownsItsTopBar = (matches: ReadonlyArray<{ staticData: StaticDataRouteOption }>) =>
-  matches[matches.length - 1]?.staticData.ownsTopBar === true;
+export const ownsItsTopBar = (
+  matches: ReadonlyArray<{ staticData: StaticDataRouteOption; status: string }>,
+) => {
+  const screen = matches[matches.length - 1];
+  return (
+    screen?.staticData.ownsTopBar === true &&
+    screen.status !== "error" &&
+    screen.status !== "notFound"
+  );
+};

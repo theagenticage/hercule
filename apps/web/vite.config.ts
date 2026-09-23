@@ -34,6 +34,33 @@ export default defineConfig(({ command }) => {
       babel({ presets: [reactCompilerPreset()] }),
       tailwindcss(),
     ],
+    // Each route gets a chunk with the code that only that route uses. A
+    // workspace package can still pull all its modules into the initial bundle
+    // through its index, unless its package.json declares `sideEffects`, as
+    // `@hercule/contract`, `@hercule/client-core` and `@hercule/ui` do.
+    // scripts/check-bundle-budget.ts checks the initial bundle size on every
+    // build.
+    build: {
+      rolldownOptions: {
+        output: {
+          // The two pages that edit a workflow load the text editor library
+          // (CodeMirror) and the graph library. Together they are bigger than
+          // the chunk size at which the build warns. So CodeMirror, the larger
+          // one, gets its own chunk, and the warning limit stays the same for
+          // every chunk. The graph library stays in the page chunk: a separate
+          // chunk for it would also take in React, which the initial bundle
+          // needs, so every page would then load the graph library.
+          codeSplitting: {
+            groups: [
+              {
+                name: "workflow-text-editor",
+                test: /[\\/]node_modules[\\/](@codemirror|@lezer)[\\/]/,
+              },
+            ],
+          },
+        },
+      },
+    },
     // In development the app is served by Vite and the API by a controller the
     // developer started themselves, so `/api` is proxied to the port `hercule
     // serve` binds by default and the app talks to one origin here as it does in

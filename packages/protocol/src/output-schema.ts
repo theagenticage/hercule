@@ -29,14 +29,39 @@ import { Schema } from "effect";
 export const MAX_OUTPUT_SCHEMA_LENGTH = 32 * 1024;
 
 /**
+ * The maximum nesting depth, in objects and arrays, of a JSON value a caller
+ * sends. A JSON Schema needs two levels for each nested object, so 32 is far
+ * more than a person writes. The limit keeps values far below the depth at
+ * which a recursive function, such as `JSON.stringify`, overflows the call
+ * stack.
+ */
+export const MAX_JSON_DEPTH = 32;
+
+/**
+ * Checks whether a JSON value nests objects and arrays at most `levels` deep.
+ * The check stops at the limit, so a very deep value costs no more to check
+ * than one at the limit.
+ */
+export const isNestedWithin = (value: unknown, levels: number): boolean =>
+  typeof value !== "object" ||
+  value === null ||
+  (levels > 0 && Object.values(value).every((child) => isNestedWithin(child, levels - 1)));
+
+/**
  * A JSON Schema document, as it travels. The controller stores and forwards it
  * byte for byte. Only `lintOutputSchema` reads inside it.
+ *
+ * The depth is checked before the length. The length is measured with
+ * `JSON.stringify`, which recurses once per level, so a deep enough schema
+ * would overflow the call stack before its length is known.
  */
 export const OutputSchema = Schema.Record(Schema.String, Schema.Json).check(
   Schema.makeFilter((schema) =>
-    JSON.stringify(schema).length > MAX_OUTPUT_SCHEMA_LENGTH
-      ? `an output schema is at most ${String(MAX_OUTPUT_SCHEMA_LENGTH)} characters of JSON`
-      : undefined,
+    !isNestedWithin(schema, MAX_JSON_DEPTH)
+      ? `an output schema can nest objects and arrays at most ${String(MAX_JSON_DEPTH)} levels deep`
+      : JSON.stringify(schema).length > MAX_OUTPUT_SCHEMA_LENGTH
+        ? `an output schema is at most ${String(MAX_OUTPUT_SCHEMA_LENGTH)} characters of JSON`
+        : undefined,
   ),
 );
 

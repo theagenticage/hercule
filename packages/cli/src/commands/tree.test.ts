@@ -9,6 +9,7 @@ import { COMMANDS, commandAt, mentionsIn } from "./tree";
  */
 interface RowField {
   readonly positional?: true;
+  readonly hidden?: true;
   readonly stdin?: true;
   readonly flag?: string;
   readonly help?: string;
@@ -134,16 +135,19 @@ describe("the spelling of a command", () => {
   });
 });
 
-// the row and the schema say the same thing about the fields.
+// the row and the schema list the same fields. If a row lists a field that the
+// operation does not have, hidden or not, building the command tree throws, so
+// every test in this package fails.
 describe("a command's fields against the schema", () => {
-  it("names exactly the fields the schema reflects", () => {
+  it("has exactly the fields of the schema, minus the ones the row hides", () => {
     for (const command of COMMANDS) {
       const reflected = [...command.positionals, ...command.payload, ...command.query].map(
         (field) => field.name,
       );
-      expect(reflected.sort(), spelling(command)).toEqual(
-        Object.keys(rowOf(command.id).fields ?? {}).sort(),
-      );
+      const shown = Object.entries(rowOf(command.id).fields ?? {})
+        .filter(([, field]) => field.hidden !== true)
+        .map(([name]) => name);
+      expect(reflected.sort(), spelling(command)).toEqual(shown.sort());
     }
   });
 

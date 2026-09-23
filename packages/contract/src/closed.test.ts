@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Schema } from "effect";
+import { Cause, Effect, Schema } from "effect";
 import { closedStruct } from "./closed";
+import { listDecodeIssues } from "./errors";
 import { SettingsPatch } from "./groups/settings";
 
 const decode =
@@ -18,6 +19,16 @@ describe("a closed struct", () => {
 
   it("fails on a key it does not declare, rather than stripping it", () => {
     expect(decode(Example)({ a: "x", b: 1 })._tag).toBe("Failure");
+  });
+
+  it("reports an unknown key at its own path, with a message that says how to fix it", () => {
+    const failed = Schema.decodeUnknownExit(Example)({ a: "x", b: 1 });
+    expect(failed._tag).toBe("Failure");
+    if (failed._tag !== "Failure") return;
+    const error = Cause.squash(failed.cause) as Schema.SchemaError;
+    expect(listDecodeIssues(error)).toEqual([
+      { path: ["b"], message: "This field is not known here. Correct its name, or remove it." },
+    ]);
   });
 
   it("encodes a value back out", () => {

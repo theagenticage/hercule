@@ -11,7 +11,8 @@ import {
 } from "@hercule/client-core";
 import type { PluginDetail, PluginStatus } from "@hercule/contract";
 import { ConfigForm } from "../../../screens/plugins/config-form";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { InPlaceQuestion } from "../../../screens/in-place-question";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
  * Only `errored` is something gone wrong; `refused` is the attention hue
@@ -126,7 +127,7 @@ export function PluginCard({
       )}
       <SaveStatus
         saved={configure.isSuccess}
-        failure={failed === null ? null : messageOf(failed)}
+        failure={failed === null ? null : readErrorMessage(failed)}
       />
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -161,28 +162,21 @@ export function PluginCard({
         )}
       </div>
 
-      {/* Wiping is not undoable and nothing else on this screen is, so the
-          question is asked in place rather than behind a browser dialog. */}
+      {/* Wiping cannot be undone, unlike everything else on this screen, so
+          the button asks for confirmation first. */}
       {confirmingReset ? (
-        <div className="flex flex-wrap items-center gap-1.5 text-row text-muted">
-          <span>Wipe everything this plugin has stored?</span>
-          <Button
-            variant="primary"
-            onClick={() => {
-              setConfirmingReset(false);
-              reset.mutate();
-            }}
-          >
-            Confirm
-          </Button>
-          <Button
-            onClick={() => {
-              setConfirmingReset(false);
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
+        <InPlaceQuestion
+          question="Wipe everything this plugin has stored?"
+          declineLabel="Cancel"
+          acceptLabel="Confirm"
+          onDecline={() => {
+            setConfirmingReset(false);
+          }}
+          onAccept={() => {
+            setConfirmingReset(false);
+            reset.mutate();
+          }}
+        />
       ) : null}
     </FormCard>
   );

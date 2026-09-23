@@ -2,7 +2,7 @@ import { useId, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Drawer, Field, Input, type ButtonVariant } from "@hercule/ui";
 import { queryKeys, type HerculeClient, type SecretFieldOffer } from "@hercule/client-core";
-import { messageOf } from "./save-status";
+import { readErrorMessage } from "./save-status";
 
 /**
  * A screen rather than a part of one, because Sessions and the runner page both
@@ -92,7 +92,7 @@ export function ProviderLogin({
       {start.error === null ? null : (
         // Full width, so the error does not read as a fourth action in the row.
         <p className="w-full pl-2 text-fine text-fail" role="alert">
-          {messageOf(start.error)}
+          {readErrorMessage(start.error)}
         </p>
       )}
 
@@ -144,6 +144,7 @@ export function ProviderLogin({
               </Field>
 
               <div className="-ml-2 flex flex-wrap items-center gap-1.5">
+                <Button onClick={close}>Cancel</Button>
                 <Button
                   variant="primary"
                   disabled={code.trim() === "" || submit.isPending}
@@ -153,7 +154,6 @@ export function ProviderLogin({
                 >
                   Submit
                 </Button>
-                <Button onClick={close}>Cancel</Button>
               </div>
             </>
           ) : (
@@ -185,7 +185,7 @@ export function ProviderLogin({
           )}
           {submit.error === null ? null : (
             <p className="text-fine text-fail" role="alert">
-              {messageOf(submit.error)}
+              {readErrorMessage(submit.error)}
             </p>
           )}
         </div>
@@ -286,6 +286,7 @@ export function ProviderKeyEntry({
             />
           </Field>
           <div className="-ml-2 flex flex-wrap items-center gap-1.5">
+            <Button onClick={close}>Cancel</Button>
             <Button
               variant="primary"
               // Nothing to save is refused here rather than a round trip away.
@@ -296,11 +297,10 @@ export function ProviderKeyEntry({
             >
               Save
             </Button>
-            <Button onClick={close}>Cancel</Button>
           </div>
           {save.error === null ? null : (
             <p className="text-fine text-fail" role="alert">
-              {messageOf(save.error)}
+              {readErrorMessage(save.error)}
             </p>
           )}
         </div>

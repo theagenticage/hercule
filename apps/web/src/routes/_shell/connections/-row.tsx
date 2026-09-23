@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, cn } from "@hercule/ui";
 import { queryKeys, type ConnectionType, type HerculeClient } from "@hercule/client-core";
 import type { Connection, ConnectionStatus } from "@hercule/contract";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { InPlaceQuestion } from "../../../screens/in-place-question";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 import { ConfigureConnection } from "./-configure";
 import { ConnectionSetup } from "./-setup";
 
@@ -121,27 +122,25 @@ export function ConnectionRow({
         <ConfigureConnection client={client} connection={connection} type={type} onDone={close} />
       ) : null}
 
-      {/* Asked in place rather than behind a browser dialog, like every other
-          question this app puts to the reader. */}
       {panel === "delete" ? (
-        <div className="flex flex-wrap items-center gap-1.5 text-row text-muted">
-          <span>Remove this connection? Its stored credentials go with it.</span>
-          <Button
-            variant="primary"
-            onClick={() => {
-              close();
-              remove.mutate();
-            }}
-          >
-            Confirm
-          </Button>
-          <Button onClick={close}>Cancel</Button>
-        </div>
+        <InPlaceQuestion
+          question="Remove this connection? Its stored credentials go with it."
+          declineLabel="Cancel"
+          acceptLabel="Confirm"
+          onDecline={close}
+          onAccept={() => {
+            close();
+            remove.mutate();
+          }}
+        />
       ) : null}
 
       {/* A delete that worked takes the row with it, so only a refusal has
           anywhere to land. */}
-      <SaveStatus saved={false} failure={remove.error === null ? null : messageOf(remove.error)} />
+      <SaveStatus
+        saved={false}
+        failure={remove.error === null ? null : readErrorMessage(remove.error)}
+      />
     </li>
   );
 }

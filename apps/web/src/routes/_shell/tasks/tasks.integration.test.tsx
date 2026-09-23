@@ -6,7 +6,14 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
+import {
+  envelope,
+  expectInDocumentOrder,
+  renderApp,
+  stubApi,
+  type Call,
+  type Handler,
+} from "../../../app/testing";
 
 const PROJECT = {
   id: "01a06d02-beca-760b-a6b2-83af536c3c20",
@@ -527,10 +534,12 @@ describe("Tasks > what the screen must not hide", () => {
 
     await user.click(screen.getByRole("button", { name: "New task" }));
     await user.type(screen.getByLabelText("Title"), "Read the log");
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expectInDocumentOrder([cancel, screen.getByRole("button", { name: "Create" })]);
     await user.click(screen.getByRole("button", { name: "Create" }));
     expect((await screen.findByRole("alert")).textContent).toContain("the database is locked");
 
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(cancel);
     await user.click(screen.getByRole("button", { name: "New task" }));
 
     expect(screen.queryByRole("alert")).toBeNull();

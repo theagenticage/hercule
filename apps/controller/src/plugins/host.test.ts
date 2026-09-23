@@ -10,13 +10,22 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   HOST_API,
   registerConnectionType,
+  registerEventSource,
   secret,
   type Plugin,
   type ProviderDefinition,
 } from "@hercule/plugin-host";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
-import { asUser, fixture, pluginStack, providerDefinition } from "./testing";
+import {
+  asUser,
+  buildActionPlugin,
+  fixture,
+  NOTE_APPEND_ACTION,
+  notesPlugin,
+  pluginStack,
+  providerDefinition,
+} from "./testing";
 
 /** Every call runs on a stack of its own, as the user a request would arrive as. */
 const run = <A, E>(body: Effect.Effect<A, E, Plugins | PluginHost | SqlClient.SqlClient>) =>
@@ -507,5 +516,136 @@ describe("a secret-valued field declared outside a provider", () => {
     expect(errored?.message).toContain("keyed-connection/vault");
     expect(errored?.message).toContain("provider definition only");
     expect(detail.contributions).toEqual([]);
+  });
+});
+
+/** Returns the message of an errored plugin, or `undefined` if the plugin is not errored. */
+const readErroredMessage = (status: Option.Option<unknown>): string | undefined => {
+  const found = Option.getOrNull(status) as { readonly _tag: string; readonly message?: string };
+  return found._tag === "errored" ? found.message : undefined;
+};
+
+describe("the workflow action catalog", () => {
+  it("has a row for each built-in action, owned by core, and one for each plugin action under its qualified id", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        yield* Effect.flatMap(PluginHost, (host) => host.boot([notesPlugin]));
+        const contributions = yield* Effect.flatMap(pluginRepository, (repository) =>
+          repository.contributions(),
+        );
+        return [...contributions].flatMap(([owner, owned]) =>
+          owned
+            .filter((row) => row.extensionPoint === "workflow-action")
+            .map((row) => `${owner} ${row.id}`),
+        );
+      }),
+    );
+
+    expect(rows.sort()).toEqual([
+      "core task.create",
+      "core task.query",
+      "core task.update",
+      "notes notes/note.append",
+    ]);
+  });
+
+  it("marks a plugin errored if its action id contains a / or its input schema is not a struct", async () => {
+    const statuses = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          buildActionPlugin("slashed", { ...NOTE_APPEND_ACTION, id: "note/append" }),
+          buildActionPlugin("listed", {
+            ...NOTE_APPEND_ACTION,
+            input: Schema.Array(Schema.String),
+          }),
+        ]);
+        return {
+          slashed: yield* host.status("slashed"),
+          listed: yield* host.status("listed"),
+          actions: yield* host.listActiveWorkflowActions(),
+        };
+      }),
+    );
+
+    expect(readErroredMessage(statuses.slashed)).toContain("The id cannot contain a / character");
+    expect(readErroredMessage(statuses.listed)).toContain("struct");
+    expect(statuses.actions.map((action) => action.id)).toEqual([
+      "task.create",
+      "task.query",
+      "task.update",
+    ]);
+  });
+});
+
+/** Builds a plugin that declares one event source, with the id `word`, and one event kind. */
+const buildEventSourcePlugin = (id: string, word: string, kind: string): Plugin => ({
+  manifest: {
+    id,
+    displayName: `Plugin ${id}`,
+    hostApi: HOST_API,
+    capabilities: ["event-sources"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    registerEventSource(host, {
+      id: word,
+      connectionType: `${id}/${id}`,
+      kinds: {
+        [kind]: {
+          description: `Something happened: ${kind}`,
+          schema: Schema.Struct({ url: Schema.String }),
+        },
+      },
+    }),
+  activate: () => Effect.succeed(Effect.void),
+});
+
+describe("the event source catalog", () => {
+  it("marks a plugin errored if its event source id contains a /", async () => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([buildEventSourcePlugin("acme", "acme/feed", "acme.thing.done")]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain("The id cannot contain a / character");
+  });
+
+  it("marks a plugin errored if it declares a core event kind, and includes the kind in the message", async () => {
+    const statuses = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          buildEventSourcePlugin("task", "task", "task.created"),
+          buildEventSourcePlugin("cron", "cron", "cron.tick"),
+        ]);
+        return [yield* host.status("task"), yield* host.status("cron")];
+      }),
+    );
+
+    for (const [status, kind] of [
+      [statuses[0]!, "task.created"],
+      [statuses[1]!, "cron.tick"],
+    ] as const) {
+      const message = readErroredMessage(status);
+      expect(message, kind).toContain(`the event kind ${kind} is already declared by the core`);
+    }
+  });
+});
+
+describe("a registry that lists a plugin with the id core", () => {
+  it("fails the boot, because that id is reserved for the built-in contributions", async () => {
+    const crash = await run(
+      Effect.flatMap(PluginHost, (host) => host.boot([fixture({ id: "core" }).plugin])).pipe(
+        Effect.as("booted"),
+        Effect.catchCause((cause) => Effect.succeed(Cause.pretty(cause))),
+      ),
+    );
+
+    expect(crash).toContain("a plugin with the id core");
+    expect(crash).toContain("Give the plugin another id.");
   });
 });

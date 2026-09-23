@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { SettingsPatch } from "@hercule/contract";
-import { messageOf } from "../../../screens/save-status";
+import { readErrorMessage } from "../../../screens/save-status";
 import { settingsQuery } from "../../../app/queries";
 
 /**
@@ -28,6 +28,6 @@ export function useSaveSettings(client: HerculeClient): {
     save: mutation.mutate,
     saving: mutation.isPending,
     saved: mutation.isSuccess,
-    failure: mutation.error === null ? null : messageOf(mutation.error),
+    failure: mutation.error === null ? null : readErrorMessage(mutation.error),
   };
 }

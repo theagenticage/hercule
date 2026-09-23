@@ -241,6 +241,9 @@ export async function startController(options: {
   throw last ?? new Error("hercule serve never started");
 }
 
+/** How long `stop` waits, at most, for the output of a process that has exited. */
+const OUTPUT_DRAIN_BOUND_MS = 5_000;
+
 /** One attempt: spawn on this port and wait for it to answer. */
 async function startOn(
   command: ReadonlyArray<string>,
@@ -263,8 +266,7 @@ async function startOn(
     const decoder = new TextDecoder();
     for await (const chunk of stream) chunks.push(decoder.decode(chunk));
   };
-  void drain(child.stdout);
-  void drain(child.stderr);
+  const drained = Promise.all([drain(child.stdout), drain(child.stderr)]);
 
   const output = (): string => chunks.join("");
   const deadline = Date.now() + (timeoutMs ?? 20_000);
@@ -289,6 +291,13 @@ async function startOn(
     stop: async () => {
       child.kill("SIGTERM");
       await child.exited;
+      // The process can exit before all of its output has been read from the
+      // pipes, and tests check the last lines it printed while stopping. The
+      // pipes close only when every process holding them has exited. The local
+      // runner shares the controller's stderr and is killed when the
+      // controller exits, so the wait is normally short. The wait is capped
+      // anyway, so a child that outlives the controller cannot block `stop`.
+      await Promise.race([drained, Bun.sleep(OUTPUT_DRAIN_BOUND_MS)]);
       return child.exitCode ?? -1;
     },
   };

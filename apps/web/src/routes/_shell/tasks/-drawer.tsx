@@ -1,6 +1,6 @@
 import { useState, type JSX } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ApiError, type HerculeClient } from "@hercule/client-core";
+import { isNotFound, type HerculeClient } from "@hercule/client-core";
 import type { Project, Task, TaskUpdateInput } from "@hercule/contract";
 import { Drawer } from "@hercule/ui";
 import { taskQuery } from "../../../app/queries";
@@ -68,7 +68,7 @@ export function TaskDrawer({
   // A task the controller no longer has is the one case where what was read
   // before is not worth keeping: the row is gone from the list under the panel,
   // and a panel still showing it would be the screen contradicting itself.
-  const gone = opened.error instanceof ApiError && opened.error.code === "not_found";
+  const gone = isNotFound(opened.error);
   const selected = gone ? undefined : (opened.data ?? listed);
 
   if (selected === undefined) {

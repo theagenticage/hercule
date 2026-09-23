@@ -34,6 +34,11 @@ describe("a required stdin field", () => {
     expect(args.payload["description"]).toBe("one\n\ntwo");
   });
 
+  it("strips a trailing CRLF, as saved on Windows, like a trailing newline", async () => {
+    const args = await parseArguments(taskCreate, ["--title", "x"], piped("one\r\ntwo\r\n"));
+    expect(args.payload["description"]).toBe("one\r\ntwo");
+  });
+
   it("is read unasked on session input too", async () => {
     const args = await parseArguments(sessionInput, [ID], piped("Carry on.\n"));
     expect(args.payload["text"]).toBe("Carry on.");
@@ -98,6 +103,11 @@ describe("user set-password", () => {
       ["--next-stdin", "--current-stdin"],
       piped("old\nnew\n"),
     );
+    expect(args.payload).toEqual({ current: "old", next: "new" });
+  });
+
+  it("splits lines at CRLF, so neither password keeps a carriage return", async () => {
+    const args = await parseArguments(setPassword, [], piped("old\r\nnew\r\n"));
     expect(args.payload).toEqual({ current: "old", next: "new" });
   });
 

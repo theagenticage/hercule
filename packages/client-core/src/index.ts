@@ -27,7 +27,13 @@ export {
   type CredentialField,
   type SetupStep,
 } from "./connections";
-export { ApiError, ConnectionError, RequestError } from "./errors";
+export {
+  ApiError,
+  ConnectionError,
+  isNotFound,
+  readValidationIssues,
+  RequestError,
+} from "./errors";
 export { idTail } from "./id-tail";
 export { joinCommand } from "./join-command";
 export {
@@ -121,3 +127,37 @@ export {
   supportedTimezones,
 } from "./timezone";
 export { createTokenStore } from "./token-store";
+export {
+  listWorkflowCompletions,
+  type CompletionList,
+  type CompletionOption,
+  type WorkflowCatalog,
+} from "./workflow-completion";
+export {
+  abbreviateEdgeCondition,
+  buildWorkflowGraph,
+  type WorkflowGraph,
+  type WorkflowGraphEdge,
+  type WorkflowGraphNode,
+} from "./workflow-graph";
+export {
+  decideIssueState,
+  formatProblemCount,
+  locateIssues,
+  parseWorkflowSourceWithRanges,
+  type LocatedIssue,
+  type ParsedWorkflowSource,
+  type WorkflowValidation,
+  type WorkflowValidationState,
+} from "./workflow-source";
+export {
+  editDraft,
+  applyStoredSourceChange,
+  markDraftSaved,
+  type WorkflowDraft,
+} from "./workflow-draft";
+export {
+  decideWorkflowHeaderStatus,
+  type WorkflowHeaderFacts,
+  type WorkflowHeaderStatus,
+} from "./workflow-header-status";

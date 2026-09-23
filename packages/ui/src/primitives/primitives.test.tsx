@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Select } from "./select";
 import { SegmentedControl, SegmentedControlItem } from "./segmented-control";
 import { StringList } from "./string-list";
+import { Switch } from "./switch";
 
 describe("Button", () => {
   it("never submits a form unless asked to", () => {
@@ -33,6 +34,29 @@ describe("Button", () => {
     );
     await userEvent.click(screen.getByRole("button"));
     expect(onClick).not.toHaveBeenCalled();
+  });
+
+  // A Save button keeps focus while its save is in flight, so a keyboard user
+  // does not lose their place.
+  it("ignores clicks, does not submit and keeps focus while aria-disabled", async () => {
+    const onClick = vi.fn();
+    const onSubmit = vi.fn((event: FormEvent) => {
+      event.preventDefault();
+    });
+    render(
+      <form onSubmit={onSubmit}>
+        <Button type="submit" aria-disabled onClick={onClick}>
+          Save
+        </Button>
+      </form>,
+    );
+    await userEvent.tab();
+    await userEvent.keyboard("{Enter}");
+    await userEvent.click(screen.getByRole("button"));
+
+    expect(onClick).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("button"));
   });
 
   it("is quiet unless the primary answer asks otherwise", () => {
@@ -221,5 +245,64 @@ describe("Checkbox", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Verbose").checked).toBe(false);
     await userEvent.click(screen.getByText("Verbose"));
     expect(screen.getByLabelText<HTMLInputElement>("Verbose").checked).toBe(true);
+  });
+});
+
+describe("Switch", () => {
+  function Example({ disabled = false }: { readonly disabled?: boolean }) {
+    const [on, setOn] = useState(false);
+    return <Switch aria-label="Enabled" checked={on} onCheckedChange={setOn} disabled={disabled} />;
+  }
+
+  it("has the switch role, its label as its name, and its state in aria-checked", () => {
+    render(<Example />);
+    expect(screen.getByRole("switch", { name: "Enabled" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+  });
+
+  it("toggles on each click, and is not a submit button", async () => {
+    render(<Example />);
+    const control = screen.getByRole("switch", { name: "Enabled" });
+    expect(control).toHaveProperty("type", "button");
+    await userEvent.click(control);
+    expect(control.getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(control);
+    expect(control.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("toggles with Space and Enter", async () => {
+    render(<Example />);
+    await userEvent.tab();
+    await userEvent.keyboard(" ");
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("ignores clicks while disabled", async () => {
+    render(<Example disabled />);
+    await userEvent.click(screen.getByRole("switch"));
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
+  });
+
+  // A switch keeps focus while its save is in flight, so a keyboard user does
+  // not lose their place.
+  it("ignores clicks and keys and keeps focus while aria-disabled", async () => {
+    const onCheckedChange = vi.fn();
+    render(
+      <Switch
+        aria-label="Enabled"
+        checked={false}
+        onCheckedChange={onCheckedChange}
+        aria-disabled
+      />,
+    );
+    await userEvent.tab();
+    await userEvent.keyboard(" ");
+    await userEvent.click(screen.getByRole("switch"));
+
+    expect(onCheckedChange).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("switch"));
   });
 });

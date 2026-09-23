@@ -12,11 +12,18 @@
  * talks to the API through `client-core`'s promises.
  */
 import { readFileSync } from "node:fs";
-import { ApiError, ConnectionError, RequestError, createClient } from "@hercule/client-core";
+import {
+  ApiError,
+  ConnectionError,
+  RequestError,
+  createClient,
+  readValidationIssues,
+} from "@hercule/client-core";
 import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hercule/home";
 import { Result } from "effect";
 import { parseArguments, said } from "./commands/args";
-import { execute } from "./commands/execute";
+import { formatIssue, type WorkflowIssues } from "@hercule/contract";
+import { execute, type Outcome } from "./commands/execute";
 import { commandHelp, nounHelp, rootHelp, shellExample } from "./commands/help";
 import { renderHuman } from "./commands/render";
 import { commandAt, wordsAfter, type Command } from "./commands/tree";
@@ -138,8 +145,22 @@ const runOperation = async (
   } else {
     for (const line of renderHuman(outcome, command)) io.out(line);
   }
-  return EXIT.ok;
+  return decideExitCode(command, outcome);
 };
+
+/**
+ * Returns the exit code for an operation the controller completed. When
+ * `workflow validate` finds errors, the controller still returns success, but
+ * the CLI exits with the same code as a rejected save. This lets a script
+ * validate a workflow and stop before saving it. Warnings alone do not block
+ * a save, so they do not change the exit code.
+ */
+const decideExitCode = (command: Command, outcome: Outcome): number =>
+  command.id === "workflow.validate" &&
+  outcome.kind === "value" &&
+  (outcome.value as WorkflowIssues).errors.length > 0
+    ? EXIT.api
+    : EXIT.ok;
 
 /**
  * Where the command's words end and its arguments begin.
@@ -257,15 +278,8 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
  * because the detail is in the issues, and a human rendering that printed only
  * the message told the caller nothing it could act on.
  */
-const refusals = (error: ApiError): ReadonlyArray<string> => {
-  const issues = (error.details as { issues?: unknown } | undefined)?.issues;
-  if (!Array.isArray(issues)) return [];
-  return issues.map((issue) => {
-    const { path, message } = issue as { path?: ReadonlyArray<string>; message?: string };
-    const where = path === undefined || path.length === 0 ? undefined : path.join(".");
-    return where === undefined ? String(message) : `${where}: ${String(message)}`;
-  });
-};
+const refusals = (error: ApiError): ReadonlyArray<string> =>
+  (readValidationIssues(error) ?? []).map(formatIssue);
 
 /** Turn whatever went wrong into a message and an exit code. */
 const report = (error: unknown, json: boolean, io: Io): number => {

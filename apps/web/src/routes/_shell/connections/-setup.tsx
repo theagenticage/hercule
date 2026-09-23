@@ -11,7 +11,7 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 import { Naming } from "./-naming";
 
 /**
@@ -173,17 +173,17 @@ export function ConnectionSetup({
       ) : null}
 
       <div className="flex items-center gap-1.5">
-        <Button type="submit" variant="form" disabled={submit.isPending}>
-          Connect
-        </Button>
         <Button type="button" variant="form" onClick={onDone}>
           Cancel
+        </Button>
+        <Button type="submit" variant="form" disabled={submit.isPending}>
+          Connect
         </Button>
       </div>
 
       {/* Nothing to say about a setup that worked: it closes and its row
           appears, so only a refusal outlives the press. */}
-      <SaveStatus saved={false} failure={failure === null ? null : messageOf(failure)} />
+      <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
     </form>
   );
 }

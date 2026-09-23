@@ -11,7 +11,7 @@ import {
 import type { ResourceCreateInput } from "@hercule/contract";
 import { connectionsQuery } from "../app/queries";
 import { NewProjectDialog, type SourceDraft } from "./new-project-dialog";
-import { messageOf } from "./save-status";
+import { readErrorMessage } from "./save-status";
 
 /**
  * Creating a project and the sources it works with (D-20b): the project first,
@@ -94,7 +94,7 @@ export function NewProject({
         id = (await createProject.mutateAsync(name.trim())).id;
         setProjectId(id);
       } catch (error) {
-        setFailure(messageOf(error));
+        setFailure(readErrorMessage(error));
         return;
       }
     }
@@ -115,7 +115,7 @@ export function NewProject({
         patch(source.key, { createdId: resource.id, message: null });
       } catch (error) {
         refused = true;
-        patch(source.key, { message: messageOf(error) });
+        patch(source.key, { message: readErrorMessage(error) });
       }
     }
     if (refused) return;

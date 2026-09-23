@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input } from "@hercule/ui";
 import { formatStamp, queryKeys, type HerculeClient } from "@hercule/client-core";
 import type { SecretRef } from "@hercule/contract";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { InPlaceQuestion } from "../../../screens/in-place-question";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
  * One stored secret, as everything about it that can be read: who owns it, what
@@ -123,9 +124,6 @@ export function SecretRow({
               />
             </Field>
           </div>
-          <Button type="submit" variant="form" disabled={rotate.isPending}>
-            Save
-          </Button>
           <Button
             type="button"
             variant="form"
@@ -136,34 +134,31 @@ export function SecretRow({
           >
             Cancel
           </Button>
+          <Button type="submit" variant="form" disabled={rotate.isPending}>
+            Save
+          </Button>
         </form>
       ) : null}
 
-      {/* Asked in place rather than behind a browser dialog, like every other
-          question this app puts to the reader. */}
       {confirmingDelete ? (
-        <div className="flex flex-wrap items-center gap-1.5 text-row text-muted">
-          <span>Delete this secret? Its value cannot be recovered.</span>
-          <Button
-            variant="primary"
-            onClick={() => {
-              setConfirmingDelete(false);
-              remove.mutate();
-            }}
-          >
-            Confirm
-          </Button>
-          <Button
-            onClick={() => {
-              setConfirmingDelete(false);
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
+        <InPlaceQuestion
+          question="Delete this secret? Its value cannot be recovered."
+          declineLabel="Cancel"
+          acceptLabel="Confirm"
+          onDecline={() => {
+            setConfirmingDelete(false);
+          }}
+          onAccept={() => {
+            setConfirmingDelete(false);
+            remove.mutate();
+          }}
+        />
       ) : null}
 
-      <SaveStatus saved={rotate.isSuccess} failure={failure === null ? null : messageOf(failure)} />
+      <SaveStatus
+        saved={rotate.isSuccess}
+        failure={failure === null ? null : readErrorMessage(failure)}
+      />
     </li>
   );
 }

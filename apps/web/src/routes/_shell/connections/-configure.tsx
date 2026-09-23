@@ -13,7 +13,7 @@ import {
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { ConfigFieldRow } from "../../../screens/plugins/config-form";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 import { Naming } from "./-naming";
 
 /**
@@ -106,16 +106,16 @@ export function ConfigureConnection({
       ))}
 
       <div className="flex items-center gap-1.5">
-        <Button type="submit" variant="form" disabled={save.isPending}>
-          Save
-        </Button>
         <Button type="button" variant="form" onClick={onDone}>
           Cancel
+        </Button>
+        <Button type="submit" variant="form" disabled={save.isPending}>
+          Save
         </Button>
       </div>
 
       {/* The form closes on a save that worked, so only a refusal is shown. */}
-      <SaveStatus saved={false} failure={failure === null ? null : messageOf(failure)} />
+      <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
     </form>
   );
 }

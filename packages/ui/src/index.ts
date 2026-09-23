@@ -10,6 +10,7 @@ export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "./primit
 export { PriorityGlyph, type GlyphTone } from "./primitives/priority-glyph";
 export { Select } from "./primitives/select";
 export { StringList } from "./primitives/string-list";
+export { Switch } from "./primitives/switch";
 export { SegmentedControl, SegmentedControlItem } from "./primitives/segmented-control";
 export { Textarea } from "./primitives/textarea";
 

@@ -6,7 +6,15 @@
  * object becomes aligned key-value lines, and ids are shortened to the tail the
  * CLI accepts back as an argument.
  */
-import type { StructuredResult } from "@hercule/contract";
+import {
+  truncateText,
+  formatIssue,
+  type StructuredResult,
+  type Workflow,
+  type WorkflowAction,
+  type WorkflowIssues,
+  type WorkflowSaveResult,
+} from "@hercule/contract";
 import type { Outcome } from "./execute";
 import type { Command } from "./tree";
 
@@ -34,10 +42,21 @@ const columnsOf = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<
   return columns;
 };
 
+/**
+ * Returns the first line of a multi-line table cell, followed by " ..." to
+ * show that more lines follow. A cell with a line break would break the table
+ * row. The space before the dots keeps them apart from a full stop that ends
+ * the first line.
+ */
+const keepOnOneLine = (text: string): string => {
+  const lineBreak = text.search(/[\r\n]/);
+  return lineBreak === -1 ? text : `${text.slice(0, lineBreak).trimEnd()} ...`;
+};
+
 const table = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
   if (rows.length === 0) return ["no results"];
   const columns = columnsOf(rows);
-  const body = rows.map((row) => columns.map((column) => cell(row[column])));
+  const body = rows.map((row) => columns.map((column) => keepOnOneLine(cell(row[column]))));
   const widths = columns.map((column, index) =>
     Math.max(column.length, ...body.map((row) => row[index]!.length)),
   );
@@ -113,10 +132,8 @@ const TRANSCRIPT_FIELD = 100;
  * output, and a transcript is read for its shape - `hercule transcript read
  * --json` is what hands back the text in full.
  */
-const brief = (value: unknown): string => {
-  const text = cell(value).replace(/\s+/g, " ").trim();
-  return text.length > TRANSCRIPT_FIELD ? `${text.slice(0, TRANSCRIPT_FIELD)}...` : text;
-};
+const brief = (value: unknown): string =>
+  truncateText(cell(value).replace(/\s+/g, " ").trim(), TRANSCRIPT_FIELD);
 
 /**
  * Describes what a turn answered under its session's output schema, as a
@@ -164,6 +181,44 @@ const transcriptLine = (row: Record<string, unknown>): string => {
 const transcript = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
   rows.length === 0 ? ["no results"] : rows.map(transcriptLine);
 
+/**
+ * Returns the lines printed after a workflow is created or updated: its id,
+ * whether it is enabled, and one line per warning with its path in the
+ * definition. The source is not printed, because the caller has just sent it.
+ */
+const renderWorkflowSaveResult = (answer: WorkflowSaveResult): ReadonlyArray<string> => [
+  ...keyValues({ id: answer.workflow.id, enabled: answer.workflow.enabled }),
+  ...answer.warnings.map((warning) => `warning: ${formatIssue(warning)}`),
+];
+
+/**
+ * Returns the lines printed for `workflow validate`: one line per error and
+ * per warning, each with its path in the definition, or one line that reports
+ * the workflow as valid.
+ */
+const renderWorkflowIssues = (answer: WorkflowIssues): ReadonlyArray<string> =>
+  answer.errors.length === 0 && answer.warnings.length === 0
+    ? ["valid: no errors and no warnings"]
+    : [
+        ...answer.errors.map((error) => `error: ${formatIssue(error)}`),
+        ...answer.warnings.map((warning) => `warning: ${formatIssue(warning)}`),
+      ];
+
+/**
+ * Returns a workflow action as a table row. The params are listed by name,
+ * with `?` after each optional one, because the full JSON Schema does not fit
+ * on one line. `--json` prints the schema.
+ */
+const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown> => {
+  const properties = Object.keys(action.inputSchema["properties"] ?? {});
+  const required = new Set((action.inputSchema["required"] ?? []) as ReadonlyArray<string>);
+  return {
+    id: action.id,
+    params: properties.map((name) => (required.has(name) ? name : `${name}?`)).join(" "),
+    description: action.description,
+  };
+};
+
 /** The lines the CLI prints for a successful command, without `--json`. */
 export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   const asLines = command.id === "transcript.read" ? transcript : table;
@@ -171,6 +226,14 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
   if (outcome.kind === "items") return asLines(outcome.items);
 
   const value = outcome.value;
+  // These two queries return a short, complete array instead of a page, so
+  // print the array as a table, like the items of a page.
+  if (command.id === "workflowAction.query") {
+    return table((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction));
+  }
+  if (command.id === "eventKind.query") {
+    return table(value as ReadonlyArray<Record<string, unknown>>);
+  }
   if (isPage(value)) {
     const lines = [...asLines(value.items)];
     if (value.nextCursor !== undefined) {
@@ -180,6 +243,20 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
   }
   if (typeof value === "object" && value !== null) {
     const record = value as Record<string, unknown>;
+    // Print a workflow's source unchanged, so the output can be edited and
+    // piped back into `workflow update`. A create or an update prints no
+    // source, because the caller has just sent it.
+    if (command.id === "workflow.read") {
+      const { source } = value as Workflow;
+      // The CLI ends each printed line with `\n`. If the source's first line
+      // break is `\r\n`, add a `\r` at the end, so the output ends in `\r\n`
+      // and a CRLF file comes back byte for byte.
+      return [/^[^\n]*\r\n/.test(source) ? `${source}\r` : source];
+    }
+    if (command.id === "workflow.create" || command.id === "workflow.update") {
+      return renderWorkflowSaveResult(value as WorkflowSaveResult);
+    }
+    if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
     const lines = [...keyValues(record)];
     // The one teaching line this build has. A caller who has just spawned a
     // session wants to watch it. It is not pointed at a subscription on that

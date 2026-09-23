@@ -332,3 +332,71 @@ export const localRunnerQuery = (
     queryFn: () => detect(runners),
     retry: false,
   });
+
+/**
+ * Reads every workflow in a single page. Users write workflows by hand, so
+ * there are few of them. If they ever outgrow one page, this query needs
+ * paging.
+ */
+export const workflowsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.workflows(),
+    queryFn: () => client.workflow.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * Reads one workflow, including its YAML source. An error is not retried,
+ * because a workflow that returns 404 once will keep returning 404.
+ */
+export const workflowQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.workflow(id),
+    queryFn: () => client.workflow.read({ params: { id } }),
+    retry: false,
+  });
+
+/**
+ * Asks the controller to validate a workflow's source, with the same checks a
+ * save runs. Returns the errors and warnings together with the source they
+ * belong to. The page keeps showing the previous result while the next source
+ * is validated, and compares the sources to know which result it is showing.
+ *
+ * A failed request is not retried: the page shows why it failed, and
+ * validates again when the live connection comes back. Window focus does not
+ * trigger a refetch either, because the page only validates after the user
+ * stops typing or after a failure.
+ */
+export const workflowValidationQuery = (client: HerculeClient, source: string) =>
+  queryOptions({
+    queryKey: queryKeys.workflowValidation(source),
+    queryFn: async () => ({
+      source,
+      issues: await client.workflow.validate({ payload: { source } }),
+    }),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+/** Reads every action a step can use. The editor suggests them after `action:`. */
+export const workflowActionsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.workflowActions(),
+    queryFn: () => client.workflowAction.query(),
+  });
+
+/** Reads every event kind a trigger can use. The editor suggests them after `kind:`. */
+export const eventKindsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.eventKinds(),
+    queryFn: () => client.eventKind.query(),
+  });
+
+/**
+ * Reads every Agent in a single page. The editor suggests them after
+ * `agent:`. Users write Agents by hand, so there are few of them.
+ */
+export const agentsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.agents(),
+    queryFn: () => client.agent.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });

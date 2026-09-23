@@ -51,6 +51,22 @@ export const queryKeys = {
   secrets: (): LiveQueryKey => ["secrets"],
   providers: (): LiveQueryKey => ["providers"],
   controller: (): LiveQueryKey => ["controller"],
+  workflows: (): LiveQueryKey => ["workflows"],
+  workflow: (id?: string): LiveQueryKey => (id === undefined ? ["workflow"] : ["workflow", id]),
+  /**
+   * Not a live topic. The key includes the source text, so validating the same
+   * source again reads the cached result.
+   */
+  workflowValidation: (source: string): LiveQueryKey => ["workflow-validation", source],
+  /**
+   * Not live topics. The action and event kind catalogs change only when a
+   * plugin is turned on or off, and the editor fetches them again each time it
+   * opens.
+   */
+  workflowActions: (): LiveQueryKey => ["workflow-actions"],
+  eventKinds: (): LiveQueryKey => ["event-kinds"],
+  /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
+  agents: (): LiveQueryKey => ["agents"],
   /** Keyed on the loopback endpoints it asks, because that is what it depends on. */
   localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
 } as const;
@@ -98,6 +114,13 @@ export const queryKeysFor = (
     return ids.length === 0
       ? [queryKeys.connections(), queryKeys.connection()]
       : [queryKeys.connections(), ...ids.map((id) => queryKeys.connection(id))];
+  }
+  // Any workflow change refetches the listing. A workflow's own page is
+  // refetched only when the push lists its id, or when the push lists no ids.
+  if (topic === "workflow") {
+    return ids.length === 0
+      ? [queryKeys.workflows(), queryKeys.workflow()]
+      : [queryKeys.workflows(), ...ids.map((id) => queryKeys.workflow(id))];
   }
   // The plugin set is fixed at build time and read as one listing, so which
   // plugin changed narrows nothing.

@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 
 /** A rejection that is not an Error still has to say something. */
-export const messageOf = (error: unknown): string =>
+export const readErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /** What the last write did, where the user can see it. */

@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/live/socket-stub.ts",
-    "./threads/testing": "./src/threads/workspaces.testing.ts"
+    "./threads/testing": "./src/threads/workspaces.testing.ts",
+    "./workflow-source/testing": "./src/workflow-source.testing.ts"
   },
   "dependencies": {
     "@hercule/contract": "workspace:*",
-    "effect": "4.0.0-rc.112"
+    "effect": "4.0.0-rc.112",
+    "yaml": "2.9.1"
   }
 }

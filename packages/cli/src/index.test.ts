@@ -1099,3 +1099,187 @@ describe("the last line of every command's help", () => {
     }
   });
 });
+
+/**
+ * A workflow's source is a document with newlines and comments, so it is
+ * passed on stdin, never in argv. `workflow create` needs a source, so it
+ * always reads stdin. `workflow update` reads stdin only with
+ * `--source-stdin`, so an empty pipe never erases a stored workflow.
+ *
+ * Input and output mirror each other:
+ *
+ * - Input: the source is stdin minus exactly one trailing line break, `\n` or
+ *   `\r\n`. Every stdin field follows this rule.
+ * - Output: `workflow read` prints the source followed by one line break, of
+ *   the same kind the source uses.
+ *
+ * So a file that ends in a line break comes back byte for byte, and a file
+ * with no trailing line break comes back with one.
+ */
+describe("a workflow's source in the CLI", () => {
+  const CREDENTIAL_ENV = { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" };
+  /** A file as an editor saves it: one newline at the end. */
+  const WORKFLOW_FILE = [
+    "# Files one task.",
+    "name: File a task",
+    "",
+    "steps:",
+    "  - id: file_task",
+    "    kind: action",
+    "    action: task.create",
+    "",
+  ].join("\n");
+  /** The source the CLI sends for that file: the file minus its trailing newline. */
+  const WORKFLOW_SOURCE = WORKFLOW_FILE.slice(0, -1);
+  const WORKFLOW_ID = id("aaaaaaa1");
+
+  const buildWorkflowRecord = (source: string) => ({
+    id: WORKFLOW_ID,
+    enabled: false,
+    source,
+    createdAt: "2026-09-22T10:00:00.000Z",
+    updatedAt: "2026-09-22T10:00:00.000Z",
+  });
+
+  /** The controller's response to a create or update: the stored record and its warnings. */
+  const SAVE_ANSWER = { workflow: buildWorkflowRecord(WORKFLOW_SOURCE), warnings: [] };
+
+  /** Returns the bytes a terminal receives: each line the CLI writes, followed by a newline. */
+  const joinPrintedLines = (lines: ReadonlyArray<string>): string =>
+    lines.map((line) => `${line}\n`).join("");
+
+  it("sends stdin minus exactly one trailing newline as the source of a create, without a flag", async () => {
+    // The second file ends in a blank line, so its source keeps one newline.
+    for (const [stdin, source] of [
+      [WORKFLOW_FILE, WORKFLOW_SOURCE],
+      [`${WORKFLOW_FILE}\n`, WORKFLOW_FILE],
+    ] as const) {
+      const fetch = stubFetch(() => SAVE_ANSWER);
+      const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin });
+
+      expect(await main(["--home", home, "workflow", "create"], io)).toBe(0);
+      expect(fetch.calls).toHaveLength(1);
+      expect(fetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/workflows" });
+      expect(fetch.calls[0]!.body).toEqual({ source });
+    }
+  });
+
+  it("sends stdin minus exactly one trailing newline as the source of an update with --source-stdin", async () => {
+    const fetch = stubFetch(() => SAVE_ANSWER);
+    const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: WORKFLOW_FILE });
+
+    expect(
+      await main(["--home", home, "workflow", "update", WORKFLOW_ID, "--source-stdin"], io),
+    ).toBe(0);
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "PATCH",
+      path: `/api/v1/workflows/${WORKFLOW_ID}`,
+    });
+    expect(fetch.calls[0]!.body).toEqual({ source: WORKFLOW_SOURCE });
+  });
+
+  it("does not read stdin for an update that only enables the workflow", async () => {
+    const fetch = stubFetch(() => ({
+      ...SAVE_ANSWER,
+      workflow: { ...SAVE_ANSWER.workflow, enabled: true },
+    }));
+    const stubbed = stubIo({ env: CREDENTIAL_ENV, fetch });
+    let stdinReads = 0;
+    const io = {
+      ...stubbed,
+      stdin: () => {
+        stdinReads += 1;
+        return Promise.resolve(WORKFLOW_FILE);
+      },
+    };
+
+    expect(
+      await main(["--home", home, "workflow", "update", WORKFLOW_ID, "--enabled", "true"], io),
+    ).toBe(0);
+    expect(stdinReads).toBe(0);
+    expect(fetch.calls[0]?.body).toEqual({ enabled: true });
+  });
+
+  it("rejects an inline --source flag on both commands, and sends nothing", async () => {
+    for (const argv of [
+      ["workflow", "create", "--source", "name: inline"],
+      ["workflow", "update", WORKFLOW_ID, "--source", "name: inline"],
+    ]) {
+      const fetch = stubFetch(() => SAVE_ANSWER);
+      const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: WORKFLOW_FILE });
+
+      expect(await main(["--home", home, ...argv], io), argv.join(" ")).toBe(2);
+      expect(io.stderr.join("\n"), argv.join(" ")).toContain("--source-stdin");
+      expect(fetch.calls, argv.join(" ")).toEqual([]);
+    }
+  });
+
+  it("prints the source and exactly one newline after it for a read, and no key-value lines", async () => {
+    // The first source ends in a newline, like one saved from a file over
+    // HTTP. The second is what the CLI itself sends for the same file.
+    for (const source of [WORKFLOW_FILE, WORKFLOW_SOURCE]) {
+      const fetch = stubFetch(() => buildWorkflowRecord(source));
+      const io = stubIo({ env: CREDENTIAL_ENV, fetch });
+
+      expect(await main(["--home", home, "workflow", "read", WORKFLOW_ID], io)).toBe(0);
+      expect(fetch.calls[0]).toMatchObject({
+        method: "GET",
+        path: `/api/v1/workflows/${WORKFLOW_ID}`,
+      });
+      expect(joinPrintedLines(io.stdout)).toBe(`${source}\n`);
+      expect(io.stderr).toEqual([]);
+    }
+  });
+
+  it("returns a file with CRLF line breaks byte for byte after a create and a read", async () => {
+    const crlfFile = WORKFLOW_FILE.replaceAll("\n", "\r\n");
+    // The stub controller stores the source it receives and returns it on a read.
+    let storedSource = "";
+    const fetch = stubFetch((request) => {
+      if (request.method !== "POST") return buildWorkflowRecord(storedSource);
+      storedSource = (request.body as { source: string }).source;
+      return { workflow: buildWorkflowRecord(storedSource), warnings: [] };
+    });
+    const createIo = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: crlfFile });
+    expect(await main(["--home", home, "workflow", "create"], createIo)).toBe(0);
+    expect(storedSource).toBe(crlfFile.slice(0, -"\r\n".length));
+
+    const readIo = stubIo({ env: CREDENTIAL_ENV, fetch });
+    expect(await main(["--home", home, "workflow", "read", WORKFLOW_ID], readIo)).toBe(0);
+    expect(joinPrintedLines(readIo.stdout)).toBe(crlfFile);
+  });
+});
+
+/**
+ * The controller returns success for `workflow validate` even when the
+ * workflow has errors, because the errors are the result. Scripts validate a
+ * workflow before saving it, so the CLI exits with 1 when there are errors,
+ * the same code as a rejected save.
+ */
+describe("hercule workflow validate", () => {
+  const CREDENTIAL_ENV = { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" };
+  const SOURCE = "name: Check me\nsteps: []\n";
+  const ERROR = { path: ["steps", "0", "action"], message: "task.creat is not an action." };
+  const WARNING = { path: ["steps"], message: "A run can end only when someone cancels it." };
+
+  it.each([
+    ["an error", { errors: [ERROR], warnings: [WARNING] }, 1],
+    ["only a warning", { errors: [], warnings: [WARNING] }, 0],
+    ["nothing", { errors: [], warnings: [] }, 0],
+  ] as const)(
+    "exits with 1 on errors and 0 otherwise when it finds %s, with and without --json",
+    async (_found, answer, code) => {
+      for (const extra of [[], ["--json"]]) {
+        const fetch = stubFetch(() => answer);
+        const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: SOURCE });
+
+        expect(await main(["--home", home, "workflow", "validate", ...extra], io)).toBe(code);
+        expect(fetch.calls[0]).toMatchObject({
+          method: "POST",
+          path: "/api/v1/workflows/validate",
+        });
+      }
+    },
+  );
+});

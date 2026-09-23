@@ -48,7 +48,9 @@ export {
   createNotFoundError,
   createUnauthenticatedError,
   createValidationError,
+  formatIssue,
   listDecodeIssues,
+  listSchemaIssues,
   type ApiError,
   type CapDetails,
   type ErrorCode,
@@ -84,7 +86,15 @@ export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 /** The form-validation interface the schemas above answer to. */
 export type { StandardSchemaV1 } from "effect/StandardSchema";
 
-export { Actor, ExternalRef, Id, MAX_EXTERNAL_REF_LENGTH, NullableActor, Timestamp } from "./ids";
+export {
+  Actor,
+  ExternalRef,
+  Id,
+  isId,
+  MAX_EXTERNAL_REF_LENGTH,
+  NullableActor,
+  Timestamp,
+} from "./ids";
 
 export { Authenticated, SetupToken } from "./security";
 
@@ -229,6 +239,7 @@ export {
   TaskPriority,
   TaskStatus,
   TaskUpdateInput,
+  refuseEmptyTaskUpdate,
 } from "./groups/task";
 export {
   MAX_PROJECT_DESCRIPTION_LENGTH,
@@ -284,6 +295,44 @@ export {
   SubscriptionTarget,
   SubscriptionTargetFromShorthand,
 } from "./groups/subscription";
+export {
+  WORKFLOW_SORT_FIELDS,
+  WORKFLOW_UPDATE_FIELDS,
+  Workflow,
+  WorkflowCreateInput,
+  WorkflowFilter,
+  WorkflowIssues,
+  WorkflowSaveResult,
+  WorkflowSummary,
+  WorkflowUpdateInput,
+  WorkflowValidateInput,
+} from "./groups/workflow";
+export {
+  ANY_CONNECTION,
+  decodeWorkflowDefinition,
+  truncateIssues,
+  listEntrySteps,
+  readFieldNotation,
+  WorkflowDefinition,
+  type FieldNotation,
+} from "./groups/workflow-definition";
+export {
+  parseWorkflowDocument,
+  parseWorkflowSource,
+  renderWorkflowSource,
+  convertKeyToPathSegment,
+} from "./groups/workflow-source";
+export { STARTER_WORKFLOW_SOURCE } from "./groups/workflow-starter";
+export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
+export { WorkflowAction } from "./groups/workflow-action";
+export { DeclaredEventKind } from "./groups/event-kind";
+export {
+  TRIGGER_SORT_FIELDS,
+  Trigger,
+  TriggerFilter,
+  TriggerKind,
+  TriggerStatus,
+} from "./groups/trigger";
 export { readShorthandDecoder } from "./shorthand";
 export {
   Delta,

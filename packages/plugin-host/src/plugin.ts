@@ -1,6 +1,10 @@
 import { Effect, Option, Redacted, Schema } from "effect";
 import type { PluginManifest } from "./manifest";
-import type { EventSourceDefinition, ProviderDefinition } from "./contributions";
+import type {
+  EventSourceDefinition,
+  ProviderDefinition,
+  WorkflowActionContribution,
+} from "./contributions";
 import type {
   ConnectionRegistration,
   ConnectionsRuntime,
@@ -23,6 +27,10 @@ export interface EventSourceRegistration {
   readonly register: (definition: EventSourceDefinition) => Effect.Effect<void, PluginError>;
 }
 
+export interface WorkflowActionRegistration {
+  readonly register: (contribution: WorkflowActionContribution) => Effect.Effect<void, PluginError>;
+}
+
 /**
  * What `register` may call. A surface is present only when the manifest asked
  * for its capability, so a plugin that did not request one has no way to reach
@@ -32,6 +40,7 @@ export interface RegistrationHost {
   readonly providers?: ProviderRegistration;
   readonly connections?: ConnectionRegistration;
   readonly eventSources?: EventSourceRegistration;
+  readonly workflowActions?: WorkflowActionRegistration;
 }
 
 /** The plugin's durable state, namespaced by plugin id. Values are JSON. */
@@ -102,3 +111,11 @@ export const registerEventSource = (
   host.eventSources === undefined
     ? Effect.fail(new PluginError({ message: "the event-sources capability was not granted" }))
     : host.eventSources.register(definition);
+
+export const registerWorkflowAction = (
+  host: RegistrationHost,
+  contribution: WorkflowActionContribution,
+): Effect.Effect<void, PluginError> =>
+  host.workflowActions === undefined
+    ? Effect.fail(new PluginError({ message: "the workflow-actions capability was not granted" }))
+    : host.workflowActions.register(contribution);

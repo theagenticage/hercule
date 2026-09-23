@@ -2,7 +2,8 @@ import { defineConfig } from "vitest/config";
 
 /**
  * Three projects: the two React packages, everything else, and the one suite
- * that runs the release binary.
+ * that runs the release binary. A few tests run in both of the first two; see
+ * `bothEngineTests` below.
  *
  * The first two run on different runtimes, which is why `pnpm test` invokes
  * vitest twice. The `node` project needs Bun: it reaches `bun:sqlite`,
@@ -15,13 +16,28 @@ import { defineConfig } from "vitest/config";
  * runs it, after `pnpm build:binary`. It is kept apart because a build rewrites
  * `apps/web/dist` and the generated file list underneath any controller a
  * parallel suite is running from source. Most of its suites test the packaging
- * itself and refuse to start without `./hercule`, saying so; the two that test the
- * controller's own surface rather than the packaging - `e2e/workspace.test.ts`
- * and `e2e/github-push.test.ts` - are the same program either way, so with no
- * build they run the dispatcher's source instead (`releaseBinary` in
- * `e2e/harness.ts`).
+ * itself and fail with a clear error when `./hercule` is missing; the three that test the
+ * controller's own surface rather than the packaging - `e2e/workspace.test.ts`,
+ * `e2e/github-push.test.ts` and `e2e/workflows.test.ts` - are the same program
+ * either way, so with no build they run the dispatcher's source instead
+ * (`releaseBinary` in `e2e/harness.ts`).
  */
 const reactPackages = ["apps/web", "packages/ui"];
+
+/**
+ * Tests that run in both the `react` and the `node` project, so that both
+ * JavaScript engines run them: V8 under Node and JavaScriptCore under Bun.
+ *
+ * The workflow parser in the contract runs in the controller (Bun) and in the
+ * browser (V8 in Chrome, JavaScriptCore in Safari). The engines have different
+ * limits, such as the maximum number of arguments to one function call, and a
+ * long workflow source can hit them. Completion and the graph code only read
+ * the parse result and hit no such limit, so their tests run on one engine.
+ */
+const bothEngineTests = [
+  "packages/contract/src/groups/workflow-source.test.ts",
+  "packages/client-core/src/workflow-source.test.ts",
+];
 
 const binaryTests = [
   "e2e/web.test.ts",
@@ -34,6 +50,7 @@ const binaryTests = [
   "e2e/subscription-wake.test.ts",
   "e2e/workspace.test.ts",
   "e2e/github-push.test.ts",
+  "e2e/workflows.test.ts",
   "e2e/binary-size.test.ts",
 ];
 
@@ -67,7 +84,7 @@ export default defineConfig({
           // sees the first one still mounted.
           globals: true,
           setupFiles: ["packages/ui/src/test-setup.ts"],
-          include: reactPackages.map((p) => `${p}/src/**/*.test.{ts,tsx}`),
+          include: [...reactPackages.map((p) => `${p}/src/**/*.test.{ts,tsx}`), ...bothEngineTests],
         },
       },
       {

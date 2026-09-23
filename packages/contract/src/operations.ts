@@ -147,6 +147,43 @@ const TABLE = {
     path: "/api/v1/subscriptions/:id",
   },
 
+  "workflow.query": { requires: "workflow.read", method: "GET", path: "/api/v1/workflows" },
+  "workflow.read": { requires: "workflow.read", method: "GET", path: "/api/v1/workflows/:id" },
+  "workflow.create": { requires: "workflow.write", method: "POST", path: "/api/v1/workflows" },
+  "workflow.update": {
+    requires: "workflow.write",
+    method: "PATCH",
+    path: "/api/v1/workflows/:id",
+  },
+  "workflow.delete": {
+    requires: "workflow.write",
+    method: "DELETE",
+    path: "/api/v1/workflows/:id",
+  },
+  // Validation stores nothing, so it needs only the read grant. Like a save,
+  // it reports whether the Agents and Connections the workflow refers to
+  // exist.
+  "workflow.validate": {
+    requires: "workflow.read",
+    method: "POST",
+    path: "/api/v1/workflows/validate",
+  },
+
+  // Every trigger belongs to a workflow, so listing triggers needs the workflow
+  // read grant. Triggers have no grant family of their own.
+  "trigger.query": { requires: "workflow.read", method: "GET", path: "/api/v1/triggers" },
+
+  // The two catalogs used to write a workflow: the actions a step can call and
+  // the event kinds a trigger can listen for. They are only needed to write
+  // workflows, so they use the workflow read grant instead of a grant family
+  // of their own.
+  "workflowAction.query": {
+    requires: "workflow.read",
+    method: "GET",
+    path: "/api/v1/workflow-actions",
+  },
+  "eventKind.query": { requires: "workflow.read", method: "GET", path: "/api/v1/event-kinds" },
+
   "runner.query": { requires: "infra.read", method: "GET", path: "/api/v1/runners" },
   "runner.read": { requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },
   "runner.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/runners/:id" },

@@ -314,12 +314,15 @@ export const parseArguments = async (
   }
 
   if (reading.length > 0) {
-    const text = await readStdin();
+    // Strip one trailing newline, because heredocs and editors add one. Files
+    // saved on Windows end with `\r\n`, which counts as that newline.
+    const text = (await readStdin()).replace(/\r?\n$/, "");
     if (reading.length === 1) {
       const field = reading[0]!;
-      payload[field.name] = coerce(field, text.replace(/\n$/, ""), help);
+      payload[field.name] = coerce(field, text, help);
     } else {
-      const lines = text.replace(/\n$/, "").split("\n");
+      // Split at `\r\n` too, so no line of a Windows file keeps a trailing `\r`.
+      const lines = text.split(/\r?\n/);
       if (lines.length !== reading.length) {
         throw new UsageError(
           `stdin has ${lines.length} line(s) but ${reading.length} fields read from it: ${reading

@@ -15,7 +15,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { reading, renderApp, stubApi, type Handler } from "../../app/testing";
+import {
+  expectInDocumentOrder,
+  reading,
+  renderApp,
+  stubApi,
+  type Handler,
+} from "../../app/testing";
 
 interface Contribution {
   readonly extensionPoint: string;
@@ -386,7 +392,13 @@ describe("Connections > setting one up", () => {
     );
     await fill(user);
     hold([created]);
-    await user.click(within(formWith("Label")).getByRole("button", { name: "Connect" }));
+    // Cancel comes before Connect.
+    const connect = within(formWith("Label")).getByRole("button", { name: "Connect" });
+    expectInDocumentOrder([
+      within(formWith("Label")).getByRole("button", { name: "Cancel" }),
+      connect,
+    ]);
+    await user.click(connect);
 
     await waitFor(() => {
       expect(writes(api)).toHaveLength(1);
@@ -560,9 +572,12 @@ describe("Connections > reconnecting and removing", () => {
     await user.click(within(row).getByRole("button", { name: "Delete" }));
 
     expect(writes(api)).toEqual([]);
+    // Cancel comes before Confirm.
+    const confirm = within(row).getByRole("button", { name: "Confirm" });
+    expectInDocumentOrder([within(row).getByRole("button", { name: "Cancel" }), confirm]);
 
     hold([PAPER]);
-    await user.click(within(row).getByRole("button", { name: "Confirm" }));
+    await user.click(confirm);
 
     await waitFor(() => {
       expect(writes(api).map((call) => `${call.method} ${call.path}`)).toEqual([
@@ -591,7 +606,12 @@ describe("Connections > configuring one", () => {
 
     await user.clear(screen.getByLabelText(/folder/i));
     await user.type(screen.getByLabelText(/folder/i), "archive");
-    await user.click(within(formWith("Label")).getByRole("button", { name: "Save" }));
+    const save = within(formWith("Label")).getByRole("button", { name: "Save" });
+    expectInDocumentOrder([
+      within(formWith("Label")).getByRole("button", { name: "Cancel" }),
+      save,
+    ]);
+    await user.click(save);
 
     await waitFor(() => {
       expect(writes(api)).toHaveLength(1);

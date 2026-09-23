@@ -88,6 +88,25 @@ export class ConnectionError extends Error {
   }
 }
 
+/** Returns true when the error is a `not_found` response from the controller. */
+export const isNotFound = (error: unknown): boolean =>
+  error instanceof ApiError && error.code === "not_found";
+
+/**
+ * Returns the issues of a `validation` error response, in order, or
+ * `undefined` for any other error. Only a `validation` response lists problems
+ * with the request the caller sent.
+ */
+export const readValidationIssues = (error: unknown): ReadonlyArray<Issue> | undefined => {
+  if (!(error instanceof ApiError) || error.code !== "validation") return undefined;
+  const details = error.details;
+  const issues =
+    typeof details === "object" && details !== null && "issues" in details
+      ? details.issues
+      : undefined;
+  return Array.isArray(issues) ? (issues as ReadonlyArray<Issue>) : undefined;
+};
+
 const isErrorCode = (u: unknown): u is ErrorCode =>
   typeof u === "string" && ERROR_CODES.includes(u as ErrorCode);
 

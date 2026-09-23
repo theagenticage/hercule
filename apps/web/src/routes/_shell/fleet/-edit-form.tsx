@@ -10,7 +10,7 @@ import {
   type RunnerDraft,
 } from "@hercule/client-core";
 import type { RunnerDetail, RunnerUpdateInput } from "@hercule/contract";
-import { messageOf, SaveStatus } from "../../../screens/save-status";
+import { readErrorMessage, SaveStatus } from "../../../screens/save-status";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -57,7 +57,7 @@ export function EditForm({
   });
 
   const blamed = runnerConflictField(save.error, sent);
-  const message = save.error === null ? null : messageOf(save.error);
+  const message = save.error === null ? null : readErrorMessage(save.error);
   /** What a refusal the controller pinned on one field says, beside that field. */
   const refusal = (field: "name" | "reserved"): string | undefined =>
     blamed === field ? (message ?? undefined) : undefined;

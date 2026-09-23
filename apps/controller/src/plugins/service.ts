@@ -1,5 +1,6 @@
 /**
- * The `plugin.*` operations.
+ * The `plugin.*` operations, and `workflowAction.query`, which lists the
+ * workflow actions that the core and the plugins registered.
  *
  * A plugin as a caller sees it joins what the user decided (enabled, config)
  * with what this boot found (status, catalog rows); only the first survives a
@@ -22,6 +23,7 @@ import {
   type PluginDetail,
   type Unauthenticated,
   type Validation,
+  type WorkflowAction,
 } from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
@@ -150,6 +152,22 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("plugin.read");
         return yield* one(id);
+      }),
+
+    /**
+     * Returns every workflow action a step can call, with its input schema as
+     * JSON Schema. Fails with `Forbidden` if the caller lacks the grant.
+     */
+    queryWorkflowActions: (): Effect.Effect<ReadonlyArray<WorkflowAction>, Forbidden> =>
+      Effect.gen(function* () {
+        yield* requireGrant("workflowAction.query");
+        const actions = yield* host.listActiveWorkflowActions();
+        return actions.map(({ id, displayName, description, inputSchema }) => ({
+          id,
+          displayName,
+          description,
+          inputSchema,
+        }));
       }),
 
     enable: (id: string): Effect.Effect<PluginDetail, MoveError> =>

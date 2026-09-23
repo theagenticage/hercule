@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@hercule/ui";
 import { queryKeys, retireQuestion, type HerculeClient } from "@hercule/client-core";
 import type { RunnerDetail } from "@hercule/contract";
-import { messageOf } from "../../../screens/save-status";
+import { InPlaceQuestion } from "../../../screens/in-place-question";
+import { readErrorMessage } from "../../../screens/save-status";
 
 type Move = "drain" | "undrain" | "refreshFacts" | "retire";
 
@@ -91,31 +92,24 @@ export function Moves({
           {question.warnings.map((warning) => (
             <span key={warning}>{warning}</span>
           ))}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span>Retire {runner.name}?</span>
-            <Button
-              variant="primary"
-              onClick={() => {
-                setConfirming(false);
-                move.mutate("retire");
-              }}
-            >
-              Confirm
-            </Button>
-            <Button
-              onClick={() => {
-                setConfirming(false);
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
+          <InPlaceQuestion
+            question={`Retire ${runner.name}?`}
+            declineLabel="Cancel"
+            acceptLabel="Confirm"
+            onDecline={() => {
+              setConfirming(false);
+            }}
+            onAccept={() => {
+              setConfirming(false);
+              move.mutate("retire");
+            }}
+          />
         </div>
       ) : null}
 
       {move.error === null ? null : (
         <p className="text-fine text-fail" role="alert">
-          {messageOf(move.error)}
+          {readErrorMessage(move.error)}
         </p>
       )}
     </div>

@@ -6,6 +6,10 @@ import { cn } from "./cn";
  * box under a heading leaves the reader working out which of the two the tick
  * belongs to, and the whole row is a bigger thing to hit. Wearing `Input`'s
  * border and focus means the platform's box is off and the tick is drawn here.
+ *
+ * A checked box is filled with ink, like a switch that is on. It uses no
+ * colour, because the design language uses colour only at the size of a word
+ * or a dot, and the live colour means that something is running.
  */
 export function Checkbox({
   label,
@@ -19,7 +23,7 @@ export function Checkbox({
           type="checkbox"
           className={cn(
             "peer size-3.5 cursor-pointer appearance-none rounded-[4px] border border-line bg-raised",
-            "checked:border-live checked:bg-live",
+            "checked:border-ink checked:bg-ink",
             "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
             "disabled:cursor-not-allowed disabled:opacity-50",
             className,

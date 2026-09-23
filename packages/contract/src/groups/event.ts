@@ -30,7 +30,7 @@ import { bounded } from "../strings";
 /** The longest event kind. Namespaced by source: `github.issue.opened`. */
 export const MAX_EVENT_KIND_LENGTH = 128;
 
-const EventKind = bounded(1, MAX_EVENT_KIND_LENGTH);
+export const EventKind = bounded(1, MAX_EVENT_KIND_LENGTH);
 
 /** An arbitrary JSON object: a per-kind payload, or a vendor passthrough. */
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown);
