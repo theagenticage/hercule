@@ -25,12 +25,12 @@ import { pickName } from "./names";
 import { runnerRepository } from "./repository";
 
 /**
- * The message does not say which of the three cases applies (never created,
- * already used, expired). The caller has to do the same thing in all three,
- * and telling them apart would help someone probing for valid tokens.
+ * The message does not say which case applies (never created, revoked, already
+ * used, or expired). The caller has to do the same thing in every case, and
+ * telling them apart would help someone probing for valid tokens.
  */
 const NO_JOIN =
-  "that join token is not valid: it was never created, was already used, or has expired. " +
+  "that join token is not valid: it was never created, was revoked, was already used, or has expired. " +
   "Create a new join token and try again";
 
 const make = Effect.gen(function* () {

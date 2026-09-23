@@ -95,7 +95,7 @@ interface Change {
 /** The error message for a runner id that matches no runner, wherever it is used. */
 export const NO_SUCH_RUNNER = "no such runner";
 
-/** The error message for a join token that was never created, already spent, or expired. */
+/** The error message for a join token that was never created, revoked, already spent, or expired. */
 const NO_SUCH_JOIN_TOKEN = "no such join token";
 
 const NAME_TAKEN = "another runner already has that name";
@@ -123,12 +123,13 @@ const NOT_DRAINING = "only a draining runner can be undrained";
 const ALREADY_RETIRED = "that runner is already retired";
 
 const STILL_RUNNING =
-  "sessions are still running on that runner; wait for them to finish, or retire it with force";
+  "sessions are still running on that runner; wait for them to finish, " +
+  "or retire it with `force` set to true";
 
 /** Starts with "unreachable", because that is the status the fleet page shows. */
 const UNREACHABLE =
   "that runner is unreachable, so it cannot confirm its sessions have finished; " +
-  "retire it with force to skip this check";
+  "retire it with `force` set to true to skip this check";
 
 /** Alphabetical: a fleet is short, and people find a runner by its name. */
 const DEFAULT_DIRECTION: SortDirection = "asc";

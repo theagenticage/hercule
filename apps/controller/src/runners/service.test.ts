@@ -72,7 +72,7 @@ const insertRunner = (
   }).pipe(Effect.orDie);
 
 describe("a caller with no actor", () => {
-  it("is rejected for lack of infra.read by query and read, before anything is looked up", async () => {
+  it("is forbidden from query and read without infra.read, before anything is looked up", async () => {
     const errors = await Promise.all([
       runError(Effect.flatMap(RunnerService, (runners) => runners.query({}))),
       runError(Effect.flatMap(RunnerService, (runners) => runners.read({ id: UNKNOWN_ID }))),
@@ -84,7 +84,7 @@ describe("a caller with no actor", () => {
     }
   });
 
-  it("is rejected for lack of infra.write by update, before anything is looked up", async () => {
+  it("is forbidden from update without infra.write, before anything is looked up", async () => {
     const error = await runError(
       Effect.flatMap(RunnerService, (runners) => runners.update({ id: UNKNOWN_ID, name: "iris" })),
     );
@@ -93,7 +93,7 @@ describe("a caller with no actor", () => {
     });
   });
 
-  it("is rejected for lack of infra.write by createJoinToken, before a token is created", async () => {
+  it("is forbidden from createJoinToken without infra.write, before a token is created", async () => {
     const error = await runError(
       Effect.flatMap(RunnerService, (runners) => runners.createJoinToken()),
     );

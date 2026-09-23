@@ -79,9 +79,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Revokes a join token. Returns `false` for a token that was never created,
-     * already spent, or already expired: none of the three can be spent, and
-     * the caller does the same thing whichever it was.
+     * Revokes a join token by deleting it. Returns `false` for a token that was
+     * never created, already revoked, already spent, or already expired: none
+     * of these can be spent, and the caller does the same thing in every case.
      */
     revoke: (id: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -95,8 +95,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Marks a join token as used and returns its id. Returns `None` for a token
-     * that was never created, already used, or expired: the caller learns
-     * nothing from the difference, and does the same thing in all three cases.
+     * that was never created, revoked, already used, or expired: the caller
+     * learns nothing from the difference, and does the same thing in every case.
      */
     spend: (token: string, at: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(

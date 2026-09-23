@@ -77,7 +77,7 @@ const NO_CREDENTIAL = "the runner socket needs a runner's credential";
  */
 const UNKNOWN_CREDENTIAL = "unknown credential";
 
-const RETIRED = "this runner was retired; run `hercule runner join` to re-enlist";
+const RETIRED = "this runner was retired; run `hercule runner join` to join the fleet again";
 
 /** Empty in v1: capability negotiation exists, but there is nothing to negotiate yet. */
 const CAPABILITIES: ReadonlyArray<string> = [];
