@@ -81,7 +81,11 @@ export const makeRpc = (
       waiting,
       frame["success"] === true
         ? Effect.succeed(frame)
-        : Effect.fail(typeof frame["error"] === "string" ? frame["error"] : GONE),
+        : Effect.fail(
+            typeof frame["error"] === "string"
+              ? frame["error"]
+              : "pi rejected the command without giving a reason",
+          ),
     );
   };
 
