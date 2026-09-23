@@ -185,8 +185,8 @@ describe("POST /events/emit", () => {
       expect(event.system).toBe("github");
       expect(event.url).toBeNull();
       expect(event.connectionId).toBeNull();
-      // Neither time is an input, and both come from one clock read, so they
-      // agree to within the second the request took.
+      // Neither time is an input: the controller sets both when the post
+      // arrives, so both fall within the time the request took.
       const occurred = Date.parse(event.occurredAt);
       const received = Date.parse(event.receivedAt);
       expect(Number.isNaN(occurred)).toBe(false);

@@ -65,10 +65,7 @@ const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
 /** One minute, so two writes never get the same timestamp by accident. */
 const A_MINUTE = 60_000;
 
-/**
- * The three `project.*` event kinds. `AUDIT_KINDS` already lists them, so the
- * cast to `AuditKind` is no longer needed.
- */
+/** The three `project.*` audit kinds these tests read back. */
 const CREATED = "project.created" as AuditKind;
 const UPDATED = "project.updated" as AuditKind;
 const DELETED = "project.deleted" as AuditKind;

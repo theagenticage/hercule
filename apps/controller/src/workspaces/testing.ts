@@ -37,11 +37,17 @@ export const MODELS: ReadonlyArray<ModelDescriptor> = [
 export interface WorkspaceFleetOptions {
   /** Plugins to load in addition to the provider fixture that every one of these fleets needs. */
   readonly plugins?: ReadonlyArray<Plugin>;
-  /** Overrides the shipped ten minutes, which is longer than a test that watches the sweep can wait. */
+  /**
+   * Overrides the shipped ten minutes, which is longer than a test that
+   * watches the sweep can wait.
+   */
   readonly workspaceSweepInterval?: Duration.Duration;
 }
 
-/** Runs `body` against a controller with one enrolled, connected, logged-in runner and a provider on it. */
+/**
+ * Runs `body` against a controller with one enrolled, connected, logged-in
+ * runner and a provider on it.
+ */
 export const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
   options: WorkspaceFleetOptions = {},
@@ -98,7 +104,10 @@ export interface WorkspaceRecord {
 export const readErrorCode = async (response: Response): Promise<string> =>
   ((await response.json()) as { error: { code: string } }).error.code;
 
-/** Creates a repo resource, optionally with the Connection its token comes from, and returns its id. */
+/**
+ * Creates a repo resource, optionally with the Connection its token comes
+ * from, and returns its id.
+ */
 export const createRepo = async (
   arranged: Arranged,
   remote: string,
@@ -114,7 +123,10 @@ export const createRepo = async (
   return ((await response.json()) as { id: string }).id;
 };
 
-/** Calls `workspace.provision` and returns the new workspace, which the runner has not provisioned yet. */
+/**
+ * Calls `workspace.provision` and returns the new workspace, which the runner
+ * has not provisioned yet.
+ */
 export const provisionWorkspaceOrFail = async (
   arranged: Arranged,
   body: unknown,

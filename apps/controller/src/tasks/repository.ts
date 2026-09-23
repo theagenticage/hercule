@@ -12,7 +12,7 @@
  * - Without a search text, it uses a keyset over one sortable column plus the
  *   id, which the partial indexes on `tasks` serve.
  * - With a search text, it uses the full-text index ordered by relevance. No
- *   row stores its rank, so paging cannot resume from a rank, and pages by
+ *   row stores its rank, so paging cannot resume from a rank and uses an
  *   offset instead.
  *
  * The two behave differently when rows are written between pages. A keyset

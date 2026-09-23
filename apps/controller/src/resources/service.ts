@@ -109,7 +109,7 @@ const NOT_A_REMOTE =
   "that is not a remote Hercule can clone: write https://host/owner/repo or git@host:owner/repo";
 
 const STANDS_ON =
-  "a workspace still uses that resource; dispose of the workspace before deleting the resource (a main workspace cannot be disposed of; it stops using the resource when its runner is retired)";
+  "a workspace still uses that resource; dispose of the workspace before deleting the resource, or retire its runner if it is a main workspace";
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 

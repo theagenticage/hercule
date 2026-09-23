@@ -54,7 +54,7 @@ export type UpdateOutcome =
   | { readonly _tag: "absent" }
   | { readonly _tag: "nameTaken" };
 
-/** Fails a read or write when a profile's grants are not a list of known grants. */
+/** A profile's stored or given grants are not a list of known grants. */
 export class GrantsError extends Schema.TaggedError<GrantsError>()("GrantsError", {
   name: Schema.String,
   message: Schema.String,

@@ -140,7 +140,10 @@ const make = Effect.gen(function* () {
         ),
       );
 
-    /** Marks the connection `needs-reauth` with `message` as the detail, and fails with it. */
+    /**
+     * Marks the connection `needs-reauth`, with `message` as the status detail,
+     * and fails with a `ConnectionUnavailable` that carries the same message.
+     */
     const needsReauth = (
       connectionId: string,
       message: string,

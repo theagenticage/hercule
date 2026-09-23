@@ -451,7 +451,10 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Marks a live workspace as `deleted`, and returns whether the status changed, for the same reason as above. */
+    /**
+     * Marks a live workspace as `deleted`, and returns whether the status
+     * changed, for the same reason as `markFailed`.
+     */
     markDisposed: (id: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`

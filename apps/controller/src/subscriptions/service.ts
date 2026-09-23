@@ -175,8 +175,9 @@ const make = Effect.gen(function* () {
         // caller can still choose another target. No expansion this version
         // produces is rejected: every id goes in as a quoted string literal, so
         // nothing a caller writes can change the expression's syntax. The
-        // validation is kept for the hand-written sources that triggers will
-        // store later.
+        // check stays as a safety net: if a change to `expandTarget` ever
+        // produced an invalid expression, the caller would get an error here
+        // instead of a subscription that silently never matches.
         yield* Effect.mapError(validateExpression(condition, "event"), (failure) =>
           createInvalidStateError(failure.message),
         );

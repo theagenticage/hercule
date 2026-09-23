@@ -131,7 +131,11 @@ const make = Effect.gen(function* () {
       { concurrency: "unbounded", discard: true },
     );
 
-  /** Logs a sweep that fails to start, for example when the instance list cannot be read, because nothing is waiting on the sweep. */
+  /**
+   * Logs the error of a sweep that fails to start, for example because the
+   * instance list cannot be read. Nothing is waiting on the sweep, so the log
+   * is the only place the error can go.
+   */
   const logSweepFailure = (swept: Effect.Effect<void, StoreError>): Effect.Effect<void> =>
     Effect.catchCause(swept, (cause) =>
       Effect.logError("A provider sweep could not be started", cause),

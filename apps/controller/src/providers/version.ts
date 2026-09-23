@@ -8,7 +8,10 @@
 import type { VersionVerdict } from "@hercule/contract";
 import { CLAUDE_CODE_VERSION, CODEX_VERSION, PI_VERSION } from "@hercule/home/version";
 
-/** The providers this build pins a version for. Other providers' versions are recorded but not compared. */
+/**
+ * The providers this build pins a version for. Other providers' versions are
+ * recorded but not compared.
+ */
 const FLOORS: ReadonlyMap<string, string> = new Map([
   ["claude-code", CLAUDE_CODE_VERSION],
   ["codex", CODEX_VERSION],

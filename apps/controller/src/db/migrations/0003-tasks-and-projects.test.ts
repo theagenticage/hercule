@@ -3,8 +3,7 @@
  * `sqlite_master` on a migrated in-memory database.
  *
  * "Applying the migrations twice is a no-op" is tested once for all of them,
- * in `db/migrate.test.ts`; that test also checks for the four tables this
- * migration adds.
+ * in `db/migrate.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -28,7 +27,10 @@ const readSchemaRows = (type: string) =>
     `;
   });
 
-/** Returns how many rows a MATCH finds, so the test does not depend on how the index stores them. */
+/**
+ * Returns how many rows a MATCH finds, so the test does not depend on how the
+ * index stores them.
+ */
 const countMatches = (expression: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

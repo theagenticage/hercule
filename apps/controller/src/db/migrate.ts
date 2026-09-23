@@ -21,7 +21,10 @@ import { migrations } from "./migrations/index";
 /** The Migrator's table of applied migrations. Its highest id is the database's schema version. */
 const MIGRATIONS_TABLE = "effect_sql_migrations";
 
-/** The file name suffix of a pre-migration copy, to tell it apart from daily backups (spec 15 section 8). */
+/**
+ * The file name suffix of a pre-migration copy, which tells it apart from the
+ * daily backups (spec 15 section 8).
+ */
 const PREMIGRATION_SUFFIX = "-premigration.db";
 
 /** How many pre-migration copies a prune keeps (spec 04, Backups). */

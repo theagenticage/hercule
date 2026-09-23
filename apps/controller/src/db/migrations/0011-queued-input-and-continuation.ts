@@ -2,11 +2,11 @@
  * Every input a session was ever given, one row each, and the two values a
  * session passes on to the session that continues it.
  *
- * A row is written before the input is sent anywhere. That gives:
+ * A row is written before the input is sent anywhere, so:
  *
- * - the operation an id to return;
- * - the actor stamp a place to be stored;
- * - an input the session cannot take yet a place to wait until it can.
+ * - the operation has an id to return;
+ * - the actor stamp has somewhere to be stored;
+ * - an input the session cannot take yet can wait until it can.
  *
  * The queue is the rows still `queued`; `delivered` and `cancelled` are final.
  *

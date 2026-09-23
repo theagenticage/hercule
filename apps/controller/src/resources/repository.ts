@@ -242,7 +242,8 @@ const make = Effect.gen(function* () {
     /**
      * Deletes the resource, its project links, and its checkouts. Those
      * checkouts belong to workspaces that are already deleted or lost: the
-     * service rejects the delete while any other workspace still uses it.
+     * service rejects the delete while a workspace that is neither deleted
+     * nor lost has a checkout of the resource.
      */
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -306,7 +307,10 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Returns the given project ids that exist and are not deleted, so a link never points at nothing. */
+    /**
+     * Returns the given project ids that exist and are not deleted, so a link
+     * never points at nothing.
+     */
     liveProjects: (
       projectIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>

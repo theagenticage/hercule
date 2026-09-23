@@ -36,7 +36,7 @@ export type ScopeSettings<S extends TypedScope> = {
   readonly [K in SettingKey<S>]?: SettingValue<S, K>;
 };
 
-/** Fails a read when a setting is not set, or holds a value its schema rejects. */
+/** A setting is not set, or its value does not match the key's schema. */
 export class SettingError extends Schema.TaggedError<SettingError>()("SettingError", {
   scope: Schema.String,
   key: Schema.String,
@@ -75,7 +75,10 @@ const createSettingError = (message: string): SettingError =>
 const buildStoredCodec = (scope: TypedScope, key: string): Schema.Codec<unknown, string> =>
   Schema.fromJsonString((SETTING_SCHEMAS[scope] as Record<string, Schema.Codec<unknown>>)[key]!);
 
-/** Decodes one stored value to the key's declared type. Fails with `SettingError` if it does not match. */
+/**
+ * Decodes one stored value to the key's declared type. Fails with
+ * `SettingError` if the value does not match.
+ */
 const decode = (
   scope: TypedScope,
   key: string,
@@ -85,7 +88,10 @@ const decode = (
     Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
   );
 
-/** Encodes one value as JSON text for the `value` column. Fails with `SettingError` if it does not match. */
+/**
+ * Encodes one value as JSON text for the `value` column. Fails with
+ * `SettingError` if the value does not match.
+ */
 const encode = (
   scope: TypedScope,
   key: string,
@@ -146,7 +152,10 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    /** Reads one controller setting, decoded to the key's type. Fails if it is not set or invalid. */
+    /**
+     * Reads one controller setting, decoded to the key's type. Fails with
+     * `SettingError` if it is not set or its value is invalid.
+     */
     get: <K extends SettingKey<"controller">>(
       key: K,
     ): Effect.Effect<SettingValue<"controller", K>, SettingError | SqlError> =>
@@ -244,7 +253,10 @@ const make = Effect.gen(function* () {
         `;
       }),
 
-    /** Reads one of a user's settings, decoded to the key's type. Fails if it is not set or invalid. */
+    /**
+     * Reads one of a user's settings, decoded to the key's type. Fails with
+     * `SettingError` if it is not set or its value is invalid.
+     */
     getForUser: <K extends SettingKey<"user">>(
       userId: string,
       key: K,

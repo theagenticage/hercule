@@ -161,7 +161,7 @@ describe("integer keyset cursors", () => {
     expect(await readFailureTag(decodeIdCursor("not a cursor at all", EVENTS))).toBe("CursorError");
   });
 
-  it("rejects a UUID keyset cursor, and its own cursor is rejected by the UUID keyset decoder", async () => {
+  it("rejects a UUID keyset cursor, and the UUID keyset decoder rejects its cursor", async () => {
     const uuid = encodeCursor(EVENTS, "2026-09-04T09:21:33.084Z", ID);
     expect(await readFailureTag(decodeIdCursor(uuid, EVENTS))).toBe("CursorError");
     expect(await readFailureTag(decodeCursor(encodeIdCursor(EVENTS, 7), EVENTS, "string"))).toBe(

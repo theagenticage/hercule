@@ -508,7 +508,10 @@ const make = Effect.gen(function* () {
         return yield* readRunnerOrFail(runnerId);
       }),
 
-    /** Creates a second account on a provider, or the first on a provider that boot did not seed. */
+    /**
+     * Creates a second account on a provider, or the first account on a
+     * provider the boot did not seed. Returns the new instance.
+     */
     create: (input: ProviderInstanceCreateInput): Effect.Effect<ProviderInstance, CreateError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.create");

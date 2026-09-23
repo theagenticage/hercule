@@ -138,7 +138,7 @@ interface TestPlugin {
 /**
  * Builds a plugin that owns one connection type. An OAuth type points at the
  * in-test provider and validates the access token it receives. A credentials
- * type exists only so a test can start an OAuth flow for a type without one.
+ * type exists only so a test can start an OAuth flow for a type that has none.
  */
 const buildConnectionTypePlugin = (options: {
   readonly id: string;

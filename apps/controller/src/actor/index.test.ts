@@ -21,7 +21,10 @@ const agent: Actor = {
   grants: ["task.read", "task.create", "session.spawn"],
 };
 
-/** Returns the grant in the `Forbidden` error, or `undefined` when the check let the caller through. */
+/**
+ * Returns the grant in the `Forbidden` error, or `undefined` when the check let
+ * the caller through.
+ */
 const readMissingGrant = (refused: ReturnType<typeof checkGrant>): string | undefined =>
   refused?.error.details.grant;
 

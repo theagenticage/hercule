@@ -4,8 +4,8 @@
  *
  * Other domains go through `WorkspaceService`. The rows, how a workspace is
  * laid out and what is written when one is opened belong to this domain alone.
- * The only other things other domains import are the two SQL predicates below,
- * which the sessions repository uses in its queries.
+ * Apart from the service, other domains import only the two SQL predicates
+ * below, which the sessions repository uses in its queries.
  *
  * Nothing here sends anything to a machine or calls another domain's service.
  * A frame is built as a value and the controller daemon sends it. That keeps

@@ -15,7 +15,10 @@ import { createValidationError, type Validation } from "@hercule/contract";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "./repository";
 
-/** The error message when no runner can take a session on this instance, because none is logged in to it. */
+/**
+ * The error message when no runner can take a session on this instance,
+ * because none is logged in to it.
+ */
 export const NO_PLACEMENT =
   "no connected runner is logged in to that provider instance; log in on a machine first";
 

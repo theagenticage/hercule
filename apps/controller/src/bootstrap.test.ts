@@ -290,8 +290,9 @@ describe("once setup is complete", () => {
     const first = await serve();
     const database = new Database(join(home, "data", "hercule.db"));
     try {
-      // The outstanding token is left in the row. Completing setup normally
-      // clears it, and the boot must clear it too if it did not happen.
+      // The outstanding token is left in the row. Completing setup clears it
+      // normally, but the controller must not rely on that, so the boot clears
+      // it too.
       database.run("UPDATE setup_state SET completed_at = '2026-09-04T00:00:00.000Z'");
     } finally {
       database.close();

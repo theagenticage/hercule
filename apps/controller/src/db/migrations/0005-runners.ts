@@ -2,8 +2,9 @@
  * The fleet: one row per runner the controller has enlisted.
  *
  * The columns the runner reports are nullable, because they have no value
- * before the runner first connects. `facts` and `watermark` are JSON documents because nothing queries
- * inside them, and columns would mean a migration per new reported field.
+ * before the runner first connects. `facts` and `watermark` are JSON documents
+ * because nothing queries inside them, and columns would mean a migration per
+ * new reported field.
  *
  * Only the credential's hash is here, and its index is unique because two
  * runners sharing one would make the socket upgrade ambiguous.

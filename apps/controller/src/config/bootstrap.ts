@@ -31,7 +31,10 @@ export const BOOTSTRAP_KEYS = ["data.dir", "bind.host", "bind.port", "log.level"
 
 export type BootstrapKey = (typeof BOOTSTRAP_KEYS)[number];
 
-/** Returns the env var name for a bootstrap key: uppercase, dots to underscores, `HERCULE_` prefix. */
+/**
+ * Returns the env var name for a bootstrap key: uppercase, dots to
+ * underscores, and a `HERCULE_` prefix.
+ */
 export function buildEnvName(key: BootstrapKey): string {
   return `HERCULE_${key.toUpperCase().replaceAll(".", "_")}`;
 }

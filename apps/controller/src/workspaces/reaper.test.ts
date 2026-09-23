@@ -66,7 +66,10 @@ const makeReady = async (arranged: Arranged, id: string): Promise<WorkspaceRecor
 
 const at = "2026-09-16T10:00:00.000Z";
 
-/** Spawns a thread in a worktree of its own, and waits until it is started and idle on the runner. */
+/**
+ * Spawns a thread in a worktree of its own, and waits until it is started and
+ * idle on the runner.
+ */
 const spawnThreadIn = async (
   arranged: Arranged,
   resourceId: string,

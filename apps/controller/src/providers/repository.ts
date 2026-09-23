@@ -10,7 +10,10 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { ModelDescriptor, type ProbeResult } from "@hercule/protocol";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 
-/** An instance as it is stored. The fields from the provider definition are added when it is read. */
+/**
+ * An instance as it is stored. The fields from the provider definition are
+ * added when it is read.
+ */
 export interface StoredInstance {
   readonly id: string;
   readonly providerId: string;
@@ -44,7 +47,10 @@ interface InstanceRow {
 
 const INSTANCE_COLUMNS = "id, provider_id, name, config, created_at, updated_at";
 
-/** The config column is decoded with a schema rather than `JSON.parse`, so a bad row fails with a typed error. */
+/**
+ * Decodes the config column with a schema rather than `JSON.parse`, so a bad
+ * row fails with a typed error.
+ */
 const decodeConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
 const toInstance = (row: InstanceRow): Effect.Effect<StoredInstance, Schema.SchemaError> =>
