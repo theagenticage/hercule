@@ -3,7 +3,7 @@ import { Cause, Schema } from "effect";
 import * as HttpServerError from "effect/unstable/http/HttpServerError";
 import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
-import { forbidden, notFound } from "@hercule/contract";
+import { createForbiddenError, createNotFoundError } from "@hercule/contract";
 import { errorFor, responseFor } from "./envelope";
 
 const schemaError = (kind: HttpApiSchemaError["kind"], input: unknown) => {
@@ -77,7 +77,7 @@ describe("errorFor", () => {
 
 describe("responseFor", () => {
   it("derives the status from the code and puts nothing beside the envelope", () => {
-    const response = responseFor(forbidden("secret.write"));
+    const response = responseFor(createForbiddenError("secret.write"));
     expect(response.status).toBe(403);
     expect(bodyOf(response)).toEqual({
       error: {
@@ -89,6 +89,6 @@ describe("responseFor", () => {
   });
 
   it("uses the code's status for every code", () => {
-    expect(responseFor(notFound("no such profile")).status).toBe(404);
+    expect(responseFor(createNotFoundError("no such profile")).status).toBe(404);
   });
 });

@@ -27,10 +27,10 @@ import {
   SUBSCRIPTION_SORT_FIELDS,
   SubscriptionCreateInput,
   SubscriptionHolder,
-  invalidState,
-  notFound,
-  validation,
-  validationOf,
+  createDecodeValidationError,
+  createInvalidStateError,
+  createNotFoundError,
+  createValidationError,
   type Forbidden,
   type InvalidState,
   type NotFound,
@@ -153,14 +153,17 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<{ readonly subscriptionId: string }, CommonError | InvalidState> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("subscription.create");
-        const { target } = yield* Effect.mapError(decodeCreate(input), validationOf);
+        const { target } = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         if (actor._tag !== "session") {
           return yield* Effect.fail(
-            validation([{ path: ["holder"], message: NEEDS_A_SESSION_REPAIR }], NEEDS_A_SESSION),
+            createValidationError(
+              [{ path: ["holder"], message: NEEDS_A_SESSION_REPAIR }],
+              NEEDS_A_SESSION,
+            ),
           );
         }
         if (target.kind !== "ref") {
-          return yield* Effect.fail(invalidState(ABSENT_TARGET_REASON[target.kind]));
+          return yield* Effect.fail(createInvalidStateError(ABSENT_TARGET_REASON[target.kind]));
         }
         const condition = expandTarget(target);
         // A condition the evaluator refuses could never match, and the caller
@@ -170,7 +173,7 @@ const make = Effect.gen(function* () {
         // grammar. The check stands for the sources a trigger stores later,
         // which are written by hand.
         yield* Effect.mapError(checkExpression(condition, "event"), (failure) =>
-          invalidState(failure.message),
+          createInvalidStateError(failure.message),
         );
         const subscriptionId = yield* withTransaction(
           sql,
@@ -198,7 +201,7 @@ const make = Effect.gen(function* () {
         const actor = yield* requireGrant("subscription.query");
         const { holder, limit, cursor, sort } = yield* Effect.mapError(
           decodeQuery(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const whose =
           holder ??
@@ -207,7 +210,10 @@ const make = Effect.gen(function* () {
             : undefined);
         if (whose === undefined) {
           return yield* Effect.fail(
-            validation([{ path: ["holder"], message: NEEDS_A_HOLDER_REPAIR }], NEEDS_A_HOLDER),
+            createValidationError(
+              [{ path: ["holder"], message: NEEDS_A_HOLDER_REPAIR }],
+              NEEDS_A_HOLDER,
+            ),
           );
         }
         const listing = yield* refuseCursor(
@@ -237,7 +243,7 @@ const make = Effect.gen(function* () {
     cancel: (input: Identified): Effect.Effect<Record<string, never>, CommonError | NotFound> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("subscription.cancel");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const heldBy =
           actor._tag === "session"
             ? ({ kind: "session", id: actor.sessionId } as const)
@@ -252,7 +258,7 @@ const make = Effect.gen(function* () {
               actor: yield* currentStamp,
               ...(heldBy === undefined ? {} : { heldBy }),
             });
-            if (!ended) return yield* Effect.fail(notFound(NO_SUCH_SUBSCRIPTION));
+            if (!ended) return yield* Effect.fail(createNotFoundError(NO_SUCH_SUBSCRIPTION));
           }),
         );
         return {};

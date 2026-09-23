@@ -35,16 +35,16 @@ import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as RpcServer from "effect/unstable/rpc/RpcServer";
 import type * as Rpc from "effect/unstable/rpc/Rpc";
 import {
-  internal,
-  invalidState,
+  createDecodeValidationError,
+  createInternalError,
+  createInvalidStateError,
+  createUnauthenticatedError,
+  createValidationError,
   isAppendOnlyLiveTopic,
   live,
   LIVE_PROTOCOL_VERSION,
   LiveTopic,
   parseSessionTopic,
-  unauthenticated,
-  validation,
-  validationOf,
   type Internal,
   type Unauthenticated,
   type Validation,
@@ -84,7 +84,9 @@ const parsePosition = (raw: string | undefined): Effect.Effect<number | undefine
   const cursor = Number(raw);
   if (!CURSOR.test(raw) || !Number.isSafeInteger(cursor)) {
     return Effect.fail(
-      validation([{ path: ["cursor"], message: "a position in the log is a whole number" }]),
+      createValidationError([
+        { path: ["cursor"], message: "a position in the log is a whole number" },
+      ]),
     );
   }
   return Effect.succeed(cursor);
@@ -138,7 +140,9 @@ const handlers = live.toLayer(
      * is all a second lookup needs.
      */
     const stillThere = (actor: UserActor): Effect.Effect<boolean, Internal> =>
-      Effect.mapError(credentials.stillLive(actor.credential), () => internal(UNREADABLE));
+      Effect.mapError(credentials.stillLive(actor.credential), () =>
+        createInternalError(UNREADABLE),
+      );
 
     /**
      * Takes everything away from a connection whose credential has gone. A
@@ -149,7 +153,7 @@ const handlers = live.toLayer(
       Effect.gen(function* () {
         connection.gone = true;
         watching.delete(connection);
-        const gone = unauthenticated(CREDENTIAL_GONE);
+        const gone = createUnauthenticatedError(CREDENTIAL_GONE);
         yield* Effect.forEach(connection.open, (queue) => topics.end(queue, gone), {
           discard: true,
         });
@@ -201,12 +205,12 @@ const handlers = live.toLayer(
         const connection = Context.getOrUndefined(client.annotations, Greeted);
         const actor = connection?.actor;
         if (connection === undefined || actor === undefined) {
-          return yield* Effect.fail(unauthenticated(HELLO_FIRST));
+          return yield* Effect.fail(createUnauthenticatedError(HELLO_FIRST));
         }
-        if (connection.gone) return yield* Effect.fail(unauthenticated(CREDENTIAL_GONE));
+        if (connection.gone) return yield* Effect.fail(createUnauthenticatedError(CREDENTIAL_GONE));
         if (yield* stillThere(actor)) return { connection, actor };
         yield* revoke(connection);
-        return yield* Effect.fail(unauthenticated(CREDENTIAL_GONE));
+        return yield* Effect.fail(createUnauthenticatedError(CREDENTIAL_GONE));
       });
 
     /**
@@ -233,7 +237,7 @@ const handlers = live.toLayer(
             }),
         );
         if (connection.gone) {
-          yield* topics.end(queue, unauthenticated(CREDENTIAL_GONE));
+          yield* topics.end(queue, createUnauthenticatedError(CREDENTIAL_GONE));
         }
         return queue;
       });
@@ -250,7 +254,7 @@ const handlers = live.toLayer(
           };
           if (existing === undefined) options.client.annotate(Greeted, connection);
           if (connection.actor !== undefined || connection.greeting) {
-            return yield* Effect.fail(invalidState(HELLO_ONCE));
+            return yield* Effect.fail(createInvalidStateError(HELLO_ONCE));
           }
           // Claimed before anything is looked up, and given back if this
           // greeting does not succeed, so a client whose first try was refused
@@ -260,7 +264,7 @@ const handlers = live.toLayer(
             Effect.gen(function* () {
               if (payload.v !== LIVE_PROTOCOL_VERSION) {
                 return yield* Effect.fail(
-                  validation([
+                  createValidationError([
                     {
                       path: ["v"],
                       message: `this controller speaks live protocol version ${LIVE_PROTOCOL_VERSION}`,
@@ -273,7 +277,7 @@ const handlers = live.toLayer(
               // minutes, so the greeting checks that credential rather than
               // trusting what the ticket was minted for.
               if (Option.isNone(actor) || !(yield* stillThere(actor.value))) {
-                return yield* Effect.fail(unauthenticated(TICKET_REFUSED));
+                return yield* Effect.fail(createUnauthenticatedError(TICKET_REFUSED));
               }
               connection.actor = actor.value;
               return { v: LIVE_PROTOCOL_VERSION, serverVersion: VERSION } as const;
@@ -287,13 +291,16 @@ const handlers = live.toLayer(
       subscribe: (payload, options) =>
         Effect.gen(function* () {
           const { connection, actor } = yield* caller(options.client);
-          const topic = yield* Effect.mapError(decodeTopic(payload.topic), validationOf);
+          const topic = yield* Effect.mapError(
+            decodeTopic(payload.topic),
+            createDecodeValidationError,
+          );
           const session = parseSessionTopic(topic);
 
           if (session?.kind === "tap") {
             if (payload.cursor !== undefined) {
               return yield* Effect.fail(
-                validation([
+                createValidationError([
                   {
                     path: ["cursor"],
                     message: `${topic} never replays, so there is nothing to resume from`,
@@ -319,7 +326,7 @@ const handlers = live.toLayer(
           if (!isAppendOnlyLiveTopic(topic)) {
             if (payload.cursor !== undefined) {
               return yield* Effect.fail(
-                validation([
+                createValidationError([
                   {
                     path: ["cursor"],
                     message: `${topic} is not a log, so there is nothing to replay`,

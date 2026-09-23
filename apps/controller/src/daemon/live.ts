@@ -20,15 +20,15 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { SessionSpec, type ModelSelection, type SessionInputResult } from "@hercule/protocol";
 import {
+  createDecodeValidationError,
+  createInvalidStateError,
+  createValidationError,
   Id,
   InvalidState,
-  invalidState,
   NotFound,
   SESSION_INPUT_FIELDS,
   SESSION_RESPOND_FIELDS,
   SESSION_UPDATE_FIELDS,
-  validation,
-  validationOf,
   type Forbidden,
   type Session,
   type SessionInputOutcome,
@@ -213,7 +213,7 @@ const make = Effect.gen(function* () {
       }
       const reason = Option.isSome(answer) ? (answer.value.message ?? REFUSED) : NOT_DELIVERED;
       yield* sessions.undelivered(row, reason);
-      return yield* Effect.fail(invalidState(reason));
+      return yield* Effect.fail(createInvalidStateError(reason));
     });
 
   /**
@@ -338,12 +338,16 @@ const make = Effect.gen(function* () {
     update: (input: UpdateInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.update");
-        const { id, ...given } = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const { id, ...given } = yield* Effect.mapError(
+          decodeUpdate(input),
+          createDecodeValidationError,
+        );
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const session = yield* one(id);
-            if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+            if (session.status === "exited")
+              return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
             const modelSelection = yield* selectionFor(session, given);
             yield* sessions.setSelection(id, modelSelection);
             return (yield* recordComposer)({ ...session, modelSelection });
@@ -373,7 +377,10 @@ const make = Effect.gen(function* () {
     input: (input: InputInput): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.input");
-        const { id, text, ...picks } = yield* Effect.mapError(decodeInput(input), validationOf);
+        const { id, text, ...picks } = yield* Effect.mapError(
+          decodeInput(input),
+          createDecodeValidationError,
+        );
         // The row is read, the picks are judged and both writes happen in one
         // transaction: two submissions landing together are serialised rather
         // than merging their picks over the same stale row, and a pick the
@@ -418,16 +425,19 @@ const make = Effect.gen(function* () {
     steer: (input: InputIdentified): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.steer");
-        const { id, inputId } = yield* Effect.mapError(decodeInputIdentified(input), validationOf);
+        const { id, inputId } = yield* Effect.mapError(
+          decodeInputIdentified(input),
+          createDecodeValidationError,
+        );
         const session = yield* one(id);
         // The row is looked up before the session's own status is judged, so an
         // id belonging to another session reads not_found rather than whatever
         // this session's status happens to be.
         const row = yield* sessions.queuedInput(id, inputId);
-        if (session.status !== "busy") return yield* Effect.fail(invalidState(NOT_BUSY));
+        if (session.status !== "busy") return yield* Effect.fail(createInvalidStateError(NOT_BUSY));
         const { definition } = yield* resolved(session.instanceId);
         if (definition.declared.steering !== "native") {
-          return yield* Effect.fail(invalidState(STEERING_UNSUPPORTED));
+          return yield* Effect.fail(createInvalidStateError(STEERING_UNSUPPORTED));
         }
         // The claim is the guard against a second steer, or the flush, taking
         // the same row: only one caller's conditional update finds it still
@@ -435,7 +445,7 @@ const make = Effect.gen(function* () {
         // not that stale read, is what gets sent, in case a rewrite landed in
         // between.
         const claimed = yield* sessions.claimInput(row.id);
-        if (Option.isNone(claimed)) return yield* Effect.fail(invalidState(NOT_WAITING));
+        if (Option.isNone(claimed)) return yield* Effect.fail(createInvalidStateError(NOT_WAITING));
         return yield* deliverClaimed(claimed.value);
       }),
 
@@ -450,11 +460,12 @@ const make = Effect.gen(function* () {
     interrupt: (input: Identified): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.interrupt");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const session = yield* one(id);
-        if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+        if (session.status === "exited")
+          return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
         if (!(yield* connections.tell(session.runnerId, sessions.interrupting(id)))) {
-          return yield* Effect.fail(invalidState(GONE));
+          return yield* Effect.fail(createInvalidStateError(GONE));
         }
         const actor = yield* currentStamp;
         yield* withTransaction(
@@ -483,16 +494,18 @@ const make = Effect.gen(function* () {
         yield* requireGrant("session.respond");
         const { id, requestId, decision } = yield* Effect.mapError(
           decodeRespond(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const session = yield* one(id);
-        if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+        if (session.status === "exited")
+          return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
         const open = session.openRequest;
-        if (open === null) return yield* Effect.fail(invalidState(NO_OPEN_REQUEST));
-        if (open.requestId !== requestId) return yield* Effect.fail(invalidState(STALE_REQUEST));
+        if (open === null) return yield* Effect.fail(createInvalidStateError(NO_OPEN_REQUEST));
+        if (open.requestId !== requestId)
+          return yield* Effect.fail(createInvalidStateError(STALE_REQUEST));
         if (!open.decisions.includes(decision)) {
           return yield* Effect.fail(
-            validation([
+            createValidationError([
               {
                 path: ["decision"],
                 message: `that request takes ${open.decisions.join(", ")}`,
@@ -503,7 +516,7 @@ const make = Effect.gen(function* () {
         if (
           !(yield* connections.tell(session.runnerId, sessions.responding(id, requestId, decision)))
         ) {
-          return yield* Effect.fail(invalidState(GONE));
+          return yield* Effect.fail(createInvalidStateError(GONE));
         }
         const actor = yield* currentStamp;
         yield* withTransaction(
@@ -531,9 +544,10 @@ const make = Effect.gen(function* () {
     stop: (input: Identified): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.stop");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const session = yield* one(id);
-        if (session.status === "exited") return yield* Effect.fail(invalidState(HAS_EXITED));
+        if (session.status === "exited")
+          return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
         if (session.status === "queued") {
           return yield* withTransaction(
             sql,
@@ -555,7 +569,7 @@ const make = Effect.gen(function* () {
           );
         }
         if (!(yield* connections.tell(session.runnerId, sessions.stopping(id)))) {
-          return yield* Effect.fail(invalidState(GONE));
+          return yield* Effect.fail(createInvalidStateError(GONE));
         }
         const actor = yield* currentStamp;
         yield* withTransaction(

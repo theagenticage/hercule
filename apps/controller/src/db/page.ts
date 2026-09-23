@@ -35,7 +35,7 @@ import type { Fragment } from "effect/unstable/sql/Statement";
 import {
   MAX_PAGE_LIMIT,
   SortDirection,
-  validation,
+  createValidationError,
   type OperationId,
   type Validation,
 } from "@hercule/contract";
@@ -331,5 +331,5 @@ export const refuseCursor = <A, E, R>(
   Effect.catchIf(
     effect,
     (error): error is CursorError => error instanceof CursorError,
-    (error) => Effect.fail(validation([{ path: ["cursor"], message: error.message }])),
+    (error) => Effect.fail(createValidationError([{ path: ["cursor"], message: error.message }])),
   ) as Effect.Effect<A, Exclude<E, CursorError> | Validation, R>;

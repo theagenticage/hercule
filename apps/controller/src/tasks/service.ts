@@ -24,17 +24,17 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  createDecodeValidationError,
+  createNotFoundError,
+  createValidationError,
   DEFAULT_PAGE_LIMIT,
   Id,
   MAX_TASK_LABELS,
-  notFound,
   TASK_SORT_FIELDS,
   TaskCreateInput,
   TaskFilter,
   TaskUpdateInput,
   refuseEmptyTaskUpdate,
-  validation,
-  validationOf,
   type Forbidden,
   type NotFound,
   type ProvenanceEntry,
@@ -115,7 +115,7 @@ const orderOf = (
 ): Effect.Effect<TaskOrder, Validation> => {
   if (text !== undefined && sort !== undefined) {
     return Effect.fail(
-      validation([
+      createValidationError([
         { path: ["sort"], message: "a full-text search is ordered by relevance" },
         { path: ["text"], message: "a search cannot also be sorted; drop one of the two" },
       ]),
@@ -135,7 +135,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(
       tasks.live(id),
       Option.match({
-        onNone: () => Effect.fail(notFound(NO_SUCH_TASK)),
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_TASK)),
         onSome: Effect.succeed,
       }),
     );
@@ -147,7 +147,7 @@ const make = Effect.gen(function* () {
     id === undefined || id === null
       ? Effect.void
       : Effect.flatMap(tasks.projectExists(id), (exists) =>
-          exists ? Effect.void : Effect.fail(notFound(NO_SUCH_PROJECT)),
+          exists ? Effect.void : Effect.fail(createNotFoundError(NO_SUCH_PROJECT)),
         );
 
   return {
@@ -157,7 +157,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<TaskPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.query");
-        const decoded = yield* Effect.mapError(decodeQuery(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         const { limit, cursor, sort, text, ...filter } = decoded;
         const order = yield* orderOf(text, sort);
         const listing = yield* refuseCursor(
@@ -175,7 +175,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* live(id);
       }),
 
@@ -185,7 +185,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.create");
-        const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -231,7 +231,10 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
-        const { id, ...patch } = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const { id, ...patch } = yield* Effect.mapError(
+          decodeUpdate(input),
+          createDecodeValidationError,
+        );
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -270,7 +273,7 @@ const make = Effect.gen(function* () {
               // what the task ends up carrying, not on what one edit named.
               if (kept.length + added.length > MAX_TASK_LABELS) {
                 return yield* Effect.fail(
-                  validation([
+                  createValidationError([
                     {
                       path: ["addLabels"],
                       message: `A task carries at most ${String(MAX_TASK_LABELS)} labels.`,
@@ -323,7 +326,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("task.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

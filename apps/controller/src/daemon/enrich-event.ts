@@ -17,7 +17,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   EventEnrichInput,
   EventId,
-  validationOf,
+  createDecodeValidationError,
   type Event,
   type Forbidden,
   type NotFound,
@@ -61,7 +61,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         // Amending the log is writing to it, which is the grant an emit needs.
         yield* requireGrant("event.enrich");
-        const decoded = yield* Effect.mapError(decodeEnrich(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeEnrich(input), createDecodeValidationError);
         const actor = yield* currentStamp;
 
         const { amended, reports } = yield* withTransaction(

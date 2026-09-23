@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Schema } from "effect";
-import { ExternalRef, Id, issuesOf } from "./index";
+import { ExternalRef, Id, listDecodeIssues } from "./index";
 
 const decode = (input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(ExternalRef)(input))._tag;
@@ -25,7 +25,7 @@ describe("the id grammar", () => {
     expect(failed._tag).toBe("Failure");
     if (failed._tag !== "Failure") return;
     const error = Cause.squash(failed.cause) as Schema.SchemaError;
-    expect(issuesOf(error)).toEqual([
+    expect(listDecodeIssues(error)).toEqual([
       { path: [], message: "Expected a canonical lowercase UUIDv7" },
     ]);
   });

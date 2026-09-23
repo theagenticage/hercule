@@ -159,38 +159,46 @@ export type ApiError =
   | CapExceeded
   | Internal;
 
-export const unauthenticated = (message: string): Unauthenticated =>
+/** Creates the error for a missing credential, or for a credential that does not resolve. */
+export const createUnauthenticatedError = (message: string): Unauthenticated =>
   new Unauthenticated({ error: { code: "unauthenticated", message } });
 
-export const forbidden = (grant: Grant, message = `missing grant ${grant}`): Forbidden =>
+/** Creates the error for a caller who lacks the grant that the operation requires. */
+export const createForbiddenError = (grant: Grant, message = `missing grant ${grant}`): Forbidden =>
   new Forbidden({ error: { code: "forbidden", message, details: { grant } } });
 
-export const validation = (
+/** Creates the error for a request that fails validation, with one issue per problem. */
+export const createValidationError = (
   issues: ReadonlyArray<Issue>,
   message = "the request is not valid",
 ): Validation => new Validation({ error: { code: "validation", message, details: { issues } } });
 
-export const notFound = (message: string): NotFound =>
+/** Creates the error for an entity that does not exist. */
+export const createNotFoundError = (message: string): NotFound =>
   new NotFound({ error: { code: "not_found", message } });
 
-export const conflict = (message: string): Conflict =>
+/** Creates the error for a write that collides with something that already exists. */
+export const createConflictError = (message: string): Conflict =>
   new Conflict({ error: { code: "conflict", message } });
 
-export const invalidState = (message: string): InvalidState =>
+/** Creates the error for an entity whose state does not allow the operation. */
+export const createInvalidStateError = (message: string): InvalidState =>
   new InvalidState({ error: { code: "invalid_state", message } });
 
-export const capExceeded = (details: CapDetails, message: string): CapExceeded =>
+/** Creates the error for a size or a count that is more than its cap. */
+export const createCapExceededError = (details: CapDetails, message: string): CapExceeded =>
   new CapExceeded({ error: { code: "cap_exceeded", message, details } });
 
-export const internal = (message: string): Internal =>
+/** Creates the error for a failure that the caller cannot fix. */
+export const createInternalError = (message: string): Internal =>
   new Internal({ error: { code: "internal", message } });
 
 /**
- * One issue as a line of text: its path, with the keys joined by dots, and
- * then its message. An issue with an empty path is its message alone. The CLI
- * prints each issue as this line, and the controller tells a plugin about each
- * field it registered wrong in this line, so an issue reads the same in both
- * places.
+ * Formats one issue as a line of text: the path with its keys joined by dots,
+ * then the message. An issue with an empty path formats as its message alone.
+ * The CLI prints each issue in this format, and the controller uses the same
+ * format when it tells a plugin about a field it registered wrong, so an issue
+ * reads the same in both places.
  */
 export const describeIssue = (issue: Issue): string =>
   issue.path.length === 0 ? issue.message : `${issue.path.join(".")}: ${issue.message}`;
@@ -198,18 +206,21 @@ export const describeIssue = (issue: Issue): string =>
 const formatStandardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
 /**
- * Every issue of a decode failure, each at its path, in the contract's
- * vocabulary: one entry per thing wrong, so a caller fixes every field in one
- * retry. Path segments are stringified because a JSON document has no other
- * kind of key.
+ * Lists every leaf issue of a Schema issue tree, each at its path, as the
+ * contract's `Issue` entries. The list has one entry per problem, so a caller
+ * can fix every field in one retry. Path segments are stringified because a
+ * JSON document has no other kind of key.
  *
- * The walk goes through the pointers, the encodings, the groups of issues and
- * the unions whose members each failed, to the leaves. `describeLeaf` gives
- * the issues that one leaf stands for, in words of the caller's own, or
- * `undefined` to describe the leaf in the schema library's words. An empty
- * list leaves the leaf out. `path` is the place of the decoded value, which
- * each path starts with. The checks of a workflow word their issues through
- * this walk, so each of them reads the failure in the same way.
+ * The walk goes through pointers, encodings, composite issues, and unions
+ * whose members all failed, down to the leaves. The options change two things:
+ *
+ * - `path` is the path of the decoded value. Every returned path starts with it.
+ * - `describeLeaf` returns the issues for one leaf in the caller's own words.
+ *   It returns `undefined` to keep the schema library's message, and an empty
+ *   list to drop the leaf.
+ *
+ * The workflow checks word their issues through this function, so they all
+ * report a decode failure in the same way.
  */
 export const listSchemaIssues = (
   issue: SchemaIssue.Issue,
@@ -239,15 +250,16 @@ export const listSchemaIssues = (
 };
 
 /**
- * A decode failure as the contract's `issues` list, in the schema library's
- * words.
+ * Lists the issues of a Schema decode failure, one entry per problem, with the
+ * schema library's messages.
  *
  * The wire vocabulary names no schema library, and this is the one place the
  * two meet: the transport decodes a request with it and a service decodes an
  * in-process call with it, so the same bad input reads the same either way.
  */
-export const issuesOf = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
+export const listDecodeIssues = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
   listSchemaIssues(error.issue);
 
-/** A decode failure as the error the operation answers with. */
-export const validationOf = (error: Schema.SchemaError): Validation => validation(issuesOf(error));
+/** Creates the validation error for a Schema decode failure, with one issue per problem. */
+export const createDecodeValidationError = (error: Schema.SchemaError): Validation =>
+  createValidationError(listDecodeIssues(error));

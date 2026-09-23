@@ -38,15 +38,15 @@ import {
   type WorkspaceReport,
 } from "@hercule/protocol";
 import {
-  conflict,
+  createConflictError,
   DEFAULT_PAGE_LIMIT,
   Id,
-  invalidState,
-  notFound,
-  validation,
+  createInvalidStateError,
+  createNotFoundError,
+  createValidationError,
   WORKSPACE_SORT_FIELDS,
   WorkspaceFilter,
-  validationOf,
+  createDecodeValidationError,
   type Checkout,
   type Conflict,
   type Forbidden,
@@ -213,7 +213,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(
       workspaces.one(id),
       Option.match({
-        onNone: () => Effect.fail(notFound(NO_SUCH_WORKSPACE)),
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_WORKSPACE)),
         onSome: Effect.succeed,
       }),
     );
@@ -266,8 +266,9 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<StoredRepo, NotFound | InvalidState | SqlError> =>
     Effect.gen(function* () {
       const found = yield* resources.one(resourceId);
-      if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_RESOURCE));
-      if (!isCheckedOut(found.value)) return yield* Effect.fail(invalidState(NOT_CHECKED_OUT));
+      if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RESOURCE));
+      if (!isCheckedOut(found.value))
+        return yield* Effect.fail(createInvalidStateError(NOT_CHECKED_OUT));
       return found.value;
     });
 
@@ -279,10 +280,14 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const found = yield* resources.one(resourceId);
       if (Option.isNone(found)) {
-        return yield* Effect.fail(validation([{ path: ["workspace"], message: NO_SUCH_RESOURCE }]));
+        return yield* Effect.fail(
+          createValidationError([{ path: ["workspace"], message: NO_SUCH_RESOURCE }]),
+        );
       }
       if (!isCheckedOut(found.value)) {
-        return yield* Effect.fail(validation([{ path: ["workspace"], message: NOT_CHECKED_OUT }]));
+        return yield* Effect.fail(
+          createValidationError([{ path: ["workspace"], message: NOT_CHECKED_OUT }]),
+        );
       }
       yield* filedUnder([resourceId], projectId);
       return found.value;
@@ -303,7 +308,9 @@ const make = Effect.gen(function* () {
       const filed = yield* resources.projectsOf(resourceIds);
       for (const resourceId of resourceIds) {
         if (!(filed.get(resourceId) ?? []).includes(projectId)) {
-          return yield* Effect.fail(validation([{ path: ["projectId"], message: NOT_IN_PROJECT }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: ["projectId"], message: NOT_IN_PROJECT }]),
+          );
         }
       }
     });
@@ -349,7 +356,9 @@ const make = Effect.gen(function* () {
         const row = yield* workspaces.one(joined);
         if (Option.isNone(row)) {
           return yield* Effect.fail(
-            validation([{ path: ["workspace", "workspaceId"], message: NO_SUCH_WORKSPACE }]),
+            createValidationError([
+              { path: ["workspace", "workspaceId"], message: NO_SUCH_WORKSPACE },
+            ]),
           );
         }
         const held = (yield* workspaces.checkoutsOf([joined])).get(joined) ?? [];
@@ -400,12 +409,12 @@ const make = Effect.gen(function* () {
       const names = repos.map((repo) => repoNameOf(repo.resource.canonicalRemote));
       if (new Set(repos.map((repo) => repo.resource.id)).size !== repos.length) {
         return yield* Effect.fail(
-          validation([{ path: ["workspace", "checkouts"], message: REPO_TWICE }]),
+          createValidationError([{ path: ["workspace", "checkouts"], message: REPO_TWICE }]),
         );
       }
       if (repos.length > 1 && new Set(names).size !== names.length) {
         return yield* Effect.fail(
-          validation([{ path: ["workspace", "checkouts"], message: SAME_NAME }]),
+          createValidationError([{ path: ["workspace", "checkouts"], message: SAME_NAME }]),
         );
       }
       // Said here, where the user can read it, rather than left to the frame
@@ -414,7 +423,9 @@ const make = Effect.gen(function* () {
       const unusable = repos.length > 1 ? names.find((name) => !isDirectoryName(name)) : undefined;
       if (unusable !== undefined) {
         return yield* Effect.fail(
-          validation([{ path: ["workspace", "checkouts"], message: unnameable(unusable) }]),
+          createValidationError([
+            { path: ["workspace", "checkouts"], message: unnameable(unusable) },
+          ]),
         );
       }
       const checkouts: ReadonlyArray<OpeningCheckout> = repos.map((repo, index) => ({
@@ -451,7 +462,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("workspace.query");
         const { limit, cursor, sort, ...filter } = yield* Effect.mapError(
           decodeQuery(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const listing = yield* refuseCursor(
           workspaces.list({
@@ -474,7 +485,7 @@ const make = Effect.gen(function* () {
     read: (input: Identified): Effect.Effect<Workspace, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* Effect.flatMap(stored(id), composedOne);
       }),
 
@@ -503,11 +514,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const resource = yield* repo(input.resourceId);
         const runner = yield* runners.read(input.runnerId);
-        if (Option.isNone(runner)) return yield* Effect.fail(notFound(NO_SUCH_RUNNER));
+        if (Option.isNone(runner)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RUNNER));
         const held = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(held)) {
           return yield* Effect.fail(
-            conflict("that repo already has a primary workspace on that machine"),
+            createConflictError("that repo already has a primary workspace on that machine"),
           );
         }
         const at = yield* nowIso;
@@ -529,12 +540,14 @@ const make = Effect.gen(function* () {
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         const workspace = yield* stored(id);
-        if (workspace.kind === "primary") return yield* Effect.fail(invalidState(PRIMARY_STANDS));
+        if (workspace.kind === "primary")
+          return yield* Effect.fail(createInvalidStateError(PRIMARY_STANDS));
         if (workspace.status === "deleted" || workspace.status === "lost") {
-          return yield* Effect.fail(invalidState(ALREADY_GONE));
+          return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
         }
         const living = (yield* workspaces.sessionIdsOf([id])).get(id) ?? [];
-        if (living.length > 0) return yield* Effect.fail(invalidState(stillLivedIn(living.length)));
+        if (living.length > 0)
+          return yield* Effect.fail(createInvalidStateError(stillLivedIn(living.length)));
         return workspace;
       }),
 
@@ -714,14 +727,18 @@ const make = Effect.gen(function* () {
         const found = yield* workspaces.one(workspaceId);
         if (Option.isNone(found)) {
           return yield* Effect.fail(
-            validation([{ path: ["workspace", "workspaceId"], message: NO_SUCH_WORKSPACE }]),
+            createValidationError([
+              { path: ["workspace", "workspaceId"], message: NO_SUCH_WORKSPACE },
+            ]),
           );
         }
         if (requestedRunnerId !== undefined && requestedRunnerId !== found.value.runnerId) {
-          return yield* Effect.fail(validation([{ path: ["runnerId"], message: WORKSPACE_PINS }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: ["runnerId"], message: WORKSPACE_PINS }]),
+          );
         }
         if (found.value.status !== "ready") {
-          return yield* Effect.fail(invalidState(WORKSPACE_NOT_READY));
+          return yield* Effect.fail(createInvalidStateError(WORKSPACE_NOT_READY));
         }
         return found.value.runnerId;
       }),

@@ -25,7 +25,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { invalidState, type InvalidState } from "@hercule/contract";
+import { createInvalidStateError, type InvalidState } from "@hercule/contract";
 import { USER_ACTOR } from "../actor";
 import { HerculeHome } from "../config";
 import { Credentials, hashToken, mintToken } from "../credentials";
@@ -100,7 +100,7 @@ const make = Effect.gen(function* () {
             `;
             const changed = yield* sql<{ readonly rows: number }>`SELECT changes() AS rows`;
             if ((changed[0]?.rows ?? 0) === 0) {
-              return yield* Effect.fail(invalidState("Hercule is already set up."));
+              return yield* Effect.fail(createInvalidStateError("Hercule is already set up."));
             }
 
             const user = yield* users.create(input.username, passwordHash);

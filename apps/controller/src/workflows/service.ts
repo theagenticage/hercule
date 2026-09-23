@@ -27,16 +27,16 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  createDecodeValidationError,
+  createNotFoundError,
+  createValidationError,
   decodeWorkflowDefinition,
   DEFAULT_PAGE_LIMIT,
   Id,
-  notFound,
   parseWorkflowSource,
   renderWorkflowSource,
   TRIGGER_SORT_FIELDS,
   TriggerFilter,
-  validation,
-  validationOf,
   WORKFLOW_SORT_FIELDS,
   WORKFLOW_UPDATE_FIELDS,
   WorkflowCreateInput,
@@ -139,7 +139,9 @@ const chooseContent = (input: {
   readonly definition?: unknown;
 }): Effect.Effect<WorkflowContent | undefined, Validation> => {
   if (input.source !== undefined && input.definition !== undefined) {
-    return Effect.fail(validation([{ path: [], message: SOURCE_AND_DEFINITION_TOGETHER }]));
+    return Effect.fail(
+      createValidationError([{ path: [], message: SOURCE_AND_DEFINITION_TOGETHER }]),
+    );
   }
   if (input.source !== undefined) return Effect.succeed({ source: input.source });
   if (input.definition !== undefined) return Effect.succeed({ definition: input.definition });
@@ -153,7 +155,7 @@ const requireContent = (input: {
 }): Effect.Effect<WorkflowContent, Validation> =>
   Effect.flatMap(chooseContent(input), (content) =>
     content === undefined
-      ? Effect.fail(validation([{ path: [], message: NO_CONTENT }]))
+      ? Effect.fail(createValidationError([{ path: [], message: NO_CONTENT }]))
       : Effect.succeed(content),
   );
 
@@ -178,7 +180,9 @@ const parseContent = (
 
 /** The text and definition of the workflow a save sent, or the refusal of every problem of shape. */
 const requireParsedContent = (content: WorkflowContent): Effect.Effect<ParsedSource, Validation> =>
-  Effect.mapError(Effect.fromResult(parseContent(content)), (issues) => validation(issues));
+  Effect.mapError(Effect.fromResult(parseContent(content)), (issues) =>
+    createValidationError(issues),
+  );
 
 /** The rows a definition's triggers are listed by, one each. */
 const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<DeclaredTrigger> =>
@@ -197,7 +201,7 @@ type CallError = Unauthenticated | Forbidden | Validation | SqlError;
 
 /** Refuses a save whose definition fails a check of meaning, with every error the check found. */
 const requireNoErrors = (problems: WorkflowIssues): Effect.Effect<void, Validation> =>
-  problems.errors.length === 0 ? Effect.void : Effect.fail(validation(problems.errors));
+  problems.errors.length === 0 ? Effect.void : Effect.fail(createValidationError(problems.errors));
 
 /** Answers the workflow an effect found, or `not_found` where it found none. */
 const requireFound = <A, E>(
@@ -206,7 +210,7 @@ const requireFound = <A, E>(
   Effect.flatMap(
     found,
     Option.match({
-      onNone: () => Effect.fail(notFound(NO_SUCH_WORKFLOW)),
+      onNone: () => Effect.fail(createNotFoundError(NO_SUCH_WORKFLOW)),
       onSome: Effect.succeed,
     }),
   );
@@ -262,7 +266,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("workflow.query");
         const { limit, cursor, sort, enabled } = yield* Effect.mapError(
           decodeQuery(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const listing = yield* refuseCursor(
           workflows.list({
@@ -281,7 +285,7 @@ const make = Effect.gen(function* () {
     read: (input: Identified): Effect.Effect<Workflow, CallError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* requireFound(workflows.read(id));
       }),
 
@@ -289,7 +293,7 @@ const make = Effect.gen(function* () {
     create: (input: WorkflowCreateInput): Effect.Effect<WorkflowSaved, CallError> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.create");
-        const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         const parsedSource = yield* requireParsedContent(yield* requireContent(decoded));
         return yield* withTransaction(
           sql,
@@ -326,10 +330,12 @@ const make = Effect.gen(function* () {
     update: (input: UpdateInput): Effect.Effect<WorkflowSaved, CallError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.update");
-        const decoded = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeUpdate(input), createDecodeValidationError);
         const content = yield* chooseContent(decoded);
         if (content === undefined && decoded.enabled === undefined) {
-          return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: [], message: "name a field to change" }]),
+          );
         }
         const parsedSource =
           content === undefined ? undefined : yield* requireParsedContent(content);
@@ -384,7 +390,7 @@ const make = Effect.gen(function* () {
     delete: (input: Identified): Effect.Effect<Record<string, never>, CallError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -410,7 +416,7 @@ const make = Effect.gen(function* () {
     validate: (input: WorkflowValidateInput): Effect.Effect<WorkflowIssues, CallError> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.validate");
-        const decoded = yield* Effect.mapError(decodeValidate(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeValidate(input), createDecodeValidationError);
         const parsed = parseContent(yield* requireContent(decoded));
         return Result.isSuccess(parsed)
           ? yield* readReferencesAndCheck(parsed.success.definition)
@@ -423,7 +429,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("trigger.query");
         const { limit, cursor, sort, ...filter } = yield* Effect.mapError(
           decodeTriggerQuery(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const listing = yield* refuseCursor(
           workflows.listTriggers({

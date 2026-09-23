@@ -22,7 +22,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import { OPERATIONS, unauthenticated } from "@hercule/contract";
+import { OPERATIONS, createUnauthenticatedError } from "@hercule/contract";
 import { Setup } from "../setup";
 import { responseFor } from "./envelope";
 
@@ -57,7 +57,7 @@ export const setupGate = HttpRouter.middleware(
         const { route } = yield* HttpRouter.RouteContext;
         if (OPEN_BEFORE_SETUP.has(`${route.method} ${route.path}`)) return yield* httpEffect;
         if (yield* isComplete) return yield* httpEffect;
-        return responseFor(unauthenticated(NOT_SET_UP));
+        return responseFor(createUnauthenticatedError(NOT_SET_UP));
       });
   }),
 );

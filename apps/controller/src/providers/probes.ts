@@ -16,7 +16,7 @@ import * as Stream from "effect/Stream";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { notFound, type CapabilitySnapshot, type NotFound } from "@hercule/contract";
+import { createNotFoundError, type CapabilitySnapshot, type NotFound } from "@hercule/contract";
 import { announce, nowIso, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
 import { RunnerConnections, runnerRepository } from "../runners";
@@ -142,7 +142,7 @@ const make = Effect.gen(function* () {
         instances.one(instanceId),
         (found): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError | NotFound> =>
           Option.isNone(found)
-            ? Effect.fail(notFound("no such provider instance"))
+            ? Effect.fail(createNotFoundError("no such provider instance"))
             : probeOne(runnerId, found.value),
       ),
 

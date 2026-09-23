@@ -8,7 +8,12 @@
  */
 import type * as Schema from "effect/Schema";
 import { PluginError } from "@hercule/plugin-host";
-import { cutShort, describeIssue, issuesOf, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
+import {
+  cutShort,
+  describeIssue,
+  listDecodeIssues,
+  MAX_PLUGIN_MESSAGE_LENGTH,
+} from "@hercule/contract";
 
 /**
  * Cutting a plugin's unbounded text where the message is made, rather than at
@@ -22,7 +27,7 @@ export const truncateMessage = (message: string): string =>
 
 /** Every issue a decode found, as one line naming the field each one is about. */
 export const describeFieldIssues = (error: Schema.SchemaError): string =>
-  truncateMessage(issuesOf(error).map(describeIssue).join("; "));
+  truncateMessage(listDecodeIssues(error).map(describeIssue).join("; "));
 
 /** The same, as the failure the registration surfaces declare. */
 export const asPluginError = (error: Schema.SchemaError): PluginError =>

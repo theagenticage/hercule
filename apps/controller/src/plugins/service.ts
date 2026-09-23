@@ -14,10 +14,10 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  notFound,
+  createDecodeValidationError,
+  createNotFoundError,
+  createValidationError,
   PluginConfigureInput,
-  validation,
-  validationOf,
   type Forbidden,
   type NotFound,
   type PluginDetail,
@@ -78,7 +78,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(details, (all) => {
       const found = all.find((detail) => detail.id === id);
       return found === undefined
-        ? Effect.fail(notFound(`no plugin named ${id} is installed`))
+        ? Effect.fail(createNotFoundError(`no plugin named ${id} is installed`))
         : Effect.succeed(found);
     });
 
@@ -92,7 +92,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(one(id), (detail) =>
       detail.status._tag === "refused"
         ? Effect.fail(
-            validation(
+            createValidationError(
               [{ path: [], message: `the plugin ${id} was not loaded, so it cannot be changed` }],
               `the plugin ${id} was not loaded`,
             ),
@@ -111,7 +111,7 @@ const make = Effect.gen(function* () {
       const detail = yield* target(id);
       if (yield* host.startable(id)) return detail;
       const message = `the plugin ${id} needs a controller restart before it can start again`;
-      return yield* Effect.fail(validation([{ path: [], message }], message));
+      return yield* Effect.fail(createValidationError([{ path: [], message }], message));
     });
 
   /**
@@ -210,7 +210,10 @@ const make = Effect.gen(function* () {
     configure: (id: string, input: PluginConfigureInput): Effect.Effect<PluginDetail, MoveError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.configure");
-        const { config } = yield* Effect.mapError(decodeConfigure(input), validationOf);
+        const { config } = yield* Effect.mapError(
+          decodeConfigure(input),
+          createDecodeValidationError,
+        );
         return yield* host.serialized(
           Effect.gen(function* () {
             yield* restartable(id);
@@ -231,7 +234,7 @@ const make = Effect.gen(function* () {
             const detail = yield* restartable(id);
             if (detail.status._tag !== "errored") {
               const message = `the plugin ${id} is not errored, so there is nothing to retry`;
-              return yield* Effect.fail(validation([{ path: [], message }], message));
+              return yield* Effect.fail(createValidationError([{ path: [], message }], message));
             }
             yield* write(id, "plugin.retried", () => Effect.void);
             yield* host.refresh(id);

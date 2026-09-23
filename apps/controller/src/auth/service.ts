@@ -19,8 +19,8 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  unauthenticated,
-  validation,
+  createUnauthenticatedError,
+  createValidationError,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
@@ -95,7 +95,7 @@ const make = Effect.gen(function* () {
               ),
               Effect.ignore,
             );
-          return yield* Effect.fail(unauthenticated(WRONG));
+          return yield* Effect.fail(createUnauthenticatedError(WRONG));
         }
 
         const token = mintToken();
@@ -124,7 +124,7 @@ const make = Effect.gen(function* () {
         const actor = yield* CurrentActor;
         if (actor._tag !== "user" || actor.credential.kind !== "login") {
           return yield* Effect.fail(
-            validation(
+            createValidationError(
               [{ path: [], message: "logout revokes a login token; use apiKey.revoke for a key" }],
               "this credential is not a login token",
             ),

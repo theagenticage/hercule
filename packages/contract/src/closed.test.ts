@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Schema } from "effect";
 import { closedStruct } from "./closed";
-import { issuesOf } from "./errors";
+import { listDecodeIssues } from "./errors";
 import { SettingsPatch } from "./groups/settings";
 
 const decode =
@@ -26,7 +26,7 @@ describe("a closed struct", () => {
     expect(failed._tag).toBe("Failure");
     if (failed._tag !== "Failure") return;
     const error = Cause.squash(failed.cause) as Schema.SchemaError;
-    expect(issuesOf(error)).toEqual([
+    expect(listDecodeIssues(error)).toEqual([
       { path: ["b"], message: "This field is not known here. Correct its name, or remove it." },
     ]);
   });

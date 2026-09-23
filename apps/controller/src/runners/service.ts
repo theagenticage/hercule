@@ -16,17 +16,17 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  conflict,
+  createConflictError,
   DEFAULT_PAGE_LIMIT,
   Id,
-  invalidState,
-  notFound,
+  createInvalidStateError,
+  createNotFoundError,
   RUNNER_RETIRE_FIELDS,
-  validation,
+  createValidationError,
   RUNNER_EDIT_FIELDS,
   RUNNER_SORT_FIELDS,
   RunnerFilter,
-  validationOf,
+  createDecodeValidationError,
   type Conflict,
   type Forbidden,
   type InvalidState,
@@ -158,7 +158,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(
       runners.read(id),
       Option.match({
-        onNone: () => Effect.fail(notFound(NO_SUCH_RUNNER)),
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_RUNNER)),
         onSome: Effect.succeed,
       }),
     );
@@ -180,14 +180,14 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<RunnerDetail, MoveError> =>
     Effect.gen(function* () {
       yield* requireGrant(move.operation);
-      const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+      const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
       return yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
           const before = yield* one(id);
           if (before.lifecycle !== move.from) {
-            return yield* Effect.fail(invalidState(move.refusal));
+            return yield* Effect.fail(createInvalidStateError(move.refusal));
           }
           yield* runners.setLifecycle(id, move.to, at);
           yield* audit.append({
@@ -210,7 +210,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("runner.query");
         const { limit, cursor, sort, connectivity, lifecycle, label } = yield* Effect.mapError(
           decodeQuery(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const listing = yield* refuseCursor(
           runners.list({
@@ -236,7 +236,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("runner.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* one(id);
       }),
 
@@ -252,9 +252,14 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("runner.update");
-        const { id, ...patch } = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const { id, ...patch } = yield* Effect.mapError(
+          decodeUpdate(input),
+          createDecodeValidationError,
+        );
         if (Object.keys(patch).length === 0) {
-          return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: [], message: "name a field to change" }]),
+          );
         }
         const result = yield* withTransaction(
           sql,
@@ -293,10 +298,10 @@ const make = Effect.gen(function* () {
             // Both reads sit inside the transaction the write is in, so the
             // fleet cannot take the name, or the default, in between.
             if (edit.name !== undefined && (yield* runners.names()).has(edit.name)) {
-              return yield* Effect.fail(conflict(NAME_TAKEN));
+              return yield* Effect.fail(createConflictError(NAME_TAKEN));
             }
             if (edit.reserved === true && (yield* settings.defaultRunnerId()) === id) {
-              return yield* Effect.fail(conflict(RESERVED_IS_THE_DEFAULT));
+              return yield* Effect.fail(createConflictError(RESERVED_IS_THE_DEFAULT));
             }
 
             yield* runners.update(id, edit, at);
@@ -378,21 +383,24 @@ const make = Effect.gen(function* () {
     retire: (input: RetireInput): Effect.Effect<Retired, MoveError | SettingError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.retire");
-        const { id, force } = yield* Effect.mapError(decodeRetire(input), validationOf);
+        const { id, force } = yield* Effect.mapError(
+          decodeRetire(input),
+          createDecodeValidationError,
+        );
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
             const before = yield* one(id);
             if (before.lifecycle === "retired") {
-              return yield* Effect.fail(invalidState(ALREADY_RETIRED));
+              return yield* Effect.fail(createInvalidStateError(ALREADY_RETIRED));
             }
             if (force !== true) {
               if ((yield* runners.runningSessions(id)) > 0) {
-                return yield* Effect.fail(invalidState(STILL_RUNNING));
+                return yield* Effect.fail(createInvalidStateError(STILL_RUNNING));
               }
               if (before.connectivity === "unreachable") {
-                return yield* Effect.fail(invalidState(UNREACHABLE));
+                return yield* Effect.fail(createInvalidStateError(UNREACHABLE));
               }
             }
             yield* runners.setLifecycle(id, "retired", at);
@@ -421,13 +429,13 @@ const make = Effect.gen(function* () {
     refreshFacts: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.refreshFacts");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const before = yield* one(id);
         yield* requireOnline(before);
         if (!(yield* connections.refreshedFacts(id))) {
           const waited = Duration.format(yield* RunnerFactsDeadline);
           return yield* Effect.fail(
-            invalidState(`that runner did not report its facts within ${waited}`),
+            createInvalidStateError(`that runner did not report its facts within ${waited}`),
           );
         }
         return yield* one(id);
@@ -481,13 +489,13 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("runner.revokeJoinToken");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
             if (!(yield* joinTokens.revoke(id, at))) {
-              return yield* Effect.fail(notFound(NO_SUCH_JOIN_TOKEN));
+              return yield* Effect.fail(createNotFoundError(NO_SUCH_JOIN_TOKEN));
             }
             yield* audit.append({
               kind: "runner.joinToken.revoked",

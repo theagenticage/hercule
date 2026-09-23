@@ -40,12 +40,12 @@ import {
   Id,
   MAX_EVENT_KIND_LENGTH,
   MAX_PAGE_LIMIT,
-  issuesOf,
-  notFound,
+  listDecodeIssues,
+  createNotFoundError,
   SortDirection,
   Timestamp,
-  validation,
-  validationOf,
+  createValidationError,
+  createDecodeValidationError,
   type EventEmitted,
   type Event,
   type Forbidden,
@@ -138,7 +138,9 @@ const decodeAgainstKind = (
  * as one about `kind` or `refs`.
  */
 const refusePayload = (error: Schema.SchemaError): Validation =>
-  validation(issuesOf(error).map((issue) => ({ ...issue, path: ["payload", ...issue.path] })));
+  createValidationError(
+    listDecodeIssues(error).map((issue) => ({ ...issue, path: ["payload", ...issue.path] })),
+  );
 
 /**
  * The external system an event of this kind is about: the id of the plugin
@@ -176,7 +178,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<EventPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("event.query");
-        const decoded = yield* Effect.mapError(decodeQuery(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         const direction = decoded.sort?.direction ?? DEFAULT_DIRECTION;
         const limit = decoded.limit ?? DEFAULT_PAGE_LIMIT;
         const scope = { op: "event.query", field: "id", direction } as const;
@@ -186,7 +188,9 @@ const make = Effect.gen(function* () {
             ? undefined
             : yield* decodeIdCursor(decoded.cursor, scope).pipe(
                 Effect.catchTag("CursorError", (error) =>
-                  Effect.fail(validation([{ path: ["cursor"], message: error.message }])),
+                  Effect.fail(
+                    createValidationError([{ path: ["cursor"], message: error.message }]),
+                  ),
                 ),
               );
 
@@ -235,7 +239,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Event, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("event.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         // An entry this caller may not see answers as an entry that is not
         // there: a hidden row and an id past the head of the log are one
         // answer, so the log's contents cannot be probed by id.
@@ -246,7 +250,9 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(EVENT_COLUMNS)} FROM events WHERE id = ${id} ${hidden}
         `;
         const row = rows[0];
-        return row === undefined ? yield* Effect.fail(notFound("no such event")) : toEvent(row);
+        return row === undefined
+          ? yield* Effect.fail(createNotFoundError("no such event"))
+          : toEvent(row);
       }),
 
     /**
@@ -262,7 +268,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("event.emit");
-        const decoded = yield* Effect.mapError(decodeEmit(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeEmit(input), createDecodeValidationError);
 
         // A kind nobody declared has no schema to read the payload against, so
         // there is nothing to write.
@@ -271,7 +277,7 @@ const make = Effect.gen(function* () {
           Option.match({
             onNone: () =>
               Effect.fail(
-                validation([
+                createValidationError([
                   { path: ["kind"], message: `no plugin declares the event kind ${decoded.kind}` },
                 ]),
               ),
@@ -309,7 +315,7 @@ const make = Effect.gen(function* () {
               `;
               if (known.length === 0) {
                 return yield* Effect.fail(
-                  notFound(`no connection has the id ${decoded.connectionId!}`),
+                  createNotFoundError(`no connection has the id ${decoded.connectionId!}`),
                 );
               }
             }
@@ -363,7 +369,7 @@ const make = Effect.gen(function* () {
         `;
         const row = rows[0];
         if (row === undefined || AUDIT_KIND_NAMES.has(row.kind)) {
-          return yield* Effect.fail(notFound("no such event"));
+          return yield* Effect.fail(createNotFoundError("no such event"));
         }
         const held = toEvent(row);
 

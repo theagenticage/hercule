@@ -42,7 +42,17 @@ The test: would a senior engineer call this overcomplicated? Then it is.
 5. A name stays true when the mechanism behind it changes.
 6. The product name never appears inside an identifier. `endedBySystem`, not `endedByHercule`: the product can be renamed, and the code should not care.
 
-**Comments explain why, in Simplified Technical English.** Write comments, docstrings and user-facing messages in the style of ASD-STE100 (Simplified Technical English): short sentences, one idea per sentence, active voice, the same word for the same thing every time, no pronoun whose referent is not in the same sentence, no figures of speech, no literary ellipsis. A comment says *why* the code is the way it is; the code says what it does. A comment stands alone: a reader one year from now, human or agent, must understand it without the spec, the plan, the ticket or the review round that produced it. Never write "D-21:" or "per F-3" as the explanation. Citing a spec section is fine in addition to the explanation, never instead of it. A message that refuses a request says what was wrong, why, and what the caller should do instead.
+**Comments are written for a newcomer.** The reader knows TypeScript but not this codebase. Write comments, docstrings and user-facing messages in plain, natural English, the way you would explain the code to a colleague.
+
+1. A function's docstring starts with a verb that says what the function does: "Parses...", "Returns...", "Checks that...". It says what the function returns and when it fails. A reader who sees only the signature and the docstring can use the function without reading its body.
+2. After that, say why, if the reason is not obvious. Inline comments only explain why, and never repeat what a line does.
+3. Use the ordinary words of programming: returns, parses, validates, converts, fails, error, schema. Use CONTEXT.md words for domain concepts. Never invent a phrase to avoid a common word.
+4. Things do not talk. Text does not "say" and a list does not "answer". Write what actually happens: "the YAML parses to", "the list is sorted by".
+5. Use short sentences and active voice. If there are three or more rules or cases, write a bullet list, not one long sentence.
+6. Each "it", "this" and "that" must be obvious. If the reader has to look back to find what it refers to, name the thing.
+7. Read the comment aloud. If you have to read a sentence twice, or no person would say it that way, rewrite it.
+
+A comment stands alone: a reader one year from now, human or agent, must understand it without the spec, the plan, the ticket or the review round that produced it. Never write "D-21:" or "per F-3" as the explanation. Citing a spec section is fine in addition to the explanation, never instead of it. A message that refuses a request says what was wrong, why, and what the caller should do instead.
 
 **Think before coding.** State your assumptions. If multiple interpretations of the ticket or spec exist, present them - don't pick one silently. If a simpler approach than the ticket implies exists, say so and push back.
 

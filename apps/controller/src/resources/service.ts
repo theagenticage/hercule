@@ -23,17 +23,17 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  conflict,
+  createConflictError,
   DEFAULT_PAGE_LIMIT,
   Id,
-  notFound,
-  invalidState,
+  createNotFoundError,
+  createInvalidStateError,
   RESOURCE_SORT_FIELDS,
   RESOURCE_UPDATE_FIELDS,
   ResourceCreateInput,
   ResourceFilter,
-  validation,
-  validationOf,
+  createValidationError,
+  createDecodeValidationError,
   type Conflict,
   type Forbidden,
   type InvalidState,
@@ -120,7 +120,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(
       resources.one(id),
       Option.match({
-        onNone: () => Effect.fail(notFound(NO_SUCH_RESOURCE)),
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_RESOURCE)),
         onSome: Effect.succeed,
       }),
     );
@@ -139,12 +139,12 @@ const make = Effect.gen(function* () {
       const found = yield* connections.one(connectionId);
       if (Option.isNone(found)) {
         return yield* Effect.fail(
-          validation([{ path: ["connectionId"], message: "no such connection" }]),
+          createValidationError([{ path: ["connectionId"], message: "no such connection" }]),
         );
       }
       if (kind === "repo" && !isGithubConnection(found.value)) {
         return yield* Effect.fail(
-          validation([
+          createValidationError([
             { path: ["connectionId"], message: "a repo acts through a github connection" },
           ]),
         );
@@ -160,7 +160,9 @@ const make = Effect.gen(function* () {
       const missing = projectIds.filter((id) => !live.has(id));
       if (missing.length > 0) {
         return yield* Effect.fail(
-          validation(missing.map(() => ({ path: ["projectIds"], message: "no such project" }))),
+          createValidationError(
+            missing.map(() => ({ path: ["projectIds"], message: "no such project" })),
+          ),
         );
       }
     });
@@ -176,11 +178,15 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const canonical = isClonableRemote(remote) ? canonicalRemoteOf(remote) : undefined;
       if (canonical === undefined) {
-        return yield* Effect.fail(validation([{ path: ["remote"], message: NOT_A_REMOTE }]));
+        return yield* Effect.fail(
+          createValidationError([{ path: ["remote"], message: NOT_A_REMOTE }]),
+        );
       }
       const held = yield* resources.byCanonicalRemote(canonical);
       if (Option.isSome(held) && held.value.id !== self) {
-        return yield* Effect.fail(conflict(`another resource already names ${canonical}`));
+        return yield* Effect.fail(
+          createConflictError(`another resource already names ${canonical}`),
+        );
       }
       return canonical;
     });
@@ -191,7 +197,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("resource.query");
         const { limit, cursor, sort, kind, projectId } = yield* Effect.mapError(
           decodeQuery(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const listing = yield* refuseCursor(
           resources.list({
@@ -212,7 +218,7 @@ const make = Effect.gen(function* () {
     read: (input: Identified): Effect.Effect<Resource, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("resource.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* Effect.flatMap(stored(id), composed);
       }),
 
@@ -221,32 +227,36 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Resource, ReadError | Conflict | Validation> =>
       Effect.gen(function* () {
         yield* requireGrant("resource.create");
-        const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         if (decoded.kind === "repo" && decoded.remote === undefined) {
           return yield* Effect.fail(
-            validation([{ path: ["remote"], message: "a repo is named by its remote" }]),
+            createValidationError([{ path: ["remote"], message: "a repo is named by its remote" }]),
           );
         }
         if (decoded.kind === "repo" && decoded.label !== undefined) {
-          return yield* Effect.fail(validation([{ path: ["label"], message: REPO_IS_ITS_REMOTE }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: ["label"], message: REPO_IS_ITS_REMOTE }]),
+          );
         }
         if (decoded.kind !== "repo") {
           if (decoded.remote !== undefined) {
             return yield* Effect.fail(
-              validation([
+              createValidationError([
                 { path: ["remote"], message: `a ${decoded.kind} has no remote to check out` },
               ]),
             );
           }
           if (decoded.label === undefined) {
             return yield* Effect.fail(
-              validation([{ path: ["label"], message: `a ${decoded.kind} is named by its label` }]),
+              createValidationError([
+                { path: ["label"], message: `a ${decoded.kind} is named by its label` },
+              ]),
             );
           }
           const off = offRepo(decoded);
           if (off !== undefined) {
             return yield* Effect.fail(
-              validation([{ path: [off], message: noCheckout(decoded.kind) }]),
+              createValidationError([{ path: [off], message: noCheckout(decoded.kind) }]),
             );
           }
         }
@@ -294,9 +304,14 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Resource, ReadError | NotFound | Conflict | Validation> =>
       Effect.gen(function* () {
         yield* requireGrant("resource.update");
-        const { id, ...patch } = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const { id, ...patch } = yield* Effect.mapError(
+          decodeUpdate(input),
+          createDecodeValidationError,
+        );
         if (Object.keys(patch).length === 0) {
-          return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: [], message: "name a field to change" }]),
+          );
         }
         return yield* withTransaction(
           sql,
@@ -309,13 +324,13 @@ const make = Effect.gen(function* () {
             if (before.kind === "repo") {
               if (patch.label !== undefined && patch.label !== null) {
                 return yield* Effect.fail(
-                  validation([{ path: ["label"], message: REPO_IS_ITS_REMOTE }]),
+                  createValidationError([{ path: ["label"], message: REPO_IS_ITS_REMOTE }]),
                 );
               }
             } else {
               if (patch.remote !== undefined) {
                 return yield* Effect.fail(
-                  validation([
+                  createValidationError([
                     { path: ["remote"], message: `a ${before.kind} has no remote to check out` },
                   ]),
                 );
@@ -323,7 +338,7 @@ const make = Effect.gen(function* () {
               const off = offRepo(patch);
               if (off !== undefined) {
                 return yield* Effect.fail(
-                  validation([{ path: [off], message: noCheckout(before.kind) }]),
+                  createValidationError([{ path: [off], message: noCheckout(before.kind) }]),
                 );
               }
             }
@@ -365,14 +380,14 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Record<string, never>, ReadError | NotFound | InvalidState> =>
       Effect.gen(function* () {
         yield* requireGrant("resource.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
             const resource = yield* Effect.flatMap(stored(id), composed);
             if (yield* resources.standsOn(id)) {
-              return yield* Effect.fail(invalidState(STANDS_ON));
+              return yield* Effect.fail(createInvalidStateError(STANDS_ON));
             }
             yield* resources.delete(id);
             // The final snapshot, because nothing can read the row afterwards.
