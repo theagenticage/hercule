@@ -1,9 +1,9 @@
 /**
  * Keeps a connection open for ever: it reconnects with an exponential backoff,
  * and a signal can cut a wait short. When a laptop lid opens or the network
- * comes back, the reason the last attempt failed is probably gone. Waiting out
- * the rest of a thirty-second sleep then decides whether the runner is online
- * when its owner opens the web app.
+ * comes back, the reason the last attempt failed is probably gone. Without a
+ * signal, the runner may wait up to thirty more seconds before it tries again,
+ * and still show as offline when its owner opens the web app.
  *
  * No portable API reports that the machine woke up, so the loop takes a stream
  * of signals and nothing else. `streamReconnectSignals` below guesses when the

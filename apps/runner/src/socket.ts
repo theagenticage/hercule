@@ -142,7 +142,10 @@ export class RunnerRetired extends Schema.TaggedError<RunnerRetired>()("RunnerRe
 export const RETIRED_MESSAGE =
   "this runner was retired; run `hercule runner join` to join the fleet again";
 
-/** The controller uses another protocol version. This is its own error because the operator can fix it by upgrading the runner. */
+/**
+ * The controller uses another protocol version. This is its own error because
+ * the operator can fix it by running the same Hercule version on both sides.
+ */
 export class ProtocolMismatch extends Schema.TaggedError<ProtocolMismatch>()("ProtocolMismatch", {
   message: Schema.String,
 }) {}
@@ -486,7 +489,7 @@ export const connect = (
         if (Option.isSome(version) && version.value.protocolVersion !== PROTOCOL_VERSION) {
           return yield* Effect.fail(
             new ProtocolMismatch({
-              message: `the controller uses runner protocol version ${String(version.value.protocolVersion)}, but this runner uses version ${String(PROTOCOL_VERSION)}. Upgrade the runner to match the controller.`,
+              message: `the controller uses runner protocol version ${String(version.value.protocolVersion)}, but this runner uses version ${String(PROTOCOL_VERSION)}. Install the same Hercule version here as on the controller.`,
             }),
           );
         }

@@ -23,7 +23,7 @@ const LAST_LINES = 5;
 export const takeLastLines = (output: string): string => {
   const said = output.trimEnd().split("\n").slice(-LAST_LINES).join("\n");
   return said === ""
-    ? "the installer failed without saying why"
+    ? "the installer failed and printed nothing"
     : said.slice(-MAX_INSTALL_MESSAGE_LENGTH);
 };
 

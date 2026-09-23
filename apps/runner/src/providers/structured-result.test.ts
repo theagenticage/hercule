@@ -115,10 +115,10 @@ describe("a validator message longer than an event allows", () => {
 describe("a harness that produced no value at all", () => {
   it("fails with the adapter's own reason, unchanged", () => {
     expect(
-      judgeAnswer(SCHEMA, { missing: "the agent settled without calling record_verdict" }),
+      judgeAnswer(SCHEMA, { missing: "the agent finished without calling record_verdict" }),
     ).toEqual({
       outcome: "schema-failure",
-      reason: "the agent settled without calling record_verdict",
+      reason: "the agent finished without calling record_verdict",
     });
   });
 

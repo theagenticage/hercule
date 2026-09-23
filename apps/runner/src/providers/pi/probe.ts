@@ -45,7 +45,7 @@ interface PiModel {
  */
 const readComplaint = (ran: Ran): string => {
   const said = (ran.stderr.trim() === "" ? ran.stdout : ran.stderr).trim();
-  return said === "" ? `pi exited with code ${ran.code} and printed no error` : said;
+  return said === "" ? `pi exited with code ${ran.code} and printed nothing` : said;
 };
 
 /**

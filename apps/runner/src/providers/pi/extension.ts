@@ -52,7 +52,7 @@ const MODE = process.env.${ACCESS_MODE_VARIABLE} ?? "approval-required";
 
 const DENIED = "The user did not approve this in Hercule.";
 
-const LOST = "Hercule could not ask the user for approval because its connection to pi was closed.";
+const LOST = "Hercule could not ask the user for approval because its connection to pi failed.";
 
 export default function (pi) {
   // A session with an output schema gives its answer by calling a tool, not in

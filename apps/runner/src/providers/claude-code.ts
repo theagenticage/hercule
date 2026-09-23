@@ -131,7 +131,7 @@ const DEFAULT_EFFORT = "medium";
  */
 const describeError = (error: unknown): string => {
   const said = truncateFact(error instanceof Error ? error.message : String(error));
-  return said === "" ? "the harness failed without saying why" : said;
+  return said === "" ? "the harness failed with an empty error message" : said;
 };
 
 /**
@@ -671,7 +671,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           return;
         }
         // One request at a time. A second request would replace the card the
-        // user is looking at, so the harness is told to wait instead.
+        // user is looking at, so the second request is denied, with a message
+        // that tells the model to ask again once the first is answered.
         if (held.park !== undefined) {
           settle({
             behavior: "deny",

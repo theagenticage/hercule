@@ -86,7 +86,7 @@ export interface Rpc {
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(30);
 
-const GONE = "the app-server closed the connection";
+const GONE = "the app-server exited or closed its output";
 
 const MALFORMED = "the app-server returned an error with no message";
 

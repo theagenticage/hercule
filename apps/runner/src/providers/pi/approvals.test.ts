@@ -125,7 +125,7 @@ describe("the request kind of a held call", () => {
 });
 
 describe("the request for a parked shell command", () => {
-  it("docks a command approval on the command's item", async () => {
+  it("opens a command approval on the command's item", async () => {
     const run = await parkOnCommand();
 
     const opened = await awaitOpenedRequest(run);
@@ -249,7 +249,7 @@ describe("what each decision does to the parked session", () => {
 });
 
 describe("a second approval asked while one is open", () => {
-  it("denies it at once and docks no second card", async () => {
+  it("denies it at once and opens no second card", async () => {
     const run = await parkOnCommand();
     await awaitOpenedRequest(run);
 

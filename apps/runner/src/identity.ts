@@ -81,7 +81,7 @@ export const serveIdentity = (
             "the web app cannot recognise this machine",
         );
         // A machine with no free port at all cannot host sessions either, so
-        // failing here is a defect.
+        // the runner stops here with a defect.
         return yield* Effect.orDie(Effect.try(() => serve(0)));
       }),
       (server) => Effect.promise(() => server.stop(true)),
