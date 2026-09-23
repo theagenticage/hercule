@@ -9,15 +9,15 @@ import { readErrorMessage } from "../../../screens/save-status";
 type Move = "drain" | "undrain" | "refreshFacts" | "retire";
 
 /**
- * Draining, re-probing and retiring.
+ * The buttons that drain, undrain, re-probe and retire a runner.
  *
- * One move at a time, so one mutation carries all four: what the last one said
- * goes when the next is asked for, rather than a refusal left standing under a
- * move that then succeeded.
+ * Only one action runs at a time, so a single mutation handles all four. The
+ * next action then clears the last one's error, so an old failure never stays
+ * on screen under an action that later succeeded.
  *
- * Retiring is the one move that cannot be undone and the one whose cost is not
- * on the button, so it asks in place with whatever else this particular machine
- * is about to take with it.
+ * Retiring is the only action that cannot be undone, and the button alone does
+ * not show its cost. So it asks for confirmation first, listing what this
+ * runner's retirement also affects.
  */
 export function Moves({
   client,
@@ -45,7 +45,8 @@ export function Moves({
     onSuccess: (updated, which) => {
       queryClient.setQueryData(queryKeys.runner(runner.id), updated);
       void queryClient.invalidateQueries({ queryKey: queryKeys.runners() });
-      // A retirement gives up the fleet default when it held it.
+      // Retiring the default runner also clears the fleet default, so the
+      // controller record is fetched again.
       if (which === "retire") {
         void queryClient.invalidateQueries({ queryKey: queryKeys.controller() });
       }

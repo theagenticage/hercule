@@ -1,26 +1,25 @@
 /**
- * Keeps the thread's own scroll position pinned to the tail while the reader
- * is already there, and leaves it alone the moment they scroll up to read
- * back - the one rule a chat-shaped column follows. The thread has no scroll
- * region of its own; the whole page does, so the scroll container is the
- * document's own scrolling element.
+ * Keeps the thread scrolled to the bottom while the user is already there,
+ * and stops following as soon as they scroll up to read back, as a chat does.
+ * The thread has no scroll region of its own; the whole page scrolls, so the
+ * scroll container is the document's scrolling element.
  *
- * `atBottomRef` is the one piece of state this needs. It is read, never
- * derived fresh, by `followIfAtBottom`: by the time anything calls it, the
- * transcript has already grown to include whatever just arrived, so the
- * geometry in hand can only answer "is the reader at the tail now that it
- * grew" - not "were they, a moment before." It is kept current instead by
- * the container's own `scroll` event, and by `scrollToBottom` itself.
+ * The only state is `atBottomRef`. `followIfAtBottom` reads it rather than
+ * measuring the page, because by the time it is called the transcript has
+ * already grown. A fresh measurement could only tell whether the user is at
+ * the bottom after the growth, not whether they were just before it. So the
+ * ref is updated instead by the page's `scroll` event and by
+ * `scrollToBottom`.
  */
 import { useCallback, useEffect, useRef } from "react";
 
-/** About one line of text: a reader a few pixels short of the tail still reads as "there." */
+/** About one line of text: a user a few pixels above the bottom still counts as at the bottom. */
 const NEAR_BOTTOM_PX = 24;
 
 export interface StickToBottom {
-  /** Call after anything that may have grown the transcript's content. */
+  /** Scrolls to the bottom if the user was there. Call it after the transcript may have grown. */
   readonly followIfAtBottom: () => void;
-  /** Unconditional: sending a message always rejoins the tail. */
+  /** Always scrolls to the bottom; used when the user sends a message. */
   readonly scrollToBottom: () => void;
 }
 
@@ -43,10 +42,9 @@ export const useStickToBottom = (): StickToBottom => {
   const scrollToBottom = useCallback(() => {
     const element = elementRef.current;
     if (element === null) return;
-    // `scrollHeight` alone overshoots by one viewport: a real browser clamps
-    // that back down for a plain scrollTop assignment, but the tail is
-    // `scrollHeight - clientHeight`, exactly, and nothing here should depend
-    // on a browser doing the clamping for it.
+    // `scrollHeight` alone overshoots by one viewport height. A real browser
+    // clamps the value, but the exact bottom is `scrollHeight - clientHeight`,
+    // and this code should not rely on the browser clamping it.
     element.scrollTop = element.scrollHeight - element.clientHeight;
     atBottomRef.current = true;
   }, []);

@@ -14,18 +14,17 @@ import { NewProjectDialog, type SourceDraft } from "./new-project-dialog";
 import { readErrorMessage } from "./save-status";
 
 /**
- * Creating a project and the sources it works with (D-20b): the project first,
- * then one resource per source under it, and the draft composer in it once
- * everything stands.
+ * Creates a project and its sources. It creates the project first, then one
+ * resource per source, and then opens a draft thread in the project.
  *
- * Neither write is undone when a later one is refused - a project that exists
- * exists - so what already stands is remembered and skipped on the next
- * submission, and only what was refused is sent again.
+ * A write that succeeded is not undone when a later one fails. Instead, what
+ * was already created is remembered and skipped on the next submission, so
+ * only the failed writes are sent again.
  *
- * Which is also what leaving does (R4): once the project has been made, Cancel
- * and Esc open the draft in it rather than dropping the user back where they
- * started with a project they were never shown. What was refused was named on
- * its own row and is simply not made.
+ * Leaving follows the same idea (R4). Once the project exists, Cancel and Esc
+ * open a draft thread in it, rather than returning the user to where they
+ * started with a project they never saw. A source that failed already shows
+ * its error on its own row, and is simply not created.
  */
 export function NewProject({
   client,
@@ -63,9 +62,9 @@ export function NewProject({
   const pending = createProject.isPending || createResource.isPending;
 
   /**
-   * The way out. A project that stands is where the user is taken, so nothing
-   * is left made-but-unseen; a request in flight is not something to walk out
-   * of, so while one is the dialog holds.
+   * Closes the dialog. If the project was already created, it opens a draft
+   * thread in it, so the user always sees what was created. Does nothing while
+   * a request is in progress.
    */
   const leave = (): void => {
     if (pending) return;
@@ -78,8 +77,8 @@ export function NewProject({
       setFailure("Name the project");
       return;
     }
-    // Refused before anything is sent: a remote git would not take is a
-    // spelling the user can fix without a round trip.
+    // Check the remotes before sending anything: a remote that git cannot
+    // clone is a typo the user can fix without a round trip to the server.
     const written = sources.map((source) => ({
       ...source,
       message: source.createdId !== null || isClonableRemote(source.remote) ? null : REMOTE_REFUSAL,

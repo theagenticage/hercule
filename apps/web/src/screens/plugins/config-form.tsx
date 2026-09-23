@@ -10,11 +10,12 @@ import {
 } from "@hercule/client-core";
 
 /**
- * The form a plugin's own config schema generates. No checking here beyond
- * giving each widget the type its field names: the schema lives in the plugin
- * and only the controller can apply it, so a second reading in the browser
- * would tell the user two different things about one value. A refusal comes
- * back from the write and is shown under the field it blamed.
+ * The form generated from a plugin's config schema. The form does not
+ * validate anything beyond giving each widget the right input type. The
+ * schema lives in the plugin and only the controller can apply it, so a
+ * second check in the browser could disagree with the controller about the
+ * same value. Validation errors come back from the save and are shown under
+ * the field they belong to.
  */
 export function ConfigForm({
   id,
@@ -25,13 +26,13 @@ export function ConfigForm({
   onEdit,
   onSave,
 }: {
-  /** Unique per plugin: these fields sit beside another plugin's on one page. */
+  /** A prefix for input ids, unique per plugin, because several plugins' forms share one page. */
   readonly id: string;
   readonly fields: ReadonlyArray<ConfigField>;
   readonly config: unknown;
   readonly issues: Readonly<Record<string, string>>;
   readonly saving: boolean;
-  /** The first change since the last write, so what that write said can go. */
+  /** Called on every edit, so the parent can clear the result of the last save. */
   readonly onEdit: () => void;
   readonly onSave: (config: ConfigJson) => void;
 }): JSX.Element {
@@ -49,10 +50,10 @@ export function ConfigForm({
 
   return (
     <form className="flex flex-col gap-3 border-t border-line-soft pt-3" onSubmit={submit}>
-      {/* The settings are a card of their own inside the plugin's card: without
-          a line above them they read as more of what the plugin contributes.
-          The label's own margin comes off, because the form's gap is what sets
-          the rhythm between every other pair of lines here. */}
+      {/* The settings get a rule above them inside the plugin's card; without
+          it they look like part of the plugin's contributions. The label's
+          own margin is removed, because the form's gap sets the spacing
+          between every other pair of lines here. */}
       <div className="-mb-2.5">
         <LaneLabel>Configuration</LaneLabel>
       </div>
@@ -77,19 +78,19 @@ export function ConfigForm({
   );
 }
 
-/** What a setting's own words say about it, under its name. */
+/** The setting's description from the schema, shown under its name. */
 function Description({ field }: { readonly field: ConfigField }): JSX.Element | null {
   if (field.description === undefined) return null;
   return <p className="text-fine text-faint">{field.description}</p>;
 }
 
 /**
- * One setting, as the widget its kind asks for. A boolean carries its own name
- * beside the box, so it is the one kind not stacked under a label.
+ * One setting, rendered with the widget for its kind. A boolean shows its
+ * name beside the checkbox, so it is the only kind not placed under a label.
  *
- * Exported because a connection's settings are the same generated fields inside
- * a form of their own: one form there holds the label and the topic beside
- * them, so it renders the rows rather than a whole second form.
+ * Exported because a connection's settings use the same generated fields
+ * inside another form, which also holds the label and the topic. That form
+ * renders these rows rather than a second `ConfigForm`.
  */
 export function ConfigFieldRow({
   inputId,
@@ -123,14 +124,14 @@ export function ConfigFieldRow({
 
   return (
     <Field id={field.kind === "stringList" ? undefined : inputId} label={field.label} error={error}>
-      {/* Above the box, so a refusal reads directly under what it refused. */}
+      {/* The description goes above the input, so an error appears directly under the input. */}
       <Description field={field} />
       <ConfigWidget inputId={inputId} field={field} value={value} onChange={onChange} />
     </Field>
   );
 }
 
-/** The same message `Field` shows, for the kind that carries its own label. */
+/** The error message `Field` would show, for the boolean kind, which has its own label. */
 function FieldError({ error }: { readonly error: string | undefined }): JSX.Element | null {
   if (error === undefined) return null;
   return (
@@ -151,13 +152,14 @@ function ConfigWidget({
   readonly value: ConfigValue;
   readonly onChange: (value: ConfigValue) => void;
 }): JSX.Element {
-  // Announced, not enforced: the browser refusing a value would be a second
-  // reading of a schema only the controller holds.
+  // Announced with `aria-required` but not enforced with `required`. If the
+  // browser blocked a value, it would be a second check of a schema only the
+  // controller holds.
   const required = field.required ? true : undefined;
 
   if (field.kind === "enum") {
     return (
-      // A closed list of short words needs no more room than its longest one.
+      // A list of short options needs no more width than its longest option.
       <div className="w-[220px]">
         <Select
           id={inputId}
@@ -167,7 +169,7 @@ function ConfigWidget({
             onChange(event.target.value);
           }}
         >
-          {/* An optional setting needs a way back to unset, which no choice says. */}
+          {/* An optional setting needs an empty choice, so the user can unset it. */}
           {field.required ? null : <option value="">—</option>}
           {(field.options ?? []).map((option) => (
             <option key={option} value={option}>
@@ -194,7 +196,7 @@ function ConfigWidget({
     <Input
       id={inputId}
       aria-required={required}
-      // A number is a few characters wide; only text can be arbitrarily long.
+      // A number needs only a few characters; only text can be arbitrarily long.
       className={field.kind === "string" ? undefined : "w-[140px]"}
       type={field.kind === "string" ? "text" : "number"}
       step={field.kind === "integer" ? 1 : "any"}

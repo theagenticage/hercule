@@ -3,8 +3,9 @@ import { cn } from "../primitives/cn";
 import { Label } from "../primitives/label";
 
 /**
- * What a screen with nothing on it says: a headline, a sentence about what will
- * be here, whatever it offers, and fine print for the detail underneath.
+ * What a screen shows when it has nothing to show yet: a headline, a lead
+ * sentence about what will appear here, any actions (`children`), and fine
+ * print with further detail.
  */
 export function EmptyState({
   headline,
@@ -27,14 +28,14 @@ export function EmptyState({
   );
 }
 
-/** An uppercase lane label; the one heading style above a group of rows. */
+/** An uppercase lane label: the heading style used above every group of rows. */
 export function LaneLabel({
   className,
   id,
   children,
 }: {
   readonly className?: string;
-  /** Names a group whose visible heading this is, through `aria-labelledby`. */
+  /** The id a group passes to `aria-labelledby`, so this label becomes its name. */
   readonly id?: string;
   readonly children: ReactNode;
 }): JSX.Element {
@@ -57,7 +58,7 @@ export function Group({ children }: { readonly children: ReactNode }): JSX.Eleme
   );
 }
 
-/** One labelled field with the message its own validation produced, if any. */
+/** One labelled field, with its validation error below it, if there is one. */
 export function Field({
   id,
   label,
@@ -65,9 +66,9 @@ export function Field({
   children,
 }: {
   /**
-   * The control the label focuses. A child that is a group of controls rather
-   * than one field names itself and is passed no id: a label pointing at an
-   * element that may not exist focuses nothing.
+   * The id of the control the label focuses. Leave it out when the child is a
+   * group of controls: the group names itself, and a label that points at a
+   * missing element focuses nothing.
    */
   readonly id?: string | undefined;
   readonly label: string;
@@ -88,11 +89,11 @@ export function Field({
 }
 
 /**
- * A card: its heading, its rows, and the fine print under them.
+ * A card: a heading, its rows, and optional fine print under them.
  *
- * A card named after a section of settings is headed by a lane label, which is
- * what a string means here. A card about one record is headed by that record,
- * whose name has to read as a name, so a node is drawn as it was written.
+ * A string `label` renders as an uppercase lane label, for a card named after
+ * a section of settings. A card about one record passes a node instead, so the
+ * record's name renders exactly as the caller wrote it.
  */
 export function FormCard({
   label,
@@ -116,7 +117,7 @@ export function FormCard({
   );
 }
 
-/** The micro label a card's rows are read by, whichever way the row stands. */
+/** The small uppercase style of a card row's label. */
 const ROW_LABEL = "text-[10px] font-emph tracking-[0.09em] text-faint uppercase";
 
 /** One labelled row of a card: the label in its own column, the control beside it. */

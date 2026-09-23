@@ -2,13 +2,13 @@ import { useEffect, useState, type JSX } from "react";
 import { TASK_STATUSES, type Project, type TaskFilter, type TaskStatus } from "@hercule/contract";
 import { Button, Field, Input, Select } from "@hercule/ui";
 
-/** The value every filter opens on: no filter at all. */
+/** The value every filter starts on, which means no filter. */
 export const ANY = "";
 
-/** How long the search box waits before it asks, so a word is one question. */
+/** How long the search box waits after typing stops, so a whole word is one request. */
 const SEARCH_SETTLE_MS = 200;
 
-/** What the bar holds, as the user has typed it and before it has settled. */
+/** The filter bar's values as the user typed them, before debouncing. */
 export interface FilterState {
   readonly text: string;
   readonly status: TaskStatus | typeof ANY;
@@ -16,7 +16,7 @@ export interface FilterState {
   readonly projectId: string;
 }
 
-/** The bar as it opens: every filter on Any. */
+/** The filter bar's starting state: every filter on Any. */
 export const NO_FILTERS: FilterState = {
   text: ANY,
   status: ANY,
@@ -24,7 +24,7 @@ export const NO_FILTERS: FilterState = {
   projectId: ANY,
 };
 
-/** A value once it has stopped changing, so typing asks one question. */
+/** Returns `value` once it has not changed for `delay` ms, so typing sends one request. */
 function useSettled<T>(value: T, delay: number): T {
   const [settled, setSettled] = useState(value);
   useEffect(() => {
@@ -38,7 +38,7 @@ function useSettled<T>(value: T, delay: number): T {
   return settled;
 }
 
-/** The labels the user typed as a comma-separated line. */
+/** Parses the comma-separated labels the user typed, dropping empty entries. */
 const parseLabels = (typed: string): readonly string[] =>
   typed
     .split(",")
@@ -46,8 +46,8 @@ const parseLabels = (typed: string): readonly string[] =>
     .filter((label) => label !== "");
 
 /**
- * The question the controller is asked, once the typed filters have stopped
- * moving. The two picked filters ask at once; the two typed ones settle first.
+ * Returns the task filter to send to the controller. The two select filters
+ * apply at once; the two text filters apply once the user stops typing.
  */
 export function useSettledFilter(state: FilterState): TaskFilter {
   const searched = useSettled(state.text.trim(), SEARCH_SETTLE_MS);
@@ -61,9 +61,11 @@ export function useSettledFilter(state: FilterState): TaskFilter {
 }
 
 /**
- * The pinned filters over the list, and the way in to writing a task by hand.
+ * The filter bar above the task list, with the button that opens the form for
+ * writing a task by hand.
  *
- * Each one opens on Any: the screen shows everything until it is asked not to.
+ * Every filter starts on Any, so the screen shows all tasks until the user
+ * narrows it.
  */
 export function TaskFilterBar({
   value,
@@ -84,8 +86,8 @@ export function TaskFilterBar({
             id="filter-text"
             type="search"
             placeholder="Title and description"
-            // The platform draws its own clear button in its own colour,
-            // which is the one hue this system has no place for.
+            // Hide the browser's own clear button: it is drawn in a color the
+            // design system does not use.
             className="[&::-webkit-search-cancel-button]:appearance-none"
             value={value.text}
             onChange={(event) => {

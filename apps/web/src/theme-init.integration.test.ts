@@ -3,22 +3,24 @@ import { createMemoryStorage } from "@hercule/ui/testing";
 import script from "../public/theme-init.js?raw";
 
 /**
- * The pre-paint script (`apps/web/public/theme-init.js`) is the half of the
- * theme choice that runs before the app does, and nothing else can exercise
- * it: the component's tests prove what is written under `hercule:theme`, and
- * this one proves the script reads that same key and paints the document with
- * it - the two literals this test and those tests seed are what keep the pair
- * honest. The CSP allows the page no inline script, which is why the script is
- * a file at all; it is read raw and run exactly as a browser runs it, as plain
+ * Tests the pre-paint script (`apps/web/public/theme-init.js`), the part of the
+ * theme choice that runs before the app does. Nothing else covers it: the
+ * ThemeSelector tests check what is written under `hercule:theme`, and these
+ * tests check that the script reads the same key and applies it to the
+ * document. Both sets of tests use the same key literal, which keeps the two
+ * sides in step.
+ *
+ * The CSP allows no inline script, which is why the script is a separate file.
+ * The test reads it as raw text and runs it the way a browser does: as plain
  * source against the globals it finds.
  */
 
-/** Runs the script the way the page does, against this storage and document. */
+/** Runs the script the way the page does, against the given storage and this document. */
 const runThemeScript = (storage: Storage): void => {
   vi.stubGlobal("localStorage", storage);
   delete document.documentElement.dataset.theme;
-  // The script is plain source with no imports; direct eval compiles and runs
-  // it in this scope against the globals it needs, as the page's parser does.
+  // The script is plain source with no imports. Direct eval compiles and runs
+  // it in this scope with the globals it needs, as the page's parser does.
   eval(script);
 };
 
@@ -27,17 +29,17 @@ afterEach(() => {
 });
 
 describe("the pre-paint theme script", () => {
-  it("paints a stored light choice before the app renders", () => {
+  it("applies a stored light choice before the app renders", () => {
     runThemeScript(createMemoryStorage({ "hercule:theme": "light" }));
     expect(document.documentElement.dataset.theme).toBe("light");
   });
 
-  it("paints a stored dark choice before the app renders", () => {
+  it("applies a stored dark choice before the app renders", () => {
     runThemeScript(createMemoryStorage({ "hercule:theme": "dark" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
-  it("paints nothing for no choice and for a value it does not know", () => {
+  it("applies nothing when no choice is stored or the value is unknown", () => {
     runThemeScript(createMemoryStorage());
     expect(document.documentElement.dataset.theme).toBeUndefined();
 
@@ -45,7 +47,7 @@ describe("the pre-paint theme script", () => {
     expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 
-  it("leaves the document alone where storage is denied", () => {
+  it("leaves the document unchanged when storage access fails", () => {
     const denied = {
       getItem: () => {
         throw new Error("The quota has been exceeded");

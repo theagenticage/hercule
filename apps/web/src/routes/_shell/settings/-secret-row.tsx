@@ -7,15 +7,15 @@ import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
- * One stored secret, as everything about it that can be read: who owns it, what
- * it is called, and when it was last written. No read carries a value, so the
- * row can only ever write one.
+ * The row for one stored secret: its owner, its name, and when it was last
+ * written. The API never returns a secret's value, so the row can write a
+ * value but never show one.
  *
- * Rotating asks for the new value in place rather than writing on the press:
- * the value is the whole of the operation, and there is nothing to rotate to
- * without it. Deleting asks for a confirmation in the same place, because
- * Hercule holds the only copy of what it is about to drop - a pasted token
- * cannot be typed again from memory - and the press sits beside Rotate.
+ * - Rotate opens an inline field for the new value, because rotating needs
+ *   that value.
+ * - Delete asks for confirmation inline. Hercule holds the only copy of the
+ *   value (nobody can retype a pasted token from memory), and the Delete
+ *   button sits right next to Rotate.
  */
 export function SecretRow({
   client,
@@ -32,15 +32,15 @@ export function SecretRow({
   const [value, setValue] = useState("");
 
   const params = { ownerKind: secret.ownerKind, ownerId: secret.ownerId, name: secret.name };
-  // The answer to a write says nothing about the rest of the listing - a set
-  // may have replaced a reference this browser never saw - so the list is
-  // reread rather than patched in place.
+  // The response to a write does not cover the rest of the list (a set may
+  // have replaced a secret this browser never saw), so the list is fetched
+  // again rather than patched in place.
   const reread = () => queryClient.invalidateQueries({ queryKey: queryKeys.secrets() });
 
   const rotate = useMutation({
-    // The value is read from state at call time rather than handed to
-    // `mutate`: a mutation keeps its variables until the next one replaces
-    // them, and that is one more place the plaintext would sit.
+    // The value is read from state when the call runs, not passed to
+    // `mutate`: a mutation keeps its variables until the next call replaces
+    // them, which would be one more place holding the plaintext.
     mutationFn: () => client.secret.set({ params, payload: { value } }),
     onSuccess: async () => {
       setValue("");
@@ -54,8 +54,8 @@ export function SecretRow({
   });
 
   const written = secret.rotatedAt ?? secret.createdAt;
-  // Only the last thing pressed has a status to show; the other's is dropped
-  // when its turn comes, so a failure cannot outlive the move that caused it.
+  // Only the last action's status is shown. Pressing Rotate or Delete clears
+  // the other one's state, so an old failure does not stay on screen.
   const failure = rotate.error ?? remove.error;
 
   const submit = (event: FormEvent): void => {
@@ -75,9 +75,8 @@ export function SecretRow({
           {secret.rotatedAt === undefined ? "set" : "rotated"}{" "}
           {formatStamp(new Date(written), timezone) ?? written}
         </span>
-        {/* The controller's own key material is written by the controller and
-            by nothing else: the service refuses both writes, so neither is
-            offered. */}
+        {/* Only the controller writes its own key material. The secret service
+            rejects both a rotate and a delete, so neither button is shown. */}
         {secret.ownerKind === "core" ? (
           <span className="text-fine text-faint">controller key</span>
         ) : (
@@ -115,7 +114,7 @@ export function SecretRow({
                 id={`rotate-${secret.ownerKind}-${secret.ownerId}-${secret.name}`}
                 type="password"
                 autoComplete="off"
-                // There is nothing to rotate to without one.
+                // A rotation needs a new value.
                 required
                 value={value}
                 onChange={(event) => {

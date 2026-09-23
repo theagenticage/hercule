@@ -3,11 +3,12 @@ import { cn } from "../primitives/cn";
 import { CLAUDE_MARK, OPENAI_MARK } from "../logos/marks";
 
 /**
- * A provider's monochrome mark, drawn in the current colour: on a model row,
- * on an account row and on the composer's pill. The marks are shipped with
- * the app (`../logos`, lobehub's set under MIT), never fetched at runtime.
+ * The SVG path of each provider's monochrome mark, by provider id. The marks
+ * ship with the app (`../logos`, from lobehub's MIT-licensed set) and are never
+ * fetched at runtime. `ProviderLogo` draws them in the current colour, on model
+ * rows, account rows and the composer's pill.
  *
- * pi has no mark of its own, so it is written the way it is read.
+ * pi has no mark of its own, so `ProviderLogo` draws it as the character π.
  */
 const MARKS: Readonly<Record<string, string>> = {
   "claude-code": CLAUDE_MARK,

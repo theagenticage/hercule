@@ -6,19 +6,21 @@ import { Lane, renderMarker, MenuRow } from "./menu";
 type Row = ModelMenu["current"]["rows"][number];
 type Instance = ModelMenu["others"][number];
 
-/** An account's row names who is logged in and on what plan, beside the account. */
+/** Builds the detail shown beside an account's name: who is logged in, and on what plan. */
 const describeLogin = (instance: Instance): string =>
   [instance.identity, instance.planLabel].filter((each) => each !== null).join(" · ");
 
-/** The Log in on an account's row reads as the row's own note, not as a button. */
+/** Classes that make the Log in on an account's row look like the row's note, not a button. */
 const ROW_LOGIN =
   "p-0 text-[11px] leading-normal font-normal text-muted enabled:hover:bg-transparent";
 
 /**
- * What the model menu lists under its filter: what was reached for last, the
- * account in use with its older models folded away, and every other account as
- * one row saying why it cannot be picked - or as a lane of its own, where the
- * filter reached into it.
+ * The list in the model menu, below the filter. It shows, in order:
+ *
+ * - Recent: the models picked most recently;
+ * - the account in use, with its older models collapsed;
+ * - every other account, as one row that says why it cannot be picked, or as
+ *   a lane of its own when the filter matches models in it.
  */
 export function ModelList({
   menu,

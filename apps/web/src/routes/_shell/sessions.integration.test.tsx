@@ -1,7 +1,7 @@
 /**
- * The Sessions screen over a stubbed controller. On a fresh install it is the
- * rest of onboarding: the one place that tells the user what stands between
- * them and a thread.
+ * Tests the Sessions screen against a stubbed controller. On a fresh install
+ * this screen finishes onboarding: it tells the user what they still need
+ * before they can start a thread.
  */
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
@@ -141,8 +141,9 @@ const openApp = async (options: {
 };
 
 /**
- * The screen's own control: the sidebar's thread list carries one too. It is a
- * disabled button until the machine is ready, then a real link to the composer.
+ * Returns the screen's own Create new thread control, ignoring the one in the
+ * sidebar's thread list. It is a disabled button until the machine is ready,
+ * then a link to the composer.
  */
 const getNewThreadControl = (): HTMLElement => {
   const found = [
@@ -154,7 +155,7 @@ const getNewThreadControl = (): HTMLElement => {
 };
 
 describe("Sessions", () => {
-  it("says a thread needs a machine when nothing answered on this one", async () => {
+  it("says a thread needs a runner when none is detected on this machine", async () => {
     await openApp({ runners: [], instances: [buildClaudeCodeInstance([])], local: null });
 
     await waitFor(() => {
@@ -169,14 +170,14 @@ describe("Sessions", () => {
     await waitFor(() => {
       expect(readPageText()).toContain("No coding harness was found on this machine.");
     });
-    // The install is a move on the machine, so the screen points at the page
-    // that makes it rather than describing what to type.
+    // Installing is an action on the runner's page, so the screen links there
+    // rather than describing what to type.
     expect(screen.getByRole("link", { name: /fleet/i }).getAttribute("href")).toBe(
       `/fleet/${BARE.id}`,
     );
   });
 
-  it("offers a login for a harness that is there and not logged in", async () => {
+  it("offers a login for an installed harness that is not logged in", async () => {
     await openApp({
       runners: [MOSS],
       instances: [buildClaudeCodeInstance([NOT_LOGGED_IN])],
@@ -200,12 +201,12 @@ describe("Sessions", () => {
     await waitFor(() => {
       expect(readPageText()).toContain("Claude Code is ready.");
     });
-    // Ready means a thread actually starts from here now: a link to the
-    // composer, not a disabled placeholder.
+    // Ready means a thread can now be started from here: the control is a
+    // link to the composer, not a disabled button.
     expect(getNewThreadControl().getAttribute("href")).toBe("/threads/new");
   });
 
-  it("logs in from here, against the machine this browser is on", async () => {
+  it("logs in from this screen, on the runner on the browser's machine", async () => {
     const user = userEvent.setup();
     let held = [buildClaudeCodeInstance([NOT_LOGGED_IN])];
     const { api } = await openApp({
@@ -222,8 +223,8 @@ describe("Sessions", () => {
           held = [buildClaudeCodeInstance([LOGGED_IN])];
           return { body: LOGGED_IN };
         },
-        // Every finished login is followed by a probe: what the machine holds
-        // now is what this screen reads.
+        // Every finished login is followed by a probe, so this screen shows
+        // the machine's current login state.
         [`POST /api/v1/runners/${MOSS.id}/probe`]: () => ({ body: LOGGED_IN }),
       },
     });
@@ -233,7 +234,7 @@ describe("Sessions", () => {
     await waitFor(() => {
       expect(readPageText()).toContain(AUTHORIZE_URL);
     });
-    // The login runs on this machine, whatever else the fleet holds.
+    // The login runs on this machine's runner, whatever other runners the fleet has.
     expect(api.calls.filter((call) => call.path.endsWith("/login"))[0]?.body).toEqual({
       runnerId: MOSS.id,
     });
@@ -241,13 +242,13 @@ describe("Sessions", () => {
     await user.type(screen.getByLabelText("Code", { exact: true }), "the-whole-code");
     await user.click(screen.getByRole("button", { name: /submit/i }));
 
-    // Finishing the login moves the screen on, without a reload.
+    // Finishing the login updates the screen without a reload.
     await waitFor(() => {
       expect(readPageText()).toContain("Claude Code is ready.");
     });
   });
 
-  it("says why the screen did not move on when the probe after a login fails", async () => {
+  it("shows the error when the probe after a login fails", async () => {
     const user = userEvent.setup();
     await openApp({
       runners: [MOSS],
@@ -272,9 +273,9 @@ describe("Sessions", () => {
 });
 
 /**
- * A provider that is logged in with a key rather than with a vendor's browser
- * flow. The screen offers the same action Fleet does, because it reads the same
- * join: a harness that is here and cannot run yet.
+ * A provider that authenticates with a key rather than a vendor's browser
+ * login. The screen offers the same action Fleet does, because both use the
+ * same data: a harness that is installed but cannot run yet.
  */
 describe("Sessions > a harness that needs a key", () => {
   const PI_ID = "01a06d02-1000-7000-8000-000000000003";
@@ -303,7 +304,7 @@ describe("Sessions > a harness that needs a key", () => {
     secretFields: [{ name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set }],
   });
 
-  it("asks for the key here, and moves on once it is saved", async () => {
+  it("asks for the key on this screen, and shows ready once it is saved", async () => {
     const user = userEvent.setup();
     let held = [buildPiInstance(false)];
     const { api } = await openApp({
@@ -344,7 +345,7 @@ describe("Sessions > a harness that needs a key", () => {
     await user.type(field, KEY_VALUE);
     await user.click(within(form).getByRole("button", { name: /save/i }));
 
-    // Saved, probed, and the screen moves on without a reload.
+    // The key is saved, the runner is probed, and the screen updates without a reload.
     await waitFor(() => {
       expect(readPageText()).toContain("pi is ready.");
     });

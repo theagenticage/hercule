@@ -4,9 +4,8 @@ import type { Task } from "@hercule/contract";
 import { ListRow, PriorityGlyph } from "@hercule/ui";
 
 /**
- * One task as a row: what it is, how much it matters, where it stands and where
- * it sits. Finished work and work that was never urgent both recede, so what is
- * left standing is what is left to do.
+ * One task as a row: its title, priority, status and project. Finished tasks
+ * and low-priority tasks are dimmed, so the tasks still to do stand out.
  */
 export function TaskRow({
   task,

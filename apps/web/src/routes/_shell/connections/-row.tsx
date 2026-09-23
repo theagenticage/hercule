@@ -9,8 +9,9 @@ import { ConfigureConnection } from "./-configure";
 import { ConnectionSetup } from "./-setup";
 
 /**
- * `connected` is the working state and wears the live hue; `needs-reauth` is
- * the user's to fix, so it is the attention hue rather than a failure.
+ * The text colour of each connection status. `connected` is the working state,
+ * so it uses the live colour. The user can fix `needs-reauth`, so it uses the
+ * attention colour rather than the failure colour.
  */
 const STATUS_HUE: Record<ConnectionStatus, string> = {
   connected: "text-live",
@@ -19,13 +20,13 @@ const STATUS_HUE: Record<ConnectionStatus, string> = {
   disabled: "text-muted",
 };
 
-/** What the row is showing under its facts: at most one thing at a time. */
+/** The panel open under the row's facts. At most one is open at a time. */
 type Panel = "none" | "reconnect" | "configure" | "delete";
 
 /**
- * One connection: which account it is, where it stands, and the three things
- * that can be done to it. The row owns those writes, because each is about this
- * connection and nothing above it needs to know one happened.
+ * The row for one connection: its account, its status, and the actions
+ * Reconnect, Configure and Delete. The row owns those mutations, because each
+ * one changes only this connection and nothing above the row needs to know.
  */
 export function ConnectionRow({
   client,
@@ -41,11 +42,11 @@ export function ConnectionRow({
   const [panel, setPanel] = useState<Panel>("none");
 
   /**
-   * The quiet line, part by part: the plugin that declares the type, the
-   * account, and the topic it files into. The plugin leads, because two plugins
-   * may declare one type name and the name above says nothing about which this
-   * is. Assembled rather than written out so the separators are one element
-   * each, spaced by the row's own gap and never by a space inside the text.
+   * The parts of the secondary line: the plugin that declares the type, the
+   * account, and the connection's topic. The plugin comes first, because two
+   * plugins may declare the same type name and the name above does not show
+   * which one this is. The line is built from parts so that each separator is
+   * its own element, spaced by the row's gap rather than by spaces in the text.
    */
   const facts = [
     ...(type === undefined ? [] : [{ key: "plugin", text: type.pluginName, tone: "text-faint" }]),
@@ -57,8 +58,8 @@ export function ConnectionRow({
 
   const remove = useMutation({
     mutationFn: () => client.connection.delete({ params: { id: connection.id } }),
-    // The row is gone from the listing, which is read again rather than
-    // patched: a delete takes the connection's secrets with it.
+    // The list is fetched again rather than patched, because a delete also
+    // removes the connection's secrets.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections() }),
   });
 
@@ -135,8 +136,7 @@ export function ConnectionRow({
         />
       ) : null}
 
-      {/* A delete that worked takes the row with it, so only a refusal has
-          anywhere to land. */}
+      {/* A successful delete removes the row, so only a failure is shown here. */}
       <SaveStatus
         saved={false}
         failure={remove.error === null ? null : readErrorMessage(remove.error)}

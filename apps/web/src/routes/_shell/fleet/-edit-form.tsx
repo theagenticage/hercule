@@ -15,14 +15,15 @@ import { readErrorMessage, SaveStatus } from "../../../screens/save-status";
 const GIB = 1024 * 1024 * 1024;
 
 /**
- * The five fields a machine's owner writes, saved as a patch of what moved.
+ * The form for the five runner fields its owner can edit. Saving sends a patch
+ * of only the changed fields.
  *
- * What moved is measured against the machine the form was opened with, not
- * against the machine as it now stands: a re-probe or a live push replaces the
- * latter under the reader, and diffing against that would send a field nobody
- * touched - turning the derived session cap into a stored override with no way
- * back. When the machine changes underneath and nothing is half-typed, the form
- * starts again from the new one instead.
+ * Changes are measured against the runner as it was when the form opened, not
+ * against the latest copy. A re-probe or a live update can replace the latest
+ * copy while the user is editing, and a diff against it would send fields
+ * nobody touched. For example, the derived session cap would become a stored
+ * override that cannot be undone. When the runner changes and the user has not
+ * edited anything, the form resets to the new copy instead.
  */
 export function EditForm({
   client,
@@ -48,17 +49,16 @@ export function EditForm({
     onSuccess: (updated) => {
       queryClient.setQueryData(queryKeys.runner(runner.id), updated);
       void queryClient.invalidateQueries({ queryKey: queryKeys.runners() });
-      // The answer is the whole machine as it now stands, not only the fields
-      // the patch named, so the form starts again from it: a field that moved
-      // on the controller while this form was open is shown rather than held
-      // as an edit nobody made.
+      // The response is the whole runner, not only the patched fields, so the
+      // form resets to it. A field that changed on the controller while the
+      // form was open is then shown as current, not as an edit nobody made.
       setForm({ base: updated, draft: buildRunnerDraft(updated) });
     },
   });
 
   const blamed = findRunnerConflictField(save.error, sent);
   const message = save.error === null ? null : readErrorMessage(save.error);
-  /** What a refusal the controller pinned on one field says, beside that field. */
+  /** Returns the error message if the controller blamed `field`, otherwise undefined. */
   const readFieldRefusal = (field: "name" | "reserved"): string | undefined =>
     blamed === field ? (message ?? undefined) : undefined;
 
@@ -79,8 +79,7 @@ export function EditForm({
       <Field id="runner-name" label="Name" error={readFieldRefusal("name")}>
         <Input
           id="runner-name"
-          // A machine has to be called something, and the name is what every
-          // other surface finds it by.
+          // Every other screen finds the runner by its name, so it cannot be empty.
           required
           value={form.draft.name}
           onChange={(event) => {
@@ -116,8 +115,8 @@ export function EditForm({
           step={1}
           value={String(form.draft.diskWatermarkBytes / GIB)}
           onChange={(event) => {
-            // Rounded, so a fraction of a GiB never turns into a byte count
-            // the contract's integer check refuses.
+            // Rounded, because a fraction of a GiB gives a byte count that is
+            // not an integer, which the contract rejects.
             edit({ diskWatermarkBytes: Math.round(Number(event.target.value) * GIB) });
           }}
         />
@@ -137,8 +136,8 @@ export function EditForm({
         )}
       </div>
       <div className="flex items-center gap-3">
-        {/* An untouched form has no patch to send, and the controller refuses
-            an empty one, so Save is not offered until something has moved. */}
+        {/* An unedited form has no patch to send, and the controller rejects
+            an empty patch, so Save is disabled until something changes. */}
         <Button type="submit" variant="form" disabled={save.isPending || !edited}>
           Save
         </Button>

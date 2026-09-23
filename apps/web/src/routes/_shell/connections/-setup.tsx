@@ -15,14 +15,14 @@ import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 import { Naming } from "./-naming";
 
 /**
- * Setting up one connection, whether it is the first or a fresh credential for
- * one that already exists. Both render the same steps because they ask the same
- * thing of the user; what differs is where the answer goes.
+ * The form that sets up a connection: either a new one, or a fresh credential
+ * for an existing one (a reconnect). Both show the same steps because they ask
+ * the user for the same thing; only the request they send differs.
  *
- * A reconnect that pastes a credential asks for nothing but the credential: the
- * write carries only that, and the label and the topic are edited under
- * Configure. A reconnect through a redirect asks for both, because it starts
- * the whole setup again and carries them along.
+ * - A reconnect with a pasted credential asks only for the credential. The
+ *   request sends only that; the label and topic are edited under Configure.
+ * - A reconnect through a provider redirect also asks for the label and
+ *   topic, because it runs the whole setup again and sends them along.
  */
 export function ConnectionSetup({
   client,
@@ -57,8 +57,8 @@ export function ConnectionSetup({
             ...(connection === undefined ? {} : { connectionId: connection.id }),
           },
         });
-        // The rest of this setup happens at the provider and comes back on the
-        // callback route, so the browser leaves rather than waiting here.
+        // The rest of the setup happens at the provider, which sends the
+        // browser back to the callback route, so the browser leaves this page.
         window.location.assign(authorizationUrl);
         return;
       }
@@ -79,13 +79,13 @@ export function ConnectionSetup({
     },
   });
 
-  // The type answers which credential it refused, so that message belongs under
-  // the field it named; anything else refused is the form's own to say.
+  // An error about one credential field is shown under that field; any other
+  // error is shown at the bottom of the form.
   const issues = readConfigIssues(submit.error, fields, "credentials");
   const failure = issues.rest ? submit.error : null;
 
-  // The same column the rows and the offers sit in: a form that spans the
-  // whole content width would be the one thing on the screen that does.
+  // The same column width as the rows and the offers, so the form does not
+  // stretch across the whole content width when nothing else does.
   const column = "max-w-[560px]";
   const heading = `${connection === undefined ? "Connect" : "Reconnect"} ${type.displayName}`;
 
@@ -113,14 +113,14 @@ export function ConnectionSetup({
 
   return (
     <form className={`flex flex-col gap-3 ${column}`} onSubmit={send}>
-      {/* The offers it replaced are gone, so the form says what is being set
-          up, in the same voice as the lane labels around it. */}
+      {/* The form replaces the offers, so this heading names what is being set
+          up, styled like the lane labels around it. */}
       <div className="-mb-2.5">
         <LaneLabel>{heading}</LaneLabel>
       </div>
       {type.setup.map((step, index) =>
         step.kind === "checklist" ? (
-          // A checklist is the provider's own instructions, in their words.
+          // A checklist step holds the provider's own instructions, shown as written.
           <p key={index} className="max-w-[52ch] text-row whitespace-pre-line text-muted">
             {step.markdown}
           </p>
@@ -152,8 +152,8 @@ export function ConnectionSetup({
             required
             value={pasted[field.name] ?? ""}
             onChange={(event) => {
-              // What the last try was refused for is about what was in the
-              // box, not about what is being typed now.
+              // Clears the last attempt's error, because that error was about
+              // the old value, not the one being typed now.
               if (!submit.isIdle) submit.reset();
               const value = event.target.value;
               setPasted((current) => ({ ...current, [field.name]: value }));
@@ -181,8 +181,8 @@ export function ConnectionSetup({
         </Button>
       </div>
 
-      {/* Nothing to say about a setup that worked: it closes and its row
-          appears, so only a refusal outlives the press. */}
+      {/* A successful setup closes the form and its row appears, so only a
+          failure is shown here. */}
       <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
     </form>
   );

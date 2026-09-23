@@ -1,7 +1,7 @@
 /**
- * The machine the two fleet tests both stub a controller with. One copy, so a
- * field added to the resource cannot reach one screen's test and not the
- * other's; each test spreads over it what its own case needs.
+ * The runner and session fixtures that both fleet tests use to stub the
+ * controller. They share one copy so that a field added to the runner record
+ * reaches both tests. Each test spreads its own overrides over these.
  */
 import type { Session } from "@hercule/contract";
 
@@ -73,9 +73,9 @@ export const MOSS: Fixture = {
 };
 
 /**
- * A session on `MOSS`, as the API answers `session.query`. The runner page
- * reads a handful of these fields; the rest are here because the contract has
- * them and a screen must not be handed a half record.
+ * A session on `MOSS`, as `session.query` returns it. The runner page reads
+ * only a few of these fields; the rest are here because the contract requires
+ * them, and a screen should never get a partial record.
  */
 const BASE_SESSION: Session = {
   id: "01a06d02-2000-7000-8000-000000000001",
@@ -102,10 +102,12 @@ const BASE_SESSION: Session = {
 };
 
 /**
- * One session on the machine. A queued session has never run, so its
- * `startedAt` is null and its two instants - `createdAt` and
- * `lastActivityAt` - are the same; `at` sets both, which is what lets a test
- * name a session's age without deciding which of the two the row reads.
+ * Builds a session on `MOSS` from `overrides`.
+ *
+ * `at` sets both `createdAt` and `lastActivityAt`, so a test can set a
+ * session's age without knowing which of the two the row reads. For a queued
+ * session, which has never run, `startedAt` stays null; otherwise `at` sets it
+ * too.
  */
 export const buildSessionFixture = (
   overrides: Partial<Session> & { readonly id: string; readonly at?: string },

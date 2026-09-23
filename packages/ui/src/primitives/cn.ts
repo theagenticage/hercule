@@ -2,12 +2,12 @@ import { clsx, type ClassValue } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
 
 /**
- * The type scale, named rather than sized (`text-row`, `text-body`).
+ * The names of the type scale's font sizes (`text-row`, `text-body`, ...).
  *
- * The merge has to be told about them: to it, `text-<word>` is a colour, so a
- * component setting its own size and a caller setting a colour would land in
- * one group and the size would be dropped. Every name here is a font size in
- * `styles.css`, and this list is the other half of that declaration.
+ * tailwind-merge must be told that these are sizes. Otherwise it treats
+ * `text-<word>` as a colour, puts a component's size and a caller's colour in
+ * the same group, and drops the size. Every name here is a font size declared
+ * in `styles.css`; keep the two lists in step.
  */
 const TEXT_SIZES = ["label", "fine", "meta", "row", "body", "lead", "title"] as const;
 

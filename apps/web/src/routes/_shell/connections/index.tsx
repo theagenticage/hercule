@@ -11,12 +11,12 @@ import { ConnectionSetup } from "./-setup";
 
 export const Route = createFileRoute("/_shell/connections/")({
   staticData: { title: "Connections" },
-  // Where the browser lands after a provider redirect: the controller has
-  // already decided, and says which way it went in the address it sends back.
+  // The browser lands here after a provider redirect. The controller has
+  // already finished the setup and puts the outcome in the `oauth` parameter.
   validateSearch: (search: Record<string, unknown>): { readonly oauth?: string } =>
     typeof search["oauth"] === "string" ? { oauth: search["oauth"] } : {},
-  // Answered before it is shown: the connections and the catalog the offers are
-  // read from, so the screen never renders as a frame around nothing.
+  // Loads the connections and the plugin catalog (which the offers are built
+  // from) before the screen renders, so it never renders empty.
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(connectionsQuery(context.client)),
@@ -26,7 +26,7 @@ export const Route = createFileRoute("/_shell/connections/")({
   component: Connections,
 });
 
-/** What a redirect that did not finish went wrong at, in one sentence each. */
+/** The message shown for each way a provider redirect can fail. */
 const OAUTH_FAILURES: Readonly<Record<string, string>> = {
   denied: "The provider denied the request, so nothing was connected.",
   expired: "That setup expired before the provider came back. Start it again.",
@@ -34,7 +34,7 @@ const OAUTH_FAILURES: Readonly<Record<string, string>> = {
   rejected: "The provider signed in, but the account was turned down.",
 };
 
-/** What each way of setting a type up is called, in the few words a row has. */
+/** A short description of each setup flow, short enough for a row. */
 const GISTS = {
   oauth: "sign in with the provider",
   credentials: "paste a token",
@@ -42,35 +42,37 @@ const GISTS = {
 } as const;
 
 /**
- * The quiet line under a type's name: the plugin that declares it, then what
- * setting it up takes. The plugin comes first because two plugins may each
- * declare a type called Gmail, and the name above says nothing about which.
+ * Returns the secondary line under a connection type's name: the plugin that
+ * declares it, then what setting it up takes. The plugin comes first because
+ * two plugins may each declare a type called Gmail, and the name above does
+ * not show which one this is.
  */
 const summarizeConnectionType = (type: ConnectionType): string => {
   const flow = decideSetupFlow(type);
-  // A step kind this build does not know: the type names itself rather than
-  // being described as something it may not be.
+  // For a setup step this build does not know, show the type's name rather
+  // than a description that may be wrong.
   return `${type.pluginName} · ${flow === "unknown" ? type.type : GISTS[flow]}`;
 };
 
 /**
- * The accounts Hercule acts through, and everything that can be connected.
+ * The Connections screen: the accounts Hercule acts through, and every type
+ * that can be connected.
  *
- * Nothing about a particular account is written here: the types, their setup
+ * Nothing here is specific to one kind of account. The types, their setup
  * steps and their settings all come from the plugin catalog, so a plugin added
- * to the binary shows up on this screen without it being touched.
+ * to the binary shows up on this screen without changes here.
  */
 function Connections(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
   const navigate = useNavigate();
-  // Read once, at the first render: the address is cleared below, and the
-  // notice is about the trip that just happened, not about this screen.
+  // Read once, on the first render: the effect below clears the parameter from
+  // the address, and the notice is only about the redirect that just happened.
   const [notice] = useState(Route.useSearch().oauth);
 
   useLiveInvalidation(live, queryClient, "connection");
 
-  // Replacing the entry that carried the outcome takes it out of the address
-  // bar and out of the back button at once, so a reload does not say it again.
+  // Replacing the history entry removes the outcome from both the address bar
+  // and the back button, so a reload does not show the notice again.
   useEffect(() => {
     if (notice !== undefined) void navigate({ to: "/connections", search: {}, replace: true });
   }, [notice, navigate]);
@@ -110,8 +112,8 @@ function Connections(): JSX.Element {
         </p>
       ) : (
         <p className="text-row text-fail" role="alert">
-          {/* A word this build does not know is not echoed back: whatever is in
-              the address bar is not ours to put on the screen. */}
+          {/* An unknown value is not shown as-is, because anyone can put any
+              text in the address bar. */}
           {OAUTH_FAILURES[notice] ?? "The setup did not finish."}
         </p>
       )}
@@ -140,7 +142,7 @@ function Connections(): JSX.Element {
               </ul>
             </Group>
           </section>
-          {/* While a setup is open it carries its own label, naming the type. */}
+          {/* An open setup form has its own heading that names the type. */}
           <section>
             {chosen === undefined ? <LaneLabel>Connect another</LaneLabel> : null}
             {offers}

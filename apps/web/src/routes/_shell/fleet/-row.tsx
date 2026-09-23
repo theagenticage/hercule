@@ -5,8 +5,10 @@ import type { Runner } from "@hercule/contract";
 import { Connectivity } from "../../../screens/connectivity";
 
 /**
- * In the order a person scans it. A row runs the facts together, so the two
- * sizes carry what they are: on the page each has a label of its own.
+ * Returns the runner's probed facts for its row, in the order a person scans
+ * them, leaving out the ones not reported yet. The row joins them into one
+ * line, so the two sizes say what they measure; on the runner page each fact
+ * has its own label instead.
  */
 const listProbedFacts = (runner: Runner): ReadonlyArray<string> => {
   const reading = describeRunnerFacts(runner);
@@ -19,13 +21,15 @@ const listProbedFacts = (runner: Runner): ReadonlyArray<string> => {
 };
 
 /**
- * A skewed binary is called out rather than left as two numbers to compare,
- * because a fleet is scanned. Labels sit apart from the probed facts, since
- * reading `gpu` as something the machine found would be backwards.
+ * The row for one runner on the fleet screen.
  *
- * The skew note takes a line of its own: it is a sentence rather than a fact,
- * and left to wrap among the facts it pushed them onto a second line that began
- * with a separator and no subject.
+ * - A runner whose version differs from the controller's gets a note, rather
+ *   than two numbers the reader has to compare, because the fleet is scanned.
+ * - The note has its own line. It is a sentence, not a fact, and when it
+ *   wrapped among the facts it pushed them onto a second line that started
+ *   with a separator.
+ * - Labels are on their own line, apart from the probed facts, so a label like
+ *   `gpu` is not mistaken for something the machine reported.
  */
 export function RunnerRow({
   runner,
@@ -52,7 +56,7 @@ export function RunnerRow({
           <b className="font-emph text-ink">{runner.name}</b>
           {isLocal ? <small className="ml-1.5 text-fine text-muted">this machine</small> : null}
         </span>
-        {/* `active` is the ordinary one; saying so on every row would be noise. */}
+        {/* `active` is the ordinary lifecycle; showing it on every row would be noise. */}
         {runner.lifecycle === "active" ? null : (
           <span className="text-fine text-faint">{runner.lifecycle}</span>
         )}

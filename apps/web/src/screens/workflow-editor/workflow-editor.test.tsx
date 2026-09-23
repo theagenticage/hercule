@@ -517,7 +517,7 @@ describe("the keyboard", () => {
     expect(document.activeElement).toBe(textbox);
   });
 
-  it("moves focus out with Escape then Tab, and says so in the editor's accessible description", async () => {
+  it("moves focus out with Escape then Tab, and explains this in the editor's accessible description", async () => {
     const { user, textbox, readSource } = await openEditorAtEnd(TEXT);
 
     expect(

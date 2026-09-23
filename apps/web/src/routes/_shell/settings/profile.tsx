@@ -15,9 +15,10 @@ export const Route = createFileRoute("/_shell/settings/profile")({
 });
 
 /**
- * The user's timezone: the one zone the whole system reads times in. It is set
- * during onboarding from the browser and changed here, and onboarding is what
- * guarantees there is one to show.
+ * The Profile screen: the user's timezone, and signing out.
+ *
+ * The whole system shows times in this one timezone. Onboarding sets it from
+ * the browser, so there is always one to show; the user changes it here.
  */
 function Profile(): JSX.Element {
   const { client, queryClient } = Route.useRouteContext();
@@ -33,19 +34,18 @@ function Profile(): JSX.Element {
   };
 
   /**
-   * Sign out: revoke the bearer at the controller, and drop it here whatever
-   * the controller answered. A token this browser has thrown away cannot be
-   * presented again, so a failed revocation must not leave the user signed in,
-   * which is why the local half runs when the mutation settles rather than
-   * when it succeeds.
+   * Signs out: revokes the bearer token at the controller, then forgets it in
+   * this browser whatever the controller returned.
    *
-   * What this screen read is dropped only once the login screen is up. Clearing
-   * it first evicts a query this screen is still subscribed to, which refetches
-   * it with no bearer and turns the answer into a failure screen racing the
-   * navigation.
-   *
-   * The live connection goes with it, and the navigation is what ends it: the
-   * entry guard holds a connection open only while there is a credential.
+   * - The local part runs when the mutation settles, not only when it
+   *   succeeds. A failed revocation must not leave the user signed in, and a
+   *   token this browser has discarded cannot be sent again anyway.
+   * - The query cache is cleared only after the login screen is showing.
+   *   Clearing it first would evict a query this screen still uses; that
+   *   query would refetch without a token, and its failure screen would race
+   *   the navigation.
+   * - The navigation also closes the live connection, because the entry guard
+   *   keeps it open only while there is a token.
    */
   const signOut = useMutation({
     mutationFn: () => client.auth.logout(),

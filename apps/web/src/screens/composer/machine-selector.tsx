@@ -4,7 +4,10 @@ import type { MachineRow } from "@hercule/client-core";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 import { SelectorShell } from "./selector-shell";
 
-/** Only `online` and `unreachable` carry a doctrine hue (live, failed); the rest are neutral. */
+/**
+ * The text colour per machine state. Only `online` (live) and `unreachable`
+ * (failed) get a colour; the rest are neutral.
+ */
 const STATE_HUE: Record<MachineRow["state"], string> = {
   online: "text-live",
   draining: "text-muted",
@@ -14,23 +17,24 @@ const STATE_HUE: Record<MachineRow["state"], string> = {
 };
 
 /**
- * A row's first line at the right: the state word in the state's hue, then how
- * much of the machine is taken. Nothing else is said there - what is true of
- * the machine belongs under it, where there is room for the reason.
+ * Renders the right-hand note on a machine row: the state in its colour, then
+ * how much of the machine's capacity is in use. Everything else about the
+ * machine goes on the line below, where there is room for a reason.
  */
 const renderStateAndCapacity = (row: MachineRow): JSX.Element => (
   <>
     <span className={STATE_HUE[row.state]}>{row.state}</span>
-    {/* The space is a character rather than a gap, so the row reads the way
-        it looks to a reader who hears it rather than sees it. */}
+    {/* The space is a real character rather than a CSS gap, so a screen
+        reader reads the state and capacity as two words. */}
     <span className="font-mono whitespace-pre text-faint tabular-nums">{` ${row.capacity}`}</span>
   </>
 );
 
 /**
- * What stands under a row: what this machine is - the local one, the one a new
- * thread lands on, one held back - and every reason it is dimmed. A machine
- * that does not hold the repo yet is still pickable: it clones on first use.
+ * Builds the line under a machine row. It lists what kind of machine this is
+ * (this machine, the default, reserved) and every reason the row is dimmed,
+ * joined with " · ". A machine that has not cloned the repo yet can still be
+ * picked, because it clones the repo on first use.
  */
 const describeMachine = (row: MachineRow): string =>
   [
@@ -44,11 +48,12 @@ const describeMachine = (row: MachineRow): string =>
     .join(" · ");
 
 /**
- * The lip's right-hand selector: which machine a new thread is placed on,
- * scoped to the instance the model selector has already picked. Its own
- * trigger carries the label the field built - the machine in force, named with
- * the reason it is dimmed, because that reason is what stops the thread from
- * starting and the menu it is inside is shut.
+ * The lip's right-hand selector: the machine a new thread is placed on,
+ * limited to machines for the provider instance picked in the model selector.
+ *
+ * The trigger shows the current machine together with the reason it is dimmed,
+ * if any. That reason is what blocks the thread from starting, and it must be
+ * visible while the menu is closed.
  */
 export function MachineSelector({
   rows,
@@ -59,7 +64,7 @@ export function MachineSelector({
   onPick,
 }: {
   readonly rows: readonly MachineRow[];
-  /** The machine in force, with the reason it is dimmed where there is one. */
+  /** The current machine's name, followed by the reason it is dimmed, if any. */
   readonly label: string;
   readonly locked: string | null;
   readonly open: boolean;

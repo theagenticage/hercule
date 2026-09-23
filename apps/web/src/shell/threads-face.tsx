@@ -30,12 +30,11 @@ import { ProjectPicker } from "../screens/project-picker";
 import { ThreadRowView } from "../screens/thread-row";
 
 /**
- * The threads face: the threads grouped per project and, inside a project, per
- * workspace (spec 14 §App shell, amended by #160 and by #72). The grouping
- * itself is `buildThreadGroups`'; what is left here is the drawing of it.
+ * The threads face of the sidebar: the threads grouped by project and, inside
+ * a project, by workspace (spec 14 §App shell, amended by #160 and #72).
+ * `buildThreadGroups` does the grouping; this component only draws it.
  *
- * The row density is the seam the thread list is built on: what a row shows is
- * the `ui.threadRows` setting's to say, and the list reads it from here.
+ * The `ui.threadRows` setting (`rows`) decides how much each row shows.
  */
 export function ThreadsFace({
   rows,
@@ -45,35 +44,35 @@ export function ThreadsFace({
   live,
 }: {
   readonly rows: ThreadRows;
-  /** What a draft opens in where its address names no workspace. */
+  /** The workspace a draft opens in when its URL names no workspace. */
   readonly preferredWorkspace: ThreadWorkspace | null;
   readonly client: HerculeClient;
   readonly queryClient: QueryClient;
   readonly live: Live;
 }): JSX.Element {
   useLiveInvalidation(live, queryClient, "session");
-  // Ages are read against the clock, not against whenever the last
-  // invalidation happened, so "2m" becomes "3m" on its own.
+  // Ages are computed from a clock that ticks every minute, not from the time
+  // of the last refetch, so "2m" becomes "3m" without new data.
   const now = useMinuteClock();
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
   const projects = useQuery(projectsQuery(client)).data?.items ?? [];
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const runners = useQuery(runnersQuery(client)).data?.items ?? [];
-  // What a meta row names its model from: the catalogs, so a row reads
-  // `Claude Sonnet 5` rather than the slug a request is written with.
+  // The provider catalogs let a meta row show the model's display name
+  // (`Claude Sonnet 5`) instead of the slug a request uses.
   const instances = useQuery(providersQuery(client)).data ?? [];
-  // Which machine is this browser's: what decides whether the project's shared
-  // checkout already stands where the draft would run.
+  // The runner on this browser's machine. It decides whether the project's
+  // main workspace already exists where the draft would run.
   const { detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
-  // One overlay at a time: the picker asks which project, the dialog makes one
-  // (D-20b), and the picker's New project row hands over to it.
+  // At most one overlay is open: the project picker or the New project dialog.
+  // The picker's New project row closes the picker and opens the dialog.
   const [overlay, setOverlay] = useState<"picker" | "new-project" | null>(null);
 
-  // The router's own answers for which thread is open and which draft is being
-  // written, so neither can drift from the route file the way a path pattern
-  // written out here would.
+  // Ask the router which thread is open and which draft is being written, so
+  // neither can drift from the route files the way a hand-written path pattern
+  // could.
   const currentId =
     useMatch({ from: "/_shell/threads/$sessionId", shouldThrow: false })?.params.sessionId ?? null;
   const drafted = useMatch({ from: "/_shell/threads/new", shouldThrow: false });
@@ -112,10 +111,9 @@ export function ThreadsFace({
           <span className="font-mono text-row text-faint">+</span>
           Create new thread
         </button>
-        {/* The one other thing started from up here: a project to start threads
-            in (D-20b). The `+` is the sidebar's own affordance for "one more of
-            these", as the per-project and per-workspace rows below already use;
-            the marks family holds no folder glyph, and #35 pins what it holds. */}
+        {/* The New project button. It shows a `+`, like the project and
+            workspace headers below, because the marks family has no folder
+            glyph and #35 fixed which glyphs it has. */}
         <button
           type="button"
           aria-label="New project"
@@ -176,7 +174,7 @@ export function ThreadsFace({
   );
 }
 
-/** One project's header, then its workspaces. Threads in no project head nothing. */
+/** One project's header, then its workspaces. Threads with no project get no header. */
 function ProjectLane({
   group,
   now,
@@ -213,7 +211,7 @@ function ProjectLane({
   );
 }
 
-/** One workspace's faint mono label, the draft that joins it, then its threads. */
+/** One workspace's label, then its threads, then the draft being written in it, if any. */
 function WorkspaceLane({
   lane,
   projectId,
@@ -229,11 +227,11 @@ function WorkspaceLane({
     <div className="group/lane">
       {projectId === null || lane.label === null ? null : (
         <div className="flex items-center gap-1.5 pt-1.5 pr-1 pb-px pl-2">
-          {/* The repo is what gives when the sidebar is narrow; ` · <machine>`
-              stands whole, because the machine is what tells one repo's two
-              main workspaces apart (D-20c). The whole label is the title. A label
-              that is one word is one element: two would be the same text
-              twice, to a reader and to anything looking for it. */}
+          {/* In a narrow sidebar the repo part is truncated and ` · <machine>`
+              stays whole, because the machine is what tells two main
+              workspaces of one repo apart. The tooltip shows the whole label.
+              A label with no machine part is a single element: nested elements
+              would repeat the same text, for a reader and for a text search. */}
           {lane.label.keep === "" ? (
             <span
               title={lane.label.clip}
@@ -270,12 +268,12 @@ function WorkspaceLane({
           selected={row.id === current}
         />
       ))}
-      {/* The draft is the lane's last row, as it is the last tab of the thread
-          chrome (spec 14 §The thread surface). */}
+      {/* The draft is the lane's last row, just as it is the last thread tab
+          (spec 14 §The thread surface). */}
       {lane.draft ? (
         <div className="flex items-center gap-2 rounded-control px-2.5 py-[7px] text-row text-muted">
-          {/* The same marker column a thread row carries, so the draft's title
-              stands on the same left edge as the titles under it. */}
+          {/* The same marker column a thread row has, so the draft's title
+              lines up with the thread titles above it. */}
           <span aria-hidden="true" className="flex w-3 shrink-0 justify-center">
             <span className="text-faint">·</span>
           </span>
@@ -287,7 +285,7 @@ function WorkspaceLane({
   );
 }
 
-/** The `+` that opens a draft already standing where it was pressed. */
+/** A `+` link that opens a new thread draft in the project or workspace it sits beside. */
 function Plus({
   name,
   search,

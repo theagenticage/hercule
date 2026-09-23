@@ -1,7 +1,7 @@
 /**
- * The Tasks screen: the list, the filters, the composer and the drawer, over a
- * stubbed controller. Detail is a drawer over `/tasks` and never a path of its
- * own, so the browser address is part of what these tests hold.
+ * Tests the Tasks screen against a stubbed controller: the list, the filters,
+ * the composer and the drawer. Task detail is a drawer over `/tasks`, never a
+ * path of its own, so these tests also check the browser URL.
  */
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -82,8 +82,9 @@ const PRUNE: Fixture = {
 };
 
 /**
- * A controller holding the tasks given, answering a listing with them and a
- * patch by applying it, so a screen that reads its own write back sees it.
+ * Returns stub routes for a controller holding the given tasks. The list route
+ * returns them, and a patch is applied to them, so a screen that reads back its
+ * own write sees the change.
  */
 const buildController = (
   tasks: readonly Fixture[],
@@ -142,14 +143,14 @@ const openApp = async (tasks: readonly Fixture[], extra?: Readonly<Record<string
   return { ...app, api };
 };
 
-/** The listing calls, oldest first, as query strings. */
+/** Returns the task list requests, oldest first. */
 const listTaskReads = (api: { readonly calls: readonly Call[] }) =>
   api.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/tasks");
 
 const getTaskRow = (title: string) => screen.getByRole("button", { name: new RegExp(title) });
 
 describe("Tasks", () => {
-  it("shows a row per task with what it is, how much it matters and where it sits", async () => {
+  it("shows a row per task with its status, labels, project and priority", async () => {
     await openApp([RUNNER, PRUNE]);
 
     const first = await screen.findByRole("button", { name: new RegExp(RUNNER.title) });
@@ -164,7 +165,7 @@ describe("Tasks", () => {
     expect(within(second).getByLabelText(/normal/i)).toBeTruthy();
   });
 
-  it("offers the pinned filters, each opening on no filter at all", async () => {
+  it("offers the four filters, each starting on Any", async () => {
     await openApp([RUNNER]);
 
     const status = screen.getByLabelText<HTMLSelectElement>("Status");
@@ -184,7 +185,7 @@ describe("Tasks", () => {
     expect(screen.getByLabelText("Labels")).toBeTruthy();
   });
 
-  it("searches by asking the controller, not by filtering what it already has", async () => {
+  it("searches through the controller, not by filtering the loaded rows", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([RUNNER, PRUNE]);
 
@@ -196,7 +197,7 @@ describe("Tasks", () => {
     });
   });
 
-  it("narrows by status through the controller too", async () => {
+  it("filters by status through the controller too", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([RUNNER, PRUNE]);
 
@@ -209,11 +210,12 @@ describe("Tasks", () => {
     });
   });
 
-  it("says what a task is for when there are none at all", async () => {
+  it("explains what a task is for when there are no tasks", async () => {
     const { api } = await openApp([]);
 
     expect(await screen.findByText("No tasks yet.")).toBeTruthy();
-    // Emptiness is what the controller answered, not what the screen assumed.
+    // The list is empty because the controller returned no tasks, not because
+    // the screen assumed so.
     expect(listTaskReads(api).length).toBeGreaterThan(0);
     expect(
       screen.getByText(
@@ -222,7 +224,7 @@ describe("Tasks", () => {
     ).toBeTruthy();
   });
 
-  it("blames the filters rather than the emptiness when a filter matched nothing", async () => {
+  it("says the filters matched nothing, rather than that there are no tasks", async () => {
     const user = userEvent.setup();
     const api = stubApi({
       ...buildController([RUNNER]),
@@ -278,7 +280,7 @@ describe("Tasks > the drawer", () => {
     expect(router.state.location.searchStr).toContain(RUNNER.id);
   });
 
-  it("shows what each provenance entry points at, who wrote it and when", async () => {
+  it("shows each provenance entry's source, actor and time", async () => {
     const user = userEvent.setup();
     await openApp([RUNNER, PRUNE]);
 
@@ -286,7 +288,7 @@ describe("Tasks > the drawer", () => {
     const first = await screen.findByRole("dialog");
     expect(first.textContent).toContain("github:issue:rogierpennink/hydra#61");
     expect(first.textContent).toContain("you");
-    // The reading may be in the user's zone or in UTC; either says the minute.
+    // The time may be shown in the user's zone or in UTC; either has the minute.
     expect(first.textContent).toMatch(/17:21|15:21/);
 
     await user.keyboard("{Escape}");
@@ -297,8 +299,8 @@ describe("Tasks > the drawer", () => {
     await user.click(getTaskRow(PRUNE.title));
     const second = await screen.findByRole("dialog");
     expect(second.textContent).toContain("4242");
-    // A session that acted is named by its tail and links to its thread, rather
-    // than printing the raw `session:<uuid>` stamp.
+    // A session actor is shown by the tail of its id, as a link to its thread,
+    // rather than as the raw `session:<uuid>` stamp.
     expect(second.textContent).not.toContain("session:01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb");
     const thread = await within(second).findByRole("link", { name: "session 7c82ebeb" });
     expect(thread.getAttribute("href")).toBe("/threads/01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb");
@@ -356,8 +358,8 @@ describe("Tasks > the drawer", () => {
   });
 });
 
-describe("Tasks > what the screen must not hide", () => {
-  /** A 403 in full: `forbidden` carries the grant it wanted. */
+describe("Tasks > errors the screen must show", () => {
+  /** A full 403 response. A `forbidden` error includes the missing grant. */
   const refused = {
     status: 403,
     body: {
@@ -369,7 +371,7 @@ describe("Tasks > what the screen must not hide", () => {
     },
   };
 
-  it("says so when the controller refuses an edit", async () => {
+  it("shows the error when the controller rejects an edit", async () => {
     const user = userEvent.setup();
     const api = stubApi({
       ...buildController([RUNNER]),
@@ -386,7 +388,7 @@ describe("Tasks > what the screen must not hide", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("task.update is not granted");
   });
 
-  it("says so for an edit the next edit answers before, rather than losing it", async () => {
+  it("still shows an edit's error when a later edit returns first", async () => {
     const user = userEvent.setup();
     let release = (): void => {};
     const answered = new Promise<void>((resolve) => {
@@ -394,8 +396,8 @@ describe("Tasks > what the screen must not hide", () => {
     });
     const api = stubApi({
       ...buildController([RUNNER]),
-      // The status edit is refused, but only once the priority edit that
-      // follows it has already been answered.
+      // The status edit fails, but only after the priority edit that follows
+      // it has already returned.
       [`PATCH /api/v1/tasks/${RUNNER.id}`]: async (call: Call) => {
         const sent = call.body as { status?: string; priority?: string };
         if (sent.status === undefined) return { body: { ...RUNNER, ...sent } };
@@ -414,7 +416,7 @@ describe("Tasks > what the screen must not hide", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("task.update is not granted");
   });
 
-  it("leaves one task's refusal out of the next task's drawer", async () => {
+  it("does not show one task's edit error in the next task's drawer", async () => {
     const user = userEvent.setup();
     const api = stubApi({
       ...buildController([RUNNER, PRUNE]),
@@ -437,11 +439,11 @@ describe("Tasks > what the screen must not hide", () => {
     expect(within(next).queryByRole("alert")).toBeNull();
   });
 
-  it("clears a refusal once a later edit of the same task goes through", async () => {
+  it("clears an edit error once a later edit of the same task succeeds", async () => {
     const user = userEvent.setup();
     const api = stubApi({
       ...buildController([RUNNER]),
-      // The status edit is refused; the priority edit that follows is taken.
+      // The status edit fails; the priority edit that follows succeeds.
       [`PATCH /api/v1/tasks/${RUNNER.id}`]: (call: Call) => {
         const sent = call.body as { status?: string; priority?: string };
         return sent.status === undefined ? { body: { ...RUNNER, ...sent } } : refused;
@@ -461,7 +463,7 @@ describe("Tasks > what the screen must not hide", () => {
     });
   });
 
-  it("leaves a refusal behind when the task is left, Back included", async () => {
+  it("drops an edit error when the drawer closes, even if Back reopens it", async () => {
     const user = userEvent.setup();
     const api = stubApi({
       ...buildController([RUNNER]),
@@ -481,8 +483,8 @@ describe("Tasks > what the screen must not hide", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
-    // Back reopens the same drawer without going through the row or the Close
-    // button, which is the one way in that clears nothing on the way.
+    // Back reopens the same drawer without a click on the row or on Close, so
+    // no click handler gets a chance to clear the error on the way.
     await act(async () => {
       router.history.back();
       await router.load();
@@ -493,7 +495,7 @@ describe("Tasks > what the screen must not hide", () => {
     expect(within(reopened).queryByRole("alert")).toBeNull();
   });
 
-  it("says so when the address names a task the controller will not answer for", async () => {
+  it("shows the error when the task in the URL cannot be read", async () => {
     const api = stubApi({
       ...buildController([]),
       [`GET /api/v1/tasks/${RUNNER.id}`]: {
@@ -508,7 +510,7 @@ describe("Tasks > what the screen must not hide", () => {
     expect(drawer.textContent).toContain(`no task with id ${RUNNER.id}`);
   });
 
-  it("says so when the controller refuses a new task, and keeps what was typed", async () => {
+  it("shows the error when creating a task fails, and keeps what was typed", async () => {
     const user = userEvent.setup();
     const api = stubApi({
       ...buildController([]),
@@ -527,7 +529,7 @@ describe("Tasks > what the screen must not hide", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Title").value).toBe("Read the log");
   });
 
-  it("drops a refused attempt when the composer is closed", async () => {
+  it("clears a failed attempt's error when the composer is closed", async () => {
     const user = userEvent.setup();
     const api = stubApi({
       ...buildController([]),
@@ -551,7 +553,7 @@ describe("Tasks > what the screen must not hide", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("opens a task named in the address that no page of the listing holds", async () => {
+  it("opens a task named in the URL that is on no loaded page of the list", async () => {
     const api = stubApi({
       ...buildController([]),
       [`GET /api/v1/tasks/${RUNNER.id}`]: { body: RUNNER },
@@ -567,7 +569,7 @@ describe("Tasks > what the screen must not hide", () => {
     let held = { ...RUNNER };
     const api = stubApi({
       ...buildController([RUNNER]),
-      // A listing narrowed to `open`, which the edit below takes the task out of.
+      // A list filtered to `open`. The edit below moves the task out of it.
       "GET /api/v1/tasks": (call: Call) => ({
         body: {
           items: call.search.includes("status=open") && held.status !== "open" ? [] : [held],
@@ -595,7 +597,7 @@ describe("Tasks > what the screen must not hide", () => {
     });
   });
 
-  it("names a project the picker does not hold rather than claiming there is none", async () => {
+  it("shows a project missing from the project list, rather than No project", async () => {
     const user = userEvent.setup();
     const orphan: Fixture = { ...RUNNER, projectId: "01a06d02-0000-7000-8000-00000000dead" };
     const api = stubApi({
@@ -624,7 +626,7 @@ describe("Tasks > live", () => {
     provenance: [],
   };
 
-  /** One invalidation, in the shape the contract puts on the wire. */
+  /** Builds one invalidation message, in the wire shape the contract defines. */
   const buildInvalidation = (kind: string, ids: readonly string[]) => ({
     _tag: "invalidate",
     ids,
@@ -632,9 +634,9 @@ describe("Tasks > live", () => {
   });
 
   /**
-   * One push on the `task` topic. It crosses a stub socket and the transport's
-   * own fibers, so it is a start rather than a barrier: what it causes is
-   * waited for at the assertion.
+   * Sends one push on the `task` topic. The push passes through a stub socket
+   * and the transport's own fibers, so it only starts the update; the test
+   * waits for the result at the assertion.
    */
   const pushTaskInvalidation = (
     live: { push(topic: string, message: unknown): void },
@@ -646,7 +648,7 @@ describe("Tasks > live", () => {
     });
   };
 
-  /** The screen is watching `task` before a push can mean anything. */
+  /** Waits until the screen subscribes to `task`; a push before that has no effect. */
   const waitForTaskTopic = async (live: { topics(): readonly string[] }) => {
     await waitFor(() => {
       expect(live.topics()).toContain("task");
@@ -663,12 +665,12 @@ describe("Tasks > live", () => {
     await waitForTaskTopic(live);
     const before = listTaskReads(api).length;
 
-    // The controller now holds one more task than the screen has read.
+    // The controller now has one more task than the screen has loaded.
     held = [ADDED, ...held];
     pushTaskInvalidation(live, "created", [ADDED.id]);
 
     expect(await screen.findByRole("button", { name: new RegExp(ADDED.title) })).toBeTruthy();
-    // The row came from a fresh listing, not from the push itself.
+    // The row came from a new list request, not from the push itself.
     expect(listTaskReads(api).length).toBeGreaterThan(before);
     expect(router.state.location.pathname).toBe("/tasks");
     expect(router.state.location.searchStr).not.toContain(ADDED.id);
@@ -692,7 +694,7 @@ describe("Tasks > live", () => {
     expect(getTaskRow(RUNNER.title)).toBeTruthy();
   });
 
-  it("shows the new values in a dossier that is open when the task is updated elsewhere", async () => {
+  it("shows the new values in an open drawer when the task is updated elsewhere", async () => {
     const user = userEvent.setup();
     let held: Fixture = { ...RUNNER };
     const { live } = await openApp([RUNNER], {
@@ -716,7 +718,7 @@ describe("Tasks > live", () => {
     expect(screen.getByRole("dialog").textContent).toContain("Wire the runner socket up, at last");
   });
 
-  it("says so in a dossier left open on a task deleted elsewhere", async () => {
+  it("shows the error in an open drawer when the task is deleted elsewhere", async () => {
     const user = userEvent.setup();
     let held: readonly Fixture[] = [RUNNER];
     const { live } = await openApp([RUNNER], {
@@ -738,7 +740,7 @@ describe("Tasks > live", () => {
     expect(screen.getByRole("dialog").textContent).not.toContain(RUNNER.title);
   });
 
-  it("leaves no subscription behind when the screen is left", async () => {
+  it("unsubscribes when the user leaves the screen", async () => {
     const { live, router } = await openApp([RUNNER]);
 
     await screen.findByRole("button", { name: new RegExp(RUNNER.title) });

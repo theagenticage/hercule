@@ -3,33 +3,36 @@ import { Popover, PopoverContent, PopoverTrigger } from "../primitives/popover";
 import { LaneLabel } from "../patterns/patterns";
 import { cn } from "../primitives/cn";
 
-/** The three ways the app can be painted; "system" follows the machine. */
+/** The three theme choices; "system" follows the operating system's appearance. */
 export type ThemeChoice = "light" | "dark" | "system";
 
 /**
- * Where the choice lives between visits. The key holds `light` or `dark`, and
- * holding nothing at all is the system choice - so a browser that has never
- * chosen is already on the default, and the pre-paint script in
- * `apps/web/public/theme-init.js` reads this same key. Keep the two in step.
+ * The `localStorage` key that keeps the choice between visits. It holds `light`
+ * or `dark`; no value means the system choice, so a browser that has never
+ * chosen is already on the default. The pre-paint script in
+ * `apps/web/public/theme-init.js` reads the same key, so keep the two in step.
  */
 const KEY = "hercule:theme";
 
-/** The pinned order: Light and Dark adjacent, System last, under its fine note. */
+/** The option order: Light and Dark together, then System last, above its note. */
 const ORDER: readonly ThemeChoice[] = ["light", "dark", "system"];
 
 const LABELS: Record<ThemeChoice, string> = { light: "Light", dark: "Dark", system: "System" };
 
 /**
- * The document is what the choice is read back from, not the storage: the
- * pre-paint script has already carried a stored choice there, and a browser
- * with storage denied still gets to choose for the visit it is on.
+ * Reads the current choice from the document's `data-theme` attribute, not from
+ * storage. The pre-paint script has already copied any stored choice there, and
+ * a browser that denies storage can still choose a theme for the current visit.
  */
 const readDocumentThemeChoice = (): ThemeChoice => {
   const theme = document.documentElement.dataset.theme;
   return theme === "light" || theme === "dark" ? theme : "system";
 };
 
-/** Applies the choice where the tokens read it, and where the next load will. */
+/**
+ * Applies the choice to the document, where the style tokens read it, and saves
+ * it to `localStorage` for the next page load.
+ */
 const applyChoice = (choice: ThemeChoice): void => {
   if (choice === "light" || choice === "dark") document.documentElement.dataset.theme = choice;
   else delete document.documentElement.dataset.theme;
@@ -42,15 +45,15 @@ const applyChoice = (choice: ThemeChoice): void => {
 };
 
 /**
- * The theme selector: a quiet row at the sidebar foot, under the Marks toggle,
- * opening the three ways the app can be painted. It is a this-browser choice
- * rather than a setting - a machine's operators are not one person with one
- * screen - and it changes nothing until it is clicked.
+ * The theme selector: a quiet row at the foot of the sidebar, under the Marks
+ * toggle, that opens the three theme choices. The choice belongs to this
+ * browser, not to the user's settings, because the people who operate one
+ * machine are not one person with one screen. Nothing changes until the user
+ * picks a theme.
  *
- * The three options are a radio group in the ARIA sense as well as the visual
- * one: one is checked, the arrow keys move the check as they go, and a click
- * commits. Arrows browse with the popover open - the app repaints under them -
- * while a click is the commitment that closes it.
+ * The options form an ARIA radio group: exactly one is checked, and the arrow
+ * keys move the check. Each arrow key press applies the theme while the popover
+ * stays open; a click applies the theme and closes the popover.
  */
 export function ThemeSelector(): JSX.Element {
   const [choice, setChoice] = useState(readDocumentThemeChoice);
@@ -76,12 +79,12 @@ export function ThemeSelector(): JSX.Element {
           ? -1
           : 0;
     if (offset === 0) return;
-    // The arrows are the radio group's own keys; they do not scroll the page
-    // behind the popover as well.
+    // The arrow keys belong to the radio group, so they must not also scroll
+    // the page behind the popover.
     event.preventDefault();
     const next = ORDER[(ORDER.indexOf(choice) + offset + ORDER.length) % ORDER.length]!;
     choose(next);
-    // Roving tabindex made the new choice the tab stop; focus follows it.
+    // With a roving tabindex the new choice is now the tab stop, so focus it.
     rows.current.get(next)?.focus();
   };
 
@@ -95,8 +98,8 @@ export function ThemeSelector(): JSX.Element {
         align="end"
         className="w-[236px]"
         aria-label="Theme"
-        // Focus lands on the checked option rather than the popover's rim, so
-        // the arrow keys work from the first keystroke.
+        // Focus the checked option, not the popover itself, so the arrow keys
+        // work from the first key press.
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           rows.current.get(choice)?.focus();

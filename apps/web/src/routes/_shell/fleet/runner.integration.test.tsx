@@ -1,10 +1,10 @@
 /**
- * The runner page over a stubbed controller.
+ * Tests for the runner page, against a stubbed controller.
  *
- * This page is where a machine is changed, so each case asserts both
- * directions: what the reader is told, and what leaves the browser when they
- * act. Retire cannot be taken back, so it is held to the question it asks and
- * to sending nothing until that question is answered.
+ * This page is where a runner is changed, so each test checks both what the
+ * page shows and what requests the browser sends when the user acts. Retiring
+ * cannot be undone, so its tests check the confirmation question and that
+ * nothing is sent until the user answers it.
  */
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -30,13 +30,13 @@ import {
   type Fixture,
 } from "./-fixtures";
 
-/** The machine this page is opened on, away since it was last seen. */
+/** The runner the page is opened on, offline since it was last seen. */
 const MOSS: Fixture = { ...MACHINE, connectivity: "offline", maxConcurrentSessions: 7 };
 
-/** The same machine, connected, which is what the live moves need. */
+/** The same runner, online, which the actions that reach the machine need. */
 const ONLINE: Fixture = { ...MOSS, connectivity: "online" };
 
-/** A machine the controller has lost: retiring it is the case that forces. */
+/** A runner the controller cannot reach, so retiring it is forced. */
 const LOST: Fixture = { ...MOSS, connectivity: "unreachable" };
 
 const BARE: Fixture = {
@@ -44,7 +44,7 @@ const BARE: Fixture = {
   facts: { ...ONLINE.facts!, providers: [{ name: "claude", present: false }] },
 };
 
-/** What every provider declares about itself; none of it is this page's subject. */
+/** Provider declarations every instance needs; this page does not test them. */
 const DECLARED = {
   steering: "native",
   fork: "native",
@@ -122,7 +122,7 @@ const CODEX = buildProviderInstance(CODEX_ID, "codex", "Codex", [NO_ADAPTER]);
 
 const INSTANCES = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
 
-/** A controller answering for itself, for the runner given, and for its writes. */
+/** Builds a stub controller that returns its own record, `runner`, and the handlers in `extra`. */
 const buildController = (
   runner: Fixture,
   options: {
@@ -133,8 +133,8 @@ const buildController = (
 ): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/providers": { body: options.instances ?? INSTANCES },
   "GET /api/v1/setup": { body: { complete: true } },
-  // The shell's thread list reads this on every path it mounts on; a test
-  // about the machine's own sessions overrides it with a real list.
+  // The shell's thread list reads this on every page; the session tests
+  // override it with a real list.
   "GET /api/v1/sessions": { body: { items: [] } },
   "GET /api/v1/settings": {
     body: {
@@ -167,32 +167,29 @@ const openApp = async (
   return { ...app, api };
 };
 
-/** Everything this page sent about the runner, in order. */
+/** Returns the writes this page sent for the runner `id`, in order. */
 const listWritesTo = (api: { readonly calls: readonly Call[] }, id: string) =>
   api.calls.filter(
     (call) => call.method !== "GET" && call.path.startsWith(`/api/v1/runners/${id}`),
   );
 
-/**
- * Whether a size is on screen, as the whole number of gibibytes the fixtures
- * are all round multiples of.
- */
+/** Checks whether `text` shows `bytes` as a whole number of GiB, as all the fixtures are. */
 const showsSize = (text: string, bytes: number): boolean =>
   new RegExp(`(^|[^\\d.])${(bytes / 1024 ** 3).toFixed(0)} ?GiB`).test(text);
 
-/** The field holding the machine's name. */
+/** Returns the runner's name field. */
 const getNameField = () => screen.getByLabelText<HTMLInputElement>(/name/i);
 
-/** The control saying whether the machine is the owner's alone. */
+/** Returns the "personal machine" checkbox. */
 const getReservedField = () => screen.getByRole("checkbox", { name: /personal machine|reserved/i });
 
-/** Whether a control is ticked, whichever way the control says so. */
+/** Checks whether a control is ticked, through `aria-checked` or `checked`. */
 const isTicked = (control: HTMLElement): boolean =>
   control.getAttribute("aria-checked") === "true" || (control as HTMLInputElement).checked;
 
 /**
- * The smallest part of the page holding both a message and the field it is
- * about. A message is beside its field when that part holds no other field.
+ * Returns the smallest element that holds both `message` and `field`. The
+ * message is beside its field when that element holds no other field.
  */
 const findMessageGroup = (message: HTMLElement, field: HTMLElement): HTMLElement => {
   let group: HTMLElement = message;
@@ -215,7 +212,7 @@ describe("Runner", () => {
     expect(readCurrentNavItems()).toEqual(["Fleet"]);
   });
 
-  it("says what the machine is, where it stands and what it may run", async () => {
+  it("shows the runner's status, its probed facts and its editable fields", async () => {
     await openApp(MOSS);
 
     const shown = await waitFor(() => {
@@ -224,16 +221,16 @@ describe("Runner", () => {
       return text;
     });
 
-    // Where it stands, on both axes. A page states every fact, so the ordinary
-    // lifecycle is written out here rather than left to be inferred from the
-    // moves being offered.
+    // Both the lifecycle and the connectivity. The page shows every fact, so
+    // even the ordinary lifecycle is shown rather than left to be guessed
+    // from the actions on offer.
     expect(shown).toContain(MOSS.lifecycle);
     expect(shown).toContain(MOSS.connectivity);
-    // A machine that is not connected carries how long ago its page was true.
+    // A runner that is not connected shows when it was last seen.
     expect(shown).toMatch(/last seen/i);
     expect(shown).toContain(formatStamp(new Date(MOSS.lastSeenAt!), ZONE)!);
 
-    // What it probed about itself.
+    // The facts it probed about itself.
     expect(shown).toContain(MOSS.facts!.os);
     expect(shown).toContain(MOSS.facts!.arch);
     expect(shown).toContain("2.50.1");
@@ -249,7 +246,7 @@ describe("Runner", () => {
     );
   });
 
-  it("says a machine is the owner's own when it is", async () => {
+  it("ticks the personal machine checkbox for a reserved runner", async () => {
     await openApp({ ...MOSS, reserved: true });
 
     await waitFor(() => {
@@ -259,12 +256,12 @@ describe("Runner", () => {
 });
 
 describe("Runner > saving", () => {
-  /** A controller that answers a patch with the machine the patch makes. */
+  /** Returns a handler that responds to a patch with `runner` updated by that patch. */
   const applyPatch = (runner: Fixture) => (call: Call) => ({
     body: { ...runner, ...(call.body as Record<string, unknown>) },
   });
 
-  it("sends the fields the owner changed and nothing else, and says it landed", async () => {
+  it("sends only the changed fields, and shows that the save worked", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(MOSS, {
       extra: { [`PATCH /api/v1/runners/${MOSS.id}`]: applyPatch(MOSS) },
@@ -273,7 +270,7 @@ describe("Runner > saving", () => {
     await waitFor(() => {
       expect(getNameField().value).toBe(MOSS.name);
     });
-    // Nothing has been touched, so there is no patch to send and Save says so.
+    // Nothing has changed, so there is no patch to send and Save is disabled.
     expect(getActionButton(/^save$/i).hasAttribute("disabled")).toBe(true);
 
     await user.clear(getNameField());
@@ -284,7 +281,7 @@ describe("Runner > saving", () => {
     expect(listWritesTo(api, MOSS.id)).toHaveLength(1);
     expect(listWritesTo(api, MOSS.id)[0]?.body).toEqual({ name: "moss-2" });
 
-    // The name is now what was saved, so the next write carries only the tick.
+    // The saved name is now the baseline, so the next patch holds only the checkbox.
     await user.click(getReservedField());
     await user.click(getActionButton(/^save$/i));
 
@@ -294,7 +291,7 @@ describe("Runner > saving", () => {
     expect(listWritesTo(api, MOSS.id)[1]?.body).toEqual({ reserved: true });
   });
 
-  it("puts a refused name beside the name", async () => {
+  it("shows a rejected name's error beside the name field", async () => {
     const user = userEvent.setup();
     const complaint = "another runner is already called hetzner-01";
     const { api } = await openApp(MOSS, {
@@ -320,7 +317,7 @@ describe("Runner > saving", () => {
     expect(listWritesTo(api, MOSS.id)).toHaveLength(1);
   });
 
-  it("puts a refused reserved beside the tick", async () => {
+  it("shows a rejected reserved flag's error beside the checkbox", async () => {
     const user = userEvent.setup();
     const complaint = "the default runner cannot be reserved";
     await openApp(MOSS, {
@@ -346,8 +343,8 @@ describe("Runner > saving", () => {
   });
 });
 
-describe("Runner > moves", () => {
-  it("drains the machine and shows that it is draining", async () => {
+describe("Runner > actions", () => {
+  it("drains the runner and shows that it is draining", async () => {
     const user = userEvent.setup();
     const draining: Fixture = { ...ONLINE, lifecycle: "draining" };
     const { api } = await openApp(ONLINE, {
@@ -364,7 +361,7 @@ describe("Runner > moves", () => {
     ]);
   });
 
-  it("calls a drain off again", async () => {
+  it("undrains a draining runner", async () => {
     const user = userEvent.setup();
     const draining: Fixture = { ...ONLINE, lifecycle: "draining" };
     const { api } = await openApp(draining, {
@@ -381,7 +378,7 @@ describe("Runner > moves", () => {
     ]);
   });
 
-  it("asks the machine to probe itself again and shows what came back", async () => {
+  it("asks the runner to probe its machine again and shows the new facts", async () => {
     const user = userEvent.setup();
     const probed: Fixture = {
       ...ONLINE,
@@ -402,11 +399,11 @@ describe("Runner > moves", () => {
     ]);
   });
 
-  it("does not send a field the owner never touched after a move changed it", async () => {
-    // The derived session cap follows the machine's memory, so a re-probe moves
-    // it under the form. Saving must never send that number back: the
-    // controller would store it as an override, and there is no control
-    // anywhere that undoes one.
+  it("does not send a field the owner never edited after a re-probe changed it", async () => {
+    // The derived session cap follows the machine's memory, so a re-probe
+    // changes it while the form is open. Saving must never send that number
+    // back: the controller would store it as an override, and no control
+    // anywhere can undo one.
     const user = userEvent.setup();
     const probed: Fixture = {
       ...ONLINE,
@@ -414,7 +411,7 @@ describe("Runner > moves", () => {
       maxConcurrentSessions: 4,
     };
     const { api } = await openApp(ONLINE, {
-      // The answer to a patch is the machine as it now stands, cap included.
+      // The response to a patch is the whole updated runner, cap included.
       extra: {
         [`POST /api/v1/runners/${ONLINE.id}/refresh-facts`]: { body: probed },
         [`PATCH /api/v1/runners/${ONLINE.id}`]: (call: Call) => ({
@@ -431,8 +428,8 @@ describe("Runner > moves", () => {
 
     await user.click(await screen.findByRole("button", { name: /refresh facts/i }));
 
-    // The re-probe changed the cap, but a half-typed form is not overwritten,
-    // so the field still holds what the reader is working from.
+    // The re-probe changed the cap, but a form with unsaved edits is not
+    // overwritten, so the name field still holds the user's edit.
     await waitFor(() => {
       expect(readPageText()).toContain("8 GiB");
     });
@@ -441,25 +438,25 @@ describe("Runner > moves", () => {
     await user.click(getActionButton(/^save$/i));
     await screen.findByRole("status");
 
-    // Only the name. The cap the re-probe moved is not the user's to send.
+    // Only the name. The user did not edit the cap, so it is not sent.
     const first = listWritesTo(api, ONLINE.id).filter((call) => call.method === "PATCH");
     expect(first).toHaveLength(1);
     expect(first[0]?.body).toEqual({ name: "moss-2" });
 
-    // The save answered with the machine whole, so the form now shows the cap
-    // the re-probe derived rather than the one it opened with.
+    // The save responded with the whole runner, so the form now shows the cap
+    // derived after the re-probe rather than the one it opened with.
     await waitFor(() => {
       expect(screen.getByLabelText<HTMLInputElement>(/session/i).value).toBe("4");
     });
 
-    // The answer to the save above is what the next patch is measured against,
-    // whole, so nothing is left to send and Save is no longer offered.
+    // The next patch is measured against the save's response, so nothing is
+    // left to send and Save is disabled.
     expect(getActionButton(/^save$/i).hasAttribute("disabled")).toBe(true);
     await user.click(getActionButton(/^save$/i));
     expect(listWritesTo(api, ONLINE.id).filter((call) => call.method === "PATCH")).toHaveLength(1);
   });
 
-  it("says what a refused move was refused with", async () => {
+  it("shows the error of a failed action", async () => {
     const user = userEvent.setup();
     const complaint = "the runner did not answer within 10s";
     const { api } = await openApp(ONLINE, {
@@ -477,7 +474,7 @@ describe("Runner > moves", () => {
     expect(listWritesTo(api, ONLINE.id)).toHaveLength(1);
   });
 
-  it("drops what a refused move said once another move succeeds", async () => {
+  it("clears a failed action's error once another action succeeds", async () => {
     const user = userEvent.setup();
     const complaint = "the runner did not answer within 10s";
     await openApp(ONLINE, {
@@ -497,8 +494,8 @@ describe("Runner > moves", () => {
 
     await user.click(getActionButton(/^drain$/i));
 
-    // The drain worked, so the refusal above it is not this page's state any
-    // more; leaving it there reads as the drain having failed.
+    // The drain worked, so the earlier error no longer applies. Leaving it on
+    // screen would make it look as if the drain had failed.
     await waitFor(() => {
       expect(readPageText()).toContain("draining");
     });
@@ -510,7 +507,7 @@ describe("Runner > moves", () => {
 describe("Runner > retiring", () => {
   const buildRetiredRunner = (runner: Fixture): Fixture => ({ ...runner, lifecycle: "retired" });
 
-  it("asks before it retires, and sends nothing until the question is answered", async () => {
+  it("asks for confirmation before it retires, and sends nothing until the user answers", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(ONLINE, {
       extra: { [`POST /api/v1/runners/${ONLINE.id}/retire`]: { body: buildRetiredRunner(ONLINE) } },
@@ -521,7 +518,7 @@ describe("Runner > retiring", () => {
     // Cancel comes before Confirm.
     expectInDocumentOrder([getActionButton(/^cancel$/i), getActionButton(/^confirm$/i)]);
 
-    // Backing out leaves the machine as it was.
+    // Cancelling leaves the runner as it was.
     await user.click(getActionButton(/^cancel$/i));
     expect(listWritesTo(api, ONLINE.id)).toEqual([]);
     expect(readPageText()).not.toContain("retired");
@@ -534,11 +531,11 @@ describe("Runner > retiring", () => {
     });
     const sent = listWritesTo(api, ONLINE.id);
     expect(sent.map((call) => call.path)).toEqual([`/api/v1/runners/${ONLINE.id}/retire`]);
-    // A machine the controller can account for is not forced.
+    // A reachable runner is not force-retired.
     expect((sent[0]?.body as { force?: boolean } | undefined)?.force).not.toBe(true);
   });
 
-  it("says that retiring a machine it cannot reach forces it, and forces it", async () => {
+  it("warns that retiring an unreachable runner forces it, and sends force", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(LOST, {
       extra: { [`POST /api/v1/runners/${LOST.id}/retire`]: { body: buildRetiredRunner(LOST) } },
@@ -556,12 +553,12 @@ describe("Runner > retiring", () => {
     expect(listWritesTo(api, LOST.id)[0]?.body).toEqual({ force: true });
   });
 
-  // The default-runner sentence and the case where neither sentence applies are
-  // pinned exactly, and in every combination, by buildRetireQuestion's unit test. Only
-  // the unreachable case is driven through the browser, because it is the one
-  // that also has to prove `force: true` reaches the wire.
+  // buildRetireQuestion's unit test covers the exact wording of the
+  // default-runner warning, the case with no warning, and every combination.
+  // Only the unreachable case runs through the browser, because it must also
+  // check that `force: true` is sent.
 
-  it("offers nothing to do to a machine that has been retired", async () => {
+  it("shows no actions for a retired runner", async () => {
     await openApp(buildRetiredRunner(MOSS));
 
     await waitFor(() => {
@@ -584,7 +581,7 @@ describe("Runner > providers", () => {
 
   const findClaudeRow = () => findInstanceRow("Claude Code");
 
-  it("says what each instance last reported on this machine", async () => {
+  it("shows what each instance last reported on this machine", async () => {
     await openApp(ONLINE);
 
     const claude = readPageText(await findClaudeRow());
@@ -592,13 +589,13 @@ describe("Runner > providers", () => {
     expect(claude).toContain("rogier@example.com");
     expect(claude).toContain("Claude Max");
     expect(claude).toMatch(/2 models/i);
-    // A version the build was tested against is remarked on with nothing at all.
+    // A version inside the tested range gets no remark.
     expect(claude).not.toMatch(/below|above|untested/i);
 
     expect(readPageText(await findInstanceRow("Codex"))).toContain("no adapter");
   });
 
-  it("marks a harness older than the one this build talks to", async () => {
+  it("marks a harness older than the version this build was tested with", async () => {
     await openApp(ONLINE, {
       instances: [
         buildClaudeCodeInstance([
@@ -617,32 +614,32 @@ describe("Runner > providers", () => {
     expect(claude).toMatch(/below/i);
   });
 
-  it("offers to log in again and to re-probe a harness that is on the machine", async () => {
+  it("offers Log in again and Probe now for a harness on the machine", async () => {
     await openApp(ONLINE);
 
     const claude = within(await findClaudeRow());
     expect(claude.getByRole("button", { name: /log in again/i })).toBeDefined();
     expect(claude.getByRole("button", { name: /probe now/i })).toBeDefined();
-    // Nothing to install: the machine reported the binary.
+    // No Install button: the machine reported the binary.
     expect(claude.queryByRole("button", { name: /install/i })).toBeNull();
   });
 
-  it("offers to install a harness that is missing, and cannot for a provider it has no adapter for", async () => {
+  it("offers to install a missing harness, and disables Install for a provider with no adapter", async () => {
     await openApp(BARE, { instances: [buildClaudeCodeInstance([]), CODEX] });
 
     const claude = within(await findClaudeRow());
     expect(claude.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(false);
-    // There is nothing to log in to until the harness is on the machine.
+    // No Log in button until the harness is on the machine.
     expect(claude.queryByRole("button", { name: /log in/i })).toBeNull();
 
     const codexRow = await findInstanceRow("Codex");
     const codex = within(codexRow);
     expect(codex.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(true);
-    // Said before the user presses anything, rather than discovered by failing.
+    // The reason is shown up front, rather than found out when an install fails.
     expect(readPageText(codexRow)).toMatch(/no adapter/i);
   });
 
-  it("logs in through the dialog and shows the account the machine came back with", async () => {
+  it("logs in through the dialog and shows the account the machine then reports", async () => {
     const user = userEvent.setup();
     let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
     const { api } = await openApp(ONLINE, {
@@ -657,21 +654,21 @@ describe("Runner > providers", () => {
           held = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
           return { body: LOGGED_IN };
         },
-        // Every finished login is followed by a probe: what the machine holds
-        // now is what the page shows.
+        // Every finished login is followed by a probe, so the page shows the
+        // account the machine now holds.
         [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => ({ body: LOGGED_IN }),
       },
     });
 
     await user.click(within(await findClaudeRow()).getByRole("button", { name: /log in/i }));
 
-    // The user reads the URL on this screen and opens it wherever they like:
-    // the machine running the harness may have no browser at all.
+    // The URL is shown on this screen so the user can open it wherever they
+    // like: the machine running the harness may have no browser at all.
     await waitFor(() => {
       expect(readPageText()).toContain(AUTHORIZE_URL);
     });
-    // And is told which site they are about to sign in at, which is the one
-    // part of a long opaque address they can check before they do.
+    // The page also names the site the user will sign in at, because that is
+    // the one part of a long opaque URL they can check first.
     expect(readPageText()).toContain("You will sign in at claude.ai");
     expect(api.calls.filter((call) => call.path.endsWith("/login"))[0]?.body).toEqual({
       runnerId: ONLINE.id,
@@ -694,7 +691,7 @@ describe("Runner > providers", () => {
     });
   });
 
-  it("finishes a printed-code login with no paste and asks the machine about it", async () => {
+  it("finishes a device-code login without a pasted code, then probes the machine", async () => {
     const user = userEvent.setup();
     let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
     const { api } = await openApp(ONLINE, {
@@ -716,11 +713,12 @@ describe("Runner > providers", () => {
     await waitFor(() => {
       expect(readPageText()).toContain("CH61-0FI2N");
     });
-    // The browser finishes this login with the vendor; Hercule is told it is over.
+    // The user finishes this login with the vendor in their browser, then
+    // presses Done to tell Hercule.
     await user.click(screen.getByRole("button", { name: "Done" }));
 
-    // The credential is on the machine and the stored snapshot predates it, so
-    // the account only appears if the machine is asked again.
+    // The credential is on the machine but the stored snapshot is older, so
+    // the account only appears after the machine is probed again.
     await waitFor(() => {
       expect(readPageText()).toContain("rogier@example.com");
     });
@@ -730,7 +728,7 @@ describe("Runner > providers", () => {
     expect(api.calls.filter((call) => call.path.endsWith("/login-code"))).toEqual([]);
   });
 
-  it("probes one instance on demand and shows what came back", async () => {
+  it("probes one instance on demand and shows the result", async () => {
     const user = userEvent.setup();
     const fresh = buildSnapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth });
     let held = INSTANCES;
@@ -750,12 +748,12 @@ describe("Runner > providers", () => {
       expect(readPageText()).toContain("2.1.300");
     });
     const asked = api.calls.filter((call) => call.path.endsWith("/probe"));
-    // One instance, not the machine's whole set: the button is on the row.
+    // Only that instance, not all of the machine's: the button is on its row.
     expect(asked).toHaveLength(1);
     expect(asked[0]?.body).toEqual({ instanceId: CLAUDE_ID });
   });
 
-  it("reads the card again when a snapshot changes elsewhere", async () => {
+  it("fetches the card again when a snapshot changes elsewhere", async () => {
     let held = INSTANCES;
     const { live } = await openApp(ONLINE, {
       extra: { "GET /api/v1/providers": () => ({ body: held }) },
@@ -779,7 +777,7 @@ describe("Runner > providers", () => {
 });
 
 describe("Runner > sessions", () => {
-  /** A machine with two slots, which is what makes a queue possible at all. */
+  /** A runner with two session slots, so a queue can form. */
   const TWO: Fixture = { ...ONLINE, maxConcurrentSessions: 2 };
 
   const buildTimestampMinutesAgo = (minutes: number): string =>
@@ -792,7 +790,7 @@ describe("Runner > sessions", () => {
     at: buildTimestampMinutesAgo(200),
   });
 
-  /** Queued out of order in the fixture, so an ordered reading is the page's doing. */
+  /** Listed out of order in the fixture, so any ordering on screen comes from the page. */
   const WAITED_LESS = buildSessionFixture({
     id: "01a06d02-2000-7000-8000-00000000000c",
     title: "Write the changelog",
@@ -808,15 +806,16 @@ describe("Runner > sessions", () => {
   });
 
   /**
-   * The controller's answer to `session.query`, narrowed by whatever the page
-   * asked for. Written as a filter rather than a fixed body so the page is free
-   * to ask once for the machine's sessions or once per status.
+   * Returns a `session.query` handler that filters `sessions` by the request's
+   * `runnerId` and `status` parameters. It filters rather than returning a
+   * fixed body, so the page may fetch the runner's sessions in one request or
+   * one request per status.
    */
   const buildSessionListingHandler = (sessions: () => readonly Session[]) => (call: Call) => {
     const asked = new URLSearchParams(call.search);
     const runnerId = asked.get("runnerId");
-    // A status filter is one bare key or several repeated ones - the page
-    // asks for its whole running-or-queued mix in one read.
+    // The status parameter may repeat, because the page asks for several
+    // statuses (running and queued) in one request.
     const statuses = asked.getAll("status");
     return {
       body: {
@@ -829,17 +828,17 @@ describe("Runner > sessions", () => {
     };
   };
 
-  /** The page itself, without the shell's own thread list beside it. */
+  /** Returns the main content's text, without the shell's thread list. */
   const readMainText = () => readPageText(screen.getByRole("main"));
 
-  /** Every reading of the session list this browser has made. */
+  /** Returns every session list request the browser has made. */
   const listSessionReads = (api: { readonly calls: readonly Call[] }) =>
     api.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/sessions");
 
   const openAppWithSessions = (runner: Fixture, sessions: () => readonly Session[]) =>
     openApp(runner, { extra: { "GET /api/v1/sessions": buildSessionListingHandler(sessions) } });
 
-  it("says how full the machine is and lists what is waiting for a slot", async () => {
+  it("shows how full the runner is and lists the sessions waiting for a slot", async () => {
     const held = [RUNNING, WAITED_LESS, WAITED_LONGEST];
     await openAppWithSessions(TWO, () => held);
 
@@ -848,31 +847,31 @@ describe("Runner > sessions", () => {
     });
 
     const shown = readMainText();
-    // Oldest first: the session that has waited longest is the next to start,
-    // and a queue that read newest first would say the opposite.
+    // Oldest first: the session that has waited longest starts next, and a
+    // newest-first list would suggest the opposite.
     expect(shown.indexOf(WAITED_LONGEST.title)).toBeGreaterThan(-1);
     expect(shown.indexOf(WAITED_LONGEST.title)).toBeLessThan(shown.indexOf(WAITED_LESS.title));
 
-    // Each row carries how long it has been waiting, read the same way every
-    // other row in the app reads an age.
+    // Each row shows how long it has waited, formatted like every other age
+    // in the app.
     expect(shown).toContain(formatAge(WAITED_LONGEST.createdAt, new Date()));
     expect(shown).toContain(formatAge(WAITED_LESS.createdAt, new Date()));
 
-    // The rows are the queue. A running session holds a slot, which the line
-    // above has already said; listing it again would read as waiting.
+    // The rows list only queued sessions. The line above already counts the
+    // running session, and listing it would make it look like it is waiting.
     expect(shown).not.toContain(RUNNING.title);
   });
 
-  it("has the queue in hand when the page opens", async () => {
-    // The loader reads it, so nothing below the route suspends: a reader never
-    // sees the machine's facts arrive with its capacity still blank.
+  it("shows the queue as soon as the page opens", async () => {
+    // The loader fetches the sessions, so nothing below the route suspends:
+    // the reader never sees the facts appear while the capacity is blank.
     const held = [RUNNING, WAITED_LESS, WAITED_LONGEST];
     await openAppWithSessions(TWO, () => held);
 
     expect(readMainText()).toContain("1 running of 2 · 2 queued");
   });
 
-  it("says only how full the machine is when nothing is waiting", async () => {
+  it("shows only how full the runner is when nothing is queued", async () => {
     const held = [RUNNING];
     await openAppWithSessions(TWO, () => held);
 
@@ -883,7 +882,7 @@ describe("Runner > sessions", () => {
     expect(readMainText()).not.toContain(RUNNING.title);
   });
 
-  it("reads the list again when a session moves elsewhere", async () => {
+  it("fetches the list again when a session changes elsewhere", async () => {
     let held: readonly Session[] = [RUNNING, WAITED_LESS, WAITED_LONGEST];
     const { api, live } = await openAppWithSessions(TWO, () => held);
 
@@ -895,7 +894,7 @@ describe("Runner > sessions", () => {
     });
     const before = listSessionReads(api).length;
 
-    // The controller started the one that had waited longest.
+    // The controller starts the session that has waited longest.
     held = [RUNNING, WAITED_LESS, { ...WAITED_LONGEST, status: "starting" }];
     act(() => {
       live.push("session", { _tag: "invalidate", ids: [WAITED_LONGEST.id], kind: "updated" });
@@ -904,18 +903,20 @@ describe("Runner > sessions", () => {
     await waitFor(() => {
       expect(readMainText()).toContain("2 running of 2 · 1 queued");
     });
-    // The page says so because it read the list again, not because the push
-    // carried the session with it.
+    // The page shows the change because it fetched the list again; the pushed
+    // message does not carry the session.
     expect(listSessionReads(api).length).toBeGreaterThan(before);
     expect(readMainText()).not.toContain(WAITED_LONGEST.title);
   });
 });
 
 /**
- * A provider whose config carries a secret-valued field. The key is a paid
- * credential, so the field is masked, it is written through `secret.set` and
- * never through the instance, and the row never reads a value back - only
- * whether one is there.
+ * Tests for a provider whose config has a secret field. The key is a paid
+ * credential, so:
+ *
+ * - the field is masked;
+ * - the key is written through `secret.set`, never through the instance;
+ * - the row never reads the value back, only whether one is set.
  */
 describe("Runner > a provider that needs a key", () => {
   const PI_ID = "01a06d02-1000-7000-8000-000000000003";
@@ -925,7 +926,7 @@ describe("Runner > a provider that needs a key", () => {
 
   const SECRET_PATH = `PUT /api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`;
 
-  /** A machine with pi on it, which is what makes the row offer anything. */
+  /** A runner with pi installed, so the pi row offers actions. */
   const WITH_PI: Fixture = {
     ...ONLINE,
     facts: {
@@ -951,7 +952,7 @@ describe("Runner > a provider that needs a key", () => {
 
   const findPiRow = () => screen.findByRole("group", { name: "pi" });
 
-  /** The calls that wrote the key, with what they wrote. */
+  /** Returns the requests that wrote the key. */
   const listKeyWrites = (api: { readonly calls: readonly Call[] }) =>
     api.calls.filter(
       (call) =>
@@ -959,7 +960,7 @@ describe("Runner > a provider that needs a key", () => {
         call.path === `/api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`,
     );
 
-  it("asks for the key in the plugin's own words, masked, and writes it where it belongs", async () => {
+  it("asks for the key in the plugin's own words, masked, and saves it as a secret", async () => {
     const user = userEvent.setup();
     let held: ReadonlyArray<ReturnType<typeof buildProviderInstance>> = [buildPiInstance(false)];
     const { api } = await openApp(WITH_PI, {
@@ -977,8 +978,8 @@ describe("Runner > a provider that needs a key", () => {
             },
           };
         },
-        // The key is on the controller and the stored snapshot predates it, so
-        // the machine is asked about the instance again.
+        // The key is on the controller but the stored snapshot is older, so
+        // the machine is probed again.
         [`POST /api/v1/runners/${WITH_PI.id}/probe`]: () => ({ body: PI_SNAPSHOT }),
       },
     });
@@ -987,17 +988,17 @@ describe("Runner > a provider that needs a key", () => {
       within(await findPiRow()).getByRole("button", { name: new RegExp(KEY_TITLE, "i") }),
     );
 
-    // The form is the field: the plugin's title heads it and the plugin's
-    // sentence says where to get one.
+    // The dialog holds just the field: the plugin's title is its heading, and
+    // the plugin's description says where to get a key.
     const form = await screen.findByRole("dialog", { name: KEY_TITLE });
     expect(readPageText(form)).toContain(KEY_DESCRIPTION);
 
     const field = within(form).getByLabelText<HTMLInputElement>(KEY_TITLE, { exact: true });
-    // A paid credential is never on screen in the clear.
+    // A paid credential is never shown in plain text.
     expect(field.type).toBe("password");
 
-    // Nothing to save yet, and nothing is sent: the refusal is here, not a
-    // round trip away.
+    // The field is empty, so Save sends nothing: the form rejects it in the
+    // browser, without a request.
     const save = within(form).getByRole("button", { name: /save/i });
     await user.click(save);
     expect(listKeyWrites(api)).toEqual([]);
@@ -1016,8 +1017,8 @@ describe("Runner > a provider that needs a key", () => {
     });
     expect(listProbeCalls()[0]?.body).toEqual({ instanceId: PI_ID });
 
-    // The form is done with, and the row now says the key is there and offers
-    // to put another one in its place.
+    // The dialog closes, and the row now shows that the key is set and
+    // offers to replace it.
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: KEY_TITLE })).toBeNull();
     });

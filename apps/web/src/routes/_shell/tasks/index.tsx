@@ -12,13 +12,12 @@ import { TaskList } from "./-list";
 
 export const Route = createFileRoute("/_shell/tasks/")({
   staticData: { title: "Tasks" },
-  // Detail is a drawer over this screen and never a page of its own, so the
-  // task being read is a parameter of the list's own address.
+  // Task detail is a drawer over this screen, never a page of its own, so the
+  // open task is a search parameter of the list's URL.
   validateSearch: (search: Record<string, unknown>): { readonly task?: string } =>
     typeof search["task"] === "string" ? { task: search["task"] } : {},
-  // The screen is answered before it is shown: the first page of tasks and the
-  // projects that name them, so it never renders as a frame around nothing and
-  // never grows entries under the reader a moment later.
+  // Load the first page of tasks and the projects before the screen shows, so
+  // it never renders empty and then fills in a moment later.
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureInfiniteQueryData(tasksQuery(context.client, {})),
@@ -75,8 +74,8 @@ function Tasks(): JSX.Element {
         value={filters}
         projects={known}
         onChange={setFilters}
-        // A refusal is answered for the attempt that drew it and no other, so
-        // opening the form again opens it clean.
+        // An error belongs to the attempt that caused it, so reopening the
+        // form clears it.
         onCompose={() => {
           create.reset();
           setComposing((open) => !open);
@@ -125,9 +124,9 @@ function Tasks(): JSX.Element {
       />
 
       <TaskDrawer
-        // What the drawer holds belongs to the task it is open on: keying it on
-        // the address leaves a refusal behind with the task it refused,
-        // whether the reader left by a row, by Close, or by Back.
+        // The drawer's state belongs to the task it shows. Keying it on the
+        // open task id discards an edit error along with its task, whether the
+        // user left by clicking a row, Close, or Back.
         key={openId ?? "none"}
         client={client}
         openId={openId}

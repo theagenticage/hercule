@@ -1,25 +1,23 @@
 import type { JSX, ReactNode } from "react";
 import { Popover, PopoverContent, PopoverTrigger, cn } from "@hercule/ui";
 
-/**
- * One composer selector: a trigger and its menu, anchored above it. Which
- * selector is open is the composer's state, passed in rather than owned here,
- * so opening one closes whatever else was open; Esc and an outside click are
- * Radix's own behaviour, free once the pair is wired through.
- *
- * `avoidCollisions={false}` because every menu sits above its trigger,
- * unconditionally: the composer is at the foot of the screen, so Radix's own
- * collision avoidance would flip exactly these menus downwards off the page.
- * With collisions off, a right-hand trigger needs `align="end"` of its own to
- * stay on screen.
- *
- * A locked field is not a disabled button but plain text carrying the reason:
- * there is nothing behind it to open any more (spec 14 §What locks at start).
- */
 const holdFocus = (event: Event): void => {
   event.preventDefault();
 };
 
+/**
+ * One composer selector: a trigger and its menu, which opens above it.
+ *
+ * - The composer owns which selector is open and passes it in, so opening one
+ *   selector closes any other. Radix handles Esc and outside clicks.
+ * - `avoidCollisions` is off because every menu must open above its trigger.
+ *   The composer sits at the bottom of the screen, so Radix's collision
+ *   handling would flip these menus downwards, off the page. A trigger on the
+ *   right therefore needs `align="end"` to stay on screen.
+ * - A locked field is plain text with the reason as its tooltip, not a
+ *   disabled button, because there is nothing left to open (spec 14 §What
+ *   locks at start).
+ */
 export function SelectorShell({
   keyLabel,
   label,
@@ -34,12 +32,12 @@ export function SelectorShell({
   onEscapeKeyDown,
   children,
 }: {
-  /** The field's own name, shown before the value on the lip's selectors. */
+  /** The field's name, shown before the value on the lip's selectors. */
   readonly keyLabel?: string;
   readonly label: ReactNode;
-  /** Why this cannot be changed here; nothing locks a field that never locks. */
+  /** Why the field cannot be changed; null (the default) when it can. */
   readonly locked?: string | null;
-  /** A thread that can take no input at all can change nothing about itself. */
+  /** Disables the trigger, for a thread that takes no input at all. */
   readonly disabled?: boolean;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
@@ -47,21 +45,21 @@ export function SelectorShell({
   readonly className?: string;
   readonly contentClassName?: string;
   /**
-   * How far along its own edge the menu is nudged, in pixels: what the
-   * prototype does when a menu anchored at its trigger would reach past
-   * something - the window's edge there, the model pill here.
+   * How far the menu is shifted along its aligned edge, in pixels. The
+   * prototype does this when a menu would reach past something: the window
+   * edge in the prototype, the model pill here.
    */
   readonly alignOffset?: number;
   /**
-   * What Esc means while this menu is open, where it means something other
-   * than closing it - a form inside it to leave first. Preventing the event's
-   * default keeps the menu open.
+   * Handles Esc while the menu is open, for a menu where Esc should do
+   * something other than close it, such as leave a form inside the menu first.
+   * Calling `preventDefault` on the event keeps the menu open.
    */
   readonly onEscapeKeyDown?: ((event: KeyboardEvent) => void) | undefined;
   readonly children: ReactNode;
 }): JSX.Element {
-  // The space is what an accessible name reads between the two; a flex
-  // container drops a whitespace-only node rather than laying it out.
+  // The space separates the key and the value in the accessible name. The
+  // flex container does not render a whitespace-only node, so it adds no gap.
   const key =
     keyLabel === undefined ? null : (
       <>
@@ -70,9 +68,9 @@ export function SelectorShell({
     );
 
   if (locked !== null) {
-    // A field with a key word reads as two parts, so the value keeps a span of
-    // its own; one without reads as a single value, and wrapping it would make
-    // the same text stand in two nested elements.
+    // With a key label, the value gets its own span so the two are separate
+    // parts. Without one, the value is not wrapped, so the same text does not
+    // appear in two nested elements.
     return (
       <span
         title={locked}
@@ -107,10 +105,10 @@ export function SelectorShell({
           )}
         >
           {key}
-          {/* The value stands in an element of its own, so a reader asking
-              for a menu row's text does not also find the trigger the row
-              would change. `min-w-0` lets it be clipped rather than grow the
-              trigger past the room the card has for it. */}
+          {/* The value gets its own element, so a search for a menu row's
+              text does not also match the trigger. `min-w-0` lets the value
+              be truncated rather than widen the trigger past the space the
+              card has for it. */}
           <span className="min-w-0">{label}</span>
         </button>
       </PopoverTrigger>
@@ -119,13 +117,13 @@ export function SelectorShell({
         align={align}
         alignOffset={alignOffset}
         avoidCollisions={false}
-        // Opening a menu marks the row in force with its dot; it does not also
-        // ring the row, as the prototype's menus do not. Focus stays where the
-        // user put it - on the trigger, or in a filter field that asks for it
-        // itself - rather than being moved onto the first row.
+        // The current row is marked with its dot, not with a focus ring, as in
+        // the prototype. So focus is not moved to the first row when the menu
+        // opens. It stays on the trigger, or goes to a filter field that
+        // focuses itself.
         onOpenAutoFocus={holdFocus}
         {...(onEscapeKeyDown === undefined ? {} : { onEscapeKeyDown })}
-        // The menu opens upwards into the room above its trigger and scrolls
+        // The menu is limited to the space above its trigger and scrolls
         // inside it, rather than growing off the top of the window.
         className={cn(
           "flex max-h-[calc(var(--radix-popover-content-available-height)-10px)] w-80 flex-col",

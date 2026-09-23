@@ -1,11 +1,11 @@
 /**
- * What a test needs to run the real app against a stubbed controller.
+ * Test helpers that run the real app against a stubbed controller.
  *
  * The network is stubbed at `fetch` and at the `WebSocket` constructor, and
  * nowhere else: the client, the live supervisor, the router, the route files
- * and the screens are the ones that ship. A test therefore exercises the same
- * sequencing a browser would, and a change to a route or to the entry guard
- * shows up here rather than in a mock.
+ * and the screens are the ones that ship. So a test runs the same sequence of
+ * steps a browser would, and a change to a route or to the entry guard shows
+ * up in the tests rather than being hidden by a mock.
  */
 import { afterEach, expect, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -21,29 +21,30 @@ import { followLiveStatus } from "./live-status";
 
 const BASE_URL = "http://controller.test";
 
-/** One request the app made, as the stub saw it. */
+/** One request the app made, as the stub received it. */
 export interface Call {
   readonly method: string;
   readonly path: string;
-  /** The query string as it went out, leading `?` and all; empty when there was none. */
+  /** The query string as sent, including the leading `?`; empty when there was none. */
   readonly search: string;
   readonly body: unknown;
   readonly token: string | null;
 }
 
-/** What a stubbed operation answers with. */
+/** The response a stubbed operation returns. */
 export interface Answer {
   readonly status?: number;
   readonly body: unknown;
 }
 
 /**
- * What one operation answers with. A handler may answer later rather than at
- * once, which is how a test holds one write open while it makes another.
+ * The response for one operation, or a function that builds it. A function may
+ * return a promise that resolves later, which lets a test keep one write
+ * pending while it makes another.
  */
 export type Handler = Answer | ((call: Call) => Answer | Promise<Answer>);
 
-/** The error envelope as the API sends it; only a `validation` refusal carries issues. */
+/** Builds the error body the API sends. Only a `validation` error includes issues. */
 export const buildErrorBody = (code: string, message: string): { error: unknown } => ({
   error: {
     code,
@@ -53,19 +54,19 @@ export const buildErrorBody = (code: string, message: string): { error: unknown 
 });
 
 /**
- * What the app asks for on its own, whatever the screen under test is. A test
- * that cares - one refusing the ticket, say - names the route itself and its
- * answer wins.
+ * The requests the app makes on its own, whatever screen is under test. A test
+ * that needs a different response - for example, one that rejects the ticket -
+ * stubs the route itself, and its handler takes precedence.
  */
 const HOUSEKEEPING: Readonly<Record<string, Handler>> = {
   "POST /api/v1/auth/ws-ticket": { body: { ticket: "ws-ticket" } },
 };
 
 /**
- * A `fetch` that answers the handlers it was given, keyed `METHOD /path`, and
- * records every call. An unstubbed path answers 404, which is what a test that
- * forgot one should see - except for the housekeeping above, which every
- * screen's test would otherwise have to stub.
+ * Returns a `fetch` that responds from the given handlers, keyed
+ * `METHOD /path`, and records every call. An unstubbed path returns 404, so a
+ * test that forgot a route notices. The housekeeping routes above are the
+ * exception, because every screen's test would otherwise have to stub them.
  */
 export const stubApi = (
   handlers: Readonly<Record<string, Handler>>,
@@ -74,8 +75,8 @@ export const stubApi = (
 
   const fetch: FetchLike = async (url, init) => {
     const authorization = new Headers(init?.headers).get("authorization");
-    // The body may arrive as a stream rather than a string, so it is read the
-    // way the controller reads it.
+    // The body may arrive as a stream rather than a string, so read it the way
+    // the controller does.
     const sent = await new Request(url, init).text();
     const call: Call = {
       method: init?.method ?? "GET",
@@ -108,34 +109,35 @@ export const stubApi = (
 };
 
 /**
- * The live connection as a test sees it: what the app is watching, and a way
- * to press one push onto it. Everything the wire framing needs is the stub
- * socket's business.
+ * The live connection as a test sees it: the topics the app subscribes to, and
+ * ways to send it pushes and failures. The stub socket handles the wire
+ * framing.
  */
 export interface LiveStub {
   /** The topics the app is subscribed to right now, oldest first. */
   topics(): readonly string[];
-  /** Whether the app is holding a socket open at all. */
+  /** Whether the app has a socket open. */
   connected(): boolean;
   /**
    * Delivers one message on the app's subscription to `topic`, in the shape
-   * the contract sends it: `{ _tag: "invalidate", ids, kind }` for a mutable
-   * topic. Pushing to a topic nothing is watching throws.
+   * the contract defines: `{ _tag: "invalidate", ids, kind }` for a mutable
+   * topic. Throws if nothing is subscribed to `topic`.
    */
   push(topic: string, message: unknown): void;
   /**
-   * Refuses the app's current subscription to `topic` with a typed failure, in
-   * the envelope the contract sends it: `{ error: { code, message, ... } }`.
-   * What the supervisor does next is its own reconnect logic (`live.ts`); this
-   * is only the wire event a test presses to reach it - a stale cursor
-   * refused `validation`, say. Failing a topic nothing is watching throws.
+   * Fails the app's current subscription to `topic` with a typed error, in the
+   * envelope the contract defines: `{ error: { code, message, ... } }`. The
+   * supervisor's reconnect logic (`live.ts`) decides what happens next; this
+   * only sends the wire event a test needs to trigger it, for example a
+   * `validation` error for a stale cursor. Throws if nothing is subscribed to
+   * `topic`.
    */
   fail(topic: string, error: unknown): void;
   /**
-   * The cursor the app's current subscription to `topic` was opened with, or
-   * `undefined` for one that started from the head - what a caller seeding an
-   * append-only subscription from a page it already holds sends as its first
-   * `subscribe` call. Asking about a topic nothing is watching throws.
+   * Returns the cursor the app's current subscription to `topic` was opened
+   * with, or `undefined` if it started from the head. A caller that seeds an
+   * append-only subscription from a page it already has sends this cursor in
+   * its first `subscribe` call. Throws if nothing is subscribed to `topic`.
    */
   cursorOf(topic: string): string | undefined;
   /**
@@ -146,19 +148,20 @@ export interface LiveStub {
 }
 
 /**
- * The connections a test started, ended when it finishes. A supervisor keeps a
- * keepalive running whether or not the app that started it is still mounted,
- * so leaving one behind would have one test's socket answering during the next.
+ * The live connections the current test started, stopped after each test. A
+ * supervisor keeps its keepalive running even after the app that started it
+ * unmounts, so a connection left behind would still respond during the next
+ * test.
  */
 const started: Live[] = [];
 afterEach(async () => {
-  // The app comes down first: a navigation still in flight would otherwise pass
-  // the entry guard after the stop and start a connection nothing ends.
+  // Unmount the app first. Otherwise a navigation still in flight could pass
+  // the entry guard after the stop and start a connection that nothing stops.
   cleanup();
   await Promise.all(started.splice(0).map((live) => live.stop()));
 });
 
-/** The page's text with its whitespace collapsed, the way a reader sees it. */
+/** Returns the element's text with whitespace collapsed, the way a reader sees it. */
 export const readPageText = (element: HTMLElement | null = document.body): string =>
   (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
@@ -186,10 +189,10 @@ export const readCurrentNavItems = (): readonly (string | null)[] =>
  * Clicks a row inside the open menu - the Radix popover, read as
  * `role="dialog"` - and waits for the menu to be gone.
  *
- * A pick hands its name to the trigger it changes: right after the click the
- * row and the trigger both answer to the same name until the popover
- * unmounts, and a query for the trigger finds two elements. Waiting for the
- * menu to close is what makes the trigger the only match.
+ * Picking a row gives its name to the menu's trigger button. Until the popover
+ * unmounts, the row and the trigger have the same accessible name, and a
+ * query for the trigger finds two elements. Waiting for the menu to close
+ * makes the trigger the only match.
  */
 export const pickRow = async (
   user: ReturnType<typeof userEvent.setup>,
@@ -202,7 +205,7 @@ export const pickRow = async (
   });
 };
 
-/** Renders the whole app at `path`, holding `token` from the start if given. */
+/** Renders the whole app at `path`, signed in with `token` if one is given. */
 export const renderApp = async ({
   path,
   api,
@@ -216,9 +219,9 @@ export const renderApp = async ({
   /** What `localStorage` holds when the app starts. */
   readonly storage?: Readonly<Record<string, string>>;
   /**
-   * Which runner is on this machine. There is no loopback to probe in a test,
-   * so the answer is handed over rather than fetched; without one, nothing on
-   * this browser answers, which is what a headless run really is.
+   * Returns the runner on this machine. A test has no loopback to probe, so
+   * the test passes the result in. The default finds no local runner, which
+   * matches a real headless run.
    */
   readonly detectLocalRunner?: (runners: ReadonlyArray<Runner>) => Promise<string | null>;
 }) => {

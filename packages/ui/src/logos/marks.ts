@@ -1,9 +1,9 @@
 /**
- * The provider marks' drawings: one path each, on a 24x24 box. They are TypeScript
- * rather than `.svg` files read as text because this package is bundled by
- * more than one bundler - Vite for the web app, Bun for the isolation check -
- * and only one of them knows a raw import. `LICENSE-lobehub.txt` records
- * which file each one came from, and under what licence.
+ * The SVG path of each provider mark, drawn on a 24x24 box. The paths live in
+ * TypeScript instead of `.svg` files imported as text, because two bundlers
+ * build this package - Vite for the web app, Bun for the isolation check - and
+ * only one of them supports raw imports. `LICENSE-lobehub.txt` lists the source
+ * file and the licence of each mark.
  */
 
 /** lobehub `claude.svg`: the Anthropic mark. */

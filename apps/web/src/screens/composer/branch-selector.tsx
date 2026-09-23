@@ -6,12 +6,13 @@ import { SelectorShell } from "./selector-shell";
 
 /**
  * The lip's second selector: the branch a main workspace switches to, or the
- * ref a fresh worktree starts from (spec 14 §The composer, the Branch
- * selector). Which of the two it is comes off the workspace pick, decided in
- * `buildBranchField`; what is left here is the drawing.
+ * ref a new worktree starts from (spec 14 §The composer, the Branch
+ * selector). Which of the two applies depends on the picked workspace and is
+ * decided in `buildBranchField`; this component only renders the field.
  *
- * A field with nothing to choose between - a repo no machine has cloned, a
- * multi-repo worktree, whose base per repo is post-v1 - is read-only text.
+ * A field with nothing to choose from is shown as read-only text. Examples: a
+ * repo no machine has cloned, or a multi-repo worktree (a base per repo comes
+ * after v1).
  */
 export function BranchSelector({
   field,
@@ -29,9 +30,9 @@ export function BranchSelector({
 }): JSX.Element {
   return (
     <SelectorShell
-      // The glyph is part of what the lip reads, not a decoration beside it:
-      // the branch mark and the name are the whole value (spec 14
-      // §Measurements, the Lip), and the mark sits on the name's own centre.
+      // The branch mark is part of the value, not a decoration beside it: the
+      // mark and the name together are the value (spec 14 §Measurements, the
+      // Lip). The mark is centred vertically on the name.
       label={
         field.glyph ? (
           <span className="flex items-center gap-1 font-mono text-[11px]">
@@ -55,7 +56,8 @@ export function BranchSelector({
           name={<span className="font-mono">{row.branch}</span>}
           note={row.badge}
           dimmed={row.dimmed}
-          // A branch name is never cut: what holds it is (R6).
+          // A branch name is never truncated; the note beside it is truncated
+          // instead (R6).
           clipNote
           current={row.branch === field.value}
           onPick={() => {
@@ -73,7 +75,7 @@ export function BranchSelector({
   );
 }
 
-/** The branch mark the lip carries, as the prototype draws it: two commits and a fork. */
+/** The branch icon shown in the lip, drawn as in the prototype: two commits and a fork. */
 function BranchMark(): JSX.Element {
   return (
     <svg

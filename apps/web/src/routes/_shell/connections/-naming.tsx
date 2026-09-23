@@ -2,15 +2,14 @@ import type { JSX } from "react";
 import { Field, Input } from "@hercule/ui";
 
 /**
- * The topics a connection can file into. Suggestions rather than a closed list:
- * a topic is an ordinary label, so a user with topics of their own types one.
+ * Suggested topics for a connection. They are suggestions, not a closed list:
+ * a topic is an ordinary label, so the user can type any other topic.
  */
 const TOPICS = ["Code", "Business", "Personal", "Ops"];
 
 /**
- * The two things the user decides about a connection rather than the account:
- * what to call it, and which topic its work files into. Asked at setup and
- * edited afterwards, so both places ask in the same words.
+ * The label and default topic fields of a connection. Setup and the edit form
+ * both use these fields, so both ask in the same words.
  */
 export function Naming({
   idPrefix,
@@ -33,7 +32,7 @@ export function Naming({
       <Field id={`${idPrefix}-label`} label="Label">
         <Input
           id={`${idPrefix}-label`}
-          // Two accounts of one type are told apart by this and nothing else.
+          // The label is the only thing that tells two accounts of one type apart.
           required
           placeholder="work"
           value={label}

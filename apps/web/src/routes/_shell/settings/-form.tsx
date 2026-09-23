@@ -5,10 +5,12 @@ import { readErrorMessage } from "../../../screens/save-status";
 import { settingsQuery } from "../../../app/queries";
 
 /**
- * Writing a settings patch and saying what happened.
+ * Returns a `save` function that sends a settings patch, plus the save's
+ * state: whether it is saving, whether it saved, and the error message if it
+ * failed.
  *
- * The answer the API sends back is the whole store, so it replaces the cached
- * copy outright: no screen refetches to find out what it just wrote.
+ * The response holds all settings, so it replaces the cached copy directly and
+ * no screen has to refetch what it just wrote.
  */
 export function useSaveSettings(client: HerculeClient): {
   readonly save: (patch: SettingsPatch) => void;

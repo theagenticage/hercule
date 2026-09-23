@@ -11,17 +11,17 @@ import { WorkspaceSelector } from "./workspace-selector";
 
 type Key = "workspace" | "branch" | "machine";
 
-/** What a menu keeps clear of whatever stands to its right. */
+/** The space, in pixels, a menu leaves between itself and the element to its right. */
 const GAP = 4;
 
-/** The branch menu's own width, as `contentClassName` sets it. */
+/** The branch menu's width in pixels; must match the `w-80` in its `contentClassName`. */
 const BRANCH_MENU_WIDTH = 320;
 
 /**
- * The strip tucked under the card: where the thread works and on which branch
- * at the left, which machine it runs on at the right. All three are the
- * session's placement, so all three are plain text on an active thread; the
- * branch is absent entirely on a workspace the thread merely joins.
+ * The strip tucked under the composer card. The workspace and branch sit on
+ * the left, the machine on the right. All three are where the session is
+ * placed, so on an active thread all three are plain text. When the thread
+ * joins an existing workspace, there is no branch selector at all.
  */
 export function Lip({
   workspace,
@@ -41,8 +41,8 @@ export function Lip({
   readonly machine: ComposerFields["machine"];
   /**
    * The card's model pill. The branch menu opens from the left of the lip and
-   * is as wide as the prototype's, which on a long model name would reach
-   * under the pill; it stops 4px short of it instead.
+   * is as wide as in the prototype, so with a long model name it would reach
+   * under the pill. It is shifted left to stop 4px short of the pill instead.
    */
   readonly pill: RefObject<HTMLSpanElement | null>;
   readonly open: Key | null;
@@ -74,8 +74,8 @@ export function Lip({
               room={room}
               open={open === "branch"}
               onOpenChange={(next) => {
-                // Measured as it opens: both boxes stand still while it is
-                // open, and neither exists to measure before it does.
+                // Measure when the menu opens. Neither element moves while
+                // the menu is open, so one measurement is enough.
                 if (next) {
                   const from = branchTrigger.current?.getBoundingClientRect().left;
                   const to = pill.current?.getBoundingClientRect().left;

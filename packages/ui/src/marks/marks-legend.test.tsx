@@ -15,13 +15,13 @@ const meanings = [
 ];
 
 describe("MarksLegend", () => {
-  it("is never permanently on the page: only its toggle shows at rest", () => {
+  it("shows only its toggle until it is opened", () => {
     render(<MarksLegend />);
     expect(screen.getByRole("button", { name: /Marks/ })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens on its toggle and names every state mark and thing", async () => {
+  it("opens from its toggle and labels every state mark and entity glyph", async () => {
     render(<MarksLegend />);
     await userEvent.click(screen.getByRole("button", { name: /Marks/ }));
     const legend = screen.getByRole("dialog");

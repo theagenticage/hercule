@@ -4,10 +4,10 @@ import { Button, EmptyState } from "@hercule/ui";
 import { TaskRow } from "./-row";
 
 /**
- * The tasks themselves: the rows, or the reason there are none.
+ * The task list: the rows, or an explanation of why there are none.
  *
- * Emptiness is never presented as the same thing twice: a filter that matched
- * nothing says so, and a store with no tasks in it says what a task is for.
+ * The two empty cases look different: when a filter matched nothing, the list
+ * says so, and when there are no tasks at all, it explains what tasks are for.
  */
 export function TaskList({
   tasks,
@@ -21,16 +21,16 @@ export function TaskList({
   more,
 }: {
   readonly tasks: readonly Task[];
-  /** What the controller answered, when it refused the listing. */
+  /** The error message, if the list request failed. */
   readonly failure: string | undefined;
   readonly pending: boolean;
-  /** Whether the listing was asked under any filter at all. */
+  /** Whether any filter is applied. */
   readonly filtering: boolean;
   readonly timezone: string;
   readonly nameOf: (id: string) => string;
   readonly openId: string | undefined;
   readonly onOpen: (id: string) => void;
-  /** The next page, when the listing has one. */
+  /** The state and loader of the next page, if the list has one. */
   readonly more: { readonly pending: boolean; readonly fetch: () => void } | undefined;
 }): JSX.Element | null {
   if (failure !== undefined) {

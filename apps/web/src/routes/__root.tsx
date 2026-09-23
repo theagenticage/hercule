@@ -3,16 +3,16 @@ import type { RouterContext } from "../app/context";
 import { buildEntryDeps, resolveEntry } from "../app/entry-guard";
 
 /**
- * Every navigation passes the entry guard before its route loads, so a deep
- * link into a screen the visitor cannot have yet is answered by the screen they
- * can.
+ * The root route. Every navigation passes the entry guard before its route
+ * loads, so a deep link to a screen the visitor cannot use yet redirects to the
+ * screen they can use.
  *
- * It is also the one place that owns the live connection, because it is the one
- * place that knows whether there is a credential to hold one with. Starting a
- * connection that is already up costs nothing, so every navigation may ask; a
- * navigation with no credential ends the connection, whether the token was
- * signed out or expired under the reader, so that a socket greeted as one
- * person is never left carrying the next.
+ * This route also owns the live connection, because it is the one place that
+ * knows whether there is a token to open one with. Starting a connection that
+ * is already open costs nothing, so every navigation starts it. A navigation
+ * with no token stops the connection, whether the user signed out or the token
+ * expired. That way a socket authenticated as one person is never reused for
+ * the next.
  */
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ context, location }) => {
@@ -20,8 +20,8 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     const elsewhere = await resolveEntry(deps, location.pathname);
     if (deps.hasToken()) context.live.start();
     else await context.live.stop();
-    // A thrown redirect is how the router is told to go elsewhere, and what it
-    // carries is a plain descriptor rather than an error.
+    // The router redirects when a `redirect` is thrown. The thrown value is a
+    // plain descriptor rather than an Error.
     // eslint-disable-next-line @typescript-eslint/only-throw-error
     if (elsewhere !== null) throw redirect({ to: elsewhere, replace: true });
   },

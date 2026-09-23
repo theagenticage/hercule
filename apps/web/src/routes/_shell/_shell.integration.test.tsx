@@ -31,7 +31,7 @@ const api: Readonly<Record<string, Handler>> = {
   },
 };
 
-/** Every screen inside the shell, and the first thing it says. */
+/** Every screen inside the shell, with its title and the first text it shows. */
 const screens: readonly [path: string, title: string, headline: string][] = [
   ["/", "Sessions", "No runner has been detected on this machine."],
   ["/intake", "Intake", "Nothing has come in yet."],
@@ -58,7 +58,7 @@ const screens: readonly [path: string, title: string, headline: string][] = [
 ];
 
 describe("every screen inside the shell", () => {
-  it.each(screens)("%s is titled %s and opens on its own words", async (path, title, headline) => {
+  it.each(screens)("%s is titled %s and shows its own headline", async (path, title, headline) => {
     const { router } = await renderApp({ path, api: stubApi(api).fetch, token: "held" });
 
     expect(router.state.location.pathname).toBe(path);
@@ -66,7 +66,7 @@ describe("every screen inside the shell", () => {
     expect(screen.getAllByText(headline).length).toBeGreaterThan(0);
   });
 
-  it("lands the section path on the first screen of its sub-navigation", async () => {
+  it("redirects a section path to the first screen of its sub-navigation", async () => {
     const { router } = await renderApp({
       path: "/settings",
       api: stubApi(api).fetch,
@@ -77,7 +77,7 @@ describe("every screen inside the shell", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Profile");
   });
 
-  it("shows an entry that failed as a Hercule screen with a way out", async () => {
+  it("shows a failed entry check as a Hercule screen with a link home", async () => {
     const broken: Readonly<Record<string, Handler>> = {
       ...api,
       "GET /api/v1/settings": { status: 500, body: { error: { code: "internal", message: "no" } } },
@@ -86,11 +86,11 @@ describe("every screen inside the shell", () => {
 
     expect(screen.getByText("This screen did not load")).toBeDefined();
     expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
-    // Nothing was mounted to keep: the guard failed before the shell.
+    // The entry guard failed before the shell mounted, so there is no sidebar.
     expect(screen.queryByRole("navigation", { name: "Hercule" })).toBeNull();
   });
 
-  it("answers a path no screen owns without taking the navigation away", async () => {
+  it("shows an unknown path inside the shell, keeping the sidebar", async () => {
     await renderApp({ path: "/nope", api: stubApi(api).fetch, token: "held" });
 
     expect(screen.getByText("No screen here")).toBeDefined();
@@ -98,9 +98,9 @@ describe("every screen inside the shell", () => {
     expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
   });
 
-  it("answers a path it cannot even decode as a Hercule screen", async () => {
+  it("shows a path that cannot be decoded as a Hercule screen", async () => {
     // A malformed percent escape fails to decode before any route is matched,
-    // so this one never reaches the shell.
+    // so this path never reaches the shell.
     await renderApp({ path: "/%zz", api: stubApi(api).fetch, token: "held" });
 
     expect(screen.getByText("No screen here")).toBeDefined();

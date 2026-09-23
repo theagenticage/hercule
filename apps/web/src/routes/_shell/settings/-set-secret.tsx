@@ -6,10 +6,10 @@ import type { OwnerKind } from "@hercule/contract";
 import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
- * The owner kinds a user may write. `core` is the controller's own key
- * material, which the service refuses anyway, so it is not offered; the
- * `satisfies` fails the build if the contract drops or renames one of the
- * four, which would otherwise leave an option nothing can answer.
+ * The owner kinds a user may write secrets for. `core` is left out: it is the
+ * controller's own key material, and the secret service rejects writes to it.
+ * The `satisfies` fails the build if the contract drops or renames one of
+ * these four, which would otherwise leave an option that always fails.
  */
 const OWNER_KINDS = [
   "connection",
@@ -21,12 +21,13 @@ const OWNER_KINDS = [
 const EMPTY = { ownerKind: OWNER_KINDS[0], ownerId: "", name: "", value: "" };
 
 /**
- * Writing a secret by naming its owner.
+ * The form that writes a secret for an owner the user names.
  *
- * Most secrets are written by whatever owns them - a connection's setup writes
- * its own - so this is the way in for the ones nothing else writes yet, and for
- * putting one back by hand. Setting a name that already exists rotates it,
- * which is what the API does with the same call.
+ * Most secrets are written by their owner's own screen (a connection's setup
+ * writes its credentials, for example). This form is for secrets that no
+ * screen writes yet, and for restoring one by hand. Setting a name that
+ * already exists rotates that secret, because the API uses the same call for
+ * both.
  */
 export function SetSecret({ client }: { readonly client: HerculeClient }): JSX.Element {
   const queryClient = useQueryClient();
@@ -44,8 +45,8 @@ export function SetSecret({ client }: { readonly client: HerculeClient }): JSX.E
         payload: { value: form.value },
       }),
     onSuccess: async () => {
-      // Cleared whole rather than field by field: the value must not survive
-      // the write, and a half-filled form is not worth keeping either.
+      // The whole form is cleared, not just the value: the value must not stay
+      // after the write, and a half-filled form is not worth keeping.
       setForm(EMPTY);
       await queryClient.invalidateQueries({ queryKey: queryKeys.secrets() });
     },

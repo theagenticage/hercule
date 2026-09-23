@@ -3,24 +3,24 @@ import type { ComposerBlocked, LoginTarget, Phrase, ProjectTone } from "@hercule
 import { cn } from "@hercule/ui";
 import { Phrases } from "./phrases";
 
-/** What the draft is for, as its heading names it: a project, or a workspace. */
+/** What the draft is for, as named in its heading: a project or a workspace. */
 export interface DraftSubject {
   readonly label: string;
-  /** The identity hue the name wears; null on a workspace, which wears none. */
+  /** The identity hue that underlines the name; null for a workspace, which has none. */
   readonly tone: ProjectTone | null;
 }
 
-/** The two identity hues, written out so Tailwind emits them (see `ProjectDot`). */
+/** The two identity hues, written out in full so Tailwind generates them (see `ProjectDot`). */
 const TONE = {
   hercule: "decoration-project-hercule",
   ops: "decoration-project-ops",
 } as const;
 
 /**
- * What a draft thread says above its composer: what it is for, and where it
- * will run. Nothing that stops it from starting is a screen of its own - the
- * blocker takes the sentence's place, with the one action that clears it
- * (spec 14 §The composer).
+ * The heading and sentence a draft thread shows above its composer: what the
+ * thread is for, and where it will run. When something blocks the thread from
+ * starting, the blocker replaces the sentence, together with the action that
+ * clears it. A blocker never gets a screen of its own (spec 14 §The composer).
  */
 export function DraftHero({
   subject,
@@ -28,9 +28,9 @@ export function DraftHero({
   blocked,
   loginSlot,
 }: {
-  /** What the thread is being started in; null on a draft that stands alone. */
+  /** The project or workspace the thread starts in; null for a draft with neither. */
   readonly subject: DraftSubject | null;
-  /** The sentence this draft stands under, where nothing blocks it. */
+  /** The sentence shown under the heading when nothing blocks the draft. */
   readonly lead: readonly Phrase[];
   readonly blocked: ComposerBlocked | null;
   readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
@@ -69,6 +69,6 @@ export function DraftHero({
   );
 }
 
-/** The one action that clears the blocker, set in the sentence as a link. */
+/** Classes for the login action that clears a blocker, styled as a link inside the sentence. */
 const HERO_LOGIN =
   "p-0 text-row leading-normal text-ink underline decoration-line underline-offset-[3px] enabled:hover:bg-transparent";

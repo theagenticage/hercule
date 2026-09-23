@@ -19,7 +19,7 @@ const signIn = async (password: string) => {
 };
 
 describe("the login screen", () => {
-  it("names neither half when the credentials are refused", async () => {
+  it("does not say which field was wrong when the credentials are rejected", async () => {
     const api = stubApi(
       buildController({ status: 401, body: buildErrorBody("unauthenticated", "no such user") }),
     );
@@ -31,7 +31,7 @@ describe("the login screen", () => {
     expect(router.state.location.pathname).toBe("/login");
   });
 
-  it("says what an empty form is missing, in words a person wrote", async () => {
+  it("shows a readable message for each empty field, without calling the API", async () => {
     const user = userEvent.setup();
     const api = stubApi(buildController({ body: {} }));
     await renderApp({ path: "/login", api: api.fetch });
@@ -43,7 +43,7 @@ describe("the login screen", () => {
     expect(api.calls.some((call) => call.method === "POST")).toBe(false);
   });
 
-  it("shows any other failure as the API worded it", async () => {
+  it("shows the API's error message for any other failure", async () => {
     const api = stubApi(
       buildController({ status: 500, body: buildErrorBody("internal", "the database is locked") }),
     );
@@ -54,7 +54,7 @@ describe("the login screen", () => {
     expect((await screen.findByRole("alert")).textContent).toBe("the database is locked");
   });
 
-  it("holds the token it was given and goes home", async () => {
+  it("keeps the returned token and goes to the home screen", async () => {
     const api = stubApi(
       buildController({ body: { token: "minted", expiresAt: "2026-10-04T00:00:00.000Z" } }),
     );

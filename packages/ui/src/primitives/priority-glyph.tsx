@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { cn } from "./cn";
 
-/** The three greys importance is drawn in. Nothing here is a semantic hue. */
+/** The three greys a priority glyph can be drawn in. None of them is a semantic hue. */
 const tones = {
   faint: "text-faint",
   muted: "text-muted",
@@ -11,10 +11,11 @@ const tones = {
 export type GlyphTone = keyof typeof tones;
 
 /**
- * Importance as three rising bars: how many are painted, and in which grey.
+ * Shows importance as three rising bars: how many are filled, and in which grey.
  *
- * Colour never says how much something matters - a hue is reserved for what is
- * happening to it - so the two axes here are shape and ink, and nothing else.
+ * Colour never shows how much something matters, because hues are reserved for
+ * what is happening to a thing. So importance uses only the number of bars and
+ * the grey.
  */
 export function PriorityGlyph({
   filled,

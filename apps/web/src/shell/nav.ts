@@ -8,17 +8,17 @@ export type Face = "threads" | "orchestration";
 export interface NavItem {
   readonly to: string;
   readonly label: string;
-  /** Set only on the entity items; every other item carries no glyph. */
+  /** Set only on the entity items (Tasks, Runs, Workflows); the others have no glyph. */
   readonly glyph?: ComponentType<MarkProps>;
-  /** The name of the count this item shows once there is one to show. */
+  /** Which count this item shows beside its label, when that count is above zero. */
   readonly count?: "intake" | "checkin" | "notifications";
-  /** True where the item is the head of a section rather than a leaf screen. */
+  /** True when the item opens a section of several screens, not a single screen. */
   readonly section?: boolean;
 }
 
 export const SEPARATOR = "separator" as const;
 
-/** The items of the orchestration face, in their pinned order. */
+/** The items of the orchestration face, in their fixed order. */
 export const ORCHESTRATION_NAV: readonly (NavItem | typeof SEPARATOR)[] = [
   { to: "/intake", label: "Intake", count: "intake" },
   { to: "/check-in", label: "Check-in", count: "checkin" },
@@ -46,9 +46,10 @@ export const SETTINGS_NAV: readonly { readonly to: string; readonly label: strin
 ];
 
 /**
- * The face a screen shows itself on: Sessions, a thread, and All sessions are
- * the threads side; everything else is orchestration, so the segmented switch
- * is what puts threads back.
+ * Returns the sidebar face for a path. Sessions (`/`), All sessions
+ * (`/sessions`) and thread pages (`/threads/...`) show the threads face; every
+ * other path shows the orchestration face. On those paths the user gets the
+ * threads face back with the segmented switch.
  */
 export const chooseFaceForPath = (pathname: string): Face =>
   pathname === "/" || pathname === "/sessions" || pathname.startsWith("/threads/")

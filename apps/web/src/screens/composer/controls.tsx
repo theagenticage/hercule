@@ -5,13 +5,13 @@ import { cn, ProviderLogo } from "@hercule/ui";
 const GLYPH =
   "inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted";
 
-/** The card row's plain controls: no domain, no state, one job each. */
+/** The attach button. Like every button in this file, it holds no state and knows no domain. */
 export function AttachButton(): JSX.Element {
   return (
     <button
       type="button"
       disabled
-      title="attachments are not built"
+      title="Attachments are not built yet"
       aria-label="Attach"
       className={cn(GLYPH, "text-[17px]")}
     >
@@ -25,7 +25,7 @@ export function VoiceButton(): JSX.Element {
     <button
       type="button"
       disabled
-      title="dictation is not built"
+      title="Dictation is not built yet"
       aria-label="Voice"
       className={cn(GLYPH, "size-7 rounded-full")}
     >
@@ -64,7 +64,7 @@ export function SendButton({
   disabled,
   onSend,
 }: {
-  /** What sending does here, as the shortcut says it: "Start thread ⏎". */
+  /** The tooltip: what sending does here, with its shortcut, such as "Start thread ⏎". */
   readonly tip: string;
   readonly disabled: boolean;
   readonly onSend: () => void;
@@ -84,13 +84,14 @@ export function SendButton({
 }
 
 /**
- * The pill's face: the mark, the account where a provider has two, the model.
+ * The model pill's content: the provider logo, the account when a provider
+ * has two, and the model name.
  *
- * A row of its own rather than three things in a line of text: the mark is an
- * `svg`, which is a block, and a block in a line of text breaks it. The name
- * is the only part that may be clipped - a model called `Default
- * (recommended)` is cut with an ellipsis rather than growing the pill a second
- * line (spec 14 §Measurements, the pill holds still).
+ * The parts are laid out as a flex row rather than inline text, because the
+ * logo is an `svg` block and a block inside inline text breaks the line. Only
+ * the name may be truncated: a model called `Default (recommended)` gets an
+ * ellipsis rather than wrapping the pill onto a second line (spec 14
+ * §Measurements, the pill holds still).
  */
 export function PillLabel({ pill }: { readonly pill: ModelPill }): JSX.Element {
   return (

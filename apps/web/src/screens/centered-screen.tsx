@@ -2,10 +2,10 @@ import type { JSX, ReactNode } from "react";
 import { Logo } from "@hercule/ui";
 
 /**
- * The frame the three screens outside the app shell share: setup, login, and an
- * onboarding step. The wordmark sits on the page ground and the screen itself is
- * one raised card, which is the depth treatment for what the eye is meant to
- * land on.
+ * The frame shared by the three screens outside the app shell: setup, login, and
+ * an onboarding step. The wordmark sits on the page background and the content
+ * sits on one raised card, because a raised surface is how the design marks
+ * what the eye should land on.
  */
 export function CenteredScreen({
   title,

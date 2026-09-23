@@ -51,17 +51,20 @@ describe("the mark family", () => {
     expect(/#[0-9a-f]{3,6}|oklch\(|rgb\(/i.test(markup)).toBe(false);
   });
 
-  it.each(Object.entries(everyMark))("%s is decorative; its meaning is in the text", (_n, Mark) => {
-    const { container } = render(<Mark />);
-    expect(container.querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
-  });
+  it.each(Object.entries(everyMark))(
+    "%s is hidden from screen readers, because the text beside it gives the meaning",
+    (_n, Mark) => {
+      const { container } = render(<Mark />);
+      expect(container.querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
+    },
+  );
 
   it.each(Object.entries(everyMark))("%s takes a className from its caller", (_n, Mark) => {
     const { container } = render(<Mark className="size-[13px]" />);
     expect(container.querySelector("svg")!.classList.contains("size-[13px]")).toBe(true);
   });
 
-  it("gives each state mark the hue its meaning is fixed to", () => {
+  it("gives each state mark the fixed hue for its meaning", () => {
     const hues = {
       working: "text-live",
       decision: "text-attn",
@@ -86,7 +89,7 @@ describe("the mark family", () => {
     }
   });
 
-  it("draws the decision mark a hair heavier than the rest of the family", () => {
+  it("draws the decision mark with a slightly heavier stroke than the other marks", () => {
     const readStrokeWidth = (svg: SVGSVGElement) => svg.getAttribute("stroke-width");
     const { container: decision } = render(<DecisionMark />);
     const { container: done } = render(<DoneMark />);

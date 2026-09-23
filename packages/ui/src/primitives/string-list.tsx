@@ -3,10 +3,12 @@ import { Button } from "./button";
 import { Input } from "./input";
 
 /**
- * A list of short strings, one field per entry: a comma-separated box would
- * quietly refuse any value with a comma in it. An empty list shows no fields at
- * all, because a blank row would read as an entry already started. The group
- * carries the name, since there is no one field for a label to point at.
+ * An editable list of short strings, with one field per entry. A single
+ * comma-separated field could not hold a value that contains a comma.
+ *
+ * An empty list shows no fields, because a blank field would look like an
+ * entry already started. The group carries the accessible name, because there
+ * is no single field for a label to point at.
  */
 export function StringList({
   label,
@@ -15,9 +17,9 @@ export function StringList({
   onChange,
   addLabel = "Add",
 }: {
-  /** What the list is called, for the group and for each entry's own name. */
+  /** The list's name, used for the group and in each entry's accessible name. */
   readonly label: string;
-  /** Announced on the group: it is the list, not any one entry, being asked for. */
+  /** Set on the group, because the list as a whole is required, not any one entry. */
   readonly required?: boolean;
   readonly values: ReadonlyArray<string>;
   readonly onChange: (values: ReadonlyArray<string>) => void;
@@ -56,10 +58,10 @@ export function StringList({
           </Button>
         </div>
       ))}
-      {/* Hang-aligned, so its text starts where every other line of the form
-          does rather than a button's padding to the right of it. It is drawn in
-          ink behind the same leading glyph the one other add affordance wears,
-          because a muted word under a form reads as another field's name. */}
+      {/* Shifted left by the button's padding, so its text lines up with the
+          rest of the form. It is drawn in ink with a leading `+`, like the
+          app's other add buttons, because a muted word under a form looks like
+          another field's label. */}
       <Button
         className="-ml-2 text-ink"
         onClick={() => {

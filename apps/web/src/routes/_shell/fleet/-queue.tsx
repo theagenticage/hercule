@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { QueuedMark, Row } from "@hercule/ui";
 
-/** One queued session, as the block reads it: nothing but what it shows. */
+/** One queued session, with only the fields the block shows. */
 export interface QueueRow {
   readonly id: string;
   readonly title: string;
@@ -9,10 +9,9 @@ export interface QueueRow {
 }
 
 /**
- * The runner page's session block: how full the machine is, and - only when
- * something is waiting - the queue itself, oldest first. Presentational: the
- * route reads the sessions, works out the line and the ordering, and hands
- * both down.
+ * The session block on the runner page: how full the runner is and, when
+ * sessions are waiting, the queue itself, oldest first. The route reads the
+ * sessions and computes the line and the order; this component only shows them.
  */
 export function SessionQueue({
   line,

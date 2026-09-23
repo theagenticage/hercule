@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hercule</title>
-    <!-- Parser-blocking on purpose: the stored theme choice reaches the
-         document before the first paint, so a dark-chooser on a light machine
-         never sees a light flash. -->
+    <!-- Blocks the parser on purpose: the stored theme choice is applied
+         before the first paint, so a user who chose dark on a machine set to
+         light never sees a light flash. -->
     <script src="/theme-init.js"></script>
   </head>
   <body>

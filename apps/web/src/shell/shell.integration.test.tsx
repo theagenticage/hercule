@@ -106,7 +106,7 @@ beforeEach(() => {
 });
 
 describe("the two-face sidebar", () => {
-  it("shows the Hercule face on an orchestration screen, in its pinned order", async () => {
+  it("shows the Hercule face on an orchestration screen, with its items in a fixed order", async () => {
     await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
     expect(readNavLabels()).toEqual([
@@ -122,7 +122,7 @@ describe("the two-face sidebar", () => {
     ]);
   });
 
-  it("highlights the item of the screen whose path contains the current page", async () => {
+  it("highlights a screen's item on a page under that screen's path", async () => {
     await renderApp({
       path: "/workflows/new",
       api: stubApi({
@@ -137,7 +137,7 @@ describe("the two-face sidebar", () => {
     expect(readCurrentNavItems()).toEqual(["Workflows"]);
   });
 
-  it("carries a glyph on the entity items and on no other", async () => {
+  it("shows a glyph on the entity items only", async () => {
     await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
     const withGlyph = getOrchestrationNav()
@@ -151,8 +151,8 @@ describe("the two-face sidebar", () => {
   it("shows the Threads face on Sessions", async () => {
     await renderApp({ path: "/", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
-    // Create new thread opens the project picker (#72 AC-16, which supersedes
-    // #160's plain link to `/threads/new`; recorded as D-14).
+    // Create new thread is a button that opens the project picker, not a link
+    // to `/threads/new` (#72).
     expect(
       await getThreadsNav().findByRole("button", { name: /create new thread/i }),
     ).toBeDefined();
@@ -169,7 +169,7 @@ describe("the two-face sidebar", () => {
     expect(readNavLabels()[0]).toBe("Intake");
   });
 
-  it("puts the screen back in charge of the face on the next navigation", async () => {
+  it("lets the screen choose the face again after the next navigation", async () => {
     const user = userEvent.setup();
     const { router } = await renderApp({
       path: "/",
@@ -219,16 +219,16 @@ describe("the two-face sidebar", () => {
 });
 
 describe("the theme selector", () => {
-  /** The document attribute is the one thing one render may leave on the next. */
+  /** The theme attribute on the document outlives a render, so remove it after each test. */
   afterEach(() => {
     delete document.documentElement.dataset.theme;
   });
 
-  it("sits below Marks at the sidebar foot, and a pick paints and persists", async () => {
+  it("sits below Marks at the sidebar foot, and applies and saves the chosen theme", async () => {
     const user = userEvent.setup();
     await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
-    // At rest the machine is in charge: no explicit theme on the document.
+    // Before any choice, the system theme applies: the document has no theme attribute.
     expect(document.documentElement.dataset.theme).toBeUndefined();
     const marks = screen.getByRole("button", { name: /Marks/ });
     const theme = screen.getByRole("button", { name: "Theme System" });
@@ -264,14 +264,14 @@ describe("the Threads face's session rows", () => {
     expectInDocumentOrder([create, listRowLinks()[0]!]);
   });
 
-  it("carries the age read with formatAge, and the model slug in meta mode", async () => {
+  it("shows the age from formatAge, and the model slug in meta mode", async () => {
     await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
 
     const first = THREE_SESSIONS[0]!;
     const row = await getThreadsNav().findByRole("link", { name: new RegExp(first.title) });
-    // Read right beside the assertion, the same instant the row itself reads
-    // from: `formatAge`'s coarsest unit is a minute, so the two reads agree unless
-    // this line and the render it followed straddle a minute boundary.
+    // Compute the expected age right at the assertion. `formatAge` counts in
+    // whole minutes at the finest, so this value matches the rendered row unless
+    // a minute boundary falls between the render and this line.
     expect(row.textContent).toContain(formatAge(first.lastActivityAt, new Date()));
     expect(row.textContent).toContain(first.modelSelection.model);
   });
@@ -317,7 +317,7 @@ describe("the Threads face's session rows", () => {
     expect(plainRow.textContent).not.toContain(target.modelSelection.model);
   });
 
-  it("carries an All sessions link to /sessions, after the rows", async () => {
+  it("shows an All sessions link to /sessions after the rows", async () => {
     await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
     await getThreadsNav().findByRole("link", { name: new RegExp(THREE_SESSIONS[0]!.title) });
 
@@ -325,7 +325,7 @@ describe("the Threads face's session rows", () => {
     expect(allSessions.getAttribute("href")).toBe("/sessions");
   });
 
-  it("refetches the list on a session invalidation nudge", async () => {
+  it("refetches the list when a session invalidation arrives", async () => {
     const api = stubApi(withThreads(THREE_SESSIONS));
     const { live } = await renderApp({ path: "/", api: api.fetch, token: "held" });
     await getThreadsNav().findByRole("link", { name: new RegExp(THREE_SESSIONS[0]!.title) });
@@ -345,11 +345,11 @@ describe("the Threads face's session rows", () => {
     });
   });
 
-  it("offers Create new thread as a live control, not a disabled placeholder", async () => {
+  it("offers Create new thread as an enabled button, not a disabled placeholder", async () => {
     await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
 
-    // Amended by #72 AC-16 (D-14): it opens the project picker rather than
-    // navigating, so it is a button and no longer carries an href.
+    // Create new thread opens the project picker instead of navigating, so it
+    // is a button, not a link (#72).
     const create = await getThreadsNav().findByRole<HTMLButtonElement>("button", {
       name: /create new thread/i,
     });
@@ -371,7 +371,7 @@ describe("the Threads face's session rows", () => {
 describe("the pulse at the sidebar foot", () => {
   const getPulseButton = () => screen.getByRole("button", { name: /Nothing to report yet/ });
 
-  it("is collapsed on arrival", async () => {
+  it("starts collapsed", async () => {
     await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
     expect(getPulseButton().getAttribute("aria-expanded")).toBe("false");
@@ -388,8 +388,8 @@ describe("the pulse at the sidebar foot", () => {
     await user.click(getPulseButton());
     expect(getPulseButton().getAttribute("aria-expanded")).toBe("true");
 
-    // The second load is a second page load, so the first one is gone by then
-    // and the pulse is the only one on screen.
+    // Unmount the first render to stand in for a page reload, so only one
+    // pulse is on screen.
     first.unmount();
     await renderApp({ path: "/runs", api: stubApi(buildShellRoutes()).fetch, token: "held" });
     expect(getPulseButton().getAttribute("aria-expanded")).toBe("true");
@@ -397,7 +397,7 @@ describe("the pulse at the sidebar foot", () => {
 });
 
 describe("the top bar", () => {
-  it("names the screen and reads the clock in the user's zone", async () => {
+  it("shows the screen title and the time in the user's zone", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
     try {
@@ -434,7 +434,7 @@ describe("the top bar", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Workflow");
   });
 
-  it("reads a zone this browser does not know in UTC, and says so", async () => {
+  it("shows times in UTC, with a warning, when this browser does not know the user's zone", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
     try {
@@ -452,14 +452,14 @@ describe("the top bar", () => {
     }
   });
 
-  it("frames Intake on when the user last checked", async () => {
+  it("shows on Intake the time the user last checked it", async () => {
     const api = stubApi(buildShellRoutes({ "lastChecked.intake": "2026-09-06T20:10:00.000Z" }));
     await renderApp({ path: "/intake", api: api.fetch, token: "held" });
 
     expect(screen.getByText("since Sunday 22:10")).toBeDefined();
   });
 
-  it("reads Intake as the plain clock until that marker exists", async () => {
+  it("shows the current time on Intake until a last-checked time is stored", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
     try {
@@ -471,7 +471,7 @@ describe("the top bar", () => {
     }
   });
 
-  it("keeps Intake standing when the stored marker is not a date", async () => {
+  it("still renders Intake, with the current time, when the stored last-checked time is not a date", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
     try {
@@ -489,20 +489,22 @@ describe("the top bar", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * Slice 3 of #72: the Threads face groups by project, then by
- * workspace (AC-20), and "Create new thread" opens the project picker
- * (AC-16).
+ * The Threads face groups threads by project, then by workspace, and
+ * "Create new thread" opens the project picker (#72).
  *
- * Readings picked here, where the SPEC names copy but not a handle:
- * - a project's group header and a workspace's group header carry their
- *   label as text, and the `+` beside each is a link whose accessible name
- *   names what it opens;
- * - a workspace's own label is its first checkout's branch (`hercule/run-3f1`),
- *   which is the only name a `Workspace` record carries.
+ * The spec gives the copy but not how a test finds each element, so
+ * these tests assume:
+ * - a project's or workspace's group header shows its label as text,
+ *   and the `+` beside it is a link whose accessible name says what it
+ *   opens;
+ * - a workspace that is not a main workspace is labelled with its first
+ *   checkout's branch (`hercule/run-3f1`), because a `Workspace` record
+ *   has no name of its own.
  * ------------------------------------------------------------------ */
 
-/** The webshop/ops world every workspace suite shares, with ids the contract
- * takes; only the threads standing in each workspace are this suite's own. */
+/** The webshop/ops fixture world that every workspace test suite shares, with
+ * ids in the format the contract accepts. Only the threads in each workspace
+ * are specific to this suite. */
 const IDS = {
   moss: "01a06d02-beff-7037-9f5b-042822015952",
   webshopProject: "01a06d02-7000-7000-8000-000000000001",
@@ -590,12 +592,12 @@ const readFaceText = (): string =>
     .replace(/\s+/g, " ")
     .trim();
 
-describe("the Threads face groups by project and workspace (AC-20)", () => {
-  it("heads each project with its name, its thread count and a + that starts a draft in it", async () => {
+describe("the Threads face groups threads by project and workspace", () => {
+  it("gives each project a header with its name, its thread count and a + that starts a draft in it", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    // The project's own + names it, and unlike the bare word it stands in one
-    // place only: a main workspace's label carries the repo's name too.
+    // Wait for the project's + link: its name appears once, while the bare
+    // word "webshop" also appears in the main workspace's label.
     await getThreadsNav().findByRole("link", { name: "New thread in webshop" });
     expect(readFaceText()).toContain("webshop 4");
     expect(readFaceText()).toContain("ops 1");
@@ -604,13 +606,14 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     expect(plus.getAttribute("href")).toBe(`/threads/new?project=${WEBSHOP.id}`);
   });
 
-  it("groups a project's threads per workspace, naming a primary after its repo and machine", async () => {
+  it("groups a project's threads by workspace, and labels a main workspace with its repo and machine", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     await getThreadsNav().findByText("hercule/run-3f1");
-    // The whole label is the tooltip, and it is split so that a sidebar too
-    // narrow for it cuts the repo rather than the machine that tells one
-    // repo's two main workspaces apart. D-20c: the word "checkout" is gone.
+    // The tooltip shows the whole label. The label is split in two so that a
+    // narrow sidebar truncates the repo, not the machine: the machine is what
+    // tells two main workspaces of one repo apart. The label does not use the
+    // word "checkout".
     const label = getThreadsNav().getByTitle("webshop · moss");
     expect(label.textContent).toBe("webshop · moss");
     expect(label.firstElementChild?.textContent).toBe("webshop");
@@ -627,7 +630,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     expect(text.indexOf("no workspace")).toBeLessThan(text.indexOf("Tidy the promotion runbook"));
   });
 
-  it("offers a + on a workspace group that opens a draft joining it", async () => {
+  it("offers a + on a workspace group that opens a draft in that workspace", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     const plus = await getThreadsNav().findByRole("link", {
@@ -638,7 +641,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     );
   });
 
-  it("puts the threads that belong to no project last, under no header of their own", async () => {
+  it("puts threads with no project last, without a header", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     await getThreadsNav().findByRole("link", { name: "New thread in webshop" });
@@ -660,12 +663,12 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
     const text = readFaceText();
     expect(text).toContain("New thread draft");
     expect(text.indexOf("hercule/run-3f1")).toBeLessThan(text.indexOf("New thread draft"));
-    // The draft is the group's last row, as it is the last of the thread tabs.
+    // The draft is the group's last row, just as it is the last thread tab.
     expect(text.indexOf("Fix flaky webhook tests")).toBeLessThan(text.indexOf("New thread draft"));
     expect(text.indexOf("New thread draft")).toBeLessThan(text.indexOf("webshop · moss"));
   });
 
-  it("no longer repeats the workspace on a row's second line", async () => {
+  it("does not repeat the workspace on a row's second line", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
     const row = await getThreadsNav().findByRole("link", { name: /Fix flaky webhook tests/ });
@@ -673,7 +676,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
   });
 });
 
-describe("Create new thread opens the project picker (AC-16)", () => {
+describe("Create new thread opens the project picker", () => {
   it("opens the picker rather than navigating straight to a draft", async () => {
     const user = userEvent.setup();
     const { router } = await renderApp({

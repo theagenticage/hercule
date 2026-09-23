@@ -1,8 +1,9 @@
 /**
- * Settings > Plugins: what the screen says about each plugin, and what a click
- * sends to the controller. The form is generated from the plugin's own schema
- * and validated by the controller alone, which is why the refused write below
- * is a stubbed answer rather than something the screen could have known.
+ * Tests for Settings > Plugins: what the screen shows about each plugin, and
+ * what each button sends to the controller. The config form is generated from
+ * the plugin's own schema, and only the controller validates it. That is why
+ * the rejected writes below are stubbed responses rather than something the
+ * screen could check itself.
  */
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -40,7 +41,7 @@ const EMPTY_SCHEMA = {
   additionalProperties: false,
 };
 
-/** Running, with one thing in the catalog, and nothing to configure. */
+/** A running plugin with one contribution and nothing to configure. */
 const ACTIVE: Fixture = {
   id: "quiet-sink",
   displayName: "Quiet Sink",
@@ -55,7 +56,7 @@ const ACTIVE: Fixture = {
 
 const ACTIVATION_FAILURE = "the socket at /var/run/borked.sock refused the connection";
 
-/** Enabled, but this boot could not start it. */
+/** An enabled plugin that failed to start on this boot. */
 const ERRORED: Fixture = {
   id: "borked-relay",
   displayName: "Borked Relay",
@@ -68,7 +69,7 @@ const ERRORED: Fixture = {
   contributions: [{ extensionPoint: "channel", id: "chatter", definition: {} }],
 };
 
-/** Built against a host API this controller does not speak; never loaded. */
+/** A plugin built for a host API this controller does not support, so it was never loaded. */
 const REFUSED: Fixture = {
   id: "ancient-source",
   displayName: "Ancient Source",
@@ -80,7 +81,7 @@ const REFUSED: Fixture = {
   contributions: [],
 };
 
-/** One of every field kind the generated form renders, with values set. */
+/** A plugin with one config field of every kind the generated form renders, all set. */
 const CONFIGURABLE: Fixture = {
   id: "notes-sink",
   displayName: "Notes Sink",
@@ -120,7 +121,7 @@ const buildWriteRoutes = (plugin: Fixture): Readonly<Record<string, Handler>> =>
   [`PUT /api/v1/plugins/${plugin.id}/config`]: { body: plugin },
 });
 
-/** A controller holding the plugins given, with every write answered. */
+/** Builds a stub controller that returns `plugins` and accepts every write to them. */
 const buildController = (
   plugins: readonly Fixture[],
   extra: Readonly<Record<string, Handler>> = {},
@@ -149,7 +150,7 @@ const openApp = async (
   return { ...app, api };
 };
 
-/** The writes that went out to one plugin, in order. */
+/** Returns the writes sent for the plugin `id`, in order. */
 const listWritesTo = (
   api: { readonly calls: readonly { method: string; path: string; body: unknown }[] },
   id: string,
@@ -158,7 +159,7 @@ const listWritesTo = (
     (call) => call.method !== "GET" && call.path.startsWith(`/api/v1/plugins/${id}`),
   );
 
-/** The card about one plugin: the section its display name heads. */
+/** Finds the card of one plugin: the section headed by its display name. */
 const findPluginCard = async (plugin: Fixture): Promise<HTMLElement> => {
   const heading = await screen.findByText(plugin.displayName);
   const card = heading.closest("section");
@@ -167,7 +168,7 @@ const findPluginCard = async (plugin: Fixture): Promise<HTMLElement> => {
 };
 
 describe("Settings > Plugins", () => {
-  it("says what each plugin is, how it is doing, and what it contributes", async () => {
+  it("shows each plugin's name, status and contributions", async () => {
     await openApp([ACTIVE, ERRORED, REFUSED]);
 
     const active = readPageText(await findPluginCard(ACTIVE));
@@ -184,7 +185,7 @@ describe("Settings > Plugins", () => {
     expect(refused).toMatch(/refused|not loaded|turned away/i);
   });
 
-  it("shows what an activation failed with, and retries it on the spot", async () => {
+  it("shows why activation failed, and retries it", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([ACTIVE, ERRORED, REFUSED]);
 
@@ -205,7 +206,7 @@ describe("Settings > Plugins", () => {
     }
   });
 
-  it("turns a plugin the user had switched off back on", async () => {
+  it("enables a plugin the user had disabled", async () => {
     const user = userEvent.setup();
     const off: Fixture = { ...ACTIVE, enabled: false, status: { _tag: "inactive" } };
     const { api } = await openApp([off]);
@@ -221,7 +222,7 @@ describe("Settings > Plugins", () => {
     });
   });
 
-  it("says so when a move the card offered was refused", async () => {
+  it("shows the error when an action on the card fails", async () => {
     const user = userEvent.setup();
     const complaint = "the plugin is not errored";
     const { api } = await openApp([ERRORED], {
@@ -238,7 +239,7 @@ describe("Settings > Plugins", () => {
     expect(listWritesTo(api, ERRORED.id)).toHaveLength(1);
   });
 
-  it("says why a refused plugin was turned away and offers nothing to switch", async () => {
+  it("shows why a refused plugin was not loaded, and disables its switch", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([ACTIVE, ERRORED, REFUSED]);
 
@@ -246,15 +247,15 @@ describe("Settings > Plugins", () => {
     expect(readPageText(card)).toMatch(/host api/i);
     expect(readPageText(card)).toContain("2");
 
-    // A refused plugin is enabled as far as the stored flag goes, so the
-    // control it offers is the one that would turn it off - and it is dead.
+    // A refused plugin's stored flag is still enabled, so the button reads
+    // Disable, and it is disabled.
     const toggle = within(card).getByRole("button", { name: "Disable" });
     expect(toggle.hasAttribute("disabled")).toBe(true);
     await user.click(toggle);
     expect(listWritesTo(api, REFUSED.id)).toEqual([]);
   });
 
-  it("turns a running plugin off", async () => {
+  it("disables a running plugin", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([ACTIVE, ERRORED, REFUSED]);
 
@@ -270,14 +271,14 @@ describe("Settings > Plugins", () => {
   });
 });
 
-/** Every value the form is holding right now, whatever widget holds it. */
+/** Returns every value in the form's inputs, selects and textareas, joined into one string. */
 const readFormValues = (): string =>
   [...document.querySelectorAll("input, select, textarea")]
     .map((element) => (element as HTMLInputElement).value)
     .join(" | ");
 
 describe("Settings > Plugins > configuration", () => {
-  it("shows a field per configurable setting, holding what is stored", async () => {
+  it("shows one field per setting, filled with the stored value", async () => {
     await openApp([CONFIGURABLE]);
 
     expect(screen.getByLabelText<HTMLInputElement>(/endpoint/i).value).toBe(
@@ -286,12 +287,12 @@ describe("Settings > Plugins > configuration", () => {
     expect(screen.getByLabelText<HTMLInputElement>(/retries/i).value).toBe("3");
     expect(screen.getByLabelText<HTMLInputElement>(/verbose/i).checked).toBe(true);
     expect(screen.getByLabelText<HTMLSelectElement>(/mode/i).value).toBe("fast");
-    // A list of strings has no one widget, so only the values have to be there.
+    // A list of strings has no single widget, so the test only checks the values.
     expect(readFormValues()).toContain("alpha");
     expect(readFormValues()).toContain("beta");
   });
 
-  it("leaves a setting nobody answered out of the write, rather than storing a default", async () => {
+  it("leaves an unfilled setting out of the write, rather than storing a default", async () => {
     const user = userEvent.setup();
     const unset: Fixture = {
       ...CONFIGURABLE,
@@ -313,7 +314,7 @@ describe("Settings > Plugins > configuration", () => {
     });
   });
 
-  it("puts a refused setting's message under the setting it is about", async () => {
+  it("shows a rejected setting's error under that setting", async () => {
     const user = userEvent.setup();
     const complaint = "must be an https URL";
     await openApp([CONFIGURABLE], {
@@ -341,7 +342,7 @@ describe("Settings > Plugins > configuration", () => {
     expect(group.contains(screen.getByLabelText(/retries/i))).toBe(false);
   });
 
-  it("says the write landed, and cannot be sent twice while it is in flight", async () => {
+  it("shows that the save worked, and cannot be sent twice while it is pending", async () => {
     const user = userEvent.setup();
     let answer = () => {};
     const held = new Promise<void>((resolve) => {
@@ -367,7 +368,7 @@ describe("Settings > Plugins > configuration", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("says a refusal that blamed no field of this form, rather than swallowing it", async () => {
+  it("shows an error that names no field of this form, rather than hiding it", async () => {
     const user = userEvent.setup();
     const complaint = "the plugin refused its own configuration";
     await openApp([CONFIGURABLE], {
@@ -388,7 +389,7 @@ describe("Settings > Plugins > configuration", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(complaint);
   });
 
-  it("shows a config changed elsewhere instead of holding the values it opened on", async () => {
+  it("shows a config changed elsewhere instead of the values it opened with", async () => {
     let held: readonly Fixture[] = [CONFIGURABLE];
     const { live } = await openApp(held, {
       "GET /api/v1/plugins": () => ({ body: held }),
@@ -419,7 +420,7 @@ describe("Settings > Plugins > configuration", () => {
 });
 
 describe("Settings > Plugins > reset", () => {
-  it("asks before it wipes a plugin's state, then wipes it", async () => {
+  it("asks for confirmation, then resets the plugin's state", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([CONFIGURABLE]);
 
@@ -441,7 +442,7 @@ describe("Settings > Plugins > reset", () => {
 });
 
 describe("Settings > Plugins > nothing installed", () => {
-  it("says what plugins would bring", async () => {
+  it("explains what plugins bring when none are installed", async () => {
     await openApp([]);
 
     expect(readPageText()).toContain("No plugins are installed.");
@@ -472,7 +473,7 @@ describe("Settings > Plugins > live", () => {
     await waitFor(async () => {
       expect(readPageText(await findPluginCard(ERRORED))).toMatch(/active/i);
     });
-    // The card came from a fresh listing, not from the push itself.
+    // The card comes from a refetched list, not from the pushed message.
     expect(api.calls.filter((call) => call.path === "/api/v1/plugins").length).toBeGreaterThan(
       before,
     );

@@ -5,12 +5,12 @@ import { ModelList } from "./model-list";
 import { SelectorShell } from "./selector-shell";
 
 /**
- * The model selector: the pill, the filter once there is enough to filter, and
- * the catalog behind them.
+ * The model selector: the pill, a filter when there are enough models to need
+ * one, and the list of models.
  *
- * The filter lives with the composer's open selector - a shut menu is
- * filtering nothing - while the fold over the older models is this menu's own
- * state, and springs back when it closes.
+ * The composer owns the filter text and clears it when this menu closes. This
+ * component owns whether the older models are expanded, and collapses them
+ * again when the menu closes.
  */
 export function ModelSelector({
   menu,
@@ -23,7 +23,7 @@ export function ModelSelector({
   onPick,
   loginSlot,
 }: {
-  /** The catalog behind the pill, resolved only while the menu is open. */
+  /** The model list; null while the menu is closed, because it is built only when open. */
   readonly menu: ModelMenu | null;
   readonly filter: string;
   readonly onFilter: (filter: string) => void;
@@ -72,8 +72,8 @@ export function ModelSelector({
             onOlder={() => {
               setOlder(true);
             }}
-            // A row carries its account: one reached through the filter or
-            // Recent switches account and model together.
+            // Each row belongs to an account, so picking a row found through
+            // the filter or Recent switches the account and the model together.
             onPickModel={(instanceId, model) => {
               pick({ kind: "instanceId", value: instanceId }, { kind: "model", value: model });
             }}

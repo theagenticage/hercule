@@ -1,6 +1,6 @@
 /**
- * All sessions (`/sessions`): the headline sentence, the pinned lanes and
- * their rows, over a stubbed controller.
+ * Tests All sessions (`/sessions`) against a stubbed controller: the headline
+ * sentence, the lanes and their rows.
  */
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
@@ -9,9 +9,9 @@ import { buildHeadline } from "@hercule/client-core";
 import { renderApp, stubApi, type Handler } from "../../../app/testing";
 
 /**
- * The screen's own Create new thread, as opposed to the sidebar's: the
- * Threads face (with its own Create new thread) is shown on `/sessions` too,
- * so a query for the link by name alone finds two.
+ * Returns the screen's own Create new thread link, not the sidebar's. The
+ * sidebar's threads face, which has its own Create new thread link, is also
+ * shown on `/sessions`, so a query by name alone finds two links.
  */
 const getScreenCreateThreadLink = (): HTMLElement =>
   screen
@@ -131,7 +131,7 @@ const openApp = async (
 };
 
 describe("All sessions", () => {
-  it("reads the headline sentence for three sessions in three statuses", async () => {
+  it("shows the headline sentence for three sessions in three statuses", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     try {
@@ -140,8 +140,8 @@ describe("All sessions", () => {
       const headline = buildHeadline(THREE_STATUSES, NOW);
       expect(headline).toBe("1 running · 1 idle · 1 settled this week");
       // `renderApp` has already awaited `router.load()`, so the screen is in
-      // its final state; a `findBy*`/`waitFor` would poll on a real timer
-      // that fake timers never advance, and would hang rather than fail.
+      // its final state. A `findBy*` or `waitFor` would poll on a timer that
+      // fake timers never advance, so it would hang rather than fail.
       expect(screen.getByText(headline)).toBeDefined();
     } finally {
       vi.useRealTimers();
@@ -152,8 +152,8 @@ describe("All sessions", () => {
     await openApp(THREE_STATUSES);
 
     await screen.findAllByRole("link", { name: /create new thread/i });
-    // The sidebar's Threads face carries its own Create new thread too, shown
-    // on /sessions as well, so this counts only the screen's own.
+    // The sidebar's threads face, also shown on /sessions, has its own Create
+    // new thread link, so count only the screen's own.
     const onScreen = screen
       .getAllByRole("link", { name: /create new thread/i })
       .filter((link) => link.closest("nav") === null);
@@ -161,7 +161,7 @@ describe("All sessions", () => {
     expect(onScreen[0]!.getAttribute("href")).toBe("/threads/new");
   });
 
-  it("renders exactly the non-empty lanes, Running, Idle and Settled, and not the always-empty ones", async () => {
+  it("renders only the non-empty lanes (Running, Idle and Settled), not the empty ones", async () => {
     await openApp(THREE_STATUSES);
 
     expect(await screen.findByText("Running")).toBeDefined();
@@ -174,8 +174,8 @@ describe("All sessions", () => {
   it("shows one row per session, with its title and provider display name", async () => {
     await openApp(THREE_STATUSES);
 
-    // The sidebar's Threads face carries every session's title too, shown on
-    // /sessions as well, so a title is looked for on the screen itself.
+    // The sidebar's threads face, also shown on /sessions, lists every
+    // session's title too, so look for each title outside the sidebar.
     for (const s of THREE_STATUSES) {
       await waitFor(() => {
         const onScreen = screen.getAllByText(s.title).filter((el) => el.closest("nav") === null);
@@ -186,7 +186,7 @@ describe("All sessions", () => {
     expect(screen.getAllByText("Claude Code").length).toBeGreaterThanOrEqual(THREE_STATUSES.length);
   });
 
-  it("reads No sessions yet with Create new thread, and no lane headings, when there are none", async () => {
+  it("shows No sessions yet, Create new thread and no lane headings when there are no sessions", async () => {
     await openApp([]);
 
     expect(await screen.findByText("No sessions yet")).toBeDefined();

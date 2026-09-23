@@ -2,14 +2,19 @@ import type { JSX, ReactNode } from "react";
 import { cn } from "@hercule/ui";
 
 /**
- * One row of a composer menu: a marker column (the dot on the row in force, or
- * a provider's mark), the name with its small detail beside it, a note at the
- * right, and a sub-line under both.
+ * One row of a composer menu. From left to right it has:
  *
- * A dimmed row is not a button. It is inert - "dimmed with the reason, never
- * hidden" (spec 14 §The composer) means the row stays on show and stops
- * answering - and the one affordance it may still carry, a login, is a control
- * of its own in the trailing slot, which could not be nested inside a button.
+ * - a marker column: a dot on the current row, or a provider's logo;
+ * - the name, with its small detail beside it;
+ * - a note on the right.
+ *
+ * An optional sub-line sits below the name and the note.
+ *
+ * A dimmed row is not a button. Spec 14 §The composer says a row is "dimmed
+ * with the reason, never hidden", so the row stays visible but does nothing
+ * when clicked. The one control it may still have, a login, sits in the
+ * trailing slot as a separate button, because a button cannot be nested
+ * inside another button.
  */
 export function MenuRow({
   marker,
@@ -25,7 +30,7 @@ export function MenuRow({
   className,
   onPick,
 }: {
-  /** What stands in the marker column; the row's own dot when nothing does. */
+  /** The content of the marker column; defaults to the row's dot. */
   readonly marker?: ReactNode;
   readonly name: ReactNode;
   /** The small word beside the name: an account, a plan, "default". */
@@ -35,19 +40,19 @@ export function MenuRow({
   readonly current?: boolean;
   readonly dimmed?: string | null;
   /**
-   * Whether it is the right-hand annotation that gives when the row is too
-   * narrow, rather than the name. A branch is the thing being picked and has
-   * to be read whole; what holds it is a note about it (R6).
+   * Whether the right-hand note is truncated, instead of the name, when the
+   * row is too narrow. A branch name is what the user picks, so it must stay
+   * whole; the note about what holds the branch is less important (R6).
    */
   readonly clipNote?: boolean;
   /**
-   * Whether the row takes no pick, where the reason it takes none is said
-   * somewhere other than the right-hand slot - on its sub-line, say. A row
-   * carrying its reason at the right is inert because it carries one.
+   * Whether the row cannot be picked, for a row that shows its reason
+   * somewhere other than the right-hand note, such as on its sub-line. A row
+   * with a `dimmed` reason is already inert without this flag.
    */
   readonly inert?: boolean;
   readonly trailing?: ReactNode;
-  /** What this row wears beyond the row treatment: a rule above it, say. */
+  /** Extra classes for the row, such as a rule above it. */
   readonly className?: string;
   readonly onPick?: () => void;
 }): JSX.Element {
@@ -67,9 +72,9 @@ export function MenuRow({
       <span
         className={cn(
           "flex items-center gap-1.5 text-[11px] font-normal",
-          // The cell keeps the row's right edge whichever half gives: it is
-          // the wide column on a `clipNote` row, so its contents are pushed to
-          // that edge rather than left sitting against the name.
+          // The note stays aligned to the row's right edge in both layouts. On
+          // a `clipNote` row the note is the wide column, so its contents are
+          // pushed right rather than left next to the name.
           clipNote ? "min-w-0 justify-end text-right" : "shrink-0 whitespace-nowrap",
           marker !== undefined && current ? "text-ink" : "text-faint",
         )}
@@ -77,8 +82,8 @@ export function MenuRow({
         {note}
         {note !== undefined && note !== null && dimmed !== null ? <span>·</span> : null}
         {clipNote && typeof dimmed === "string" ? (
-          // Cut from its own width, with the whole of it as the title, so what
-          // is clipped is still readable.
+          // Truncated, with the full text as the tooltip so the clipped part
+          // can still be read.
           <span title={dimmed} className="min-w-0 truncate">
             {dimmed}
           </span>
@@ -98,10 +103,10 @@ export function MenuRow({
 
   const layout = cn(
     "grid w-full items-center gap-x-2 rounded-[6px]",
-    // The flexible column is the one allowed to give: the name by default, the
-    // annotation where the name is what must be read whole.
+    // Only the flexible column shrinks: the name by default, or the note when
+    // the name must stay whole.
     clipNote ? "grid-cols-[auto_auto_minmax(0,1fr)]" : "grid-cols-[auto_minmax(0,1fr)_auto]",
-    // A row that carries a mark is a model row: a shade taller, and in ink.
+    // A row with a marker is a model row: slightly taller, and in ink.
     marker === undefined ? "px-2 py-[5px]" : "px-2 py-1.5",
     "text-left text-meta",
     current && "font-emph",
@@ -129,7 +134,7 @@ export function MenuRow({
   );
 }
 
-/** A lane's own heading inside a menu; the first one carries no rule above it. */
+/** A lane's heading inside a menu. Every lane but the first has a rule above it. */
 export function Lane({ label }: { readonly label: string }): JSX.Element {
   return (
     <div className="mt-1.5 border-t border-line-soft px-2 pt-2 pb-[3px] first:mt-0 first:border-t-0 first:pt-1 [input+&]:mt-0 [input+&]:border-t-0 [input+&]:pt-1">
@@ -138,12 +143,12 @@ export function Lane({ label }: { readonly label: string }): JSX.Element {
   );
 }
 
-/** The marker column of a row that carries a provider's mark rather than a dot. */
+/** Wraps a provider's logo for a row's marker column, in place of the dot. */
 export const renderMarker = (mark: ReactNode): ReactNode => (
   <span className="flex w-4 justify-center opacity-85">{mark}</span>
 );
 
-/** A menu's own first row: what is being picked, and what picking it settles. */
+/** A menu's first row: the label of what is being picked, and an optional note on the right. */
 export function MenuHeader({
   label,
   note,
@@ -163,7 +168,7 @@ export function MenuHeader({
   );
 }
 
-/** The fine print under a menu: what it will offer, and does not yet. */
+/** The fine print at the bottom of a menu. */
 export function MenuFoot({ children }: { readonly children: ReactNode }): JSX.Element {
   return (
     <div className="mt-1.5 border-t border-line-soft px-2 pt-[7px] pb-[3px] text-[11.5px] leading-[1.45] text-faint">

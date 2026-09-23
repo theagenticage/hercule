@@ -2,18 +2,17 @@ import { useEffect, useRef, type JSX, type KeyboardEvent, type ReactNode } from 
 import { Button } from "./button";
 
 /**
- * Detail over the page, on the right, never a page of its own and never a
- * permanent split.
+ * A panel over the right side of the page that shows detail. It is never a page
+ * of its own and never a permanent split view.
  *
- * Escape and the page behind it both close it, so a reader who opened one by
- * accident is never trapped in it. Focus moves into the panel when it opens and
- * back to whatever had it when it closes, which is what makes the same two
- * gestures work for someone driving from the keyboard. Escape is heard on the
- * panel rather than on the document, so a menu opened over the drawer takes its
- * own Escape and the drawer stays where it is.
- *
- * The page behind stays reachable: nothing here makes it inert, so the drawer
- * does not claim to be modal.
+ * - Escape and a click on the page behind both close it, so a user who opened
+ *   it by accident is never stuck in it.
+ * - Focus moves into the panel when it opens and returns to the previously
+ *   focused element when it closes, so keyboard users get the same behaviour.
+ * - Escape is handled on the panel, not on the document, so a menu open over
+ *   the drawer handles its own Escape and the drawer stays open.
+ * - The page behind is not made inert, so the drawer does not claim to be
+ *   modal.
  */
 export function Drawer({
   open,

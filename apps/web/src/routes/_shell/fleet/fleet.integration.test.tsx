@@ -1,17 +1,17 @@
 /**
- * The Fleet screen: what a machine's row says, which machine the browser is
- * sitting on, and how a new machine is enlisted, over a stubbed controller.
+ * Tests for the Fleet screen, against a stubbed controller: what a runner's
+ * row shows, which runner is on the browser's machine, and how a new machine
+ * is added.
  *
- * The fleet is the one screen whose rows are almost entirely a machine's own
- * report, so the assertions here are about what a runner said reaching the
- * reader: whether it is reachable, the binary it runs, and the facts it probed. A
- * row that shows a name and nothing else would leave a person no way to tell
- * two machines apart.
+ * The fleet rows show almost only what each runner reported about itself, so
+ * these tests check that the report reaches the screen: whether the runner is
+ * reachable, the binary version it runs, and the facts it probed. A row that
+ * showed only a name would give a person no way to tell two machines apart.
  *
- * Which row is "this machine" cannot be asked of the controller - it knows
- * every runner and where none of them are - so detection is handed to the app
- * and stubbed here, and both of its answers are held: the id of a listed
- * runner, and nothing at all.
+ * The controller cannot tell which runner is "this machine", because it does
+ * not know where the browser is. The app detects it instead, and the tests stub
+ * that detection with both possible results: the id of a listed runner, and
+ * null.
  */
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
@@ -20,7 +20,7 @@ import { formatStamp } from "@hercule/client-core";
 import { readPageText, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 import { CONTROLLER_VERSION, GIB, MOSS, ZONE, type Fixture } from "./-fixtures";
 
-/** A machine somewhere else, running an older binary than the controller. */
+/** A remote runner, running an older binary than the controller. */
 const HETZNER: Fixture = {
   ...MOSS,
   id: "01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb",
@@ -43,7 +43,7 @@ const HETZNER: Fixture = {
   lastSeenAt: "2026-09-05T08:02:00.000Z",
 };
 
-/** A machine the owner is emptying: reachable, but on its way out of the fleet. */
+/** A runner the owner is draining: online, but leaving the fleet. */
 const SIRIUS: Fixture = {
   ...HETZNER,
   id: "01a06d02-d222-7b1f-9c4e-ad2e6b39f0aa",
@@ -62,7 +62,7 @@ interface TokenFixture {
   readonly expiresAt: string;
 }
 
-/** A token minted a moment ago, running out in `minutes`. */
+/** Builds a join token created a minute ago that expires in `minutes`. */
 const buildOutstandingToken = (id: string, minutes: number): TokenFixture => ({
   id,
   createdAt: new Date(Date.now() - 60_000).toISOString(),
@@ -72,7 +72,7 @@ const buildOutstandingToken = (id: string, minutes: number): TokenFixture => ({
 const EXPIRING_SOON = buildOutstandingToken("01a06d02-e100-7c00-8a00-000000000001", 12);
 const EXPIRING_LATER = buildOutstandingToken("01a06d02-e100-7c00-8a00-000000000002", 55);
 
-/** A controller holding the fleet given, and answering for itself. */
+/** Builds a stub controller that returns `runners` and its own record. */
 const buildController = (
   runners: readonly Fixture[],
   extra: Readonly<Record<string, Handler>> = {},
@@ -97,7 +97,7 @@ const buildController = (
     status: 201,
     body: { token: TOKEN, expiresAt: "2026-09-05T10:14:00.000Z" },
   },
-  // Nothing is outstanding unless a test says so; the screen asks either way.
+  // No unused tokens unless a test adds some; the screen fetches them either way.
   "GET /api/v1/runners/join-tokens": { body: [] },
   ...extra,
 });
@@ -119,17 +119,17 @@ const openApp = async (
   return { ...app, api };
 };
 
-/** The fleet listings the screen made, oldest first. */
+/** Returns the runner list requests the screen made, oldest first. */
 const listRunnerReads = (api: { readonly calls: readonly Call[] }) =>
   api.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/runners");
 
 /**
- * The part of the page that is about one machine and no other.
+ * Finds the part of the page about the runner `name` and no runner in `others`.
  *
- * A row has no shape this test is entitled to know, so it is found rather than
- * assumed: start at the deepest element carrying the name and climb while the
- * parent still says nothing about any other machine. What comes back is
- * everything the screen says about that one runner, whatever it is built from.
+ * The test should not depend on how a row is built, so the row is searched
+ * for: start at the smallest element that contains the name, and climb while
+ * the parent's text mentions none of `others`. The result holds everything the
+ * screen shows about that one runner, whatever elements it is built from.
  */
 const findRunnerRow = async (name: string, others: readonly string[]): Promise<HTMLElement> => {
   const found = await screen.findAllByText(new RegExp(name));
@@ -146,19 +146,19 @@ const findRunnerRow = async (name: string, others: readonly string[]): Promise<H
 };
 
 /**
- * Whether a size is on screen, as the whole number of gibibytes the fixtures
- * are all round multiples of. Anything else the screen might have printed is
- * something a reader would have to convert in their head.
+ * Checks whether `text` shows `bytes` as a whole number of GiB. The fixtures
+ * are all whole GiB, and any other unit would make the reader convert it in
+ * their head.
  */
 const showsSize = (text: string, bytes: number): boolean =>
   new RegExp(`(^|[^\\d.])${(bytes / 1024 ** 3).toFixed(0)} ?GiB`).test(text);
 
 /**
- * Whether a token's expiry reached the reader.
+ * Checks whether `text` shows the token's expiry.
  *
- * When a token runs out is a stamp, read in the user's own zone the way every
- * other moment on this screen is. A countdown would be a second reading of time
- * in one app, which is the decision this pins.
+ * The expiry is shown as a timestamp in the user's own timezone, like every
+ * other time on this screen. This check pins that decision: a countdown would
+ * be a second way to show time in the same app.
  */
 const showsExpiry = (text: string, token: TokenFixture): boolean => {
   const stamp = formatStamp(new Date(token.expiresAt), ZONE);
@@ -168,12 +168,12 @@ const showsExpiry = (text: string, token: TokenFixture): boolean => {
 const queryRevokeButtons = (): readonly HTMLElement[] =>
   screen.queryAllByRole("button", { name: /revoke/i });
 
-/** The link a row carries, whether it wraps the row or sits inside it. */
+/** Returns the row's link, whether the link wraps the row or sits inside it. */
 const findRowLink = (row: HTMLElement): HTMLAnchorElement | null =>
   row.closest("a") ?? row.querySelector("a");
 
 describe("Fleet", () => {
-  it("shows what each machine is and what it reported about itself", async () => {
+  it("shows each runner's name and what it reported about itself", async () => {
     await openApp([MOSS, HETZNER]);
 
     const moss = readPageText(await findRunnerRow(MOSS.name, [HETZNER.name]));
@@ -199,23 +199,23 @@ describe("Fleet", () => {
     );
   });
 
-  it("warns on the machine whose binary is not the controller's, and only there", async () => {
+  it("warns on the runner whose binary version differs from the controller's, and only there", async () => {
     await openApp([MOSS, HETZNER]);
 
-    // The wording is the screen's; what has to be there is that the row says
-    // its binary is not the controller's, rather than only printing a number
-    // the reader would have to compare themselves.
+    // The exact wording is up to the screen. What matters is that the row
+    // says its version differs from the controller's, rather than only
+    // showing a number the reader has to compare.
     const skew = /skew|mismatch|differ|out of date|behind|ahead|older|newer|not the controller/i;
     const hetzner = readPageText(await findRunnerRow(HETZNER.name, [MOSS.name]));
     expect(hetzner).toContain(HETZNER.version);
     expect(hetzner, "the older binary is called out").toMatch(skew);
 
-    // The machine on the controller's own version says nothing about skew.
+    // The runner on the controller's version shows no warning.
     const moss = readPageText(await findRunnerRow(MOSS.name, [HETZNER.name]));
     expect(moss).not.toMatch(skew);
   });
 
-  it("keeps its shape when no machine has joined", async () => {
+  it("shows a placeholder row and the add card when no runner has joined", async () => {
     await openApp([]);
 
     expect(readPageText()).toContain("no runner has joined yet");
@@ -227,7 +227,7 @@ describe("Fleet", () => {
 });
 
 describe("Fleet > this machine", () => {
-  it("marks the machine the browser is on, and only that one", async () => {
+  it("marks the runner on the browser's machine, and only that one", async () => {
     await openApp([MOSS, HETZNER], { local: MOSS.id });
 
     await waitFor(async () => {
@@ -240,19 +240,19 @@ describe("Fleet > this machine", () => {
     );
   });
 
-  it("marks nothing when no machine on this browser answers", async () => {
+  it("marks nothing when no runner is detected on the browser's machine", async () => {
     await openApp([MOSS, HETZNER], { local: null });
 
     await screen.findAllByText(new RegExp(MOSS.name));
-    // Detection resolves on its own turn, so the absence is given the time a
-    // present sub-label would have taken to arrive.
+    // Detection resolves asynchronously, so wait as long as a found runner's
+    // label would take to appear before checking that none did.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(readPageText()).not.toContain("this machine");
   });
 });
 
 describe("Fleet > add machine", () => {
-  it("mints a token and shows the command that spends it", async () => {
+  it("creates a token and shows the join command that uses it", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([MOSS]);
 
@@ -268,22 +268,22 @@ describe("Fleet > add machine", () => {
         (call) => call.method === "POST" && call.path === "/api/v1/runners/join-tokens",
       ).length,
     ).toBeGreaterThan(0);
-    // The command that predates the join exchange is not what is shown.
+    // The old command from before join tokens existed is not shown.
     expect(readPageText()).not.toContain("hercule runner --controller");
   });
 });
 
 describe("Fleet > live", () => {
-  /** One invalidation, in the shape the contract puts on the wire. */
+  /** Builds an invalidation message in its wire format. */
   const buildInvalidation = (kind: string, ids: readonly string[]) => ({
     _tag: "invalidate",
     ids,
     kind,
   });
 
-  it("shows that a machine has become unreachable when it does so elsewhere", async () => {
-    // A second machine, so what the changed row says is read off that row and
-    // not off a page that has the word on it somewhere.
+  it("shows a runner as unreachable after a live update says it changed", async () => {
+    // A second runner, so the check reads the changed row itself and not a
+    // word that could appear anywhere on the page.
     const OTHER: Fixture = { ...HETZNER, connectivity: "offline" };
     let held: readonly Fixture[] = [MOSS, OTHER];
     const { api, live } = await openApp(held, {
@@ -304,13 +304,13 @@ describe("Fleet > live", () => {
     await waitFor(async () => {
       expect(readPageText(await findRunnerRow(MOSS.name, [OTHER.name]))).toContain("unreachable");
     });
-    // The row came from a fresh listing, not from the push itself.
+    // The row comes from a refetched list, not from the pushed message.
     expect(listRunnerReads(api).length).toBeGreaterThan(before);
   });
 });
 
 describe("Fleet > outstanding tokens", () => {
-  it("lists the tokens still waiting to be spent, and when each runs out", async () => {
+  it("lists the unused tokens, and when each expires", async () => {
     await openApp([MOSS], {
       extra: { "GET /api/v1/runners/join-tokens": { body: [EXPIRING_SOON, EXPIRING_LATER] } },
     });
@@ -323,14 +323,14 @@ describe("Fleet > outstanding tokens", () => {
     expect(showsExpiry(shown, EXPIRING_LATER), `the second expiry in: ${shown}`).toBe(true);
   });
 
-  it("offers nothing to take back when no token is outstanding", async () => {
+  it("shows no Revoke button when there are no unused tokens", async () => {
     await openApp([MOSS]);
 
     await screen.findByRole("button", { name: /add machine/i });
     expect(queryRevokeButtons()).toEqual([]);
   });
 
-  it("takes a token back, and drops it from the list", async () => {
+  it("revokes a token and removes it from the list", async () => {
     const user = userEvent.setup();
     let held: readonly TokenFixture[] = [EXPIRING_SOON, EXPIRING_LATER];
     const { api } = await openApp([MOSS], {
@@ -354,8 +354,8 @@ describe("Fleet > outstanding tokens", () => {
     expect(first).toBeDefined();
     await user.click(first!);
 
-    // Which token that button was for is read off the request rather than
-    // guessed from the order the list happens to be in.
+    // The revoked token is read from the request rather than guessed from
+    // the list's order.
     const deletes = api.calls.filter(
       (call) => call.method === "DELETE" && call.path.startsWith("/api/v1/runners/join-tokens/"),
     );
@@ -378,7 +378,7 @@ describe("Fleet > outstanding tokens", () => {
 });
 
 describe("Fleet > add machine > personal", () => {
-  it("puts the reserved flag on the command the machine will run", async () => {
+  it("adds the reserved flag to the join command", async () => {
     const user = userEvent.setup();
     await openApp([MOSS]);
 
@@ -395,7 +395,7 @@ describe("Fleet > add machine > personal", () => {
       expect(readPageText()).toContain(`${plain} --reserved`);
     });
 
-    // The flag is the tick's, so unticking takes it back off.
+    // Unticking the checkbox removes the flag again.
     await user.click(screen.getByRole("checkbox", { name: /personal machine/i }));
     await waitFor(() => {
       expect(readPageText()).not.toContain("--reserved");
@@ -404,16 +404,16 @@ describe("Fleet > add machine > personal", () => {
   });
 });
 
-describe("Fleet > opening a machine", () => {
-  it("says where each machine stands and leads to the machine itself", async () => {
+describe("Fleet > opening a runner", () => {
+  it("shows each runner's status and links to its page", async () => {
     await openApp([MOSS, SIRIUS]);
 
     const moss = await findRunnerRow(MOSS.name, [SIRIUS.name]);
     expect(readPageText(moss)).toContain(MOSS.connectivity);
     expect(findRowLink(moss)?.getAttribute("href")).toBe(`/fleet/${MOSS.id}`);
 
-    // A machine on its way out says so: its lifecycle is the reason a reader
-    // would open it, and it is not what its connectivity says.
+    // A draining runner shows its lifecycle: that is why a reader would open
+    // it, and its connectivity does not show it.
     const sirius = await findRunnerRow(SIRIUS.name, [MOSS.name]);
     expect(readPageText(sirius)).toContain(SIRIUS.connectivity);
     expect(readPageText(sirius)).toContain(SIRIUS.lifecycle);

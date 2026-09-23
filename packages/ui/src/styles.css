@@ -1,7 +1,8 @@
 @import "tailwindcss";
 
-/* Tailwind skips node_modules, and every workspace package is reached through
-   one, so the component library's own class names have to be pointed at. */
+/* Tailwind does not scan node_modules, and the app reaches every workspace
+   package through node_modules, so Tailwind must be told to scan this
+   package's class names. */
 @source ".";
 
 /* Onest (variable, wght 100-900) and IBM Plex Mono, latin and latin-ext subsets,
@@ -74,8 +75,8 @@
 /* The Midnight token system: blue-violet neutrals at oklch hue 265, grounds
    94.5% light and 20% dark. Light is the base; the two dark rules below give the
    same values to the system preference and to an explicit choice. `color-scheme`
-   moves with the tokens so what the browser draws itself - scrollbars, form
-   controls, the caret - follows a forced theme rather than the machine. */
+   changes with the tokens, so what the browser draws itself - scrollbars, form
+   controls, the caret - follows a chosen theme instead of the system setting. */
 :root {
   color-scheme: light;
   --bg: oklch(94.5% 0.0156 265);
@@ -96,7 +97,7 @@
   --attn-soft: rgba(138, 97, 22, 0.09);
   --project-hercule: #7d7ab0;
   --project-ops: #a67f92;
-  /* What an overlay dims the page behind it with. */
+  /* The colour an overlay uses to dim the page behind it. */
   --scrim: rgba(23, 26, 33, 0.22);
 
   /* Syntax highlighting colours for code, such as a workflow's YAML. Keys are
@@ -185,8 +186,8 @@
   --syn-meta: oklch(78% 0.09 317);
 }
 
-/* The type scale and radii are Tailwind theme values outright: nothing else
-   restates them, and Tailwind emits them as custom properties too. */
+/* The type scale and radii are defined directly as Tailwind theme values.
+   Nothing else repeats them, and Tailwind also emits them as custom properties. */
 @theme {
   --text-label: 10.5px;
   --text-fine: 12px;
@@ -200,8 +201,8 @@
   --radius-control: 6px;
 }
 
-/* The colour and face utilities read the tokens instead of restating them, so a theme
-   change moves the utilities with it. */
+/* The colour and font utilities refer to the tokens instead of copying their
+   values, so a theme change updates the utilities too. */
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -238,8 +239,8 @@
   }
 }
 
-/* The working mark: three bars breathing on a slow cycle. Static things have no
-   motion, so this is the only animation the mark family carries. */
+/* The working mark: three bars rising and falling on a slow cycle. The marks
+   for static states do not move, so this is the only animated mark. */
 @keyframes hercule-equalizer {
   0%,
   100% {
@@ -262,9 +263,8 @@
   animation-delay: 0.7s;
 }
 
-/* The drawer arrives from the edge it lives on, once, over 160ms. It is the
-   one transition in the system: the panel has to read as sitting over the page
-   rather than as having replaced it. */
+/* The drawer slides in from the right edge once, over 160ms, so the panel
+   looks like it sits over the page, not like it replaced the page. */
 @keyframes hercule-drawer-in {
   from {
     transform: translateX(12px);
@@ -280,8 +280,8 @@
   animation: hercule-drawer-in 160ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* Currency: a thing that is live carries a slow pulse beside its state word.
-   Nothing static moves, so the motion itself is the signal. */
+/* Liveness: something live has a slowly pulsing dot beside its state word.
+   Nothing static moves, so the motion itself shows that it is live. */
 @keyframes hercule-live-pulse {
   0%,
   100% {

@@ -7,13 +7,13 @@ import { taskQuery } from "../../../app/queries";
 import { TaskDetail } from "./-detail";
 
 /**
- * The task the address names, read and edited beside the list.
+ * The drawer that shows and edits the task named in the URL, beside the list.
  *
- * Detail is a drawer over `/tasks`, so what is open is a parameter of the
- * list's own address and nothing else: opening, closing and the browser's own
- * Back are one mechanism. The list keys this component on that parameter, so
- * everything held here - a refusal above all - belongs to one task and is left
- * behind with it, whichever of the three the reader used.
+ * The drawer sits over `/tasks`, so the open task is only a search parameter
+ * of the list's URL. Opening, closing and the browser's Back button all work
+ * the same way: they change that parameter. The list keys this component on
+ * the parameter, so all state held here - above all an edit error - belongs to
+ * one task and is discarded when the user leaves it, whichever way they leave.
  */
 export function TaskDrawer({
   client,
@@ -25,21 +25,23 @@ export function TaskDrawer({
   onClose,
 }: {
   readonly client: HerculeClient;
-  /** The task the address names, or none. */
+  /** The id of the task named in the URL, if any. */
   readonly openId: string | undefined;
-  /** The same task as the listing already holds it, when it holds it. */
+  /** The same task as the list already has it, if the list has it. */
   readonly listed: Task | undefined;
   readonly projects: readonly Project[];
   readonly timezone: string;
   readonly reread: (id: string) => Promise<void>;
   readonly onClose: () => void;
 }): JSX.Element | null {
-  // A refused edit belongs to the task it was made on. The mutation's own error
-  // cannot say that: every field of the drawer shares one mutation, so a second
-  // edit issued before the first answers clears the first one's error before it
-  // is ever rendered, and an error that does survive is rendered inside
-  // whichever task's drawer is open next. So the refusal is held here, named by
-  // the task it refused, and shown only there.
+  // A failed edit belongs to the task it was made on. The mutation's own error
+  // cannot track that, because every field in the drawer shares one mutation:
+  // - a second edit sent before the first returns clears the first one's error
+  //   before it is ever rendered;
+  // - an error that does survive would render in whichever task's drawer is
+  //   open next.
+  // So the error is stored here with the id of its task, and shown only for
+  // that task.
   const [refusal, setRefusal] = useState<
     { readonly taskId: string; readonly message: string } | undefined
   >(undefined);
@@ -47,9 +49,9 @@ export function TaskDrawer({
   const edit = useMutation({
     mutationFn: ({ id, patch }: { readonly id: string; readonly patch: TaskUpdateInput }) =>
       client.task.update({ params: { id }, payload: patch }),
-    // A write the controller took answers the refusal before it, so a refusal
-    // held by hand is cleared by hand: what the drawer says about a task is
-    // that task's last word, not its worst one.
+    // A successful edit supersedes an earlier failed one, so clear the stored
+    // error by hand. The drawer shows the result of the task's latest edit,
+    // not its worst one.
     onSuccess: (_, variables) => {
       setRefusal((held) => (held?.taskId === variables.id ? undefined : held));
       return reread(variables.id);
@@ -59,22 +61,22 @@ export function TaskDrawer({
     },
   });
 
-  // The listing answers the panel instantly and the read keeps it right: a task
-  // reached by address may be on no page fetched, and one the user has just
-  // edited may have left the filter the listing is under. A read that is being
-  // refetched keeps the answer it had, so an edit that takes the task out of
-  // the filter does not take the panel with it.
+  // The list's copy fills the drawer instantly, and the task's own read keeps
+  // it correct: a task opened by URL may not be on any fetched page, and a task
+  // the user just edited may no longer match the list's filter. A query that is
+  // refetching keeps its previous data, so an edit that removes the task from
+  // the filter does not close the drawer.
   const opened = useQuery({ ...taskQuery(client, openId ?? ""), enabled: openId !== undefined });
-  // A task the controller no longer has is the one case where what was read
-  // before is not worth keeping: the row is gone from the list under the panel,
-  // and a panel still showing it would be the screen contradicting itself.
+  // A 404 is the one case where the earlier data should be dropped: the row is
+  // gone from the list behind the drawer, and a drawer still showing the task
+  // would contradict the list.
   const gone = isNotFound(opened.error);
   const selected = gone ? undefined : (opened.data ?? listed);
 
   if (selected === undefined) {
-    // A task named in the address that the controller will not answer for -
-    // deleted, or never there - is not silence: the drawer opens and says what
-    // the controller said.
+    // If the task in the URL cannot be read - it was deleted, or never
+    // existed - the drawer still opens and shows the controller's error
+    // message, rather than showing nothing.
     if (openId === undefined || !opened.isError) return null;
     return (
       <Drawer open onClose={onClose} title="Task not found">

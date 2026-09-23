@@ -2,12 +2,12 @@ import type { ComponentProps, JSX } from "react";
 import { cn } from "./cn";
 
 /**
- * One row of a list that opens something.
+ * One row of a list. Pressing it opens something, so it is a button. It uses
+ * no colour.
  *
- * A row is a button, because that is what it does; the hue-free treatment is
- * all it carries. `dimmed` is the recession finished and unimportant work
- * takes, and it is opacity rather than a paler ink so everything in the row
- * recedes together.
+ * `dimmed` fades the row, for finished or unimportant work. It lowers the
+ * opacity instead of using a paler ink, so everything in the row fades
+ * together.
  */
 export function ListRow({
   dimmed = false,

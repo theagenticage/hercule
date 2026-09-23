@@ -18,7 +18,7 @@ describe("Button", () => {
     expect(screen.getByRole("button", { name: "Allow" })).toHaveProperty("type", "button");
   });
 
-  it("reports the press", async () => {
+  it("calls onClick when pressed", async () => {
     const onClick = vi.fn();
     render(<Button onClick={onClick}>Allow</Button>);
     await userEvent.click(screen.getByRole("button"));
@@ -59,16 +59,17 @@ describe("Button", () => {
     expect(document.activeElement).toBe(screen.getByRole("button"));
   });
 
-  it("is quiet unless the primary answer asks otherwise", () => {
+  it("uses the quiet variant unless another variant is given", () => {
     const { rerender } = render(<Button>Deny</Button>);
     expect(screen.getByRole("button").dataset.variant).toBe("quiet");
     rerender(<Button variant="primary">Allow</Button>);
     expect(screen.getByRole("button").dataset.variant).toBe("primary");
   });
 
-  it("keeps its own size when it carries a colour of its own", () => {
-    // The type scale is named, not sized, so the merge has to be told the
-    // difference: a button whose size was dropped inherits the ambient one.
+  it("keeps its font size class next to its colour classes", () => {
+    // The type scale uses names, not sizes, so tailwind-merge must be told they
+    // are sizes. A button whose size class was dropped would inherit the
+    // surrounding font size.
     render(<Button>Allow</Button>);
     expect(screen.getByRole("button").className).toContain("text-row");
   });
@@ -82,7 +83,7 @@ describe("Button", () => {
 });
 
 describe("Input and Label", () => {
-  it("hands focus to the field its label names", async () => {
+  it("focuses the field when its label is clicked", async () => {
     render(
       <>
         <Label htmlFor="username">Username</Label>
@@ -93,7 +94,7 @@ describe("Input and Label", () => {
     expect(screen.getByLabelText("Username")).toBe(document.activeElement);
   });
 
-  it("carries what the user types", async () => {
+  it("holds what the user types", async () => {
     render(<Input aria-label="Username" />);
     const field = screen.getByLabelText("Username");
     await userEvent.type(field, "rogier");
@@ -149,7 +150,7 @@ describe("Select", () => {
     );
   });
 
-  it("reports the value the user picks", async () => {
+  it("calls onChange with the value the user picks", async () => {
     const onChange = vi.fn();
     render(<Example onChange={onChange} />);
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Timezone" }), "UTC");
@@ -168,7 +169,7 @@ describe("SegmentedControl", () => {
     );
   }
 
-  it("marks exactly one face as on", async () => {
+  it("shows exactly one option as selected", async () => {
     render(<Example />);
     expect(screen.getByRole("radio", { name: "Threads" }).dataset.state).toBe("on");
     await userEvent.click(screen.getByRole("radio", { name: "Hercule" }));
@@ -176,13 +177,13 @@ describe("SegmentedControl", () => {
     expect(screen.getByRole("radio", { name: "Threads" }).dataset.state).toBe("off");
   });
 
-  it("has no off state: pressing the face already on leaves it on", async () => {
+  it("has no off state: pressing the selected option keeps it selected", async () => {
     render(<Example />);
     await userEvent.click(screen.getByRole("radio", { name: "Threads" }));
     expect(screen.getByRole("radio", { name: "Threads" }).dataset.state).toBe("on");
   });
 
-  it("moves between faces with the arrow keys", async () => {
+  it("moves between options with the arrow keys", async () => {
     render(<Example />);
     await userEvent.tab();
     await userEvent.keyboard("{ArrowRight}");
@@ -196,20 +197,20 @@ describe("StringList", () => {
     return <StringList label="Tag" values={values} onChange={setValues} />;
   }
 
-  it("names each entry by its place, so a screen reader can tell them apart", () => {
+  it("names each entry by its position, so a screen reader can tell them apart", () => {
     render(<Example initial={["alpha", "beta"]} />);
     expect(screen.getByLabelText<HTMLInputElement>("Tag entry 1").value).toBe("alpha");
     expect(screen.getByLabelText<HTMLInputElement>("Tag entry 2").value).toBe("beta");
   });
 
-  it("reports an edited entry with the rest of the list beside it", async () => {
+  it("keeps the rest of the list unchanged when one entry is edited", async () => {
     render(<Example initial={["alpha", "beta"]} />);
     await userEvent.type(screen.getByLabelText("Tag entry 1"), "!");
     expect(screen.getByLabelText<HTMLInputElement>("Tag entry 1").value).toBe("alpha!");
     expect(screen.getByLabelText<HTMLInputElement>("Tag entry 2").value).toBe("beta");
   });
 
-  it("grows by an empty entry and shrinks by the one removed", async () => {
+  it("adds an empty entry, and removes the chosen entry", async () => {
     render(<Example initial={["alpha", "beta"]} />);
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByLabelText<HTMLInputElement>("Tag entry 3").value).toBe("");
@@ -219,7 +220,7 @@ describe("StringList", () => {
     expect(screen.queryByLabelText("Tag entry 3")).toBeNull();
   });
 
-  it("shows only the way to add when there is nothing in the list", () => {
+  it("shows only the Add button when the list is empty", () => {
     render(<Example initial={[]} />);
     expect(screen.queryByLabelText("Tag entry 1")).toBeNull();
     expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
@@ -240,7 +241,7 @@ describe("Checkbox", () => {
     );
   }
 
-  it("is reached by the name beside it", async () => {
+  it("is toggled by a click on the label beside it", async () => {
     render(<Example />);
     expect(screen.getByLabelText<HTMLInputElement>("Verbose").checked).toBe(false);
     await userEvent.click(screen.getByText("Verbose"));

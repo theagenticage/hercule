@@ -8,10 +8,10 @@ export const Route = createFileRoute("/_shell/settings/system")({
 });
 
 /**
- * The controller's operational settings, none of them editable yet, above one
- * thing that never will be: the access-mode fallback policy is a property of
- * the system rather than a setting (spec 06 §8.4, spec 13 §7), so the screen
- * states it and offers nothing to change it.
+ * The System screen: the controller's operational settings, none of them
+ * editable yet, below one policy that never will be. The access-mode fallback
+ * policy is a property of the system, not a setting (spec 06 §8.4, spec 13
+ * §7), so the screen describes it and offers no way to change it.
  */
 function System(): JSX.Element {
   return (
@@ -23,8 +23,8 @@ function System(): JSX.Element {
         <p className="text-row text-muted">
           The four access modes run from least to most permissive:
         </p>
-        {/* Its own line, and never broken mid-token: a chain that wrapped
-            between a mode and its `<` would read as a different chain. */}
+        {/* On its own line and never wrapped: a break between a mode and its
+            `<` would make the order read differently. */}
         <span className="block overflow-x-auto font-mono text-row whitespace-nowrap text-ink">
           approval-required &lt; auto-accept-edits &lt; auto &lt; full-access
         </span>

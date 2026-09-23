@@ -4,16 +4,16 @@ import type { ThreadTab } from "@hercule/client-core";
 import { DoneMark, WorkingMark, cn } from "@hercule/ui";
 
 /**
- * The thread's chrome: the one row spec 14 §The thread surface pins - the
- * project crumb, then the title, then the actions at the right. A thread that
- * belongs to no project crumbs `Threads /`.
+ * The thread's header row, as set by spec 14 §The thread surface: the project
+ * crumb, then the title, then the actions on the right. A thread with no
+ * project shows `Threads /` as its crumb.
  *
- * When the thread's workspace holds more than one thread the title is the
- * active tab and its siblings sit beside it, in the workspace's own order; the
- * workspace's own name is not repeated here, because the lip has it.
+ * When the thread's workspace holds more than one thread, the title becomes
+ * the active tab, with the other threads beside it in the workspace's order.
+ * The workspace name is not repeated here, because the lip already shows it.
  *
- * It belongs to the screen rather than to the shell: the shell's own title
- * would say the same thing one row higher.
+ * The thread screen draws this row instead of the shell's top bar, because
+ * the shell's title would repeat the same information one row higher.
  */
 export function ThreadChrome({
   crumb,
@@ -21,7 +21,7 @@ export function ThreadChrome({
   tabs = [],
   actions,
 }: {
-  /** The project the thread belongs to; `Threads` where it belongs to none. */
+  /** The name of the thread's project; the crumb shows `Threads` when undefined. */
   readonly crumb?: string | undefined;
   readonly title: string;
   readonly tabs?: readonly ThreadTab[];
@@ -46,7 +46,7 @@ export function ThreadChrome({
   );
 }
 
-/** One thread of the workspace, beside its siblings. The active one is not a link. */
+/** One thread's tab in the header. The active tab is not a link. */
 function Tab({ tab }: { readonly tab: ThreadTab }): JSX.Element {
   const body = (
     <>
@@ -56,7 +56,7 @@ function Tab({ tab }: { readonly tab: ThreadTab }): JSX.Element {
         ) : tab.mark === "exited" ? (
           <DoneMark />
         ) : tab.mark === "draft" ? (
-          // The draft's own mark, as the sidebar's draft row carries it.
+          // The draft mark, the same one the sidebar's draft row shows.
           <span aria-hidden="true" className="text-faint">
             ·
           </span>
@@ -82,11 +82,11 @@ function Tab({ tab }: { readonly tab: ThreadTab }): JSX.Element {
   );
 }
 
-/** One action on that row. The chrome owns the look; the screen says what it does. */
+/** A button in the header row. This component sets the look; the screen supplies the behaviour. */
 export function ChromeAction(props: {
   readonly title: string;
   readonly disabled?: boolean;
-  /** A glyph rather than a word: narrower, and its dots spaced out. */
+  /** Whether the content is a glyph rather than a word: narrower padding, wider letter spacing. */
   readonly icon?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
@@ -107,14 +107,14 @@ export function ChromeAction(props: {
 }
 
 /**
- * The one action a thread in a workspace offers: another thread beside it, in
- * the same files. Absent on a workspace-less thread, which has no "here".
+ * The New thread here link: starts another thread in the same workspace. A
+ * thread without a workspace does not show it.
  */
 export function NewThreadHere({
   projectId,
   workspaceId,
 }: {
-  /** Null on a thread in a workspace that belongs to no project. */
+  /** Null when the workspace belongs to no project. */
   readonly projectId: string | null;
   readonly workspaceId: string;
 }): JSX.Element {
@@ -135,7 +135,7 @@ export function NewThreadHere({
 const ACTION =
   "rounded-full border border-line bg-raised py-[3px] text-meta font-normal whitespace-nowrap text-muted";
 
-/** The column under the chrome: 800px centred, with the surface's own padding. */
+/** The content column below the header row: up to 800px wide and centred. */
 export function ThreadColumn({
   className,
   children,

@@ -5,18 +5,23 @@ import { queryKeys, type HerculeClient, type SecretFieldOffer } from "@hercule/c
 import { readErrorMessage } from "./save-status";
 
 /**
- * A screen rather than a part of one, because Sessions and the runner page both
- * offer this exact action.
+ * The Log in button for a provider, with the drawer that walks the user
+ * through the vendor's browser login. It lives in `screens/` because
+ * Sessions and the runner page both offer this exact action.
  *
- * The URL is shown rather than opened: the machine running the harness may have
- * no browser, and this one is often not it. A refused code leaves the exchange
- * standing, so the panel stays open for another paste.
+ * The login URL is shown rather than opened: the machine running the harness
+ * may have no browser, and it is often not the machine the user is on. If a
+ * pasted code is rejected, the login is still in progress, so the drawer stays
+ * open for another try.
  *
- * Two flows end up here. A vendor that reads a code back asks the user to paste
- * one. A vendor that printed a one-time code reads nothing at all: the user
- * types that code into their browser and the browser finishes the exchange with
- * the vendor, so the panel only shows what to do and is dismissed when it is
- * done - there is nothing for Hercule to relay and nothing to wait for.
+ * There are two flows:
+ *
+ * - Paste-back: the vendor gives the user a code in the browser, and the user
+ *   pastes it here.
+ * - One-time code: the vendor printed a code, the user enters it in the
+ *   browser, and the browser completes the login with the vendor. Hercule has
+ *   nothing to send and nothing to wait for, so the drawer only shows the
+ *   instructions and the user closes it when done.
  */
 export function ProviderLogin({
   client,
@@ -31,9 +36,9 @@ export function ProviderLogin({
   readonly className?: string;
   readonly client: HerculeClient;
   readonly instanceId: string;
-  /** The machine the credential lands on, and the only one it works on. */
+  /** The machine the credential is stored on, and the only one it works on. */
   readonly runnerId: string;
-  /** What is being logged in and where, as a name: "Claude Code on moss". */
+  /** What is being logged in and on which machine, such as "Claude Code on moss". */
   readonly subject: string;
   readonly label: string;
   readonly variant?: ButtonVariant;
@@ -49,8 +54,8 @@ export function ProviderLogin({
     mutationFn: () =>
       client.provider.submitLoginCode({
         params: { id: instanceId },
-        // A pasted code often carries a stray space or newline, which the
-        // vendor reads as a different code.
+        // A pasted code often has a stray space or newline, and the vendor
+        // would treat it as a different code.
         payload: { runnerId, code: code.trim() },
       }),
     onSuccess: () => {
@@ -59,14 +64,17 @@ export function ProviderLogin({
     },
   });
 
-  /** The started login is the whole of this panel's state, so dropping it closes. */
+  /** Closes the drawer by clearing the started login, which is what keeps the drawer open. */
   const close = (): void => {
     setCode("");
     submit.reset();
     start.reset();
   };
 
-  /** Nothing was relayed, so all that is left is to stop showing the code. */
+  /**
+   * Finishes a one-time-code login. The browser already completed the login
+   * with the vendor, so this only closes the drawer and notifies the caller.
+   */
   const finishLogin = (): void => {
     close();
     onLoggedIn();
@@ -80,8 +88,8 @@ export function ProviderLogin({
       <Button
         variant={variant}
         className={className}
-        // A second login would kill the child the first one is showing a code
-        // for, so the one on screen is the only one.
+        // Starting a second login would kill the process of the first one,
+        // whose code is on screen, so only one login can run at a time.
         disabled={start.isPending || url !== undefined}
         onClick={() => {
           start.mutate();
@@ -90,7 +98,7 @@ export function ProviderLogin({
         {label}
       </Button>
       {start.error === null ? null : (
-        // Full width, so the error does not read as a fourth action in the row.
+        // Full width, so the error does not look like another action in the row.
         <p className="w-full pl-2 text-fine text-fail" role="alert">
           {readErrorMessage(start.error)}
         </p>
@@ -104,8 +112,8 @@ export function ProviderLogin({
               : "Open this address in any browser, sign in, and enter this one-time code there. Nothing is typed back here."}
           </p>
           <div className="flex flex-col items-start gap-1.5">
-            {/* The site is the one part of a long opaque URL a reader can
-                check, and naming it is what tells them to. */}
+            {/* The host is the only part of a long, opaque URL the user can
+                check, so it is named here to prompt them to check it. */}
             <p className="text-row text-muted">
               You will sign in at <b className="font-emph text-ink">{parseSiteHost(url)}</b>.
             </p>
@@ -120,8 +128,8 @@ export function ProviderLogin({
             <Button
               className="-ml-2"
               onClick={() => {
-                // `clipboard` is absent over plain HTTP off localhost; the
-                // address is on screen anyway.
+                // `clipboard` is undefined over plain HTTP except on
+                // localhost. The address is on screen anyway.
                 void navigator.clipboard?.writeText(url ?? "");
               }}
             >
@@ -170,7 +178,7 @@ export function ProviderLogin({
                 </Button>
               </div>
               <p className="text-fine text-muted">
-                If the code will not do, reach the machine itself: forward its login port with{" "}
+                If the code does not work, log in on the machine itself: forward its login port with{" "}
                 <code className="font-mono text-ink">ssh -L 1455:localhost:1455</code> and run{" "}
                 <code className="font-mono text-ink">codex login</code> over that connection, or
                 copy an authorized <code className="font-mono text-ink">auth.json</code> into the
@@ -203,16 +211,16 @@ const parseSiteHost = (url: string | undefined): string => {
 };
 
 /**
- * The other way in: a provider whose credential is typed in rather than fetched
- * from a vendor's browser flow. The field is the plugin's own - its title heads
- * the panel and labels the input, its sentence says where to get one - so
- * nothing here knows which provider it is asking for.
+ * The other way to log in: for a provider whose credential is typed in,
+ * such as an API key, rather than obtained through a vendor's browser login.
+ * The plugin defines the field: its title is the drawer's title and the
+ * input's label, and its description says where to get the credential. So
+ * this component does not know which provider it serves.
  *
- * The value goes straight to the secrets table under the instance's own owner
- * and is never read back: the panel offers to replace what is there, never to
- * show it. Saving is not the end of it, so the caller is told - a credential
- * the machine has not been asked about yet is one the screen still reads as
- * missing.
+ * The value is stored as a secret owned by the provider instance and is never
+ * read back: the drawer can replace the stored value, never show it. The
+ * caller is notified after saving, because the screen keeps showing the
+ * credential as missing until the machine has been asked about it again.
  */
 export function ProviderKeyEntry({
   client,
@@ -234,7 +242,7 @@ export function ProviderKeyEntry({
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
 
-  /** The typed value is the whole of this panel's state, so dropping it closes. */
+  /** Clears the typed value and closes the drawer. */
   const close = (): void => {
     setValue("");
     save.reset();
@@ -245,14 +253,14 @@ export function ProviderKeyEntry({
     mutationFn: () =>
       client.secret.set({
         params: { ownerKind: "provider-instance", ownerId: instanceId, name: field.name },
-        // A pasted credential often carries a stray space or newline, which the
-        // vendor reads as a different one.
+        // A pasted credential often has a stray space or newline, and the
+        // vendor would treat it as a different credential.
         payload: { value: value.trim() },
       }),
     onSuccess: () => {
       close();
-      // Before whatever the caller does with it: the value is stored, so the
-      // row says so even where the machine cannot be asked about it.
+      // Refresh the providers before calling the caller: the value is stored,
+      // so the row should show it even if the machine cannot be reached.
       void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
       onSaved();
     },
@@ -289,7 +297,7 @@ export function ProviderKeyEntry({
             <Button onClick={close}>Cancel</Button>
             <Button
               variant="primary"
-              // Nothing to save is refused here rather than a round trip away.
+              // An empty value is blocked here, without a round trip to the server.
               disabled={value.trim() === "" || save.isPending}
               onClick={() => {
                 save.mutate();

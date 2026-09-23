@@ -5,9 +5,9 @@ import { Button, Group } from "@hercule/ui";
 const HARNESSES = ["Claude Code", "Codex", "pi"];
 
 /**
- * The fleet before it has a machine in it. No runner has dialled in, so nothing
- * has probed which harnesses are installed anywhere: each one is listed with
- * that said plainly rather than guessed at.
+ * The fleet screen before any runner has joined. Nothing has checked which
+ * harnesses are installed, so each harness is listed with its login state
+ * shown as unknown rather than guessed.
  */
 export function NoRunners(): JSX.Element {
   return (

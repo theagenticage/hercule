@@ -1,13 +1,16 @@
 /**
- * The thread surface over a stubbed controller.
+ * Tests the thread screen against a stubbed controller.
  *
- * These tests drive the transcript's rendering, the live turn's divider, the
- * token tap and the top bar's crumb - all through `renderApp` and the
- * `LiveStub`, never by reaching into the screen's own modules. Fixtures follow
- * the shapes `packages/client-core/src/threads/turns.test.ts` fixed: a
- * `user_message` item carries `detail: { text }` on both `item.started` and
- * `item.completed`; assistant text arrives only on `content.delta`, never on
- * the `assistant_message` item events themselves.
+ * These tests cover the transcript's rendering, the live turn's divider, the
+ * token tap and the header's breadcrumb. They drive the app only through
+ * `renderApp` and the `LiveStub`, and never import the screen's own modules.
+ *
+ * The fixtures use the event shapes from
+ * `packages/client-core/src/threads/turns.test.ts`:
+ * - A `user_message` item has `detail: { text }` on both `item.started` and
+ *   `item.completed`.
+ * - Assistant text arrives only on `content.delta`, never on the
+ *   `assistant_message` item events.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -65,11 +68,12 @@ const BASE_SESSION: Session = {
 const buildSession = (overrides: Partial<Session>): Session => ({ ...BASE_SESSION, ...overrides });
 
 /**
- * The composer's own fixtures (AC-19 to AC-21): a provider instance, a runner
- * and a profile matching `BASE_SESSION`'s own ids, so the started thread's
- * read-only fields and its model menu resolve against them; a second instance,
- * runner and profile of each kind exist only to prove nothing about them ever
- * surfaces on a started thread's read-only fields or its other-instance groups.
+ * Fixtures for the composer tests:
+ * - A provider instance, a runner and a profile with `BASE_SESSION`'s ids,
+ *   which the started thread's read-only fields and model menu read.
+ * - A second instance, runner and profile, which exist only to prove that
+ *   they never show up in a started thread's read-only fields or its
+ *   other-instance groups.
  */
 const DECLARED: ProviderInstance["declared"] = {
   steering: "native",
@@ -120,10 +124,10 @@ const INSTANCE_STARTED: ProviderInstance = {
 };
 
 /**
- * The same descriptor `new.integration.test.tsx` uses, for the option tests of
- * P001's AC-6 and AC-7. It rides a fixture of its own (`INSTANCE_OPTIONS`)
- * rather than `INSTANCE_STARTED`, so the tests that are not about options keep
- * reading a pill with no effort segment.
+ * The same descriptor `new.integration.test.tsx` uses, for the model option
+ * tests. Only `INSTANCE_OPTIONS` offers it, not
+ * `INSTANCE_STARTED`, so the tests that are not about options see a pill with
+ * no options selector.
  */
 const EFFORT: ModelOption = {
   id: "effort",
@@ -195,7 +199,7 @@ const PROFILE_OTHER: Profile = {
   name: "worker",
 };
 
-/** A controller answering for itself and for this one session's thread. */
+/** Builds the stubbed controller routes for the app and for the thread of `fixture`. */
 const buildController = (
   fixture: Session,
   rows: readonly TranscriptRow[],
@@ -210,8 +214,8 @@ const buildController = (
   },
   [`GET /api/v1/sessions/${fixture.id}`]: { body: fixture },
   [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
-  // The composer's own reads (AC-19 to AC-21): a test that cares about
-  // specific queued inputs overrides the last one with its own `extra`.
+  // The composer's reads. A test that needs specific queued
+  // inputs overrides the `/inputs` route below with its own `extra`.
   "GET /api/v1/providers": { body: [INSTANCE_STARTED, INSTANCE_OTHER] },
   "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
   "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
@@ -230,19 +234,22 @@ const openApp = async (
 };
 
 /**
- * `StubSocket.push` delivers over `queueMicrotask` (`socket-stub.ts`'s
- * `deliver`), and the RPC stream's own decode-and-dispatch is a few fiber
- * yields past that, so a push needs a few microtask turns before its effect -
- * a re-render, a `requestAnimationFrame` request - is observable. Testing
- * Library's own `findBy*`/`waitFor` poll on a real timer, which a frozen fake
- * clock never fires, so tests running under one flush this by hand instead.
+ * Runs pending microtasks inside `act`, so the effects of a socket push are
+ * visible.
+ *
+ * `StubSocket.push` delivers with `queueMicrotask` (see `deliver` in
+ * `socket-stub.ts`), and the RPC stream decodes and dispatches a few fiber
+ * yields after that. A push therefore needs a few microtask turns before its
+ * effect (a re-render, a `requestAnimationFrame` request) can be seen.
+ * Testing Library's `findBy*` and `waitFor` poll on a real timer, which never
+ * fires while the fake clock is frozen, so those tests call this instead.
  */
 const settle = () =>
   act(async () => {
     for (let i = 0; i < 10; i++) await Promise.resolve();
   });
 
-/** A `TranscriptRow`, position and `at` taken off the event itself. */
+/** Builds a `TranscriptRow` at `position`, with `at` copied from the event. */
 const buildTranscriptRow = (position: number, event: TranscriptRow["event"]): TranscriptRow => ({
   position,
   at: event.at,
@@ -250,9 +257,10 @@ const buildTranscriptRow = (position: number, event: TranscriptRow["event"]): Tr
 });
 
 /**
- * The box holding one turn's whole answer: the prose blocks and, while the
- * agent is typing, the live tail beside them. Found from any node inside it,
- * because a block and the tail are siblings there.
+ * Returns the element that holds one turn's whole answer: the prose blocks
+ * and, while the agent is typing, the live tail next to them. `inside` can be
+ * a block or the tail, because they are siblings in that element. Fails the
+ * test when `inside` is neither a paragraph nor the live tail.
  */
 const findAnswerArea = (inside: HTMLElement): HTMLElement => {
   const paragraph = inside.tagName === "SPAN" ? inside : inside.closest("p");
@@ -261,9 +269,9 @@ const findAnswerArea = (inside: HTMLElement): HTMLElement => {
 };
 
 /**
- * The 800px reading column a turn renders into, found from something inside it
- * - the same anchor the transcript test above uses. It scopes the markdown
- * assertions to the thread's own prose, away from the chrome and the composer.
+ * Returns the 800px reading column that contains `inside`, and fails the test
+ * when there is none. The markdown tests use it to check only the thread's
+ * prose, not the header or the composer.
  */
 const findProseColumn = (inside: HTMLElement): HTMLElement => {
   const column = inside.closest('[class*="max-w-[800px]"]');
@@ -271,31 +279,30 @@ const findProseColumn = (inside: HTMLElement): HTMLElement => {
   return column as HTMLElement;
 };
 
-/** One event of a turn, before `transcript` gives it its place in the log. */
+/** One event of a turn, before `buildTranscript` gives it a position in the log. */
 type TurnEvent = TranscriptRow["event"];
 
 /**
- * A transcript, numbered in order. Event ids are handed out alongside the
- * positions because nothing under test reads one: what a row means to these
- * surfaces is where it sits in the log, and the position is what
- * `mergeTranscript` orders and de-duplicates on.
+ * Builds a transcript from the given events, numbered in order. Each event
+ * gets an id that matches its position. The screens under test never read
+ * the event id: `mergeTranscript` sorts and de-duplicates by position.
  */
 const buildTranscript = (...parts: ReadonlyArray<readonly TurnEvent[]>): TranscriptRow[] =>
   parts.flat().map((event, index) => buildTranscriptRow(index, { ...event, eventId: `e${index}` }));
 
-/** A turn opens. */
+/** Builds the event that starts a turn. */
 const buildTurnStart = (turnId: string, at: string): TurnEvent[] => [
   { _tag: "turn.started", eventId: "", sessionId: SESSION_ID, at, turnId },
 ];
 
-/** A turn closes, which is what gives it a duration to show. */
+/** Builds the event that completes a turn. The screen needs it to show the turn's duration. */
 const buildTurnCompletion = (turnId: string, at: string): TurnEvent[] => [
   { _tag: "turn.completed", eventId: "", sessionId: SESSION_ID, at, turnId, state: "completed" },
 ];
 
 /**
- * The user's message, the way a transcript writes one: started and completed
- * in the same breath, the text on both.
+ * Builds the user's message the way a transcript records one: started and
+ * completed at the same time, with the text on both events.
  */
 const buildUserMessage = (
   turnId: string,
@@ -326,7 +333,7 @@ const buildUserMessage = (
   },
 ];
 
-/** The text of an assistant message, which is the only place one carries text. */
+/** Builds the text of an assistant message. Assistant text arrives only in this event. */
 const buildAssistantTextDelta = (
   turnId: string,
   at: string,
@@ -345,7 +352,7 @@ const buildAssistantTextDelta = (
   },
 ];
 
-/** An assistant message's start; on an open item this is the last row there is. */
+/** Builds an assistant message's start event. While the item is open, it is the last row. */
 const buildAssistantStart = (turnId: string, at: string, itemId: string): TurnEvent[] => [
   {
     _tag: "item.started",
@@ -358,7 +365,7 @@ const buildAssistantStart = (turnId: string, at: string, itemId: string): TurnEv
   },
 ];
 
-/** An assistant message's completion. */
+/** Builds an assistant message's completion event. */
 const buildAssistantCompletion = (turnId: string, at: string, itemId: string): TurnEvent[] => [
   {
     _tag: "item.completed",
@@ -372,7 +379,7 @@ const buildAssistantCompletion = (turnId: string, at: string, itemId: string): T
   },
 ];
 
-/** What an assistant message is in full: its text, then its own two rows. */
+/** Builds a whole assistant message: its text, then its start and completion events. */
 const buildAssistantMessage = (
   turnId: string,
   at: string,
@@ -384,7 +391,10 @@ const buildAssistantMessage = (
   ...buildAssistantCompletion(turnId, at, itemId),
 ];
 
-/** A command item's start; it completes separately, or not at all while it runs. */
+/**
+ * Builds a command item's start event. Its completion is a separate event,
+ * which is missing while the command runs.
+ */
 const buildCommandStart = (
   turnId: string,
   at: string,
@@ -403,7 +413,7 @@ const buildCommandStart = (
   },
 ];
 
-/** A command item's completion. */
+/** Builds a command item's completion event. */
 const buildCommandCompletion = (
   turnId: string,
   at: string,
@@ -425,7 +435,7 @@ const buildCommandCompletion = (
 
 const USER_TEXT = "Show me some markdown";
 
-/** One completed turn: `userText` as the user's line, then `text` as the whole answer. */
+/** Builds one completed turn: `userText` as the user's message, then `text` as the whole answer. */
 const buildAnsweredTurn = (text: string, userText: string = USER_TEXT): TranscriptRow[] =>
   buildTranscript(
     buildTurnStart("t5", "2026-09-08T13:00:00.000Z"),
@@ -434,26 +444,27 @@ const buildAnsweredTurn = (text: string, userText: string = USER_TEXT): Transcri
     buildTurnCompletion("t5", "2026-09-08T13:00:02.000Z"),
   );
 
-/** Opens a thread whose one turn answers with `text`, and returns its column. */
+/** Opens a thread whose only turn has `text` as its answer, and returns the prose column. */
 const openAnsweredThread = async (text: string): Promise<HTMLElement> => {
   await openApp(buildSession({ status: "idle" }), buildAnsweredTurn(text));
   return findProseColumn(await screen.findByText(USER_TEXT));
 };
 
 const TOOL_DETAIL = { name: "Bash", input: { command: "ls -la" } };
-/** `summarize`'s own summary of `TOOL_DETAIL`: the command, not the row's raw JSON. */
+/** How `summarize` shows `TOOL_DETAIL`: the command, not the row's raw JSON. */
 const TOOL_TARGET = "ls -la";
 
 /**
- * Two completed turns: the first opens with a tool call (a divider to
- * collapse/expand), the second has no tool items at all (no divider).
+ * Builds two completed turns. The first starts with a tool call, so it has a
+ * divider to collapse and expand. The second has no tool items, so it has no
+ * divider.
  */
 const buildTwoCompletedTurns = (): TranscriptRow[] =>
   buildTranscript(
     buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
     buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
     // The tool starts before the answer's text and finishes between that text
-    // and the assistant item's own rows, the way a real turn interleaves them.
+    // and the assistant item's events, the way a real turn mixes them.
     buildCommandStart("t1", "2026-09-08T10:00:01.000Z", "tool1", TOOL_DETAIL),
     buildAssistantTextDelta("t1", "2026-09-08T10:00:02.000Z", "a1", "I'll look at the file."),
     buildCommandCompletion("t1", "2026-09-08T10:00:03.000Z", "tool1", TOOL_DETAIL),
@@ -466,21 +477,21 @@ const buildTwoCompletedTurns = (): TranscriptRow[] =>
     buildTurnCompletion("t2", "2026-09-08T10:01:03.000Z"),
   );
 
-describe("Thread: transcript (AC-11)", () => {
+describe("Thread: transcript", () => {
   it("renders each completed turn with its timestamp, the user bubble, the assistant text and a Worked-for divider for the turn with a tool item", async () => {
     const user = userEvent.setup();
     await openApp(buildSession({ status: "idle", title: "Thread s1" }), buildTwoCompletedTurns());
 
     // The user's message and the assistant's reply, both turns.
     const userBubble = await screen.findByText("Fix the login bug");
-    // The column itself: 800px max width, holding both.
+    // The 800px column holds both turns.
     const column = findProseColumn(userBubble);
     expect(column.contains(await screen.findByText("What about the tests?"))).toBe(true);
     expect(readPageText()).toContain("I'll look at the file.");
     expect(readPageText()).toContain("What about the tests?");
     expect(readPageText()).toContain("Added a test too.");
 
-    // Each turn's own mono timestamp line.
+    // Each turn has its own timestamp line in mono.
     const stamp1 = formatStamp(new Date("2026-09-08T10:00:00.000Z"), ZONE)!;
     const stamp2 = formatStamp(new Date("2026-09-08T10:01:00.000Z"), ZONE)!;
     expect(readPageText()).toContain(stamp1);
@@ -501,9 +512,9 @@ describe("Thread: transcript (AC-11)", () => {
     expect(screen.queryAllByRole("button", { name: /worked for/i })).toHaveLength(1);
   });
 
-  it("reads an earlier turn abandoned by an interrupt as settled with no number, never as 0s or as still running", async () => {
-    // Turn 1 opens a tool call and is cut off - no item.completed, no
-    // turn.completed - before turn 2 starts and finishes normally.
+  it("shows an earlier turn cut off by an interrupt as finished with no duration, never as 0s or as still running", async () => {
+    // Turn 1 starts a tool call and is cut off (no item.completed, no
+    // turn.completed). Then turn 2 starts and finishes normally.
     const abandonedThenCompleted: TranscriptRow[] = [
       buildTranscriptRow(0, {
         _tag: "turn.started",
@@ -563,13 +574,13 @@ describe("Thread: transcript (AC-11)", () => {
 
     const divider = await screen.findByRole("button", { name: /worked for/i });
     expect(readPageText(divider)).toBe("Worked for —›");
-    // Settled, not still running: no shimmer, no live hue, no ticking.
+    // Finished, not still running: no shimmer and no live color.
     expect(divider.className).not.toContain("hercule-thread-shimmer");
     expect(divider.className).not.toContain("text-live");
   });
 });
 
-describe("Thread: the live turn (AC-12)", () => {
+describe("Thread: the live turn", () => {
   const buildLiveTurnRows = (): TranscriptRow[] =>
     buildTranscript(
       buildTurnStart("t3", "2026-09-08T11:00:00.000Z"),
@@ -582,10 +593,12 @@ describe("Thread: the live turn (AC-12)", () => {
     );
 
   /**
-   * Advances the frozen fake clock in small steps, settling after each one,
-   * until `predicate` holds - for work (like the live socket coming up) that
-   * needs both microtask turns and a macrotask tick or two to complete, which
-   * a fully frozen clock never provides on its own.
+   * Advances the frozen fake clock in small steps, running microtasks after
+   * each step, until `predicate` returns true. Fails after `maxSteps` steps.
+   *
+   * Some work, such as the live socket connecting, needs both microtasks and
+   * a timer tick or two. A frozen clock never provides the timer ticks by
+   * itself.
    */
   const pumpUntil = async (predicate: () => boolean, stepMs = 20, maxSteps = 50): Promise<void> => {
     for (let i = 0; i < maxSteps; i++) {
@@ -603,7 +616,7 @@ describe("Thread: the live turn (AC-12)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reads Working for, ticking every second, with the shimmer class and the running item marked", async () => {
+  it("shows Working for, counting up every second, with the shimmer class and the running item marked", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-08T11:00:03.000Z")); // 3s after turn.started
 
@@ -614,9 +627,10 @@ describe("Thread: the live turn (AC-12)", () => {
     const divider = screen.getByRole("button", { name: /^Working for 3s$/ });
     expect(divider.className).toContain("hercule-thread-shimmer");
 
-    // The running tool item's line, once the divider (collapsed by default,
-    // as AC-11's) is opened. `fireEvent`, not `userEvent`, since userEvent's
-    // own internal delays do not get on with a fully frozen fake clock.
+    // The running tool item's line shows once the divider is opened (it is
+    // collapsed by default). The test uses `fireEvent`, not
+    // `userEvent`, because userEvent's internal delays hang on a frozen fake
+    // clock.
     fireEvent.click(divider);
     await settle();
     expect(readPageText()).toContain("command · pnpm test · running");
@@ -628,12 +642,12 @@ describe("Thread: the live turn (AC-12)", () => {
     screen.getByRole("button", { name: /^Working for 4s$/ });
   });
 
-  it("leaves the shimmer class in place under prefers-reduced-motion, since the stylesheet owns that rule", async () => {
-    // `.hercule-thread-shimmer` drops its own sweep and keeps the live hue
-    // inside `@media (prefers-reduced-motion: reduce)` in `@hercule/ui`. There
-    // is deliberately no JS copy of that rule, so the class the divider
-    // carries is the same either way; whether the sweep actually stops is a
-    // stylesheet question jsdom cannot answer and a manual check does.
+  it("keeps the shimmer class under prefers-reduced-motion, because the stylesheet handles that case", async () => {
+    // In `@hercule/ui`, `.hercule-thread-shimmer` has a
+    // `@media (prefers-reduced-motion: reduce)` rule that stops the sweep and
+    // keeps the live color. There is deliberately no JavaScript copy of that
+    // rule, so the divider has the same class either way. jsdom cannot check
+    // whether the sweep actually stops; that needs a manual check.
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-08T11:00:03.000Z"));
     vi.stubGlobal("matchMedia", (query: string) => ({
@@ -651,10 +665,10 @@ describe("Thread: the live turn (AC-12)", () => {
     expect(divider.className).toContain("hercule-thread-shimmer");
   });
 
-  it("reads a dangling last turn on a session that is no longer busy as settled, with no shimmer and no ticking", async () => {
+  it("shows an unfinished last turn on a session that is no longer busy as finished, with no shimmer and no counting", async () => {
     // A runner that died mid-turn leaves no `turn.completed` row behind, so
-    // the rows alone still look live; the session's own status is what says
-    // otherwise.
+    // the rows alone still look live. The session's status shows that the
+    // turn is over.
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-08T11:00:03.000Z"));
 
@@ -669,7 +683,7 @@ describe("Thread: the live turn (AC-12)", () => {
     const divider = screen.getByRole("button", { name: /^Worked for —$/ });
     expect(divider.className).not.toContain("hercule-thread-shimmer");
 
-    // Nothing ticks: a minute later it still reads the same settled line.
+    // Nothing counts up: a minute later the divider shows the same text.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
@@ -686,10 +700,10 @@ describe("Thread: the live turn (AC-12)", () => {
     const { live } = await openApp(busy, buildLiveTurnRows());
     await settle();
 
-    // Live and ticking, however many seconds the wait for the subscription
-    // below costs; the exact reading is not the point here (the ticking test
-    // above already pins it), only that it reads "Working for" before the
-    // turn completes.
+    // The divider is live and counting. The exact number of seconds depends
+    // on how long the subscription below takes, and the counting test above
+    // already checks it. Here it only matters that the divider shows
+    // "Working for" before the turn completes.
     screen.getByRole("button", { name: /^Working for \d+s$/ });
 
     await pumpUntil(() => live.topics().includes(buildSessionStreamTopic(SESSION_ID)));
@@ -727,20 +741,21 @@ describe("Thread: the live turn (AC-12)", () => {
   });
 });
 
-describe("Thread: token tap (AC-13)", () => {
+describe("Thread: token tap", () => {
   const buildOpenTurnRows = (): TranscriptRow[] =>
     buildTranscript(
       buildTurnStart("t4", "2026-09-08T12:00:00.000Z"),
       buildUserMessage("t4", "2026-09-08T12:00:00.100Z", "u4", "Say hi"),
-      // Only the assistant item's start, never its completion: it is the open
+      // Only the assistant item's start, with no completion: it is the open
       // item, and its text is still arriving on the tap.
       buildAssistantStart("t4", "2026-09-08T12:00:00.200Z", "a4"),
     );
 
   /**
-   * A `requestAnimationFrame` stub that records every request and never
-   * fires on its own; `runFrame` fires everything queued so far, once, the
-   * way a browser runs every callback registered since the last frame.
+   * Replaces `requestAnimationFrame` with a stub that records every request
+   * and never fires by itself. Returns the stub as `raf`, and `runFrame`,
+   * which runs every callback queued so far once, the way a browser runs all
+   * callbacks registered since the last frame.
    */
   const stubFrames = () => {
     const queue: FrameRequestCallback[] = [];
@@ -787,7 +802,7 @@ describe("Thread: token tap (AC-13)", () => {
     });
     await settle();
 
-    // Two deltas, requested for one frame - not two.
+    // Two deltas, but only one frame request.
     expect(raf).toHaveBeenCalledTimes(1);
     // Nothing is written to the DOM before the frame runs.
     expect(screen.queryByText(/Hello/)).toBeNull();
@@ -797,12 +812,12 @@ describe("Thread: token tap (AC-13)", () => {
     await screen.findByText("Hello");
   });
 
-  it("paints the live tail beside the settled prose, not inside it", async () => {
-    // A turn holds any number of assistant messages (spec 06 section 6.2).
-    // The committed text ends in a3; the open item a4 is a new message. The
-    // settled text is a block of its own and the tail is the span after it, so
-    // the break between them is the layout's and nothing is written into the
-    // text to make one.
+  it("renders the live tail next to the finished prose, not inside it", async () => {
+    // A turn can hold any number of assistant messages (spec 06 section 6.2).
+    // The saved text ends with a3, and the open item a4 is a new message. The
+    // finished text is its own block and the tail is the span after it, so
+    // the layout makes the break between them. No separator is added to the
+    // text.
     const { runFrame } = stubFrames();
     const rows = buildOpenTurnRows();
     const withEarlier = [
@@ -845,12 +860,12 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
     runFrame();
 
-    // The settled prose is the paragraph; the tail is the span beside it, and
-    // it holds exactly what the agent has typed so far.
+    // The finished prose is the paragraph. The tail is the span next to it,
+    // and holds exactly what the agent has typed so far.
     expect(answer.querySelector("p")?.textContent).toBe("First answer.");
     expect(answer.querySelector("span")?.textContent).toBe("Second");
 
-    // A flush inside the same item goes on filling that same span.
+    // A later flush for the same item keeps filling the same span.
     act(() => {
       live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
@@ -864,10 +879,10 @@ describe("Thread: token tap (AC-13)", () => {
     expect(answer.querySelector("span")?.textContent).toBe("Second answer.");
   });
 
-  it("never paints a reasoning or command-output tap on the open item as the assistant's answer", async () => {
-    // The open item (a4) is an `assistant_message`; a `reasoning_text` or
-    // `command_output` delta naming it is never the answer, so it is dropped
-    // rather than painted where the answer renders.
+  it("never shows a reasoning or command-output tap for the open item as the assistant's answer", async () => {
+    // The open item (a4) is an `assistant_message`. A `reasoning_text` or
+    // `command_output` delta for it is never part of the answer, so it is
+    // dropped instead of shown where the answer renders.
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
     const { live } = await openApp(busy, buildOpenTurnRows());
@@ -887,7 +902,7 @@ describe("Thread: token tap (AC-13)", () => {
     expect(screen.queryByText(/thinking/)).toBeNull();
   });
 
-  it("lets the coalesced :stream row win over the buffer, and later taps for an item that has completed change nothing", async () => {
+  it("replaces the buffer with the coalesced :stream row, and ignores later taps for the completed item", async () => {
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
     const { live } = await openApp(busy, buildOpenTurnRows());
@@ -910,10 +925,10 @@ describe("Thread: token tap (AC-13)", () => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     act(() => {
-      // The coalescing rule flushes a row at an item's completion (spec 04
-      // §Streaming deltas are coalesced), so the row and the item's own
-      // completion arrive together - which is what actually retires the item
-      // as "open" and is why a tap for it afterwards has nothing left to do.
+      // The coalescing rule flushes a row when an item completes (spec 04
+      // §Streaming deltas are coalesced), so the row and the item's
+      // completion arrive together. The completion ends the item as the open
+      // one, so a later tap for it has no effect.
       live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: [
@@ -954,16 +969,16 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
     runFrame();
 
-    // A later tap delta for the item the row already answered for changes
-    // nothing: the whole paragraph's text, tail node included, is unchanged.
+    // A later tap delta for the item that the row already covers changes
+    // nothing: the answer's whole text, including the tail, is unchanged.
     expect(answer.textContent).toBe("Hello world");
   });
 
-  it("lets a coalesced :stream row for an item that is still open win, and keeps painting the taps after it", async () => {
+  it("replaces the buffer with a coalesced :stream row for a still-open item, and keeps showing the taps after it", async () => {
     // The 4KB flush (spec 04 §Streaming deltas are coalesced) writes a
-    // `content.delta` row inside an open item: the row wins over what the
-    // tail held, and the item goes on streaming into the same tail. Any
-    // answer longer than 4KB takes this path.
+    // `content.delta` row while the item is still open. The row replaces what
+    // the tail held, and the item keeps streaming into the same tail. Any
+    // answer longer than 4KB goes through this path.
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
     const { live } = await openApp(busy, buildOpenTurnRows());
@@ -1016,14 +1031,15 @@ describe("Thread: token tap (AC-13)", () => {
     await settle();
     runFrame();
 
-    // The row's text, then the taps that came after it - the buffer the row
-    // replaced is not repeated.
+    // The row's text, then the taps that came after it. The buffer that the
+    // row replaced is not repeated.
     expect(answer.textContent).toBe("Hello world, again");
   });
 
   it("leaves the open item's buffered tail alone when a :stream row for a different item arrives", async () => {
-    // A tool item started earlier, still running when the assistant item
-    // (a4, later, so still the open one per findOpenItem) began streaming.
+    // A tool item started earlier and is still running when the assistant
+    // item a4 starts streaming. a4 started later, so `findOpenItem` returns
+    // a4 as the open item.
     const rowsWithEarlierTool: TranscriptRow[] = [
       ...buildOpenTurnRows().slice(0, 3),
       buildTranscriptRow(3, {
@@ -1063,7 +1079,7 @@ describe("Thread: token tap (AC-13)", () => {
     runFrame();
     const answer = findAnswerArea(await screen.findByText("Hello"));
 
-    // tool0 finishing is a row about a different item; a4 stays open.
+    // tool0's completion is a row for a different item, so a4 stays open.
     await waitFor(() => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
@@ -1088,7 +1104,7 @@ describe("Thread: token tap (AC-13)", () => {
     });
     await settle();
 
-    // Untouched: the row was not about the open item's own text.
+    // Unchanged, because the row was not about the open item's text.
     expect(answer.textContent).toBe("Hello");
   });
 
@@ -1116,8 +1132,8 @@ describe("Thread: token tap (AC-13)", () => {
       },
     });
 
-    // A buffered tap delta is standing when the reset arrives, to prove it is
-    // dropped rather than surviving into the refetched reading.
+    // A tap delta is in the buffer when the reset arrives, to prove that it
+    // is dropped and does not survive into the refetched transcript.
     await waitFor(() => {
       expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
     });
@@ -1133,9 +1149,9 @@ describe("Thread: token tap (AC-13)", () => {
     runFrame();
     await screen.findByText("stale buffer");
 
-    // A cursor is on record before the refusal: `reset` only fires for one
-    // that is (`live.ts`'s own rule - a fresh subscription's `undefined`
-    // cursor cannot be "past the end of the log").
+    // The subscription must have a cursor before the failure, because
+    // `live.ts` fires `reset` only then: a new subscription's `undefined`
+    // cursor cannot be "past the end of the log".
     await waitFor(() => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
@@ -1161,10 +1177,10 @@ describe("Thread: token tap (AC-13)", () => {
     expect(screen.queryByText(/stale buffer/)).toBeNull();
   });
 
-  // Markdown leaves the streaming path alone: a tap delta is a plain write
-  // into the tail - no parse, one frame for the two deltas - and the prose
-  // only becomes markdown once the item's own row lands.
-  it("a live tap paints plain text into the tail and the row lands as markdown", async () => {
+  // Markdown stays out of the streaming path. A tap delta is written into the
+  // tail as plain text, with no parsing and one frame for the two deltas. The
+  // prose becomes markdown only when the item's row arrives.
+  it("shows a live tap as plain text in the tail, and the row as markdown when it arrives", async () => {
     const { raf, runFrame } = stubFrames();
     const { live } = await openApp(buildSession({ status: "busy" }), buildOpenTurnRows());
 
@@ -1191,8 +1207,7 @@ describe("Thread: token tap (AC-13)", () => {
     expect(raf).toHaveBeenCalledTimes(1);
     runFrame();
 
-    // The tail reads as the literal characters the agent typed: nothing parsed
-    // them on the way in.
+    // The tail shows the exact characters the agent typed, unparsed.
     expect(readPageText(column)).toContain("**bold**");
     expect(column.querySelector("strong")).toBeNull();
 
@@ -1236,9 +1251,9 @@ describe("Thread: token tap (AC-13)", () => {
 });
 
 /**
- * The assistant's prose reads as markdown. Each test opens one completed turn
- * whose whole answer is the fixture text, and reads the prose column the turn
- * renders into.
+ * The assistant's prose renders as markdown. Each test opens one completed
+ * turn whose whole answer is the fixture text, and checks the prose column
+ * that the turn renders into.
  */
 describe("Thread: the assistant's prose renders markdown", () => {
   it("renders assistant markdown", async () => {
@@ -1271,8 +1286,8 @@ describe("Thread: the assistant's prose renders markdown", () => {
     const table = within(column).getByRole("table");
     expect(within(table).getByRole("cell", { name: "2" })).toBeDefined();
 
-    // The fenced block: the mono face and the hairline card, carried by the
-    // code element, its `<pre>` or the wrapper around it.
+    // The fenced block has the mono font and the hairline card. These classes
+    // can be on the code element, its `<pre>`, or the wrapper around it.
     const code = within(column).getByText("const x = 1;");
     const pre = code.closest("pre");
     expect(pre, "the fenced block is not a <pre>").not.toBeNull();
@@ -1284,14 +1299,14 @@ describe("Thread: the assistant's prose renders markdown", () => {
     expect(shell).toContain("border-line-soft");
     expect(shell).toContain("rounded-card");
 
-    // None of the markup survives as characters to read.
+    // No markdown syntax is left in the visible text.
     const prose = readPageText(column);
     expect(prose).not.toContain("**");
     expect(prose).not.toContain("`");
     expect(prose).not.toContain("|");
   });
 
-  it("raw HTML in assistant text renders as literal text", async () => {
+  it("renders raw HTML in assistant text as literal text", async () => {
     const column = await openAnsweredThread(
       "before <script>alert(1)</script> and <img src=x onerror=alert(1)> after",
     );
@@ -1302,11 +1317,11 @@ describe("Thread: the assistant's prose renders markdown", () => {
     expect(column.querySelector("[onerror]")).toBeNull();
   });
 
-  it("assistant prose keeps soft breaks", async () => {
+  it("keeps soft breaks in assistant prose", async () => {
     const column = await openAnsweredThread("line one\nline two");
 
-    // A single typed newline is a CommonMark soft break, not a line break:
-    // `remark-breaks` belongs to the user's bubble alone.
+    // A single typed newline is a CommonMark soft break, not a line break.
+    // Only the user's bubble uses `remark-breaks`.
     expect(column.querySelectorAll("br")).toHaveLength(0);
     const paragraph = within(column).getByText(
       (_, element) =>
@@ -1317,9 +1332,9 @@ describe("Thread: the assistant's prose renders markdown", () => {
 });
 
 /**
- * The user's own bubble reads as markdown too, with `remark-breaks`, so a
- * newline they typed stays a line break instead of collapsing the way
- * CommonMark's soft break would.
+ * The user's bubble renders as markdown too, with `remark-breaks`. A newline
+ * the user typed stays a line break, instead of collapsing into a space the
+ * way a CommonMark soft break would.
  */
 describe("Thread: the user's bubble renders markdown", () => {
   it("renders the user's bubble as markdown with typed line breaks", async () => {
@@ -1327,8 +1342,8 @@ describe("Thread: the user's bubble renders markdown", () => {
     await openApp(buildSession({ status: "idle" }), buildAnsweredTurn("Sure.", typed));
     const column = findProseColumn(await screen.findByText("Sure."));
 
-    // The right-aligned card the bubble has always been: the flex row, and the
-    // card shape on the element inside it.
+    // The bubble is still a right-aligned card: a flex row, with the card
+    // styles on the element inside it.
     const rows = column.querySelectorAll('[class*="justify-end"]');
     expect(rows, "no right-aligned row for the user's bubble").toHaveLength(1);
     const flexRow = rows[0] as HTMLElement;
@@ -1354,7 +1369,7 @@ describe("Thread: the user's bubble renders markdown", () => {
     }
     expect(afterTheBreak.trim()).toContain("second line");
 
-    // Raw HTML is characters, not markup.
+    // Raw HTML shows as text, not as markup.
     expect(readPageText(bubble)).toContain("<b>not bold</b>");
     expect(bubble.querySelector("b")).toBeNull();
 
@@ -1368,13 +1383,13 @@ describe("Thread: the user's bubble renders markdown", () => {
   });
 });
 
-describe("Thread: the transcript cache only ever grows forwards", () => {
+describe("Thread: the transcript cache only grows forwards", () => {
   it("appends the same :stream delta once, however many times it is delivered", async () => {
-    // The transcript log is append-only and strictly ordered, so a row at or
-    // below the last one held is one the cache already has: a replay the
-    // subscription resumed from, or one delta delivered twice. The probe is
-    // an `assistant_text` delta, because `buildTurns` concatenates those - a
-    // second copy in the cache reads as the sentence said twice.
+    // The transcript log is append-only and strictly ordered. A row at or
+    // below the last position in the cache is already in the cache: either
+    // replayed when the subscription resumed, or a delta delivered twice. The
+    // test uses an `assistant_text` delta because `buildTurns` concatenates
+    // those, so a second copy in the cache would show the sentence twice.
     const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     await waitFor(() => {
@@ -1424,9 +1439,10 @@ describe("Thread: the transcript cache only ever grows forwards", () => {
     act(() => {
       live.push(buildSessionStreamTopic(SESSION_ID), again);
     });
-    // React Query notifies its observers on a macrotask, which `settle`'s
-    // microtask turns never reach - so a re-render this delta did cause would
-    // still be pending, and the assertion below would pass by being early.
+    // React Query notifies its observers in a macrotask, which `settle` does
+    // not wait for. Without this wait, a re-render caused by the delta would
+    // still be pending, and the assertion below would pass only because it
+    // ran too early.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -1443,10 +1459,10 @@ describe("Thread: live subscriptions", () => {
       buildTwoCompletedTurns(),
     );
 
-    // Judged among this thread's own per-session topics: the shell mounts
-    // its own subscriptions (the sidebar's `session` invalidation topic
-    // among them) regardless of which screen is open, so the assertion
-    // narrows to what starts with `session:` rather than the whole set.
+    // The shell has its own subscriptions whatever screen is open (for
+    // example the sidebar's `session` invalidation topic). The assertion
+    // therefore checks only the topics that start with `session:`, not the
+    // whole set.
     const listSessionTopics = () => live.topics().filter((topic) => topic.startsWith("session:"));
 
     await waitFor(() => {
@@ -1464,12 +1480,12 @@ describe("Thread: live subscriptions", () => {
     });
   });
 
-  it("replays a just-spawned thread's rows when the transcript read found none", async () => {
-    // The loader reads the transcript of a session the runner is still
-    // starting, so the answer is empty and the cache is never refetched
+  it("replays a just-spawned thread's rows when the transcript read returned none", async () => {
+    // The loader reads the transcript while the runner is still starting the
+    // session, so the transcript is empty, and the cache is never refetched
     // (staleTime Infinity). Subscribing with no cursor would mean "start at
-    // the head, replay nothing", and every row written between the read and
-    // the subscription would be lost for good.
+    // the head and replay nothing", so every row written between the read
+    // and the subscription would be lost for good.
     const { live } = await openApp(buildSession({ status: "busy" }), []);
 
     await waitFor(() => {
@@ -1489,12 +1505,12 @@ describe("Thread: live subscriptions", () => {
     await screen.findByText("Added a test too.");
   });
 
-  it("renders a replay that arrives after the rows it comes before", async () => {
-    // Two deliveries on one just-spawned thread: the subscribe effect re-runs
-    // while the cache is still empty, so both subscriptions replay from
-    // cursor 0 and the later one's rows can land first. The transcript is
-    // merged on `position` rather than appended after whatever it last held,
-    // or every row of the earlier replay would be dropped as already seen.
+  it("renders replayed rows that arrive after the later rows", async () => {
+    // A just-spawned thread gets two deliveries: the subscribe effect runs
+    // again while the cache is still empty, so both subscriptions replay from
+    // cursor 0, and the second one's rows can arrive first. The transcript is
+    // merged by `position` instead of appended after its last row; otherwise
+    // every row of the earlier replay would be dropped as already seen.
     const { live } = await openApp(buildSession({ status: "busy" }), []);
 
     await waitFor(() => {
@@ -1518,9 +1534,9 @@ describe("Thread: live subscriptions", () => {
       });
     });
 
-    // The first turn's user message is in the earlier delta and the second
-    // turn's text is in the later one: both are on screen, and the transcript
-    // reads in position order rather than in arrival order.
+    // The first turn's user message is in the delta that arrived second, and
+    // the second turn's text is in the one that arrived first. Both are on
+    // screen, in position order, not in arrival order.
     const shown = await screen.findByText("Fix the login bug", { selector: "p" });
     await screen.findByText("Added a test too.");
     expect(readPageText().indexOf("Fix the login bug")).toBeLessThan(
@@ -1530,9 +1546,9 @@ describe("Thread: live subscriptions", () => {
   });
 
   it("does not carry the previous thread's cursor into a newly opened thread's :stream subscription", async () => {
-    // The router does not remount this screen for a route-param-only
-    // navigation, so per-thread state - the seeded cursor included - has to
-    // be reset by hand rather than surviving as leftover component state.
+    // The router does not remount this screen when only the route param
+    // changes, so per-thread state, including the stream cursor, must be
+    // reset explicitly. Otherwise it stays behind as leftover component state.
     const OTHER_ID = "01a06d02-b100-7000-8000-000000000002";
     const other = buildSession({ id: OTHER_ID, status: "idle", title: "A second thread" });
     const { live, router } = await openApp(
@@ -1547,7 +1563,7 @@ describe("Thread: live subscriptions", () => {
     await waitFor(() => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
-    // This thread has rows on record, so its own cursor is its last position.
+    // This thread has rows, so its cursor is its last position.
     expect(live.cursorOf(buildSessionStreamTopic(SESSION_ID))).toBe("15");
 
     await act(async () => {
@@ -1557,18 +1573,19 @@ describe("Thread: live subscriptions", () => {
     await waitFor(() => {
       expect(live.topics()).toContain(buildSessionStreamTopic(OTHER_ID));
     });
-    // The second thread's transcript is empty, so a correctly-scoped seed
-    // starts at the beginning of its log; a leaked cursor from the thread just
-    // left is the only way this could read as anything else.
+    // The second thread's transcript is empty, so its cursor must start at
+    // the beginning of its log. Any other value means the previous thread's
+    // cursor leaked.
     expect(live.cursorOf(buildSessionStreamTopic(OTHER_ID))).toBe("0");
   });
 });
 
 describe("Thread: auto-scroll follows new content", () => {
   /**
-   * jsdom computes no layout, so the geometry `useStickToBottom` reads is set
-   * by hand on the document's own scrolling element - the thread has no
-   * scroll region of its own, the whole page does.
+   * Returns the document's scrolling element. jsdom computes no layout, so
+   * the tests set the scroll geometry that `useStickToBottom` reads by hand on
+   * this element. The thread has no scroll region of its own; the whole page
+   * scrolls.
    */
   const getScrollElement = (): Element => document.scrollingElement ?? document.documentElement;
 
@@ -1603,7 +1620,7 @@ describe("Thread: auto-scroll follows new content", () => {
       turnId: "t3",
     });
 
-  it("rejoins the tail on a :stream delta when the reader was at the bottom", async () => {
+  it("scrolls to the bottom on a :stream delta when the reader was at the bottom", async () => {
     const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
     await waitFor(() => {
       expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
@@ -1613,8 +1630,8 @@ describe("Thread: auto-scroll follows new content", () => {
     fireEvent.scroll(window);
     await settle();
 
-    // A real browser's scrollHeight would already reflect the new row by the
-    // time the layout effect after this delta's commit runs.
+    // In a real browser, scrollHeight already includes the new row when the
+    // layout effect after this delta's commit runs.
     setGeometry({ scrollTop: 900, scrollHeight: 1200, clientHeight: 100 });
     act(() => {
       live.push(buildSessionStreamTopic(SESSION_ID), {
@@ -1654,18 +1671,19 @@ describe("Thread: auto-scroll follows new content", () => {
 });
 
 /**
- * The thread's chrome is the screen's own first row, and the shell's top bar
- * steps aside on this route. These tests replace the "Thread: top bar" pair
- * that asserted the old shell title and its `thread · <short id>` crumb.
+ * The thread's header is the screen's own first row, and the shell's top bar
+ * is hidden on this route. These tests replace the two "Thread: top bar"
+ * tests, which checked the old shell title and its `thread · <short id>`
+ * breadcrumb.
  *
- * How the row is read here:
- * - the crumb `Threads /` and the title are separate text-bearing elements in
- *   one row, so the row is the crumb's parent element;
- * - the overflow button's accessible name is the glyph `…`, spec 14's own
- *   wording. It carries no `aria-label`; add one only by changing this test.
+ * How these tests find the header:
+ * - The breadcrumb `Threads /` and the title are separate elements in one
+ *   row, so the row is the breadcrumb's parent element.
+ * - The overflow button's accessible name is the glyph `…`, as in spec 14.
+ *   It has no `aria-label`; adding one means changing this test.
  */
-describe("Thread: the chrome is the screen's first row", () => {
-  it("reads Threads / then the session title, with a disabled … button", async () => {
+describe("Thread: the header is the screen's first row", () => {
+  it("shows Threads / then the session title, with a disabled … button", async () => {
     await openApp(
       buildSession({ status: "idle", title: "Fix the login bug" }),
       buildTwoCompletedTurns(),
@@ -1680,18 +1698,18 @@ describe("Thread: the chrome is the screen's first row", () => {
     expect(overflow.disabled).toBe(true);
   });
 
-  it("truncates a long title rather than pushing the crumb or the actions out of place", async () => {
+  it("truncates a long title instead of pushing the breadcrumb or the actions out of place", async () => {
     const longTitle =
       "Fix the login bug for real this time and also the logout bug and the signup bug";
     await openApp(buildSession({ status: "idle", title: longTitle }), buildTwoCompletedTurns());
 
     const crumb = await waitFor(() => screen.getByText("Threads /"));
     expect(screen.getByText(longTitle).className).toContain("truncate");
-    // The crumb and the actions still render in full - only the title gave way.
+    // The breadcrumb and the actions still render in full; only the title is truncated.
     expect(crumb.className).toContain("shrink-0");
   });
 
-  it("still warns about a zone this browser cannot read, the one thing the bar owes the screen", async () => {
+  it("still warns about a time zone this browser does not know, even with the top bar hidden", async () => {
     await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       "GET /api/v1/settings": {
         body: {
@@ -1701,13 +1719,14 @@ describe("Thread: the chrome is the screen's first row", () => {
       },
     });
 
-    // The chrome titles the screen, but nothing else renders the warning - a
-    // thread reading its stamps in the wrong zone would say nothing at all.
+    // The thread's header shows the title, but nothing else on the screen
+    // shows this warning. Without it, the thread would show its timestamps
+    // in the wrong zone with no hint of the problem.
     expect(await screen.findByText(/does not know the zone Mars\/Olympus/)).toBeDefined();
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 
-  it("renders no shell title above it: no h1 and no thread · crumb anywhere", async () => {
+  it("renders no shell title above it: no h1 and no thread · breadcrumb anywhere", async () => {
     await openApp(
       buildSession({ status: "idle", title: "Fix the login bug" }),
       buildTwoCompletedTurns(),
@@ -1722,16 +1741,17 @@ describe("Thread: the chrome is the screen's first row", () => {
 });
 
 /**
- * AC-19 to AC-21 (the "Web: composer" table's in-thread half): the composer at
- * the foot of a started thread, driven only through `renderApp` and the
- * stubbed `fetch`/`LiveStub`.
+ * Tests for the composer at the bottom of a started thread (the in-thread
+ * half of the "Web: composer" table). They drive the app only through
+ * `renderApp` and the stubbed `fetch` and `LiveStub`.
  *
- * Decisions made where the SPEC does not pin an exact rendering detail, the
- * same as `new.integration.test.tsx`: a lone icon's disabled reason surfaces
- * via `title`, and the send/Steer/Cancel/Stop controls' accessible names
- * contain their literal AC wording ("send", "Steer", "Cancel", "Stop").
+ * Where the spec leaves a rendering detail open, these tests make the same
+ * assumptions as `new.integration.test.tsx`:
+ * - A lone icon button shows why it is disabled in its `title`.
+ * - The accessible names of the send, Steer, Cancel and Stop controls contain
+ *   the exact words from the ACs ("send", "Steer", "Cancel", "Stop").
  */
-describe("Thread: composer read-only fields and model switch (AC-19)", () => {
+describe("Thread: composer read-only fields and model switch", () => {
   it("renders workspace, machine and access mode as read-only values with no menu", async () => {
     const user = userEvent.setup();
     await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
@@ -1740,11 +1760,10 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
     expect(readPageText()).toContain(RUNNER_STARTED.name);
     expect(readPageText()).toContain("approval-required");
 
-    // None of these values ever reveals another option when interacted with -
-    // the "no menu" half of the criterion. A read-only value need not be a
-    // `<button>` to prove there is nothing behind it to open, so this checks
-    // for the other option's absence after the click rather than for the
-    // presence or absence of a particular element type.
+    // Clicking any of these values never shows another option; that is the
+    // "no menu" part of the criterion. A read-only value could still be a
+    // `<button>`, so the test checks that the other option is absent after
+    // the click, not which element type the value is.
     await user.click(screen.getByText(RUNNER_STARTED.name));
     expect(screen.queryByText(RUNNER_OTHER.name)).toBeNull();
 
@@ -1755,20 +1774,20 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
     expect(screen.queryByText("full-access")).toBeNull();
   });
 
-  it("dims the model menu's other accounts with account fixed", async () => {
+  it("dims the model menu's other accounts with the note account fixed", async () => {
     const user = userEvent.setup();
     await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
 
     expect(readPageText()).toContain("account fixed");
-    // The current instance's own other model stays selectable, unlike the
+    // The current instance's other model can still be picked, unlike the
     // other instance's group.
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
   });
 
-  // Rewritten for P001 AD-4/AC-6: picking a model no longer patches the
-  // session; the pick is draft state that rides the next submission.
+  // Picking a model does not patch the session. The pick is draft state that
+  // is sent with the next submission.
   it("shows the picked model in the pill without sending anything when a model of the same instance is chosen", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
@@ -1789,7 +1808,7 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
 
 const INPUT_ID = "01a06d02-5000-7000-8000-000000000001";
 
-/** One queued input, ready for a busy thread's queued list. */
+/** Builds one queued input for a busy thread's queue list. `overrides` replaces any field. */
 const buildQueuedInput = (overrides: Partial<Input> = {}): Input => ({
   id: INPUT_ID,
   sessionId: SESSION_ID,
@@ -1805,8 +1824,8 @@ const buildQueuedInput = (overrides: Partial<Input> = {}): Input => ({
   ...overrides,
 });
 
-describe("Thread: input queue (AC-20)", () => {
-  it("sends POST /sessions/:id/input and clears the textarea once it answers opened, for an idle thread", async () => {
+describe("Thread: input queue", () => {
+  it("sends POST /sessions/:id/input on an idle thread and clears the textarea once the result is opened", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
@@ -1824,9 +1843,9 @@ describe("Thread: input queue (AC-20)", () => {
       if (found === undefined) throw new Error("input not sent yet");
       return found;
     });
-    // An input carries the picks made since the last submission and nothing
-    // else, so an untouched composer sends the text alone and the session
-    // keeps what it runs with.
+    // An input carries only the picks made since the last submission. An
+    // untouched composer sends only the text, and the session keeps its
+    // current model and options.
     expect(call.body).toEqual({ text: "Also check the logs" });
 
     await waitFor(() => {
@@ -1834,7 +1853,7 @@ describe("Thread: input queue (AC-20)", () => {
     });
   });
 
-  it("shows a queued answer in a list above the composer with Steer and Cancel, read from GET /sessions/:id/inputs", async () => {
+  it("shows a queued input in a list above the composer with Steer and Cancel, read from GET /sessions/:id/inputs", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
@@ -1856,14 +1875,14 @@ describe("Thread: input queue (AC-20)", () => {
     ).toBe(true);
   });
 
-  it("calls steer and the row leaves the list once it answers steered", async () => {
+  it("calls steer and removes the row from the list once the result is steered", async () => {
     const user = userEvent.setup();
-    // Keyed on whether steer has actually landed, not on a raw call count: the
-    // live connection's own first-connect sweep (`live.ts`'s `session` -
-    // "every mutable reader ... swept ... on the first connection of a page
-    // load") refetches this list once on its own, ahead of the steer click, so
-    // a plain "second call empties it" counter would race that sweep instead
-    // of the steer this test is actually about.
+    // The stub empties the list once steer has actually been called, not
+    // after a fixed number of calls. On its first connection, the live
+    // connection makes every mutable query refetch once (see `runConnection`
+    // in `packages/client-core/src/live/live.ts`), before the steer click. A
+    // "second call returns an empty list" counter would be used up by that
+    // refetch instead of the steer.
     let delivered = false;
     const { api } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => ({
@@ -1892,10 +1911,10 @@ describe("Thread: input queue (AC-20)", () => {
     });
   });
 
-  it("calls cancel (DELETE) and the row leaves the list", async () => {
+  it("calls cancel (DELETE) and removes the row from the list", async () => {
     const user = userEvent.setup();
-    // See the steer test above: keyed on the cancel actually landing, not a
-    // raw call count, for the same reason.
+    // As in the steer test above, the stub empties the list once cancel has
+    // actually been called, not after a fixed number of calls.
     let delivered = false;
     const { api } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => ({
@@ -1934,7 +1953,7 @@ describe("Thread: input queue (AC-20)", () => {
     await screen.findByText("the runner has not answered yet");
   });
 
-  it("refetches the queued list on the session invalidation nudge", async () => {
+  it("refetches the queued list when the session is invalidated", async () => {
     let inputsCalls = 0;
     const { live } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => {
@@ -1958,7 +1977,7 @@ describe("Thread: input queue (AC-20)", () => {
     });
   });
 
-  it("shows the message and keeps the row when a steer attempt answers invalid_state", async () => {
+  it("shows the message and keeps the row when a steer attempt fails with invalid_state", async () => {
     const user = userEvent.setup();
     await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [buildQueuedInput()] } },
@@ -1976,7 +1995,7 @@ describe("Thread: input queue (AC-20)", () => {
   });
 });
 
-describe("Thread: stop control (AC-21)", () => {
+describe("Thread: stop control", () => {
   it("shows Stop on a busy thread and calls POST /sessions/:id/interrupt", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
@@ -2011,14 +2030,14 @@ describe("Thread: stop control (AC-21)", () => {
 });
 
 /**
- * P001 AC-6 and AC-7: the model options block on a started thread. The picks
- * are draft state that never leaves the browser until a submission, and the
- * pill reads the stored row once the server has it.
+ * Tests for the model options on a started thread. The
+ * picks are draft state that stays in the browser until the next submission.
+ * After the server stores them, the pill shows the stored session values.
  *
- * These tests answer `GET /api/v1/providers` with `INSTANCE_OPTIONS`, the one
- * fixture whose models carry an `effort` descriptor.
+ * These tests return `INSTANCE_OPTIONS` from `GET /api/v1/providers`, the
+ * only fixture whose models have an `effort` descriptor.
  */
-describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
+describe("Thread: model options are sent with the submission", () => {
   const providers = { body: [INSTANCE_OPTIONS, INSTANCE_OTHER] };
 
   it("sends nothing when an option is picked, and carries the pick on the next input", async () => {
@@ -2033,7 +2052,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     await user.click(screen.getByRole("button", { name: "medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
 
-    // The pick itself is not a write: neither the input route nor the update
+    // The pick itself writes nothing: neither the input route nor the update
     // route is called before the user sends.
     expect(
       api.calls.some(
@@ -2083,7 +2102,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
       if (found === undefined) throw new Error("input not sent yet");
       return found;
     });
-    // The options went with the model that offered them.
+    // The option picks were cleared together with the model that offered them.
     expect(call.body).toEqual({ text: "Also check the logs", model: "claude-opus-5" });
     expect(
       api.calls.some(
@@ -2092,7 +2111,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     ).toBe(false);
   });
 
-  it("shows the newly picked model's own defaults rather than the stored model's options", async () => {
+  it("shows the newly picked model's defaults instead of the stored model's options", async () => {
     const user = userEvent.setup();
     await openApp(
       buildSession({
@@ -2107,19 +2126,19 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     await pickRow(user, /claude opus 5/i);
     await user.click(await screen.findByRole("button", { name: "medium" }));
 
-    // The stored `high` was stored for the other model, and the server drops
-    // it on a model change - so the block reads the descriptor's default.
+    // The stored `high` belongs to the other model, and the server drops it
+    // when the model changes, so the options show the descriptor's default.
     const medium = await screen.findByRole<HTMLButtonElement>("radio", { name: "Medium" });
     expect(medium.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("radio", { name: "High" }).getAttribute("aria-checked")).toBe("false");
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
   });
 
-  it("clears the picks once the input is accepted and reads the stored options back", async () => {
+  it("clears the picks once the input is accepted, and shows the stored options instead", async () => {
     const user = userEvent.setup();
     // The controller stores the pick, so the session read after the input
-    // answers with it - which is where the pill's own label comes from once
-    // the draft pick is gone.
+    // returns it. Once the draft pick is cleared, the selector's label comes
+    // from that stored value.
     let stored: Record<string, string> = {};
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       "GET /api/v1/providers": providers,
@@ -2141,13 +2160,13 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     await user.type(screen.getByRole("textbox"), "Also check the logs");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
-    // The selector still reads high after the picks are cleared, which it can
-    // only do by having re-read the session the input just changed.
+    // The selector still shows high after the picks are cleared. It can only
+    // do that by reading the session again after the input changed it.
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "high" })).toBeDefined();
     });
 
-    // And the cleared picks show in the next submission, which carries none.
+    // The next submission shows that the picks were cleared: it carries none.
     await user.type(screen.getByRole("textbox"), "And the metrics");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
@@ -2161,10 +2180,10 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     expect(second?.body).toEqual({ text: "And the metrics" });
   });
 
-  it("holds the picks until the re-read lands, so a send right after one reads the fresh row", async () => {
+  it("keeps the picks until the session is read again, so the next send uses the stored session", async () => {
     const user = userEvent.setup();
-    // The session read that follows the input is held open, which is the
-    // window a second send would otherwise fall into.
+    // The stub holds back the session read that follows the input. A second
+    // send in that window must not use the old session data.
     let stored: { model: string; options: Record<string, string> } = {
       model: "claude-sonnet-5",
       options: {},
@@ -2197,9 +2216,9 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     await user.type(screen.getByRole("textbox"), "Also check the logs");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
-    // While the read is out the submission has not settled: the send button
-    // stays disabled and the pill still reads what was picked, never the row
-    // the cache still holds.
+    // While the read is pending, the submission is not finished: the send
+    // button stays disabled, and the pill shows the picks, not the old
+    // session in the cache.
     await waitFor(() => {
       const call = api.calls.find(
         (each) => each.method === "POST" && each.path === `/api/v1/sessions/${SESSION_ID}/input`,
@@ -2221,8 +2240,8 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
     expect(screen.getByRole("button", { name: "high" })).toBeDefined();
 
-    // The picks are gone, and the next send reads the row the server stored
-    // rather than the session the cache held while the read was out.
+    // The picks are cleared, and the next send uses the session the server
+    // stored, not the one the cache held while the read was pending.
     holding = false;
     await user.type(screen.getByRole("textbox"), "And the metrics");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -2237,7 +2256,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     expect(second?.body).toEqual({ text: "And the metrics" });
   });
 
-  it("shows the stored option on a fresh render: the pill's label, and the block enabled on that value (AC-7)", async () => {
+  it("shows the stored option on a fresh render, in the selector's label and as the enabled checked choice", async () => {
     const user = userEvent.setup();
     await openApp(
       buildSession({
@@ -2259,7 +2278,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     expect(high.getAttribute("aria-checked")).toBe("true");
     expect(high.disabled).toBe(false);
 
-    // The stored value wins over the descriptor's own default.
+    // The stored value takes precedence over the descriptor's default.
     const medium = screen.getByRole<HTMLButtonElement>("radio", { name: "Medium" });
     expect(medium.getAttribute("aria-checked")).toBe("false");
     expect(medium.disabled).toBe(false);
@@ -2274,7 +2293,7 @@ describe("Thread: an exited thread that can be resumed", () => {
     exitedAt: "2026-09-08T10:05:00.000Z",
   });
 
-  it("reads like an idle thread: textarea and model pill enabled, no Stop and nothing saying exited", async () => {
+  it("looks like an idle thread: textarea and model pill enabled, no Stop, and no mention of exited", async () => {
     await openApp(EXITED_RESUMABLE, buildTwoCompletedTurns());
 
     const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
@@ -2311,7 +2330,7 @@ describe("Thread: an exited thread that can be resumed", () => {
 
     const queued = await screen.findByText("Also check the logs");
     expect(screen.getByRole("button", { name: /steer/i })).toBeDefined();
-    // The list sits above the composer, in reading order.
+    // The list comes before the composer in document order.
     expect(
       queued.compareDocumentPosition(screen.getByRole("textbox")) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -2323,7 +2342,7 @@ describe("Thread: an exited thread that cannot be resumed", () => {
   it.each<[string, string | null]>([
     ["its transcript is gone", null],
     ["its runner was retired", "native-1"],
-  ])("is read-only and says %s", async (reason, nativeSessionId) => {
+  ])("is read-only and explains that %s", async (reason, nativeSessionId) => {
     await openApp(
       buildSession({
         status: "exited",
@@ -2345,19 +2364,20 @@ describe("Thread: an exited thread that cannot be resumed", () => {
 });
 
 /**
- * The composer on an active thread: the note a model pick stands under until
- * it is sent, and the fields that locked when the thread started.
+ * Tests for the composer on an active thread: the note shown under a model
+ * pick until it is sent, and the fields that locked when the thread started.
  *
- * How the surface is read here: the model pill is the button whose accessible
- * name holds the model's *display* name ("Claude Sonnet 5"); a locked field is
- * whatever element carries the `title`, and "no button" is read as that
- * element not being one.
+ * How these tests find things:
+ * - The model pill is the button whose accessible name contains the model's
+ *   *display* name ("Claude Sonnet 5").
+ * - A locked field is the element with the `title`, and "no button" means
+ *   that element is not a button.
  */
 describe("Composer: a model pick is pending until it is sent", () => {
-  it("says the change applies on send, names it on the pill, and drops the note once the session carries it", async () => {
+  it("notes that the change applies on send, shows it on the pill, and removes the note once the session has it", async () => {
     const user = userEvent.setup();
-    // The controller stores what the input carried, so the session read after
-    // it answers with the new model - which is what retires the note.
+    // The controller stores the model from the input, so the session read
+    // after it returns the new model, and that removes the note.
     let stored = { model: "claude-sonnet-5", options: {} as Record<string, string> };
     await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({
@@ -2374,7 +2394,8 @@ describe("Composer: a model pick is pending until it is sent", () => {
     await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
 
-    // Unsent, so the card says so, and the pill already names what will go.
+    // The pick is not sent yet, so the card shows a note, and the pill
+    // already shows the model that will be sent.
     await waitFor(() => {
       expect(readPageText()).toContain("model change applies on send");
     });
@@ -2383,8 +2404,8 @@ describe("Composer: a model pick is pending until it is sent", () => {
     await user.type(screen.getByRole("textbox"), "Also check the logs");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
-    // Once the session itself carries the model there is nothing pending to
-    // warn about.
+    // Once the session has the new model, nothing is pending, so the note is
+    // gone.
     await waitFor(() => {
       expect(readPageText()).not.toContain("model change applies on send");
     });
@@ -2392,8 +2413,8 @@ describe("Composer: a model pick is pending until it is sent", () => {
   });
 });
 
-describe("Composer: what locked at start says why", () => {
-  it("renders the access mode, the workspace and the machine as plain text with the reason as their tooltip", async () => {
+describe("Composer: fields that locked when the thread started explain why", () => {
+  it("renders the access mode, the workspace and the machine as plain text, with the reason as their tooltip", async () => {
     await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     for (const field of ["access mode", "workspace", "machine"]) {
@@ -2402,7 +2423,7 @@ describe("Composer: what locked at start says why", () => {
       expect(locked.closest("button")).toBeNull();
     }
 
-    // And none of the three is a trigger under another name.
+    // None of the three is a menu trigger under another accessible name either.
     expect(screen.queryByRole("button", { name: /approval-required/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /no workspace/i })).toBeNull();
     expect(screen.queryByRole("button", { name: RUNNER_STARTED.name })).toBeNull();
@@ -2410,10 +2431,10 @@ describe("Composer: what locked at start says why", () => {
 });
 
 /**
- * The permission card docked above the composer (spec 14 §The thread
- * surface, ticket #70). Every word on it comes from `buildApprovalCard` in
- * `client-core`, so this test reads its labels from there rather than
- * restating copy `apps/web` does not author.
+ * Tests for the permission card docked above the composer (spec 14 §The
+ * thread surface, ticket #70). All the card's text comes from
+ * `buildApprovalCard` in `client-core`, so these tests read the labels from
+ * there instead of repeating text that `apps/web` does not own.
  */
 describe("Thread: the permission card", () => {
   const REQUEST: NonNullable<Session["openRequest"]> = {
@@ -2444,7 +2465,7 @@ describe("Thread: the permission card", () => {
     },
   };
 
-  /** A live turn whose one open item is the one `REQUEST` is about. */
+  /** Builds a live turn whose only open item is the one `REQUEST` is about. */
   const buildParkedRows = (): TranscriptRow[] => [
     buildTranscriptRow(0, {
       _tag: "turn.started",
@@ -2486,7 +2507,11 @@ describe("Thread: the permission card", () => {
     }),
   ];
 
-  /** One answer row of the card, matched by the text `client-core` gave it. */
+  /**
+   * Returns a matcher for the accessible name of the card's row for
+   * `decision`, using the text that `client-core` gives that row. Throws when
+   * the card has no row for `decision`.
+   */
   const buildAnswerMatcher = (
     request: NonNullable<Session["openRequest"]>,
     decision: string,
@@ -2496,14 +2521,14 @@ describe("Thread: the permission card", () => {
     return (name: string) => name.includes(found.label) && name.includes(found.describe);
   };
 
-  /** The composer's own card: the raised box the message goes in. */
+  /** Returns the composer's card, the raised box that holds the message. Throws if it is missing. */
   const getComposerCard = (): HTMLElement => {
     const found = screen.getByRole("textbox").closest<HTMLElement>('[class*="bg-raised"]');
     if (found === null) throw new Error("the composer's card was not found");
     return found;
   };
 
-  it("docks the card above the composer, one row per offered decision and no copy in the transcript", async () => {
+  it("docks the card above the composer, with one row per offered decision and no copy in the transcript", async () => {
     await openApp(buildSession({ status: "busy", openRequest: REQUEST }), buildParkedRows());
 
     const allow = await screen.findByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") });
@@ -2515,10 +2540,10 @@ describe("Thread: the permission card", () => {
         `${decision} does not render exactly once`,
       ).toHaveLength(1);
     }
-    // The card names the command the request is about.
+    // The card shows the command the request is about.
     expect(readPageText()).toContain("ls -la");
 
-    // In the sticky foot, above the composer.
+    // The card is in the sticky footer, above the composer.
     const foot = allow.closest<HTMLElement>('[class*="sticky"]');
     expect(foot, "the card is not in the sticky foot").not.toBeNull();
     expect(foot?.contains(getComposerCard())).toBe(true);
@@ -2527,10 +2552,10 @@ describe("Thread: the permission card", () => {
       "the composer does not follow the card",
     ).toBeTruthy();
 
-    // The dock is the lip mirrored above the card, so the card keeps its own
-    // 14px radius in every state and the dock tucks under it (spec 14
-    // §Measurements, amended 2026-09-14). Whether it looks flush is the
-    // residual manual check; the classes are what jsdom can say.
+    // The dock is a mirror image of the lip, placed above the card. The card
+    // keeps its 14px radius in every state and the dock tucks under it (spec
+    // 14 §Measurements, amended 2026-09-14). jsdom can only check the
+    // classes; whether the two look flush needs a manual check.
     expect(getComposerCard().className).toContain("rounded-[14px]");
     const dock = allow.closest<HTMLElement>('[class*="rounded-t-[10px]"]');
     expect(dock, "the dock is not the lip mirrored").not.toBeNull();
@@ -2538,16 +2563,16 @@ describe("Thread: the permission card", () => {
     expect(dock?.className).toContain("border-line-soft");
   });
 
-  it("posts the clicked decision once and drops the card when the record's open request clears", async () => {
+  it("posts the clicked decision once, and removes the card when the session's open request is cleared", async () => {
     const user = userEvent.setup();
     let current = buildSession({ status: "busy", openRequest: REQUEST });
     let release: (() => void) | undefined;
     const api = stubApi({
       ...buildController(current, buildParkedRows()),
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
-      // Held open until the test releases it, and answering with the park
-      // still on the record: the answer is a snapshot of when it was asked,
-      // and the card follows the live record instead.
+      // The response is held until the test releases it, and it still has
+      // the open request. The response is a snapshot from when the request
+      // was made; the card follows the live session instead.
       [`POST /api/v1/sessions/${SESSION_ID}/respond`]: () =>
         new Promise<{ readonly body: unknown }>((resolve) => {
           release = () => {
@@ -2573,7 +2598,8 @@ describe("Thread: the permission card", () => {
       body: { requestId: REQUEST.requestId, decision: "allow" },
     });
 
-    // The card goes when the record does, not when the click happens.
+    // The card disappears when the session's open request is cleared, not
+    // when the user clicks.
     expect(
       screen.getByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") }),
     ).toBeDefined();
@@ -2591,8 +2617,9 @@ describe("Thread: the permission card", () => {
       ).toBeNull();
     });
 
-    // And now the answer lands, carrying the park the controller still had
-    // when it was asked. A card the record has cleared does not come back.
+    // Now the response arrives, with the open request the controller still
+    // had when it was called. The card, which the session has cleared, does
+    // not come back.
     await act(async () => {
       release?.();
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -2601,7 +2628,7 @@ describe("Thread: the permission card", () => {
     expect(screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") })).toBeNull();
   });
 
-  it("takes one answer only: a second click while the request is still open sends nothing", async () => {
+  it("accepts only one answer: a second click while the request is still open sends nothing", async () => {
     const user = userEvent.setup();
     const current = buildSession({ status: "busy", openRequest: REQUEST });
     const api = stubApi({
@@ -2616,15 +2643,16 @@ describe("Thread: the permission card", () => {
       expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
     });
 
-    // The card is still up - only the runner clears it - but it has had its
-    // answer, and a contradictory second one would be sent and audited.
+    // The card is still shown, because only the runner clears it. But it
+    // already has its answer, and a contradicting second answer would be
+    // sent and recorded in the audit log.
     await user.click(screen.getByRole("button", { name: buildAnswerMatcher(REQUEST, "deny") }));
     await user.click(allow);
 
     expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
   });
 
-  it("reads the item the request is about as awaiting approval, in the attention hue", async () => {
+  it("shows the item the request is about as awaiting approval, in the attention color", async () => {
     const user = userEvent.setup();
     await openApp(buildSession({ status: "busy", openRequest: REQUEST }), buildParkedRows());
 
@@ -2636,7 +2664,7 @@ describe("Thread: the permission card", () => {
     expect(readPageText()).not.toContain("· running");
   });
 
-  it("renders no card when the record carries no open request", async () => {
+  it("renders no card when the session has no open request", async () => {
     await openApp(buildSession({ status: "busy", openRequest: null }), buildParkedRows());
 
     await screen.findByRole("textbox");
@@ -2645,7 +2673,7 @@ describe("Thread: the permission card", () => {
     expect(getComposerCard().className).toContain("rounded-[14px]");
   });
 
-  it("shows a question request's questions with deny and cancel only, and says answering is not built", async () => {
+  it("shows a question request's questions with only deny and cancel, and explains that answering is not built", async () => {
     await openApp(buildSession({ status: "busy", openRequest: QUESTIONS }), buildParkedRows());
 
     await screen.findByRole("button", { name: buildAnswerMatcher(QUESTIONS, "deny") });
@@ -2657,16 +2685,19 @@ describe("Thread: the permission card", () => {
       screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow_always") }),
     ).toBeNull();
 
-    // The chip, the prose and what each answer would have meant: a question is
-    // not an approval, and the card shows all three - as three blocks rather
-    // than one paragraph. The chip is a lane label, and an option's label and
-    // its description are two elements on the answer ledger's grid.
+    // A question is not an approval. The card shows three separate blocks,
+    // not one paragraph:
+    // - the header chip, styled as a lane label;
+    // - the question text;
+    // - each option's label and description, as two elements in the answer
+    //   grid.
     expect(screen.getByText("Database").className).toContain("uppercase");
     expect(screen.getByText("Which database should it use?")).toBeDefined();
     expect(screen.getByText("SQLite").className).toContain("font-emph");
     expect(screen.getByText("the one Hercule ships")).toBeDefined();
-    // Cancel first: a reply sent while the session is parked queues behind the
-    // turn instead of reaching the harness that is asking.
+    // The user must cancel first: a reply sent while the session waits for an
+    // answer is queued behind the turn, and never reaches the harness that
+    // asked.
     expect(readPageText()).toContain(
       "Answering here is not built yet. Cancel the turn, then reply in the thread.",
     );
@@ -2674,15 +2705,17 @@ describe("Thread: the permission card", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * Slice 3 of #72 (AC-21): the thread's chrome names the project it
- * belongs to, the workspace's other threads sit beside the title as
- * tabs, and a thread in a workspace offers a new one beside it.
+ * Tests for the thread's header (#72):
+ * - The header shows the project the thread belongs to.
+ * - The workspace's other threads are tabs next to the title.
+ * - A thread in a workspace offers a link to start a new thread there.
  *
- * Readings picked here, where the SPEC names copy but not a handle:
- * - the chrome is still the crumb's parent element, as above;
- * - a sibling tab is a link to that thread, so a tab strip is read by the
- *   links the chrome holds;
- * - "+ New thread here" is a link carrying that text.
+ * The spec gives the text but not how to find these elements. These
+ * tests assume:
+ * - The header is still the breadcrumb's parent element, as above.
+ * - A sibling tab is a link to that thread, so the tab strip is found
+ *   through the links in the header.
+ * - "+ New thread here" is a link with that text.
  * ------------------------------------------------------------------ */
 
 const AT = "2026-09-10T09:00:00.000Z";
@@ -2759,7 +2792,7 @@ const SIBLING: Session = buildSession({
   projectId: WEBSHOP.id,
 });
 
-/** The world slice 3 adds around one thread: its project and its workspace. */
+/** Builds the routes for one thread's project, workspaces and sessions. */
 const buildThreadWorldRoutes = (
   workspaces: readonly Workspace[],
   sessions: readonly Session[],
@@ -2775,15 +2808,15 @@ const buildThreadWorldRoutes = (
 const findThreadChrome = async (): Promise<HTMLElement> => {
   const crumb = await waitFor(() => screen.getByText(/\/$/));
   const row = crumb.parentElement;
-  if (row === null) throw new Error("the crumb stands in no row");
+  if (row === null) throw new Error("the breadcrumb has no parent row");
   return row;
 };
 
-describe("Thread: the chrome names the project and the workspace's threads (AC-21)", () => {
+describe("Thread: the header shows the project and the workspace's threads", () => {
   const buildSessionInWorkspace = (workspaceId: string): Session =>
     buildSession({ status: "idle", projectId: WEBSHOP.id, workspaceId });
 
-  it("crumbs the project a thread belongs to", async () => {
+  it("shows the thread's project in the breadcrumb", async () => {
     const fixture = buildSessionInWorkspace(buildEphemeralWorkspace([SESSION_ID]).id);
     await openApp(
       fixture,
@@ -2801,7 +2834,7 @@ describe("Thread: the chrome names the project and the workspace's threads (AC-2
     expect(readPageText(await findThreadChrome())).toMatch(/^Threads \/ Fix the login bug/);
   });
 
-  it("leaves the title alone while the workspace holds one thread", async () => {
+  it("shows no tabs next to the title while the workspace has one thread", async () => {
     const workspace = buildEphemeralWorkspace([SESSION_ID]);
     const fixture = buildSessionInWorkspace(workspace.id);
     await openApp(
@@ -2815,7 +2848,7 @@ describe("Thread: the chrome names the project and the workspace's threads (AC-2
     expect(within(chrome).queryByRole("link", { name: /Write the retry runbook/ })).toBeNull();
   });
 
-  it("puts the workspace's other threads beside the title, in the workspace's own order", async () => {
+  it("shows the workspace's other threads next to the title, in the workspace's order", async () => {
     const workspace = buildEphemeralWorkspace([SESSION_ID, SIBLING_ID]);
     const fixture = buildSessionInWorkspace(workspace.id);
     await openApp(
@@ -2860,7 +2893,7 @@ describe("Thread: the chrome names the project and the workspace's threads (AC-2
     );
   });
 
-  it("offers no new thread here on a thread with no workspace", async () => {
+  it("offers no + New thread here on a thread with no workspace", async () => {
     const fixture = buildSession({ status: "idle", projectId: WEBSHOP.id, workspaceId: null });
     await openApp(fixture, buildTwoCompletedTurns(), buildThreadWorldRoutes([], [fixture]));
 
@@ -2869,8 +2902,8 @@ describe("Thread: the chrome names the project and the workspace's threads (AC-2
   });
 });
 
-describe("Draft: a draft joining a workspace (AC-21)", () => {
-  it("crumbs its project, joins the tab strip last, and offers no actions", async () => {
+describe("Draft: a draft joining a workspace", () => {
+  it("shows its project in the breadcrumb, comes last in the tab strip, and offers no actions", async () => {
     const workspace = buildEphemeralWorkspace([SESSION_ID]);
     const fixture = buildSession({
       status: "idle",
@@ -2895,7 +2928,7 @@ describe("Draft: a draft joining a workspace (AC-21)", () => {
     const text = readPageText(chrome);
     expect(text).toContain("webshop /");
     expect(text).toContain("New thread");
-    // The draft joins the workspace's strip last, after the thread already in it.
+    // The draft comes last in the tab strip, after the thread already in the workspace.
     expect(text.indexOf("Fix the login bug")).toBeLessThan(text.indexOf("New thread"));
     // A draft has nothing to act on yet.
     expect(within(chrome).queryByRole("button", { name: "…" })).toBeNull();

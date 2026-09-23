@@ -6,8 +6,8 @@ import { cn } from "./cn";
  * `aria-disabled` when the button must keep keyboard focus, such as a Save
  * button while its save is in flight. Both look the same.
  *
- * A quiet button stays borderless when it cannot be used: a box is the one shape
- * that says "this commits", which is what the `form` variant means.
+ * A quiet button stays borderless when it cannot be used. Only the `form`
+ * variant has a box, because a box marks the button that commits a form.
  */
 const disabledQuiet = [
   "disabled:cursor-not-allowed disabled:text-faint",
@@ -15,10 +15,10 @@ const disabledQuiet = [
 ].join(" ");
 
 /**
- * The primary answer keeps its box when it cannot be used, because it is often
- * the only affordance on the surface and boxless it reads as prose. The
- * hairline is inset rather than a border, so a primary beside a quiet one is
- * the same height in either state.
+ * A primary button gains an outlined box when it cannot be used. It is often
+ * the only control on the surface, and without a box its muted label would
+ * look like plain text. The outline is an inset shadow, not a border, so a
+ * primary button stays the same height as a quiet one beside it.
  */
 const disabledPrimary = [
   "disabled:cursor-not-allowed",
@@ -43,10 +43,10 @@ const disabledForm = [
 const usableHover = "enabled:not-aria-disabled:hover:bg-line-soft";
 
 /**
- * Decision affordances are quiet: text only, a soft background on hover, and
- * the primary answer set apart by ink rather than by a fill. `form` is the one
- * exception, and it is not a monitoring surface: a form's submit carries a
- * hairline and a surface ground so it reads as the thing that commits.
+ * Buttons are quiet: text only, with a soft background on hover. The primary
+ * button stands out by its ink colour, not by a fill. `form` is the exception:
+ * a form's submit button has a thin border and a surface background, so it
+ * reads as the button that commits the form.
  *
  * Hover styles apply only to a usable button. A button that cannot be pressed
  * still receives pointer events, so it must show its own not-allowed cursor.
@@ -59,7 +59,10 @@ const variants = {
 
 export type ButtonVariant = keyof typeof variants;
 
-/** The look every button-shaped thing wears - a caller that needs it on a Link reads it directly. */
+/**
+ * Builds the class names for a button of the given variant, with the caller's
+ * `className` applied last. Use it directly to style a Link as a button.
+ */
 export const buildButtonClassName = (
   variant: ButtonVariant,
   className: string | undefined,

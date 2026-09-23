@@ -2,8 +2,9 @@ import type { JSX, ReactNode, SVGProps } from "react";
 import { cn } from "../primitives/cn";
 
 /**
- * Every mark is drawn on one 12px grid at a 1.15px stroke, in `currentColor`,
- * and is decorative: the row it sits in names its meaning in text.
+ * The props every mark takes. Every mark is drawn on a 12px grid, with a 1.15px
+ * stroke by default, in `currentColor`. Marks are decorative (`aria-hidden`):
+ * the text of the row a mark sits in gives its meaning.
  */
 export type MarkProps = Omit<SVGProps<SVGSVGElement>, "children" | "name">;
 
@@ -40,9 +41,9 @@ function Mark({
 }
 
 /**
- * The soft equalizer: three bars breathing in the live hue. Their resting
- * heights are the attributes, which is what shows under reduced motion; the
- * `hercule-equalizer` rules in styles.css animate them otherwise.
+ * The working mark: three equalizer bars in the live hue. The heights set here
+ * are the resting heights, shown under reduced motion; otherwise the
+ * `hercule-equalizer` rules in styles.css animate the bars.
  */
 export function WorkingMark({ className, ...props }: MarkProps): JSX.Element {
   return (
