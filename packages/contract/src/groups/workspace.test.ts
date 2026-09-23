@@ -12,7 +12,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { Branch, Checkout } from "./workspace";
 
-const takes = (schema: Schema.Codec<string>, value: string): boolean =>
+const isAccepted = (schema: Schema.Codec<string>, value: string): boolean =>
   Schema.decodeUnknownExit(schema)(value)._tag === "Success";
 
 describe("a branch name", () => {
@@ -25,7 +25,7 @@ describe("a branch name", () => {
       "user/fix.bug",
       "a",
     ]) {
-      expect(takes(Branch, branch), branch).toBe(true);
+      expect(isAccepted(Branch, branch), branch).toBe(true);
     }
   });
 
@@ -54,7 +54,7 @@ describe("a branch name", () => {
       "feature/.git",
       `${"a".repeat(256)}`,
     ]) {
-      expect(takes(Branch, branch), JSON.stringify(branch)).toBe(false);
+      expect(isAccepted(Branch, branch), JSON.stringify(branch)).toBe(false);
     }
   });
 });

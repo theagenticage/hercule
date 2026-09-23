@@ -21,7 +21,7 @@ export const cleanupHomes = (): void => {
 };
 
 /** A home of this test's own, named for the harness it stands in for. */
-export const scratchHome = (label: string): string => {
+export const createScratchHome = (label: string): string => {
   const home = mkdtempSync(join(tmpdir(), `hercule-${label}-`));
   homes.push(home);
   return home;
@@ -33,7 +33,7 @@ export const PRIOR = "0199e0e7-0000-7000-8000-0000000000fa";
 export const CWD = "/tmp/work";
 
 /** A stream of lines a test pushes into, read once by the code under test. */
-export const lines = (): {
+export const createLines = (): {
   readonly push: (line: string) => void;
   readonly end: () => void;
   readonly iterable: AsyncIterable<string>;
@@ -41,7 +41,7 @@ export const lines = (): {
   const queued: Array<string> = [];
   let wake: (() => void) | undefined;
   let ended = false;
-  const woken = (): void => {
+  const wakeReader = (): void => {
     const pending = wake;
     wake = undefined;
     pending?.();
@@ -49,11 +49,11 @@ export const lines = (): {
   return {
     push: (line) => {
       queued.push(line);
-      woken();
+      wakeReader();
     },
     end: () => {
       ended = true;
-      woken();
+      wakeReader();
     },
     iterable: {
       async *[Symbol.asyncIterator]() {
@@ -75,7 +75,7 @@ export const WAIT_MS = 2_000;
  * Waits for something the adapter has done, or gives up and says what it was.
  * A case driving a real harness over a network gives itself longer.
  */
-export const until = async (
+export const waitUntil = async (
   what: string,
   ready: () => boolean,
   budgetMs: number = WAIT_MS,
@@ -88,7 +88,7 @@ export const until = async (
 /** Long enough for anything already in flight to have arrived, so "nothing" means it. */
 export const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
 
-export const taggedIn = <Tag extends ProviderEvent["_tag"]>(
+export const filterByTag = <Tag extends ProviderEvent["_tag"]>(
   seen: ReadonlyArray<ProviderEvent>,
   tag: Tag,
 ): ReadonlyArray<Extract<ProviderEvent, { _tag: Tag }>> =>

@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
-import { providerRows } from "./provider-rows";
-import { instance, snapshot, WITH_CLAUDE } from "./providers.testing";
+import { buildProviderRows } from "./provider-rows";
+import { buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
 
-const only = (runner: Runner, one: ProviderInstance) => providerRows(runner, [one])[0]!;
+const buildProviderRow = (runner: Runner, one: ProviderInstance) =>
+  buildProviderRows(runner, [one])[0]!;
 
-describe("providerRows", () => {
+describe("buildProviderRows", () => {
   it("reads a logged-in harness as what it is holding and what it offers", () => {
-    const row = only(WITH_CLAUDE, instance("claude-code", "Claude Code", [snapshot()]));
+    const row = buildProviderRow(
+      WITH_CLAUDE,
+      buildInstance("claude-code", "Claude Code", [buildSnapshot()]),
+    );
 
     expect(row).toMatchObject({
       name: "Claude Code",
@@ -25,19 +29,19 @@ describe("providerRows", () => {
   it("says the harness is signed in when it reports neither an identity nor a plan", () => {
     // A harness credentialled from the environment: the login works, but there
     // is no account name behind it, and an empty sub-line reads as a fault.
-    const row = only(
+    const row = buildProviderRow(
       WITH_CLAUDE,
-      instance("claude-code", "Claude Code", [snapshot({ auth: { status: "ok" } })]),
+      buildInstance("claude-code", "Claude Code", [buildSnapshot({ auth: { status: "ok" } })]),
     );
 
     expect(row.account).toBe("signed in");
   });
 
   it("names the token source the harness reported, where it named one", () => {
-    const row = only(
+    const row = buildProviderRow(
       WITH_CLAUDE,
-      instance("claude-code", "Claude Code", [
-        snapshot({ auth: { status: "ok", backend: "ANTHROPIC_API_KEY" } }),
+      buildInstance("claude-code", "Claude Code", [
+        buildSnapshot({ auth: { status: "ok", backend: "ANTHROPIC_API_KEY" } }),
       ]),
     );
 
@@ -45,10 +49,10 @@ describe("providerRows", () => {
   });
 
   it("names a version this build was not tested against", () => {
-    const row = only(
+    const row = buildProviderRow(
       WITH_CLAUDE,
-      instance("claude-code", "Claude Code", [
-        snapshot({ harnessVersion: "2.0.9", versionVerdict: "below-floor" }),
+      buildInstance("claude-code", "Claude Code", [
+        buildSnapshot({ harnessVersion: "2.0.9", versionVerdict: "below-floor" }),
       ]),
     );
 
@@ -56,16 +60,16 @@ describe("providerRows", () => {
   });
 
   it("offers the install, and no login, for a harness that is not on the machine", () => {
-    const row = only(WITH_CLAUDE, instance("codex", "Codex", []));
+    const row = buildProviderRow(WITH_CLAUDE, buildInstance("codex", "Codex", []));
 
     expect(row).toMatchObject({ install: "blocked", logIn: false, version: "not reported" });
     expect(row.account).toBe("no adapter in this runner build");
   });
 
   it("offers nothing on a machine that is not holding a connection", () => {
-    const row = only(
+    const row = buildProviderRow(
       { ...WITH_CLAUDE, connectivity: "offline" },
-      instance("claude-code", "Claude Code", [snapshot()]),
+      buildInstance("claude-code", "Claude Code", [buildSnapshot()]),
     );
 
     expect(row).toMatchObject({ install: "none", logIn: false, probe: false });
@@ -84,8 +88,8 @@ describe("a provider with a secret-valued field", () => {
     description: "From your Z.ai Coding Plan subscription.",
   };
 
-  const keyed = (set: boolean): ProviderInstance => ({
-    ...instance("pi", "pi", [snapshot({ auth: { status: "unauthenticated" } })]),
+  const buildKeyedInstance = (set: boolean): ProviderInstance => ({
+    ...buildInstance("pi", "pi", [buildSnapshot({ auth: { status: "unauthenticated" } })]),
     binaryName: "pi",
     secretFields: [{ ...FIELD, set }],
   });
@@ -100,19 +104,22 @@ describe("a provider with a secret-valued field", () => {
   };
 
   it("asks for the key in the plugin's words, and offers to replace one that is there", () => {
-    expect(only(WITH_PI, keyed(false)).secretFields).toEqual([
+    expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).secretFields).toEqual([
       { ...FIELD, set: false, label: `Enter ${FIELD.title}` },
     ]);
-    expect(only(WITH_PI, keyed(true)).secretFields).toEqual([
+    expect(buildProviderRow(WITH_PI, buildKeyedInstance(true)).secretFields).toEqual([
       { ...FIELD, set: true, label: `Replace ${FIELD.title}` },
     ]);
   });
 
   it("offers the key in place of a login: there is no vendor to send the user to", () => {
-    expect(only(WITH_PI, keyed(false)).logIn).toBe(false);
+    expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).logIn).toBe(false);
   });
 
   it("offers neither on a machine this harness is not on", () => {
-    expect(only(WITH_CLAUDE, keyed(false))).toMatchObject({ secretFields: [], logIn: false });
+    expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false))).toMatchObject({
+      secretFields: [],
+      logIn: false,
+    });
   });
 });

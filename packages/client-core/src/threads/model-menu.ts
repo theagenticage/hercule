@@ -7,10 +7,16 @@
  * whole menu.
  */
 import type { ModelDescriptor, ProviderInstance } from "@hercule/contract";
-import { accountName, instanceLabel, loginTarget, snapshotOn, type LoginTarget } from "./catalog";
+import {
+  findAccountName,
+  buildInstanceLabel,
+  buildLoginTarget,
+  findSnapshotOn,
+  type LoginTarget,
+} from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
 import type { RecentModel } from "./recent";
-import { referenceRunner } from "./runner-menu";
+import { findReferenceRunner } from "./runner-menu";
 
 /** Past this many models across every account, the menu is worth filtering. */
 const FILTER_THRESHOLD = 8;
@@ -75,20 +81,20 @@ export interface ModelMenuView {
   readonly recent: readonly RecentModel[];
 }
 
-const matches = (descriptor: ModelDescriptor, filter: string): boolean =>
+const matchesFilter = (descriptor: ModelDescriptor, filter: string): boolean =>
   descriptor.name.toLowerCase().includes(filter) || descriptor.slug.toLowerCase().includes(filter);
 
-export const modelMenu = (
+export const buildModelMenu = (
   catalogs: ThreadCatalogs,
   current: ThreadConfig,
   view: ModelMenuView,
 ): ModelMenu => {
-  const runner = referenceRunner(catalogs.runners, current.runnerId, catalogs.localRunnerId);
+  const runner = findReferenceRunner(catalogs.runners, current.runnerId, catalogs.localRunnerId);
   const filter = view.filter.trim().toLowerCase();
-  const modelsOf = (instance: ProviderInstance): readonly ModelDescriptor[] =>
-    snapshotOn(instance, runner?.id)?.models ?? [];
+  const listModels = (instance: ProviderInstance): readonly ModelDescriptor[] =>
+    findSnapshotOn(instance, runner?.id)?.models ?? [];
 
-  const rowOf = (instance: ProviderInstance, descriptor: ModelDescriptor): ModelMenuRow => ({
+  const buildRow = (instance: ProviderInstance, descriptor: ModelDescriptor): ModelMenuRow => ({
     instanceId: instance.id,
     slug: descriptor.slug,
     name: descriptor.name,
@@ -100,18 +106,18 @@ export const modelMenu = (
   const shown =
     instance === undefined
       ? []
-      : modelsOf(instance)
-          .filter((descriptor) => filter === "" || matches(descriptor, filter))
-          .map((descriptor) => ({ descriptor, row: rowOf(instance, descriptor) }));
+      : listModels(instance)
+          .filter((descriptor) => filter === "" || matchesFilter(descriptor, filter))
+          .map((descriptor) => ({ descriptor, row: buildRow(instance, descriptor) }));
   // Nothing folds away while filtering - what the user typed is what they are
   // looking for, legacy or not - and the model in force never folds away
   // either, or the lane would carry no check mark.
-  const foldable = (descriptor: ModelDescriptor, row: ModelMenuRow): boolean =>
+  const isFoldable = (descriptor: ModelDescriptor, row: ModelMenuRow): boolean =>
     filter === "" && descriptor.isLegacy === true && !row.current;
 
   return {
     filterable:
-      catalogs.instances.reduce((total, each) => total + modelsOf(each).length, 0) >
+      catalogs.instances.reduce((total, each) => total + listModels(each).length, 0) >
       FILTER_THRESHOLD,
 
     recent: view.recent
@@ -120,14 +126,14 @@ export const modelMenu = (
         const descriptor =
           held === undefined
             ? undefined
-            : modelsOf(held).find((model) => model.slug === pair.model);
+            : listModels(held).find((model) => model.slug === pair.model);
         if (held === undefined || descriptor === undefined) return [];
         return [
           {
             ...pair,
             name: descriptor.name,
             providerId: held.providerId,
-            account: accountName(catalogs.instances, held),
+            account: findAccountName(catalogs.instances, held),
             dimmed: view.kind === "active" && held.id !== current.instanceId ? ACCOUNT_FIXED : null,
           },
         ];
@@ -137,20 +143,26 @@ export const modelMenu = (
     current: {
       instanceId: current.instanceId,
       providerId: instance?.providerId ?? null,
-      label: instance === undefined ? null : instanceLabel(catalogs.instances, instance),
-      rows: shown.filter(({ descriptor, row }) => !foldable(descriptor, row)).map(({ row }) => row),
-      older: shown.filter(({ descriptor, row }) => foldable(descriptor, row)).map(({ row }) => row),
+      label: instance === undefined ? null : buildInstanceLabel(catalogs.instances, instance),
+      rows: shown
+        .filter(({ descriptor, row }) => !isFoldable(descriptor, row))
+        .map(({ row }) => row),
+      older: shown
+        .filter(({ descriptor, row }) => isFoldable(descriptor, row))
+        .map(({ row }) => row),
     },
 
     others: catalogs.instances
       .filter((each) => each.id !== current.instanceId)
       .flatMap((each) => {
-        const snapshot = snapshotOn(each, runner?.id);
-        const models = modelsOf(each);
+        const snapshot = findSnapshotOn(each, runner?.id);
+        const models = listModels(each);
         const matched =
           filter === ""
             ? []
-            : models.filter((descriptor) => matches(descriptor, filter)).map((d) => rowOf(each, d));
+            : models
+                .filter((descriptor) => matchesFilter(descriptor, filter))
+                .map((d) => buildRow(each, d));
         if (filter !== "" && matched.length === 0) return [];
 
         const dimmed =
@@ -166,7 +178,7 @@ export const modelMenu = (
           {
             instanceId: each.id,
             providerId: each.providerId,
-            name: instanceLabel(catalogs.instances, each),
+            name: buildInstanceLabel(catalogs.instances, each),
             identity: snapshot?.auth.identity ?? null,
             planLabel: snapshot?.auth.planLabel ?? null,
             modelCount: models.length,
@@ -178,7 +190,7 @@ export const modelMenu = (
               snapshot !== undefined &&
               snapshot.auth.status !== "ok" &&
               runner !== undefined
-                ? loginTarget(each, runner)
+                ? buildLoginTarget(each, runner)
                 : null,
             rows: view.kind === "active" ? [] : matched,
           },

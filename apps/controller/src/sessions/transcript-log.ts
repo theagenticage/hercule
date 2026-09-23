@@ -33,7 +33,7 @@ export const sessionExists = (
       );
 
 /** The position of a session's newest transcript row, or zero for one with none. */
-export const headOfTranscript = (
+export const readTranscriptHead = (
   sql: SqlClient.SqlClient,
   sessionId: string,
 ): Effect.Effect<number, SqlError> =>
@@ -45,7 +45,7 @@ export const headOfTranscript = (
   );
 
 /** The next rows of a session's stream after a position, oldest first. */
-export const transcriptRowsAfter = (
+export const readTranscriptRowsAfter = (
   sql: SqlClient.SqlClient,
   sessionId: string,
   after: number,

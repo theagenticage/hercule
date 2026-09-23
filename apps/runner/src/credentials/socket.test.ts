@@ -10,14 +10,15 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CredentialAnswer } from "@hercule/protocol";
 import { serveCredentialSocket } from "./index";
-import { cleanTemporaries, temporary } from "../workspaces/testing";
+import { cleanTemporaries, createTemporaryDir } from "../workspaces/testing";
 
 afterAll(cleanTemporaries);
 
-const socketPath = (): string => join(temporary("hercule-credentials-"), "daemon.sock");
+const createSocketPath = (): string =>
+  join(createTemporaryDir("hercule-credentials-"), "daemon.sock");
 
 /** D-21 F5: an answer is a credential or a refusal, never a struct of maybes. */
-const answering = (
+const buildCredentialAnswer = (
   fields:
     | { readonly token: string; readonly username: string }
     | { readonly error: "unauthorized" | "no_connection" },
@@ -28,7 +29,7 @@ const answering = (
 });
 
 /** One question down the socket, one line back, the way the helper asks it. */
-const asks = (path: string, request: Record<string, string>): Promise<string> =>
+const askOverSocket = (path: string, request: Record<string, string>): Promise<string> =>
   new Promise((resolve, reject) => {
     const socket = createConnection({ path });
     let received = "";
@@ -49,10 +50,10 @@ const asks = (path: string, request: Record<string, string>): Promise<string> =>
 
 const asked: Array<unknown> = [];
 
-const serving = async (
+const startCredentialSocket = async (
   answer: (request: unknown) => Promise<CredentialAnswer>,
 ): Promise<{ path: string; close: () => Promise<void> }> => {
-  const path = socketPath();
+  const path = createSocketPath();
   const server = await serveCredentialSocket({
     path,
     ask: (request) => {
@@ -66,11 +67,11 @@ const serving = async (
 describe("what the socket relays", () => {
   it("asks the controller for the remote git named, on behalf of the session that asked", async () => {
     asked.length = 0;
-    const served = await serving(() =>
-      Promise.resolve(answering({ token: "the-token", username: "octocat" })),
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ token: "the-token", username: "octocat" })),
     );
 
-    const reply = await asks(served.path, {
+    const reply = await askOverSocket(served.path, {
       protocol: "https",
       host: "github.com",
       path: "acme/web",
@@ -85,11 +86,11 @@ describe("what the socket relays", () => {
 
   it("carries a workspace id instead, for the runner's own git while it provisions", async () => {
     asked.length = 0;
-    const served = await serving(() =>
-      Promise.resolve(answering({ token: "the-token", username: "octocat" })),
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ token: "the-token", username: "octocat" })),
     );
 
-    await asks(served.path, {
+    await askOverSocket(served.path, {
       protocol: "https",
       host: "github.com",
       path: "acme/web",
@@ -105,9 +106,11 @@ describe("what the socket relays", () => {
 
 describe("when no credential is coming", () => {
   it("answers empty on a refusal, so git falls through to the machine's helpers", async () => {
-    const served = await serving(() => Promise.resolve(answering({ error: "unauthorized" })));
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ error: "unauthorized" })),
+    );
 
-    const reply = await asks(served.path, {
+    const reply = await askOverSocket(served.path, {
       protocol: "https",
       host: "github.com",
       path: "acme/web",
@@ -120,11 +123,11 @@ describe("when no credential is coming", () => {
 
   it("answers empty, and asks nobody, when the request proves nothing", async () => {
     asked.length = 0;
-    const served = await serving(() =>
-      Promise.resolve(answering({ token: "the-token", username: "octocat" })),
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ token: "the-token", username: "octocat" })),
     );
 
-    const reply = await asks(served.path, {
+    const reply = await askOverSocket(served.path, {
       protocol: "https",
       host: "github.com",
       path: "acme/web",
@@ -136,9 +139,11 @@ describe("when no credential is coming", () => {
   });
 
   it("answers empty when the controller cannot be reached", async () => {
-    const served = await serving(() => Promise.reject(new Error("the controller is disconnected")));
+    const served = await startCredentialSocket(() =>
+      Promise.reject(new Error("the controller is disconnected")),
+    );
 
-    const reply = await asks(served.path, {
+    const reply = await askOverSocket(served.path, {
       protocol: "https",
       host: "github.com",
       path: "acme/web",
@@ -153,12 +158,12 @@ describe("when no credential is coming", () => {
 
 describe("an answer git could not read as one", () => {
   it("is not passed on when a field carries a line break", async () => {
-    const served = await serving(() =>
+    const served = await startCredentialSocket(() =>
       // A second line would be a second answer, and git reads every line.
-      Promise.resolve(answering({ token: "the-token\nquit=1", username: "octocat" })),
+      Promise.resolve(buildCredentialAnswer({ token: "the-token\nquit=1", username: "octocat" })),
     );
 
-    const reply = await asks(served.path, {
+    const reply = await askOverSocket(served.path, {
       protocol: "https",
       host: "github.com",
       path: "acme/web",
@@ -173,8 +178,8 @@ describe("an answer git could not read as one", () => {
 describe("a peer that is not asking a question", () => {
   it("is cut off rather than buffered, and nobody is asked", async () => {
     asked.length = 0;
-    const served = await serving(() =>
-      Promise.resolve(answering({ token: "the-token", username: "octocat" })),
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ token: "the-token", username: "octocat" })),
     );
 
     // How the cut-off reaches the peer is the kernel's choice, not ours. Where
@@ -208,7 +213,9 @@ describe("a peer that is not asking a question", () => {
 
 describe("the socket itself", () => {
   it("is reachable by this user alone", async () => {
-    const served = await serving(() => Promise.resolve(answering({ error: "no_connection" })));
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ error: "no_connection" })),
+    );
 
     // A same-user process is at parity with the runner anyway, but no other
     // OS user reaches this.
@@ -217,7 +224,9 @@ describe("the socket itself", () => {
   });
 
   it("refuses to take over a socket another daemon is answering on", async () => {
-    const served = await serving(() => Promise.resolve(answering({ error: "no_connection" })));
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ error: "no_connection" })),
+    );
 
     // Two daemons on one home would answer this machine's helpers with two
     // different controllers' credentials.
@@ -231,7 +240,9 @@ describe("the socket itself", () => {
   });
 
   it("is gone once it is closed", async () => {
-    const served = await serving(() => Promise.resolve(answering({ error: "no_connection" })));
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ error: "no_connection" })),
+    );
 
     await served.close();
 

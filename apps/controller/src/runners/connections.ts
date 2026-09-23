@@ -50,7 +50,7 @@ import { runnerRepository, type RunnerHelloRecord } from "./repository";
 
 export type Connection = symbol;
 
-export const newConnection = (): Connection => Symbol("runner connection");
+export const mintConnection = (): Connection => Symbol("runner connection");
 
 export type Departure = "offline" | "unreachable";
 
@@ -201,7 +201,7 @@ const make = Effect.gen(function* () {
    * dropped: an id the controller never issued, or a second report under one it
    * did.
    */
-  const woke = (held: Reachable, key: string, reported: Reported): void => {
+  const wakeWaiters = (held: Reachable, key: string, reported: Reported): void => {
     const waiting = held.pending.get(key);
     if (waiting === undefined) return;
     held.pending.delete(key);
@@ -228,7 +228,7 @@ const make = Effect.gen(function* () {
    * Giving up is this caller's alone: the frame is still out there, so whoever
    * else is waiting under the same key is still answered when it comes back.
    */
-  const askedFor = (
+  const askAndAwaitReport = (
     id: string,
     key: string,
     send: (held: Reachable) => Effect.Effect<void>,
@@ -265,7 +265,7 @@ const make = Effect.gen(function* () {
    * Only connectivity is written here: where the runner stands with its owner
    * is the user's, and a drain outlives the socket that was dropped under it.
    */
-  const moved = (id: string, connectivity: RunnerConnectivity, at: string) =>
+  const changeConnectivity = (id: string, connectivity: RunnerConnectivity, at: string) =>
     Effect.gen(function* () {
       if (!(yield* runners.setConnectivity(id, connectivity, at))) return;
       yield* audit.append({
@@ -303,7 +303,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             yield* runners.recordHello(id, hello, at);
-            yield* moved(id, "online", at);
+            yield* changeConnectivity(id, "online", at);
             // The hello rewrites version, capabilities and facts whether or not
             // the state moved, so the row can change with nothing in the log.
             yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
@@ -352,7 +352,12 @@ const make = Effect.gen(function* () {
         const deadline = yield* RunnerFactsDeadline;
         // Every call asks: another caller's wait is no evidence a frame is
         // still in flight, and skipping the ask would leave the button inert.
-        const answer = yield* askedFor(id, FACTS_KEY, (held) => held.askForFacts, deadline);
+        const answer = yield* askAndAwaitReport(
+          id,
+          FACTS_KEY,
+          (held) => held.askForFacts,
+          deadline,
+        );
         return Option.isSome(answer);
       }),
 
@@ -362,7 +367,7 @@ const make = Effect.gen(function* () {
       deadline: Duration.Duration,
     ): Effect.Effect<Option.Option<Answer>> =>
       Effect.map(
-        askedFor(id, request.requestId, (held) => held.ask(request), deadline),
+        askAndAwaitReport(id, request.requestId, (held) => held.ask(request), deadline),
         // The facts report answers its own key and no request id, so nothing
         // but an answer can come back under this one.
         Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
@@ -376,7 +381,7 @@ const make = Effect.gen(function* () {
       Effect.sync(() => {
         const held = reachable.get(id);
         if (held?.connection !== connection) return;
-        woke(held, answer.requestId, answer);
+        wakeWaiters(held, answer.requestId, answer);
       }),
 
     /**
@@ -496,7 +501,7 @@ const make = Effect.gen(function* () {
         // case the runner reconnected in between: the new connection's waiters
         // are waiting on the new machine, and it has not spoken yet.
         const held = recorded ? reachable.get(id) : undefined;
-        if (held?.connection === connection) woke(held, FACTS_KEY, FACTS_REPORTED);
+        if (held?.connection === connection) wakeWaiters(held, FACTS_KEY, FACTS_REPORTED);
       }),
 
     /** Only the crossing is recorded, because that is the part placement acts on. */
@@ -548,7 +553,7 @@ const make = Effect.gen(function* () {
             Effect.gen(function* () {
               if (held?.connection !== connection) return;
               reachable.delete(id);
-              yield* moved(id, departure, yield* nowIso);
+              yield* changeConnectivity(id, departure, yield* nowIso);
             }),
           ),
           // Nothing is coming over a connection that has gone, whether or not
@@ -570,7 +575,8 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const at = yield* nowIso;
-        for (const id of yield* runners.connected()) yield* moved(id, "unreachable", at);
+        for (const id of yield* runners.connected())
+          yield* changeConnectivity(id, "unreachable", at);
       }),
     ),
   };

@@ -37,7 +37,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentUser, USER_ACTOR } from "../actor";
+import { requireUserActor, USER_ACTOR } from "../actor";
 import { withTransaction, type CursorError } from "../db";
 import { AuditLog } from "../events";
 import {
@@ -81,7 +81,7 @@ export interface SecretRefPage {
 const CORE_REFUSED =
   "the `core` owner holds the controller's own key material and is not writable through the API";
 
-const coreRefused = (): Validation =>
+const createCoreRefusedError = (): Validation =>
   createValidationError([{ path: ["ownerKind"], message: CORE_REFUSED }], CORE_REFUSED);
 
 /** What the wire sees: everything but the value, and no internal row id. */
@@ -94,13 +94,13 @@ const toRef = (stored: StoredSecret): SecretRef => ({
 });
 
 /** A separator the repository refused, in the envelope's vocabulary. */
-const nameIssue = (error: SecretNameError): Effect.Effect<never, Validation> =>
+const failWithNameIssue = (error: SecretNameError): Effect.Effect<never, Validation> =>
   Effect.fail(
     createValidationError([{ path: [], message: error.message }], "the request is not valid"),
   );
 
 /** A cursor this listing did not issue, in the envelope's vocabulary. */
-const cursorIssue = (error: CursorError): Effect.Effect<never, Validation> =>
+const failWithCursorIssue = (error: CursorError): Effect.Effect<never, Validation> =>
   Effect.fail(
     createValidationError(
       [{ path: ["cursor"], message: error.message }],
@@ -113,7 +113,7 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const audit = yield* AuditLog;
 
-  const ownerOf = (input: { ownerKind: OwnerKind; ownerId: string }): SecretOwner => ({
+  const buildSecretOwner = (input: { ownerKind: OwnerKind; ownerId: string }): SecretOwner => ({
     kind: input.ownerKind,
     id: input.ownerId,
   });
@@ -124,7 +124,7 @@ const make = Effect.gen(function* () {
       input: SecretQueryInput,
     ): Effect.Effect<SecretRefPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
-        yield* currentUser("secret.query");
+        yield* requireUserActor("secret.query");
         const page = yield* secrets.list({
           ownerKind: input.ownerKind,
           ownerId: input.ownerId,
@@ -136,7 +136,7 @@ const make = Effect.gen(function* () {
           items: page.items.map(toRef),
           ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
         };
-      }).pipe(Effect.catchTag("CursorError", cursorIssue)),
+      }).pipe(Effect.catchTag("CursorError", failWithCursorIssue)),
 
     /**
      * Stores a value, or rotates the one already there. Which of the two it was
@@ -150,10 +150,10 @@ const make = Effect.gen(function* () {
       input: SecretSetInput,
     ): Effect.Effect<SecretRef, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
-        yield* currentUser("secret.set");
-        if (input.ownerKind === "core") return yield* Effect.fail(coreRefused());
+        yield* requireUserActor("secret.set");
+        if (input.ownerKind === "core") return yield* Effect.fail(createCoreRefusedError());
 
-        const owner = ownerOf(input);
+        const owner = buildSecretOwner(input);
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -169,7 +169,7 @@ const make = Effect.gen(function* () {
           }),
         );
         return toRef(stored);
-      }).pipe(Effect.catchTag("SecretNameError", nameIssue)),
+      }).pipe(Effect.catchTag("SecretNameError", failWithNameIssue)),
 
     /** Removes a stored value. A name nobody stored is `not_found`, not a no-op. */
     delete: (
@@ -179,10 +179,10 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | NotFound | SqlError
     > =>
       Effect.gen(function* () {
-        yield* currentUser("secret.delete");
-        if (input.ownerKind === "core") return yield* Effect.fail(coreRefused());
+        yield* requireUserActor("secret.delete");
+        if (input.ownerKind === "core") return yield* Effect.fail(createCoreRefusedError());
 
-        const owner = ownerOf(input);
+        const owner = buildSecretOwner(input);
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -200,7 +200,7 @@ const make = Effect.gen(function* () {
           }),
         );
         return {};
-      }).pipe(Effect.catchTag("SecretNameError", nameIssue)),
+      }).pipe(Effect.catchTag("SecretNameError", failWithNameIssue)),
   };
 });
 

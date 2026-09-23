@@ -11,20 +11,20 @@ const stubFetch = (respond: (request: Request) => Response) => {
     seen.push(request);
     return Promise.resolve(respond(request));
   };
-  const sent = (index: number): Request => {
+  const readSentRequest = (index: number): Request => {
     const request = seen[index];
     assert.isDefined(request, `no request at index ${index}`);
     return request;
   };
-  return { fetch, sent, seen };
+  return { fetch, sent: readSentRequest, seen };
 };
 
-const json = (body: unknown, status = 200) =>
+const buildJsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 describe("createClient", () => {
   it("decodes a success round trip", async () => {
-    const { fetch, sent } = stubFetch(() => json({ complete: false }));
+    const { fetch, sent } = stubFetch(() => buildJsonResponse({ complete: false }));
     const client = createClient({ baseUrl: BASE, fetch });
 
     assert.deepStrictEqual(await client.setup.read(), { complete: false });
@@ -33,7 +33,7 @@ describe("createClient", () => {
   });
 
   it("sends the bearer token only while one is held", async () => {
-    const { fetch, sent } = stubFetch(() => json({ complete: false }));
+    const { fetch, sent } = stubFetch(() => buildJsonResponse({ complete: false }));
     const client = createClient({ baseUrl: BASE });
 
     // No token to start with.
@@ -59,7 +59,7 @@ describe("createClient", () => {
 
   it("turns an error envelope into an ApiError", async () => {
     const { fetch } = stubFetch(() =>
-      json(
+      buildJsonResponse(
         {
           error: {
             code: "forbidden",
@@ -124,7 +124,7 @@ describe("createClient", () => {
   });
 
   it("turns a request it cannot encode into a RequestError, having sent nothing", async () => {
-    const { fetch, seen } = stubFetch(() => json({}));
+    const { fetch, seen } = stubFetch(() => buildJsonResponse({}));
     const client = createClient({ baseUrl: BASE, fetch });
 
     const error = await client.task
@@ -181,7 +181,7 @@ describe("createClient", () => {
       contributions: [],
     };
     const { fetch, sent } = stubFetch((request) =>
-      json(request.url.endsWith("/api/v1/plugins") ? [detail] : detail),
+      buildJsonResponse(request.url.endsWith("/api/v1/plugins") ? [detail] : detail),
     );
     const client = createClient({ baseUrl: BASE, fetch });
     const params = { id: "claude-code" };
@@ -211,7 +211,7 @@ describe("createClient", () => {
   });
 
   it("sends several statuses as repeated query keys", async () => {
-    const { fetch, sent } = stubFetch(() => json({ items: [] }));
+    const { fetch, sent } = stubFetch(() => buildJsonResponse({ items: [] }));
     const client = createClient({ baseUrl: BASE, fetch });
 
     await client.session.query({ query: { status: ["queued", "starting", "idle", "busy"] } });
@@ -231,7 +231,7 @@ describe("createClient", () => {
 });
 
 /** A token store over a plain variable, so a test can read what it kept. */
-const fakeStore = (initial: string | null = null) => {
+const createFakeStore = (initial: string | null = null) => {
   let held = initial;
   return {
     read: () => held,
@@ -248,15 +248,15 @@ const PROFILE = { params: { id: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b" } };
 
 describe("createClient with a token store", () => {
   it("starts with the token the store holds", async () => {
-    const { fetch, sent } = stubFetch(() => json({}));
-    const client = createClient({ baseUrl: BASE, fetch, tokenStore: fakeStore("tok_kept") });
+    const { fetch, sent } = stubFetch(() => buildJsonResponse({}));
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: createFakeStore("tok_kept") });
 
     await client.auth.logout();
     assert.strictEqual(sent(0).headers.get("authorization"), "Bearer tok_kept");
   });
 
   it("prefers an explicit token over the stored one, and keeps it", () => {
-    const store = fakeStore("tok_kept");
+    const store = createFakeStore("tok_kept");
     const client = createClient({ baseUrl: BASE, token: "tok_given", tokenStore: store });
 
     assert.strictEqual(client.getToken(), "tok_given");
@@ -264,7 +264,7 @@ describe("createClient with a token store", () => {
   });
 
   it("writes through what setToken is given", () => {
-    const store = fakeStore();
+    const store = createFakeStore();
     const client = createClient({ baseUrl: BASE, tokenStore: store });
 
     client.setToken("tok_1");
@@ -275,8 +275,8 @@ describe("createClient with a token store", () => {
   });
 
   it("sends a presented token without writing it", async () => {
-    const store = fakeStore();
-    const { fetch, sent } = stubFetch(() => json({ complete: false }));
+    const store = createFakeStore();
+    const { fetch, sent } = stubFetch(() => buildJsonResponse({ complete: false }));
     const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
 
     client.presentToken("tok_one_time");
@@ -288,8 +288,8 @@ describe("createClient with a token store", () => {
   });
 
   it("keeps the token setup.complete hands back", async () => {
-    const store = fakeStore();
-    const { fetch } = stubFetch(() => json({ token: "tok_setup" }));
+    const store = createFakeStore();
+    const { fetch } = stubFetch(() => buildJsonResponse({ token: "tok_setup" }));
     const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
 
     await client.setup.complete({
@@ -301,9 +301,9 @@ describe("createClient with a token store", () => {
   });
 
   it("keeps the token auth.login hands back", async () => {
-    const store = fakeStore();
+    const store = createFakeStore();
     const { fetch } = stubFetch(() =>
-      json({ token: "tok_login", expiresAt: "2026-10-07T07:14:00.000Z" }),
+      buildJsonResponse({ token: "tok_login", expiresAt: "2026-10-07T07:14:00.000Z" }),
     );
     const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
 
@@ -313,8 +313,8 @@ describe("createClient with a token store", () => {
   });
 
   it("clears the token on logout", async () => {
-    const store = fakeStore("tok_kept");
-    const { fetch } = stubFetch(() => json({}));
+    const store = createFakeStore("tok_kept");
+    const { fetch } = stubFetch(() => buildJsonResponse({}));
     const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
 
     await client.auth.logout();
@@ -324,9 +324,9 @@ describe("createClient with a token store", () => {
   });
 
   it("clears the token on an unauthenticated answer, and still surfaces it", async () => {
-    const store = fakeStore("tok_stale");
+    const store = createFakeStore("tok_stale");
     const { fetch } = stubFetch(() =>
-      json({ error: { code: "unauthenticated", message: "token expired" } }, 401),
+      buildJsonResponse({ error: { code: "unauthenticated", message: "token expired" } }, 401),
     );
     const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
 
@@ -342,9 +342,9 @@ describe("createClient with a token store", () => {
   });
 
   it("keeps the token on any other failure", async () => {
-    const store = fakeStore("tok_kept");
+    const store = createFakeStore("tok_kept");
     const { fetch } = stubFetch(() =>
-      json(
+      buildJsonResponse(
         {
           error: {
             code: "forbidden",

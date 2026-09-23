@@ -29,7 +29,7 @@ export interface Resolved {
  * A machine's own word that it can run an instance: the stored capability
  * snapshot saying it is logged in. Read, never probed.
  */
-export const loggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status === "ok";
+export const isLoggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status === "ok";
 
 /**
  * An instance and the provider definition behind it, or a `validation` saying

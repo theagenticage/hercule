@@ -76,7 +76,7 @@ export const queryKeys = {
  * topic changed, which is what a reconnect assumes, so the answer is the two
  * prefixes rather than a list nobody has.
  */
-export const queryKeysFor = (
+export const buildQueryKeys = (
   topic: MutableLiveTopic,
   ids: ReadonlyArray<string>,
 ): ReadonlyArray<LiveQueryKey> => {

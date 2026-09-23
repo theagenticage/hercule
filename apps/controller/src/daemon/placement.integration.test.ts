@@ -15,41 +15,41 @@ import {
   type RunnerFacts,
 } from "@hercule/protocol";
 import { get, post, send } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
+import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
-  agentOn,
-  instanceOf,
-  inputsOf,
-  profileNamed,
+  spawnAgentUnder,
+  findInstanceId,
+  listInputs,
+  readProfileNamed,
   createProfile,
   readSession,
-  spawn,
-  spawned,
-  startFrames,
-  until,
+  spawnSession,
+  spawnSessionOrFail,
+  waitForStartFrames,
+  waitUntil,
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
   type Arranged,
 } from "../sessions/testing";
-import { framesTagged, readWorkspace, repo } from "../workspaces/testing";
+import { listFramesTagged, readWorkspace, createRepo } from "../workspaces/testing";
 
 /** Everything native, and not the instance the thread defaults will name. */
-const ALPHA: ProviderDefinition = providerDefinition("alpha-provider", { token: "t" });
+const ALPHA: ProviderDefinition = buildProviderDefinition("alpha-provider", { token: "t" });
 
 /** The instance the thread defaults name. */
-const BETA: ProviderDefinition = providerDefinition("beta-provider", { token: "t" });
+const BETA: ProviderDefinition = buildProviderDefinition("beta-provider", { token: "t" });
 
 /** The one that stores a tool restriction and enforces none of it, as Codex does. */
 const GAMMA: ProviderDefinition = {
-  ...providerDefinition("gamma-provider", { token: "t" }),
+  ...buildProviderDefinition("gamma-provider", { token: "t" }),
   declared: {
-    ...providerDefinition("gamma-provider").declared,
+    ...buildProviderDefinition("gamma-provider").declared,
     disallowedTools: "unsupported",
   },
 };
 
-const registry = (): ReadonlyArray<Plugin> => [
-  fixture({ id: "providers", definitions: [ALPHA, BETA, GAMMA] }).plugin,
+const buildPlugins = (): ReadonlyArray<Plugin> => [
+  createPluginFixture({ id: "providers", definitions: [ALPHA, BETA, GAMMA] }).plugin,
 ];
 
 const FACTS: RunnerFacts = {
@@ -93,10 +93,10 @@ const MODELS: ReadonlyArray<ModelDescriptor> = [
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  sharedWithFleet(body, { plugins: registry(), facts: FACTS, models: MODELS });
+  sharedWithFleet(body, { plugins: buildPlugins(), facts: FACTS, models: MODELS });
 
 /** The user's thread defaults, written the way the settings screen writes them. */
-const threadDefaults = async (
+const setThreadDefaults = async (
   arranged: Arranged,
   values: Record<string, unknown>,
 ): Promise<void> => {
@@ -120,13 +120,13 @@ const readStoredSpec = async (arranged: Arranged, id: string): Promise<Record<st
 };
 
 /** The workspace frame the machine was told to act on, once it is on the wire. */
-const provisionFrame = (arranged: Arranged): Promise<Record<string, unknown>> =>
-  until(
+const waitForProvisionFrame = (arranged: Arranged): Promise<Record<string, unknown>> =>
+  waitUntil(
     "told the machine to make the working area",
-    () => framesTagged(arranged.wire, "workspaceProvision")[0],
+    () => listFramesTagged(arranged.wire, "workspaceProvision")[0],
   );
 
-const ephemeral = (resourceId: string) => ({
+const buildEphemeralWorkspace = (resourceId: string) => ({
   kind: "ephemeral" as const,
   checkouts: [{ resourceId }],
 });
@@ -134,16 +134,16 @@ const ephemeral = (resourceId: string) => ({
 describe("placeSession", () => {
   it("carries the user's thread defaults into the stored spec", async () => {
     await withFleet(async (arranged) => {
-      const beta = instanceOf(arranged, "beta-provider");
-      const worker = await profileNamed(arranged, "worker");
-      await threadDefaults(arranged, {
+      const beta = findInstanceId(arranged, "beta-provider");
+      const worker = await readProfileNamed(arranged, "worker");
+      await setThreadDefaults(arranged, {
         "thread.instanceId": beta,
         "thread.model": "fast",
         "thread.accessMode": "auto",
         "thread.profileId": worker.id,
       });
 
-      const session = await spawned(arranged, { prompt: "hello" });
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
 
       expect(session.instanceId).toBe(beta);
       expect(session.permissionProfileId).toBe(worker.id);
@@ -159,11 +159,11 @@ describe("placeSession", () => {
 
   it("puts the session on the runner it placed, in the workspace it opened, with the prompt as its first input", async () => {
     await withFleet(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
+      const web = await createRepo(arranged, "https://github.com/acme/web");
 
-      const session = await spawned(arranged, {
+      const session = await spawnSessionOrFail(arranged, {
         prompt: "take a look",
-        workspace: ephemeral(web),
+        workspace: buildEphemeralWorkspace(web),
       });
 
       expect(session.runnerId).toBe(arranged.runnerId);
@@ -171,11 +171,11 @@ describe("placeSession", () => {
       const workspace = await readWorkspace(arranged, String(session.workspaceId));
       expect(workspace.runnerId).toBe(arranged.runnerId);
 
-      const inputs = await inputsOf(arranged, session.id);
+      const inputs = await listInputs(arranged, session.id);
       expect(inputs.map((one) => one.text)).toEqual(["take a look"]);
       expect(inputs[0]?.source).toBe("user");
 
-      expect((await provisionFrame(arranged))["workspaceId"]).toBe(session.workspaceId);
+      expect((await waitForProvisionFrame(arranged))["workspaceId"]).toBe(session.workspaceId);
 
       const entries = await arranged.harness.audit("session.spawned");
       expect(entries).toHaveLength(1);
@@ -213,7 +213,7 @@ const readStartedSpec = async (
   arranged: Arranged,
   sessionId: string,
 ): Promise<Record<string, unknown>> => {
-  const [frame] = await startFrames(arranged, sessionId, 1);
+  const [frame] = await waitForStartFrames(arranged, sessionId, 1);
   return { ...frame!.spec };
 };
 
@@ -231,8 +231,8 @@ describe("placeSession from an Agent", () => {
     arranged: Arranged,
     fields: Record<string, unknown> = {},
   ): Promise<{ readonly id: string; readonly profileId: string; readonly instanceId: string }> => {
-    const profile = await profileNamed(arranged, "worker");
-    const instanceId = instanceOf(arranged, "alpha-provider");
+    const profile = await readProfileNamed(arranged, "worker");
+    const instanceId = findInstanceId(arranged, "alpha-provider");
     const agent = await createAgent(arranged, {
       name: `assessor-${crypto.randomUUID()}`,
       systemPrompt: "You assess tasks.",
@@ -250,7 +250,10 @@ describe("placeSession from an Agent", () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
 
-      const session = await spawned(arranged, { agentId: agent.id, prompt: "assess this" });
+      const session = await spawnSessionOrFail(arranged, {
+        agentId: agent.id,
+        prompt: "assess this",
+      });
 
       expect(session.agentId).toBe(agent.id);
       expect(session.permissionProfileId).toBe(agent.profileId);
@@ -271,7 +274,7 @@ describe("placeSession from an Agent", () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, { model: "fast", options: { effort: "high" } });
 
-      const session = await spawned(arranged, {
+      const session = await spawnSessionOrFail(arranged, {
         agentId: agent.id,
         prompt: "assess this",
         model: "swift",
@@ -288,7 +291,7 @@ describe("placeSession from an Agent", () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
 
-      const session = await spawned(arranged, {
+      const session = await spawnSessionOrFail(arranged, {
         agentId: agent.id,
         prompt: "assess this",
         model: "swift",
@@ -305,15 +308,18 @@ describe("placeSession from an Agent", () => {
       // Set, and not to be read: an Agent answers what the thread defaults
       // answer for a Thread, so reaching them here would run the agent's
       // session under a value nobody put on the agent.
-      await threadDefaults(arranged, { "thread.model": "fast" });
+      await setThreadDefaults(arranged, { "thread.model": "fast" });
       const bare = await createAgent(arranged, {
         name: `bare-${crypto.randomUUID()}`,
         systemPrompt: "You assess tasks.",
-        instanceId: instanceOf(arranged, "alpha-provider"),
-        permissionProfileId: (await profileNamed(arranged, "worker")).id,
+        instanceId: findInstanceId(arranged, "alpha-provider"),
+        permissionProfileId: (await readProfileNamed(arranged, "worker")).id,
       });
 
-      const session = await spawned(arranged, { agentId: bare.id, prompt: "assess this" });
+      const session = await spawnSessionOrFail(arranged, {
+        agentId: bare.id,
+        prompt: "assess this",
+      });
 
       expect(session.modelSelection.model).toBe("clever");
       expect(session.requestedAccessMode).toBe("full-access");
@@ -326,10 +332,16 @@ describe("placeSession from an Agent", () => {
       await withFleet(async (arranged) => {
         const agent = await createAssessor(arranged);
         const value =
-          field === "instanceId" ? agent.instanceId : (await profileNamed(arranged, "worker")).id;
+          field === "instanceId"
+            ? agent.instanceId
+            : (await readProfileNamed(arranged, "worker")).id;
 
         const refused = await parseRefusal(
-          await spawn(arranged, { agentId: agent.id, prompt: "assess this", [field]: value }),
+          await spawnSession(arranged, {
+            agentId: agent.id,
+            prompt: "assess this",
+            [field]: value,
+          }),
         );
 
         expect(refused.code).toBe("validation");
@@ -340,7 +352,7 @@ describe("placeSession from an Agent", () => {
 
   it("answers not_found for an agent nobody holds", async () => {
     await withFleet(async (arranged) => {
-      const response = await spawn(arranged, {
+      const response = await spawnSession(arranged, {
         agentId: "0199e0e7-9999-7000-8000-000000000000",
         prompt: "assess this",
       });
@@ -355,7 +367,7 @@ describe("placeSession from an Agent", () => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await createProfile(arranged, "narrow", ["session.read"])).id,
       });
-      const { token } = await agentOn(
+      const { token } = await spawnAgentUnder(
         arranged,
         await createProfile(arranged, "spawner", ["session.spawn", "session.read"]),
       );
@@ -375,9 +387,9 @@ describe("placeSession from an Agent", () => {
   it("refuses that same session an agent whose profile grants more than its own", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
-        permissionProfileId: (await profileNamed(arranged, "unrestricted")).id,
+        permissionProfileId: (await readProfileNamed(arranged, "unrestricted")).id,
       });
-      const { token } = await agentOn(
+      const { token } = await spawnAgentUnder(
         arranged,
         await createProfile(arranged, "spawner-2", ["session.spawn", "session.read"]),
       );
@@ -403,7 +415,7 @@ describe("placeSession from an Agent", () => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await createProfile(arranged, "narrow-3", ["session.read"])).id,
       });
-      const { token } = await agentOn(
+      const { token } = await spawnAgentUnder(
         arranged,
         await createProfile(arranged, "spawner-3", ["session.spawn", "session.read"]),
       );
@@ -429,7 +441,7 @@ describe("placeSession from an Agent", () => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await createProfile(arranged, "narrow-4", ["session.read"])).id,
       });
-      const { token } = await agentOn(
+      const { token } = await spawnAgentUnder(
         arranged,
         await createProfile(arranged, "spawner-4", ["session.spawn", "session.read"]),
       );
@@ -453,7 +465,10 @@ describe("placeSession from an Agent", () => {
   it("leaves a running session and the spec its machine was told untouched when the agent is edited", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
-      const session = await spawned(arranged, { agentId: agent.id, prompt: "assess this" });
+      const session = await spawnSessionOrFail(arranged, {
+        agentId: agent.id,
+        prompt: "assess this",
+      });
       const before = await readSession(arranged, session.id);
       const specBefore = await readStartedSpec(arranged, session.id);
 
@@ -461,8 +476,8 @@ describe("placeSession from an Agent", () => {
         body: {
           name: "somebody-else",
           systemPrompt: "You do something else entirely.",
-          instanceId: instanceOf(arranged, "beta-provider"),
-          permissionProfileId: (await profileNamed(arranged, "unrestricted")).id,
+          instanceId: findInstanceId(arranged, "beta-provider"),
+          permissionProfileId: (await readProfileNamed(arranged, "unrestricted")).id,
           accessMode: "approval-required",
           model: "clever",
           disallowedTools: [],
@@ -480,11 +495,14 @@ describe("placeSession from an Agent", () => {
   it("says on the session which of its spec the provider will not act on", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
-        instanceId: instanceOf(arranged, "gamma-provider"),
+        instanceId: findInstanceId(arranged, "gamma-provider"),
         disallowedTools: ["edit"],
       });
 
-      const session = await spawned(arranged, { agentId: agent.id, prompt: "assess this" });
+      const session = await spawnSessionOrFail(arranged, {
+        agentId: agent.id,
+        prompt: "assess this",
+      });
 
       expect(session.unenforced).toEqual(["disallowedTools"]);
       expect((await readSession(arranged, session.id)).unenforced).toEqual(["disallowedTools"]);
@@ -495,7 +513,7 @@ describe("placeSession from an Agent", () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
 
-      const session = await spawned(arranged, {
+      const session = await spawnSessionOrFail(arranged, {
         agentId: agent.id,
         prompt: "assess this",
         outputSchema: SCHEMA,
@@ -510,7 +528,7 @@ describe("placeSession from an Agent", () => {
       const agent = await createAssessor(arranged);
 
       const refused = await parseRefusal(
-        await spawn(arranged, {
+        await spawnSession(arranged, {
           agentId: agent.id,
           prompt: "assess this",
           outputSchema: {
@@ -541,7 +559,7 @@ describe("placeSession from an Agent", () => {
       const properties = Object.fromEntries(keys.map((key) => [key, { type: "string" }]));
 
       const refused = await parseRefusal(
-        await spawn(arranged, {
+        await spawnSession(arranged, {
           agentId: agent.id,
           prompt: "assess this",
           outputSchema: {

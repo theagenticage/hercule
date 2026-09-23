@@ -24,17 +24,17 @@ const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
 /** How long a tail the human rendering prints, and the shortest the CLI accepts. */
 const TAIL = 8;
 
-const cell = (value: unknown): string => {
+const formatCell = (value: unknown): string => {
   if (value === undefined || value === null) return "";
   if (typeof value === "string") return CANONICAL_ID.test(value) ? value.slice(-TAIL) : value;
-  if (Array.isArray(value)) return value.map(cell).join(",");
+  if (Array.isArray(value)) return value.map(formatCell).join(",");
   if (typeof value === "object") return JSON.stringify(value);
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return JSON.stringify(value) ?? "";
 };
 
 /** Every key any row has, in the order the rows introduce them. */
-const columnsOf = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
+const listColumns = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
   const columns: Array<string> = [];
   for (const row of rows) {
     for (const key of Object.keys(row)) if (!columns.includes(key)) columns.push(key);
@@ -53,10 +53,10 @@ const keepOnOneLine = (text: string): string => {
   return lineBreak === -1 ? text : `${text.slice(0, lineBreak).trimEnd()} ...`;
 };
 
-const table = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
+const renderTable = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
   if (rows.length === 0) return ["no results"];
-  const columns = columnsOf(rows);
-  const body = rows.map((row) => columns.map((column) => keepOnOneLine(cell(row[column]))));
+  const columns = listColumns(rows);
+  const body = rows.map((row) => columns.map((column) => keepOnOneLine(formatCell(row[column]))));
   const widths = columns.map((column, index) =>
     Math.max(column.length, ...body.map((row) => row[index]!.length)),
   );
@@ -84,13 +84,13 @@ const flatten = (
       : [[name, item] as const];
   });
 
-const keyValues = (value: Record<string, unknown>): ReadonlyArray<string> => {
+const renderKeyValues = (value: Record<string, unknown>): ReadonlyArray<string> => {
   const entries = flatten(value);
   if (entries.length === 0) return ["ok"];
   const width = Math.max(...entries.map(([key]) => key.length));
   // Trimmed as the table's lines are: a key whose value is empty reads as the
   // key, not as the key plus the padding that would have held a value.
-  return entries.map(([key, item]) => `${key.padEnd(width)}  ${cell(item)}`.trimEnd());
+  return entries.map(([key, item]) => `${key.padEnd(width)}  ${formatCell(item)}`.trimEnd());
 };
 
 const isPage = (
@@ -132,8 +132,8 @@ const TRANSCRIPT_FIELD = 100;
  * output, and a transcript is read for its shape - `hercule transcript read
  * --json` is what hands back the text in full.
  */
-const brief = (value: unknown): string =>
-  truncateText(cell(value).replace(/\s+/g, " ").trim(), TRANSCRIPT_FIELD);
+const abbreviateValue = (value: unknown): string =>
+  truncateText(formatCell(value).replace(/\s+/g, " ").trim(), TRANSCRIPT_FIELD);
 
 /**
  * Describes what a turn answered under its session's output schema, as a
@@ -145,18 +145,18 @@ const describeResult = (structuredResult: unknown): string => {
   const answer = structuredResult as StructuredResult;
   switch (answer.outcome) {
     case "ok":
-      return `result: ok ${brief(answer.value)}`;
+      return `result: ok ${abbreviateValue(answer.value)}`;
     case "schema-failure":
-      return `result: schema-failure: ${brief(answer.reason)}`;
+      return `result: schema-failure: ${abbreviateValue(answer.reason)}`;
   }
 };
 
 /** `<position>  <at>  <tag>  <what that tag adds>`. */
-const transcriptLine = (row: Record<string, unknown>): string => {
+const renderTranscriptLine = (row: Record<string, unknown>): string => {
   const event = (row["event"] ?? {}) as Record<string, unknown>;
   const fields = Object.entries(event)
     .filter(([key]) => !TRANSCRIPT_NOISE.has(key) && key !== "structuredResult")
-    .map(([key, value]) => `${key}=${brief(value)}`);
+    .map(([key, value]) => `${key}=${abbreviateValue(value)}`);
   // The answer is placed right after the turn's state, and not where the event
   // happens to carry it. The reader reads the line for the answer, and behind
   // the usage figures the answer wraps off a 120-column terminal.
@@ -168,7 +168,7 @@ const transcriptLine = (row: Record<string, unknown>): string => {
       describeResult(answered),
     );
   }
-  return [cell(row["position"]), cell(row["at"]), cell(event["_tag"]), ...fields]
+  return [formatCell(row["position"]), formatCell(row["at"]), formatCell(event["_tag"]), ...fields]
     .join("  ")
     .trimEnd();
 };
@@ -178,8 +178,8 @@ const transcriptLine = (row: Record<string, unknown>): string => {
  * columns plus a payload whose fields differ per tag, so a table of it would be
  * mostly empty cells. It is rendered as lines instead.
  */
-const transcript = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
-  rows.length === 0 ? ["no results"] : rows.map(transcriptLine);
+const renderTranscript = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
+  rows.length === 0 ? ["no results"] : rows.map(renderTranscriptLine);
 
 /**
  * Returns the lines printed after a workflow is created or updated: its id,
@@ -187,7 +187,7 @@ const transcript = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray
  * definition. The source is not printed, because the caller has just sent it.
  */
 const renderWorkflowSaveResult = (answer: WorkflowSaveResult): ReadonlyArray<string> => [
-  ...keyValues({ id: answer.workflow.id, enabled: answer.workflow.enabled }),
+  ...renderKeyValues({ id: answer.workflow.id, enabled: answer.workflow.enabled }),
   ...answer.warnings.map((warning) => `warning: ${formatIssue(warning)}`),
 ];
 
@@ -221,7 +221,7 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
 
 /** The lines the CLI prints for a successful command, without `--json`. */
 export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
-  const asLines = command.id === "transcript.read" ? transcript : table;
+  const asLines = command.id === "transcript.read" ? renderTranscript : renderTable;
 
   if (outcome.kind === "items") return asLines(outcome.items);
 
@@ -229,10 +229,10 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
   // These two queries return a short, complete array instead of a page, so
   // print the array as a table, like the items of a page.
   if (command.id === "workflowAction.query") {
-    return table((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction));
+    return renderTable((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction));
   }
   if (command.id === "eventKind.query") {
-    return table(value as ReadonlyArray<Record<string, unknown>>);
+    return renderTable(value as ReadonlyArray<Record<string, unknown>>);
   }
   if (isPage(value)) {
     const lines = [...asLines(value.items)];
@@ -257,15 +257,18 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
       return renderWorkflowSaveResult(value as WorkflowSaveResult);
     }
     if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
-    const lines = [...keyValues(record)];
+    const lines = [...renderKeyValues(record)];
     // The one teaching line this build has. A caller who has just spawned a
     // session wants to watch it. It is not pointed at a subscription on that
     // session: no platform event about a session is emitted yet, so such a
     // claim is refused. It is pointed at the transcript it can already read.
     if (command.id === "session.spawn") {
-      lines.push("", `read what it says with \`hercule transcript read ${cell(record["id"])}\``);
+      lines.push(
+        "",
+        `read what it says with \`hercule transcript read ${formatCell(record["id"])}\``,
+      );
     }
     return lines;
   }
-  return [cell(value)];
+  return [formatCell(value)];
 };

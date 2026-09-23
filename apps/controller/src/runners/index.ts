@@ -24,7 +24,7 @@ export {
   type FleetTraffic,
   type SessionTraffic,
 } from "./connections";
-export { onlineWhere, runnerRepository } from "./repository";
+export { buildOnlineClause, runnerRepository } from "./repository";
 export { RunnerJoinRouteLayer } from "./route";
 export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./socket";
 export {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { configDraft, configFields, configIssues, configPayload } from "./config-fields";
+import {
+  buildConfigDraft,
+  buildConfigFields,
+  readConfigIssues,
+  buildConfigPayload,
+} from "./config-fields";
 import { ApiError } from "./errors";
 
 /**
@@ -8,7 +13,7 @@ import { ApiError } from "./errors";
  * record the wire declares. A field model built from anything narrower would
  * not be reachable from what the screen actually holds.
  */
-const objectSchema = (
+const buildObjectSchema = (
   properties: Record<string, unknown>,
   required: readonly string[] = [],
 ): Record<string, unknown> => ({
@@ -18,10 +23,10 @@ const objectSchema = (
   additionalProperties: false,
 });
 
-describe("configFields", () => {
+describe("buildConfigFields", () => {
   it("gives one field per property, in schema order, with the kind its type names", () => {
-    const fields = configFields(
-      objectSchema({
+    const fields = buildConfigFields(
+      buildObjectSchema({
         endpoint: { type: "string" },
         timeout: { type: "number" },
         retries: { type: "integer" },
@@ -48,8 +53,8 @@ describe("configFields", () => {
   });
 
   it("marks required exactly the properties the schema requires", () => {
-    const fields = configFields(
-      objectSchema(
+    const fields = buildConfigFields(
+      buildObjectSchema(
         {
           endpoint: { type: "string" },
           timeout: { type: "number" },
@@ -65,8 +70,8 @@ describe("configFields", () => {
   });
 
   it("reads the label off the title where there is one, and the description through", () => {
-    const fields = configFields(
-      objectSchema({
+    const fields = buildConfigFields(
+      buildObjectSchema({
         endpoint: {
           type: "string",
           title: "Endpoint",
@@ -88,13 +93,13 @@ describe("configFields", () => {
   });
 
   it("has nothing to show for a plugin with nothing to configure", () => {
-    expect(configFields(objectSchema({}))).toEqual([]);
+    expect(buildConfigFields(buildObjectSchema({}))).toEqual([]);
   });
 });
 
-describe("configDraft", () => {
-  const fields = configFields(
-    objectSchema({
+describe("buildConfigDraft", () => {
+  const fields = buildConfigFields(
+    buildObjectSchema({
       endpoint: { type: "string" },
       retries: { type: "integer" },
       verbose: { type: "boolean" },
@@ -104,7 +109,7 @@ describe("configDraft", () => {
 
   it("reads the stored config into what each widget holds", () => {
     expect(
-      configDraft(fields, {
+      buildConfigDraft(fields, {
         endpoint: "https://notes.test",
         retries: 3,
         verbose: true,
@@ -119,7 +124,7 @@ describe("configDraft", () => {
   });
 
   it("gives an unset setting the empty form of its own kind", () => {
-    expect(configDraft(fields, {})).toEqual({
+    expect(buildConfigDraft(fields, {})).toEqual({
       endpoint: "",
       retries: "",
       verbose: false,
@@ -128,9 +133,9 @@ describe("configDraft", () => {
   });
 });
 
-describe("configPayload", () => {
-  const fields = configFields(
-    objectSchema({
+describe("buildConfigPayload", () => {
+  const fields = buildConfigFields(
+    buildObjectSchema({
       endpoint: { type: "string" },
       timeout: { type: "number" },
       retries: { type: "integer" },
@@ -141,7 +146,7 @@ describe("configPayload", () => {
 
   it("sends each setting as the type its schema names", () => {
     expect(
-      configPayload(
+      buildConfigPayload(
         fields,
         {
           endpoint: "https://notes.test",
@@ -163,7 +168,7 @@ describe("configPayload", () => {
 
   it("leaves out what nobody filled in, rather than sending an empty one", () => {
     expect(
-      configPayload(
+      buildConfigPayload(
         fields,
         { endpoint: "", timeout: "", retries: "", verbose: false, tags: [] },
         {},
@@ -173,25 +178,28 @@ describe("configPayload", () => {
 
   it("keeps writing a checkbox and a list the stored config already has an answer for", () => {
     expect(
-      configPayload(fields, { verbose: false, tags: [] }, { verbose: true, tags: ["alpha"] }),
+      buildConfigPayload(fields, { verbose: false, tags: [] }, { verbose: true, tags: ["alpha"] }),
     ).toEqual({ verbose: false, tags: [] });
   });
 
   it("sends a required checkbox and list even where nothing is stored", () => {
-    const required = configFields(
-      objectSchema({ verbose: { type: "boolean" }, tags: { type: "array" } }, ["verbose", "tags"]),
+    const required = buildConfigFields(
+      buildObjectSchema({ verbose: { type: "boolean" }, tags: { type: "array" } }, [
+        "verbose",
+        "tags",
+      ]),
     );
 
-    expect(configPayload(required, { verbose: false, tags: [] }, {})).toEqual({
+    expect(buildConfigPayload(required, { verbose: false, tags: [] }, {})).toEqual({
       verbose: false,
       tags: [],
     });
   });
 });
 
-describe("configIssues", () => {
-  const fields = configFields(
-    objectSchema({ endpoint: { type: "string" }, retries: { type: "integer" } }),
+describe("readConfigIssues", () => {
+  const fields = buildConfigFields(
+    buildObjectSchema({ endpoint: { type: "string" }, retries: { type: "integer" } }),
   );
 
   it("keys a refused write's messages by the setting each blamed", () => {
@@ -202,31 +210,31 @@ describe("configIssues", () => {
       ],
     });
 
-    expect(configIssues(refusal, fields)).toEqual({
+    expect(readConfigIssues(refusal, fields)).toEqual({
       perField: { endpoint: "must be an https URL", retries: "must be at least 1" },
       rest: false,
     });
   });
 
   it("leaves the form to say what no rendered setting carries", () => {
-    expect(configIssues(new ApiError("internal", "the database is locked"), fields)).toEqual({
+    expect(readConfigIssues(new ApiError("internal", "the database is locked"), fields)).toEqual({
       perField: {},
       rest: true,
     });
-    expect(configIssues(new Error("the controller could not be reached"), fields)).toEqual({
+    expect(readConfigIssues(new Error("the controller could not be reached"), fields)).toEqual({
       perField: {},
       rest: true,
     });
     // A refusal about the payload as a whole belongs to the form, not a field.
     expect(
-      configIssues(
+      readConfigIssues(
         new ApiError("validation", "no", { issues: [{ path: [], message: "no" }] }),
         fields,
       ),
     ).toEqual({ perField: {}, rest: true });
     // A setting this form does not render would otherwise be shown nowhere.
     expect(
-      configIssues(
+      readConfigIssues(
         new ApiError("validation", "no", { issues: [{ path: ["gone"], message: "unknown key" }] }),
         fields,
       ),
@@ -234,7 +242,7 @@ describe("configIssues", () => {
   });
 
   it("says nothing at all when the write was not refused", () => {
-    expect(configIssues(null, fields)).toEqual({ perField: {}, rest: false });
+    expect(readConfigIssues(null, fields)).toEqual({ perField: {}, rest: false });
   });
 
   it("reads a group's own fields out of a path that names the group", () => {
@@ -245,12 +253,12 @@ describe("configIssues", () => {
       ],
     });
 
-    expect(configIssues(refusal, [{ name: "token" }], "credentials")).toEqual({
+    expect(readConfigIssues(refusal, [{ name: "token" }], "credentials")).toEqual({
       perField: { token: "that token was rejected" },
       // The settings issue lands on no field this form draws.
       rest: true,
     });
-    expect(configIssues(refusal, fields, "config")).toEqual({
+    expect(readConfigIssues(refusal, fields, "config")).toEqual({
       perField: { endpoint: "must be an https URL" },
       rest: true,
     });
@@ -263,6 +271,6 @@ describe("configIssues", () => {
 
     // The type is gone, so this form draws nothing: without this the message
     // would be filed under a field nobody can see and never shown.
-    expect(configIssues(refusal, [], "config")).toEqual({ perField: {}, rest: true });
+    expect(readConfigIssues(refusal, [], "config")).toEqual({ perField: {}, rest: true });
   });
 });

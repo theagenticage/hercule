@@ -321,7 +321,7 @@ describe("stamping a credential's use", () => {
       const minted = await post(base, "/api/v1/api-keys", { name: "laptop" }, bearer);
       const key = (await minted.json()) as { id: string; token: string };
 
-      const stampOf = async (): Promise<string | null> => {
+      const readLastUsedAt = async (): Promise<string | null> => {
         const page = (await (await get(base, "/api/v1/api-keys", bearer)).json()) as {
           items: ReadonlyArray<{ id: string; lastUsedAt: string | null }>;
         };
@@ -329,11 +329,11 @@ describe("stamping a credential's use", () => {
       };
 
       expect((await get(base, "/api/v1/api-keys", key.token)).status).toBe(200);
-      const first = await stampOf();
+      const first = await readLastUsedAt();
       await new Promise((resolve) => setTimeout(resolve, 25));
       expect((await get(base, "/api/v1/api-keys", key.token)).status).toBe(200);
 
-      expect(await stampOf()).toBe(first);
+      expect(await readLastUsedAt()).toBe(first);
     });
   });
 });

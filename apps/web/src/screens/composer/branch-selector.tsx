@@ -8,7 +8,7 @@ import { SelectorShell } from "./selector-shell";
  * The lip's second selector: the branch a main workspace switches to, or the
  * ref a fresh worktree starts from (spec 14 §The composer, the Branch
  * selector). Which of the two it is comes off the workspace pick, decided in
- * `branchField`; what is left here is the drawing.
+ * `buildBranchField`; what is left here is the drawing.
  *
  * A field with nothing to choose between - a repo no machine has cloned, a
  * multi-repo worktree, whose base per repo is post-v1 - is read-only text.

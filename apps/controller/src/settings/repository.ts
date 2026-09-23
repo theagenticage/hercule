@@ -61,7 +61,7 @@ const DEFAULT_RUNNER_ID = "defaultRunnerId";
 
 const DefaultRunnerId = Schema.fromJsonString(Schema.NullOr(Id));
 
-const unreadable = (message: string): SettingError =>
+const createSettingError = (message: string): SettingError =>
   new SettingError({ scope: "controller", key: DEFAULT_RUNNER_ID, message });
 
 /**
@@ -69,7 +69,7 @@ const unreadable = (message: string): SettingError =>
  * the `value` column holds. The lookup is by string, so the caller's typed key
  * is what keeps the value type honest.
  */
-const schemaFor = (scope: TypedScope, key: string): Schema.Codec<unknown, string> =>
+const buildStoredCodec = (scope: TypedScope, key: string): Schema.Codec<unknown, string> =>
   Schema.fromJsonString((SETTING_SCHEMAS[scope] as Record<string, Schema.Codec<unknown>>)[key]!);
 
 /** One stored value, decoded to the key's declared type. */
@@ -78,7 +78,7 @@ const decode = (
   key: string,
   value: string,
 ): Effect.Effect<unknown, SettingError> =>
-  Schema.decodeUnknownEffect(schemaFor(scope, key))(value).pipe(
+  Schema.decodeUnknownEffect(buildStoredCodec(scope, key))(value).pipe(
     Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
   );
 
@@ -88,7 +88,7 @@ const encode = (
   key: string,
   value: unknown,
 ): Effect.Effect<string, SettingError> =>
-  Schema.encodeUnknownEffect(schemaFor(scope, key))(value).pipe(
+  Schema.encodeUnknownEffect(buildStoredCodec(scope, key))(value).pipe(
     Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
   );
 
@@ -183,7 +183,7 @@ const make = Effect.gen(function* () {
           const row = rows[0];
           if (row === undefined) return Effect.succeed(null);
           return Schema.decodeUnknownEffect(DefaultRunnerId)(row.value).pipe(
-            Effect.mapError((error) => unreadable(error.message)),
+            Effect.mapError((error) => createSettingError(error.message)),
           );
         },
       ),
@@ -196,7 +196,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const json = yield* Effect.mapError(
           Schema.encodeUnknownEffect(DefaultRunnerId)(id),
-          (error) => unreadable(error.message),
+          (error) => createSettingError(error.message),
         );
         yield* sql`
           INSERT INTO settings (scope, key, value, updated_at)

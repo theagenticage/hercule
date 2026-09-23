@@ -96,7 +96,7 @@ type Payload = ReadonlyArray<string | number>;
 /** A sort key on the wire: whatever the ordered column holds. */
 export type SortKey = string | number;
 
-const seal = (scope: CursorScope, payload: Payload): string =>
+const sealCursor = (scope: CursorScope, payload: Payload): string =>
   Buffer.from(
     JSON.stringify([scope.op, scope.field, scope.direction, ...payload]),
     "utf8",
@@ -107,25 +107,25 @@ const seal = (scope: CursorScope, payload: Payload): string =>
  * cursor of one kind unreadable as another: it sees the payload only after the
  * walk matched, and rejects anything it does not recognise.
  */
-const open = <A>(
+const openCursor = <A>(
   cursor: string,
   scope: CursorScope,
   shape: (payload: ReadonlyArray<unknown>) => A | undefined,
 ): Effect.Effect<A, CursorError> => {
-  const refuse = (message: string) => Effect.fail(new CursorError({ message }));
+  const failWithCursorError = (message: string) => Effect.fail(new CursorError({ message }));
   let parsed: unknown;
   try {
     parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
   } catch {
-    return refuse(NOT_OURS);
+    return failWithCursorError(NOT_OURS);
   }
-  if (!Array.isArray(parsed) || parsed.length < 4) return refuse(NOT_OURS);
+  if (!Array.isArray(parsed) || parsed.length < 4) return failWithCursorError(NOT_OURS);
   const [op, field, direction, ...payload] = parsed as ReadonlyArray<unknown>;
-  if (op !== scope.op) return refuse(NOT_OURS);
-  if (field !== scope.field) return refuse(OTHER_LISTING);
-  if (direction !== scope.direction) return refuse(OTHER_ORDER);
+  if (op !== scope.op) return failWithCursorError(NOT_OURS);
+  if (field !== scope.field) return failWithCursorError(OTHER_LISTING);
+  if (direction !== scope.direction) return failWithCursorError(OTHER_ORDER);
   const value = shape(payload);
-  return value === undefined ? refuse(NOT_OURS) : Effect.succeed(value);
+  return value === undefined ? failWithCursorError(NOT_OURS) : Effect.succeed(value);
 };
 
 // A position SQLite can bind and compare as an integer. `isSafeInteger` is the
@@ -142,7 +142,7 @@ const isPosition = (value: unknown): value is number =>
  * ends after its first page with no error to show for it.
  */
 export const encodeCursor = (scope: CursorScope, sortKey: SortKey, id: string): string =>
-  seal(scope, [sortKey, id]);
+  sealCursor(scope, [sortKey, id]);
 
 /**
  * The sort key and id a cursor names, or `CursorError` if it names neither or
@@ -160,7 +160,7 @@ export const decodeCursor = (
   scope: CursorScope,
   keyType: "string" | "number",
 ): Effect.Effect<readonly [SortKey, string], CursorError> =>
-  open(cursor, scope, (payload) =>
+  openCursor(cursor, scope, (payload) =>
     payload.length === 2 &&
     typeof payload[0] === keyType &&
     typeof payload[1] === "string" &&
@@ -179,7 +179,7 @@ export const encodeOwnedCursor = (
   sortKey: string,
   ownerId: string,
   name: string,
-): string => seal(scope, [sortKey, ownerId, name]);
+): string => sealCursor(scope, [sortKey, ownerId, name]);
 
 /**
  * Decodes a cursor from `encodeOwnedCursor` into its sort key, owner id and
@@ -194,7 +194,7 @@ export const decodeOwnedCursor = (
   cursor: string,
   scope: CursorScope,
 ): Effect.Effect<readonly [string, string, string], CursorError> =>
-  open(cursor, scope, (payload) =>
+  openCursor(cursor, scope, (payload) =>
     payload.length === 3 &&
     typeof payload[0] === "string" &&
     typeof payload[1] === "string" &&
@@ -205,14 +205,15 @@ export const decodeOwnedCursor = (
   );
 
 /** The cursor for a walk over integer ids: the id of the page's last row. */
-export const encodeIdCursor = (scope: CursorScope, id: number): string => seal(scope, ["id", id]);
+export const encodeIdCursor = (scope: CursorScope, id: number): string =>
+  sealCursor(scope, ["id", id]);
 
 /** The id a cursor names, or `CursorError` if it names none or belongs to another walk. */
 export const decodeIdCursor = (
   cursor: string,
   scope: CursorScope,
 ): Effect.Effect<number, CursorError> =>
-  open(cursor, scope, (payload) =>
+  openCursor(cursor, scope, (payload) =>
     payload.length === 2 && payload[0] === "id" && isPosition(payload[1]) ? payload[1] : undefined,
   );
 
@@ -222,7 +223,7 @@ export const decodeIdCursor = (
  * ordering by a rank no row carries.
  */
 export const encodeOffsetCursor = (scope: CursorScope, offset: number): string =>
-  seal(scope, ["offset", offset]);
+  sealCursor(scope, ["offset", offset]);
 
 /**
  * The two fragments a keyset walk adds to its query: the boundary the cursor
@@ -238,7 +239,7 @@ export const encodeOffsetCursor = (scope: CursorScope, offset: number): string =
  * answer the resume: `(a, b) > (x, y)` reads along the index from that pair
  * rather than filtering out every row before it.
  */
-export const keysetOver = (
+export const buildKeyset = (
   sql: SqlClient.SqlClient,
   columns: ReadonlyArray<string>,
   after: ReadonlyArray<unknown> | undefined,
@@ -280,7 +281,7 @@ export const keysetOver = (
  * warns about. Both callbacks in the tree map every row; the `undefined` guard
  * below is what the generic's own type demands, not a case that can arise.
  */
-export const pageOf = <Row, A, E, R>(
+export const buildPage = <Row, A, E, R>(
   rows: ReadonlyArray<Row>,
   limit: number,
   items: (rows: ReadonlyArray<Row>) => Effect.Effect<ReadonlyArray<A>, E, R>,
@@ -299,7 +300,7 @@ export const decodeOffsetCursor = (
   cursor: string,
   scope: CursorScope,
 ): Effect.Effect<number, CursorError> =>
-  open(cursor, scope, (payload) =>
+  openCursor(cursor, scope, (payload) =>
     payload.length === 2 && payload[0] === "offset" && isPosition(payload[1])
       ? payload[1]
       : undefined,
@@ -314,7 +315,9 @@ export const decodeOffsetCursor = (
  * both by a transport that has already decoded that string and by a workflow
  * action that never had one, so what it decodes is the pair, not the string.
  */
-export const pageInput = <const Fields extends ReadonlyArray<string>>(fields: Fields) => ({
+export const buildPageInputFields = <const Fields extends ReadonlyArray<string>>(
+  fields: Fields,
+) => ({
   limit: Schema.optionalKey(
     Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
   ),

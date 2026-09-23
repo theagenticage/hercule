@@ -1,7 +1,7 @@
 import { Effect, Layer } from "effect";
 import {
-  configFileIn,
-  homePaths,
+  locateConfigFile,
+  buildHomePaths,
   InvalidOptionError,
   parseGlobalOptions,
   resolveHomePath,
@@ -13,14 +13,14 @@ import { createDirectory, createLayout, HerculeHome } from "./home";
 // The pure home pieces live in `@hercule/home`, which the CLI and the runner link
 // too; a controller module reaches them through here.
 export {
-  configFileIn,
+  locateConfigFile,
   DATABASE_FILE_NAME,
   DEFAULT_HOME_NAME,
-  homePaths,
+  buildHomePaths,
   InvalidOptionError,
   parseGlobalOptions,
   resolveHomePath,
-  setupUrlFileIn,
+  locateSetupUrlFile,
   type GlobalOptions,
   type HomePaths,
 } from "@hercule/home";
@@ -59,7 +59,7 @@ export const layer = (
       }
 
       const home = resolveHomePath(options.home, env);
-      const configFile = configFileIn(home);
+      const configFile = locateConfigFile(home);
 
       // The home must exist before `config.toml` can be written into it; the
       // rest of the layout waits until `data.dir` is known, so a configured
@@ -73,7 +73,7 @@ export const layer = (
         configFile,
       });
 
-      const paths = homePaths(home, config.dataDir);
+      const paths = buildHomePaths(home, config.dataDir);
       yield* createLayout(paths);
 
       return Layer.mergeAll(

@@ -9,7 +9,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   expectInDocumentOrder,
-  reading,
+  readPageText,
   renderApp,
   stubApi,
   type Handler,
@@ -110,7 +110,7 @@ const CONFIGURABLE: Fixture = {
   contributions: [{ extensionPoint: "provider", id: "notes", definition: {} }],
 };
 
-const writeRoutes = (plugin: Fixture): Readonly<Record<string, Handler>> => ({
+const buildWriteRoutes = (plugin: Fixture): Readonly<Record<string, Handler>> => ({
   [`POST /api/v1/plugins/${plugin.id}/enable`]: { body: { ...plugin, enabled: true } },
   [`POST /api/v1/plugins/${plugin.id}/disable`]: {
     body: { ...plugin, enabled: false, status: { _tag: "inactive" } },
@@ -121,7 +121,7 @@ const writeRoutes = (plugin: Fixture): Readonly<Record<string, Handler>> => ({
 });
 
 /** A controller holding the plugins given, with every write answered. */
-const controller = (
+const buildController = (
   plugins: readonly Fixture[],
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
@@ -134,20 +134,23 @@ const controller = (
   },
   "GET /api/v1/plugins": { body: plugins },
   ...plugins.reduce<Record<string, Handler>>(
-    (all, plugin) => ({ ...all, ...writeRoutes(plugin) }),
+    (all, plugin) => ({ ...all, ...buildWriteRoutes(plugin) }),
     {},
   ),
   ...extra,
 });
 
-const open = async (plugins: readonly Fixture[], extra: Readonly<Record<string, Handler>> = {}) => {
-  const api = stubApi(controller(plugins, extra));
+const openApp = async (
+  plugins: readonly Fixture[],
+  extra: Readonly<Record<string, Handler>> = {},
+) => {
+  const api = stubApi(buildController(plugins, extra));
   const app = await renderApp({ path: "/settings/plugins", api: api.fetch, token: "held" });
   return { ...app, api };
 };
 
 /** The writes that went out to one plugin, in order. */
-const writesTo = (
+const listWritesTo = (
   api: { readonly calls: readonly { method: string; path: string; body: unknown }[] },
   id: string,
 ) =>
@@ -156,7 +159,7 @@ const writesTo = (
   );
 
 /** The card about one plugin: the section its display name heads. */
-const cardFor = async (plugin: Fixture): Promise<HTMLElement> => {
+const findPluginCard = async (plugin: Fixture): Promise<HTMLElement> => {
   const heading = await screen.findByText(plugin.displayName);
   const card = heading.closest("section");
   if (card === null) throw new Error(`no card around ${plugin.displayName}`);
@@ -165,39 +168,39 @@ const cardFor = async (plugin: Fixture): Promise<HTMLElement> => {
 
 describe("Settings > Plugins", () => {
   it("says what each plugin is, how it is doing, and what it contributes", async () => {
-    await open([ACTIVE, ERRORED, REFUSED]);
+    await openApp([ACTIVE, ERRORED, REFUSED]);
 
-    const active = reading(await cardFor(ACTIVE));
+    const active = readPageText(await findPluginCard(ACTIVE));
     expect(active).toMatch(/active/i);
     expect(active).toMatch(/provider/i);
     expect(active).toContain("acme");
 
-    const errored = reading(await cardFor(ERRORED));
+    const errored = readPageText(await findPluginCard(ERRORED));
     expect(errored).toMatch(/error/i);
     expect(errored).toMatch(/channel/i);
     expect(errored).toContain("chatter");
 
-    const refused = reading(await cardFor(REFUSED));
+    const refused = readPageText(await findPluginCard(REFUSED));
     expect(refused).toMatch(/refused|not loaded|turned away/i);
   });
 
   it("shows what an activation failed with, and retries it on the spot", async () => {
     const user = userEvent.setup();
-    const { api } = await open([ACTIVE, ERRORED, REFUSED]);
+    const { api } = await openApp([ACTIVE, ERRORED, REFUSED]);
 
-    const card = await cardFor(ERRORED);
-    expect(reading(card)).toContain(ACTIVATION_FAILURE);
+    const card = await findPluginCard(ERRORED);
+    expect(readPageText(card)).toContain(ACTIVATION_FAILURE);
 
     await user.click(within(card).getByRole("button", { name: "Retry" }));
 
     await waitFor(() => {
-      expect(writesTo(api, ERRORED.id).map((call) => call.path)).toEqual([
+      expect(listWritesTo(api, ERRORED.id).map((call) => call.path)).toEqual([
         `/api/v1/plugins/${ERRORED.id}/retry`,
       ]);
     });
 
     for (const plugin of [ACTIVE, REFUSED]) {
-      const other = within(await cardFor(plugin));
+      const other = within(await findPluginCard(plugin));
       expect(other.queryByRole("button", { name: "Retry" })).toBeNull();
     }
   });
@@ -205,14 +208,14 @@ describe("Settings > Plugins", () => {
   it("turns a plugin the user had switched off back on", async () => {
     const user = userEvent.setup();
     const off: Fixture = { ...ACTIVE, enabled: false, status: { _tag: "inactive" } };
-    const { api } = await open([off]);
+    const { api } = await openApp([off]);
 
-    const card = await cardFor(off);
+    const card = await findPluginCard(off);
 
     await user.click(within(card).getByRole("button", { name: "Enable" }));
 
     await waitFor(() => {
-      expect(writesTo(api, off.id).map((call) => call.path)).toEqual([
+      expect(listWritesTo(api, off.id).map((call) => call.path)).toEqual([
         `/api/v1/plugins/${off.id}/enable`,
       ]);
     });
@@ -221,46 +224,46 @@ describe("Settings > Plugins", () => {
   it("says so when a move the card offered was refused", async () => {
     const user = userEvent.setup();
     const complaint = "the plugin is not errored";
-    const { api } = await open([ERRORED], {
+    const { api } = await openApp([ERRORED], {
       [`POST /api/v1/plugins/${ERRORED.id}/retry`]: {
         status: 400,
         body: { error: { code: "validation", message: complaint, details: { issues: [] } } },
       },
     });
 
-    const card = await cardFor(ERRORED);
+    const card = await findPluginCard(ERRORED);
     await user.click(within(card).getByRole("button", { name: "Retry" }));
 
     expect((await within(card).findByRole("alert")).textContent).toBe(complaint);
-    expect(writesTo(api, ERRORED.id)).toHaveLength(1);
+    expect(listWritesTo(api, ERRORED.id)).toHaveLength(1);
   });
 
   it("says why a refused plugin was turned away and offers nothing to switch", async () => {
     const user = userEvent.setup();
-    const { api } = await open([ACTIVE, ERRORED, REFUSED]);
+    const { api } = await openApp([ACTIVE, ERRORED, REFUSED]);
 
-    const card = await cardFor(REFUSED);
-    expect(reading(card)).toMatch(/host api/i);
-    expect(reading(card)).toContain("2");
+    const card = await findPluginCard(REFUSED);
+    expect(readPageText(card)).toMatch(/host api/i);
+    expect(readPageText(card)).toContain("2");
 
     // A refused plugin is enabled as far as the stored flag goes, so the
     // control it offers is the one that would turn it off - and it is dead.
     const toggle = within(card).getByRole("button", { name: "Disable" });
     expect(toggle.hasAttribute("disabled")).toBe(true);
     await user.click(toggle);
-    expect(writesTo(api, REFUSED.id)).toEqual([]);
+    expect(listWritesTo(api, REFUSED.id)).toEqual([]);
   });
 
   it("turns a running plugin off", async () => {
     const user = userEvent.setup();
-    const { api } = await open([ACTIVE, ERRORED, REFUSED]);
+    const { api } = await openApp([ACTIVE, ERRORED, REFUSED]);
 
-    const card = await cardFor(ACTIVE);
+    const card = await findPluginCard(ACTIVE);
 
     await user.click(within(card).getByRole("button", { name: "Disable" }));
 
     await waitFor(() => {
-      expect(writesTo(api, ACTIVE.id).map((call) => call.path)).toEqual([
+      expect(listWritesTo(api, ACTIVE.id).map((call) => call.path)).toEqual([
         `/api/v1/plugins/${ACTIVE.id}/disable`,
       ]);
     });
@@ -268,14 +271,14 @@ describe("Settings > Plugins", () => {
 });
 
 /** Every value the form is holding right now, whatever widget holds it. */
-const values = (): string =>
+const readFormValues = (): string =>
   [...document.querySelectorAll("input, select, textarea")]
     .map((element) => (element as HTMLInputElement).value)
     .join(" | ");
 
 describe("Settings > Plugins > configuration", () => {
   it("shows a field per configurable setting, holding what is stored", async () => {
-    await open([CONFIGURABLE]);
+    await openApp([CONFIGURABLE]);
 
     expect(screen.getByLabelText<HTMLInputElement>(/endpoint/i).value).toBe(
       "https://notes.test/ingest",
@@ -284,8 +287,8 @@ describe("Settings > Plugins > configuration", () => {
     expect(screen.getByLabelText<HTMLInputElement>(/verbose/i).checked).toBe(true);
     expect(screen.getByLabelText<HTMLSelectElement>(/mode/i).value).toBe("fast");
     // A list of strings has no one widget, so only the values have to be there.
-    expect(values()).toContain("alpha");
-    expect(values()).toContain("beta");
+    expect(readFormValues()).toContain("alpha");
+    expect(readFormValues()).toContain("beta");
   });
 
   it("leaves a setting nobody answered out of the write, rather than storing a default", async () => {
@@ -296,16 +299,16 @@ describe("Settings > Plugins > configuration", () => {
       displayName: "Fresh Sink",
       config: {},
     };
-    const { api } = await open([unset]);
+    const { api } = await openApp([unset]);
 
     await user.type(screen.getByLabelText(/endpoint/i), "https://notes.test/ingest");
     await user.type(screen.getByLabelText(/retries/i), "5");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(writesTo(api, unset.id)).toHaveLength(1);
+      expect(listWritesTo(api, unset.id)).toHaveLength(1);
     });
-    expect(writesTo(api, unset.id)[0]?.body).toEqual({
+    expect(listWritesTo(api, unset.id)[0]?.body).toEqual({
       config: { endpoint: "https://notes.test/ingest", retries: 5 },
     });
   });
@@ -313,7 +316,7 @@ describe("Settings > Plugins > configuration", () => {
   it("puts a refused setting's message under the setting it is about", async () => {
     const user = userEvent.setup();
     const complaint = "must be an https URL";
-    await open([CONFIGURABLE], {
+    await openApp([CONFIGURABLE], {
       [`PUT /api/v1/plugins/${CONFIGURABLE.id}/config`]: {
         status: 400,
         body: {
@@ -344,7 +347,7 @@ describe("Settings > Plugins > configuration", () => {
     const held = new Promise<void>((resolve) => {
       answer = resolve;
     });
-    await open([CONFIGURABLE], {
+    await openApp([CONFIGURABLE], {
       [`PUT /api/v1/plugins/${CONFIGURABLE.id}/config`]: async () => {
         await held;
         return { body: CONFIGURABLE };
@@ -367,7 +370,7 @@ describe("Settings > Plugins > configuration", () => {
   it("says a refusal that blamed no field of this form, rather than swallowing it", async () => {
     const user = userEvent.setup();
     const complaint = "the plugin refused its own configuration";
-    await open([CONFIGURABLE], {
+    await openApp([CONFIGURABLE], {
       [`PUT /api/v1/plugins/${CONFIGURABLE.id}/config`]: {
         status: 400,
         body: {
@@ -387,7 +390,7 @@ describe("Settings > Plugins > configuration", () => {
 
   it("shows a config changed elsewhere instead of holding the values it opened on", async () => {
     let held: readonly Fixture[] = [CONFIGURABLE];
-    const { live } = await open(held, {
+    const { live } = await openApp(held, {
       "GET /api/v1/plugins": () => ({ body: held }),
     });
     await waitFor(() => {
@@ -418,11 +421,11 @@ describe("Settings > Plugins > configuration", () => {
 describe("Settings > Plugins > reset", () => {
   it("asks before it wipes a plugin's state, then wipes it", async () => {
     const user = userEvent.setup();
-    const { api } = await open([CONFIGURABLE]);
+    const { api } = await openApp([CONFIGURABLE]);
 
     await user.click(await screen.findByRole("button", { name: "Reset plugin state" }));
 
-    expect(writesTo(api, CONFIGURABLE.id)).toEqual([]);
+    expect(listWritesTo(api, CONFIGURABLE.id)).toEqual([]);
     // Cancel comes before Confirm.
     const confirm = screen.getByRole("button", { name: "Confirm" });
     expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), confirm]);
@@ -430,7 +433,7 @@ describe("Settings > Plugins > reset", () => {
     await user.click(confirm);
 
     await waitFor(() => {
-      expect(writesTo(api, CONFIGURABLE.id).map((call) => call.path)).toEqual([
+      expect(listWritesTo(api, CONFIGURABLE.id).map((call) => call.path)).toEqual([
         `/api/v1/plugins/${CONFIGURABLE.id}/reset-state`,
       ]);
     });
@@ -439,10 +442,10 @@ describe("Settings > Plugins > reset", () => {
 
 describe("Settings > Plugins > nothing installed", () => {
   it("says what plugins would bring", async () => {
-    await open([]);
+    await openApp([]);
 
-    expect(reading()).toContain("No plugins are installed.");
-    expect(reading()).toContain(
+    expect(readPageText()).toContain("No plugins are installed.");
+    expect(readPageText()).toContain(
       "Plugins bring channels, event sources, providers and workflow actions. Each one declares what it contributes, and Hercule generates its configuration form from that.",
     );
   });
@@ -451,11 +454,11 @@ describe("Settings > Plugins > nothing installed", () => {
 describe("Settings > Plugins > live", () => {
   it("shows a plugin's new status when it changes elsewhere", async () => {
     let held: readonly Fixture[] = [ACTIVE, ERRORED];
-    const { api, live } = await open(held, {
+    const { api, live } = await openApp(held, {
       "GET /api/v1/plugins": () => ({ body: held }),
     });
 
-    expect(reading(await cardFor(ERRORED))).toMatch(/error/i);
+    expect(readPageText(await findPluginCard(ERRORED))).toMatch(/error/i);
     await waitFor(() => {
       expect(live.topics()).toContain("plugin");
     });
@@ -467,7 +470,7 @@ describe("Settings > Plugins > live", () => {
     });
 
     await waitFor(async () => {
-      expect(reading(await cardFor(ERRORED))).toMatch(/active/i);
+      expect(readPageText(await findPluginCard(ERRORED))).toMatch(/active/i);
     });
     // The card came from a fresh listing, not from the push itself.
     expect(api.calls.filter((call) => call.path === "/api/v1/plugins").length).toBeGreaterThan(

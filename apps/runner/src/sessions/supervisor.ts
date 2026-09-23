@@ -29,9 +29,9 @@ import {
   type SessionStart,
   type SessionStop,
 } from "@hercule/protocol";
-import { noAdapterFor, type ProviderAdapter } from "../providers";
-import { now, wentWrong } from "../report";
-import { resolve, type Machine } from "./context";
+import { describeMissingAdapter, type ProviderAdapter } from "../providers";
+import { now, describeCause } from "../report";
+import { resolveSessionContext, type Machine } from "./context";
 
 /**
  * One session this runner holds. The binding is not here: the adapters are the
@@ -127,7 +127,7 @@ export interface Supervising {
 const SHUTDOWN_STOP_BOUND: Duration.Duration = Duration.seconds(5);
 
 /** Taken once, so the state below is the process's rather than a connection's. */
-export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervising => {
+export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervising => {
   const live = new Map<string, Live>();
   let lastSeq = 0;
   /**
@@ -159,7 +159,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
   };
 
   const forConnection = (connection: Connection): SessionSupervisor => {
-    const discard = (scratch: string | undefined): void => {
+    const discardScratch = (scratch: string | undefined): void => {
       if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
     };
 
@@ -168,15 +168,15 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
      * one event lost rather than the whole relay, which would drop every
      * session's traffic for the life of the connection with nobody watching.
      */
-    const sending = (frame: RunnerToController): Effect.Effect<void> =>
+    const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
       Effect.ignoreCause(Effect.suspend(() => connection.send(frame)));
 
     /** Interrupts both timer fibers of one entry and discards its scratch. */
-    const teardown = (held: Live): Effect.Effect<void> =>
+    const tearDownSession = (held: Live): Effect.Effect<void> =>
       Effect.gen(function* () {
         if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
         if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
-        discard(held.scratch);
+        discardScratch(held.scratch);
       });
 
     /**
@@ -184,7 +184,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
      * event's: a session id started again while its old exit was still in
      * flight is a different session, and the old run must not sweep it away.
      */
-    const release = (sessionId: string): Effect.Effect<void> =>
+    const releaseSession = (sessionId: string): Effect.Effect<void> =>
       Effect.gen(function* () {
         const held = live.get(sessionId);
         if (held === undefined) return;
@@ -197,7 +197,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
         // this exit belongs to.
         if (live.get(sessionId) !== held) return;
         live.delete(sessionId);
-        yield* teardown(held);
+        yield* tearDownSession(held);
       });
 
     /**
@@ -206,7 +206,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
      * arriving mid-sleep only moves `lastEventAt` (no interrupt, no fork), so
      * the fiber already asleep has to notice the deadline moved on its own.
      */
-    const watchingInactivity = (held: Live, sessionId: string): Effect.Effect<void> =>
+    const watchInactivity = (held: Live, sessionId: string): Effect.Effect<void> =>
       Effect.gen(function* () {
         while (true) {
           const remaining = held.lastEventAt + held.inactivityMs - (yield* Clock.currentTimeMillis);
@@ -232,7 +232,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
       Effect.ignoreCause(
         Effect.flatMap(
           Effect.promise(() => connection.machine.workspaces.reportAfterSession(workspaceId)),
-          (report) => (report === undefined ? Effect.void : sending(report)),
+          (report) => (report === undefined ? Effect.void : sendFrame(report)),
         ),
       );
 
@@ -241,7 +241,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
      * or moving the inactivity clock happens first, so a caller that has seen
      * the frame this event produced has also seen what it did to the clock.
      */
-    const sequenced = (event: ProviderEvent): Effect.Effect<void> =>
+    const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
       sequencing.withPermits(1)(
         Effect.gen(function* () {
           const held = live.get(event.sessionId);
@@ -274,9 +274,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
             if (held.turnOpen && !held.parked) {
               held.lastEventAt = yield* Clock.currentTimeMillis;
               if (held.inactivity === undefined) {
-                held.inactivity = yield* Effect.forkDetach(
-                  watchingInactivity(held, event.sessionId),
-                );
+                held.inactivity = yield* Effect.forkDetach(watchInactivity(held, event.sessionId));
               }
             } else if (held.inactivity !== undefined) {
               const fiber = held.inactivity;
@@ -286,8 +284,8 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
           }
           lastSeq += 1;
           const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
-          if (event._tag === "session.exited") yield* release(event.sessionId);
-          yield* sending(frame);
+          if (event._tag === "session.exited") yield* releaseSession(event.sessionId);
+          yield* sendFrame(frame);
           // After the send, not before: a `shutdown` waiting on this deferred
           // must see the frame already on the wire when it wakes.
           if (event._tag === "session.exited") {
@@ -305,10 +303,10 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
      * every other session's events would wait behind it. The entry is read
      * before the exit is sequenced, because that is what removes it.
      */
-    const forward = (event: ProviderEvent): Effect.Effect<void> => {
+    const forwardEvent = (event: ProviderEvent): Effect.Effect<void> => {
       const workspaceId =
         event._tag === "session.exited" ? live.get(event.sessionId)?.workspaceId : undefined;
-      return Effect.flatMap(sequenced(event), () =>
+      return Effect.flatMap(sendSequenced(event), () =>
         workspaceId === undefined || workspaceId === null
           ? Effect.void
           : reportWorkspace(workspaceId),
@@ -316,8 +314,8 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
     };
 
     /** What went wrong, in the session's own stream, where a reader of the thread sees it. */
-    const failed = (sessionId: string, message: string): Effect.Effect<void> =>
-      forward({
+    const reportFailure = (sessionId: string, message: string): Effect.Effect<void> =>
+      forwardEvent({
         _tag: "runtime.error",
         eventId: crypto.randomUUID(),
         sessionId,
@@ -333,9 +331,9 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
      * `starting` until an exit says otherwise, and `crash` is the reason for an
      * end nobody asked for that leaves nothing to resume.
      */
-    const died = (sessionId: string, message: string): Effect.Effect<void> =>
-      Effect.flatMap(failed(sessionId, message), () =>
-        forward({
+    const reportDeath = (sessionId: string, message: string): Effect.Effect<void> =>
+      Effect.flatMap(reportFailure(sessionId, message), () =>
+        forwardEvent({
           _tag: "session.exited",
           eventId: crypto.randomUUID(),
           sessionId,
@@ -360,12 +358,12 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
       const issues =
         frame.spec.outputSchema === undefined ? [] : lintOutputSchema(frame.spec.outputSchema);
       if (issues.length > 0) {
-        return died(
+        return reportDeath(
           frame.sessionId,
           `the output schema is outside the subset every harness accepts: ${issues.join("; ")}`,
         );
       }
-      return resolve(frame, connection.machine, adapter.binaryName).pipe(
+      return resolveSessionContext(frame, connection.machine, adapter.binaryName).pipe(
         Effect.flatMap((resolved) =>
           Effect.asVoid(
             Effect.uninterruptible(
@@ -393,8 +391,8 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
                 // stop.
                 if (stopped) {
                   live.delete(frame.sessionId);
-                  yield* teardown(held);
-                  return yield* forward({
+                  yield* tearDownSession(held);
+                  return yield* forwardEvent({
                     _tag: "session.exited",
                     eventId: crypto.randomUUID(),
                     sessionId: frame.sessionId,
@@ -423,7 +421,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
                       // now, and this one has nothing left to take away.
                       if (live.get(frame.sessionId) !== held) return;
                       live.delete(frame.sessionId);
-                      yield* teardown(held);
+                      yield* tearDownSession(held);
                     }),
                 );
                 // By identity, the same guard both timers use: a start after
@@ -443,8 +441,10 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
             ),
           ),
         ),
-        Effect.catch((message) => died(frame.sessionId, message)),
-        Effect.catchCause((cause) => died(frame.sessionId, wentWrong(cause, MAX_MESSAGE_LENGTH))),
+        Effect.catch((message) => reportDeath(frame.sessionId, message)),
+        Effect.catchCause((cause) =>
+          reportDeath(frame.sessionId, describeCause(cause, MAX_MESSAGE_LENGTH)),
+        ),
       );
     };
 
@@ -454,14 +454,14 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
           adapters.map((adapter) => adapter.events),
           { concurrency: "unbounded" },
         ),
-        forward,
+        forwardEvent,
       ),
 
       // Asked of the adapters when the controller asks, not built when the
       // connection was made.
       report: Effect.flatMap(
         Effect.forEach(adapters, (adapter) => adapter.listSessions),
-        (held) => sending({ _tag: "sessionsReport", sessions: held.flat() }),
+        (held) => sendFrame({ _tag: "sessionsReport", sessions: held.flat() }),
       ),
 
       start: (frame: SessionStart): Effect.Effect<void> =>
@@ -472,7 +472,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
           if (stopped) return;
           const adapter = adapters.find((one) => one.providerId === frame.providerId);
           if (adapter === undefined) {
-            return yield* died(frame.sessionId, noAdapterFor(frame.providerId));
+            return yield* reportDeath(frame.sessionId, describeMissingAdapter(frame.providerId));
           }
           // The adapter is asked, never this table: a start for a session it
           // still holds is one the controller re-issued after a reconnect,
@@ -484,7 +484,7 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
           const stale = live.get(frame.sessionId);
           if (stale !== undefined) {
             live.delete(frame.sessionId);
-            yield* teardown(stale);
+            yield* tearDownSession(stale);
           }
           return yield* startSession(frame, adapter);
         }),
@@ -496,22 +496,22 @@ export const supervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervisi
        * controller is waiting on this frame under the row's own id.
        */
       input: (frame: SessionInput): Effect.Effect<void> => {
-        const answer = (result: Omit<SessionInputResult, "_tag" | "requestId">) =>
-          sending({ _tag: "sessionInputResult", requestId: frame.requestId, ...result });
+        const sendInputResult = (result: Omit<SessionInputResult, "_tag" | "requestId">) =>
+          sendFrame({ _tag: "sessionInputResult", requestId: frame.requestId, ...result });
         // Both: the caller waiting on the answer needs the reason, and the
         // session's own stream is where a reader of the thread sees it.
-        const refuse = (message: string): Effect.Effect<void> =>
-          Effect.flatMap(failed(frame.sessionId, message), () =>
-            answer({ ok: false, message: message.slice(0, MAX_MESSAGE_LENGTH) }),
+        const refuseInput = (message: string): Effect.Effect<void> =>
+          Effect.flatMap(reportFailure(frame.sessionId, message), () =>
+            sendInputResult({ ok: false, message: message.slice(0, MAX_MESSAGE_LENGTH) }),
           );
         const held = live.get(frame.sessionId);
         if (held === undefined) {
-          return refuse(`session ${frame.sessionId} is not running on this runner`);
+          return refuseInput(`session ${frame.sessionId} is not running on this runner`);
         }
         return held.adapter.sendInput(frame.sessionId, frame.input).pipe(
-          Effect.flatMap((sent) => answer({ ok: true, delivery: sent.delivery })),
-          Effect.catch(refuse),
-          Effect.catchCause((cause) => refuse(wentWrong(cause, MAX_MESSAGE_LENGTH))),
+          Effect.flatMap((sent) => sendInputResult({ ok: true, delivery: sent.delivery })),
+          Effect.catch(refuseInput),
+          Effect.catchCause((cause) => refuseInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
         );
       },
 

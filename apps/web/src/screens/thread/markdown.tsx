@@ -32,7 +32,7 @@ const HEADING = "mt-5 first:mt-0";
  * appends to whatever class the renderer already put there rather than
  * replacing it: `sr-only` on the footnote label, for one, is load-bearing.
  */
-const styled =
+const createStyledComponent =
   (tag: string, className: string) =>
   (props: Dressable): JSX.Element =>
     createElement(tag, {
@@ -63,7 +63,7 @@ const CELL = "border border-line-soft px-2 py-1 align-top";
  * editor needs them. The app's own markup uses classes only, so a stricter
  * policy would break nothing.
  */
-const cell = (
+const renderTableCell = (
   tag: "th" | "td",
   className: string,
   props: Dressable & { readonly style?: { readonly textAlign?: string | undefined } | undefined },
@@ -83,15 +83,15 @@ const components: Components = {
   // is prose with sections, not a document, and the thread's own title sits a
   // few pixels away in the chrome. What separates a heading is the air above
   // it and the weight, not the size.
-  h1: styled("h1", `${HEADING} text-lead font-emph text-ink`),
-  h2: styled("h2", `${HEADING} text-body font-emph text-ink`),
-  h3: styled("h3", `${HEADING} font-emph text-ink`),
-  h4: styled("h4", `${HEADING} font-emph text-ink`),
-  h5: styled("h5", `${HEADING} font-emph text-ink`),
-  h6: styled("h6", `${HEADING} font-emph text-ink`),
-  p: styled("p", `${STACKED} leading-relaxed`),
+  h1: createStyledComponent("h1", `${HEADING} text-lead font-emph text-ink`),
+  h2: createStyledComponent("h2", `${HEADING} text-body font-emph text-ink`),
+  h3: createStyledComponent("h3", `${HEADING} font-emph text-ink`),
+  h4: createStyledComponent("h4", `${HEADING} font-emph text-ink`),
+  h5: createStyledComponent("h5", `${HEADING} font-emph text-ink`),
+  h6: createStyledComponent("h6", `${HEADING} font-emph text-ink`),
+  p: createStyledComponent("p", `${STACKED} leading-relaxed`),
   // 500, not the browser's 700: heavier bolds squint in this face.
-  strong: styled("strong", "font-emph"),
+  strong: createStyledComponent("strong", "font-emph"),
   // The link text is written by the agent and the target need not match it, so
   // a click leaves this tab where it is and carries no referrer out. A link
   // into the page itself - a footnote's number and its way back - is the
@@ -103,26 +103,32 @@ const components: Components = {
       ...(props.href?.startsWith("#") === true ? {} : { target: "_blank", rel: "noreferrer" }),
       className: "underline decoration-line underline-offset-[3px]",
     }),
-  ul: styled("ul", `${STACKED} list-disc space-y-1 pl-5 marker:text-faint`),
-  ol: styled("ol", `${STACKED} list-decimal space-y-1 pl-5 marker:text-faint`),
+  ul: createStyledComponent("ul", `${STACKED} list-disc space-y-1 pl-5 marker:text-faint`),
+  ol: createStyledComponent("ol", `${STACKED} list-decimal space-y-1 pl-5 marker:text-faint`),
   // A list inside a list item belongs to that item, so it sits closer to it
   // than two blocks of prose sit to each other.
-  li: styled("li", "leading-relaxed [&>ul]:mt-1 [&>ol]:mt-1"),
+  li: createStyledComponent("li", "leading-relaxed [&>ul]:mt-1 [&>ol]:mt-1"),
   // A tint rather than a filled chip, because the same rule has to read on the
   // page behind the prose and on the surface of the user's bubble; an alpha
   // over either one shows, a second opaque colour over one of them does not.
-  code: styled("code", "rounded-control bg-line-soft px-1 py-px font-mono text-[0.92em]"),
-  pre: styled("pre", FENCE),
-  blockquote: styled("blockquote", `${STACKED} border-l-2 border-line-soft pl-3 text-muted`),
-  hr: styled("hr", `${STACKED} border-line`),
+  code: createStyledComponent(
+    "code",
+    "rounded-control bg-line-soft px-1 py-px font-mono text-[0.92em]",
+  ),
+  pre: createStyledComponent("pre", FENCE),
+  blockquote: createStyledComponent(
+    "blockquote",
+    `${STACKED} border-l-2 border-line-soft pl-3 text-muted`,
+  ),
+  hr: createStyledComponent("hr", `${STACKED} border-line`),
   // A wide table scrolls on its own rather than widening the column.
   table: (props) => (
     <div className={`${STACKED} overflow-x-auto`}>
       {createElement("table", { ...props, node: undefined, className: "w-full border-collapse" })}
     </div>
   ),
-  th: (props) => cell("th", `${CELL} font-emph`, props),
-  td: (props) => cell("td", CELL, props),
+  th: (props) => renderTableCell("th", `${CELL} font-emph`, props),
+  td: (props) => renderTableCell("td", CELL, props),
 };
 
 /**

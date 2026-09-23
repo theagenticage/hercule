@@ -1,5 +1,5 @@
 import { Fragment, type JSX } from "react";
-import { optionsMenu } from "@hercule/client-core";
+import { buildOptionsMenu } from "@hercule/client-core";
 import type { ModelOption } from "@hercule/contract";
 import { SegmentedControl, SegmentedControlItem } from "@hercule/ui";
 import { MenuHeader } from "./menu";
@@ -46,7 +46,7 @@ export function ModelOptionsSelector({
     >
       <MenuHeader label={HEADER} note={modelName ?? undefined} />
       <div className="mt-0.5 grid grid-cols-[68px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-[5px] px-2 pt-1.5 pb-1">
-        {optionsMenu(descriptors, selected).map((row) => (
+        {buildOptionsMenu(descriptors, selected).map((row) => (
           <Fragment key={row.id}>
             <span className="text-[10px] font-emph tracking-[0.09em] text-faint uppercase">
               {row.label}

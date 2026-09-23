@@ -57,7 +57,7 @@ class Rollback {
  * publish happens after the commit, so a read in the same turn as the write
  * would be measuring the race rather than the behaviour.
  */
-const settled = (queue: LiveQueue): Effect.Effect<ReadonlyArray<LiveMessage>> =>
+const takeSettledMessages = (queue: LiveQueue): Effect.Effect<ReadonlyArray<LiveMessage>> =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 20; attempt++) {
       const size = yield* Queue.size(queue);
@@ -86,7 +86,7 @@ describe("publishing after a commit", () => {
           ),
         );
 
-        return yield* settled(queue);
+        return yield* takeSettledMessages(queue);
       }),
     );
 
@@ -119,7 +119,7 @@ describe("publishing after a commit", () => {
           }),
         );
 
-        return [yield* settled(queue), task.id] as const;
+        return [yield* takeSettledMessages(queue), task.id] as const;
       }),
     );
 
@@ -139,7 +139,7 @@ describe("publishing after a commit", () => {
           tasks.create({ title: "a task that sticks", description: "" }),
         );
 
-        return [yield* settled(queue), task.id] as const;
+        return [yield* takeSettledMessages(queue), task.id] as const;
       }),
     );
 

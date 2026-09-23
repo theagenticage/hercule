@@ -4,7 +4,7 @@
  */
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { siblingTabs, turnsOf, type HerculeClient, type Live } from "@hercule/client-core";
+import { buildSiblingTabs, buildTurns, type HerculeClient, type Live } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import {
   inputsQuery,
@@ -45,7 +45,7 @@ export function ThreadScreen({
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId)).data;
   // The item the session is parked on reads `awaiting approval` in the
   // transcript, in place of `running`.
-  const turns = turnsOf(rows, session.openRequest?.itemId);
+  const turns = buildTurns(rows, session.openRequest?.itemId);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
   const tailRef = useThreadLive(live, queryClient, sessionId, rows, followIfAtBottom);
   const lastIndex = turns.length - 1;
@@ -81,7 +81,7 @@ export function ThreadScreen({
       <ThreadChrome
         crumb={project?.name}
         title={session.title}
-        tabs={siblingTabs({ workspace, sessions, activeSessionId: session.id })}
+        tabs={buildSiblingTabs({ workspace, sessions, activeSessionId: session.id })}
         actions={
           <>
             {workspace === undefined ? null : (

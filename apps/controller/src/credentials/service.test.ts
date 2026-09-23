@@ -22,7 +22,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
  * The one user, and a call made as it: the actor is what the transport puts in
  * `CurrentActor` for a request under that user's login bearer.
  */
-const asUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
+const runAsUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
   run(
     Effect.gen(function* () {
       const users = yield* Users;
@@ -38,7 +38,7 @@ const asUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
 
 describe("apiKey.create", () => {
   it("returns a token that resolves, and stores only its hash", async () => {
-    const result = await asUser(
+    const result = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
         const credentials = yield* Credentials;
@@ -54,7 +54,7 @@ describe("apiKey.create", () => {
   });
 
   it("stamps the mint in the audit log, with the key's id and name", async () => {
-    const result = await asUser(
+    const result = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
         const audit = yield* AuditLog;
@@ -81,7 +81,7 @@ describe("apiKey.create", () => {
 
 describe("apiKey.query", () => {
   it("lists the caller's keys newest first, revoked ones included, tokens never", async () => {
-    const items = await asUser(
+    const items = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
         const first = yield* apiKeys.create({ name: "laptop" });
@@ -98,7 +98,7 @@ describe("apiKey.query", () => {
   });
 
   it("pages by keyset, and refuses a cursor it did not issue", async () => {
-    const result = await asUser(
+    const result = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
         yield* apiKeys.create({ name: "one" });
@@ -123,7 +123,7 @@ describe("apiKey.query", () => {
 
 describe("apiKey.revoke", () => {
   it("revokes the key, stamps it, and says not_found the second time", async () => {
-    const result = await asUser(
+    const result = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
         const audit = yield* AuditLog;
@@ -141,7 +141,7 @@ describe("apiKey.revoke", () => {
   });
 
   it("logs nothing when there was nothing to revoke: the transaction rolls back", async () => {
-    const entries = await asUser(
+    const entries = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
         const audit = yield* AuditLog;

@@ -16,29 +16,29 @@ import {
   PASSWORD,
   ROOT,
   USERNAME,
-  apiKeyIn,
-  cli,
+  readApiKey,
+  runCli,
   completeSetup,
-  jsonOf,
+  parseJsonOutput,
   startController,
-  temporaryHome,
+  createTemporaryHome,
   type Controller,
 } from "./harness";
 
-const state = temporaryHome();
+const state = createTemporaryHome();
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;
 
 /** The CLI, as the binary, under the credential file the login wrote. */
-const hercule = (args: ReadonlyArray<string>, stdin?: string) =>
-  cli(args, { home: state.home, binary, stdin });
+const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
+  runCli(args, { home: state.home, binary, stdin });
 
 /** Fails with the command's own output rather than on an undefined field. */
-const ok = (ran: { code: number; stdout: string; stderr: string }): unknown => {
+const expectJsonOutput = (ran: { code: number; stdout: string; stderr: string }): unknown => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
-  return jsonOf(ran);
+  return parseJsonOutput(ran);
 };
 
 interface TaskRow {
@@ -61,7 +61,7 @@ beforeAll(async () => {
   const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-  const login = await hercule(
+  const login = await runLoggedInCli(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-cli"],
     PASSWORD,
   );
@@ -75,14 +75,16 @@ afterAll(async () => {
 
 describe("tasks, projects, the log and the plugins through the binary", () => {
   it("creates, lists, reads, updates and deletes a task", async () => {
-    const project = ok(await hercule(["project", "create", "--name", "hercule", "--json"])) as {
+    const project = expectJsonOutput(
+      await runLoggedInCli(["project", "create", "--name", "hercule", "--json"]),
+    ) as {
       id: string;
       name: string;
     };
     expect(project.name).toBe("hercule");
 
-    const created = ok(
-      await hercule(
+    const created = expectJsonOutput(
+      await runLoggedInCli(
         [
           "task",
           "create",
@@ -106,36 +108,42 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
 
     // A task that matches neither filter, so a listing that answers with both
     // rows would fail here rather than pass by accident.
-    ok(await hercule(["task", "create", "--title", "unrelated", "--json"], ""));
+    expectJsonOutput(
+      await runLoggedInCli(["task", "create", "--title", "unrelated", "--json"], ""),
+    );
 
-    const queried = ok(
-      await hercule(["task", "list", "--status", "open", "--label", "x", "--json"]),
+    const queried = expectJsonOutput(
+      await runLoggedInCli(["task", "list", "--status", "open", "--label", "x", "--json"]),
     ) as { items: ReadonlyArray<TaskRow> };
     expect(queried.items.map((task) => task.id)).toEqual([created.id]);
 
-    const byTail = ok(await hercule(["task", "read", created.id.slice(-8), "--json"])) as TaskRow;
+    const byTail = expectJsonOutput(
+      await runLoggedInCli(["task", "read", created.id.slice(-8), "--json"]),
+    ) as TaskRow;
     expect(byTail.id).toBe(created.id);
 
-    const updated = ok(
-      await hercule(["task", "update", created.id, "--status", "in-progress", "--json"]),
+    const updated = expectJsonOutput(
+      await runLoggedInCli(["task", "update", created.id, "--status", "in-progress", "--json"]),
     ) as TaskRow;
     expect(updated.status).toBe("in-progress");
 
-    const deleted = await hercule(["task", "delete", created.id, "--json"]);
+    const deleted = await runLoggedInCli(["task", "delete", created.id, "--json"]);
     expect(deleted.code).toBe(0);
 
-    const gone = await hercule(["task", "read", created.id, "--json"]);
+    const gone = await runLoggedInCli(["task", "read", created.id, "--json"]);
     expect(gone.code).toBe(1);
-    expect(jsonOf(gone)).toMatchObject({ error: { code: "not_found" } });
+    expect(parseJsonOutput(gone)).toMatchObject({ error: { code: "not_found" } });
 
-    const projects = ok(await hercule(["project", "list", "--json"])) as {
+    const projects = expectJsonOutput(await runLoggedInCli(["project", "list", "--json"])) as {
       items: ReadonlyArray<{ id: string; name: string }>;
     };
     expect(projects.items.map((one) => one.name)).toContain("hercule");
   }, 60_000);
 
   it("shows the task events the commands wrote, each stamped with the user", async () => {
-    const events = ok(await hercule(["event", "list", "--kind", "task.created", "--json"])) as {
+    const events = expectJsonOutput(
+      await runLoggedInCli(["event", "list", "--kind", "task.created", "--json"]),
+    ) as {
       items: ReadonlyArray<{ id: number; kind: string; actor: string | null }>;
     };
     expect(events.items.length).toBeGreaterThanOrEqual(2);
@@ -150,7 +158,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     // No CLI command for plugins, so the route is called the way the web app
     // does: the key the login above minted, straight over the wire.
     const response = await fetch(`${url}/api/v1/plugins`, {
-      headers: { authorization: `Bearer ${apiKeyIn(state.home)}` },
+      headers: { authorization: `Bearer ${readApiKey(state.home)}` },
     });
     expect(response.status).toBe(200);
 
@@ -169,7 +177,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
   }, 30_000);
 
   it("lists the five task verbs in help, each with its grant and a line of its own", async () => {
-    const help = await hercule(["task", "--help"]);
+    const help = await runLoggedInCli(["task", "--help"]);
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("usage: hercule task <verb>");
     for (const verb of ["list", "read", "create", "update", "delete"]) {
@@ -187,7 +195,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
   }, 30_000);
 
   it("ends the help of one command with its operation, route and grant", async () => {
-    const help = await hercule(["task", "create", "--help"]);
+    const help = await runLoggedInCli(["task", "create", "--help"]);
     expect(help.code).toBe(0);
     expect(help.stdout.trimEnd().split("\n").at(-1)).toBe(
       "operation task.create · POST /api/v1/tasks · grant task.create",

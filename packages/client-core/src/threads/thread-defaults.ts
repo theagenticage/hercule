@@ -17,9 +17,9 @@ import type {
   Runner,
   SettingsState,
 } from "@hercule/contract";
-import { defaultInstanceId } from "./default-instance";
-import { threadModelField } from "./model-field";
-import { runnerMenu } from "./runner-menu";
+import { findDefaultInstanceId } from "./default-instance";
+import { buildThreadModelField } from "./model-field";
+import { buildRunnerMenu } from "./runner-menu";
 
 const DEFAULT_PROFILE_NAME = "unrestricted";
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
@@ -39,19 +39,19 @@ export interface ThreadDefaults {
  * one machine's snapshot beside a runner that is another machine is a pill
  * reading `not offered on <runner>` before the user has touched anything.
  */
-export const instanceDefaults = (
+export const computeInstanceDefaults = (
   instance: ProviderInstance,
   runners: readonly Runner[],
   localRunnerId: string | null,
 ): { readonly runnerId: string | null; readonly model: string | null } => {
-  const runnerId = runnerMenu(runners, localRunnerId, instance).defaultRunnerId;
-  const field = threadModelField(instance, runnerId, undefined);
+  const runnerId = buildRunnerMenu(runners, localRunnerId, instance).defaultRunnerId;
+  const field = buildThreadModelField(instance, runnerId, undefined);
   const model =
     field.options.find((option) => option.isDefault)?.slug ?? field.options[0]?.slug ?? null;
   return { runnerId, model };
 };
 
-export const threadDefaults = (
+export const computeThreadDefaults = (
   settingsUser: SettingsState["user"],
   instances: readonly ProviderInstance[],
   runners: readonly Runner[],
@@ -63,11 +63,11 @@ export const threadDefaults = (
   // catalog from - never the empty, unexplained field a stale id would leave.
   const instance =
     instances.find((each) => each.id === settingsUser["thread.instanceId"]) ??
-    instances.find((each) => each.id === defaultInstanceId(instances));
+    instances.find((each) => each.id === findDefaultInstanceId(instances));
   const forInstance =
     instance === undefined
       ? { runnerId: null, model: null }
-      : instanceDefaults(instance, runners, localRunnerId);
+      : computeInstanceDefaults(instance, runners, localRunnerId);
 
   return {
     instanceId: instance?.id ?? null,

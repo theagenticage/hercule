@@ -15,21 +15,22 @@ const FLOORS: ReadonlyMap<string, string> = new Map([
   ["pi", PI_VERSION],
 ]);
 
-export const floorFor = (providerId: string): string | null => FLOORS.get(providerId) ?? null;
+export const findVersionFloor = (providerId: string): string | null =>
+  FLOORS.get(providerId) ?? null;
 
 /** The leading numeric components, so 10 sorts after 9 rather than before it. */
-const partsOf = (version: string): ReadonlyArray<number> | undefined => {
+const parseVersionParts = (version: string): ReadonlyArray<number> | undefined => {
   const parts = version.split(".", 3).map((part) => Number.parseInt(part, 10));
   return parts.length === 3 && parts.every(Number.isInteger) ? parts : undefined;
 };
 
-export const versionVerdict = (
+export const computeVersionVerdict = (
   harnessVersion: string | null,
   floor: string | null,
 ): VersionVerdict => {
   if (harnessVersion === null || floor === null) return "unknown";
-  const running = partsOf(harnessVersion);
-  const least = partsOf(floor);
+  const running = parseVersionParts(harnessVersion);
+  const least = parseVersionParts(floor);
   // An unparseable version on either side compares to nothing, same as none
   // reported.
   if (running === undefined || least === undefined) return "unknown";

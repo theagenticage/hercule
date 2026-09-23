@@ -17,7 +17,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   decodeAgainst,
-  secretFields,
+  listSecretFields,
   excludeSecretFields,
   type ProviderDefinition,
 } from "@hercule/plugin-host";
@@ -46,7 +46,7 @@ import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
 import {
-  providerInstanceOwner,
+  buildProviderInstanceOwner,
   Secrets,
   type SecretDecryptError,
   type SecretNameRef,
@@ -62,7 +62,7 @@ import {
 } from "../runners";
 import { ProviderProbes, ProviderProbeDeadline } from "./probes";
 import { providerRepository, type StoredInstance, type StoredSnapshot } from "./repository";
-import { floorFor, versionVerdict } from "./version";
+import { findVersionFloor, computeVersionVerdict } from "./version";
 
 /**
  * The user is watching a dialog; a cold CLI reaching the vendor is what takes
@@ -142,7 +142,7 @@ type AskError = WriteError | InvalidState;
  * entered. Said as a state rather than as a fault, because it is one the user
  * settles by entering the credential again.
  */
-const undecryptable = (error: SecretDecryptError): InvalidState =>
+const createUndecryptableError = (error: SecretDecryptError): InvalidState =>
   createInvalidStateError(
     `the credential stored as ${error.name} for that provider instance could not be ` +
       "decrypted; enter it again to replace it",
@@ -153,7 +153,7 @@ type LoginAnswer = LoginUrl | LoginFailed | LoginResult;
 const isLoginAnswer = (answer: Answer): answer is LoginAnswer =>
   answer._tag === "loginUrl" || answer._tag === "loginFailed" || answer._tag === "loginResult";
 
-const refusalIn = (answer: LoginAnswer): string =>
+const describeLoginFailure = (answer: LoginAnswer): string =>
   answer._tag === "loginFailed" ? answer.message : "the login did not answer with a URL";
 
 /**
@@ -193,16 +193,16 @@ const make = Effect.gen(function* () {
    * instance has a value stored under each name. The value itself is never
    * read here: an instance says a credential is there, never what it is.
    */
-  const secretFieldsOf = (
+  const listInstanceSecretFields = (
     definition: ProviderDefinition,
     stored: ReadonlyArray<SecretNameRef>,
   ): ProviderInstance["secretFields"] =>
-    secretFields(definition.configSchema).map((field) => ({
+    listSecretFields(definition.configSchema).map((field) => ({
       ...field,
       set: stored.some((ref) => ref.name === field.name),
     }));
 
-  const compose = (
+  const buildProviderInstance = (
     stored: StoredInstance,
     definition: ProviderDefinition,
     snapshots: ReadonlyArray<StoredSnapshot>,
@@ -212,14 +212,17 @@ const make = Effect.gen(function* () {
     displayName: definition.displayName,
     binaryName: definition.binaryName,
     declared: definition.declared,
-    secretFields: secretFieldsOf(definition, held),
+    secretFields: listInstanceSecretFields(definition, held),
     snapshots: snapshots
       .filter((snapshot) => snapshot.instanceId === stored.id)
       .map((snapshot) => ({
         runnerId: snapshot.runnerId,
         probedAt: snapshot.probedAt,
         harnessVersion: snapshot.harnessVersion,
-        versionVerdict: versionVerdict(snapshot.harnessVersion, floorFor(stored.providerId)),
+        versionVerdict: computeVersionVerdict(
+          snapshot.harnessVersion,
+          findVersionFloor(stored.providerId),
+        ),
         auth: snapshot.auth,
         models: snapshot.models,
       })),
@@ -241,12 +244,12 @@ const make = Effect.gen(function* () {
       const definition = known.get(row.providerId);
       return definition === undefined
         ? []
-        : [compose(row, definition, snapshots, held.get(row.id) ?? [])];
+        : [buildProviderInstance(row, definition, snapshots, held.get(row.id) ?? [])];
     });
   });
 
   /** One instance, without the grant check: a write has already been checked once. */
-  const one = (
+  const readInstanceOrFail = (
     id: string,
   ): Effect.Effect<ProviderInstance, NotFound | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
@@ -256,7 +259,7 @@ const make = Effect.gen(function* () {
       const held = yield* secrets.refs(OWNER_KIND, [id]);
       const found = Option.flatMap(stored, (row) =>
         Option.map(Option.fromNullishOr(known.get(row.providerId)), (definition) =>
-          compose(row, definition, snapshots, held.get(id) ?? []),
+          buildProviderInstance(row, definition, snapshots, held.get(id) ?? []),
         ),
       );
       return yield* Option.match(found, {
@@ -265,7 +268,9 @@ const make = Effect.gen(function* () {
       });
     });
 
-  const provider = (id: string): Effect.Effect<ProviderDefinition, Validation | SqlError> =>
+  const readProviderDefinitionOrFail = (
+    id: string,
+  ): Effect.Effect<ProviderDefinition, Validation | SqlError> =>
     Effect.flatMap(definitions, (known) => {
       const definition = known.get(id);
       return definition === undefined
@@ -277,21 +282,23 @@ const make = Effect.gen(function* () {
         : Effect.succeed(definition);
     });
 
-  const machine = (runnerId: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
+  const readRunnerOrFail = (runnerId: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
     Effect.gen(function* () {
       const runner = yield* runners.read(runnerId);
       if (Option.isNone(runner)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RUNNER));
       return runner.value;
     });
 
-  const drivable = (
+  const validateRunnerCanDrive = (
     runnerId: string,
     providerId: string,
     field: string,
   ): Effect.Effect<void, AskError> =>
-    Effect.flatMap(machine(runnerId), (runner) => requireAdapter(runner, providerId, field));
+    Effect.flatMap(readRunnerOrFail(runnerId), (runner) =>
+      requireAdapter(runner, providerId, field),
+    );
 
-  const asked = (
+  const askRunner = (
     runnerId: string,
     request: LoginStart | LoginCode,
     deadline: Duration.Duration,
@@ -323,7 +330,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("provider.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        return yield* one(id);
+        return yield* readInstanceOrFail(id);
       }),
 
     /**
@@ -339,9 +346,9 @@ const make = Effect.gen(function* () {
           decodeLogin(input),
           createDecodeValidationError,
         );
-        const instance = yield* one(id);
-        yield* drivable(runnerId, instance.providerId, "runnerId");
-        const answer = yield* asked(
+        const instance = yield* readInstanceOrFail(id);
+        yield* validateRunnerCanDrive(runnerId, instance.providerId, "runnerId");
+        const answer = yield* askRunner(
           runnerId,
           {
             _tag: "loginStart",
@@ -352,7 +359,7 @@ const make = Effect.gen(function* () {
           yield* ProviderLoginDeadline,
         );
         if (answer._tag !== "loginUrl")
-          return yield* Effect.fail(createInvalidStateError(refusalIn(answer)));
+          return yield* Effect.fail(createInvalidStateError(describeLoginFailure(answer)));
         // Absent rather than empty: a code is what tells the user's browser,
         // not this exchange, to finish the login.
         return {
@@ -373,15 +380,15 @@ const make = Effect.gen(function* () {
           decodeLoginCode(input),
           createDecodeValidationError,
         );
-        const instance = yield* one(id);
-        yield* drivable(runnerId, instance.providerId, "runnerId");
-        const answer = yield* asked(
+        const instance = yield* readInstanceOrFail(id);
+        yield* validateRunnerCanDrive(runnerId, instance.providerId, "runnerId");
+        const answer = yield* askRunner(
           runnerId,
           { _tag: "loginCode", requestId: crypto.randomUUID(), instanceId: id, code },
           LOGIN_CODE_DEADLINE,
         );
         if (answer._tag !== "loginResult") {
-          return yield* Effect.fail(createInvalidStateError(refusalIn(answer)));
+          return yield* Effect.fail(createInvalidStateError(describeLoginFailure(answer)));
         }
         if (!answer.ok) {
           const said = answer.message ?? "that code was refused";
@@ -407,7 +414,9 @@ const make = Effect.gen(function* () {
         const snapshot = yield* probes
           .probe(runnerId, id)
           .pipe(
-            Effect.catchTag("SecretDecryptError", (error) => Effect.fail(undecryptable(error))),
+            Effect.catchTag("SecretDecryptError", (error) =>
+              Effect.fail(createUndecryptableError(error)),
+            ),
           );
         return yield* Option.match(snapshot, {
           onNone: () =>
@@ -433,11 +442,13 @@ const make = Effect.gen(function* () {
           decodeProbe(input),
           createDecodeValidationError,
         );
-        yield* requireOnline(yield* machine(runnerId));
+        yield* requireOnline(yield* readRunnerOrFail(runnerId));
         const snapshot = yield* probes
           .probe(runnerId, instanceId)
           .pipe(
-            Effect.catchTag("SecretDecryptError", (error) => Effect.fail(undecryptable(error))),
+            Effect.catchTag("SecretDecryptError", (error) =>
+              Effect.fail(createUndecryptableError(error)),
+            ),
           );
         return yield* Option.match(snapshot, {
           onNone: () =>
@@ -464,7 +475,7 @@ const make = Effect.gen(function* () {
           decodeInstall(input),
           createDecodeValidationError,
         );
-        yield* drivable(runnerId, providerId, "providerId");
+        yield* validateRunnerCanDrive(runnerId, providerId, "providerId");
         const answer = yield* connections.asked(
           runnerId,
           { _tag: "installRequest", requestId: crypto.randomUUID(), providerId },
@@ -482,7 +493,7 @@ const make = Effect.gen(function* () {
           );
         }
         yield* Effect.forkDetach(probes.sweepRunner(runnerId));
-        return yield* machine(runnerId);
+        return yield* readRunnerOrFail(runnerId);
       }),
 
     /** Opens a second account on a provider, or the first on one the boot missed. */
@@ -490,7 +501,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("provider.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
-        const definition = yield* provider(decoded.providerId);
+        const definition = yield* readProviderDefinitionOrFail(decoded.providerId);
         yield* readConfig(definition, decoded.config);
         return yield* withTransaction(
           sql,
@@ -522,7 +533,7 @@ const make = Effect.gen(function* () {
               at,
             });
             // Nothing can be stored under an instance that did not exist a moment ago.
-            return compose(stored, definition, [], []);
+            return buildProviderInstance(stored, definition, [], []);
           }),
         );
       }),
@@ -547,9 +558,9 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const before = yield* one(id);
+            const before = yield* readInstanceOrFail(id);
             if (patch.config !== undefined) {
-              yield* Effect.flatMap(provider(before.providerId), (definition) =>
+              yield* Effect.flatMap(readProviderDefinitionOrFail(before.providerId), (definition) =>
                 readConfig(definition, patch.config as Schema.Json),
               );
             }
@@ -563,7 +574,7 @@ const make = Effect.gen(function* () {
             });
             // Read back rather than merge in memory: what the caller gets is
             // the row that was written, whatever the edit touched.
-            return yield* one(id);
+            return yield* readInstanceOrFail(id);
           }),
         ).pipe(
           // After the commit, unawaited: the edit stales every machine's
@@ -598,7 +609,7 @@ const make = Effect.gen(function* () {
             const held = (yield* secrets.refs(OWNER_KIND, [id])).get(id) ?? [];
             yield* Effect.forEach(
               held,
-              (ref) => secrets.delete(providerInstanceOwner(id), ref.name),
+              (ref) => secrets.delete(buildProviderInstanceOwner(id), ref.name),
               {
                 discard: true,
               },

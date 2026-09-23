@@ -12,19 +12,19 @@ import type {
   ProviderInstance,
   Runner,
 } from "@hercule/contract";
-import { accessModeMenu, type AccessModeMenuItem } from "./access-modes";
-import { accountName, loginTarget, snapshotOn, type LoginTarget } from "./catalog";
+import { buildAccessModeMenu, type AccessModeMenuItem } from "./access-modes";
+import { findAccountName, buildLoginTarget, findSnapshotOn, type LoginTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./config";
-import { referenceRunner, runnerMenu, type RunnerMenuRow } from "./runner-menu";
+import { findReferenceRunner, buildRunnerMenu, type RunnerMenuRow } from "./runner-menu";
 import {
-  defaultWorkspacePick,
+  decideDefaultWorkspacePick,
   NO_PROJECT_REASON,
   NO_WORKSPACE_REASON,
-  projectRepos,
-  readyPrimary,
-  repoName,
-  workspaceLead,
-  workspaceName,
+  listProjectRepos,
+  findReadyPrimary,
+  formatRepoName,
+  buildWorkspaceLead,
+  formatWorkspaceName,
   type Phrase,
   type WorkspacePick,
 } from "./workspaces";
@@ -79,7 +79,7 @@ export interface ComposerFields {
     /**
      * The machine everything else reads from. It is not `config.runnerId`: a
      * draft whose fleet holds nothing selectable has picked none, and falls
-     * back to the machine it would really be placed on (`referenceRunner`).
+     * back to the machine it would really be placed on (`findReferenceRunner`).
      * Anything asking "is the repo cloned there" has to ask about that one, or
      * the lead sentence and the menu under it name two different machines.
      */
@@ -97,7 +97,7 @@ export interface ComposerFields {
  * run it with, a machine to run it on, then a login on that machine. Only the
  * last of the three is something a button can fix from here.
  */
-const blockerOf = (
+const findBlocker = (
   instance: ProviderInstance | undefined,
   runner: Runner | undefined,
   snapshot: CapabilitySnapshot | undefined,
@@ -109,15 +109,15 @@ const blockerOf = (
   if (snapshot.auth.status !== "ok")
     return {
       reason: `${instance.displayName} is on ${runner.name} but not logged in`,
-      login: loginTarget(instance, runner),
+      login: buildLoginTarget(instance, runner),
     };
   return null;
 };
 
-const lockedReason = (kind: ThreadKind, field: string): string | null =>
+const findLockedReason = (kind: ThreadKind, field: string): string | null =>
   kind === "active" ? `Create a new thread to change the ${field}` : null;
 
-export const composerFields = (
+export const buildComposerFields = (
   catalogs: ThreadCatalogs,
   config: ThreadConfig,
   kind: ThreadKind,
@@ -126,10 +126,11 @@ export const composerFields = (
   const resources = catalogs.resources ?? [];
   const workspaces = catalogs.workspaces ?? [];
   const projectId = config.projectId ?? null;
-  const repos = projectRepos(resources, projectId);
+  const repos = listProjectRepos(resources, projectId);
   // The pick the user made stands; otherwise the default follows the stored
   // setting, and the repos of the project are what either can name.
-  const pick = config.workspace ?? defaultWorkspacePick(repos, config.preferredWorkspace ?? null);
+  const pick =
+    config.workspace ?? decideDefaultWorkspacePick(repos, config.preferredWorkspace ?? null);
   // Read only on a draft: a thread that has started is locked because it
   // started, which is what its tooltip has to say, and its own machine is the
   // one worth naming rather than the workspace that chose it.
@@ -140,19 +141,21 @@ export const composerFields = (
   // A workspace that already stands is on one machine and never moves, so a
   // draft joining one takes that machine as its default before anything is
   // read off it; a machine the user picked is in `config.runnerId` already.
-  const runner = referenceRunner(
+  const runner = findReferenceRunner(
     catalogs.runners,
     joined?.runnerId ?? config.runnerId,
     catalogs.localRunnerId,
   );
-  const snapshot = instance === undefined ? undefined : snapshotOn(instance, runner?.id);
+  const snapshot = instance === undefined ? undefined : findSnapshotOn(instance, runner?.id);
   const descriptor = snapshot?.models.find((model) => model.slug === config.model);
 
   // The name and the reason come off one machine, never off two: a machine
   // named with another's reason would send the user to fix the wrong thing.
   const menu =
-    instance === undefined ? null : runnerMenu(catalogs.runners, catalogs.localRunnerId, instance);
-  const hosted = (runnerId: string): number =>
+    instance === undefined
+      ? null
+      : buildRunnerMenu(catalogs.runners, catalogs.localRunnerId, instance);
+  const countHostedSessions = (runnerId: string): number =>
     (catalogs.sessions ?? []).filter(
       (session) => session.runnerId === runnerId && session.exitedAt === null,
     ).length;
@@ -161,13 +164,13 @@ export const composerFields = (
       ...row,
       current: row.runnerId === runner?.id,
       isDefault: row.runnerId === menu.defaultRunnerId,
-      capacity: `${String(hosted(row.runnerId))}/${String(
+      capacity: `${String(countHostedSessions(row.runnerId))}/${String(
         catalogs.runners.find((each) => each.id === row.runnerId)?.maxConcurrentSessions ?? 0,
       )}`,
       notCloned:
         pick.kind === "primary" &&
-        readyPrimary(workspaces, pick.resourceId, row.runnerId) === undefined
-          ? `${repoName(resources.find((each) => each.id === pick.resourceId))} is not cloned there · clones on first use`
+        findReadyPrimary(workspaces, pick.resourceId, row.runnerId) === undefined
+          ? `${formatRepoName(resources.find((each) => each.id === pick.resourceId))} is not cloned there · clones on first use`
           : null,
     })) ?? [];
   const dimmed = rows.find((row) => row.current)?.dimmed ?? null;
@@ -175,17 +178,17 @@ export const composerFields = (
 
   return {
     accessMode: {
-      locked: lockedReason(kind, "access mode"),
+      locked: findLockedReason(kind, "access mode"),
       value: config.accessMode,
       rows:
         instance === undefined
           ? []
-          : accessModeMenu(instance.declared.accessModes, instance.displayName),
+          : buildAccessModeMenu(instance.declared.accessModes, instance.displayName),
     },
     model: {
       pill: {
         providerId: instance?.providerId ?? null,
-        account: instance === undefined ? null : accountName(catalogs.instances, instance),
+        account: instance === undefined ? null : findAccountName(catalogs.instances, instance),
         // A slug the snapshot no longer offers is still what the thread runs
         // under, so the pill names it rather than going blank.
         name: descriptor?.name ?? config.model,
@@ -199,7 +202,7 @@ export const composerFields = (
       // (D-20d) - which is a different way out on a draft that stands in no
       // project at all, where there is nothing to add a repo to yet.
       locked:
-        lockedReason(kind, "workspace") ??
+        findLockedReason(kind, "workspace") ??
         (repos.length > 0 ? null : projectId === null ? NO_PROJECT_REASON : NO_WORKSPACE_REASON),
       value: pick,
     },
@@ -209,11 +212,11 @@ export const composerFields = (
       // §Workspace).
       locked:
         joined === undefined
-          ? lockedReason(kind, "machine")
+          ? findLockedReason(kind, "machine")
           : "The workspace it joins decides the machine",
       label:
         joined !== undefined
-          ? `set by the workspace ${workspaceName(joined)}`
+          ? `set by the workspace ${formatWorkspaceName(joined)}`
           : dimmed === null
             ? name
             : `${name} · ${dimmed}`,
@@ -223,14 +226,14 @@ export const composerFields = (
     lead:
       kind === "active"
         ? null
-        : workspaceLead(pick, {
+        : buildWorkspaceLead(pick, {
             resources,
             workspaces,
             sessions: catalogs.sessions ?? [],
             machine: name,
             runnerId: runner?.id ?? null,
           }),
-    blocked: kind === "active" ? null : blockerOf(instance, runner, snapshot),
+    blocked: kind === "active" ? null : findBlocker(instance, runner, snapshot),
   };
 };
 
@@ -240,5 +243,5 @@ export const composerFields = (
  * the picks ride `session.input`), so the thread still runs the model it
  * runs this turn with until the next message goes out.
  */
-export const pendingModelNote = (kind: ThreadKind, picks: ThreadPicks): string | null =>
+export const buildPendingModelNote = (kind: ThreadKind, picks: ThreadPicks): string | null =>
   kind === "active" && picks.model !== undefined ? "model change applies on send" : null;

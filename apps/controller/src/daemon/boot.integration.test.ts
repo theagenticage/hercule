@@ -9,10 +9,10 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { del, type ServerHarness } from "../http/testing";
-import { at, until, WAIT_DEADLINE_MS, type Agent, type Arranged } from "../sessions/testing";
+import { at, waitUntil, WAIT_DEADLINE_MS, type Agent, type Arranged } from "../sessions/testing";
 import {
   buildRecordingNotifier,
-  emitted,
+  emitManualEvent,
   OTHER_REF,
   readCursorAndHead,
   readSubscription,
@@ -20,9 +20,9 @@ import {
   runEffect,
   spawnSubscriber,
   storeCondition,
-  subscribed,
-  subscriptionRow,
-  subscriptionWhen,
+  subscribeAgent,
+  readSubscriptionRow,
+  waitForSubscription,
   UNRESOLVABLE,
   withPipeline,
   type Notified,
@@ -49,7 +49,7 @@ interface InputRow {
   readonly reason: string | null;
 }
 
-const inputRow = async (harness: ServerHarness, id: string): Promise<InputRow> => {
+const readInputRow = async (harness: ServerHarness, id: string): Promise<InputRow> => {
   const rows = await runEffect(
     harness.sql<InputRow>`
       SELECT status, sent_at, reason FROM session_inputs
@@ -69,7 +69,7 @@ const withALostWakeUp = async (
   readonly subscription: ReadSubscription;
 }> => {
   const agent = await spawnSubscriber(arranged, name);
-  const subscriptionId = await subscribed(arranged, agent, REF);
+  const subscriptionId = await subscribeAgent(arranged, agent, REF);
   expect((await readSubscription(arranged, agent, subscriptionId)).lostWakeUp).toBeNull();
 
   // A row that went out and was never answered: the machine may or may not
@@ -88,7 +88,7 @@ const withALostWakeUp = async (
 
   await arranged.harness.reboot();
 
-  const subscription = await subscriptionWhen(
+  const subscription = await waitForSubscription(
     arranged,
     agent,
     subscriptionId,
@@ -99,8 +99,8 @@ const withALostWakeUp = async (
 };
 
 /** Waits until the router has walked past this entry, whatever it did with it. */
-const walkedPast = (arranged: Arranged, eventId: number): Promise<number> =>
-  until("walked past the event", async () => {
+const waitForCursorPast = (arranged: Arranged, eventId: number): Promise<number> =>
+  waitUntil("walked past the event", async () => {
     const seen = await readCursorAndHead(arranged.harness);
     return seen.position !== null && seen.position >= eventId ? seen.position : undefined;
   });
@@ -124,7 +124,7 @@ describe("an input a restart caught on the wire", () => {
       const lost = await withALostWakeUp(arranged, "wake-up-holder");
 
       for (const id of [WAKE_UP_INPUT_ID, TYPED_INPUT_ID]) {
-        const row = await inputRow(arranged.harness, id);
+        const row = await readInputRow(arranged.harness, id);
         expect(row.status, id).toBe("cancelled");
         expect(row.sent_at, id).toBeNull();
         expect(row.reason ?? "", id).toContain("restarted");
@@ -138,15 +138,18 @@ describe("an input a restart caught on the wire", () => {
       // An event this subscription does not wait for evaluates cleanly and
       // leaves the lost wake-up where it is. It is about one event that is
       // gone, which no later evaluation can say anything about.
-      await walkedPast(arranged, await emitted(arranged, [OTHER_REF], "for somebody else"));
+      await waitForCursorPast(
+        arranged,
+        await emitManualEvent(arranged, [OTHER_REF], "for somebody else"),
+      );
       expect(await readSubscription(arranged, lost.agent, lost.subscriptionId)).toEqual(
         lost.subscription,
       );
 
       // A wake-up that does arrive is what makes it out of date, and it takes
       // nothing else with it.
-      await emitted(arranged, [REF], "the next one");
-      const woken = await subscriptionWhen(
+      await emitManualEvent(arranged, [REF], "the next one");
+      const woken = await waitForSubscription(
         arranged,
         lost.agent,
         lost.subscriptionId,
@@ -165,8 +168,8 @@ describe("an input a restart caught on the wire", () => {
         // A condition that cannot be evaluated is the second fact, and it is
         // written where the first one is not.
         await storeCondition(arranged.harness, lost.subscriptionId, UNRESOLVABLE);
-        await emitted(arranged, [REF], "cannot be evaluated");
-        const failed = await subscriptionWhen(
+        await emitManualEvent(arranged, [REF], "cannot be evaluated");
+        const failed = await waitForSubscription(
           arranged,
           lost.agent,
           lost.subscriptionId,
@@ -174,7 +177,7 @@ describe("an input a restart caught on the wire", () => {
         );
         expect(failed.lostWakeUp).toEqual(lost.subscription.lostWakeUp);
         expect(failed.health.message ?? "").not.toBe("");
-        await until("reported the evaluation error", () =>
+        await waitUntil("reported the evaluation error", () =>
           calls.some((call) => call.subscriptionId === lost.subscriptionId) ? calls : undefined,
         );
 
@@ -182,8 +185,8 @@ describe("an input a restart caught on the wire", () => {
         // clean evaluation ends the first and the wake-up written ends the
         // second.
         await storeCondition(arranged.harness, lost.subscriptionId, "true");
-        await emitted(arranged, [REF], "the next one");
-        const repaired = await subscriptionWhen(
+        await emitManualEvent(arranged, [REF], "the next one");
+        const repaired = await waitForSubscription(
           arranged,
           lost.agent,
           lost.subscriptionId,
@@ -198,7 +201,7 @@ describe("an input a restart caught on the wire", () => {
   it("says nothing on a subscription that has ended: there is no holder left to tell", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "gone-holder");
-      const subscriptionId = await subscribed(arranged, agent, REF);
+      const subscriptionId = await subscribeAgent(arranged, agent, REF);
       const cancelled = await del(
         arranged.harness.base,
         `/api/v1/subscriptions/${subscriptionId}`,
@@ -220,8 +223,8 @@ describe("an input a restart caught on the wire", () => {
 
       await arranged.harness.reboot();
 
-      expect((await inputRow(arranged.harness, WAKE_UP_INPUT_ID)).status).toBe("cancelled");
-      const row = await subscriptionRow(arranged.harness, subscriptionId);
+      expect((await readInputRow(arranged.harness, WAKE_UP_INPUT_ID)).status).toBe("cancelled");
+      const row = await readSubscriptionRow(arranged.harness, subscriptionId);
       expect(row?.ended_at).not.toBeNull();
       expect(row?.lost_wake_up_event_id).toBeNull();
       expect(row?.health_error_message).toBeNull();

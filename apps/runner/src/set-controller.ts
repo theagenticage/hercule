@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema";
 import {
   CONTROLLER_URL_SCHEMES,
   readRunnerFile,
-  runnerFileIn,
+  buildRunnerFilePath,
   writeRunnerFile,
 } from "./runner-file";
 
@@ -48,7 +48,7 @@ export const setController = (options: {
       readRunnerFile(options.home),
       (error) => new SetControllerError({ message: error.message }),
     );
-    const path = runnerFileIn(options.home);
+    const path = buildRunnerFilePath(options.home);
     yield* Effect.try({
       try: () => {
         writeRunnerFile(path, { ...current, controllerUrl: options.controllerUrl });

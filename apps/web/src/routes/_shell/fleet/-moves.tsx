@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@hercule/ui";
-import { queryKeys, retireQuestion, type HerculeClient } from "@hercule/client-core";
+import { queryKeys, buildRetireQuestion, type HerculeClient } from "@hercule/client-core";
 import type { RunnerDetail } from "@hercule/contract";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { readErrorMessage } from "../../../screens/save-status";
@@ -31,7 +31,7 @@ export function Moves({
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
 
-  const question = retireQuestion(runner, defaultRunnerId);
+  const question = buildRetireQuestion(runner, defaultRunnerId);
   const params = { id: runner.id };
   const calls: Record<Move, () => Promise<RunnerDetail>> = {
     drain: () => client.runner.drain({ params }),

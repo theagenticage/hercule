@@ -15,7 +15,7 @@ const MESSAGE = "msg_011CeoxAoRk4jaxYB956uTmL";
 const TOOL = "toolu_016JZjZUP3FNEkwxFk3eJZao";
 
 /** Ids the test can read: the tenth minted id is `id-10`, in mint order. */
-const state = (outputSchema?: OutputSchema) => {
+const buildTestState = (outputSchema?: OutputSchema) => {
   let minted = 0;
   return buildNormalizingState(
     SESSION,
@@ -38,7 +38,7 @@ const OUTPUT_SCHEMA: OutputSchema = {
 /** What each event says, short enough to read a whole turn as a list. */
 type Event = Schema.Schema.Type<typeof ProviderEvent>;
 
-const said = (event: Event): string => {
+const formatEvent = (event: Event): string => {
   switch (event._tag) {
     case "item.started":
       return `item.started ${event.kind} ${event.itemId}`;
@@ -55,9 +55,9 @@ const said = (event: Event): string => {
   }
 };
 
-const through = (messages: ReadonlyArray<unknown>): ReadonlyArray<string> => {
-  const running = state();
-  return messages.flatMap((message) => normalize(running, message as SDKMessage).map(said));
+const normalizeMessages = (messages: ReadonlyArray<unknown>): ReadonlyArray<string> => {
+  const running = buildTestState();
+  return messages.flatMap((message) => normalize(running, message as SDKMessage).map(formatEvent));
 };
 
 const INIT = {
@@ -92,34 +92,34 @@ const MESSAGE_START_AFTER_TOOL = {
   },
 };
 
-const streamed = (event: unknown) => ({
+const buildStreamEvent = (event: unknown) => ({
   type: "stream_event",
   session_id: NATIVE,
   parent_tool_use_id: null,
   event,
 });
 
-const THINKING_START = streamed({
+const THINKING_START = buildStreamEvent({
   type: "content_block_start",
   index: 0,
   content_block: { type: "thinking", thinking: "", signature: "" },
 });
 
-const THINKING_DELTA = streamed({
+const THINKING_DELTA = buildStreamEvent({
   type: "content_block_delta",
   index: 0,
   delta: { type: "thinking_delta", thinking: "The user wants an echo." },
 });
 
-const SIGNATURE_DELTA = streamed({
+const SIGNATURE_DELTA = buildStreamEvent({
   type: "content_block_delta",
   index: 0,
   delta: { type: "signature_delta", signature: "EoMDCrIBCBEYAipAdq0YOrgkNZI" },
 });
 
-const THINKING_STOP = streamed({ type: "content_block_stop", index: 0 });
+const THINKING_STOP = buildStreamEvent({ type: "content_block_stop", index: 0 });
 
-const TOOL_START = streamed({
+const TOOL_START = buildStreamEvent({
   type: "content_block_start",
   index: 1,
   content_block: {
@@ -131,25 +131,25 @@ const TOOL_START = streamed({
   },
 });
 
-const TOOL_ARGUMENT_DELTA = streamed({
+const TOOL_ARGUMENT_DELTA = buildStreamEvent({
   type: "content_block_delta",
   index: 1,
   delta: { type: "input_json_delta", partial_json: '{"command": "echo hi' },
 });
 
-const TEXT_START = streamed({
+const TEXT_START = buildStreamEvent({
   type: "content_block_start",
   index: 1,
   content_block: { type: "text", text: "" },
 });
 
-const TEXT_DELTA = streamed({
+const TEXT_DELTA = buildStreamEvent({
   type: "content_block_delta",
   index: 1,
   delta: { type: "text_delta", text: "ready" },
 });
 
-const TEXT_STOP = streamed({ type: "content_block_stop", index: 1 });
+const TEXT_STOP = buildStreamEvent({ type: "content_block_stop", index: 1 });
 
 const ASSISTANT_TOOL_USE = {
   type: "assistant",
@@ -415,7 +415,7 @@ describe("one SDK message at a time", () => {
 
   for (const one of cases) {
     it(one.name, () => {
-      expect(through(one.messages)).toEqual(one.events);
+      expect(normalizeMessages(one.messages)).toEqual(one.events);
     });
   }
 });
@@ -443,7 +443,7 @@ const TURN = [
 
 describe("a whole turn", () => {
   it("reads as the episode it was", () => {
-    expect(through(TURN)).toEqual([
+    expect(normalizeMessages(TURN)).toEqual([
       "turn.started",
       `item.started reasoning ${MESSAGE}#0`,
       'content.delta reasoning_text "The user wants an echo."',
@@ -459,7 +459,7 @@ describe("a whole turn", () => {
   });
 
   it("carries the vendor payload on the first event of each message, and never on a delta", () => {
-    const running = state();
+    const running = buildTestState();
     const raw = TURN.flatMap((message) => normalize(running, message as SDKMessage)).filter(
       (event) => event.raw !== undefined,
     );
@@ -471,7 +471,7 @@ describe("a whole turn", () => {
   });
 
   it("takes the usage snapshot the result reports", () => {
-    const running = state();
+    const running = buildTestState();
     const events = normalize(running, RESULT as unknown as SDKMessage);
     const snapshot = events.find((event) => event._tag === "session.usage.updated");
     // Every model call the session made, summed, not the main loop's own turn.
@@ -485,7 +485,7 @@ describe("a whole turn", () => {
   });
 
   it("opens the next turn after the result closed the last one", () => {
-    const running = state();
+    const running = buildTestState();
     normalize(running, RESULT as unknown as SDKMessage);
     expect(running.turnId).toBeUndefined();
     const next = normalize(running, ASSISTANT_TOOL_USE as unknown as SDKMessage);
@@ -495,12 +495,12 @@ describe("a whole turn", () => {
 
 describe("a turn that did not simply finish", () => {
   it("reports an abort as interrupted", () => {
-    const events = through([{ ...RESULT, terminal_reason: "aborted_streaming" }]);
+    const events = normalizeMessages([{ ...RESULT, terminal_reason: "aborted_streaming" }]);
     expect(events).toContain("turn.completed interrupted");
   });
 
   it("reports an error result as failed, with what the harness said", () => {
-    const running = state();
+    const running = buildTestState();
     const events = normalize(running, {
       ...RESULT,
       subtype: "error_during_execution",
@@ -514,12 +514,12 @@ describe("a turn that did not simply finish", () => {
 });
 
 describe("what an item says about itself", () => {
-  const detailOf = (
+  const readItemDetail = (
     messages: ReadonlyArray<unknown>,
     itemId: string,
     tag: "item.started" | "item.completed",
   ): unknown => {
-    const running = state();
+    const running = buildTestState();
     const events = messages.flatMap((message) => normalize(running, message as SDKMessage));
     for (const event of events) {
       if (event._tag === tag && event.itemId === itemId) return event.detail;
@@ -528,26 +528,26 @@ describe("what an item says about itself", () => {
   };
 
   it("names the tool and carries the arguments it was called with", () => {
-    expect(detailOf([ASSISTANT_TOOL_USE], TOOL, "item.started")).toEqual({
+    expect(readItemDetail([ASSISTANT_TOOL_USE], TOOL, "item.started")).toEqual({
       name: "Bash",
       input: { command: "echo hi", description: "Echo hi" },
     });
   });
 
   it("tells an MCP tool apart from a native one by its name", () => {
-    const call = (name: string) => ({
+    const buildToolUse = (name: string) => ({
       ...ASSISTANT_TOOL_USE,
       message: {
         ...ASSISTANT_TOOL_USE.message,
         content: [{ type: "tool_use", id: TOOL, name, input: {} }],
       },
     });
-    expect(detailOf([call("mcp__linear__issues")], TOOL, "item.started")).toEqual({
+    expect(readItemDetail([buildToolUse("mcp__linear__issues")], TOOL, "item.started")).toEqual({
       name: "mcp__linear__issues",
       input: {},
       kind: "mcp",
     });
-    expect(detailOf([call("Glob")], TOOL, "item.started")).toEqual({
+    expect(readItemDetail([buildToolUse("Glob")], TOOL, "item.started")).toEqual({
       name: "Glob",
       input: {},
       kind: "native",
@@ -555,7 +555,7 @@ describe("what an item says about itself", () => {
   });
 
   it("carries the tool's output on the item the result completes", () => {
-    expect(detailOf([ASSISTANT_TOOL_USE, TOOL_RESULT], TOOL, "item.completed")).toEqual({
+    expect(readItemDetail([ASSISTANT_TOOL_USE, TOOL_RESULT], TOOL, "item.completed")).toEqual({
       content: "hi",
     });
   });
@@ -566,7 +566,7 @@ describe("what an item says about itself", () => {
    * the one that reports a user message, and the normalizer reports none.
    */
   it("makes no user_message item out of the harness's echo of what was sent", () => {
-    const echoed = (content: unknown) => ({
+    const buildUserEcho = (content: unknown) => ({
       type: "user",
       session_id: NATIVE,
       parent_tool_use_id: null,
@@ -574,8 +574,8 @@ describe("what an item says about itself", () => {
     });
 
     for (const content of ["run the tests", [{ type: "text", text: "run the tests" }]]) {
-      const running = state();
-      const events = normalize(running, echoed(content) as unknown as SDKMessage);
+      const running = buildTestState();
+      const events = normalize(running, buildUserEcho(content) as unknown as SDKMessage);
       // Nothing at all: not the item, and not the turn the message opened on
       // its way in either.
       expect(events).toEqual([]);
@@ -583,7 +583,7 @@ describe("what an item says about itself", () => {
   });
 
   it("puts the vendor payload on the unknown item, not on the turn it had to open", () => {
-    const running = state();
+    const running = buildTestState();
     const events = normalize(running, {
       type: "system",
       subtype: "image_generated",
@@ -595,7 +595,7 @@ describe("what an item says about itself", () => {
 
 describe("what the ops events say", () => {
   it("says which retry it is and what the harness was retrying after", () => {
-    const running = state();
+    const running = buildTestState();
     const events = normalize(running, {
       type: "system",
       subtype: "api_retry",
@@ -613,7 +613,7 @@ describe("what the ops events say", () => {
   });
 
   it("says what a compaction did to the context", () => {
-    const running = state();
+    const running = buildTestState();
     const events = normalize(running, {
       type: "system",
       subtype: "compact_boundary",
@@ -631,7 +631,7 @@ describe("what the ops events say", () => {
 
 describe("what a turn reports when it was interrupted", () => {
   it("says nothing about an error: the text it stopped on is the assistant's, not a reason", () => {
-    const running = state();
+    const running = buildTestState();
     const events = normalize(running, {
       ...RESULT,
       result: "Here is the partial answer I had",
@@ -647,7 +647,7 @@ describe("what the protocol will carry", () => {
   const encode = Schema.encodeUnknownSync(ProviderEvent);
 
   it("encodes every event a whole turn produces", () => {
-    const running = state();
+    const running = buildTestState();
     for (const message of TURN) {
       for (const event of normalize(running, message as SDKMessage)) {
         expect(() => encode(event)).not.toThrow();
@@ -657,7 +657,7 @@ describe("what the protocol will carry", () => {
 
   it("encodes a turn that answered its schema, and one that could not", () => {
     for (const structured_output of [{ verdict: "accept" }, { verdict: "maybe" }]) {
-      const running = state(OUTPUT_SCHEMA);
+      const running = buildTestState(OUTPUT_SCHEMA);
       const events = normalize(running, { ...RESULT, structured_output } as unknown as SDKMessage);
       const done = events.find((event) => event._tag === "turn.completed");
       expect(done?._tag === "turn.completed" ? done.structuredResult?.outcome : undefined).toBe(
@@ -668,7 +668,7 @@ describe("what the protocol will carry", () => {
   });
 
   it("encodes a tool result that came back with no output at all", () => {
-    const running = state();
+    const running = buildTestState();
     const events = [
       ASSISTANT_TOOL_USE,
       {
@@ -695,23 +695,25 @@ describe("what nothing can take the session down with", () => {
 
   for (const [name, message] of broken) {
     it(`turns ${name} into an unknown item rather than throwing`, () => {
-      const running = state();
+      const running = buildTestState();
       expect(() => normalize(running, message as SDKMessage)).not.toThrow();
-      const kinds = through([message]).map((event) => event.split(" ").slice(0, 2).join(" "));
+      const kinds = normalizeMessages([message]).map((event) =>
+        event.split(" ").slice(0, 2).join(" "),
+      );
       expect(kinds).toContain("item.started unknown");
     });
   }
 });
 
 describe("two agents streaming at once", () => {
-  const from = (parent: string | null, event: unknown) => ({
+  const buildAgentStreamEvent = (parent: string | null, event: unknown) => ({
     type: "stream_event",
     session_id: NATIVE,
     parent_tool_use_id: parent,
     event,
   });
 
-  const opening = (id: string) => ({
+  const buildMessageStart = (id: string) => ({
     type: "message_start",
     message: { id, model: "claude-haiku-4-5-20251001", role: "assistant" },
   });
@@ -720,17 +722,17 @@ describe("two agents streaming at once", () => {
 
   it("keeps the main loop's blocks apart from a subagent's", () => {
     expect(
-      through([
-        from(null, opening("msg_main")),
-        from(null, text),
-        from("toolu_sub", opening("msg_sub")),
-        from("toolu_sub", text),
-        from(null, {
+      normalizeMessages([
+        buildAgentStreamEvent(null, buildMessageStart("msg_main")),
+        buildAgentStreamEvent(null, text),
+        buildAgentStreamEvent("toolu_sub", buildMessageStart("msg_sub")),
+        buildAgentStreamEvent("toolu_sub", text),
+        buildAgentStreamEvent(null, {
           type: "content_block_delta",
           index: 0,
           delta: { type: "text_delta", text: "from the main loop" },
         }),
-        from(null, { type: "content_block_stop", index: 0 }),
+        buildAgentStreamEvent(null, { type: "content_block_stop", index: 0 }),
       ]),
     ).toEqual([
       "turn.started",

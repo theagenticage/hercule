@@ -88,7 +88,7 @@ const decodeModels = Schema.decodeUnknownEffect(
 );
 
 /** Null column becomes an absent key: the wire shape has no nulls in it. */
-const said = (row: SnapshotRow): ProbeResult["auth"] => ({
+const toProbeAuth = (row: SnapshotRow): ProbeResult["auth"] => ({
   status: row.auth_status as ProbeResult["auth"]["status"],
   ...(row.auth_identity === null ? {} : { identity: row.auth_identity }),
   ...(row.auth_plan_label === null ? {} : { planLabel: row.auth_plan_label }),
@@ -102,7 +102,7 @@ const toSnapshot = (row: SnapshotRow): Effect.Effect<StoredSnapshot, Schema.Sche
     runnerId: uuidToString(row.runner_id),
     probedAt: row.probed_at,
     harnessVersion: row.harness_version,
-    auth: said(row),
+    auth: toProbeAuth(row),
     models,
   }));
 

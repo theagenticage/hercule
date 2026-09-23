@@ -5,14 +5,14 @@
  */
 import * as Duration from "effect/Duration";
 import type { ProbeResult } from "@hercule/protocol";
-import { fact } from "./text";
+import { truncateFact } from "./text";
 
 /** Long enough for a cold harness, short enough that a Fleet page does not look hung. */
 export const PROBE_DEADLINE: Duration.Duration = Duration.seconds(15);
 
 /** Cut to what the protocol carries rather than failing the whole report. */
-export const probeFailed = (harnessVersion: string | null, message: string): ProbeResult => ({
+export const buildFailedProbe = (harnessVersion: string | null, message: string): ProbeResult => ({
   harnessVersion,
-  auth: { status: "error", message: fact(message) },
+  auth: { status: "error", message: truncateFact(message) },
   models: [],
 });

@@ -29,15 +29,15 @@ import {
   decodeIdCursor,
   encodeCursor,
   encodeIdCursor,
-  keysetOver,
-  pageOf,
+  buildKeyset,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
   type CursorScope,
   type Page,
 } from "../db";
-import { readyWhere, resumableWhere } from "../workspaces";
+import { buildReadyClause, buildResumableClause } from "../workspaces";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
 import type { StreamRow } from "./stream";
 
@@ -162,7 +162,7 @@ interface SessionRow {
  * its own module had finished - a `ReferenceError` that depends only on which
  * domain happened to be imported first.
  */
-const columns = (): string =>
+const buildColumnList = (): string =>
   "id, title, permission_profile_id, agent_id, instance_id, runner_id, workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
   // Both read for `unenforced`: which provider is behind the instance, and
@@ -171,7 +171,7 @@ const columns = (): string =>
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
   "open_request, created_at, started_at, exited_at, " +
-  `last_activity_at, (${resumableWhere("sessions")}) AS resumable`;
+  `last_activity_at, (${buildResumableClause("sessions")}) AS resumable`;
 
 const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),
@@ -214,7 +214,7 @@ const buildCursorScope = (direction: SortDirection): CursorScope => ({
  * session is part of the walk the cursor belongs to: without it one session's
  * cursor would silently hide rows on another's transcript.
  */
-const transcriptScope = (sessionId: string, direction: SortDirection): CursorScope => ({
+const buildTranscriptScope = (sessionId: string, direction: SortDirection): CursorScope => ({
   op: "transcript.read",
   field: `position:${sessionId}`,
   direction,
@@ -265,14 +265,14 @@ export interface TranscriptPageRequest {
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const COLUMNS = columns();
+  const COLUMNS = buildColumnList();
 
   /**
    * One status is `=`; several - the runner page's capacity read - is `IN`.
    * The contract requires at least one element in the array, so there is no
    * empty case here to guard.
    */
-  const statusClause = (status: SessionStatus | ReadonlyArray<SessionStatus>) =>
+  const buildStatusClause = (status: SessionStatus | ReadonlyArray<SessionStatus>) =>
     Array.isArray(status) ? sql`status IN ${sql.in(status)}` : sql`status = ${status}`;
 
   return {
@@ -332,7 +332,7 @@ const make = Effect.gen(function* () {
             sql<{ readonly id: Uint8Array }>`
               SELECT id FROM sessions
               WHERE id IN ${sql.in(ids.map(uuidFromString))}
-                AND status = 'exited' AND NOT (${sql.literal(resumableWhere("sessions"))})
+                AND status = 'exited' AND NOT (${sql.literal(buildResumableClause("sessions"))})
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),
           ),
@@ -346,14 +346,14 @@ const make = Effect.gen(function* () {
           request.cursor === undefined
             ? undefined
             : yield* decodeCursor(request.cursor, scope, "string");
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["created_at", "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
           request.direction,
         );
         const clauses = [keyset];
-        if (request.status !== undefined) clauses.push(statusClause(request.status));
+        if (request.status !== undefined) clauses.push(buildStatusClause(request.status));
         if (request.runnerId !== undefined) {
           clauses.push(sql`runner_id = ${uuidFromString(request.runnerId)}`);
         }
@@ -370,7 +370,7 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(COLUMNS)} FROM sessions
           WHERE ${sql.and(clauses)} ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (found) => Effect.succeed(found.map(toSession)),
@@ -401,10 +401,10 @@ const make = Effect.gen(function* () {
       request: TranscriptPageRequest,
     ): Effect.Effect<Page<StoredStreamRow>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const scope = transcriptScope(request.sessionId, request.direction);
+        const scope = buildTranscriptScope(request.sessionId, request.direction);
         const after =
           request.cursor === undefined ? undefined : yield* decodeIdCursor(request.cursor, scope);
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["position"],
           after === undefined ? undefined : [after],
@@ -419,7 +419,7 @@ const make = Effect.gen(function* () {
           WHERE session_id = ${uuidFromString(request.sessionId)} AND ${keyset}
           ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (found) =>
@@ -546,7 +546,7 @@ const make = Effect.gen(function* () {
             stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
                            WHERE session_id = sessions.id)
           WHERE id = ${uuidFromString(sessionId)}
-            AND ${sql.literal(resumableWhere("sessions"))}
+            AND ${sql.literal(buildResumableClause("sessions"))}
           RETURNING id
         `,
         (rows) => rows.length > 0,
@@ -635,7 +635,7 @@ const make = Effect.gen(function* () {
             -- A session waits for the working area it asked for: telling the
             -- machine to start it before the workspace stands would hand the
             -- harness a directory that is not there yet.
-            AND ${sql.literal(readyWhere("s"))}
+            AND ${sql.literal(buildReadyClause("s"))}
             -- The walk's position, on the same pair the order below sorts by;
             -- the sentinels a first batch passes sort before every real row.
             AND (s.created_at, s.id) > (${after?.createdAt ?? ""}, ${after === undefined ? new Uint8Array(0) : uuidFromString(after.id)})
@@ -810,7 +810,7 @@ const NO_SUCH_SESSION = "no such session";
  * there, over the repository the caller already holds: the same id reads the
  * same refusal wherever it is looked up.
  */
-export const requireSession =
+export const readSessionOrFail =
   (rows: SessionRows) =>
   (id: string): Effect.Effect<StoredSession, NotFound | SqlError> =>
     Effect.flatMap(

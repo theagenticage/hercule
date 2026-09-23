@@ -21,7 +21,7 @@ const STATUSES = ["queued", "starting", "idle", "busy", "exited"] as const;
  * The token hash each status's row holds once the migration has run, and the
  * error a second row that presents a hash already held gets.
  */
-const migrated = (): Promise<{
+const seedAndMigrate = (): Promise<{
   readonly hashes: Readonly<Record<string, string | null>>;
   readonly duplicate: string;
 }> =>
@@ -56,7 +56,7 @@ const migrated = (): Promise<{
 
 describe("a token hash on a database written before the rule", () => {
   it("stays on a running session and is dropped from every other one", async () => {
-    expect((await migrated()).hashes).toEqual({
+    expect((await seedAndMigrate()).hashes).toEqual({
       queued: null,
       starting: "hash-starting",
       idle: "hash-idle",
@@ -67,6 +67,6 @@ describe("a token hash on a database written before the rule", () => {
 
   it("is still unique once the column is rebuilt", async () => {
     // Two sessions that share a credential would each act as the other.
-    expect((await migrated()).duplicate).toContain("UNIQUE constraint failed");
+    expect((await seedAndMigrate()).duplicate).toContain("UNIQUE constraint failed");
   });
 });

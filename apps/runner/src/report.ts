@@ -9,5 +9,5 @@ export const now = (): string => new Date().toISOString();
  * nothing would leave the controller waiting out its deadline for an answer
  * this machine already has.
  */
-export const wentWrong = (cause: Cause.Cause<unknown>, limit: number): string =>
+export const describeCause = (cause: Cause.Cause<unknown>, limit: number): string =>
   (Cause.pretty(cause).split("\n")[0] ?? "").slice(0, limit) || "the runner could not answer";

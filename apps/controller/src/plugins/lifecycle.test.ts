@@ -20,39 +20,39 @@ import { AuditLog } from "../events";
 import { Secret, Secrets } from "../secrets";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
-import { asUser, fixture, pluginStack, USER, type Fixture } from "./testing";
+import { asUser, createPluginFixture, buildPluginStack, USER, type Fixture } from "./testing";
 
 type Services = Plugins | PluginHost | Secret | Secrets | AuditLog | SqlClient.SqlClient;
 
 /** Every call runs on a stack of its own, as the user a request would arrive as. */
 const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
-  Effect.runPromise(body.pipe(Effect.provide(pluginStack()), asUser));
+  Effect.runPromise(body.pipe(Effect.provide(buildPluginStack()), asUser));
 
 /**
  * The catalog's own column, not the plugin's: a contribution outlives its owner
  * being turned off, so a picker can say what is missing.
  */
-const ownerEnabled = (id: string) =>
+const readOwnerEnabled = (id: string) =>
   Effect.map(
     Effect.flatMap(pluginRepository, (repository) => repository.contributions()),
     (byOwner) => (byOwner.get(id) ?? []).map((row) => row.ownerEnabled),
   );
 
 /** The context of the plugin's most recent activation: what it is running with. */
-const currentContext = (of: Fixture): ActivationContext => {
+const readCurrentContext = (of: Fixture): ActivationContext => {
   const ctx = of.contexts.at(-1);
   if (ctx === undefined) throw new Error(`${of.plugin.manifest.id} was never activated`);
   return ctx;
 };
 
-const kvOf = (of: Fixture): KeyValueStore => {
-  const kv = currentContext(of).kv;
+const readKeyValueStore = (of: Fixture): KeyValueStore => {
+  const kv = readCurrentContext(of).kv;
   if (kv === undefined) throw new Error(`${of.plugin.manifest.id} was given no kv surface`);
   return kv;
 };
 
-const secretsOf = (of: Fixture): PluginSecrets => {
-  const secrets = currentContext(of).secrets;
+const readPluginSecrets = (of: Fixture): PluginSecrets => {
+  const secrets = readCurrentContext(of).secrets;
   if (secrets === undefined) {
     throw new Error(`${of.plugin.manifest.id} was given no secrets surface`);
   }
@@ -61,7 +61,10 @@ const secretsOf = (of: Fixture): PluginSecrets => {
 
 describe("what a plugin's hooks are handed", () => {
   it("gives register the providers surface only, whatever else the manifest asked for", async () => {
-    const everything = fixture({ id: "everything", capabilities: ["providers", "kv", "secrets"] });
+    const everything = createPluginFixture({
+      id: "everything",
+      capabilities: ["providers", "kv", "secrets"],
+    });
 
     await run(Effect.flatMap(PluginHost, (host) => host.boot([everything.plugin])));
 
@@ -77,9 +80,12 @@ describe("what a plugin's hooks are handed", () => {
   });
 
   it("gives activate exactly the runtime surfaces the manifest asked for", async () => {
-    const bare = fixture({ id: "bare", capabilities: ["providers"] });
-    const stateful = fixture({ id: "stateful", capabilities: ["providers", "kv"] });
-    const trusted = fixture({ id: "trusted", capabilities: ["providers", "kv", "secrets"] });
+    const bare = createPluginFixture({ id: "bare", capabilities: ["providers"] });
+    const stateful = createPluginFixture({ id: "stateful", capabilities: ["providers", "kv"] });
+    const trusted = createPluginFixture({
+      id: "trusted",
+      capabilities: ["providers", "kv", "secrets"],
+    });
 
     await run(
       Effect.flatMap(PluginHost, (host) =>
@@ -87,14 +93,14 @@ describe("what a plugin's hooks are handed", () => {
       ),
     );
 
-    expect(currentContext(bare).kv).toBeUndefined();
-    expect(currentContext(bare).secrets).toBeUndefined();
+    expect(readCurrentContext(bare).kv).toBeUndefined();
+    expect(readCurrentContext(bare).secrets).toBeUndefined();
 
-    expect(currentContext(stateful).kv).toBeDefined();
-    expect(currentContext(stateful).secrets).toBeUndefined();
+    expect(readCurrentContext(stateful).kv).toBeDefined();
+    expect(readCurrentContext(stateful).secrets).toBeUndefined();
 
-    expect(currentContext(trusted).kv).toBeDefined();
-    expect(currentContext(trusted).secrets).toBeDefined();
+    expect(readCurrentContext(trusted).kv).toBeDefined();
+    expect(readCurrentContext(trusted).secrets).toBeDefined();
   });
 });
 
@@ -102,7 +108,7 @@ describe("what a plugin's hooks are handed", () => {
  * A row as an earlier boot left it, so this boot's activation pass is the first
  * one and finds a plugin the user already disabled or configured.
  */
-const storedState = (id: string, enabled: 0 | 1, config: string) =>
+const insertPluginState = (id: string, enabled: 0 | 1, config: string) =>
   Effect.flatMap(
     SqlClient.SqlClient,
     (sql) => sql`
@@ -113,20 +119,20 @@ const storedState = (id: string, enabled: 0 | 1, config: string) =>
 
 describe("the activation pass at the end of a boot", () => {
   it("activates each enabled plugin with its stored config, and leaves a disabled one alone", async () => {
-    const enabled = fixture({
+    const enabled = createPluginFixture({
       id: "enabled",
       configSchema: Schema.Struct({
         model: Schema.String,
         retries: Schema.optionalKey(Schema.Finite),
       }),
     });
-    const other = fixture({ id: "other" });
-    const off = fixture({ id: "off" });
+    const other = createPluginFixture({ id: "other" });
+    const off = createPluginFixture({ id: "off" });
 
     await run(
       Effect.gen(function* () {
-        yield* storedState("enabled", 1, '{"model":"opus"}');
-        yield* storedState("off", 0, "{}");
+        yield* insertPluginState("enabled", 1, '{"model":"opus"}');
+        yield* insertPluginState("off", 0, "{}");
         yield* Effect.flatMap(PluginHost, (host) =>
           host.boot([enabled.plugin, other.plugin, off.plugin]),
         );
@@ -136,11 +142,11 @@ describe("the activation pass at the end of a boot", () => {
     expect(enabled.calls).toEqual(["activate"]);
     expect(other.calls).toEqual(["activate"]);
     expect(off.calls).toEqual([]);
-    expect(currentContext(enabled).config).toEqual({ model: "opus" });
+    expect(readCurrentContext(enabled).config).toEqual({ model: "opus" });
   });
 
   it("errors an enabled plugin whose stored config no longer decodes, and does not activate it", async () => {
-    const drifted = fixture({
+    const drifted = createPluginFixture({
       id: "drifted",
       configSchema: Schema.Struct({ model: Schema.String }),
     });
@@ -148,7 +154,7 @@ describe("the activation pass at the end of a boot", () => {
     const detail = await run(
       Effect.gen(function* () {
         // What a plugin whose schema changed between two versions leaves behind.
-        yield* storedState("drifted", 1, '{"model":42}');
+        yield* insertPluginState("drifted", 1, '{"model":42}');
         yield* Effect.flatMap(PluginHost, (host) => host.boot([drifted.plugin]));
         return yield* Effect.flatMap(Plugins, (plugins) => plugins.read("drifted"));
       }),
@@ -162,8 +168,8 @@ describe("the activation pass at the end of a boot", () => {
 
 describe("disabling and enabling a plugin", () => {
   it("deactivates it, marks it inactive, and marks its contributions as a disabled plugin's", async () => {
-    const alpha = fixture({ id: "alpha" });
-    const beta = fixture({ id: "beta" });
+    const alpha = createPluginFixture({ id: "alpha" });
+    const beta = createPluginFixture({ id: "beta" });
 
     const { detail, rows, owned } = await run(
       Effect.gen(function* () {
@@ -172,7 +178,7 @@ describe("disabling and enabling a plugin", () => {
         return {
           detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.disable("alpha")),
           rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.disabled")),
-          owned: yield* ownerEnabled("alpha"),
+          owned: yield* readOwnerEnabled("alpha"),
         };
       }),
     );
@@ -187,7 +193,7 @@ describe("disabling and enabling a plugin", () => {
   });
 
   it("activates it again when it is enabled", async () => {
-    const alpha = fixture({ id: "alpha" });
+    const alpha = createPluginFixture({ id: "alpha" });
 
     const { detail, rows, owned } = await run(
       Effect.gen(function* () {
@@ -198,7 +204,7 @@ describe("disabling and enabling a plugin", () => {
         return {
           detail: yield* plugins.enable("alpha"),
           rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.enabled")),
-          owned: yield* ownerEnabled("alpha"),
+          owned: yield* readOwnerEnabled("alpha"),
         };
       }),
     );
@@ -214,11 +220,14 @@ describe("disabling and enabling a plugin", () => {
 describe("configuring a plugin", () => {
   // The key is optional, so the plugin starts on the empty config it is
   // installed with and the test can then configure a running plugin.
-  const configurable = (id: string) =>
-    fixture({ id, configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }) });
+  const buildConfigurableFixture = (id: string) =>
+    createPluginFixture({
+      id,
+      configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
+    });
 
   it("restarts it with the new config, and stores what it was restarted with", async () => {
-    const alpha = configurable("alpha");
+    const alpha = buildConfigurableFixture("alpha");
 
     const { detail, rows } = await run(
       Effect.gen(function* () {
@@ -235,12 +244,12 @@ describe("configuring a plugin", () => {
 
     expect(rows).toMatchObject([{ actor: "user", payload: { pluginId: "alpha" } }]);
     expect(alpha.calls).toEqual(["activate", "deactivate", "activate"]);
-    expect(currentContext(alpha).config).toEqual({ model: "sonnet" });
+    expect(readCurrentContext(alpha).config).toEqual({ model: "sonnet" });
     expect(detail.config).toEqual({ model: "sonnet" });
   });
 
   it("refuses a config its schema rejects, naming the field, and leaves it running", async () => {
-    const alpha = configurable("alpha");
+    const alpha = buildConfigurableFixture("alpha");
 
     const failure = await run(
       Effect.gen(function* () {
@@ -272,7 +281,7 @@ describe("configuring a plugin", () => {
 
 describe("a plugin whose activate fails", () => {
   it("is errored after one attempt, and the failure is on the audit log", async () => {
-    const flaky = fixture({ id: "flaky", activateFailures: 1 });
+    const flaky = createPluginFixture({ id: "flaky", activateFailures: 1 });
 
     const { detail, errors } = await run(
       Effect.gen(function* () {
@@ -296,7 +305,7 @@ describe("a plugin whose activate fails", () => {
   });
 
   it("runs activate once more when the user retries, and comes up active", async () => {
-    const flaky = fixture({ id: "flaky", activateFailures: 1 });
+    const flaky = createPluginFixture({ id: "flaky", activateFailures: 1 });
 
     const { detail, rows } = await run(
       Effect.gen(function* () {
@@ -317,7 +326,7 @@ describe("a plugin whose activate fails", () => {
 
 describe("retrying a plugin that is not errored", () => {
   it("is refused, so the button is never a second spelling of enable", async () => {
-    const alpha = fixture({ id: "alpha" });
+    const alpha = createPluginFixture({ id: "alpha" });
 
     const failure = await run(
       Effect.gen(function* () {
@@ -334,7 +343,10 @@ describe("retrying a plugin that is not errored", () => {
 
 describe("a plugin whose deactivate fails", () => {
   it("is errored with the leftover machinery said out loud, and its contributions read disabled", async () => {
-    const stuck = fixture({ id: "stuck", deactivateFails: "the poll loop would not stop" });
+    const stuck = createPluginFixture({
+      id: "stuck",
+      deactivateFails: "the poll loop would not stop",
+    });
 
     const { detail, errors, owned } = await run(
       Effect.gen(function* () {
@@ -343,7 +355,7 @@ describe("a plugin whose deactivate fails", () => {
         return {
           detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.disable("stuck")),
           errors: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.errored")),
-          owned: yield* ownerEnabled("stuck"),
+          owned: yield* readOwnerEnabled("stuck"),
         };
       }),
     );
@@ -363,22 +375,23 @@ describe("a plugin whose deactivate fails", () => {
 });
 
 describe("the key-value store a plugin is given", () => {
-  const stateful = (id: string) => fixture({ id, capabilities: ["providers", "kv"] });
+  const buildStatefulFixture = (id: string) =>
+    createPluginFixture({ id, capabilities: ["providers", "kv"] });
 
   it("is namespaced by plugin, so one plugin never reads another's key", async () => {
-    const alpha = stateful("alpha");
-    const beta = stateful("beta");
+    const alpha = buildStatefulFixture("alpha");
+    const beta = buildStatefulFixture("beta");
 
     const read = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin, beta.plugin]);
-        yield* kvOf(alpha).set("k", 1);
-        yield* kvOf(beta).set("k", 2);
+        yield* readKeyValueStore(alpha).set("k", 1);
+        yield* readKeyValueStore(beta).set("k", 2);
         return {
-          alpha: yield* kvOf(alpha).get("k"),
-          beta: yield* kvOf(beta).get("k"),
-          alphaKeys: yield* kvOf(alpha).list(),
+          alpha: yield* readKeyValueStore(alpha).get("k"),
+          beta: yield* readKeyValueStore(beta).get("k"),
+          alphaKeys: yield* readKeyValueStore(alpha).list(),
         };
       }),
     );
@@ -389,15 +402,18 @@ describe("the key-value store a plugin is given", () => {
   });
 
   it("forgets a key that was deleted", async () => {
-    const alpha = stateful("alpha");
+    const alpha = buildStatefulFixture("alpha");
 
     const read = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin]);
-        yield* kvOf(alpha).set("k", 1);
-        yield* kvOf(alpha).delete("k");
-        return { value: yield* kvOf(alpha).get("k"), keys: yield* kvOf(alpha).list() };
+        yield* readKeyValueStore(alpha).set("k", 1);
+        yield* readKeyValueStore(alpha).delete("k");
+        return {
+          value: yield* readKeyValueStore(alpha).get("k"),
+          keys: yield* readKeyValueStore(alpha).list(),
+        };
       }),
     );
 
@@ -406,17 +422,17 @@ describe("the key-value store a plugin is given", () => {
   });
 
   it("survives a disable, because re-enabling resumes where the plugin left off", async () => {
-    const alpha = stateful("alpha");
+    const alpha = buildStatefulFixture("alpha");
 
     const value = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin]);
-        yield* kvOf(alpha).set("cursor", "2026-09-06");
+        yield* readKeyValueStore(alpha).set("cursor", "2026-09-06");
         const plugins = yield* Plugins;
         yield* plugins.disable("alpha");
         yield* plugins.enable("alpha");
-        return yield* kvOf(alpha).get("cursor");
+        return yield* readKeyValueStore(alpha).get("cursor");
       }),
     );
 
@@ -425,23 +441,24 @@ describe("the key-value store a plugin is given", () => {
 });
 
 describe("resetting a plugin's state", () => {
-  const stateful = (id: string) => fixture({ id, capabilities: ["providers", "kv"] });
+  const buildStatefulFixture = (id: string) =>
+    createPluginFixture({ id, capabilities: ["providers", "kv"] });
 
   it("wipes that plugin's keys only, restarts it, and says so on the audit log", async () => {
-    const alpha = stateful("alpha");
-    const beta = stateful("beta");
+    const alpha = buildStatefulFixture("alpha");
+    const beta = buildStatefulFixture("beta");
 
     const result = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin, beta.plugin]);
-        yield* kvOf(alpha).set("k", 1);
-        yield* kvOf(beta).set("k", 2);
+        yield* readKeyValueStore(alpha).set("k", 1);
+        yield* readKeyValueStore(beta).set("k", 2);
         const detail = yield* Effect.flatMap(Plugins, (plugins) => plugins.resetState("alpha"));
         return {
           detail,
-          alpha: yield* kvOf(alpha).get("k"),
-          beta: yield* kvOf(beta).get("k"),
+          alpha: yield* readKeyValueStore(alpha).get("k"),
+          beta: yield* readKeyValueStore(beta).get("k"),
           rows: yield* Effect.flatMap(AuditLog, (log) => log.listByKind("plugin.stateReset")),
         };
       }),
@@ -457,13 +474,13 @@ describe("resetting a plugin's state", () => {
   });
 
   it("wipes a disabled plugin's keys without starting it", async () => {
-    const alpha = stateful("alpha");
+    const alpha = buildStatefulFixture("alpha");
 
     const keys = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin]);
-        yield* kvOf(alpha).set("k", 1);
+        yield* readKeyValueStore(alpha).set("k", 1);
         const plugins = yield* Plugins;
         yield* plugins.disable("alpha");
         yield* plugins.resetState("alpha");
@@ -480,18 +497,19 @@ describe("resetting a plugin's state", () => {
 });
 
 describe("the secrets a plugin is given", () => {
-  const trusted = (id: string) => fixture({ id, capabilities: ["providers", "secrets"] });
+  const buildTrustedFixture = (id: string) =>
+    createPluginFixture({ id, capabilities: ["providers", "secrets"] });
 
   const VALUE = "ghp_a-real-looking-token";
 
   it("are rows in the one secrets table, owned by the plugin, listed without their value", async () => {
-    const alpha = trusted("alpha");
+    const alpha = buildTrustedFixture("alpha");
 
     const page = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin]);
-        yield* secretsOf(alpha).set("token", Redacted.make(VALUE));
+        yield* readPluginSecrets(alpha).set("token", Redacted.make(VALUE));
         return yield* Effect.flatMap(Secret, (secret) => secret.query({}));
       }),
     );
@@ -506,19 +524,19 @@ describe("the secrets a plugin is given", () => {
   });
 
   it("are scoped to their owner, so one plugin never reads or lists another's", async () => {
-    const alpha = trusted("alpha");
-    const beta = trusted("beta");
+    const alpha = buildTrustedFixture("alpha");
+    const beta = buildTrustedFixture("beta");
 
     const read = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin, beta.plugin]);
-        yield* secretsOf(alpha).set("token", Redacted.make(VALUE));
+        yield* readPluginSecrets(alpha).set("token", Redacted.make(VALUE));
         return {
-          alphaValue: yield* secretsOf(alpha).get("token"),
-          alphaNames: yield* secretsOf(alpha).list(),
-          betaValue: yield* secretsOf(beta).get("token"),
-          betaNames: yield* secretsOf(beta).list(),
+          alphaValue: yield* readPluginSecrets(alpha).get("token"),
+          alphaNames: yield* readPluginSecrets(alpha).list(),
+          betaValue: yield* readPluginSecrets(beta).get("token"),
+          betaNames: yield* readPluginSecrets(beta).list(),
         };
       }),
     );
@@ -530,16 +548,16 @@ describe("the secrets a plugin is given", () => {
   });
 
   it("are gone from the table once the plugin deletes one", async () => {
-    const alpha = trusted("alpha");
+    const alpha = buildTrustedFixture("alpha");
 
     const result = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin]);
-        yield* secretsOf(alpha).set("token", Redacted.make(VALUE));
-        yield* secretsOf(alpha).delete("token");
+        yield* readPluginSecrets(alpha).set("token", Redacted.make(VALUE));
+        yield* readPluginSecrets(alpha).delete("token");
         return {
-          value: yield* secretsOf(alpha).get("token"),
+          value: yield* readPluginSecrets(alpha).get("token"),
           page: yield* Effect.flatMap(Secret, (secret) => secret.query({})),
         };
       }),
@@ -552,7 +570,7 @@ describe("the secrets a plugin is given", () => {
 
 describe("configuring a plugin whose deactivate failed", () => {
   it("stores the config but does not start it on top of the machinery left behind", async () => {
-    const stuck = fixture({
+    const stuck = createPluginFixture({
       id: "stuck",
       configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
       deactivateFails: "the poll loop would not stop",
@@ -576,8 +594,14 @@ describe("configuring a plugin whose deactivate failed", () => {
 
 describe("a plugin that answers with a different manifest after it is loaded", () => {
   it("stays scoped by the manifest it was loaded with", async () => {
-    const victim = fixture({ id: "victim", capabilities: ["providers", "kv", "secrets"] });
-    const shifty = fixture({ id: "shifty", capabilities: ["providers", "kv", "secrets"] });
+    const victim = createPluginFixture({
+      id: "victim",
+      capabilities: ["providers", "kv", "secrets"],
+    });
+    const shifty = createPluginFixture({
+      id: "shifty",
+      capabilities: ["providers", "kv", "secrets"],
+    });
     const own = shifty.plugin.manifest;
     let reads = 0;
     const disguised: Plugin = {
@@ -592,11 +616,11 @@ describe("a plugin that answers with a different manifest after it is loaded", (
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([victim.plugin, disguised]);
-        yield* kvOf(shifty).set("k", 1);
-        yield* secretsOf(shifty).set("token", Redacted.make("shhh"));
+        yield* readKeyValueStore(shifty).set("k", 1);
+        yield* readPluginSecrets(shifty).set("token", Redacted.make("shhh"));
         return {
-          victimKey: yield* kvOf(victim).get("k"),
-          victimSecrets: yield* secretsOf(victim).list(),
+          victimKey: yield* readKeyValueStore(victim).get("k"),
+          victimSecrets: yield* readPluginSecrets(victim).list(),
           owners: (yield* Effect.flatMap(Plugins, (plugins) => plugins.query())).map((detail) => ({
             id: detail.id,
             contributions: detail.contributions.map((c) => c.id),
@@ -616,7 +640,10 @@ describe("a plugin that answers with a different manifest after it is loaded", (
 
 describe("a plugin that only a restart can start again", () => {
   it("refuses a retry after its register failed, because it contributed nothing to run", async () => {
-    const broken = fixture({ id: "broken", registerFails: "the manifest names no provider" });
+    const broken = createPluginFixture({
+      id: "broken",
+      registerFails: "the manifest names no provider",
+    });
 
     const { failure, detail } = await run(
       Effect.gen(function* () {
@@ -637,7 +664,10 @@ describe("a plugin that only a restart can start again", () => {
   });
 
   it("refuses a retry after its deactivate failed, because that instance is still up", async () => {
-    const stuck = fixture({ id: "stuck", deactivateFails: "the poll loop would not stop" });
+    const stuck = createPluginFixture({
+      id: "stuck",
+      deactivateFails: "the poll loop would not stop",
+    });
 
     const failure = await run(
       Effect.gen(function* () {
@@ -657,7 +687,7 @@ describe("a plugin that only a restart can start again", () => {
 
 describe("two moves on one plugin at the same time", () => {
   it("tears a plugin down once when it is disabled twice at once", async () => {
-    const alpha = fixture({ id: "alpha", slow: true });
+    const alpha = createPluginFixture({ id: "alpha", slow: true });
 
     const result = await run(
       Effect.gen(function* () {
@@ -676,7 +706,7 @@ describe("two moves on one plugin at the same time", () => {
   });
 
   it("leaves nothing running when a disable races a retry", async () => {
-    const flaky = fixture({ id: "flaky", activateFailures: 1, slow: true });
+    const flaky = createPluginFixture({ id: "flaky", activateFailures: 1, slow: true });
 
     const detail = await run(
       Effect.gen(function* () {
@@ -700,7 +730,7 @@ describe("two moves on one plugin at the same time", () => {
 
 describe("a move that changes nothing", () => {
   it("does not start an enabled plugin a second time", async () => {
-    const alpha = fixture({ id: "alpha" });
+    const alpha = createPluginFixture({ id: "alpha" });
 
     const rows = await run(
       Effect.gen(function* () {
@@ -716,7 +746,7 @@ describe("a move that changes nothing", () => {
   });
 
   it("does not tear a disabled plugin down a second time", async () => {
-    const alpha = fixture({ id: "alpha" });
+    const alpha = createPluginFixture({ id: "alpha" });
 
     const rows = await run(
       Effect.gen(function* () {
@@ -736,7 +766,7 @@ describe("a move that changes nothing", () => {
 
 describe("a plugin that was never loaded", () => {
   it("refuses every move, because there is nothing to act on", async () => {
-    const ahead = fixture({ id: "ahead" });
+    const ahead = createPluginFixture({ id: "ahead" });
     const future: Plugin = {
       ...ahead.plugin,
       manifest: { ...ahead.plugin.manifest, hostApi: HOST_API + 1 },
@@ -765,15 +795,20 @@ describe("a plugin that was never loaded", () => {
 
 describe("an empty key or secret name", () => {
   it("is refused by the surface, so the plugin reads a sentence and not a statement", async () => {
-    const alpha = fixture({ id: "alpha", capabilities: ["providers", "kv", "secrets"] });
+    const alpha = createPluginFixture({
+      id: "alpha",
+      capabilities: ["providers", "kv", "secrets"],
+    });
 
     const failures = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin]);
         return {
-          key: yield* Effect.flip(Effect.sandbox(kvOf(alpha).set("", 1))),
-          name: yield* Effect.flip(Effect.sandbox(secretsOf(alpha).set("", Redacted.make("shhh")))),
+          key: yield* Effect.flip(Effect.sandbox(readKeyValueStore(alpha).set("", 1))),
+          name: yield* Effect.flip(
+            Effect.sandbox(readPluginSecrets(alpha).set("", Redacted.make("shhh"))),
+          ),
         };
       }),
     );
@@ -787,7 +822,7 @@ describe("an empty key or secret name", () => {
 
 describe("disabling a plugin whose activate failed", () => {
   it("leaves it inactive rather than errored, so Retry is not offered on a plugin that is off", async () => {
-    const flaky = fixture({ id: "flaky", activateFailures: 1 });
+    const flaky = createPluginFixture({ id: "flaky", activateFailures: 1 });
 
     const { detail, failure } = await run(
       Effect.gen(function* () {
@@ -812,7 +847,7 @@ describe("a plugin that fails with a very long message", () => {
   it("has it cut before it reaches the log, which keeps what it is told for months", async () => {
     const shouted = "x".repeat(10_000);
     const shouty: Plugin = {
-      ...fixture({ id: "shouty" }).plugin,
+      ...createPluginFixture({ id: "shouty" }).plugin,
       activate: () => Effect.fail(new PluginError({ message: shouted })),
     };
 
@@ -836,7 +871,7 @@ describe("a plugin that fails with a very long message", () => {
 
 describe("a caller with no credential behind it", () => {
   it("is refused by every operation, before anything is read or run", async () => {
-    const alpha = fixture({ id: "alpha" });
+    const alpha = createPluginFixture({ id: "alpha" });
 
     const { failures, rows } = await Effect.runPromise(
       Effect.gen(function* () {
@@ -868,7 +903,7 @@ describe("a caller with no credential behind it", () => {
             (kind) => log.listByKind(kind),
           ),
         };
-      }).pipe(Effect.provide(pluginStack())),
+      }).pipe(Effect.provide(buildPluginStack())),
     );
 
     for (const failure of failures) {

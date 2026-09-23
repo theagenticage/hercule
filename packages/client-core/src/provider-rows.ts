@@ -53,7 +53,7 @@ const VERDICTS: Readonly<Record<string, string>> = {
   "above-tested-max": "above the version this build was tested with",
 };
 
-const accountIn = (snapshot: ProviderInstance["snapshots"][number] | undefined): string => {
+const describeAccount = (snapshot: ProviderInstance["snapshots"][number] | undefined): string => {
   if (snapshot === undefined) return "not probed yet";
   const { auth } = snapshot;
   if (auth.status === "unauthenticated") return "not logged in";
@@ -67,13 +67,15 @@ const accountIn = (snapshot: ProviderInstance["snapshots"][number] | undefined):
   return named.length === 0 ? (auth.backend ?? "signed in") : named.join(" · ");
 };
 
-const modelsIn = (snapshot: ProviderInstance["snapshots"][number] | undefined): string => {
+const describeModelCount = (
+  snapshot: ProviderInstance["snapshots"][number] | undefined,
+): string => {
   const count = snapshot?.models.length ?? 0;
   if (count === 0) return "no models";
   return count === 1 ? "1 model" : `${String(count)} models`;
 };
 
-export const providerRows = (
+export const buildProviderRows = (
   runner: Runner,
   instances: ReadonlyArray<ProviderInstance>,
 ): ReadonlyArray<ProviderRow> =>
@@ -98,8 +100,8 @@ export const providerRows = (
       version: snapshot?.harnessVersion ?? "not reported",
       verdict: snapshot === undefined ? null : (VERDICTS[snapshot.versionVerdict] ?? null),
       // Said once, in place of whatever a stale snapshot claimed.
-      account: adapter ? accountIn(snapshot) : NO_ADAPTER,
-      models: modelsIn(snapshot),
+      account: adapter ? describeAccount(snapshot) : NO_ADAPTER,
+      models: describeModelCount(snapshot),
       loggedIn: snapshot?.auth.status === "ok",
       install: !reachable || present ? "none" : adapter ? "offered" : "blocked",
       // A provider whose credential is typed in has no vendor to send the user

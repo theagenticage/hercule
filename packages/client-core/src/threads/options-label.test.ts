@@ -1,10 +1,10 @@
 /**
- * `optionsLabel(descriptors, selected)` is the one line the model options
+ * `buildOptionsLabel(descriptors, selected)` is the one line the model options
  * selector shows for what is picked under the model.
  */
 import { describe, expect, it } from "vitest";
 import type { ModelOption } from "@hercule/contract";
-import { optionsLabel } from "./options-label";
+import { buildOptionsLabel } from "./options-label";
 
 const EFFORT: ModelOption = {
   id: "effort",
@@ -32,35 +32,39 @@ const FAST_MODE: ModelOption = {
   default: false,
 };
 
-describe("optionsLabel", () => {
+describe("buildOptionsLabel", () => {
   it("has nothing to say when the model declares no options", () => {
-    expect(optionsLabel([], {})).toBeNull();
+    expect(buildOptionsLabel([], {})).toBeNull();
   });
 
   it("reads the selected effort choice's label, lower-cased", () => {
-    expect(optionsLabel([EFFORT], { effort: "high" })).toBe("high");
+    expect(buildOptionsLabel([EFFORT], { effort: "high" })).toBe("high");
   });
 
   it("says thinking on for a boolean thinking option that is set", () => {
-    expect(optionsLabel([THINKING], { thinking: true })).toBe("thinking on");
+    expect(buildOptionsLabel([THINKING], { thinking: true })).toBe("thinking on");
   });
 
   it("has nothing to say while thinking is off", () => {
-    expect(optionsLabel([THINKING], { thinking: false })).toBeNull();
+    expect(buildOptionsLabel([THINKING], { thinking: false })).toBeNull();
   });
 
   it("has nothing to append the bolt to when fast mode is all the model offers", () => {
-    expect(optionsLabel([FAST_MODE], { fastMode: true })).toBeNull();
+    expect(buildOptionsLabel([FAST_MODE], { fastMode: true })).toBeNull();
   });
 
   it("appends the bolt while fast mode is on", () => {
-    expect(optionsLabel([EFFORT, FAST_MODE], { effort: "high", fastMode: true })).toBe("high ⚡");
-    expect(optionsLabel([THINKING, FAST_MODE], { thinking: true, fastMode: true })).toBe(
+    expect(buildOptionsLabel([EFFORT, FAST_MODE], { effort: "high", fastMode: true })).toBe(
+      "high ⚡",
+    );
+    expect(buildOptionsLabel([THINKING, FAST_MODE], { thinking: true, fastMode: true })).toBe(
       "thinking on ⚡",
     );
   });
 
   it("leaves the bolt off while fast mode is off", () => {
-    expect(optionsLabel([EFFORT, FAST_MODE], { effort: "high", fastMode: false })).toBe("high");
+    expect(buildOptionsLabel([EFFORT, FAST_MODE], { effort: "high", fastMode: false })).toBe(
+      "high",
+    );
   });
 });

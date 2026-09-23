@@ -10,7 +10,7 @@
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 
-export const absorbing = <E>(
+export const absorbFailures = <E>(
   what: string,
   effect: Effect.Effect<void, E>,
 ): Effect.Effect<void, E> =>
@@ -23,5 +23,7 @@ export const absorbing = <E>(
  * waits on a machine - a dispatch, a flush, a machine told what it owes - must
  * not hold up the next item behind it.
  */
-export const forking = <E>(what: string, effect: Effect.Effect<void, E>): Effect.Effect<void> =>
-  Effect.asVoid(Effect.forkChild(absorbing(what, effect)));
+export const forkAndAbsorbFailures = <E>(
+  what: string,
+  effect: Effect.Effect<void, E>,
+): Effect.Effect<void> => Effect.asVoid(Effect.forkChild(absorbFailures(what, effect)));

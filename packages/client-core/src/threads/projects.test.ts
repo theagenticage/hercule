@@ -3,8 +3,8 @@
  * on, rather than a name alone.
  */
 import { describe, expect, it } from "vitest";
-import { projectPickerRows } from "./projects";
-import { projectTone } from "./tone";
+import { buildProjectPickerRows } from "./projects";
+import { pickProjectTone } from "./tone";
 import {
   INFRA,
   OPS_PROJECT,
@@ -13,24 +13,24 @@ import {
   RUNBOOKS,
   WEBSHOP,
   WEBSHOP_PROJECT,
-  project,
-  session,
+  buildProject,
+  buildSession,
 } from "./workspaces.testing";
 
-const SANDBOX = project("p-sandbox", "sandbox");
+const SANDBOX = buildProject("p-sandbox", "sandbox");
 
-const rows = projectPickerRows({
+const rows = buildProjectPickerRows({
   projects: [WEBSHOP_PROJECT, OPS_PROJECT, SANDBOX],
   resources: [WEBSHOP, INFRA, RUNBOOKS],
   workspaces: [PRIMARY, RUN_3F1],
   sessions: [
-    session({ id: "s1", projectId: WEBSHOP_PROJECT.id }),
-    session({ id: "s2", projectId: WEBSHOP_PROJECT.id }),
-    session({ id: "s3", projectId: OPS_PROJECT.id }),
+    buildSession({ id: "s1", projectId: WEBSHOP_PROJECT.id }),
+    buildSession({ id: "s2", projectId: WEBSHOP_PROJECT.id }),
+    buildSession({ id: "s3", projectId: OPS_PROJECT.id }),
   ],
 });
 
-describe("projectPickerRows", () => {
+describe("buildProjectPickerRows", () => {
   it("says how much stands under a project, naming its repos", () => {
     expect(rows[0]?.sub).toBe("1 repo · webshop · 2 threads · 1 workspace");
     expect(rows[1]?.sub).toBe("2 repos · ops-infra, ops-runbooks · 1 thread · 0 workspaces");
@@ -45,9 +45,9 @@ describe("projectPickerRows", () => {
   });
 
   it("offers a key to the first nine and none past them", () => {
-    const many = projectPickerRows({
+    const many = buildProjectPickerRows({
       projects: Array.from({ length: 10 }, (_, index) =>
-        project(`p${String(index)}`, `p${String(index)}`),
+        buildProject(`p${String(index)}`, `p${String(index)}`),
       ),
       resources: [],
       workspaces: [],
@@ -60,32 +60,34 @@ describe("projectPickerRows", () => {
   });
 });
 
-describe("projectTone", () => {
+describe("pickProjectTone", () => {
   const PROJECTS = [WEBSHOP_PROJECT, OPS_PROJECT, SANDBOX];
 
   // R6: hashing the id gave two projects one hue as often as not; the place in
   // the listing cannot.
   it("gives two projects standing next to each other different hues", () => {
-    expect(projectTone(WEBSHOP_PROJECT.id, PROJECTS)).not.toBe(
-      projectTone(OPS_PROJECT.id, PROJECTS),
+    expect(pickProjectTone(WEBSHOP_PROJECT.id, PROJECTS)).not.toBe(
+      pickProjectTone(OPS_PROJECT.id, PROJECTS),
     );
-    expect(projectTone(OPS_PROJECT.id, PROJECTS)).not.toBe(projectTone(SANDBOX.id, PROJECTS));
+    expect(pickProjectTone(OPS_PROJECT.id, PROJECTS)).not.toBe(
+      pickProjectTone(SANDBOX.id, PROJECTS),
+    );
   });
 
   it("answers the same hue for the same project every time, and the rows agree", () => {
-    expect(projectTone(WEBSHOP_PROJECT.id, PROJECTS)).toBe(
-      projectTone(WEBSHOP_PROJECT.id, PROJECTS),
+    expect(pickProjectTone(WEBSHOP_PROJECT.id, PROJECTS)).toBe(
+      pickProjectTone(WEBSHOP_PROJECT.id, PROJECTS),
     );
     expect(rows.map((row) => row.tone)).toEqual(
-      PROJECTS.map((each) => projectTone(each.id, PROJECTS)),
+      PROJECTS.map((each) => pickProjectTone(each.id, PROJECTS)),
     );
   });
 
   it("only ever answers one of the two hues the design language fixes", () => {
     const many = Array.from({ length: 40 }, (_, index) =>
-      project(`p-${String(index)}`, `p${String(index)}`),
+      buildProject(`p-${String(index)}`, `p${String(index)}`),
     );
-    const tones = new Set(many.map((each) => projectTone(each.id, many)));
+    const tones = new Set(many.map((each) => pickProjectTone(each.id, many)));
 
     expect([...tones].every((tone) => tone === "hercule" || tone === "ops")).toBe(true);
     expect(tones.size).toBe(2);

@@ -42,11 +42,11 @@ const EMPTY = "{}\n";
 export const isSpeakable = (value: string): boolean => !/[\n\r\0]/.test(value);
 
 /** `<host>/<path>`, the way spec 13 section 9 names the thing git is talking to. */
-const remoteOf = (question: HelperQuestion): string =>
+const formatRemote = (question: HelperQuestion): string =>
   [question.host, question.path].filter((part) => part !== undefined && part.length > 0).join("/");
 
-const askFor = (question: HelperQuestion): CredentialAsk | undefined => {
-  const remote = remoteOf(question);
+const buildCredentialAsk = (question: HelperQuestion): CredentialAsk | undefined => {
+  const remote = formatRemote(question);
   if (remote.length === 0) return undefined;
   // A session's own token is the stronger claim, and the runner never makes one
   // on a session's behalf.
@@ -58,7 +58,7 @@ const askFor = (question: HelperQuestion): CredentialAsk | undefined => {
     : { remote, workspaceId: question.workspaceId };
 };
 
-const answerFor = async (
+const answerQuestionLine = async (
   line: string,
   ask: (request: CredentialAsk) => Promise<CredentialAnswer>,
 ): Promise<string> => {
@@ -68,7 +68,7 @@ const answerFor = async (
   } catch {
     return EMPTY;
   }
-  const asking = askFor(question);
+  const asking = buildCredentialAsk(question);
   if (asking === undefined) return EMPTY;
   try {
     const answer = await ask(asking);
@@ -85,7 +85,7 @@ const answerFor = async (
 };
 
 /** Whether a daemon is already listening there, which is not a path to unlink. */
-const answeredAt = (path: string): Promise<boolean> =>
+const isDaemonListening = (path: string): Promise<boolean> =>
   new Promise((resolve) => {
     const probe = createConnection({ path });
     probe.on("connect", () => {
@@ -102,7 +102,7 @@ export const serveCredentialSocket = async (options: {
   readonly path: string;
   readonly ask: (request: CredentialAsk) => Promise<CredentialAnswer>;
 }): Promise<{ close(): Promise<void> }> => {
-  if (await answeredAt(options.path)) {
+  if (await isDaemonListening(options.path)) {
     throw new Error(
       `another Hercule runner is already listening at ${options.path}; ` +
         "only one daemon may run against one Hercule home",
@@ -131,7 +131,7 @@ export const serveCredentialSocket = async (options: {
       const line = received.slice(0, newline);
       // One question per connection: what follows the first line is nobody's.
       connection.removeAllListeners("data");
-      void answerFor(line, options.ask).then((reply) => connection.end(reply));
+      void answerQuestionLine(line, options.ask).then((reply) => connection.end(reply));
     });
     // A helper that went away mid-question leaves nothing to clean up.
     connection.on("error", () => connection.destroy());

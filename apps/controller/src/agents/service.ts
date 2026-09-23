@@ -48,7 +48,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
@@ -58,7 +58,7 @@ import { agentRepository, type AgentEdit, type StoredAgent } from "./repository"
 
 const QueryInput = Schema.Struct({
   ...AgentFilter.fields,
-  ...pageInput(AGENT_SORT_FIELDS),
+  ...buildPageInputFields(AGENT_SORT_FIELDS),
 });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
@@ -163,7 +163,7 @@ const make = Effect.gen(function* () {
    * does not carry. What the machines that host the provider can do now is not
    * read: an agent is a stored configuration, not a placement.
    */
-  const requireProvider = (instanceId: string): Effect.Effect<string, WriteError> =>
+  const readProviderIdOrFail = (instanceId: string): Effect.Effect<string, WriteError> =>
     Effect.gen(function* () {
       const instance = yield* instances.one(instanceId);
       if (Option.isNone(instance)) {
@@ -189,7 +189,7 @@ const make = Effect.gen(function* () {
     });
 
   /** Refuses a `permissionProfileId` naming no profile, before it is written as one. */
-  const requireProfile = (profileId: string): Effect.Effect<void, WriteError> =>
+  const validateProfileExists = (profileId: string): Effect.Effect<void, WriteError> =>
     Effect.gen(function* () {
       const profile = yield* profiles.getById(profileId);
       if (Option.isNone(profile)) {
@@ -200,7 +200,7 @@ const make = Effect.gen(function* () {
     });
 
   /** The stored agent, or `not_found` if no agent has this id. */
-  const requireAgent = (id: string): Effect.Effect<StoredAgent, NotFound | SqlError> =>
+  const readAgentOrFail = (id: string): Effect.Effect<StoredAgent, NotFound | SqlError> =>
     Effect.flatMap(
       agents.read(id),
       Option.match({
@@ -238,7 +238,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("agent.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const composeRecord = yield* agentRecordComposer;
-        return composeRecord(yield* requireAgent(id));
+        return composeRecord(yield* readAgentOrFail(id));
       }),
 
     /** Records a configuration sessions can be spawned from. */
@@ -255,8 +255,8 @@ const make = Effect.gen(function* () {
             // read before the transaction can be deleted between that read and
             // the insert, which would store an agent that names a row that is
             // gone.
-            const providerId = yield* requireProvider(decoded.instanceId);
-            yield* requireProfile(decoded.permissionProfileId);
+            const providerId = yield* readProviderIdOrFail(decoded.instanceId);
+            yield* validateProfileExists(decoded.permissionProfileId);
             // One clock read, inside the transaction. The row and the event
             // that records the row carry the same instant, so a new agent's
             // `updatedAt` is equal to its `createdAt`.
@@ -316,15 +316,15 @@ const make = Effect.gen(function* () {
             // Inside the write set. A profile or an instance that is deleted
             // between the check and the update would leave the agent naming a
             // row that is gone.
-            if (edit.instanceId !== undefined) yield* requireProvider(edit.instanceId);
+            if (edit.instanceId !== undefined) yield* readProviderIdOrFail(edit.instanceId);
             if (edit.permissionProfileId !== undefined) {
-              yield* requireProfile(edit.permissionProfileId);
+              yield* validateProfileExists(edit.permissionProfileId);
             }
             const at = yield* nowIso;
             // Read for the refusal it can give. An id that no agent holds
             // must answer `not_found`, and not an update that changed no rows
             // and reported success.
-            yield* requireAgent(id);
+            yield* readAgentOrFail(id);
             yield* agents.update(id, edit, at);
             yield* audit.append({
               kind: "agent.updated",
@@ -334,7 +334,7 @@ const make = Effect.gen(function* () {
               payload: { agentId: id, changed: Object.keys(edit).sort() },
               at,
             });
-            return yield* requireAgent(id);
+            return yield* readAgentOrFail(id);
           }),
         );
         return composeRecord(stored);
@@ -355,7 +355,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const agent = yield* requireAgent(id);
+            const agent = yield* readAgentOrFail(id);
             // The oldest session this agent spawned that has not exited. It is
             // named in the refusal, so the user knows which session to end.
             const live = yield* refuseCursor(

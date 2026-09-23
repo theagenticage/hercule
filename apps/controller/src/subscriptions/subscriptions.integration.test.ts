@@ -12,10 +12,10 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import { del, get, post, readRefusal } from "../http/testing";
+import { del, get, post, readErrorBody } from "../http/testing";
 import {
-  agentHolding,
-  agentOn,
+  spawnAgentWithGrants,
+  spawnAgentUnder,
   createProfile,
   WAIT_DEADLINE_MS,
   withAgentFleet,
@@ -118,7 +118,7 @@ const cancelSubscription = (arranged: Arranged, id: string, token: string): Prom
 describe("subscription.create", () => {
   it("stores the target, its expansion, and the session that asked, as live", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await agentHolding(arranged, "subscribers", [
+      const agent = await spawnAgentWithGrants(arranged, "subscribers", [
         "subscription.write",
         "subscription.read",
       ]);
@@ -143,7 +143,7 @@ describe("subscription.create", () => {
 
   it("refuses each target whose subject this version cannot have, naming it", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await agentHolding(arranged, "subscribers", ["subscription.write"]);
+      const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
       const cases: ReadonlyArray<readonly [unknown, RegExp]> = [
         [{ kind: "run", runId: "r_3" }, /run/i],
         [{ kind: "session", sessionId: agent.session.id }, /session/i],
@@ -151,7 +151,7 @@ describe("subscription.create", () => {
       ];
       for (const [target, names] of cases) {
         const response = await createSubscription(arranged, target, agent.token);
-        const refused = await readRefusal(response);
+        const refused = await readErrorBody(response);
         expect(response.status, JSON.stringify(target)).toBe(409);
         expect(refused.code, JSON.stringify(target)).toBe("invalid_state");
         expect(refused.message).toMatch(names);
@@ -167,7 +167,7 @@ describe("subscription.create", () => {
         { kind: "ref", ref: REF },
         arranged.token,
       );
-      const refused = await readRefusal(response);
+      const refused = await readErrorBody(response);
       expect(response.status, refused.text).toBe(400);
       expect(refused.code).toBe("validation");
       expect(refused.message).toMatch(/session/i);
@@ -182,8 +182,8 @@ describe("subscription.query", () => {
         "subscription.write",
         "subscription.read",
       ]);
-      const mine = await agentOn(arranged, profile);
-      const theirs = await agentOn(arranged, profile);
+      const mine = await spawnAgentUnder(arranged, profile);
+      const theirs = await spawnAgentUnder(arranged, profile);
       const own = await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, mine.token);
       const other = await createSubscriptionOrFail(
         arranged,
@@ -208,8 +208,8 @@ describe("subscription.query", () => {
         "subscription.write",
         "subscription.read",
       ]);
-      const mine = await agentOn(arranged, profile);
-      const theirs = await agentOn(arranged, profile);
+      const mine = await spawnAgentUnder(arranged, profile);
+      const theirs = await spawnAgentUnder(arranged, profile);
       await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, mine.token);
       const other = await createSubscriptionOrFail(
         arranged,
@@ -226,7 +226,7 @@ describe("subscription.query", () => {
   it("refuses a user credential that names no holder, saying one must be named", async () => {
     await withAgentFleet(async (arranged) => {
       const response = await listSubscriptions(arranged, arranged.token);
-      const refused = await readRefusal(response);
+      const refused = await readErrorBody(response);
       expect(response.status, refused.text).toBe(400);
       expect(refused.code).toBe("validation");
       expect(refused.message).toMatch(/holder/i);
@@ -237,7 +237,7 @@ describe("subscription.query", () => {
 describe("subscription.cancel", () => {
   it("ends the subscription, with cancelled as the reason on the row", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await agentHolding(arranged, "subscribers", [
+      const agent = await spawnAgentWithGrants(arranged, "subscribers", [
         "subscription.write",
         "subscription.read",
       ]);
@@ -262,7 +262,7 @@ describe("subscription.cancel", () => {
 
   it("answers a second cancel of the same subscription with not found", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await agentHolding(arranged, "subscribers", ["subscription.write"]);
+      const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
       const subscriptionId = await createSubscriptionOrFail(
         arranged,
         { kind: "ref", ref: REF },
@@ -271,7 +271,7 @@ describe("subscription.cancel", () => {
       expect((await cancelSubscription(arranged, subscriptionId, agent.token)).status).toBe(200);
 
       const again = await cancelSubscription(arranged, subscriptionId, agent.token);
-      const refused = await readRefusal(again);
+      const refused = await readErrorBody(again);
       expect(again.status, refused.text).toBe(404);
       expect(refused.code).toBe("not_found");
     });
@@ -279,13 +279,13 @@ describe("subscription.cancel", () => {
 
   it("answers an id naming no subscription with not found", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await agentHolding(arranged, "subscribers", ["subscription.write"]);
+      const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
       // One live subscription stands beside it, so not-found is an answer
       // about this id and not about an empty table.
       await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, agent.token);
 
       const response = await cancelSubscription(arranged, ABSENT_ID, agent.token);
-      const refused = await readRefusal(response);
+      const refused = await readErrorBody(response);
       expect(response.status, refused.text).toBe(404);
       expect(refused.code).toBe("not_found");
     });
@@ -304,8 +304,8 @@ describe("whose subscription a session may cancel", () => {
         "subscription.write",
         "subscription.read",
       ]);
-      const mine = await agentOn(arranged, profile);
-      const theirs = await agentOn(arranged, profile);
+      const mine = await spawnAgentUnder(arranged, profile);
+      const theirs = await spawnAgentUnder(arranged, profile);
       const other = await createSubscriptionOrFail(
         arranged,
         { kind: "ref", ref: REF },
@@ -313,7 +313,7 @@ describe("whose subscription a session may cancel", () => {
       );
 
       const response = await cancelSubscription(arranged, other, mine.token);
-      const refused = await readRefusal(response);
+      const refused = await readErrorBody(response);
       expect(response.status, refused.text).toBe(404);
       expect(refused.code).toBe("not_found");
 
@@ -325,7 +325,7 @@ describe("whose subscription a session may cancel", () => {
 
   it("lets the user cancel a session's subscription", async () => {
     await withAgentFleet(async (arranged) => {
-      const agent = await agentHolding(arranged, "subscribers", [
+      const agent = await spawnAgentWithGrants(arranged, "subscribers", [
         "subscription.write",
         "subscription.read",
       ]);

@@ -22,7 +22,7 @@ const decode = (
 ) => Effect.runSyncExit(Schema.decodeUnknownEffect(schema)(input));
 
 /** A copy of `message` without `key`, for asserting a field is required. */
-const without = (message: object, key: string) => {
+const omitKey = (message: object, key: string) => {
   const copy: Record<string, unknown> = { ...message };
   delete copy[key];
   return copy;
@@ -136,7 +136,7 @@ const requests = [
   },
 ] as const;
 
-const tagsOf = (union: typeof ProviderEvent) =>
+const listTags = (union: typeof ProviderEvent) =>
   union.members.map((member) => member.fields._tag.literal);
 
 describe("the normalized event taxonomy", () => {
@@ -146,7 +146,7 @@ describe("the normalized event taxonomy", () => {
   });
 
   it("holds exactly the members the round-trip cases cover", () => {
-    expect(tagsOf(ProviderEvent)).toEqual(events.map((event) => event._tag));
+    expect(listTags(ProviderEvent)).toEqual(events.map((event) => event._tag));
   });
 
   it.each(requests)("takes a $kind request with the detail that kind carries", (request) => {
@@ -162,7 +162,7 @@ describe("the normalized event taxonomy", () => {
     for (const event of events) {
       for (const key of ["eventId", "sessionId", "at"]) {
         expect(
-          decode(ProviderEvent, without(event, key))._tag,
+          decode(ProviderEvent, omitKey(event, key))._tag,
           `${event._tag} without ${key}`,
         ).toBe("Failure");
       }
@@ -228,7 +228,7 @@ describe("the normalized event taxonomy", () => {
   });
 
   it("takes one to many structured questions, and refuses a request carrying none", () => {
-    const asking = (questions: unknown) =>
+    const decodeQuestionRequest = (questions: unknown) =>
       decode(ProviderEvent, {
         _tag: "request.opened",
         ...baseFields,
@@ -247,10 +247,10 @@ describe("the normalized event taxonomy", () => {
       multiSelect: false,
     };
 
-    expect(asking([one, { ...one, header: "Second" }])).toBe("Success");
+    expect(decodeQuestionRequest([one, { ...one, header: "Second" }])).toBe("Success");
     // A question is the payload, so a request with none of them is a card with
     // nothing on it; the adapter falls back rather than send this.
-    expect(asking([])).toBe("Failure");
+    expect(decodeQuestionRequest([])).toBe("Failure");
     // The struct carries no vendor extras: the Claude SDK's optional `preview`
     // is dropped on the way in, so what the user reads never depends on which
     // harness asked (ADR 0007).
@@ -276,25 +276,25 @@ describe("the normalized event taxonomy", () => {
         },
       },
     });
-    expect(asking([without(one, "multiSelect")])).toBe("Failure");
-    expect(asking([{ ...one, header: "" }])).toBe("Failure");
+    expect(decodeQuestionRequest([omitKey(one, "multiSelect")])).toBe("Failure");
+    expect(decodeQuestionRequest([{ ...one, header: "" }])).toBe("Failure");
   });
 
   it("brackets a turn by an id neither end may omit", () => {
     for (const tag of ["turn.started", "turn.completed"]) {
       const complete = { _tag: tag, ...baseFields, turnId: "t1", state: "completed" };
       expect(decode(ProviderEvent, complete)._tag, tag).toBe("Success");
-      expect(decode(ProviderEvent, without(complete, "turnId"))._tag, tag).toBe("Failure");
+      expect(decode(ProviderEvent, omitKey(complete, "turnId"))._tag, tag).toBe("Failure");
     }
   });
 
   it("takes a harness message far longer than a fact, and refuses only a document", () => {
-    const warning = (message: string) =>
+    const decodeWarning = (message: string) =>
       decode(ProviderEvent, { _tag: "runtime.warning", ...baseFields, message })._tag;
     // A stack trace is what arrives here, and a refused frame costs the runner
     // its socket, so the limit sits well above anything a fact may be.
-    expect(warning("x".repeat(MAX_MESSAGE_LENGTH))).toBe("Success");
-    expect(warning("x".repeat(MAX_MESSAGE_LENGTH + 1))).toBe("Failure");
+    expect(decodeWarning("x".repeat(MAX_MESSAGE_LENGTH))).toBe("Success");
+    expect(decodeWarning("x".repeat(MAX_MESSAGE_LENGTH + 1))).toBe("Failure");
   });
 
   it("gives a delta no length limit, because the payload is not a fact about a peer", () => {
@@ -310,15 +310,15 @@ describe("the normalized event taxonomy", () => {
   });
 
   it("refuses a negative or fractional token count", () => {
-    const usage = (value: unknown) =>
+    const decodeUsage = (value: unknown) =>
       decode(ProviderEvent, {
         _tag: "session.usage.updated",
         ...baseFields,
         usage: { inputTokens: value, outputTokens: 0 },
       })._tag;
-    expect(usage(0)).toBe("Success");
-    expect(usage(-1)).toBe("Failure");
-    expect(usage(1.5)).toBe("Failure");
+    expect(decodeUsage(0)).toBe("Success");
+    expect(decodeUsage(-1)).toBe("Failure");
+    expect(decodeUsage(1.5)).toBe("Failure");
   });
 });
 
@@ -332,7 +332,7 @@ describe("what the controller authors for a session", () => {
 
   it("needs every field of the spec and of the binding", () => {
     for (const key of Object.keys(spec)) {
-      expect(decode(SessionSpec, without(spec, key))._tag, key).toBe("Failure");
+      expect(decode(SessionSpec, omitKey(spec, key))._tag, key).toBe("Failure");
     }
     expect(decode(SessionBinding, { sessionId: SESSION_ID, instanceId: "inst-1" })._tag).toBe(
       "Failure",
@@ -361,7 +361,7 @@ describe("what the controller authors for a session", () => {
 
   it("takes a workspace-less session as an explicit null, never as an absent key", () => {
     expect(decode(SessionSpec, { ...spec, workspaceId: "w1" })._tag).toBe("Success");
-    expect(decode(SessionSpec, without(spec, "workspaceId"))._tag).toBe("Failure");
+    expect(decode(SessionSpec, omitKey(spec, "workspaceId"))._tag).toBe("Failure");
   });
 
   it("refuses an access mode the vocabulary does not have", () => {
@@ -386,7 +386,7 @@ describe("what the controller authors for a session", () => {
     // would leave the agent inside that session unable to reach Hercule at all,
     // and an empty one would be a credential that authenticates nobody.
     expect(decode(SessionStart, start)._tag).toBe("Success");
-    expect(decode(SessionStart, without(start, "token"))._tag).toBe("Failure");
+    expect(decode(SessionStart, omitKey(start, "token"))._tag).toBe("Failure");
     expect(decode(SessionStart, { ...start, token: "" })._tag).toBe("Failure");
   });
 

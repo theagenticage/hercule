@@ -38,7 +38,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { VERSION } from "@hercule/home/version";
-import { currentUser, USER_ACTOR } from "../actor";
+import { requireUserActor, USER_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { ControllerIdentity } from "../identity";
@@ -59,7 +59,7 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const audit = yield* AuditLog;
 
-  const info = (): Effect.Effect<ControllerInfo, SettingError | SqlError> =>
+  const readControllerInfo = (): Effect.Effect<ControllerInfo, SettingError | SqlError> =>
     Effect.gen(function* () {
       const record = yield* identity.read;
       if (Option.isNone(record)) {
@@ -81,7 +81,7 @@ const make = Effect.gen(function* () {
     read: (): Effect.Effect<
       ControllerInfo,
       Unauthenticated | Forbidden | SettingError | SqlError
-    > => Effect.flatMap(currentUser("controller.read"), info),
+    > => Effect.flatMap(requireUserActor("controller.read"), readControllerInfo),
 
     /**
      * Names the runner a placement falls back to. A patch that names no field
@@ -95,9 +95,9 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | Conflict | SettingError | SqlError
     > =>
       Effect.gen(function* () {
-        yield* currentUser("controller.update");
+        yield* requireUserActor("controller.update");
         const patch = yield* Effect.mapError(decodeUpdate(input), createDecodeValidationError);
-        if (patch.defaultRunnerId === undefined) return yield* info();
+        if (patch.defaultRunnerId === undefined) return yield* readControllerInfo();
         const chosen = patch.defaultRunnerId;
         return yield* withTransaction(
           sql,
@@ -107,7 +107,7 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             // Naming the runner already named is not a change: it would
             // otherwise stamp a `controller.updated` row describing nothing.
-            if (chosen === (yield* settings.defaultRunnerId())) return yield* info();
+            if (chosen === (yield* settings.defaultRunnerId())) return yield* readControllerInfo();
             if (chosen !== null) {
               const runner = yield* runners.read(chosen);
               if (Option.isNone(runner)) {
@@ -127,7 +127,7 @@ const make = Effect.gen(function* () {
               payload: { defaultRunnerId: chosen },
               at,
             });
-            return yield* info();
+            return yield* readControllerInfo();
           }),
         );
       }),

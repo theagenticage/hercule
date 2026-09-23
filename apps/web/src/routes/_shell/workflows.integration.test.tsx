@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { QueryClient } from "@tanstack/react-query";
-import { ageOf, queryKeys, parseWorkflowSourceWithRanges } from "@hercule/client-core";
+import { formatAge, queryKeys, parseWorkflowSourceWithRanges } from "@hercule/client-core";
 import type {
   DeclaredEventKind,
   Issue,
@@ -26,9 +26,9 @@ import type {
   WorkflowSummary,
 } from "@hercule/contract";
 import {
-  envelope,
+  buildErrorBody,
   expectInDocumentOrder,
-  reading,
+  readPageText,
   renderApp,
   stubApi,
   type Answer,
@@ -294,7 +294,10 @@ const buildRefusal = (issues: readonly Issue[]) => ({
   },
 });
 
-const WORKFLOW_NOT_FOUND = { status: 404, body: envelope("not_found", "No workflow has that id.") };
+const WORKFLOW_NOT_FOUND = {
+  status: 404,
+  body: buildErrorBody("not_found", "No workflow has that id."),
+};
 
 /** Returns the value of the top-level `key` in `source`, or `undefined` when the source does not set it. */
 const readTopLevelValue = (source: string, key: string): string | undefined =>
@@ -638,7 +641,7 @@ describe("Workflows > the list", () => {
 
     await screen.findByRole("link", { name: TRIAGE_NAME });
     const rows = within(getWorkflowList()).getAllByRole("listitem");
-    expect(rows.map((row) => reading(within(row).getByRole("link")))).toEqual([
+    expect(rows.map((row) => readPageText(within(row).getByRole("link")))).toEqual([
       TRIAGE_NAME,
       NIGHTLY_NAME,
       WEEKLY_NAME,
@@ -654,12 +657,12 @@ describe("Workflows > the list", () => {
       expect(within(row).getByRole("link", { name }).getAttribute("href")).toBe(
         `/workflows/${workflow.id}`,
       );
-      if (description !== undefined) expect(reading(row)).toContain(description);
+      if (description !== undefined) expect(readPageText(row)).toContain(description);
       expect(getEnabledSwitch(name).getAttribute("aria-checked")).toBe(String(workflow.enabled));
       // The expected age uses the same function as the app. Its smallest unit
       // is a minute, so the two agree unless a minute boundary falls between
       // them.
-      expect(reading(row)).toContain(ageOf(workflow.updatedAt, new Date()));
+      expect(readPageText(row)).toContain(formatAge(workflow.updatedAt, new Date()));
     }
   });
 
@@ -830,7 +833,7 @@ describe("Workflows > a stored workflow", { timeout: EDITOR_TEST_TIMEOUT_MS }, (
       NO_TERMINAL_STEP.message,
     );
     expectInDocumentOrder([refused, warned]);
-    expect(reading(await findProblemsPanel())).toContain("2 problems");
+    expect(readPageText(await findProblemsPanel())).toContain("2 problems");
     expect(listWrites(api).map(describeWrite)).toEqual([
       [`PATCH /api/v1/workflows/${TRIAGE.id}`, { source: PROBLEM_SOURCE }],
     ]);
@@ -1028,7 +1031,7 @@ describe("Workflows > the problems panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     // would put the warning between the two errors.
     expect(SECOND_STEP_LINE).toBeLessThan(UNKNOWN_ACTION_LINE);
     expectInDocumentOrder([unknownKind, unknownAction, noTerminalStep]);
-    expect(reading(panel)).toContain("3 problems");
+    expect(readPageText(panel)).toContain("3 problems");
   });
 
   it("uses the singular for one problem", async () => {
@@ -1042,7 +1045,7 @@ describe("Workflows > the problems panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     const panel = await findProblemsPanel();
     await findProblem(panel, UNKNOWN_ACTION_LINE, UNKNOWN_ACTION.message);
 
-    expect(reading(panel)).toMatch(/\b1 problem\b/);
+    expect(readPageText(panel)).toMatch(/\b1 problem\b/);
   });
 
   it('shows "No problems." when there are none', async () => {
@@ -1055,11 +1058,11 @@ describe("Workflows > the problems panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     // problems." appears only after the result arrives.
     await waitFor(
       () => {
-        expect(reading(panel)).toContain("No problems.");
+        expect(readPageText(panel)).toContain("No problems.");
       },
       { timeout: VALIDATION_TIMEOUT_MS },
     );
-    expect(reading(panel)).not.toMatch(/\d+ problems?/);
+    expect(readPageText(panel)).not.toMatch(/\d+ problems?/);
     expect(within(panel).queryAllByRole("button", { name: /\bLine \d+/ })).toEqual([]);
   });
 
@@ -1242,7 +1245,7 @@ describe("Workflows > the switch in the list", () => {
       overrides: {
         [`PATCH /api/v1/workflows/${TRIAGE.id}`]: {
           status: 500,
-          body: envelope("internal", "The controller could not store the change."),
+          body: buildErrorBody("internal", "The controller could not store the change."),
         },
       },
     });
@@ -1329,7 +1332,7 @@ describe("Workflows > the page header", { timeout: EDITOR_TEST_TIMEOUT_MS }, () 
       overrides: {
         [`PATCH /api/v1/workflows/${TRIAGE.id}`]: {
           status: 500,
-          body: envelope("internal", "The disk is full."),
+          body: buildErrorBody("internal", "The disk is full."),
         },
       },
     });
@@ -1367,7 +1370,7 @@ describe("Workflows > the page header", { timeout: EDITOR_TEST_TIMEOUT_MS }, () 
       overrides: {
         [`DELETE /api/v1/workflows/${TRIAGE.id}`]: {
           status: 500,
-          body: envelope("internal", "The database is locked."),
+          body: buildErrorBody("internal", "The database is locked."),
         },
       },
     });
@@ -1419,7 +1422,7 @@ describe("Workflows > the page header", { timeout: EDITOR_TEST_TIMEOUT_MS }, () 
   it('shows "Checking…" until the validation returns, then why it could not run', async () => {
     const held = holdAnswer(() => ({
       status: 500,
-      body: envelope("internal", "The validation timed out."),
+      body: buildErrorBody("internal", "The validation timed out."),
     }));
     await openApp({
       path: `/workflows/${TRIAGE.id}`,
@@ -1427,19 +1430,19 @@ describe("Workflows > the page header", { timeout: EDITOR_TEST_TIMEOUT_MS }, () 
     });
     await findEditor();
     const panel = await findProblemsPanel();
-    expect(reading(panel)).toContain("Checking…");
-    expect(reading(panel)).not.toContain("No problems.");
+    expect(readPageText(panel)).toContain("Checking…");
+    expect(readPageText(panel)).not.toContain("No problems.");
 
     held.release();
 
     await waitFor(
       () => {
-        expect(reading(panel)).toContain("Not checked: The validation timed out.");
+        expect(readPageText(panel)).toContain("Not checked: The validation timed out.");
       },
       { timeout: VALIDATION_TIMEOUT_MS },
     );
-    expect(reading(panel)).not.toContain("Checking…");
-    expect(reading(panel)).not.toContain("No problems.");
+    expect(readPageText(panel)).not.toContain("Checking…");
+    expect(readPageText(panel)).not.toContain("No problems.");
   });
 });
 
@@ -1499,14 +1502,14 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     const panel = await findProblemsPanel();
     await waitFor(
       () => {
-        expect(reading(panel)).toContain("No problems.");
+        expect(readPageText(panel)).toContain("No problems.");
       },
       { timeout: VALIDATION_TIMEOUT_MS },
     );
     held.release();
     await waitForIdleRequests(queryClient);
 
-    expect(reading(panel)).toContain("No problems.");
+    expect(readPageText(panel)).toContain("No problems.");
     expect(within(panel).queryAllByRole("button", { name: /\bLine \d+/ })).toEqual([]);
   });
 
@@ -1524,14 +1527,14 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     const panel = await findProblemsPanel();
     await waitFor(
       () => {
-        expect(reading(panel)).toContain("No problems.");
+        expect(readPageText(panel)).toContain("No problems.");
       },
       { timeout: VALIDATION_TIMEOUT_MS },
     );
     held.release();
     await waitForIdleRequests(queryClient);
 
-    expect(reading(panel)).toContain("No problems.");
+    expect(readPageText(panel)).toContain("No problems.");
     expect(within(panel).queryAllByRole("button", { name: /\bLine \d+/ })).toEqual([]);
     expect(readHeaderStatus()).toBeUndefined();
   });
@@ -1558,7 +1561,7 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     const panel = await findProblemsPanel();
     await waitFor(
       () => {
-        expect(reading(panel)).toContain("No problems.");
+        expect(readPageText(panel)).toContain("No problems.");
       },
       { timeout: VALIDATION_TIMEOUT_MS },
     );
@@ -1584,7 +1587,7 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
         "POST /api/v1/workflows/validate": (call) =>
           isReachable
             ? held.handler(call)
-            : { status: 500, body: envelope("internal", "The controller is restarting.") },
+            : { status: 500, body: buildErrorBody("internal", "The controller is restarting.") },
       },
     });
     await findEditor();
@@ -1593,7 +1596,7 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     await waitForIdleRequests(queryClient);
     await waitFor(
       () => {
-        expect(reading(panel)).toContain("Not checked: The controller is restarting.");
+        expect(readPageText(panel)).toContain("Not checked: The controller is restarting.");
       },
       { timeout: VALIDATION_TIMEOUT_MS },
     );
@@ -1606,15 +1609,15 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     // The live connection waits about a second before it reconnects.
     await waitFor(
       () => {
-        expect(reading(panel)).toContain("Checking…");
+        expect(readPageText(panel)).toContain("Checking…");
       },
       { timeout: 3 * VALIDATION_TIMEOUT_MS },
     );
-    expect(reading(panel)).not.toContain("Not checked");
+    expect(readPageText(panel)).not.toContain("Not checked");
     held.release();
     await waitFor(
       () => {
-        expect(reading(panel)).toContain("No problems.");
+        expect(readPageText(panel)).toContain("No problems.");
       },
       { timeout: VALIDATION_TIMEOUT_MS },
     );
@@ -1633,7 +1636,7 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     await waitForIdleRequests(queryClient);
 
     expect(listValidatedSources(api)).toHaveLength(validationCount);
-    expect(reading(panel)).toContain("No problems.");
+    expect(readPageText(panel)).toContain("No problems.");
   });
 });
 
@@ -1656,7 +1659,7 @@ describe(
       pushWorkflowChange(live, TRIAGE.id, "updated");
 
       await waitFor(() => {
-        expect(reading(editor)).toContain("another client changed");
+        expect(readPageText(editor)).toContain("another client changed");
       });
       expect(await readEditorSource(user)).toBe(CHANGED_ELSEWHERE_SOURCE);
       expect(screen.getByRole("button", { name: "Save" }).getAttribute("aria-disabled")).toBe(

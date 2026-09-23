@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { canonicalRemoteOf, isClonableRemote, repoNameOf } from "./remote";
+import { canonicalRemoteOf, isClonableRemote, extractRepoName } from "./remote";
 
 describe("the remotes Hercule will hand to git", () => {
   it("takes an https URL and git's own user@host:owner/repo", () => {
@@ -51,7 +51,7 @@ describe("the remotes Hercule will hand to git", () => {
 
 describe("what a repository is called", () => {
   it("is the last segment of its canonical remote", () => {
-    expect(repoNameOf("github.com/acme/web")).toBe("web");
-    expect(repoNameOf("git.example.com/team/group/app")).toBe("app");
+    expect(extractRepoName("github.com/acme/web")).toBe("web");
+    expect(extractRepoName("git.example.com/team/group/app")).toBe("app");
   });
 });

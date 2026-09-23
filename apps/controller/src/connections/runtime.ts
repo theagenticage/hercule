@@ -57,10 +57,10 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connections = yield* connectionRepository;
   const secrets = yield* Secrets;
-  const clientOf = yield* oauthClients;
+  const findOAuthClient = yield* oauthClients;
   const declared = yield* Ref.make<ReadonlyMap<string, RegisteredConnectionType>>(new Map());
 
-  const summary = (row: StoredConnection): ConnectionSummary => ({
+  const toConnectionSummary = (row: StoredConnection): ConnectionSummary => ({
     id: row.id,
     type: row.type,
     label: row.label,
@@ -104,7 +104,7 @@ const make = Effect.gen(function* () {
 
   // Made synchronously: an effect between the read and the write is a point two
   // fibers can both pass, and they would each end up holding a permit of their own.
-  const refreshPermit = (connectionId: string): Semaphore.Semaphore => {
+  const readOrCreateRefreshPermit = (connectionId: string): Semaphore.Semaphore => {
     const held = permits.get(connectionId);
     if (held !== undefined) return held;
     const made = Semaphore.makeUnsafe(1);
@@ -118,7 +118,9 @@ const make = Effect.gen(function* () {
      * plugin's row and an id nobody created are the same answer, because a
      * plugin may not learn that the first exists.
      */
-    const own = (id: string): Effect.Effect<StoredConnection, ConnectionUnavailable> =>
+    const readOwnConnectionOrFail = (
+      id: string,
+    ): Effect.Effect<StoredConnection, ConnectionUnavailable> =>
       Effect.flatMap(Effect.orDie(connections.one(id)), (found) =>
         Option.match(
           Option.filter(found, (row) => row.pluginId === pluginId),
@@ -143,7 +145,9 @@ const make = Effect.gen(function* () {
       );
 
     /** What was declared for the type this row is, if it is a redirect flow. */
-    const declaredOAuth = (row: StoredConnection): Effect.Effect<OAuthDeclaration | undefined> =>
+    const readDeclaredOAuth = (
+      row: StoredConnection,
+    ): Effect.Effect<OAuthDeclaration | undefined> =>
       Effect.map(Ref.get(declared), (all) => all.get(row.type)?.contribution.oauth);
 
     /**
@@ -151,7 +155,7 @@ const make = Effect.gen(function* () {
      * connection holding none cannot be acted through, which is the same answer
      * as one whose credentials no longer work.
      */
-    const pastedCredentials = (
+    const readPastedCredentials = (
       connectionId: string,
     ): Effect.Effect<Record<string, string>, ConnectionUnavailable> =>
       Effect.flatMap(
@@ -169,7 +173,9 @@ const make = Effect.gen(function* () {
       );
 
     /** The token set a connection holds, or nothing it can be acted through with. */
-    const storedTokens = (connectionId: string): Effect.Effect<TokenSet, ConnectionUnavailable> =>
+    const readStoredTokens = (
+      connectionId: string,
+    ): Effect.Effect<TokenSet, ConnectionUnavailable> =>
       Effect.flatMap(
         Effect.orDie(secrets.get({ kind: "connection", id: connectionId }, OAUTH_TOKENS)),
         Option.match({
@@ -186,16 +192,16 @@ const make = Effect.gen(function* () {
      * A provider that answered and said no is a credential to reauthorise; one
      * that could not be reached is weather, and the status stays as it was.
      */
-    const refreshed = (
+    const refreshTokens = (
       connectionId: string,
       oauth: OAuthDeclaration,
     ): Effect.Effect<TokenSet, ConnectionUnavailable> =>
       Effect.gen(function* () {
-        const tokens = yield* storedTokens(connectionId);
+        const tokens = yield* readStoredTokens(connectionId);
         const millis = yield* Clock.currentTimeMillis;
         if (!isStale(tokens, millis)) return tokens;
 
-        const client = yield* Effect.orDie(clientOf(pluginId));
+        const client = yield* Effect.orDie(findOAuthClient(pluginId));
         if (tokens.refreshToken === undefined || Option.isNone(client)) {
           return yield* needsReauth(connectionId, "this connection cannot be refreshed");
         }
@@ -228,36 +234,38 @@ const make = Effect.gen(function* () {
      * spent or nearly so. The refresh is the core's: a plugin asks for
      * credentials and is handed a token that works, or told it cannot act.
      */
-    const accessToken = (
+    const readFreshAccessToken = (
       connectionId: string,
       oauth: OAuthDeclaration,
     ): Effect.Effect<Record<string, string>, ConnectionUnavailable> =>
       Effect.gen(function* () {
-        const tokens = yield* storedTokens(connectionId);
+        const tokens = yield* readStoredTokens(connectionId);
         const millis = yield* Clock.currentTimeMillis;
         if (!isStale(tokens, millis)) return { accessToken: tokens.accessToken };
-        const fresh = yield* refreshPermit(connectionId).withPermits(1)(
-          refreshed(connectionId, oauth),
+        const fresh = yield* readOrCreateRefreshPermit(connectionId).withPermits(1)(
+          refreshTokens(connectionId, oauth),
         );
         return { accessToken: fresh.accessToken };
       });
 
     return {
       list: () =>
-        Effect.map(Effect.orDie(connections.ofPlugin(pluginId)), (rows) => rows.map(summary)),
+        Effect.map(Effect.orDie(connections.ofPlugin(pluginId)), (rows) =>
+          rows.map(toConnectionSummary),
+        ),
 
       credentials: (connectionId) =>
         Effect.gen(function* () {
-          const row = yield* own(connectionId);
-          const oauth = yield* declaredOAuth(row);
+          const row = yield* readOwnConnectionOrFail(connectionId);
+          const oauth = yield* readDeclaredOAuth(row);
           return oauth === undefined
-            ? yield* pastedCredentials(connectionId)
-            : yield* accessToken(connectionId, oauth);
+            ? yield* readPastedCredentials(connectionId)
+            : yield* readFreshAccessToken(connectionId, oauth);
         }),
 
       report: (connectionId, report) =>
         Effect.andThen(
-          own(connectionId),
+          readOwnConnectionOrFail(connectionId),
           setStatus(connectionId, report.status, report.detail ?? null),
         ),
     };

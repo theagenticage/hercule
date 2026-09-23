@@ -22,7 +22,7 @@ export const STUB_SERVER_VERSION = "0.1.0";
  * keeps it, in the order it opened them, so the caller can reach the one a
  * connection is on now and the ones it has been on.
  */
-export const openInto =
+export const stubWebSocketInto =
   (sockets: Array<StubSocket>) =>
   (url: string): WebSocket => {
     const socket = new StubSocket(url);

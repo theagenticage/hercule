@@ -28,19 +28,19 @@ import {
   IMPOSSIBLE_SCHEMA,
 } from "../packages/protocol/src/output-schema.testing";
 import {
-  apiKeyIn,
-  cli,
+  readApiKey,
+  runCli,
   completeSetup,
-  jsonOk,
-  liveSessionsAsked,
+  parseJsonOutputOrFail,
+  isLiveSessionTestEnabled,
   LOGIN_DEADLINE_MS,
-  loginLent,
+  isLoginAvailable,
   PASSWORD,
   prepareLoggedInInstance,
   ROOT,
   startController,
-  temporaryHome,
-  untilTag,
+  createTemporaryHome,
+  waitForTranscriptTag,
   USERNAME,
   type Controller,
   type Page,
@@ -50,9 +50,9 @@ import {
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
-const wanted = liveSessionsAsked();
+const wanted = isLiveSessionTestEnabled();
 
-const state = temporaryHome();
+const state = createTemporaryHome();
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -85,12 +85,12 @@ let ready: Ready | undefined;
  */
 const prepare = async (): Promise<Ready> => {
   const { instance } = await prepareLoggedInInstance({ home: state.home, binary, url, apiKey });
-  const profiles = jsonOk<Page<{ readonly id: string; readonly name: string }>>(
-    await cli(["profile", "list", "--json"], { home: state.home, binary }),
+  const profiles = parseJsonOutputOrFail<Page<{ readonly id: string; readonly name: string }>>(
+    await runCli(["profile", "list", "--json"], { home: state.home, binary }),
   ).items;
   const profile = profiles.find((one) => one.name === "unrestricted") ?? profiles[0]!;
-  const agent = jsonOk<Agent>(
-    await cli(
+  const agent = parseJsonOutputOrFail<Agent>(
+    await runCli(
       [
         "agent",
         "create",
@@ -133,7 +133,7 @@ const runSessionUnderSchema = async (
   schema: unknown,
   prompt: string,
 ): Promise<ReadonlyArray<Row>> => {
-  const spawned: Ran = await cli(
+  const spawned: Ran = await runCli(
     [
       "session",
       "spawn",
@@ -145,8 +145,8 @@ const runSessionUnderSchema = async (
     ],
     { home: state.home, binary, stdin: prompt },
   );
-  const session = jsonOk<Session>(spawned);
-  return untilTag({
+  const session = parseJsonOutputOrFail<Session>(spawned);
+  return waitForTranscriptTag({
     home: state.home,
     binary,
     id: session.id,
@@ -168,14 +168,14 @@ beforeAll(async () => {
   const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-  const login = await cli(
+  const login = await runCli(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-agent-session"],
     { home: state.home, binary, stdin: PASSWORD },
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
-  apiKey = apiKeyIn(state.home);
+  apiKey = readApiKey(state.home);
 
-  if (!loginLent()) return;
+  if (!isLoginAvailable()) return;
   ready = await prepare();
 }, LOGIN_DEADLINE_MS * 2);
 

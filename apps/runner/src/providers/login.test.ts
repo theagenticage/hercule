@@ -15,7 +15,7 @@ import {
   COMPLAINT_GRACE,
   LOGIN_CODE_LIFETIME,
   LOGIN_IDLE,
-  logins,
+  makeLogins,
   type LoginAnswer,
   type LoginChild,
   type LoginSpawn,
@@ -40,11 +40,11 @@ const URL_TWO = "https://claude.ai/oauth/authorize?code=challenge-two";
 
 const INVALID = "Invalid code. Please make sure the full code was copied.";
 
-const pipe = () => {
+const createPipe = () => {
   const chunks: Array<string> = [];
   let wake: (() => void) | undefined;
   let ended = false;
-  const stream = async function* (): AsyncIterable<string> {
+  const streamChunks = async function* (): AsyncIterable<string> {
     for (;;) {
       while (chunks.length > 0) yield chunks.shift()!;
       if (ended) return;
@@ -54,7 +54,7 @@ const pipe = () => {
     }
   };
   return {
-    stream: stream(),
+    stream: streamChunks(),
     write: (text: string) => {
       chunks.push(text);
       wake?.();
@@ -78,18 +78,18 @@ interface Fake {
   readonly killed: () => boolean;
 }
 
-const machine = () => {
+const createMachine = () => {
   const children: Array<Fake> = [];
   const spawn: LoginSpawn = (command, env) => {
-    const out = pipe();
-    const err = pipe();
+    const out = createPipe();
+    const err = createPipe();
     const stdin: Array<string> = [];
     let settle: (code: number) => void = () => undefined;
     const exited = new Promise<number>((resolve) => {
       settle = resolve;
     });
     let killed = false;
-    const ends = (code: number): void => {
+    const endChild = (code: number): void => {
       out.end();
       err.end();
       settle(code);
@@ -114,7 +114,7 @@ const machine = () => {
       stdin,
       says: out.write,
       complains: err.write,
-      exit: ends,
+      exit: endChild,
       killed: () => killed,
     });
     return child;
@@ -127,8 +127,8 @@ const run = <A>(effect: Effect.Effect<A>): Promise<A> =>
 
 describe("starting a login", () => {
   it("spawns the vendor's login against the instance's own config directory", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
@@ -153,8 +153,8 @@ describe("starting a login", () => {
   });
 
   it("answers with the first URL and ignores whatever the child prints after it", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
@@ -171,8 +171,8 @@ describe("starting a login", () => {
   });
 
   it("takes the address out of the terminal hyperlink the vendor prints it in", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
@@ -190,8 +190,8 @@ describe("starting a login", () => {
   });
 
   it("kills the login it was already holding for that instance", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const second = await run(
       Effect.gen(function* () {
@@ -214,8 +214,8 @@ describe("starting a login", () => {
   });
 
   it("says what the child said when it ended without printing a URL", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
@@ -235,7 +235,7 @@ describe("starting a login", () => {
 });
 
 describe("submitting a login code", () => {
-  const waiting = (driver: ReturnType<typeof logins>, children: ReadonlyArray<Fake>) =>
+  const startLogin = (driver: ReturnType<typeof makeLogins>, children: ReadonlyArray<Fake>) =>
     Effect.gen(function* () {
       const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
       yield* TestClock.adjust(Duration.zero);
@@ -244,12 +244,12 @@ describe("submitting a login code", () => {
     });
 
   it("writes the code to the child's stdin and reports the login it finished", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
-        yield* waiting(driver, children);
+        yield* startLogin(driver, children);
         const submitting = yield* Effect.forkChild(driver.submit(INSTANCE, "the-pasted-code"));
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[0]!.exit(0));
@@ -264,12 +264,12 @@ describe("submitting a login code", () => {
   });
 
   it("hands back the CLI's own complaint and keeps the child for another try", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const [refused, accepted] = await run(
       Effect.gen(function* () {
-        yield* waiting(driver, children);
+        yield* startLogin(driver, children);
 
         const first = yield* Effect.forkChild(driver.submit(INSTANCE, "half-a-code"));
         yield* TestClock.adjust(Duration.zero);
@@ -293,9 +293,9 @@ describe("submitting a login code", () => {
   });
 
   it("has nothing to hand a code to when no login is in progress", async () => {
-    const { spawn, children } = machine();
+    const { spawn, children } = createMachine();
 
-    const answer = await run(logins(spawn).submit(INSTANCE, "a-code"));
+    const answer = await run(makeLogins(spawn).submit(INSTANCE, "a-code"));
 
     expect(answer).toMatchObject({ _tag: "loginFailed" });
     expect((answer as { message: string }).message).toContain("no login in progress");
@@ -304,12 +304,12 @@ describe("submitting a login code", () => {
 
   it("kills a login nobody ever finished, and has nothing to submit to after", async () => {
     expect(Duration.toMinutes(LOGIN_IDLE)).toBe(10);
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
-        yield* waiting(driver, children);
+        yield* startLogin(driver, children);
         // A tab closed on the URL leaves the CLI blocked on stdin for the life
         // of the daemon.
         yield* TestClock.adjust(LOGIN_IDLE);
@@ -324,8 +324,8 @@ describe("submitting a login code", () => {
 
 describe("more than one login at a time", () => {
   it("does not let a replaced login take the one that replaced it down", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     // Two tabs, or the Sessions button and the Fleet row: the first start is
     // still waiting for a URL when the second arrives.
@@ -357,8 +357,8 @@ describe("more than one login at a time", () => {
   });
 
   it("ends the logins it is holding when the runner stops", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     await run(
       Effect.gen(function* () {
@@ -376,8 +376,8 @@ describe("more than one login at a time", () => {
   });
 
   it("has nothing to paste into once the vendor has given up on its own", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
@@ -396,8 +396,8 @@ describe("more than one login at a time", () => {
   });
 
   it("reads a login that finished as one that worked, whatever it said on the way out", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
@@ -465,31 +465,31 @@ describe("a device-code login", () => {
    * capture cannot keep, so the colour goes back on: the driver reads the line
    * a terminal would have carried, not a cleaned-up one.
    */
-  const prints = (children: ReadonlyArray<Fake>): void => {
+  const printRecordedLogin = (children: ReadonlyArray<Fake>): void => {
     // A driver that spawned nothing has to fail on its answer, not in here.
     for (const line of RECORDED) children[0]?.says(`\u001b[36m${line}\u001b[0m\n`);
   };
 
-  const waiting = (driver: ReturnType<typeof logins>, children: ReadonlyArray<Fake>) =>
+  const startLogin = (driver: ReturnType<typeof makeLogins>, children: ReadonlyArray<Fake>) =>
     Effect.gen(function* () {
       const starting = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
       yield* TestClock.adjust(Duration.zero);
-      yield* Effect.sync(() => prints(children));
+      yield* Effect.sync(() => printRecordedLogin(children));
       return yield* Fiber.join(starting);
     });
 
   it("reads both the address and the one-time code out of what the vendor printed", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
-    const answer = await run(waiting(driver, children));
+    const answer = await run(startLogin(driver, children));
 
     expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
   });
 
   it("answers the address only once the code beside it has been read too", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
     let early: LoginAnswer | undefined;
 
     const [pending, answer] = await run(
@@ -516,15 +516,15 @@ describe("a device-code login", () => {
   });
 
   it("answers what the vendor printed when its output ends on the code", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
         const starting = yield* Effect.forkChild(driver.start(INSTANCE, codex, CODEX_CONTEXT));
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
-          prints(children);
+          printRecordedLogin(children);
           // Nothing more is coming: the pipe closes on the last line printed.
           children[0]?.exit(0);
         });
@@ -536,8 +536,8 @@ describe("a device-code login", () => {
   });
 
   it("says what the machine said when the address came with no code to type", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
@@ -560,8 +560,8 @@ describe("a device-code login", () => {
   });
 
   it("says the code is what was missing when the machine said nothing", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
@@ -584,8 +584,8 @@ describe("a device-code login", () => {
   });
 
   it("leaves a paste login's answer exactly as it was", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
@@ -600,12 +600,12 @@ describe("a device-code login", () => {
   });
 
   it("takes no code: a submit writes nothing and says so", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const answer = await run(
       Effect.gen(function* () {
-        yield* waiting(driver, children);
+        yield* startLogin(driver, children);
         return yield* driver.submit(INSTANCE, USER_CODE);
       }),
     );
@@ -618,12 +618,12 @@ describe("a device-code login", () => {
   });
 
   it("keeps a child that is still polling past the idle clock, and ends it with the code", async () => {
-    const { spawn, children } = machine();
-    const driver = logins(spawn);
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
 
     const [early, answer] = await run(
       Effect.gen(function* () {
-        yield* waiting(driver, children);
+        yield* startLogin(driver, children);
         // A device login shows no sign of life between the code and the exit,
         // so the clock that kills an abandoned paste must not reach it.
         yield* TestClock.adjust(LOGIN_IDLE);

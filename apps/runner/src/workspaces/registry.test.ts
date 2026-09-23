@@ -10,32 +10,37 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
 import {
-  checkout,
+  buildCheckout,
   cleanTemporaries,
-  git,
-  id,
+  runGitOrThrow,
+  createId,
   makeRemote,
-  provisionFrame,
-  temporary,
+  buildProvisionFrame,
+  createTemporaryDir,
 } from "./testing";
 
 afterAll(cleanTemporaries);
 
-const storage = (): string => temporary("hercule-storage-");
+const createStorageDir = (): string => createTemporaryDir("hercule-storage-");
 
 describe("resolving a workspace", () => {
   it("reads an ephemeral back after a restart, with its checkouts", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const resourceId = id();
-    const checkoutId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const resourceId = createId();
+    const checkoutId = createId();
     await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({ checkoutId, resourceId, remote: remote.url, branch: "hercule/run-1a1a1a1a" }),
+          buildCheckout({
+            checkoutId,
+            resourceId,
+            remote: remote.url,
+            branch: "hercule/run-1a1a1a1a",
+          }),
         ],
       }),
     );
@@ -55,21 +60,21 @@ describe("resolving a workspace", () => {
   it("runs a multi-repo ephemeral above its repositories", async () => {
     const web = makeRemote();
     const api = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
     await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: web.url,
             subdirectory: "web",
             branch: "hercule/run-2b2b2b2b",
           }),
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: api.url,
             subdirectory: "api",
             branch: "hercule/run-2b2b2b2b",
@@ -91,14 +96,14 @@ describe("resolving a workspace", () => {
   // D-20a: a primary is Hercule's own clone under the machine's storage.
   it("runs a primary in the clone it made for the repository", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const resourceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const resourceId = createId();
     await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "primary",
-        checkouts: [checkout({ resourceId, remote: remote.url })],
+        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
 
@@ -110,20 +115,22 @@ describe("resolving a workspace", () => {
   });
 
   it("knows nothing about a workspace it does not hold", () => {
-    expect(makeWorkspaces({ storageDir: storage() }).resolve(id())).toBeUndefined();
+    expect(makeWorkspaces({ storageDir: createStorageDir() }).resolve(createId())).toBeUndefined();
   });
 });
 
 describe("provisioning a workspace this runner already holds", () => {
   it("re-reports it rather than making it again", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const resourceId = id();
-    const frame = provisionFrame({
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const resourceId = createId();
+    const frame = buildProvisionFrame({
       workspaceId,
       kind: "ephemeral",
-      checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-3c3c3c3c" })],
+      checkouts: [
+        buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-3c3c3c3c" }),
+      ],
     });
     const workspaces = makeWorkspaces({ storageDir });
     const first = await workspaces.provision(frame);
@@ -135,7 +142,7 @@ describe("provisioning a workspace this runner already holds", () => {
     expect(again.status).toBe("ready");
     expect(again.checkouts?.[0]?.branch).toBe(first.checkouts?.[0]?.branch);
     // A repeated frame must never throw the work in the workspace away.
-    expect(git(directory, "status", "--porcelain")).toContain("work-in-progress.txt");
+    expect(runGitOrThrow(directory, "status", "--porcelain")).toContain("work-in-progress.txt");
   });
 
   /**
@@ -147,13 +154,17 @@ describe("provisioning a workspace this runner already holds", () => {
    */
   it("reports the one in flight rather than provisioning twice", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const frame = provisionFrame({
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const frame = buildProvisionFrame({
       workspaceId,
       kind: "ephemeral",
       checkouts: [
-        checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-1d1d1d1d" }),
+        buildCheckout({
+          resourceId: createId(),
+          remote: remote.url,
+          branch: "hercule/run-1d1d1d1d",
+        }),
       ],
     });
     const workspaces = makeWorkspaces({ storageDir });
@@ -167,20 +178,26 @@ describe("provisioning a workspace this runner already holds", () => {
     expect(first.status, first.message ?? "").toBe("ready");
     expect(second).toEqual(first);
     const directory = join(storageDir, "workspaces", workspaceId);
-    expect(git(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("hercule/run-1d1d1d1d");
+    expect(runGitOrThrow(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+      "hercule/run-1d1d1d1d",
+    );
   });
 });
 
 describe("a workspace whose directory is gone", () => {
   it("is nowhere to run, and is reported failed rather than re-reported ready", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const frame = provisionFrame({
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const frame = buildProvisionFrame({
       workspaceId,
       kind: "ephemeral",
       checkouts: [
-        checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-5e5e0000" }),
+        buildCheckout({
+          resourceId: createId(),
+          remote: remote.url,
+          branch: "hercule/run-5e5e0000",
+        }),
       ],
     });
     await makeWorkspaces({ storageDir }).provision(frame);
@@ -202,20 +219,20 @@ describe("a workspace whose directory is gone", () => {
 describe("what a primary is re-reported as after a session in it", () => {
   it("re-reads the branch the session left the checkout on", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const resourceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const resourceId = createId();
     const workspaces = makeWorkspaces({ storageDir });
     await workspaces.provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "primary",
-        checkouts: [checkout({ resourceId, remote: remote.url })],
+        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
     const folder = join(storageDir, "primaries", resourceId);
     // What a session does: it works on a branch of its own.
-    git(folder, "checkout", "-b", "feature/what-the-agent-did");
+    runGitOrThrow(folder, "checkout", "-b", "feature/what-the-agent-did");
 
     const report = await workspaces.reportAfterSession(workspaceId);
 
@@ -230,7 +247,7 @@ describe("what a primary is re-reported as after a session in it", () => {
 
   it("has nothing to say about a workspace it does not hold", async () => {
     expect(
-      await makeWorkspaces({ storageDir: storage() }).reportAfterSession(id()),
+      await makeWorkspaces({ storageDir: createStorageDir() }).reportAfterSession(createId()),
     ).toBeUndefined();
   });
 });

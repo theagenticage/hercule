@@ -40,7 +40,7 @@ export interface NewContribution {
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
 /** Boot writes a row in the transaction that lists the plugin, so a missing one is a broken database. */
-export const storedState = (
+export const readStoredStateOrDie = (
   state: PluginState | undefined,
   id: string,
 ): Effect.Effect<PluginState> =>
@@ -102,7 +102,7 @@ const make = Effect.gen(function* () {
           readonly config: string;
         }>`SELECT enabled, config FROM plugins WHERE id = ${id}`;
         const row = rows[0];
-        return yield* storedState(
+        return yield* readStoredStateOrDie(
           row === undefined
             ? undefined
             : { enabled: row.enabled === 1, config: yield* decodeJson(row.config) },

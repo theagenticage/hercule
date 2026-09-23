@@ -43,7 +43,7 @@ const ED25519 = { name: "Ed25519" } as const;
  * as the DOM types are concerned. Exported because the socket decodes the nonce
  * it hands to `sign` the same way.
  */
-export const asBytes = (encoded: string): Uint8Array<ArrayBuffer> => {
+export const decodeBase64Bytes = (encoded: string): Uint8Array<ArrayBuffer> => {
   const decoded = Buffer.from(encoded, "base64");
   const bytes = new Uint8Array(decoded.byteLength);
   bytes.set(decoded);
@@ -112,9 +112,13 @@ export const controllerIdentityLayer: Layer.Layer<
         return yield* Effect.die("the controller's signing key cannot be read");
       }
       return yield* Effect.promise(() =>
-        crypto.subtle.importKey("pkcs8", asBytes(Redacted.value(stored.value)), ED25519, false, [
-          "sign",
-        ]),
+        crypto.subtle.importKey(
+          "pkcs8",
+          decodeBase64Bytes(Redacted.value(stored.value)),
+          ED25519,
+          false,
+          ["sign"],
+        ),
       );
     });
 

@@ -29,7 +29,7 @@ afterAll(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-const root = (): string => {
+const createRoot = (): string => {
   const made = mkdtempSync(join(tmpdir(), "hercule-tooling-"));
   roots.push(made);
   return made;
@@ -38,12 +38,12 @@ const root = (): string => {
 const SKILL = "# hercule\n\nCall `hercule --help` to find out what this controller can do.\n";
 
 /** A home and a storage directory of one runner, with a binary to point at. */
-const machine = (): {
+const createMachine = (): {
   readonly home: string;
   readonly storageDir: string;
   readonly execPath: string;
 } => {
-  const under = root();
+  const under = createRoot();
   const home = join(under, "home");
   const storageDir = join(under, "home", "runner", "controller-one");
   mkdirSync(storageDir, { recursive: true });
@@ -54,7 +54,7 @@ const machine = (): {
 
 describe("the hercule binary a session calls", () => {
   it("is a symlink to this running binary, on the directory sessions get on PATH", () => {
-    const { home, storageDir, execPath } = machine();
+    const { home, storageDir, execPath } = createMachine();
 
     const { binDir } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
@@ -67,7 +67,7 @@ describe("the hercule binary a session calls", () => {
   });
 
   it("re-points a symlink an older build left behind", () => {
-    const { home, storageDir, execPath } = machine();
+    const { home, storageDir, execPath } = createMachine();
     const binDir = join(home, "runner", "bin");
     mkdirSync(binDir, { recursive: true });
     symlinkSync(join(home, "a-binary-that-was-replaced"), join(binDir, "hercule"));
@@ -82,7 +82,7 @@ describe("the hercule binary a session calls", () => {
 
 describe("the Claude plugin directory the skill is materialized into", () => {
   it("is a loadable plugin under the runner's own storage, carrying the skill", () => {
-    const { home, storageDir, execPath } = machine();
+    const { home, storageDir, execPath } = createMachine();
 
     const {
       herculeTool: { claudePluginDir },
@@ -101,7 +101,7 @@ describe("the Claude plugin directory the skill is materialized into", () => {
   });
 
   it("overwrites the skill text an older build wrote", () => {
-    const { home, storageDir, execPath } = machine();
+    const { home, storageDir, execPath } = createMachine();
     const first = prepareTooling({
       home,
       storageDir,

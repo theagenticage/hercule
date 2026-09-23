@@ -79,7 +79,7 @@ interface TestPlugin {
  * `type` is the bare word the plugin declares. What every request below names
  * is the qualified `<pluginId>/<word>` the host mints from it.
  */
-const connectionPlugin = (options: {
+const buildConnectionPlugin = (options: {
   readonly id: string;
   readonly type: string;
   readonly flow?: "credentials" | "oauth";
@@ -132,23 +132,23 @@ const connectionPlugin = (options: {
 };
 
 /** The registry every test boots, built afresh so no context outlives its test. */
-const plugins = () => ({
-  main: connectionPlugin({ id: "main", type: "main-type" }),
-  other: connectionPlugin({ id: "other", type: "other-type" }),
-  configured: connectionPlugin({
+const buildPlugins = () => ({
+  main: buildConnectionPlugin({ id: "main", type: "main-type" }),
+  other: buildConnectionPlugin({ id: "other", type: "other-type" }),
+  configured: buildConnectionPlugin({
     id: "configured",
     type: "configured-type",
     configSchema: Schema.Struct({ watch: Schema.String }),
   }),
-  oauth: connectionPlugin({ id: "oauthy", type: "oauth-type", flow: "oauth" }),
+  oauth: buildConnectionPlugin({ id: "oauthy", type: "oauth-type", flow: "oauth" }),
 });
 
-type Registry = ReturnType<typeof plugins>;
+type Registry = ReturnType<typeof buildPlugins>;
 
 const withConnections = (
   body: (harness: ServerHarness, registry: Registry, token: string) => Promise<void>,
 ): Promise<void> => {
-  const registry = plugins();
+  const registry = buildPlugins();
   return withServer(
     async (harness) => {
       const token = await completeSetup(harness.base);
@@ -158,16 +158,16 @@ const withConnections = (
   );
 };
 
-const create = (base: string, token: string, body: unknown): Promise<Response> =>
+const createConnection = (base: string, token: string, body: unknown): Promise<Response> =>
   post(base, "/api/v1/connections", body, token);
 
 /** Creates and asserts it worked, for the tests whose subject is something else. */
-const created = async (
+const createConnectionOrFail = async (
   base: string,
   token: string,
   body: Record<string, unknown>,
 ): Promise<ConnectionRecord> => {
-  const response = await create(base, token, {
+  const response = await createConnection(base, token, {
     label: "work",
     labels: ["Code"],
     credentials: { token: GOOD },
@@ -177,17 +177,21 @@ const created = async (
   return (await response.json()) as ConnectionRecord;
 };
 
-const read = async (base: string, token: string, id: string): Promise<ConnectionRecord> => {
+const readConnection = async (
+  base: string,
+  token: string,
+  id: string,
+): Promise<ConnectionRecord> => {
   const response = await get(base, `/api/v1/connections/${id}`, token);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as ConnectionRecord;
 };
 
-const errorOf = async (response: Response): Promise<ErrorBody["error"]> =>
+const readError = async (response: Response): Promise<ErrorBody["error"]> =>
   ((await response.json()) as ErrorBody).error;
 
 /** The runtime surface the host handed a plugin at its last activation. */
-const surfaceOf = (of: TestPlugin) => {
+const readConnectionsSurface = (of: TestPlugin) => {
   const ctx = of.contexts.at(-1);
   if (ctx === undefined) throw new Error("the plugin was never activated");
   if (ctx.connections === undefined) throw new Error("the plugin was given no connections surface");
@@ -197,7 +201,7 @@ const surfaceOf = (of: TestPlugin) => {
 describe("POST /connections", () => {
   it("creates a connected connection from the type's own verdict, and puts no value on the wire", async () => {
     await withConnections(async ({ base, audit, sql }, _registry, token) => {
-      const response = await create(base, token, {
+      const response = await createConnection(base, token, {
         type: "main/main-type",
         label: "work",
         labels: ["Code"],
@@ -242,14 +246,14 @@ describe("POST /connections", () => {
 
   it("hands back the type's own message at the field, and writes nothing, when the token is turned down", async () => {
     await withConnections(async ({ base, sql }, _registry, token) => {
-      const response = await create(base, token, {
+      const response = await createConnection(base, token, {
         type: "main/main-type",
         label: "work",
         labels: ["Code"],
         credentials: { token: BAD },
       });
 
-      const error = await errorOf(response);
+      const error = await readError(response);
       expect(error.code).toBe("validation");
       expect(error.details?.issues).toContainEqual(
         expect.objectContaining({ path: ["credentials", "token"], message: REJECTED }),
@@ -274,7 +278,7 @@ describe("POST /connections", () => {
       ];
 
       for (const body of bodies) {
-        const error = await errorOf(await create(base, token, body));
+        const error = await readError(await createConnection(base, token, body));
         expect(error.code, JSON.stringify(body)).toBe("validation");
       }
     });
@@ -282,8 +286,8 @@ describe("POST /connections", () => {
 
   it("refuses a type whose setup is an OAuth flow, and says where to start one", async () => {
     await withConnections(async ({ base }, _registry, token) => {
-      const error = await errorOf(
-        await create(base, token, {
+      const error = await readError(
+        await createConnection(base, token, {
           type: "oauthy/oauth-type",
           label: "work",
           labels: ["Code"],
@@ -300,10 +304,16 @@ describe("POST /connections", () => {
 describe("GET /connections", () => {
   it("filters by type and by status, and reads one back with references and no values", async () => {
     await withConnections(async ({ base }, registry, token) => {
-      const mine = await created(base, token, { type: "main/main-type" });
-      const theirs = await created(base, token, { type: "other/other-type", label: "theirs" });
+      const mine = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      const theirs = await createConnectionOrFail(base, token, {
+        type: "other/other-type",
+        label: "theirs",
+      });
       await Effect.runPromise(
-        surfaceOf(registry.other).report(theirs.id, { status: "error", detail: "rate limited" }),
+        readConnectionsSurface(registry.other).report(theirs.id, {
+          status: "error",
+          detail: "rate limited",
+        }),
       );
 
       const byType = await get(base, "/api/v1/connections?type=main/main-type", token);
@@ -326,25 +336,29 @@ describe("GET /connections", () => {
     await withConnections(async ({ base }, _registry, token) => {
       // One connection first, so a 404 from a route that does not exist yet
       // cannot pass for a 404 about this id.
-      await created(base, token, { type: "main/main-type" });
+      await createConnectionOrFail(base, token, { type: "main/main-type" });
 
       const response = await get(base, `/api/v1/connections/${ABSENT}`, token);
 
       expect(response.status).toBe(404);
-      expect(await errorOf(response)).toMatchObject({ code: "not_found" });
+      expect(await readError(response)).toMatchObject({ code: "not_found" });
     });
   });
 });
 
 describe("PATCH /connections/:id", () => {
-  const patch = (base: string, token: string, id: string, body: unknown): Promise<Response> =>
-    send("PATCH", base, `/api/v1/connections/${id}`, { body, token });
+  const patchConnection = (
+    base: string,
+    token: string,
+    id: string,
+    body: unknown,
+  ): Promise<Response> => send("PATCH", base, `/api/v1/connections/${id}`, { body, token });
 
   it("changes what the user chose and leaves the account, the status and the credentials alone", async () => {
     await withConnections(async ({ base }, _registry, token) => {
-      const before = await created(base, token, { type: "main/main-type" });
+      const before = await createConnectionOrFail(base, token, { type: "main/main-type" });
 
-      const response = await patch(base, token, before.id, {
+      const response = await patchConnection(base, token, before.id, {
         label: "personal",
         labels: ["Business"],
       });
@@ -366,16 +380,20 @@ describe("PATCH /connections/:id", () => {
 
   it("refuses an empty topic list and a config the type's schema turns down", async () => {
     await withConnections(async ({ base }, _registry, token) => {
-      const one = await created(base, token, {
+      const one = await createConnectionOrFail(base, token, {
         type: "configured/configured-type",
         config: { watch: "a" },
       });
 
-      expect(await errorOf(await patch(base, token, one.id, { labels: [] }))).toMatchObject({
+      expect(
+        await readError(await patchConnection(base, token, one.id, { labels: [] })),
+      ).toMatchObject({
         code: "validation",
       });
 
-      const wrong = await errorOf(await patch(base, token, one.id, { config: { watch: 7 } }));
+      const wrong = await readError(
+        await patchConnection(base, token, one.id, { config: { watch: 7 } }),
+      );
       expect(wrong.code).toBe("validation");
       expect(wrong.details?.issues).toContainEqual(
         expect.objectContaining({ path: ["config", "watch"] }),
@@ -385,7 +403,7 @@ describe("PATCH /connections/:id", () => {
 
   it("answers invalid_state for a row whose type no plugin in this build defines", async () => {
     await withConnections(async ({ base, sql }, _registry, token) => {
-      const one = await created(base, token, { type: "main/main-type" });
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
       // A build that dropped the plugin that defined the type, arranged the one
       // way a running controller cannot reach: the row outlives the catalog.
       await Effect.runPromise(
@@ -394,7 +412,7 @@ describe("PATCH /connections/:id", () => {
         ),
       );
 
-      const refused = await errorOf(await patch(base, token, one.id, { config: {} }));
+      const refused = await readError(await patchConnection(base, token, one.id, { config: {} }));
 
       expect(refused.code).toBe("invalid_state");
       expect(refused.message).toContain("gone-type");
@@ -403,13 +421,13 @@ describe("PATCH /connections/:id", () => {
 
   it("accepts an empty config, and nothing else, for a type that declared no schema", async () => {
     await withConnections(async ({ base }, _registry, token) => {
-      const one = await created(base, token, { type: "main/main-type" });
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
 
-      const empty = await patch(base, token, one.id, { config: {} });
+      const empty = await patchConnection(base, token, one.id, { config: {} });
       expect(empty.status, await empty.clone().text()).toBe(200);
 
-      const filled = await patch(base, token, one.id, { config: { watch: "a" } });
-      expect(await errorOf(filled)).toMatchObject({ code: "validation" });
+      const filled = await patchConnection(base, token, one.id, { config: { watch: "a" } });
+      expect(await readError(filled)).toMatchObject({ code: "validation" });
     });
   });
 });
@@ -425,8 +443,10 @@ describe("POST /connections/:id/credentials", () => {
 
   it("puts a connection that needed reauthenticating back to connected, under its own id", async () => {
     await withConnections(async ({ base }, registry, token) => {
-      const one = await created(base, token, { type: "main/main-type" });
-      await Effect.runPromise(surfaceOf(registry.main).report(one.id, { status: "needs-reauth" }));
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      await Effect.runPromise(
+        readConnectionsSurface(registry.main).report(one.id, { status: "needs-reauth" }),
+      );
 
       const response = await setCredentials(base, token, one.id, { token: ROTATED });
 
@@ -444,13 +464,15 @@ describe("POST /connections/:id/credentials", () => {
 
   it("leaves everything as it was when the type turns the new token down", async () => {
     await withConnections(async ({ base }, registry, token) => {
-      const one = await created(base, token, { type: "main/main-type" });
-      await Effect.runPromise(surfaceOf(registry.main).report(one.id, { status: "needs-reauth" }));
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      await Effect.runPromise(
+        readConnectionsSurface(registry.main).report(one.id, { status: "needs-reauth" }),
+      );
 
       const response = await setCredentials(base, token, one.id, { token: BAD });
 
-      expect(await errorOf(response)).toMatchObject({ code: "validation" });
-      const after = await read(base, token, one.id);
+      expect(await readError(response)).toMatchObject({ code: "validation" });
+      const after = await readConnection(base, token, one.id);
       expect(after).toMatchObject({
         status: "needs-reauth",
         displayName: one.displayName,
@@ -464,7 +486,7 @@ describe("POST /connections/:id/credentials", () => {
 describe("DELETE /connections/:id", () => {
   it("takes the connection and every secret it owned with it", async () => {
     await withConnections(async ({ base, audit }, _registry, token) => {
-      const one = await created(base, token, { type: "main/main-type" });
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
       const second = await send("PUT", base, `/api/v1/secrets/connection/${one.id}/extra`, {
         body: { value: "another-value" },
         token,
@@ -492,10 +514,10 @@ describe("DELETE /connections/:id", () => {
 describe("the connections surface a plugin is activated with", () => {
   it("lists the plugin's own connections, without credentials", async () => {
     await withConnections(async ({ base }, registry, token) => {
-      const mine = await created(base, token, { type: "main/main-type" });
-      await created(base, token, { type: "other/other-type" });
+      const mine = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      await createConnectionOrFail(base, token, { type: "other/other-type" });
 
-      const listed = await Effect.runPromise(surfaceOf(registry.main).list());
+      const listed = await Effect.runPromise(readConnectionsSurface(registry.main).list());
 
       expect(listed.map((one) => one.id)).toEqual([mine.id]);
       expect(listed[0]).toMatchObject({
@@ -512,13 +534,13 @@ describe("the connections surface a plugin is activated with", () => {
 
   it("decodes the credentials of its own connection, and reports a status the API reads back", async () => {
     await withConnections(async ({ base }, registry, token) => {
-      const mine = await created(base, token, { type: "main/main-type" });
-      const surface = surfaceOf(registry.main);
+      const mine = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      const surface = readConnectionsSurface(registry.main);
 
       expect(await Effect.runPromise(surface.credentials(mine.id))).toEqual({ token: GOOD });
 
       await Effect.runPromise(surface.report(mine.id, { status: "error", detail: "rate limited" }));
-      expect(await read(base, token, mine.id)).toMatchObject({
+      expect(await readConnection(base, token, mine.id)).toMatchObject({
         status: "error",
         statusDetail: "rate limited",
       });
@@ -527,8 +549,8 @@ describe("the connections surface a plugin is activated with", () => {
 
   it("refuses another plugin's connection, whichever way it is reached for", async () => {
     await withConnections(async ({ base }, registry, token) => {
-      const theirs = await created(base, token, { type: "other/other-type" });
-      const surface = surfaceOf(registry.main);
+      const theirs = await createConnectionOrFail(base, token, { type: "other/other-type" });
+      const surface = readConnectionsSurface(registry.main);
 
       const decoded = await Effect.runPromise(Effect.flip(surface.credentials(theirs.id)));
       const reported = await Effect.runPromise(
@@ -550,8 +572,8 @@ describe("two plugins declaring one word", () => {
   }
 
   it("gives each its own qualified type, and keeps the other's connections out of its reach", async () => {
-    const first = connectionPlugin({ id: "first", type: "gmail" });
-    const second = connectionPlugin({ id: "second", type: "gmail" });
+    const first = buildConnectionPlugin({ id: "first", type: "gmail" });
+    const second = buildConnectionPlugin({ id: "second", type: "gmail" });
 
     await withServer(
       async ({ base }) => {
@@ -568,11 +590,11 @@ describe("two plugins declaring one word", () => {
         expect(one?.contributions.map((contribution) => contribution.id)).toEqual(["first/gmail"]);
         expect(two?.contributions.map((contribution) => contribution.id)).toEqual(["second/gmail"]);
 
-        const made = await created(base, token, { type: "first/gmail" });
+        const made = await createConnectionOrFail(base, token, { type: "first/gmail" });
         expect(made.type).toBe("first/gmail");
 
-        const mine = await Effect.runPromise(surfaceOf(first).list());
-        const theirs = await Effect.runPromise(surfaceOf(second).list());
+        const mine = await Effect.runPromise(readConnectionsSurface(first).list());
+        const theirs = await Effect.runPromise(readConnectionsSurface(second).list());
         expect(mine.map((connection) => connection.id)).toEqual([made.id]);
         expect(theirs).toEqual([]);
       },
@@ -581,7 +603,7 @@ describe("two plugins declaring one word", () => {
   });
 
   it("refuses a word holding the separator, so a qualified type always has one reading", async () => {
-    const sneaky = connectionPlugin({ id: "sneaky", type: "other/gmail" });
+    const sneaky = buildConnectionPlugin({ id: "sneaky", type: "other/gmail" });
 
     await withServer(
       async ({ base }) => {

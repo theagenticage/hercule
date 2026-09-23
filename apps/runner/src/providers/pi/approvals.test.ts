@@ -18,7 +18,15 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { ProviderEvent } from "@hercule/protocol";
-import { busy, cleanupHomes, SESSION, sentOf, settle, taggedIn, until } from "./testing";
+import {
+  startBusySession,
+  cleanupHomes,
+  SESSION,
+  listSentCommands,
+  settle,
+  filterByTag,
+  waitUntil,
+} from "./testing";
 
 afterAll(cleanupHomes);
 
@@ -36,53 +44,55 @@ const SECOND_CALL = "call_0199e0e8";
  * pi's dialog carries no call of its own, and the card is rendered from the
  * call rather than from this, so the name and the id are all it says.
  */
-const about = (toolCallId: string, toolName: string): string =>
+const buildDialogMessage = (toolCallId: string, toolName: string): string =>
   JSON.stringify({ toolCallId, toolName });
 
 const COMMAND = "rm -rf build && echo rebuilt";
 
-type DrivenAdapter = Awaited<ReturnType<typeof busy>>;
+type DrivenAdapter = Awaited<ReturnType<typeof startBusySession>>;
 
 /** A turn stopped on a call the extension will not run unasked. */
-const parkedOn = async (
+const parkOnTool = async (
   toolName: string,
   args: Readonly<Record<string, unknown>>,
 ): Promise<DrivenAdapter> => {
-  const run = await busy();
+  const run = await startBusySession();
   run.child.push({ type: "tool_execution_start", toolCallId: CALL, toolName, args });
   run.child.push({
     type: "extension_ui_request",
     id: UI,
     method: "confirm",
     title: `Approve ${toolName}?`,
-    message: about(CALL, toolName),
+    message: buildDialogMessage(CALL, toolName),
   });
   return run;
 };
 
 /** A turn stopped on a shell command, which is what most of this file drives. */
-const parked = (): Promise<DrivenAdapter> => parkedOn("bash", { command: COMMAND });
+const parkOnCommand = (): Promise<DrivenAdapter> => parkOnTool("bash", { command: COMMAND });
 
-const openedIn = async (
+const awaitOpenedRequest = async (
   run: DrivenAdapter,
 ): Promise<Extract<ProviderEvent, { _tag: "request.opened" }>> => {
-  await until("docked the request", () => taggedIn(run.seen, "request.opened").length === 1);
-  return taggedIn(run.seen, "request.opened")[0]!;
+  await waitUntil("docked the request", () => filterByTag(run.seen, "request.opened").length === 1);
+  return filterByTag(run.seen, "request.opened")[0]!;
 };
 
 /** What the adapter wrote back to pi for one dialog, once it has written it. */
-const answerTo = async (run: DrivenAdapter, id: string): Promise<Record<string, unknown>> => {
-  await until(`answered dialog ${id}`, () =>
-    sentOf(run.sent, "extension_ui_response").some((written) => written["id"] === id),
+const awaitAnswer = async (run: DrivenAdapter, id: string): Promise<Record<string, unknown>> => {
+  await waitUntil(`answered dialog ${id}`, () =>
+    listSentCommands(run.sent, "extension_ui_response").some((written) => written["id"] === id),
   );
-  return sentOf(run.sent, "extension_ui_response").find((written) => written["id"] === id)!;
+  return listSentCommands(run.sent, "extension_ui_response").find(
+    (written) => written["id"] === id,
+  )!;
 };
 
-const resolvedIn = async (
+const awaitResolvedRequest = async (
   run: DrivenAdapter,
 ): Promise<Extract<ProviderEvent, { _tag: "request.resolved" }>> => {
-  await until("ended the park", () => taggedIn(run.seen, "request.resolved").length === 1);
-  return taggedIn(run.seen, "request.resolved")[0]!;
+  await waitUntil("ended the park", () => filterByTag(run.seen, "request.resolved").length === 1);
+  return filterByTag(run.seen, "request.resolved")[0]!;
 };
 
 /**
@@ -104,19 +114,19 @@ describe("what a held call is asked as", () => {
 
   for (const [toolName, args, kind] of CARDS) {
     it(`asks about ${toolName} as a ${kind}`, async () => {
-      const run = await parkedOn(toolName, args);
+      const run = await parkOnTool(toolName, args);
 
-      expect((await openedIn(run)).request.kind).toBe(kind);
+      expect((await awaitOpenedRequest(run)).request.kind).toBe(kind);
     });
   }
 });
 
 describe("what a parked shell command asks the user", () => {
   it("docks a command approval on the item the command started", async () => {
-    const run = await parked();
+    const run = await parkOnCommand();
 
-    const opened = await openedIn(run);
-    const item = taggedIn(run.seen, "item.started").find(
+    const opened = await awaitOpenedRequest(run);
+    const item = filterByTag(run.seen, "item.started").find(
       (event) => event.kind === "command_execution",
     );
     expect(opened.request.kind).toBe("command_approval");
@@ -128,43 +138,43 @@ describe("what a parked shell command asks the user", () => {
   });
 
   it("says nothing to pi until the user answers", async () => {
-    const run = await parked();
-    await openedIn(run);
+    const run = await parkOnCommand();
+    await awaitOpenedRequest(run);
 
     await settle();
 
     // pi is holding the tool call open; an answer written early runs it.
-    expect(sentOf(run.sent, "extension_ui_response")).toEqual([]);
-    expect(taggedIn(run.seen, "request.resolved")).toEqual([]);
+    expect(listSentCommands(run.sent, "extension_ui_response")).toEqual([]);
+    expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
   });
 });
 
 describe("what each answer does to the parked session", () => {
   it("lets the command run on an allow, and reports the park over", async () => {
-    const run = await parked();
-    const opened = await openedIn(run);
+    const run = await parkOnCommand();
+    const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
       run.adapter.respondToRequest(SESSION, opened.request.requestId, "allow"),
     );
 
-    const written = await answerTo(run, UI);
+    const written = await awaitAnswer(run, UI);
     expect(written["confirmed"]).toBe(true);
     expect(written["cancelled"]).toBeUndefined();
-    const resolved = await resolvedIn(run);
+    const resolved = await awaitResolvedRequest(run);
     expect(resolved.requestId).toBe(opened.request.requestId);
     expect(resolved.decision).toBe("allow");
   });
 
   it("blocks the command on a deny, with the reason pi reports on the item", async () => {
     const reason = "Denied by the user in Hercule";
-    const run = await parked();
-    const opened = await openedIn(run);
+    const run = await parkOnCommand();
+    const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
       run.adapter.respondToRequest(SESSION, opened.request.requestId, "deny"),
     );
-    const written = await answerTo(run, UI);
+    const written = await awaitAnswer(run, UI);
     run.child.push({
       type: "tool_execution_end",
       toolCallId: CALL,
@@ -174,12 +184,12 @@ describe("what each answer does to the parked session", () => {
     });
 
     expect(written["confirmed"]).toBe(false);
-    expect((await resolvedIn(run)).decision).toBe("deny");
-    await until("completed the blocked command", () => {
-      const done = taggedIn(run.seen, "item.completed");
+    expect((await awaitResolvedRequest(run)).decision).toBe("deny");
+    await waitUntil("completed the blocked command", () => {
+      const done = filterByTag(run.seen, "item.completed");
       return done.some((event) => event.itemId === opened.request.itemId);
     });
-    const completed = taggedIn(run.seen, "item.completed").find(
+    const completed = filterByTag(run.seen, "item.completed").find(
       (event) => event.itemId === opened.request.itemId,
     )!;
     expect(completed.status).toBe("declined");
@@ -189,87 +199,87 @@ describe("what each answer does to the parked session", () => {
   });
 
   it("refuses the command and ends the turn on a cancel", async () => {
-    const run = await parked();
-    const opened = await openedIn(run);
+    const run = await parkOnCommand();
+    const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(
       run.adapter.respondToRequest(SESSION, opened.request.requestId, "cancel"),
     );
 
-    const written = await answerTo(run, UI);
+    const written = await awaitAnswer(run, UI);
     expect(written["cancelled"]).toBe(true);
-    expect((await resolvedIn(run)).decision).toBe("cancel");
+    expect((await awaitResolvedRequest(run)).decision).toBe("cancel");
     // A cancel is not a no to one command: pi reads a refusal as one tool it
     // may not run and carries on with the rest of what it planned, so the turn
     // has to go with it.
-    await until("stopped the turn", () => sentOf(run.sent, "abort").length === 1);
+    await waitUntil("stopped the turn", () => listSentCommands(run.sent, "abort").length === 1);
     run.child.push({ type: "agent_end", messages: [{ role: "assistant", stopReason: "aborted" }] });
     run.child.push({ type: "agent_settled" });
 
-    await until("ended the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
-    expect(taggedIn(run.seen, "turn.completed")[0]?.state).toBe("interrupted");
+    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    expect(filterByTag(run.seen, "turn.completed")[0]?.state).toBe("interrupted");
     // The park ended once. A turn that ended a second time over the same
     // question would leave a card reported as resolved twice.
-    expect(taggedIn(run.seen, "request.resolved")).toHaveLength(1);
+    expect(filterByTag(run.seen, "request.resolved")).toHaveLength(1);
   });
 
   it("cancels the dialog and ends the turn when the session is interrupted", async () => {
-    const run = await parked();
-    const opened = await openedIn(run);
+    const run = await parkOnCommand();
+    const opened = await awaitOpenedRequest(run);
 
     await Effect.runPromise(run.adapter.interrupt(SESSION));
 
-    const written = await answerTo(run, UI);
+    const written = await awaitAnswer(run, UI);
     // A `cancelled` is the only answer pi reads as "no decision was made".
     expect(written["cancelled"]).toBe(true);
-    const resolved = await resolvedIn(run);
+    const resolved = await awaitResolvedRequest(run);
     expect(resolved.requestId).toBe(opened.request.requestId);
     expect(resolved.decision).toBe("cancel");
-    await until("stopped the turn", () => sentOf(run.sent, "abort").length === 1);
+    await waitUntil("stopped the turn", () => listSentCommands(run.sent, "abort").length === 1);
     run.child.push({ type: "agent_end", messages: [{ role: "assistant", stopReason: "aborted" }] });
     run.child.push({ type: "agent_settled" });
 
-    await until("ended the turn", () => taggedIn(run.seen, "turn.completed").length === 1);
+    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
     // The turn ending does not end the park a second time.
-    expect(taggedIn(run.seen, "request.resolved")).toHaveLength(1);
+    expect(filterByTag(run.seen, "request.resolved")).toHaveLength(1);
   });
 });
 
 describe("a second question asked while one is open", () => {
   it("refuses it at once and docks nothing", async () => {
-    const run = await parked();
-    await openedIn(run);
+    const run = await parkOnCommand();
+    await awaitOpenedRequest(run);
 
     run.child.push({
       type: "extension_ui_request",
       id: SECOND_UI,
       method: "confirm",
       title: "Run a shell command?",
-      message: about(SECOND_CALL, "bash"),
+      message: buildDialogMessage(SECOND_CALL, "bash"),
     });
 
-    const written = await answerTo(run, SECOND_UI);
+    const written = await awaitAnswer(run, SECOND_UI);
     expect(written["confirmed"]).toBe(false);
     await settle();
     // One card is docked on the composer; a second would have nowhere to go.
-    expect(taggedIn(run.seen, "request.opened")).toHaveLength(1);
-    expect(sentOf(run.sent, "extension_ui_response")).toHaveLength(1);
+    expect(filterByTag(run.seen, "request.opened")).toHaveLength(1);
+    expect(listSentCommands(run.sent, "extension_ui_response")).toHaveLength(1);
   });
 
   it("says why it refused", async () => {
-    const run = await parked();
-    await openedIn(run);
+    const run = await parkOnCommand();
+    await awaitOpenedRequest(run);
 
     run.child.push({
       type: "extension_ui_request",
       id: SECOND_UI,
       method: "confirm",
       title: "Run a shell command?",
-      message: about(SECOND_CALL, "bash"),
+      message: buildDialogMessage(SECOND_CALL, "bash"),
     });
-    await answerTo(run, SECOND_UI);
+    await awaitAnswer(run, SECOND_UI);
 
-    const said = taggedIn(run.seen, "runtime.warning")
+    const said = filterByTag(run.seen, "runtime.warning")
       .map((event) => event.message)
       .join(" ");
     expect(said.toLowerCase()).toContain("one at a time");

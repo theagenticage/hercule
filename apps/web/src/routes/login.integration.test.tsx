@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { envelope, renderApp, stubApi, type Answer, type Handler } from "../app/testing";
+import { buildErrorBody, renderApp, stubApi, type Answer, type Handler } from "../app/testing";
 
-const controller = (login: Answer): Readonly<Record<string, Handler>> => ({
+const buildController = (login: Answer): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/setup": { body: { complete: true } },
   "POST /api/v1/auth/login": login,
   "GET /api/v1/settings": {
@@ -21,7 +21,7 @@ const signIn = async (password: string) => {
 describe("the login screen", () => {
   it("names neither half when the credentials are refused", async () => {
     const api = stubApi(
-      controller({ status: 401, body: envelope("unauthenticated", "no such user") }),
+      buildController({ status: 401, body: buildErrorBody("unauthenticated", "no such user") }),
     );
     const { router } = await renderApp({ path: "/login", api: api.fetch });
 
@@ -33,7 +33,7 @@ describe("the login screen", () => {
 
   it("says what an empty form is missing, in words a person wrote", async () => {
     const user = userEvent.setup();
-    const api = stubApi(controller({ body: {} }));
+    const api = stubApi(buildController({ body: {} }));
     await renderApp({ path: "/login", api: api.fetch });
 
     await user.click(screen.getByRole("button", { name: "Sign in" }));
@@ -45,7 +45,7 @@ describe("the login screen", () => {
 
   it("shows any other failure as the API worded it", async () => {
     const api = stubApi(
-      controller({ status: 500, body: envelope("internal", "the database is locked") }),
+      buildController({ status: 500, body: buildErrorBody("internal", "the database is locked") }),
     );
     await renderApp({ path: "/login", api: api.fetch });
 
@@ -56,7 +56,7 @@ describe("the login screen", () => {
 
   it("holds the token it was given and goes home", async () => {
     const api = stubApi(
-      controller({ body: { token: "minted", expiresAt: "2026-10-04T00:00:00.000Z" } }),
+      buildController({ body: { token: "minted", expiresAt: "2026-10-04T00:00:00.000Z" } }),
     );
     const { router, client } = await renderApp({ path: "/login", api: api.fetch });
 

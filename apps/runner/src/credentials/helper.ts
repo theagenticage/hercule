@@ -20,7 +20,7 @@ const PROVISIONING = "HERCULE_WORKSPACE_PROVISIONING";
 const SOCKET = "HERCULE_RUNNER_SOCKET";
 
 /** git writes `key=value` lines and ends with a blank one. */
-const questionFrom = (input: string): Record<string, string> => {
+const parseHelperQuestion = (input: string): Record<string, string> => {
   const fields: Record<string, string> = {};
   for (const line of input.split("\n")) {
     const at = line.indexOf("=");
@@ -33,23 +33,23 @@ const askDaemon = (path: string, question: unknown): Promise<string> =>
   new Promise((resolve) => {
     const socket = createConnection({ path });
     let received = "";
-    const done = (answer: string): void => {
+    const finishWithAnswer = (answer: string): void => {
       socket.destroy();
       resolve(answer);
     };
     socket.setEncoding("utf8");
-    socket.setTimeout(CREDENTIAL_DEADLINE_MS, () => done(""));
+    socket.setTimeout(CREDENTIAL_DEADLINE_MS, () => finishWithAnswer(""));
     socket.on("connect", () => socket.write(`${JSON.stringify(question)}\n`));
     socket.on("data", (chunk: string) => {
       received += chunk;
-      if (received.includes("\n")) done(received);
+      if (received.includes("\n")) finishWithAnswer(received);
     });
-    socket.on("end", () => done(received));
+    socket.on("end", () => finishWithAnswer(received));
     // No daemon, no socket, no permission: all of them are "no credential".
-    socket.on("error", () => done(""));
+    socket.on("error", () => finishWithAnswer(""));
   });
 
-export const helperMain = async (
+export const answerCredentialQuestion = async (
   input: string,
   env: Record<string, string | undefined>,
 ): Promise<string> => {
@@ -66,7 +66,7 @@ export const helperMain = async (
   // Nothing to prove is nothing to ask: the daemon would refuse it anyway, and
   // git is waiting on this.
   if (claim === undefined) return "";
-  const question = questionFrom(input);
+  const question = parseHelperQuestion(input);
   const answer = await askDaemon(path, {
     protocol: question["protocol"],
     host: question["host"],
@@ -97,5 +97,5 @@ export const helperMain = async (
  */
 export const runCredentialAction = async (action: string | undefined): Promise<void> => {
   if (action !== "get") return;
-  process.stdout.write(await helperMain(await Bun.stdin.text(), process.env));
+  process.stdout.write(await answerCredentialQuestion(await Bun.stdin.text(), process.env));
 };

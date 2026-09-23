@@ -40,7 +40,7 @@ const CANONICAL_ZONES: readonly string[] = (() => {
 })();
 
 /** The zones a screen offers, in the order the runtime lists them. */
-export const supportedTimezones = (): readonly string[] => CANONICAL_ZONES;
+export const listSupportedTimezones = (): readonly string[] => CANONICAL_ZONES;
 
 /** Whether this runtime can format times in this zone. */
 export const isSupportedTimezone = (timezone: string): boolean => {
@@ -53,7 +53,7 @@ export const isSupportedTimezone = (timezone: string): boolean => {
 };
 
 /** The browser's zone when this runtime knows it, and UTC when it does not. */
-export const browserTimezone = (resolve: TimezoneResolver = resolveFromIntl): string => {
+export const resolveBrowserTimezone = (resolve: TimezoneResolver = resolveFromIntl): string => {
   const zone = resolve();
   return isSupportedTimezone(zone) ? zone : FALLBACK_TIMEZONE;
 };

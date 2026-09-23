@@ -18,13 +18,13 @@ import type {
   ThreadWorkspace,
   Workspace,
 } from "@hercule/contract";
-import { threadRows, type ThreadRow } from "./rows";
-import { projectTone, type ProjectTone } from "./tone";
+import { buildThreadRows, type ThreadRow } from "./rows";
+import { pickProjectTone, type ProjectTone } from "./tone";
 import {
-  defaultWorkspacePick,
-  projectRepos,
-  readyPrimary,
-  workspaceLabelParts,
+  decideDefaultWorkspacePick,
+  listProjectRepos,
+  findReadyPrimary,
+  buildWorkspaceLabelParts,
   type WorkspaceLabel,
 } from "./workspaces";
 
@@ -61,13 +61,13 @@ export interface DraftPlace {
 /**
  * Which group the draft being written belongs to. The address settles it where
  * it names a workspace; where it names none, the draft will open in whatever
- * the project opens in (`defaultWorkspacePick`), and a main workspace that
+ * the project opens in (`decideDefaultWorkspacePick`), and a main workspace that
  * already stands on the machine it would run on is a group of its own - the
  * draft is filed with the threads it will sit beside, not under "no
  * workspace". A checkout nothing has cloned yet is no group at all: the draft
  * stands under the project itself until the machine has made one.
  */
-export const draftPlace = ({
+export const decideDraftPlace = ({
   projectId,
   workspaceId,
   resources,
@@ -85,11 +85,11 @@ export const draftPlace = ({
   readonly preferred?: ThreadWorkspace | null;
 }): DraftPlace => {
   if (workspaceId !== null || projectId === null) return { projectId, workspaceId };
-  const pick = defaultWorkspacePick(projectRepos(resources, projectId), preferred);
+  const pick = decideDefaultWorkspacePick(listProjectRepos(resources, projectId), preferred);
   if (pick.kind !== "primary") return { projectId, workspaceId: null };
   return {
     projectId,
-    workspaceId: readyPrimary(workspaces, pick.resourceId, runnerId)?.id ?? null,
+    workspaceId: findReadyPrimary(workspaces, pick.resourceId, runnerId)?.id ?? null,
   };
 };
 
@@ -100,7 +100,7 @@ const holdsDraft = (
   workspaceId: string | null,
 ): boolean => draft !== null && joins && draft.workspaceId === workspaceId;
 
-const recency = (rows: readonly ThreadRow[]): number =>
+const readRecency = (rows: readonly ThreadRow[]): number =>
   rows.length === 0 ? 0 : Date.parse(rows[0]!.activityAt);
 
 /**
@@ -108,14 +108,14 @@ const recency = (rows: readonly ThreadRow[]): number =>
  * one place per worktree in catalog order, then the main workspace, then the
  * lane of threads that work without a checkout.
  */
-const rank = (lane: WorkspaceGroup, workspaces: readonly Workspace[]): number => {
+const rankLane = (lane: WorkspaceGroup, workspaces: readonly Workspace[]): number => {
   if (lane.workspaceId === null) return lane.draft ? -1 : workspaces.length + 2;
   const workspace = workspaces.find((each) => each.id === lane.workspaceId);
   if (workspace === undefined || workspace.kind === "primary") return workspaces.length + 1;
   return workspaces.findIndex((each) => each.id === lane.workspaceId);
 };
 
-export const threadGroups = ({
+export const buildThreadGroups = ({
   sessions,
   projects,
   workspaces,
@@ -135,12 +135,12 @@ export const threadGroups = ({
   readonly mode: ThreadRows;
   readonly draft?: DraftPlace | null;
 }): readonly ProjectGroup[] => {
-  const rows = threadRows(sessions, mode, instances);
-  const placeOf = new Map(sessions.map((session) => [session.id, session]));
+  const rows = buildThreadRows(sessions, mode, instances);
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
 
   const byProject = new Map<string | null, ThreadRow[]>();
   for (const row of rows) {
-    const projectId = placeOf.get(row.id)?.projectId ?? null;
+    const projectId = sessionsById.get(row.id)?.projectId ?? null;
     byProject.set(projectId, [...(byProject.get(projectId) ?? []), row]);
   }
   // A project the draft is headed for stands even while it holds no thread.
@@ -149,7 +149,7 @@ export const threadGroups = ({
   const groups = [...byProject].map(([projectId, held]): ProjectGroup => {
     const byWorkspace = new Map<string | null, ThreadRow[]>();
     for (const row of held) {
-      const workspaceId = placeOf.get(row.id)?.workspaceId ?? null;
+      const workspaceId = sessionsById.get(row.id)?.workspaceId ?? null;
       byWorkspace.set(workspaceId, [...(byWorkspace.get(workspaceId) ?? []), row]);
     }
     const joins = draft !== null && draft.projectId === projectId;
@@ -169,7 +169,7 @@ export const threadGroups = ({
             ? alone || (holdsDraft(draft, joins, workspaceId) && rowsIn.length === 0)
               ? null
               : { clip: "no workspace", keep: "" }
-            : workspaceLabelParts(workspace, resources, runners),
+            : buildWorkspaceLabelParts(workspace, resources, runners),
         draft: holdsDraft(draft, joins, workspaceId),
         rows: rowsIn,
       };
@@ -178,14 +178,14 @@ export const threadGroups = ({
     return {
       projectId,
       name: projects.find((each) => each.id === projectId)?.name ?? null,
-      tone: projectId === null ? null : projectTone(projectId, projects),
+      tone: projectId === null ? null : pickProjectTone(projectId, projects),
       count: held.length,
       // The prototype's own order: the worktrees first, in the order the
       // catalog lists them, then the repo's main workspace, then the threads
       // that work without a checkout. A draft that has no workspace at all yet
       // is not that last lane - it stands under the project's own header,
       // before everything, which is where the user just asked for it.
-      workspaces: lanes.sort((a, b) => rank(a, workspaces) - rank(b, workspaces)),
+      workspaces: lanes.sort((a, b) => rankLane(a, workspaces) - rankLane(b, workspaces)),
     };
   });
 
@@ -193,6 +193,6 @@ export const threadGroups = ({
     (a, b) =>
       Number(a.projectId === null) - Number(b.projectId === null) ||
       Number(b.projectId === draft?.projectId) - Number(a.projectId === draft?.projectId) ||
-      recency(b.workspaces[0]?.rows ?? []) - recency(a.workspaces[0]?.rows ?? []),
+      readRecency(b.workspaces[0]?.rows ?? []) - readRecency(a.workspaces[0]?.rows ?? []),
   );
 };

@@ -12,12 +12,12 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
 import type { SubscriptionTarget } from "@hercule/contract";
-import { checkExpression } from "../expressions";
+import { validateExpression } from "../expressions";
 import { expandTarget } from "./targets";
 
 /** Whether the evaluator accepts a source, as `subscription.create` asks it. */
-const accepted = (source: string): boolean =>
-  Exit.isSuccess(Effect.runSyncExit(checkExpression(source, "event")));
+const isAccepted = (source: string): boolean =>
+  Exit.isSuccess(Effect.runSyncExit(validateExpression(source, "event")));
 
 describe("expandTarget", () => {
   it("expands a ref target into the membership test the spec pins", () => {
@@ -28,19 +28,19 @@ describe("expandTarget", () => {
   it("expands a run target into a source naming that run", () => {
     const source = expandTarget({ kind: "run", runId: "r_3" });
     expect(source).toContain("r_3");
-    expect(accepted(source), source).toBe(true);
+    expect(isAccepted(source), source).toBe(true);
   });
 
   it("expands a session target into a source naming that session", () => {
     const source = expandTarget({ kind: "session", sessionId: "s_12" });
     expect(source).toContain("s_12");
-    expect(accepted(source), source).toBe(true);
+    expect(isAccepted(source), source).toBe(true);
   });
 
   it("expands a request target into a source naming that request", () => {
     const source = expandTarget({ kind: "request", requestId: "pr_7" });
     expect(source).toContain("pr_7");
-    expect(accepted(source), source).toBe(true);
+    expect(isAccepted(source), source).toBe(true);
   });
 
   it("produces a source the evaluator accepts for every kind of target", () => {
@@ -52,7 +52,7 @@ describe("expandTarget", () => {
     ];
     for (const target of targets) {
       const source = expandTarget(target);
-      expect(accepted(source), `${target.kind}: ${source}`).toBe(true);
+      expect(isAccepted(source), `${target.kind}: ${source}`).toBe(true);
     }
   });
 });

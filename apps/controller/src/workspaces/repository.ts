@@ -18,13 +18,13 @@ import type {
   WorkspaceKind,
   WorkspaceStatus,
 } from "@hercule/contract";
-import { onlineWhere } from "../runners";
+import { buildOnlineClause } from "../runners";
 import {
   decodeCursor,
   encodeCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -107,7 +107,7 @@ export interface SweepCandidate {
  * for it before it is dispatched, and an exited one cannot be resumed without it
  * - and three spellings of "the workspace stands" would be three answers.
  */
-export const readyWhere = (alias: string): string =>
+export const buildReadyClause = (alias: string): string =>
   `(${alias}.workspace_id IS NULL OR EXISTS (SELECT 1 FROM workspaces ` +
   `WHERE workspaces.id = ${alias}.workspace_id AND workspaces.status = 'ready'))`;
 
@@ -123,11 +123,11 @@ export const readyWhere = (alias: string): string =>
  * sessions listing reads the same one to answer `resumable`. One owner, and the
  * only owner both can import without the two domains importing each other.
  */
-export const resumableWhere = (alias: string): string =>
+export const buildResumableClause = (alias: string): string =>
   `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
   `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
   `AND runners.lifecycle <> 'retired') ` +
-  `AND ${readyWhere(alias)}`;
+  `AND ${buildReadyClause(alias)}`;
 
 /** The statuses a workspace can still leave: everything else is where it ends. */
 const LIVE_STATUSES = "('provisioning', 'ready', 'failed')";
@@ -215,7 +215,7 @@ const make = Effect.gen(function* () {
       (rows) => Option.map(Option.fromNullishOr(rows[0]), toWorkspace),
     );
 
-  const checkoutsOf = (
+  const listCheckouts = (
     ids: ReadonlyArray<string>,
   ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<StoredCheckout>>, SqlError> =>
     ids.length === 0
@@ -240,7 +240,7 @@ const make = Effect.gen(function* () {
 
   return {
     one,
-    checkoutsOf,
+    listCheckouts,
 
     /** The sessions in each of these workspaces that have not exited. */
     sessionIdsOf: (
@@ -483,11 +483,11 @@ const make = Effect.gen(function* () {
                  (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id
                   AND s.status IN ('queued', 'starting', 'idle', 'busy')) AS live,
                  (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id
-                  AND ${sql.literal(resumableWhere("s"))}) AS resumable,
+                  AND ${sql.literal(buildResumableClause("s"))}) AS resumable,
                  COALESCE(w.last_used_at, w.created_at) AS used_at
           FROM workspaces w JOIN runners r ON r.id = w.runner_id
           WHERE w.kind = 'ephemeral' AND w.status = 'ready'
-            AND ${sql.literal(onlineWhere("r"))}
+            AND ${sql.literal(buildOnlineClause("r"))}
         `,
         (rows) =>
           rows.map((row) => ({
@@ -508,7 +508,7 @@ const make = Effect.gen(function* () {
           request.cursor === undefined
             ? undefined
             : yield* decodeCursor(request.cursor, scope, "string");
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["created_at", "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -533,7 +533,7 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(COLUMNS)} FROM workspaces
           WHERE ${sql.and(clauses)} ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (found) => Effect.succeed(found.map(toWorkspace)),

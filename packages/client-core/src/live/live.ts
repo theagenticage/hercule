@@ -47,7 +47,7 @@ import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as Socket from "effect/unstable/socket/Socket";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
-import { queryKeysFor, type LiveQueryKey } from "./keys";
+import { buildQueryKeys, type LiveQueryKey } from "./keys";
 
 /** How long the first reconnect waits, and how long the longest one waits. */
 const FIRST_RETRY_MS = 1_000;
@@ -159,7 +159,7 @@ type LiveFailure =
 type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof liveGroup>, RpcClientError>;
 
 /** The socket sits at `/ws` on the authority the API is served from. */
-const socketUrl = (baseUrl: string): string =>
+const buildSocketUrl = (baseUrl: string): string =>
   `${baseUrl.replace(/\/+$/, "").replace(/^http/, "ws")}/ws`;
 
 /**
@@ -167,7 +167,8 @@ const socketUrl = (baseUrl: string): string =>
  * rather than the controller's. The contract's errors are told apart by the
  * code in their envelope; none of them carries a tag.
  */
-const errorCode = (failure: LiveFailure) => ("error" in failure ? failure.error.code : undefined);
+const readErrorCode = (failure: LiveFailure) =>
+  "error" in failure ? failure.error.code : undefined;
 
 /**
  * Waits before trying again. The wait is shortened by chance rather than
@@ -175,11 +176,11 @@ const errorCode = (failure: LiveFailure) => ("error" in failure ? failure.error.
  * waiters - tabs, or subscriptions capped in the same flush - stop waking
  * together.
  */
-const waitOut = (delay: number): Effect.Effect<void> =>
+const sleepWithJitter = (delay: number): Effect.Effect<void> =>
   Effect.sleep(delay * (1 - JITTER * Math.random()));
 
 export const createLive = (options: LiveOptions): Live => {
-  const url = socketUrl(options.baseUrl);
+  const url = buildSocketUrl(options.baseUrl);
   const dial: LiveWebSocketConstructor =
     options.webSocket ?? ((address) => new globalThis.WebSocket(address));
 
@@ -207,7 +208,7 @@ export const createLive = (options: LiveOptions): Live => {
   const sweep = (subscription: Subscription): void => {
     const topic = subscription.topic;
     if (isAppendOnlyLiveTopic(topic)) return;
-    isolate(() => (subscription.handler as LiveInvalidateHandler)(queryKeysFor(topic, [])));
+    isolate(() => (subscription.handler as LiveInvalidateHandler)(buildQueryKeys(topic, [])));
   };
 
   /**
@@ -240,7 +241,7 @@ export const createLive = (options: LiveOptions): Live => {
         return;
       }
       (subscription.handler as LiveInvalidateHandler)(
-        queryKeysFor(subscription.topic as MutableLiveTopic, message.ids),
+        buildQueryKeys(subscription.topic as MutableLiveTopic, message.ids),
       );
     });
   };
@@ -273,7 +274,7 @@ export const createLive = (options: LiveOptions): Live => {
           ),
         );
 
-        const code = Result.isFailure(outcome) ? errorCode(outcome.failure) : undefined;
+        const code = Result.isFailure(outcome) ? readErrorCode(outcome.failure) : undefined;
         if (code === "unauthenticated") {
           // The credential behind this connection is gone, so nothing on it can
           // be recovered by asking again. A fresh connection is the only move,
@@ -314,7 +315,7 @@ export const createLive = (options: LiveOptions): Live => {
           continue;
         }
         sweep(subscription);
-        yield* waitOut(delay);
+        yield* sleepWithJitter(delay);
         delay = Math.min(delay * 2, MAX_RETRY_MS);
       }
     });
@@ -330,7 +331,7 @@ export const createLive = (options: LiveOptions): Live => {
    * more. The price is one refetch per reader on the first connection of a page
    * load, which is what a gap nobody can see is worth.
    */
-  const session = (rpc: LiveClient, closed: Latch.Latch) =>
+  const runConnection = (rpc: LiveClient, closed: Latch.Latch) =>
     Effect.gen(function* () {
       for (const subscription of subscriptions) sweep(subscription);
 
@@ -374,11 +375,11 @@ export const createLive = (options: LiveOptions): Live => {
       let greetedAt: number | null = null;
       const construct = (address: string): WebSocket => {
         const socket = dial(address);
-        const ended = (): void => {
+        const markClosed = (): void => {
           closed.openUnsafe();
         };
-        socket.addEventListener("close", ended, { once: true });
-        socket.addEventListener("error", ended, { once: true });
+        socket.addEventListener("close", markClosed, { once: true });
+        socket.addEventListener("error", markClosed, { once: true });
         return socket;
       };
 
@@ -401,7 +402,7 @@ export const createLive = (options: LiveOptions): Live => {
           serverVersion = greeting.serverVersion;
           greetedAt = performance.now();
           setStatus("connected");
-          yield* Effect.raceFirst(session(rpc, closed), closed.await);
+          yield* Effect.raceFirst(runConnection(rpc, closed), closed.await);
         }).pipe(Effect.provide(protocol)),
       ).pipe(
         Effect.ignore,
@@ -437,7 +438,7 @@ export const createLive = (options: LiveOptions): Live => {
       // that cannot connect, so the next drop starts over at the shortest wait
       // rather than inheriting a schedule from hours ago.
       if (held !== null && held >= MAX_RETRY_MS) delay = FIRST_RETRY_MS;
-      yield* waitOut(delay);
+      yield* sleepWithJitter(delay);
       delay = Math.min(delay * 2, MAX_RETRY_MS);
     }
   });

@@ -17,7 +17,7 @@ export interface RunnerDraft {
 }
 
 /** The draft a form opens on. */
-export const runnerDraft = (runner: Runner): RunnerDraft => ({
+export const buildRunnerDraft = (runner: Runner): RunnerDraft => ({
   name: runner.name,
   labels: runner.labels,
   maxConcurrentSessions: runner.maxConcurrentSessions,
@@ -26,7 +26,7 @@ export const runnerDraft = (runner: Runner): RunnerDraft => ({
 });
 
 /** Labels are replaced whole, so their order is part of the value. */
-const sameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
+const areLabelsEqual = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
   left.length === right.length && left.every((label, index) => label === right[index]);
 
 /**
@@ -41,11 +41,11 @@ const sameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): 
  * submit that, and a draft that differs from the machine is what stops a fresh
  * answer refilling the field under the user.
  */
-export const runnerPatch = (runner: Runner, draft: RunnerDraft): RunnerUpdateInput => {
+export const buildRunnerPatch = (runner: Runner, draft: RunnerDraft): RunnerUpdateInput => {
   const patch: { -readonly [K in keyof RunnerUpdateInput]: RunnerUpdateInput[K] } = {};
   const name = draft.name.trim();
   if (name !== runner.name) patch.name = name;
-  if (!sameLabels(draft.labels, runner.labels)) patch.labels = [...draft.labels];
+  if (!areLabelsEqual(draft.labels, runner.labels)) patch.labels = [...draft.labels];
   if (draft.maxConcurrentSessions !== runner.maxConcurrentSessions) {
     patch.maxConcurrentSessions = draft.maxConcurrentSessions;
   }
@@ -65,7 +65,7 @@ export const runnerPatch = (runner: Runner, draft: RunnerDraft): RunnerUpdateInp
  * apart, and the refusal is answered whole rather than pinned on a field that
  * may be innocent.
  */
-export const runnerConflictField = (
+export const findRunnerConflictField = (
   error: unknown,
   patch: RunnerUpdateInput,
 ): "name" | "reserved" | null => {
@@ -93,7 +93,10 @@ const LOSES_DEFAULT = "This is the default runner; the fleet will have no defaul
  * A machine the controller cannot reach may still be running sessions nobody
  * can see the end of, and retiring the fleet's default leaves it without one.
  */
-export const retireQuestion = (runner: Runner, defaultRunnerId: string | null): RetireQuestion => {
+export const buildRetireQuestion = (
+  runner: Runner,
+  defaultRunnerId: string | null,
+): RetireQuestion => {
   const unreachable = runner.connectivity === "unreachable";
   const warnings: Array<string> = [];
   if (unreachable) warnings.push(UNREACHABLE);

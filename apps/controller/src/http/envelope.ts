@@ -33,7 +33,7 @@ import {
 } from "@hercule/contract";
 
 /** The eight error classes all carry `error`; this is what puts one on the wire. */
-export const responseFor = (error: ApiError): HttpServerResponse.HttpServerResponse =>
+export const buildErrorResponse = (error: ApiError): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe({ error: error.error }, { status: ERROR_STATUS[error.error.code] });
 
 /** Which part of the request failed to decode, in the caller's words. */
@@ -53,7 +53,7 @@ const PART: Record<HttpApiSchemaError["kind"], string> = {
  * Pure, and the whole of the mapping: the wrapper around the app turns what
  * comes back into a response and logs the ones the caller cannot act on.
  */
-export const errorFor = (cause: Cause.Cause<unknown>): ApiError | undefined => {
+export const findApiError = (cause: Cause.Cause<unknown>): ApiError | undefined => {
   let internalDetail: string | undefined;
   for (const reason of cause.reasons) {
     if (reason._tag === "Interrupt") continue;
@@ -89,9 +89,9 @@ export const withEnvelope = <E, R>(
   app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> =>
   Effect.catchCause(app, (cause) => {
-    const error = errorFor(cause);
+    const error = findApiError(cause);
     if (error === undefined) return Effect.failCause(cause);
-    const respond = Effect.succeed(responseFor(error));
+    const respond = Effect.succeed(buildErrorResponse(error));
     // The detail of an `internal` is for the operator's log and never for the
     // caller, who can do nothing with it.
     return error.error.code === "internal"

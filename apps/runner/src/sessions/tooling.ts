@@ -18,7 +18,7 @@
  */
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runnerDirIn } from "@hercule/home";
+import { locateRunnerDir } from "@hercule/home";
 import { VERSION } from "@hercule/home/version";
 
 export interface Tooling {
@@ -44,7 +44,7 @@ export interface ToolingRequest {
 }
 
 /** The minimum a Claude plugin directory is loadable with. */
-const manifest = (): string =>
+const buildManifest = (): string =>
   `${JSON.stringify(
     {
       name: "hercule",
@@ -56,11 +56,11 @@ const manifest = (): string =>
   )}\n`;
 
 /** The frontmatter that makes a `SKILL.md` a skill the harness can find by name. */
-const skillFile = (skill: string): string =>
+const buildSkillFile = (skill: string): string =>
   `---\nname: hercule\ndescription: How to reach the Hercule controller this session runs under - the hercule CLI on PATH, its help, and what a 403 means.\n---\n\n${skill}`;
 
 export const prepareTooling = ({ home, storageDir, execPath, skill }: ToolingRequest): Tooling => {
-  const binDir = join(runnerDirIn(home), "bin");
+  const binDir = join(locateRunnerDir(home), "bin");
   mkdirSync(binDir, { recursive: true });
   const link = join(binDir, "hercule");
   // Removed rather than checked: what is there points at a build that may be
@@ -70,10 +70,10 @@ export const prepareTooling = ({ home, storageDir, execPath, skill }: ToolingReq
 
   const claudePluginDir = join(storageDir, "claude-plugin");
   mkdirSync(join(claudePluginDir, ".claude-plugin"), { recursive: true });
-  writeFileSync(join(claudePluginDir, ".claude-plugin", "plugin.json"), manifest());
+  writeFileSync(join(claudePluginDir, ".claude-plugin", "plugin.json"), buildManifest());
   const skillDir = join(claudePluginDir, "skills", "hercule");
   mkdirSync(skillDir, { recursive: true });
-  writeFileSync(join(skillDir, "SKILL.md"), skillFile(skill));
+  writeFileSync(join(skillDir, "SKILL.md"), buildSkillFile(skill));
 
   return { binDir, herculeTool: { skill, claudePluginDir } };
 };

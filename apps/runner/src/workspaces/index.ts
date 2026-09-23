@@ -11,14 +11,14 @@ import { disposeWorkspace } from "./dispose";
 import { provisionWorkspace, reprovision } from "./provision";
 import {
   makeRegistry,
-  stillOnDisk,
+  isStillOnDisk,
   type RegisteredCheckout,
   type RegisteredWorkspace,
 } from "./registry";
-import { SETUP_DEADLINE_MS, substrateEnv, type Substrate } from "./substrate";
+import { SETUP_DEADLINE_MS, buildSubstrateEnv, type Substrate } from "./substrate";
 
 export { switchBranch } from "./git";
-export { substrateEnv } from "./substrate";
+export { buildSubstrateEnv } from "./substrate";
 
 /** Where one workspace's work happens, as a session is placed into it. */
 export interface Resolved {
@@ -41,7 +41,7 @@ export interface Workspaces {
  * One repository in the workspace means the work happens in it; several mean it
  * happens above them, which is the only place both are in view.
  */
-const cwdOf = (entry: RegisteredWorkspace): string =>
+const chooseCwd = (entry: RegisteredWorkspace): string =>
   entry.checkouts.length === 1 ? entry.checkouts[0]!.path : entry.root;
 
 export const makeWorkspaces = (options: {
@@ -54,7 +54,7 @@ export const makeWorkspaces = (options: {
   const substrate: Substrate = {
     storageDir: options.storageDir,
     registry: makeRegistry(options.storageDir),
-    gitEnv: substrateEnv(process.env, options.gitEnv),
+    gitEnv: buildSubstrateEnv(process.env, options.gitEnv),
     setupDeadlineMs: options.setupDeadlineMs ?? SETUP_DEADLINE_MS,
   };
 
@@ -73,9 +73,9 @@ export const makeWorkspaces = (options: {
    * A workspace whose directory somebody removed underneath the machine is one
    * no session can be placed in, and re-reporting it would place one there.
    */
-  const standing = (workspaceId: string): RegisteredWorkspace | undefined => {
+  const findStandingWorkspace = (workspaceId: string): RegisteredWorkspace | undefined => {
     const entry = substrate.registry.held(workspaceId);
-    return entry !== undefined && stillOnDisk(entry) ? entry : undefined;
+    return entry !== undefined && isStillOnDisk(entry) ? entry : undefined;
   };
 
   return {
@@ -104,13 +104,13 @@ export const makeWorkspaces = (options: {
       return disposeWorkspace(substrate, frame);
     },
     resolve: (workspaceId) => {
-      const entry = standing(workspaceId);
+      const entry = findStandingWorkspace(workspaceId);
       return entry === undefined
         ? undefined
-        : { root: entry.root, cwd: cwdOf(entry), checkouts: entry.checkouts };
+        : { root: entry.root, cwd: chooseCwd(entry), checkouts: entry.checkouts };
     },
     reportAfterSession: async (workspaceId) => {
-      const entry = standing(workspaceId);
+      const entry = findStandingWorkspace(workspaceId);
       return entry === undefined || entry.kind !== "primary"
         ? undefined
         : reprovision(substrate, entry);

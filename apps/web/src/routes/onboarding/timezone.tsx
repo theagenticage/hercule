@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { browserTimezone } from "@hercule/client-core";
+import { resolveBrowserTimezone } from "@hercule/client-core";
 import { Button, Field } from "@hercule/ui";
 import { HOME_PATH } from "../../app/entry-guard";
 import { settingsQuery } from "../../app/queries";
@@ -21,7 +21,7 @@ function TimezoneStep(): JSX.Element {
   const navigate = useNavigate();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
 
-  const [timezone, setTimezone] = useState(settings.user.timezone ?? browserTimezone());
+  const [timezone, setTimezone] = useState(settings.user.timezone ?? resolveBrowserTimezone());
   const [failure, setFailure] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 

@@ -17,7 +17,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   expectInDocumentOrder,
-  reading,
+  readPageText,
   renderApp,
   stubApi,
   type Handler,
@@ -96,7 +96,7 @@ const CHATTER_TYPE = {
   setup: [{ kind: "pairing" }],
 };
 
-const pluginFor = (id: string, definition: { type: string; displayName: string }): Plugin => ({
+const buildPlugin = (id: string, definition: { type: string; displayName: string }): Plugin => ({
   id,
   // Named apart from the type it declares, because a row shows both: the type
   // by its display name, the plugin under it.
@@ -122,9 +122,9 @@ const BYSTANDER: Plugin = {
 };
 
 const CATALOG: readonly Plugin[] = [
-  pluginFor("paper-trail", PAPER_TYPE),
-  pluginFor("skyline", SKY_TYPE),
-  pluginFor("chatterbox", CHATTER_TYPE),
+  buildPlugin("paper-trail", PAPER_TYPE),
+  buildPlugin("skyline", SKY_TYPE),
+  buildPlugin("chatterbox", CHATTER_TYPE),
   BYSTANDER,
 ];
 
@@ -156,7 +156,7 @@ const SKY: Connection = {
 };
 
 /** A controller holding `connections`, with the catalog above behind it. */
-const controller = (
+const buildController = (
   connections: () => readonly Connection[],
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
@@ -172,13 +172,13 @@ const controller = (
   ...extra,
 });
 
-const open = async (
+const openApp = async (
   connections: readonly Connection[],
   extra: Readonly<Record<string, Handler>> = {},
   path = "/connections",
 ) => {
   const held = [...connections];
-  const api = stubApi(controller(() => held, extra));
+  const api = stubApi(buildController(() => held, extra));
   const app = await renderApp({ path, api: api.fetch, token: "held" });
   return {
     ...app,
@@ -195,40 +195,40 @@ const open = async (
  * every screen inside it, and the ticket it fetches is a POST nobody on this
  * screen asked for, so it is not one of them.
  */
-const writes = (api: {
+const listWrites = (api: {
   readonly calls: readonly { method: string; path: string; body: unknown }[];
 }) => api.calls.filter((call) => call.method !== "GET" && !call.path.endsWith("/auth/ws-ticket"));
 
-const listings = (api: { readonly calls: readonly { path: string }[] }) =>
+const countConnectionReads = (api: { readonly calls: readonly { path: string }[] }) =>
   api.calls.filter((call) => call.path === "/api/v1/connections").length;
 
 /** The nearest thing around `inner` that is a whole one of `name`. */
-const around = (inner: HTMLElement, name: string): HTMLElement => {
+const findGroupOffering = (inner: HTMLElement, name: string): HTMLElement => {
   let group: HTMLElement | null = inner.parentElement;
   while (group !== null && within(group).queryByRole("button", { name }) === null) {
     group = group.parentElement;
   }
-  if (group === null) throw new Error(`nothing around ${reading(inner)} offers ${name}`);
+  if (group === null) throw new Error(`nothing around ${readPageText(inner)} offers ${name}`);
   return group;
 };
 
 /** The row about one connection: what sits around the account it names. */
-const rowFor = async (connection: Connection): Promise<HTMLElement> =>
-  around(await screen.findByText(connection.displayName), "Delete");
+const findConnectionRow = async (connection: Connection): Promise<HTMLElement> =>
+  findGroupOffering(await screen.findByText(connection.displayName), "Delete");
 
 /** The row about one catalogued type in the empty state. */
-const offerFor = async (displayName: string): Promise<HTMLElement> =>
-  around(await screen.findByText(displayName), "Connect");
+const findTypeOffer = async (displayName: string): Promise<HTMLElement> =>
+  findGroupOffering(await screen.findByText(displayName), "Connect");
 
 /** The setup or settings form holding the field labelled `label`. */
-const formWith = (label: string | RegExp): HTMLElement => {
+const getFormWithField = (label: string | RegExp): HTMLElement => {
   const form = screen.getByLabelText(label).closest("form");
   if (form === null) throw new Error(`the field ${String(label)} is in no form`);
   return form;
 };
 
 /** What the input labelled `label` offers as suggestions, through its datalist. */
-const suggestionsFor = (label: string): readonly string[] => {
+const readSuggestions = (label: string): readonly string[] => {
   const input = screen.getByLabelText<HTMLInputElement>(label);
   const id = input.getAttribute("list");
   const list = id === null ? null : document.getElementById(id);
@@ -237,7 +237,11 @@ const suggestionsFor = (label: string): readonly string[] => {
 };
 
 /** Whether the message shown is about that field and no other. */
-const messageIsAt = (message: string, field: HTMLElement, other: HTMLElement | null): void => {
+const expectMessageAtField = (
+  message: string,
+  field: HTMLElement,
+  other: HTMLElement | null,
+): void => {
   const shown = screen.getByText(new RegExp(message));
   let group: HTMLElement = shown;
   while (group.parentElement !== null && !group.contains(field)) {
@@ -247,19 +251,19 @@ const messageIsAt = (message: string, field: HTMLElement, other: HTMLElement | n
   if (other !== null) expect(group.contains(other)).toBe(false);
 };
 
-const refusal = (message: string, issues: readonly { path: string[]; message: string }[]) => ({
+const buildRefusal = (message: string, issues: readonly { path: string[]; message: string }[]) => ({
   status: 400,
   body: { error: { code: "validation", message, details: { issues } } },
 });
 
 describe("Connections", () => {
   it("offers every catalogued type when nothing is connected, and nothing else", async () => {
-    await open([]);
+    await openApp([]);
 
-    expect(reading()).toContain("Nothing connected yet.");
+    expect(readPageText()).toContain("Nothing connected yet.");
 
     for (const displayName of ["Paper Trail", "Skyline", "Chatterbox"]) {
-      const offer = await offerFor(displayName);
+      const offer = await findTypeOffer(displayName);
       expect(within(offer).getByRole("button", { name: "Connect" }).hasAttribute("disabled")).toBe(
         false,
       );
@@ -270,17 +274,19 @@ describe("Connections", () => {
     // Slack - it is a sentence about what a connection is, not a row.
     const offered = screen
       .getAllByRole("button", { name: "Connect" })
-      .map((connect) => reading(around(connect, "Connect").querySelector<HTMLElement>("b")));
+      .map((connect) =>
+        readPageText(findGroupOffering(connect, "Connect").querySelector<HTMLElement>("b")),
+      );
     expect(offered).toEqual(["Paper Trail", "Skyline", "Chatterbox"]);
     // Under each name, the plugin that declares the type: two plugins may
     // declare one word, so the name alone does not say which this is.
-    expect(reading(await offerFor("Paper Trail"))).toContain("paper-trail plugin");
-    expect(reading(await offerFor("Skyline"))).toContain("skyline plugin");
+    expect(readPageText(await findTypeOffer("Paper Trail"))).toContain("paper-trail plugin");
+    expect(readPageText(await findTypeOffer("Skyline"))).toContain("skyline plugin");
   });
 
   it("offers two plugins declaring one word as two rows, told apart by the plugin under each", async () => {
-    const gmail = (id: string): Plugin => ({
-      ...pluginFor(id, { type: `${id}/gmail`, displayName: "Gmail" }),
+    const buildGmailPlugin = (id: string): Plugin => ({
+      ...buildPlugin(id, { type: `${id}/gmail`, displayName: "Gmail" }),
       contributions: [
         {
           extensionPoint: "connection-type",
@@ -294,13 +300,13 @@ describe("Connections", () => {
       ],
     });
     const api = stubApi({
-      ...controller(() => []),
-      "GET /api/v1/plugins": { body: [gmail("first"), gmail("second")] },
+      ...buildController(() => []),
+      "GET /api/v1/plugins": { body: [buildGmailPlugin("first"), buildGmailPlugin("second")] },
     });
     await renderApp({ path: "/connections", api: api.fetch, token: "held" });
 
     const rows = (await screen.findAllByRole("button", { name: "Connect" })).map((connect) =>
-      reading(around(connect, "Connect")),
+      readPageText(findGroupOffering(connect, "Connect")),
     );
 
     expect(rows).toHaveLength(2);
@@ -311,9 +317,9 @@ describe("Connections", () => {
   });
 
   it("says which account each connection is, where it stands and where it files", async () => {
-    await open([PAPER, SKY]);
+    await openApp([PAPER, SKY]);
 
-    const paper = reading(await rowFor(PAPER));
+    const paper = readPageText(await findConnectionRow(PAPER));
     expect(paper).toContain("Paper Trail");
     expect(paper).toContain("work");
     expect(paper).toContain("acct:paper-work");
@@ -321,7 +327,7 @@ describe("Connections", () => {
     expect(paper).toContain("Code");
     expect(paper).toContain("paper-trail plugin");
 
-    const sky = reading(await rowFor(SKY));
+    const sky = readPageText(await findConnectionRow(SKY));
     expect(sky).toContain("Skyline");
     expect(sky).toContain("personal");
     expect(sky).toContain("rogier@skyline.test");
@@ -331,18 +337,18 @@ describe("Connections", () => {
   });
 
   it("still offers every type once something is connected", async () => {
-    await open([PAPER, SKY]);
+    await openApp([PAPER, SKY]);
 
-    await offerFor("Chatterbox");
+    await findTypeOffer("Chatterbox");
     expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(3);
   });
 
   it("reads the list again when a connection changes elsewhere", async () => {
-    const { api, live, hold } = await open([PAPER]);
+    const { api, live, hold } = await openApp([PAPER]);
     await waitFor(() => {
       expect(live.topics()).toContain("connection");
     });
-    const before = listings(api);
+    const before = countConnectionReads(api);
 
     hold([PAPER, SKY]);
     act(() => {
@@ -350,7 +356,7 @@ describe("Connections", () => {
     });
 
     expect(await screen.findByText(SKY.displayName)).toBeDefined();
-    expect(listings(api)).toBeGreaterThan(before);
+    expect(countConnectionReads(api)).toBeGreaterThan(before);
   });
 });
 
@@ -365,46 +371,46 @@ describe("Connections > setting one up", () => {
 
   it("shows what the type asks for, and asks for it in secret", async () => {
     const user = userEvent.setup();
-    await open([]);
+    await openApp([]);
 
     await user.click(
-      within(await offerFor("Paper Trail")).getByRole("button", { name: "Connect" }),
+      within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
     );
 
     // The offers it replaced are gone, so the form names what is being set up.
-    expect(reading()).toContain("Connect Paper Trail");
-    expect(reading()).toContain(CHECKLIST);
+    expect(readPageText()).toContain("Connect Paper Trail");
+    expect(readPageText()).toContain(CHECKLIST);
     expect(screen.getByLabelText<HTMLInputElement>("Access token").type).toBe("password");
     expect(screen.getByLabelText("Label")).toBeDefined();
-    expect(suggestionsFor("Default topic")).toEqual(
+    expect(readSuggestions("Default topic")).toEqual(
       expect.arrayContaining(["Code", "Business", "Personal", "Ops"]),
     );
   });
 
   it("sends what was filled in, and shows the connection it made", async () => {
     const user = userEvent.setup();
-    const { api, hold } = await open([], {
+    const { api, hold } = await openApp([], {
       "POST /api/v1/connections": { status: 201, body: created },
     });
 
     await user.click(
-      within(await offerFor("Paper Trail")).getByRole("button", { name: "Connect" }),
+      within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
     );
     await fill(user);
     hold([created]);
     // Cancel comes before Connect.
-    const connect = within(formWith("Label")).getByRole("button", { name: "Connect" });
+    const connect = within(getFormWithField("Label")).getByRole("button", { name: "Connect" });
     expectInDocumentOrder([
-      within(formWith("Label")).getByRole("button", { name: "Cancel" }),
+      within(getFormWithField("Label")).getByRole("button", { name: "Cancel" }),
       connect,
     ]);
     await user.click(connect);
 
     await waitFor(() => {
-      expect(writes(api)).toHaveLength(1);
+      expect(listWrites(api)).toHaveLength(1);
     });
-    expect(writes(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
-    expect(writes(api)[0]?.body).toEqual({
+    expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/connections" });
+    expect(listWrites(api)[0]?.body).toEqual({
       type: "paper-trail/paper",
       label: "work",
       labels: ["Code"],
@@ -416,35 +422,41 @@ describe("Connections > setting one up", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText("Access token")).toBeNull();
     });
-    expect(reading(await rowFor(created))).toContain("acct:paper-work");
+    expect(readPageText(await findConnectionRow(created))).toContain("acct:paper-work");
   });
 
   it("puts a refused credential's message under the field it was about", async () => {
     const user = userEvent.setup();
     const complaint = "Paper Trail rejected that token";
-    await open([], {
-      "POST /api/v1/connections": refusal("the credentials were refused", [
+    await openApp([], {
+      "POST /api/v1/connections": buildRefusal("the credentials were refused", [
         { path: ["credentials", "token"], message: complaint },
       ]),
     });
 
     await user.click(
-      within(await offerFor("Paper Trail")).getByRole("button", { name: "Connect" }),
+      within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
     );
     await fill(user);
-    await user.click(within(formWith("Label")).getByRole("button", { name: "Connect" }));
+    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
 
     await screen.findByText(new RegExp(complaint));
-    messageIsAt(complaint, screen.getByLabelText("Access token"), screen.getByLabelText("Label"));
+    expectMessageAtField(
+      complaint,
+      screen.getByLabelText("Access token"),
+      screen.getByLabelText("Label"),
+    );
   });
 
   it("says pairing is not built yet rather than offering a form", async () => {
     const user = userEvent.setup();
-    await open([]);
+    await openApp([]);
 
-    await user.click(within(await offerFor("Chatterbox")).getByRole("button", { name: "Connect" }));
+    await user.click(
+      within(await findTypeOffer("Chatterbox")).getByRole("button", { name: "Connect" }),
+    );
 
-    expect(reading()).toContain("not built yet");
+    expect(readPageText()).toContain("not built yet");
   });
 });
 
@@ -462,23 +474,25 @@ describe("Connections > a redirect flow", () => {
   it("shows the redirect URI to register, and hands the browser to the provider", async () => {
     const user = userEvent.setup();
     const assign = watchNavigation();
-    const { api } = await open([], {
+    const { api } = await openApp([], {
       "POST /api/v1/oauth/start": { body: { authorizationUrl: AUTHORIZATION_URL } },
     });
 
-    await user.click(within(await offerFor("Skyline")).getByRole("button", { name: "Connect" }));
+    await user.click(
+      within(await findTypeOffer("Skyline")).getByRole("button", { name: "Connect" }),
+    );
 
-    expect(reading()).toContain(`${window.location.origin}/oauth/callback`);
+    expect(readPageText()).toContain(`${window.location.origin}/oauth/callback`);
 
     await user.type(screen.getByLabelText("Label"), "personal");
     await user.type(screen.getByLabelText("Default topic"), "Business");
-    await user.click(within(formWith("Label")).getByRole("button", { name: "Connect" }));
+    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
-      expect(writes(api)).toHaveLength(1);
+      expect(listWrites(api)).toHaveLength(1);
     });
-    expect(writes(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
-    expect(writes(api)[0]?.body).toEqual({
+    expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
+    expect(listWrites(api)[0]?.body).toEqual({
       type: "skyline/mail",
       origin: window.location.origin,
       label: "personal",
@@ -491,21 +505,21 @@ describe("Connections > a redirect flow", () => {
   });
 
   it("says so on the way back from one that worked", async () => {
-    await open([PAPER], {}, "/connections?oauth=ok");
+    await openApp([PAPER], {}, "/connections?oauth=ok");
 
-    expect(reading(await screen.findByRole("status"))).toMatch(/connected/i);
+    expect(readPageText(await screen.findByRole("status"))).toMatch(/connected/i);
   });
 
   it("says what went wrong on the way back from one that did not", async () => {
-    await open([PAPER], {}, "/connections?oauth=denied");
+    await openApp([PAPER], {}, "/connections?oauth=denied");
 
-    expect(reading(await screen.findByRole("alert"))).toContain("denied");
+    expect(readPageText(await screen.findByRole("alert"))).toContain("denied");
   });
 
   it("does not echo a word it does not know back onto the screen", async () => {
-    await open([PAPER], {}, "/connections?oauth=%3Cscript%3Eboom%3C%2Fscript%3E");
+    await openApp([PAPER], {}, "/connections?oauth=%3Cscript%3Eboom%3C%2Fscript%3E");
 
-    const alert = reading(await screen.findByRole("alert"));
+    const alert = readPageText(await screen.findByRole("alert"));
     expect(alert).toBe("The setup did not finish.");
     expect(alert).not.toContain("boom");
   });
@@ -516,23 +530,27 @@ describe("Connections > reconnecting and removing", () => {
 
   it("pastes a fresh credential into the connection that already exists", async () => {
     const user = userEvent.setup();
-    const { api } = await open([STALE], {
+    const { api } = await openApp([STALE], {
       [`POST /api/v1/connections/${STALE.id}/credentials`]: { body: PAPER },
     });
 
-    await user.click(within(await rowFor(STALE)).getByRole("button", { name: "Reconnect" }));
-    expect(reading()).toContain("Reconnect Paper Trail");
+    await user.click(
+      within(await findConnectionRow(STALE)).getByRole("button", { name: "Reconnect" }),
+    );
+    expect(readPageText()).toContain("Reconnect Paper Trail");
     await user.type(await screen.findByLabelText("Access token"), "pt-secret-fresh");
-    await user.click(within(formWith("Access token")).getByRole("button", { name: "Connect" }));
+    await user.click(
+      within(getFormWithField("Access token")).getByRole("button", { name: "Connect" }),
+    );
 
     await waitFor(() => {
-      expect(writes(api)).toHaveLength(1);
+      expect(listWrites(api)).toHaveLength(1);
     });
-    expect(writes(api)[0]).toMatchObject({
+    expect(listWrites(api)[0]).toMatchObject({
       method: "POST",
       path: `/api/v1/connections/${STALE.id}/credentials`,
     });
-    expect(writes(api)[0]?.body).toEqual({
+    expect(listWrites(api)[0]?.body).toEqual({
       credentials: { token: "pt-secret-fresh" },
     });
   });
@@ -544,18 +562,20 @@ describe("Connections > reconnecting and removing", () => {
       origin: window.location.origin,
       assign: vi.fn(),
     });
-    const { api } = await open([SKY], {
+    const { api } = await openApp([SKY], {
       "POST /api/v1/oauth/start": { body: { authorizationUrl: "https://skyline.test/again" } },
     });
 
-    await user.click(within(await rowFor(SKY)).getByRole("button", { name: "Reconnect" }));
-    await user.click(within(formWith("Label")).getByRole("button", { name: "Connect" }));
+    await user.click(
+      within(await findConnectionRow(SKY)).getByRole("button", { name: "Reconnect" }),
+    );
+    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
-      expect(writes(api)).toHaveLength(1);
+      expect(listWrites(api)).toHaveLength(1);
     });
-    expect(writes(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
-    expect(writes(api)[0]?.body).toMatchObject({
+    expect(listWrites(api)[0]).toMatchObject({ method: "POST", path: "/api/v1/oauth/start" });
+    expect(listWrites(api)[0]?.body).toMatchObject({
       type: "skyline/mail",
       connectionId: SKY.id,
     });
@@ -564,14 +584,14 @@ describe("Connections > reconnecting and removing", () => {
 
   it("asks before it removes a connection, then removes it", async () => {
     const user = userEvent.setup();
-    const { api, hold } = await open([PAPER, SKY], {
+    const { api, hold } = await openApp([PAPER, SKY], {
       [`DELETE /api/v1/connections/${SKY.id}`]: { body: {} },
     });
 
-    const row = await rowFor(SKY);
+    const row = await findConnectionRow(SKY);
     await user.click(within(row).getByRole("button", { name: "Delete" }));
 
-    expect(writes(api)).toEqual([]);
+    expect(listWrites(api)).toEqual([]);
     // Cancel comes before Confirm.
     const confirm = within(row).getByRole("button", { name: "Confirm" });
     expectInDocumentOrder([within(row).getByRole("button", { name: "Cancel" }), confirm]);
@@ -580,7 +600,7 @@ describe("Connections > reconnecting and removing", () => {
     await user.click(confirm);
 
     await waitFor(() => {
-      expect(writes(api).map((call) => `${call.method} ${call.path}`)).toEqual([
+      expect(listWrites(api).map((call) => `${call.method} ${call.path}`)).toEqual([
         `DELETE /api/v1/connections/${SKY.id}`,
       ]);
     });
@@ -594,11 +614,13 @@ describe("Connections > reconnecting and removing", () => {
 describe("Connections > configuring one", () => {
   it("shows the type's own settings beside the label and the topic", async () => {
     const user = userEvent.setup();
-    const { api } = await open([PAPER], {
+    const { api } = await openApp([PAPER], {
       [`PATCH /api/v1/connections/${PAPER.id}`]: { body: PAPER },
     });
 
-    await user.click(within(await rowFor(PAPER)).getByRole("button", { name: "Configure" }));
+    await user.click(
+      within(await findConnectionRow(PAPER)).getByRole("button", { name: "Configure" }),
+    );
 
     expect(screen.getByLabelText<HTMLInputElement>(/folder/i).value).toBe("inbox");
     expect(screen.getByLabelText<HTMLInputElement>("Label").value).toBe("work");
@@ -606,17 +628,17 @@ describe("Connections > configuring one", () => {
 
     await user.clear(screen.getByLabelText(/folder/i));
     await user.type(screen.getByLabelText(/folder/i), "archive");
-    const save = within(formWith("Label")).getByRole("button", { name: "Save" });
+    const save = within(getFormWithField("Label")).getByRole("button", { name: "Save" });
     expectInDocumentOrder([
-      within(formWith("Label")).getByRole("button", { name: "Cancel" }),
+      within(getFormWithField("Label")).getByRole("button", { name: "Cancel" }),
       save,
     ]);
     await user.click(save);
 
     await waitFor(() => {
-      expect(writes(api)).toHaveLength(1);
+      expect(listWrites(api)).toHaveLength(1);
     });
-    expect(writes(api)[0]).toMatchObject({
+    expect(listWrites(api)[0]).toMatchObject({
       method: "PATCH",
       path: `/api/v1/connections/${PAPER.id}`,
     });
@@ -630,24 +652,32 @@ describe("Connections > configuring one", () => {
   it("puts a refused setting's message under the setting it is about", async () => {
     const user = userEvent.setup();
     const complaint = "no such folder";
-    await open([PAPER], {
-      [`PATCH /api/v1/connections/${PAPER.id}`]: refusal("the settings were refused", [
+    await openApp([PAPER], {
+      [`PATCH /api/v1/connections/${PAPER.id}`]: buildRefusal("the settings were refused", [
         { path: ["config", "folder"], message: complaint },
       ]),
     });
 
-    await user.click(within(await rowFor(PAPER)).getByRole("button", { name: "Configure" }));
-    await user.click(within(formWith("Label")).getByRole("button", { name: "Save" }));
+    await user.click(
+      within(await findConnectionRow(PAPER)).getByRole("button", { name: "Configure" }),
+    );
+    await user.click(within(getFormWithField("Label")).getByRole("button", { name: "Save" }));
 
     await screen.findByText(new RegExp(complaint));
-    messageIsAt(complaint, screen.getByLabelText(/folder/i), screen.getByLabelText("Label"));
+    expectMessageAtField(
+      complaint,
+      screen.getByLabelText(/folder/i),
+      screen.getByLabelText("Label"),
+    );
   });
 
   it("shows only the label and the topic for a type with no settings of its own", async () => {
     const user = userEvent.setup();
-    await open([SKY]);
+    await openApp([SKY]);
 
-    await user.click(within(await rowFor(SKY)).getByRole("button", { name: "Configure" }));
+    await user.click(
+      within(await findConnectionRow(SKY)).getByRole("button", { name: "Configure" }),
+    );
 
     expect(screen.getByLabelText<HTMLInputElement>("Label").value).toBe("personal");
     expect(screen.getByLabelText<HTMLInputElement>("Default topic").value).toBe("Business");

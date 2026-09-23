@@ -47,15 +47,15 @@ interface SetupRow {
 const COLUMNS = "state, type, connection_id, label, labels, config, origin, code_verifier";
 
 /** Written by this repository alone, so a column that does not parse is a broken database. */
-const jsonOf = <A>(text: string): A => JSON.parse(text) as A;
+const parseJson = <A>(text: string): A => JSON.parse(text) as A;
 
 const toSetup = (row: SetupRow): StoredSetup => ({
   state: row.state,
   type: row.type,
   connectionId: row.connection_id === null ? undefined : uuidToString(row.connection_id),
   label: row.label,
-  labels: jsonOf<ReadonlyArray<string>>(row.labels),
-  config: jsonOf<Record<string, Schema.Json>>(row.config),
+  labels: parseJson<ReadonlyArray<string>>(row.labels),
+  config: parseJson<Record<string, Schema.Json>>(row.config),
   origin: row.origin,
   codeVerifier: row.code_verifier,
 });

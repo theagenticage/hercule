@@ -12,9 +12,9 @@
  * JSON-RPC error reply.
  */
 import type { ApprovalDecision, OpenRequest } from "@hercule/protocol";
-import { idOf } from "../events";
-import { questionRequest } from "../questions";
-import { fact, text } from "../text";
+import { ensureId } from "../events";
+import { buildQuestionRequest } from "../questions";
+import { truncateFact, truncateMessage } from "../text";
 import type { RpcReply } from "./rpc";
 import type {
   CommandExecutionRequestApprovalParams,
@@ -58,7 +58,7 @@ export interface Asked {
  * `unknown` narrowed at the one point the method is known, and it is here
  * rather than in five row bodies.
  */
-const asked = <P>(row: {
+const buildAsked = <P>(row: {
   readonly opens: (params: P, arrival: Arrival) => OpenRequest;
   readonly replies: (decision: ApprovalDecision, params: P) => RpcReply;
   readonly endsTurn?: ReadonlyArray<ApprovalDecision>;
@@ -88,7 +88,10 @@ const DECLINED: RpcReply = { error: { code: INTERNAL_ERROR, message: "declined b
  * The profile the agent asked for, as a grant. A half the request left null is
  * a half nothing was asked for, which is the same grant as leaving it out.
  */
-const granting = ({ network, fileSystem }: RequestPermissionProfile): GrantedPermissionProfile => ({
+const buildGrantedProfile = ({
+  network,
+  fileSystem,
+}: RequestPermissionProfile): GrantedPermissionProfile => ({
   ...(network === null ? {} : { network }),
   ...(fileSystem === null ? {} : { fileSystem }),
 });
@@ -105,25 +108,25 @@ const USER_INPUT_TOOL = "requestUserInput";
  * request is the one failure nobody upstream can see.
  */
 export const ASKED: Readonly<Record<string, Asked>> = {
-  "item/commandExecution/requestApproval": asked<CommandExecutionRequestApprovalParams>({
+  "item/commandExecution/requestApproval": buildAsked<CommandExecutionRequestApprovalParams>({
     opens: (params, { requestId }) => ({
       requestId,
-      itemId: idOf(params.itemId),
+      itemId: ensureId(params.itemId),
       kind: "command_approval",
       decisions: EVERY_ANSWER,
       // A command the harness did not name leaves the card with nothing to
       // read, which is still the honest report of what it asked.
-      detail: { command: text(params.command ?? "") },
+      detail: { command: truncateMessage(params.command ?? "") },
     }),
     replies: (decision) => ({
       result: { decision: APPROVED[decision] } satisfies CommandExecutionRequestApprovalResponse,
     }),
   }),
 
-  "item/fileChange/requestApproval": asked<FileChangeRequestApprovalParams>({
+  "item/fileChange/requestApproval": buildAsked<FileChangeRequestApprovalParams>({
     opens: (params, { requestId, paths }) => ({
       requestId,
-      itemId: idOf(params.itemId),
+      itemId: ensureId(params.itemId),
       kind: "file_change_approval",
       decisions: EVERY_ANSWER,
       detail: { paths: paths(params.itemId) },
@@ -133,10 +136,10 @@ export const ASKED: Readonly<Record<string, Asked>> = {
     }),
   }),
 
-  "item/permissions/requestApproval": asked<PermissionsRequestApprovalParams>({
+  "item/permissions/requestApproval": buildAsked<PermissionsRequestApprovalParams>({
     opens: (params, { requestId }) => ({
       requestId,
-      itemId: idOf(params.itemId),
+      itemId: ensureId(params.itemId),
       kind: "tool_approval",
       // The answer is a grant, not a decision, so there is no cancel in it: a
       // button for one would be a stop this adapter would have to invent.
@@ -148,24 +151,28 @@ export const ASKED: Readonly<Record<string, Asked>> = {
     replies: (decision, params) => ({
       result: {
         permissions:
-          decision === "allow" || decision === "allow_always" ? granting(params.permissions) : {},
+          decision === "allow" || decision === "allow_always"
+            ? buildGrantedProfile(params.permissions)
+            : {},
         scope: decision === "allow_always" ? "session" : "turn",
       } satisfies PermissionsRequestApprovalResponse,
     }),
   }),
 
-  [ELICITATION]: asked<McpServerElicitationRequestParams>({
+  [ELICITATION]: buildAsked<McpServerElicitationRequestParams>({
     opens: (params, { requestId, threadId }) => ({
       requestId,
       // An elicitation is about no item, so it is filed under the turn it
       // interrupted, and under the thread where the server could not name one.
-      itemId: idOf(params.turnId ?? threadId),
+      itemId: ensureId(params.turnId ?? threadId),
       kind: "tool_approval",
       // The answer has no for-session accept, so offering one would be offering
       // an answer this adapter would have to substitute for.
       decisions: ["allow", "deny", "cancel"],
       // A server that did not name itself is named by what it asked through.
-      detail: { toolName: params.serverName === "" ? ELICITATION : fact(params.serverName) },
+      detail: {
+        toolName: params.serverName === "" ? ELICITATION : truncateFact(params.serverName),
+      },
     }),
     replies: (decision) => ({
       result: {
@@ -179,10 +186,10 @@ export const ASKED: Readonly<Record<string, Asked>> = {
     }),
   }),
 
-  "item/tool/requestUserInput": asked<ToolRequestUserInputParams>({
+  "item/tool/requestUserInput": buildAsked<ToolRequestUserInputParams>({
     opens: (params, { requestId }) =>
-      questionRequest(
-        { requestId, itemId: idOf(params.itemId) },
+      buildQuestionRequest(
+        { requestId, itemId: ensureId(params.itemId) },
         USER_INPUT_TOOL,
         params.questions,
       ),

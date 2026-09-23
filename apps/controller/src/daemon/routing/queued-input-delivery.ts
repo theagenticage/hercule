@@ -18,7 +18,7 @@ import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { SessionService } from "../../sessions";
 import type { Delivery } from "../event-router";
-import { forking } from "../absorbing";
+import { forkAndAbsorbFailures } from "../absorbing";
 import { Live } from "../live";
 
 export const queuedInputDelivery: Effect.Effect<Delivery, never, SessionService | Live> =
@@ -31,7 +31,7 @@ export const queuedInputDelivery: Effect.Effect<Delivery, never, SessionService 
       deliverWaiting: (): Effect.Effect<void, SqlError> =>
         Effect.gen(function* () {
           for (const sessionId of yield* sessions.listSessionsAwaitingInput()) {
-            yield* forking(
+            yield* forkAndAbsorbFailures(
               "A session could not be given what it was waiting for",
               live.deliverQueuedInput(sessionId),
             );

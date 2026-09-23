@@ -61,7 +61,7 @@ describe("formatStamp", () => {
 
 describe("the formatters these readings need", () => {
   /** How many `Intl.DateTimeFormat`s `run` builds. */
-  const built = (run: () => void): number => {
+  const countFormattersBuilt = (run: () => void): number => {
     const original = Intl.DateTimeFormat;
     let count = 0;
     Intl.DateTimeFormat = new Proxy(original, {
@@ -83,7 +83,7 @@ describe("the formatters these readings need", () => {
     const zone = "Pacific/Auckland";
     const rows = 50;
 
-    const count = built(() => {
+    const count = countFormattersBuilt(() => {
       for (let row = 0; row < rows; row += 1) {
         formatStamp(new Date(MONDAY_MORNING.getTime() + row * 60_000), zone);
         formatTimeContext(MONDAY_MORNING, zone);
@@ -95,7 +95,7 @@ describe("the formatters these readings need", () => {
   });
 
   it("does not rebuild for a zone this runtime has already refused", () => {
-    const count = built(() => {
+    const count = countFormattersBuilt(() => {
       assert.isUndefined(formatStamp(MONDAY_MORNING, "Europe/Atlantis"));
       assert.isUndefined(formatStamp(MONDAY_MORNING, "Europe/Atlantis"));
     });

@@ -88,7 +88,7 @@ export const USER_ACTOR = "user";
  * who made them.
  *
  * It is a stamp and never an actor: nothing carrying it reaches an operation,
- * so `grantCheck` never sees it and the union above gains no member.
+ * so `checkGrant` never sees it and the union above gains no member.
  */
 export const SYSTEM_ACTOR = "system";
 
@@ -104,7 +104,7 @@ export const SYSTEM_ACTOR = "system";
  * the user and a session. A write with no request behind it names
  * `SYSTEM_ACTOR` for itself, explicitly, rather than passing nobody here.
  */
-export const stampOf = (actor: UserActor | SessionActor): string =>
+export const buildActorStamp = (actor: UserActor | SessionActor): string =>
   actor._tag === "session" ? `session:${actor.sessionId}` : USER_ACTOR;
 
 /**
@@ -118,14 +118,14 @@ export const stampOf = (actor: UserActor | SessionActor): string =>
 export const currentStamp: Effect.Effect<string> = Effect.flatMap(CurrentActor, (actor) =>
   actor._tag === "none"
     ? Effect.die("a write reached stamping with no authenticated actor behind it")
-    : Effect.succeed(stampOf(actor)),
+    : Effect.succeed(buildActorStamp(actor)),
 );
 
 /**
  * The grant an operation names, or `undefined` where its requirement is not a
  * grant at all.
  */
-const grantOf = (requirement: Requirement): Grant | undefined => {
+const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
   switch (requirement) {
     case "unauthenticated":
     case "setup-token":
@@ -160,8 +160,8 @@ const grantOf = (requirement: Requirement): Grant | undefined => {
  * the Agent names. The second rule and the third rule both need the Agent row
  * to be read first.
  */
-export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined => {
-  const grant = grantOf(OPERATIONS[id].requires);
+export const checkGrant = (id: OperationId, actor: Actor): Forbidden | undefined => {
+  const grant = findRequiredGrant(OPERATIONS[id].requires);
   if (grant === undefined) return undefined;
   switch (actor._tag) {
     case "user":
@@ -180,7 +180,7 @@ export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined
  */
 export const requireGrant = (id: OperationId): Effect.Effect<Actor, Forbidden> =>
   Effect.flatMap(CurrentActor, (actor) => {
-    const refused = grantCheck(id, actor);
+    const refused = checkGrant(id, actor);
     return refused === undefined ? Effect.succeed(actor) : Effect.fail(refused);
   });
 
@@ -202,12 +202,12 @@ const USER_ONLY = "only the user may make this call; no grant confers it";
  * happens where the operation's requirement is `authenticated` rather than a
  * grant, since `requireGrant` refuses nobody a grant first.
  */
-export const currentUser = (
+export const requireUserActor = (
   id: OperationId,
 ): Effect.Effect<UserActor, Forbidden | Unauthenticated> =>
   Effect.flatMap(requireGrant(id), (actor) => {
     if (actor._tag === "user") return Effect.succeed(actor);
-    const grant = grantOf(OPERATIONS[id].requires);
+    const grant = findRequiredGrant(OPERATIONS[id].requires);
     return Effect.fail(
       actor._tag === "session" && grant !== undefined
         ? createForbiddenError(grant, USER_ONLY)

@@ -14,9 +14,9 @@ import type { InputSource, InputStatus, SortDirection } from "@hercule/contract"
 import {
   decodeCursor,
   encodeCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -269,7 +269,7 @@ const make = Effect.gen(function* () {
           request.cursor === undefined
             ? undefined
             : yield* decodeCursor(request.cursor, scope, "string");
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["created_at", "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -280,7 +280,7 @@ const make = Effect.gen(function* () {
           WHERE session_id = ${uuidFromString(request.sessionId)} AND ${keyset}
           ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (found) => Effect.succeed(found.map(toInput)),

@@ -24,7 +24,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentUser, USER_ACTOR } from "../actor";
+import { requireUserActor, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { hashPassword, PasswordCost, verifyPassword } from "./password";
@@ -53,7 +53,7 @@ const make = Effect.gen(function* () {
       input: SetPasswordInput,
     ): Effect.Effect<Record<string, never>, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
-        const actor = yield* currentUser("user.setPassword");
+        const actor = yield* requireUserActor("user.setPassword");
         const user = yield* users.findById(actor.userId);
         if (Option.isNone(user)) {
           // The credential resolved through this row a moment ago, so its

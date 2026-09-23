@@ -17,7 +17,7 @@ import { sweepSessionsOnLostRunners } from "./lost-runners";
 const at = "2026-09-22T10:00:00.000Z";
 
 /** A runner row at this connectivity, which is all the clock reads about a runner. */
-const aRunner = (connectivity: "online" | "unreachable") =>
+const insertRunner = (connectivity: "online" | "unreachable") =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const id = mintUuid();
@@ -42,8 +42,8 @@ describe("sweepSessionsOnLostRunners", () => {
 
     const { online } = await Effect.runPromise(
       Effect.gen(function* () {
-        const online = yield* aRunner("online");
-        yield* aRunner("unreachable");
+        const online = yield* insertRunner("online");
+        yield* insertRunner("unreachable");
         // The shipped interval is a minute, so a second pass cannot run in
         // this test: what is seen is the pass at start.
         const sweeping = yield* Effect.forkChild(sweepSessionsOnLostRunners);

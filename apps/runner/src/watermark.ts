@@ -14,7 +14,9 @@ import type { RunnerWatermark } from "@hercule/protocol";
 export const WATERMARK_INTERVAL: Duration.Duration = Duration.seconds(60);
 
 /** For the filesystem the given path sits on. */
-export const machineHeadroom = (path: string): Effect.Effect<RunnerWatermark, Cause.UnknownError> =>
+export const readMachineHeadroom = (
+  path: string,
+): Effect.Effect<RunnerWatermark, Cause.UnknownError> =>
   Effect.map(
     Effect.tryPromise(() => statfs(path)),
     (stats) => ({
@@ -38,7 +40,7 @@ export interface WatermarkCheck<E> {
  * decide, against the watermark it holds; the runner only reports what the
  * machine has left.
  */
-export const checkWatermark = <E>(check: WatermarkCheck<E>): Effect.Effect<never, E> =>
+export const reportWatermark = <E>(check: WatermarkCheck<E>): Effect.Effect<never, E> =>
   Effect.gen(function* () {
     while (true) {
       const headroom = yield* Effect.option(

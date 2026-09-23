@@ -5,7 +5,7 @@ import { cn } from "@hercule/ui";
 /**
  * A project's identity dot: a small square in one of the two identity hues the
  * design language fixes (§Color doctrine, §Lineage - "on group headers only,
- * never per row"). Which hue a project wears is `projectTone`'s to say, and it
+ * never per row"). Which hue a project wears is `pickProjectTone`'s to say, and it
  * is read where the projects are listed rather than here: the hue follows a
  * project's place among the others, which a dot on its own cannot see.
  *

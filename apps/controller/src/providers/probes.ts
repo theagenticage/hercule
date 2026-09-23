@@ -20,9 +20,9 @@ import { createNotFoundError, type CapabilitySnapshot, type NotFound } from "@he
 import { announce, nowIso, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
 import { RunnerConnections, runnerRepository } from "../runners";
-import { instanceSecrets, Secrets, type SecretDecryptError } from "../secrets";
+import { readInstanceSecrets, Secrets, type SecretDecryptError } from "../secrets";
 import { providerRepository, type StoredInstance } from "./repository";
-import { floorFor, versionVerdict } from "./version";
+import { findVersionFloor, computeVersionVerdict } from "./version";
 
 /**
  * The runner's own 15s probe budget plus the round trip, so its "did not
@@ -76,7 +76,7 @@ const make = Effect.gen(function* () {
           config: instance.config,
           // Decrypted here, at send time: the probe runs the harness's own auth
           // check, which is only worth anything with the credential in hand.
-          secrets: yield* instanceSecrets(
+          secrets: yield* readInstanceSecrets(
             secrets,
             yield* host.providers(),
             instance.id,
@@ -99,7 +99,10 @@ const make = Effect.gen(function* () {
             runnerId,
             probedAt: at,
             harnessVersion: result.harnessVersion,
-            versionVerdict: versionVerdict(result.harnessVersion, floorFor(instance.providerId)),
+            versionVerdict: computeVersionVerdict(
+              result.harnessVersion,
+              findVersionFloor(instance.providerId),
+            ),
             auth: result.auth,
             models: result.models,
           });
@@ -125,13 +128,13 @@ const make = Effect.gen(function* () {
     );
 
   /** Nobody is waiting on a sweep, so a listing that will not answer is logged. */
-  const inTheBackground = (swept: Effect.Effect<void, StoreError>): Effect.Effect<void> =>
+  const logSweepFailure = (swept: Effect.Effect<void, StoreError>): Effect.Effect<void> =>
     Effect.catchCause(swept, (cause) =>
       Effect.logError("A provider sweep could not be started", cause),
     );
 
   const sweepRunner = (runnerId: string): Effect.Effect<void> =>
-    inTheBackground(Effect.flatMap(instances.list(), (all) => sweep([runnerId], all)));
+    logSweepFailure(Effect.flatMap(instances.list(), (all) => sweep([runnerId], all)));
 
   return {
     probe: (
@@ -153,7 +156,7 @@ const make = Effect.gen(function* () {
      * snapshot at once.
      */
     sweepInstance: (instanceId: string): Effect.Effect<void> =>
-      inTheBackground(
+      logSweepFailure(
         Effect.gen(function* () {
           const found = yield* instances.one(instanceId);
           if (Option.isNone(found)) return;
@@ -172,7 +175,7 @@ const make = Effect.gen(function* () {
           const interval = yield* ProviderProbeInterval;
           while (true) {
             yield* Effect.sleep(interval);
-            yield* inTheBackground(
+            yield* logSweepFailure(
               Effect.gen(function* () {
                 const online = yield* runners.connected();
                 if (online.length === 0) return;

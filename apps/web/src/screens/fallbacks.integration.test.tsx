@@ -20,7 +20,7 @@ const api: Readonly<Record<string, Handler>> = {
  * standing at the path that failed, so the frame it picks is the one the app
  * would show.
  */
-const failureAt = async (path: string, token: string | null = "held") => {
+const renderFailureAt = async (path: string, token: string | null = "held") => {
   const { router, queryClient, unmount } = await renderApp({
     path,
     api: stubApi(api).fetch,
@@ -39,7 +39,7 @@ const failureAt = async (path: string, token: string | null = "held") => {
 
 describe("the screen a render failure leaves behind", () => {
   it("names what went wrong and offers the way back", async () => {
-    await failureAt("/tasks");
+    await renderFailureAt("/tasks");
 
     expect(screen.getByText("This screen did not load")).toBeDefined();
     expect(screen.getByRole("alert").textContent).toBe("the chunk did not load");
@@ -47,14 +47,14 @@ describe("the screen a render failure leaves behind", () => {
   });
 
   it("is a screen of the shell when the shell is what failed inside", async () => {
-    await failureAt("/tasks");
+    await renderFailureAt("/tasks");
 
     expect(screen.getByText(/The rest of Hercule is still here/)).toBeDefined();
     expect(screen.queryByText("Hercule")).toBeNull();
   });
 
   it("is the whole page outside the shell, where there is nothing to keep", async () => {
-    await failureAt("/login", null);
+    await renderFailureAt("/login", null);
 
     expect(screen.queryByText(/The rest of Hercule is still here/)).toBeNull();
     expect(screen.getByText("Hercule")).toBeDefined();

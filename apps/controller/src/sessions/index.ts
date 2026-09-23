@@ -9,13 +9,13 @@
  * machine is told.
  */
 export { type LostWakeUp, type StoredInput } from "./inputs";
-export { buildContinuingSpec, timeoutsFrom, validatedOptions } from "./options";
+export { buildContinuingSpec, buildTimeouts, validateOptions } from "./options";
 export { sessionRecordComposer } from "./records";
 export {
   LIVE_SESSION_STATUSES,
-  requireSession,
+  readSessionOrFail,
   sessionRepository,
   type StoredSession,
 } from "./repository";
 export { cancelStrandedInputs, SessionService, SessionServiceLayer } from "./service";
-export { headOfTranscript, sessionExists, transcriptRowsAfter } from "./transcript-log";
+export { readTranscriptHead, sessionExists, readTranscriptRowsAfter } from "./transcript-log";

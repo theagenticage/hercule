@@ -1,25 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type { PluginDetail } from "@hercule/contract";
 import {
-  connectionTypes,
-  credentialFieldsOf,
-  redirectUriFor,
-  setupFlowOf,
+  listConnectionTypes,
+  listCredentialFields,
+  buildRedirectUri,
+  decideSetupFlow,
   type ConnectionType,
 } from "./connections";
 
-describe("redirectUriFor", () => {
+describe("buildRedirectUri", () => {
   it("is the callback path on the origin the browser is at", () => {
-    expect(redirectUriFor("https://n.tail.ts.net")).toBe("https://n.tail.ts.net/oauth/callback");
+    expect(buildRedirectUri("https://n.tail.ts.net")).toBe("https://n.tail.ts.net/oauth/callback");
   });
 
   it("does not double the slash when the origin carries a trailing one", () => {
-    expect(redirectUriFor("https://n.tail.ts.net/")).toBe("https://n.tail.ts.net/oauth/callback");
+    expect(buildRedirectUri("https://n.tail.ts.net/")).toBe("https://n.tail.ts.net/oauth/callback");
   });
 });
 
 /** A catalogued plugin, with whatever it contributes. */
-const plugin = (id: string, contributions: PluginDetail["contributions"]): PluginDetail => ({
+const buildPlugin = (id: string, contributions: PluginDetail["contributions"]): PluginDetail => ({
   id,
   displayName: `Plugin ${id}`,
   hostApi: 1,
@@ -38,13 +38,13 @@ const PAPER = {
   configSchema: { type: "object", properties: { folder: { type: "string" } } },
 };
 
-describe("connectionTypes", () => {
+describe("listConnectionTypes", () => {
   it("is every connection-type contribution, and nothing else a plugin declares", () => {
-    const types = connectionTypes([
-      plugin("paper-trail", [
+    const types = listConnectionTypes([
+      buildPlugin("paper-trail", [
         { extensionPoint: "connection-type", id: "paper-trail/paper", definition: PAPER },
       ]),
-      plugin("quiet-sink", [{ extensionPoint: "provider", id: "acme", definition: {} }]),
+      buildPlugin("quiet-sink", [{ extensionPoint: "provider", id: "acme", definition: {} }]),
     ]);
 
     expect(types).toEqual([
@@ -59,20 +59,20 @@ describe("connectionTypes", () => {
   });
 
   it("names two plugins declaring one word apart, by the type and by the plugin", () => {
-    const gmail = (displayName: string) => ({ type: "x", displayName, setup: [] });
-    const types = connectionTypes([
-      plugin("first", [
+    const buildGmailType = (displayName: string) => ({ type: "x", displayName, setup: [] });
+    const types = listConnectionTypes([
+      buildPlugin("first", [
         {
           extensionPoint: "connection-type",
           id: "first/gmail",
-          definition: { ...gmail("Gmail"), type: "first/gmail" },
+          definition: { ...buildGmailType("Gmail"), type: "first/gmail" },
         },
       ]),
-      plugin("second", [
+      buildPlugin("second", [
         {
           extensionPoint: "connection-type",
           id: "second/gmail",
-          definition: { ...gmail("Gmail"), type: "second/gmail" },
+          definition: { ...buildGmailType("Gmail"), type: "second/gmail" },
         },
       ]),
     ]);
@@ -92,22 +92,22 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   setup,
 });
 
-describe("setupFlowOf", () => {
+describe("decideSetupFlow", () => {
   it("is the one step that decides how the credential is obtained", () => {
     expect(
-      setupFlowOf(withSetup([{ kind: "checklist", markdown: "do this" }, { kind: "oauth" }])),
+      decideSetupFlow(withSetup([{ kind: "checklist", markdown: "do this" }, { kind: "oauth" }])),
     ).toBe("oauth");
     expect(
-      setupFlowOf(
+      decideSetupFlow(
         withSetup([{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }]),
       ),
     ).toBe("credentials");
-    expect(setupFlowOf(withSetup([{ kind: "pairing" }]))).toBe("pairing");
+    expect(decideSetupFlow(withSetup([{ kind: "pairing" }]))).toBe("pairing");
   });
 
   it("prefers the redirect when a type declares both", () => {
     expect(
-      setupFlowOf(
+      decideSetupFlow(
         withSetup([
           { kind: "credentials", fields: [{ name: "token", label: "Token" }] },
           { kind: "oauth" },
@@ -117,18 +117,18 @@ describe("setupFlowOf", () => {
   });
 
   it("is unknown when nothing in the setup is a step this build can render", () => {
-    expect(setupFlowOf(withSetup([]))).toBe("unknown");
+    expect(decideSetupFlow(withSetup([]))).toBe("unknown");
     expect(
-      setupFlowOf(
+      decideSetupFlow(
         withSetup([{ kind: "device-code" } as unknown as ConnectionType["setup"][number]]),
       ),
     ).toBe("unknown");
   });
 });
 
-describe("credentialFieldsOf", () => {
+describe("listCredentialFields", () => {
   it("is every declared field, in order, across the credential steps", () => {
-    const fields = credentialFieldsOf(
+    const fields = listCredentialFields(
       withSetup([
         { kind: "checklist", markdown: "first" },
         { kind: "credentials", fields: [{ name: "token", label: "Token", help: "paste it" }] },
@@ -143,6 +143,6 @@ describe("credentialFieldsOf", () => {
   });
 
   it("is empty for a setup that asks the user to paste nothing", () => {
-    expect(credentialFieldsOf(withSetup([{ kind: "oauth" }]))).toEqual([]);
+    expect(listCredentialFields(withSetup([{ kind: "oauth" }]))).toEqual([]);
   });
 });

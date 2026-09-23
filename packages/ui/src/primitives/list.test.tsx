@@ -65,21 +65,21 @@ describe("Drawer", () => {
 });
 
 describe("PriorityGlyph", () => {
-  const bars = () => [...document.querySelectorAll<HTMLElement>("[data-bar]")];
-  const painted = () => bars().filter((bar) => bar.dataset.filled === "true");
+  const listBars = () => [...document.querySelectorAll<HTMLElement>("[data-bar]")];
+  const listFilledBars = () => listBars().filter((bar) => bar.dataset.filled === "true");
 
   it("is always three bars, of which it paints the ones it was given", () => {
     const { rerender } = render(<PriorityGlyph filled={1} label="low" />);
-    expect(bars()).toHaveLength(3);
-    expect(painted()).toHaveLength(1);
+    expect(listBars()).toHaveLength(3);
+    expect(listFilledBars()).toHaveLength(1);
 
     rerender(<PriorityGlyph filled={2} label="normal" />);
-    expect(bars()).toHaveLength(3);
-    expect(painted()).toHaveLength(2);
+    expect(listBars()).toHaveLength(3);
+    expect(listFilledBars()).toHaveLength(2);
 
     rerender(<PriorityGlyph filled={3} label="urgent" />);
-    expect(bars()).toHaveLength(3);
-    expect(painted()).toHaveLength(3);
+    expect(listBars()).toHaveLength(3);
+    expect(listFilledBars()).toHaveLength(3);
   });
 
   it("carries the name it was given", () => {
@@ -126,12 +126,14 @@ describe("Textarea", () => {
     );
     // The treatment is whatever the input states; the point is that the two
     // fields state the same thing, so a change to one is a change to both.
-    const treatment = (element: Element) =>
+    const readTreatmentClasses = (element: Element) =>
       element.className.split(" ").filter((name) => /^(border|bg-|focus-visible:)/.test(name));
 
-    const single = treatment(screen.getByLabelText("Title"));
+    const single = readTreatmentClasses(screen.getByLabelText("Title"));
     expect(single.length).toBeGreaterThan(0);
-    expect(treatment(screen.getByLabelText("Description"))).toEqual(expect.arrayContaining(single));
+    expect(readTreatmentClasses(screen.getByLabelText("Description"))).toEqual(
+      expect.arrayContaining(single),
+    );
   });
 });
 

@@ -41,7 +41,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
-import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
 import { requireOnline } from "./adapters";
@@ -51,7 +51,7 @@ import { runnerRepository, type RunnerEdit } from "./repository";
 
 const QueryInput = Schema.Struct({
   ...RunnerFilter.fields,
-  ...pageInput(RUNNER_SORT_FIELDS),
+  ...buildPageInputFields(RUNNER_SORT_FIELDS),
 });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
@@ -142,7 +142,7 @@ export type MoveError =
   | Schema.SchemaError;
 
 /** Labels are replaced whole, so their order is part of the value. */
-const sameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
+const haveSameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
   left.length === right.length && left.every((label, index) => label === right[index]);
 
 const make = Effect.gen(function* () {
@@ -154,7 +154,7 @@ const make = Effect.gen(function* () {
 
   const connections = yield* RunnerConnections;
 
-  const one = (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
+  const readRunnerOrFail = (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
     Effect.flatMap(
       runners.read(id),
       Option.match({
@@ -185,7 +185,7 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
-          const before = yield* one(id);
+          const before = yield* readRunnerOrFail(id);
           if (before.lifecycle !== move.from) {
             return yield* Effect.fail(createInvalidStateError(move.refusal));
           }
@@ -197,7 +197,7 @@ const make = Effect.gen(function* () {
             payload: { runnerId: id },
             at,
           });
-          return yield* one(id);
+          return yield* readRunnerOrFail(id);
         }),
       );
     });
@@ -237,7 +237,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("runner.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        return yield* one(id);
+        return yield* readRunnerOrFail(id);
       }),
 
     /**
@@ -266,7 +266,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             // One clock read, so the row and the event carry the same instant.
             const at = yield* nowIso;
-            const before = yield* one(id);
+            const before = yield* readRunnerOrFail(id);
 
             const changes: Record<string, Change> = {};
             const edit: Edit = {};
@@ -274,7 +274,7 @@ const make = Effect.gen(function* () {
               changes.name = { old: before.name, new: patch.name };
               edit.name = patch.name;
             }
-            if (patch.labels !== undefined && !sameLabels(patch.labels, before.labels)) {
+            if (patch.labels !== undefined && !haveSameLabels(patch.labels, before.labels)) {
               changes.labels = { old: before.labels, new: patch.labels };
               edit.labels = patch.labels;
             }
@@ -330,7 +330,7 @@ const make = Effect.gen(function* () {
             }
             return {
               // Read back rather than merged, so the caller gets the written row.
-              detail: yield* one(id),
+              detail: yield* readRunnerOrFail(id),
               placements: "maxConcurrentSessions" in changes || "diskWatermarkBytes" in changes,
             };
           }),
@@ -391,7 +391,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const before = yield* one(id);
+            const before = yield* readRunnerOrFail(id);
             if (before.lifecycle === "retired") {
               return yield* Effect.fail(createInvalidStateError(ALREADY_RETIRED));
             }
@@ -415,7 +415,7 @@ const make = Effect.gen(function* () {
               payload: { runnerId: id, forced: force === true, lostDefaultRunner: wasDefault },
               at,
             });
-            return { ...(yield* one(id)), at };
+            return { ...(yield* readRunnerOrFail(id)), at };
           }),
         );
       }),
@@ -430,7 +430,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("runner.refreshFacts");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        const before = yield* one(id);
+        const before = yield* readRunnerOrFail(id);
         yield* requireOnline(before);
         if (!(yield* connections.refreshedFacts(id))) {
           const waited = Duration.format(yield* RunnerFactsDeadline);
@@ -438,7 +438,7 @@ const make = Effect.gen(function* () {
             createInvalidStateError(`that runner did not report its facts within ${waited}`),
           );
         }
-        return yield* one(id);
+        return yield* readRunnerOrFail(id);
       }),
 
     /**

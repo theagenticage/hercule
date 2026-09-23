@@ -9,7 +9,7 @@
  * package's `/testing` subpath, the way `@hercule/client-core/testing` is
  * reached for.
  */
-export const memoryStorage = (seed: Readonly<Record<string, string>> = {}): Storage => {
+export const createMemoryStorage = (seed: Readonly<Record<string, string>> = {}): Storage => {
   const held = new Map(Object.entries(seed));
   return {
     getItem: (key) => held.get(key) ?? null,

@@ -39,7 +39,7 @@ function useSettled<T>(value: T, delay: number): T {
 }
 
 /** The labels the user typed as a comma-separated line. */
-const labelsOf = (typed: string): readonly string[] =>
+const parseLabels = (typed: string): readonly string[] =>
   typed
     .split(",")
     .map((label) => label.trim())
@@ -51,7 +51,7 @@ const labelsOf = (typed: string): readonly string[] =>
  */
 export function useSettledFilter(state: FilterState): TaskFilter {
   const searched = useSettled(state.text.trim(), SEARCH_SETTLE_MS);
-  const wanted = labelsOf(useSettled(state.labels, SEARCH_SETTLE_MS));
+  const wanted = parseLabels(useSettled(state.labels, SEARCH_SETTLE_MS));
   return {
     ...(searched === "" ? {} : { text: searched }),
     ...(state.status === ANY ? {} : { status: [state.status] }),

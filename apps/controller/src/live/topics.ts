@@ -37,8 +37,8 @@ import {
   createInternalError,
   createNotFoundError,
   createValidationError,
-  sessionStreamTopic,
-  sessionTapTopic,
+  buildSessionStreamTopic,
+  buildSessionTapTopic,
   type CapExceeded,
   type Delta,
   type Event,
@@ -55,7 +55,7 @@ import {
 } from "@hercule/contract";
 import { AfterCommit, type Change } from "../db";
 import { readEventsAfter, readLogHead } from "../events";
-import { headOfTranscript, sessionExists, transcriptRowsAfter } from "../sessions";
+import { readTranscriptHead, sessionExists, readTranscriptRowsAfter } from "../sessions";
 
 /**
  * How long a burst of record changes is collected before it is announced, in
@@ -114,9 +114,9 @@ const make = Effect.gen(function* () {
   /** Rings once whenever there is something pending; holds no more than that. */
   const wake = yield* Queue.dropping<void>(1);
 
-  const watchersOf = (topic: LiveTopic): ReadonlySet<Watcher> => watchers.get(topic) ?? new Set();
+  const listWatchers = (topic: LiveTopic): ReadonlySet<Watcher> => watchers.get(topic) ?? new Set();
 
-  const drop = (watcher: Watcher): void => {
+  const dropWatcher = (watcher: Watcher): void => {
     const set = watchers.get(watcher.topic);
     if (set === undefined) return;
     set.delete(watcher);
@@ -133,7 +133,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const waiting = yield* Queue.size(watcher.queue);
       if (waiting >= SUBSCRIPTION_CAP) {
-        drop(watcher);
+        dropWatcher(watcher);
         yield* Queue.fail(
           watcher.queue,
           createCapExceededError({ count: waiting, cap: SUBSCRIPTION_CAP }, TOO_SLOW),
@@ -242,7 +242,7 @@ const make = Effect.gen(function* () {
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           yield* Effect.logError("a live subscription could not read its log", cause);
-          drop(watcher);
+          dropWatcher(watcher);
           yield* Queue.fail(watcher.queue, createInternalError(source.unreadable));
         }),
       ),
@@ -256,10 +256,10 @@ const make = Effect.gen(function* () {
     unreadable: LOG_UNREADABLE,
   };
 
-  const transcriptSource = (sessionId: string): LogSource<TranscriptRow> => ({
-    after: (position, limit) => transcriptRowsAfter(sql, sessionId, position, limit),
+  const buildTranscriptSource = (sessionId: string): LogSource<TranscriptRow> => ({
+    after: (position, limit) => readTranscriptRowsAfter(sql, sessionId, position, limit),
     positionOf: (item) => item.position,
-    head: headOfTranscript(sql, sessionId),
+    head: readTranscriptHead(sql, sessionId),
     noun: "transcript",
     unreadable: SESSION_UNREADABLE,
   });
@@ -293,7 +293,7 @@ const make = Effect.gen(function* () {
         );
       }
       const doorbell = yield* Queue.dropping<void>(1);
-      const watcher = yield* hold(topic, after ?? head, doorbell);
+      const watcher = yield* registerWatcher(topic, after ?? head, doorbell);
       // Forked, so the client is handed its queue before the replay runs and
       // reads what it is being sent while the rest of it is still being read.
       yield* Effect.forkScoped(pump(source, watcher, doorbell));
@@ -301,7 +301,7 @@ const make = Effect.gen(function* () {
     });
 
   /** Takes out a subscription for the length of the current scope. */
-  const hold = (
+  const registerWatcher = (
     topic: LiveTopic,
     cursor: number,
     doorbell: Queue.Queue<void> | undefined,
@@ -317,7 +317,7 @@ const make = Effect.gen(function* () {
       (watcher) =>
         Effect.andThen(
           Effect.sync(() => {
-            drop(watcher);
+            dropWatcher(watcher);
           }),
           Queue.shutdown(watcher.queue),
         ),
@@ -326,7 +326,7 @@ const make = Effect.gen(function* () {
   return {
     /** A subscription to a mutable topic, which carries news and no records. */
     subscribe: (topic: MutableLiveTopic): Effect.Effect<LiveQueue, never, Scope.Scope> =>
-      Effect.map(hold(topic, 0, undefined), (watcher) => watcher.queue),
+      Effect.map(registerWatcher(topic, 0, undefined), (watcher) => watcher.queue),
 
     /** A subscription to the event log, replayed from `after` and followed from there. */
     follow: (
@@ -353,7 +353,11 @@ const make = Effect.gen(function* () {
         ) {
           return yield* Effect.fail(createNotFoundError(NO_SUCH_SESSION));
         }
-        return yield* followLog(sessionStreamTopic(sessionId), transcriptSource(sessionId), after);
+        return yield* followLog(
+          buildSessionStreamTopic(sessionId),
+          buildTranscriptSource(sessionId),
+          after,
+        );
       }),
 
     /**
@@ -371,7 +375,7 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createNotFoundError(NO_SUCH_SESSION));
         }
         return yield* Effect.map(
-          hold(sessionTapTopic(sessionId), 0, undefined),
+          registerWatcher(buildSessionTapTopic(sessionId), 0, undefined),
           (watcher) => watcher.queue,
         );
       }),
@@ -408,7 +412,7 @@ const make = Effect.gen(function* () {
             continue;
           }
           if (change._tag === "transcript") {
-            grown.add(sessionStreamTopic(change.sessionId));
+            grown.add(buildSessionStreamTopic(change.sessionId));
             continue;
           }
           if (change._tag === "tap") {
@@ -425,7 +429,7 @@ const make = Effect.gen(function* () {
         if (collected) yield* Queue.offer(wake, undefined);
         for (const topic of grown) {
           yield* Effect.forEach(
-            watchersOf(topic),
+            listWatchers(topic),
             (watcher) =>
               watcher.doorbell === undefined
                 ? Effect.void
@@ -436,7 +440,7 @@ const make = Effect.gen(function* () {
         for (const tap of taps) {
           const message: LiveMessage = { _tag: "delta", items: [tap.item] };
           yield* Effect.forEach(
-            watchersOf(sessionTapTopic(tap.sessionId)),
+            listWatchers(buildSessionTapTopic(tap.sessionId)),
             (watcher) => offerTo(watcher, message),
             { discard: true },
           );

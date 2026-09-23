@@ -4,8 +4,8 @@
  * under it, so the choice is made on what is there rather than on a name.
  */
 import type { Project, Resource, Session, Workspace } from "@hercule/contract";
-import { projectTone, type ProjectTone } from "./tone";
-import { projectRepos, projectWorkspaces, repoName } from "./workspaces";
+import { pickProjectTone, type ProjectTone } from "./tone";
+import { listProjectRepos, listProjectWorkspaces, formatRepoName } from "./workspaces";
 
 export interface ProjectPickerRow {
   readonly projectId: string;
@@ -17,9 +17,10 @@ export interface ProjectPickerRow {
   readonly shortcut: string | null;
 }
 
-const count = (n: number, word: string): string => `${String(n)} ${n === 1 ? word : `${word}s`}`;
+const formatCount = (n: number, word: string): string =>
+  `${String(n)} ${n === 1 ? word : `${word}s`}`;
 
-export const projectPickerRows = ({
+export const buildProjectPickerRows = ({
   projects,
   resources,
   workspaces,
@@ -31,18 +32,18 @@ export const projectPickerRows = ({
   readonly sessions: readonly Session[];
 }): readonly ProjectPickerRow[] =>
   projects.map((project, index) => {
-    const repos = projectRepos(resources, project.id);
+    const repos = listProjectRepos(resources, project.id);
     const threads = sessions.filter((session) => session.projectId === project.id).length;
-    const live = projectWorkspaces(workspaces, repos).length;
+    const live = listProjectWorkspaces(workspaces, repos).length;
     return {
       projectId: project.id,
       name: project.name,
-      tone: projectTone(project.id, projects),
+      tone: pickProjectTone(project.id, projects),
       sub: [
-        count(repos.length, "repo"),
-        ...(repos.length === 0 ? [] : [repos.map(repoName).join(", ")]),
-        count(threads, "thread"),
-        count(live, "workspace"),
+        formatCount(repos.length, "repo"),
+        ...(repos.length === 0 ? [] : [repos.map(formatRepoName).join(", ")]),
+        formatCount(threads, "thread"),
+        formatCount(live, "workspace"),
       ].join(" · "),
       shortcut: index < 9 ? `⌘${String(index + 1)}` : null,
     };

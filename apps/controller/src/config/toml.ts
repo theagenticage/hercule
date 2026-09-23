@@ -27,10 +27,10 @@ export function parseToml(text: string): Result.Result<Record<string, TomlScalar
 
 /** Render the bootstrap keys as dotted-key TOML, one key per line. */
 export function formatToml(values: Record<string, TomlScalar>): string {
-  const line = (key: string, value: TomlScalar) =>
+  const formatLine = (key: string, value: TomlScalar) =>
     `${key} = ${typeof value === "string" ? JSON.stringify(value) : String(value)}`;
   return `${Object.entries(values)
-    .map(([key, value]) => line(key, value))
+    .map(([key, value]) => formatLine(key, value))
     .join("\n")}\n`;
 }
 

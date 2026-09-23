@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { VERSION } from "@hercule/home/version";
 import { CurrentActor, type Actor } from "../actor";
-import { homePaths, HerculeHome } from "../config";
+import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
@@ -26,14 +26,14 @@ afterEach(() => {
   homes = [];
 });
 
-const stack = () => {
+const buildStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-controller-read-"));
   homes.push(home);
   return ControllerLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(controllerIdentityLayer, SettingsLayer, AuditLogLayer)),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
 };
 
@@ -50,7 +50,7 @@ const withIdentity = <A, E>(
         ? body
         : body.pipe(Effect.provideService(CurrentActor, actor));
       return { record, result };
-    }).pipe(Effect.provide(stack())),
+    }).pipe(Effect.provide(buildStack())),
   );
 
 describe("controller.read", () => {

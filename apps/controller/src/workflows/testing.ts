@@ -19,12 +19,12 @@ import {
   completeSetup,
   get,
   post,
-  readRefusal,
+  readErrorBody,
   send,
   withServer,
   type ServerHarness,
 } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
+import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import type { WorkflowPage } from "./service";
 
 /** A valid UUIDv7 that is not the id of anything on the test controller. */
@@ -34,7 +34,7 @@ export const ABSENT_ID = "0192f0a1-0000-7000-8000-00000000dead";
 export const ACCEPTED_GITHUB_TOKEN = "ghp_a-token";
 
 /** The provider an agent step's Agent runs on. */
-export const AGENT_PROVIDER = providerDefinition("test-provider", { token: "t" });
+export const AGENT_PROVIDER = buildProviderDefinition("test-provider", { token: "t" });
 
 /**
  * A local stand-in for the GitHub plugin, with its Connection type and the one
@@ -106,7 +106,7 @@ export const withSetUpController = (
     },
     {
       plugins: [
-        fixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin,
+        createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin,
         localGithubPlugin,
         ...additionalPlugins,
       ],
@@ -197,7 +197,7 @@ export const updateWorkflow = (
  */
 export const readIssues = async (response: Response): Promise<ReadonlyArray<Issue>> => {
   expect(response.status, await response.clone().text()).toBe(400);
-  const refusal = await readRefusal(response);
+  const refusal = await readErrorBody(response);
   expect(refusal.code).toBe("validation");
   return (JSON.parse(refusal.text) as { error: { details: { issues: ReadonlyArray<Issue> } } })
     .error.details.issues;

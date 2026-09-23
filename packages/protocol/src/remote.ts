@@ -43,7 +43,7 @@ const isTraversal = (segment: string): boolean => segment === "." || segment ===
  * one string, which is what a second resource collides on and what a machine's
  * credential request is matched against.
  */
-export const canonicalRemoteOf = (remote: string): string | undefined => {
+export const canonicalizeRemote = (remote: string): string | undefined => {
   const written = remote.trim();
   if (written.length === 0 || OPTION.test(written)) return undefined;
   const url = SCHEME.exec(written);

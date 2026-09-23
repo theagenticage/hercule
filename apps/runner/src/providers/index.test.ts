@@ -8,12 +8,12 @@ import { Effect } from "effect";
 import type { RunnerToController } from "@hercule/protocol";
 import type { Machine } from "../sessions/context";
 import { makeWorkspaces } from "../workspaces";
-import { supervising } from "../sessions/supervisor";
-import { ADAPTER_IDS, adapterFor, adapters } from "./index";
+import { makeSupervising } from "../sessions/supervisor";
+import { ADAPTER_IDS, findAdapter, adapters } from "./index";
 
 describe("the adapters this runner build carries", () => {
   it("answers for Codex, by the id and the binary name the plugin declares", () => {
-    const codex = adapterFor("codex");
+    const codex = findAdapter("codex");
 
     expect(codex?.providerId).toBe("codex");
     expect(codex?.binaryName).toBe("codex");
@@ -23,7 +23,7 @@ describe("the adapters this runner build carries", () => {
   });
 
   it("puts the Codex adapter on the stream the supervisor relays", async () => {
-    const codex = adapterFor("codex");
+    const codex = findAdapter("codex");
     // `supervising` merges the events of every adapter it is given, and the
     // runner gives it this array: an adapter outside it publishes to nobody.
     expect(adapters).toContain(codex);
@@ -41,7 +41,7 @@ describe("the adapters this runner build carries", () => {
       workspaces: makeWorkspaces({ storageDir: "/var/hercule/runner" }),
       socketPath: "/var/hercule/runner/daemon.sock",
     };
-    const supervisor = supervising(adapters).forConnection({
+    const supervisor = makeSupervising(adapters).forConnection({
       machine,
       send: (frame) => Effect.sync(() => void sent.push(frame)),
     });
@@ -54,7 +54,7 @@ describe("the adapters this runner build carries", () => {
 
 describe("the pi adapter this runner build carries", () => {
   it("answers for pi, by the id and the binary name the plugin declares", () => {
-    const pi = adapterFor("pi");
+    const pi = findAdapter("pi");
 
     expect(pi?.providerId).toBe("pi");
     expect(pi?.binaryName).toBe("pi");
@@ -67,6 +67,6 @@ describe("the pi adapter this runner build carries", () => {
   });
 
   it("can put the harness on a machine that has none", () => {
-    expect(adapterFor("pi")?.install).toBeDefined();
+    expect(findAdapter("pi")?.install).toBeDefined();
   });
 });

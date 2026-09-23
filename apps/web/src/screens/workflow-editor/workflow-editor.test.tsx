@@ -948,11 +948,11 @@ describe("the screen's view of the source", () => {
 });
 
 describe("the graph", () => {
-  const renderGraphOf = (source: string) =>
+  const renderGraph = (source: string) =>
     renderEditor({ source, onIssuesChange: () => {}, view: "split" });
 
   it("draws a node for each step and trigger, with each edge's condition and traversal limit", async () => {
-    renderGraphOf(LOOP_SOURCE);
+    renderGraph(LOOP_SOURCE);
     const graph = screen.getByRole("region", { name: "Workflow graph" });
 
     // findByText fails on two matches, so this also checks that each id shows once.
@@ -964,7 +964,7 @@ describe("the graph", () => {
   });
 
   it("redraws when the source changes to another valid workflow", async () => {
-    const { update } = renderGraphOf(LOOP_SOURCE);
+    const { update } = renderGraph(LOOP_SOURCE);
     const graph = screen.getByRole("region", { name: "Workflow graph" });
     await within(graph).findByText("implement");
 
@@ -1029,7 +1029,7 @@ describe("the graph", () => {
     // 29 characters fit in a widened card. 41 characters exceed the widest card.
     const longId = "changes_requested_by_reviewer";
     const tooLongId = "open_a_task_for_the_labelled_pull_request";
-    renderGraphOf(LINEAR_SOURCE.replaceAll("labelled", longId).replaceAll("open_task", tooLongId));
+    renderGraph(LINEAR_SOURCE.replaceAll("labelled", longId).replaceAll("open_task", tooLongId));
     const graph = screen.getByRole("region", { name: "Workflow graph" });
     await within(graph).findByText(longId);
     /** Returns a card's x position and width from its React Flow node style. */
@@ -1052,7 +1052,7 @@ describe("the graph", () => {
   });
 
   it("draws an edge from a step to itself with its traversal limit", async () => {
-    renderGraphOf(
+    renderGraph(
       LINEAR_SOURCE.replace(
         "edges:\n",
         "edges:\n  - from: review\n    to: review\n    condition: steps.review.output.again\n    maxTraversals: 2\n",
@@ -1069,11 +1069,11 @@ describe("the graph", () => {
     // change. Only the nodes the edges connect differ: the branch becomes a row.
     const findGraphNode = (id: string) =>
       within(screen.getByRole("region", { name: "Workflow graph" })).findByText(id);
-    renderGraphOf(LINEAR_SOURCE);
+    renderGraph(LINEAR_SOURCE);
     await findGraphNode("open_task");
     const rowViewport = readViewportTransform();
     cleanup();
-    const { update } = renderGraphOf(BRANCHED_SOURCE);
+    const { update } = renderGraph(BRANCHED_SOURCE);
     await findGraphNode("open_task");
     const branchViewport = readViewportTransform();
     expect(branchViewport).not.toBe(rowViewport);
@@ -1087,7 +1087,7 @@ describe("the graph", () => {
 
   it("keeps the viewport when a step is renamed or a condition changes", async () => {
     const user = userEvent.setup();
-    const { update } = renderGraphOf(LOOP_SOURCE);
+    const { update } = renderGraph(LOOP_SOURCE);
     const graph = screen.getByRole("region", { name: "Workflow graph" });
     await within(graph).findByText("implement");
     const placed = readViewportTransform();

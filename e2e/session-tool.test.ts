@@ -34,22 +34,22 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  apiKeyIn,
-  cli,
+  readApiKey,
+  runCli,
   completeSetup,
-  instancesOf,
-  jsonOk,
+  listInstances,
+  parseJsonOutputOrFail,
   lendCredential,
   LENT_CREDENTIALS,
-  liveSessionsAsked,
-  loginLent,
+  isLiveSessionTestEnabled,
+  isLoginAvailable,
   PASSWORD,
   ROOT,
-  saidIn,
-  sessionOf,
+  collectAssistantText,
+  readSession,
   startController,
-  temporaryHome,
-  untilTag,
+  createTemporaryHome,
+  waitForTranscriptTag,
   USERNAME,
   type Controller,
   type Instance,
@@ -58,9 +58,9 @@ import {
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
-const wanted = liveSessionsAsked();
+const wanted = isLiveSessionTestEnabled();
 
-const state = temporaryHome();
+const state = createTemporaryHome();
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -106,19 +106,22 @@ interface Page<A> {
  * `runner.json` and its storage directory on the way, which is what the login
  * is lent into, so nothing may read either before this answers.
  */
-const enrolledRunner = async (): Promise<string> => {
+const waitForOwnRunner = async (): Promise<string> => {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   for (;;) {
-    const ran = await cli(["runner", "list", "--json"], { home: state.home, binary });
-    const id = ran.code === 0 ? jsonOk<Page<{ readonly id: string }>>(ran).items[0]?.id : undefined;
+    const ran = await runCli(["runner", "list", "--json"], { home: state.home, binary });
+    const id =
+      ran.code === 0
+        ? parseJsonOutputOrFail<Page<{ readonly id: string }>>(ran).items[0]?.id
+        : undefined;
     if (id !== undefined && existsSync(join(state.home, "runner", "runner.json"))) return id;
     if (Date.now() > deadline) throw new Error(`no runner dialled the controller:\n${ran.stdout}`);
     await Bun.sleep(500);
   }
 };
 
-const claudeInstance = async (): Promise<Instance> => {
-  const found = (await instancesOf({ url, apiKey })).find(
+const findClaudeInstance = async (): Promise<Instance> => {
+  const found = (await listInstances({ url, apiKey })).find(
     (one) => one.providerId === "claude-code",
   );
   if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
@@ -130,16 +133,16 @@ const claudeInstance = async (): Promise<Instance> => {
  * with that snapshot. Repeated rather than trusted once: a probe of a directory
  * that was empty a moment ago has been seen to answer `unauthenticated`.
  */
-const probedLoggedIn = async (runnerId: string, instanceId: string): Promise<Snapshot> => {
+const waitForLoggedInSnapshot = async (runnerId: string, instanceId: string): Promise<Snapshot> => {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   let last: string;
   for (;;) {
-    const ran = await cli(["runner", "probe", runnerId, "--instance", instanceId, "--json"], {
+    const ran = await runCli(["runner", "probe", runnerId, "--instance", instanceId, "--json"], {
       home: state.home,
       binary,
     });
     if (ran.code === 0) {
-      const snapshot = jsonOk<Snapshot>(ran);
+      const snapshot = parseJsonOutputOrFail<Snapshot>(ran);
       if (snapshot.auth.status === "ok") return snapshot;
       last = `${snapshot.auth.status}: ${snapshot.auth.message ?? "no message"}`;
     } else {
@@ -189,12 +192,12 @@ beforeAll(async () => {
   const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-  const login = await cli(
+  const login = await runCli(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-session-tool"],
     { home: state.home, binary, stdin: PASSWORD },
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
-  apiKey = apiKeyIn(state.home);
+  apiKey = readApiKey(state.home);
 }, 120_000);
 
 afterAll(async () => {
@@ -207,7 +210,7 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
   it(
     "creates and updates a task as itself, is refused the delete its profile withholds",
     async (ctx) => {
-      if (!loginLent()) {
+      if (!isLoginAvailable()) {
         ctx.skip(
           "no login for the claude-code instance: name a credentials file in " +
             "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
@@ -215,21 +218,21 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
         return;
       }
 
-      const runnerId = await enrolledRunner();
-      const instance = await claudeInstance();
+      const runnerId = await waitForOwnRunner();
+      const instance = await findClaudeInstance();
       if (LENT_CREDENTIALS !== undefined) lendCredential(state.home, instance.id);
-      const snapshot = await probedLoggedIn(runnerId, instance.id);
+      const snapshot = await waitForLoggedInSnapshot(runnerId, instance.id);
 
       // The cheapest model that answers, when this machine reported one.
       const haiku = snapshot.models.find((model) => model.slug.includes("haiku"))?.slug;
 
-      const worker = jsonOk<Page<Profile>>(
-        await cli(["profile", "list", "--json", "--all"], { home: state.home, binary }),
+      const worker = parseJsonOutputOrFail<Page<Profile>>(
+        await runCli(["profile", "list", "--json", "--all"], { home: state.home, binary }),
       ).items.find((profile) => profile.name === "worker");
       expect(worker, "the shipped worker profile is not seeded").not.toBe(undefined);
 
-      const session = jsonOk<Session>(
-        await cli(
+      const session = parseJsonOutputOrFail<Session>(
+        await runCli(
           [
             "session",
             "spawn",
@@ -247,7 +250,7 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
       );
       expect(session.permissionProfileId).toBe(worker!.id);
 
-      const rows = await untilTag({
+      const rows = await waitForTranscriptTag({
         home: state.home,
         binary,
         id: session.id,
@@ -258,22 +261,23 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
       const actor = `session:${session.id}`;
 
       // The task the agent made, read back by the user over the same API.
-      const tasks = jsonOk<Page<Task>>(
-        await cli(["task", "list", "--json", "--all"], { home: state.home, binary }),
+      const tasks = parseJsonOutputOrFail<Page<Task>>(
+        await runCli(["task", "list", "--json", "--all"], { home: state.home, binary }),
       ).items;
       const mine = tasks.find((task) => task.title === TITLE);
       // Read after the turn, so a task that is here is a task the refused
       // delete did not take away.
-      expect(mine, `no task titled ${TITLE}. What the session said was:\n${saidIn(rows)}`).not.toBe(
-        undefined,
-      );
+      expect(
+        mine,
+        `no task titled ${TITLE}. What the session said was:\n${collectAssistantText(rows)}`,
+      ).not.toBe(undefined);
       // The update landed on the task the create made, not on a second one.
       expect(mine!.description).toBe(UPDATED);
       expect(mine!.provenance.map((entry) => entry.actor)).toContain(actor);
 
       // The event log says the same thing about who did it.
-      const created = jsonOk<Page<Event>>(
-        await cli(["event", "list", "--kind", "task.created", "--json", "--all"], {
+      const created = parseJsonOutputOrFail<Page<Event>>(
+        await runCli(["event", "list", "--kind", "task.created", "--json", "--all"], {
           home: state.home,
           binary,
         }),
@@ -283,21 +287,21 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
 
       // The delete was refused, and the refusal named the grant to ask for
       // rather than failing anonymously.
-      const said = saidIn(rows);
+      const said = collectAssistantText(rows);
       expect(said, `the session never reported a refused delete. It said:\n${said}`).toContain(
         "missing grant task.delete",
       );
-      const stopped = jsonOk<Session>(
-        await cli(["session", "stop", session.id, "--json"], { home: state.home, binary }),
+      const stopped = parseJsonOutputOrFail<Session>(
+        await runCli(["session", "stop", session.id, "--json"], { home: state.home, binary }),
       );
       expect(stopped.id).toBe(session.id);
       // The stop is a request to the runner, so the row reaches `exited` when
       // the machine says the process went away, not when the command returns.
       const deadline = Date.now() + 60_000;
-      let after = await sessionOf({ home: state.home, binary, id: session.id });
+      let after = await readSession({ home: state.home, binary, id: session.id });
       while (after.status !== "exited" && Date.now() < deadline) {
         await Bun.sleep(500);
-        after = await sessionOf({ home: state.home, binary, id: session.id });
+        after = await readSession({ home: state.home, binary, id: session.id });
       }
       expect(after.status).toBe("exited");
     },

@@ -7,16 +7,18 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { homePaths, HerculeHome } from "../config";
+import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { ControllerIdentity, controllerIdentityLayer, SIGNING_KEY_SECRET } from "./repository";
 import { CORE_OWNER, masterKeyLayer, Secrets, secretsLayer } from "../secrets";
 
 let home: string;
 
-const stack = () => {
+const buildStack = () => {
   const key = masterKeyLayer("file").pipe(
-    Layer.provide(Layer.succeed(HerculeHome, HerculeHome.of(homePaths(home, join(home, "data"))))),
+    Layer.provide(
+      Layer.succeed(HerculeHome, HerculeHome.of(buildHomePaths(home, join(home, "data")))),
+    ),
   );
   return controllerIdentityLayer.pipe(
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(key))),
@@ -26,7 +28,7 @@ const stack = () => {
 
 const run = <A, E>(
   effect: Effect.Effect<A, E, ControllerIdentity | Secrets | SqlClient.SqlClient>,
-) => Effect.runPromise(effect.pipe(Effect.provide(stack())));
+) => Effect.runPromise(effect.pipe(Effect.provide(buildStack())));
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "hercule-identity-"));

@@ -83,7 +83,7 @@ const SUBJECTS: Readonly<Record<OpenRequest["kind"], string>> = {
   question: "the question",
 };
 
-const describeOf = (decision: ApprovalDecision, subject: string): string => {
+const describeDecision = (decision: ApprovalDecision, subject: string): string => {
   switch (decision) {
     case "allow":
       return `Runs ${subject} this once; the agent asks again next time.`;
@@ -109,7 +109,7 @@ const describeOf = (decision: ApprovalDecision, subject: string): string => {
  */
 const NOT_BUILT = "Answering here is not built yet. Cancel the turn, then reply in the thread.";
 
-const titleOf = (request: OpenRequest): string => {
+const buildCardTitle = (request: OpenRequest): string => {
   switch (request.kind) {
     case "command_approval":
       return "Run this command?";
@@ -124,7 +124,7 @@ const titleOf = (request: OpenRequest): string => {
   }
 };
 
-const subjectOf = (request: OpenRequest): readonly string[] => {
+const buildCardSubject = (request: OpenRequest): readonly string[] => {
   switch (request.kind) {
     case "command_approval":
       return [request.detail.command];
@@ -142,7 +142,7 @@ const subjectOf = (request: OpenRequest): readonly string[] => {
 
 const MULTI = "More than one answer may be chosen.";
 
-const questionsOf = (request: OpenRequest): readonly ApprovalQuestion[] =>
+const buildCardQuestions = (request: OpenRequest): readonly ApprovalQuestion[] =>
   request.kind === "question"
     ? request.detail.questions.map((question) => ({
         header: question.header,
@@ -152,15 +152,15 @@ const questionsOf = (request: OpenRequest): readonly ApprovalQuestion[] =>
       }))
     : [];
 
-export const approvalCard = (request: OpenRequest): ApprovalCard => ({
-  title: titleOf(request),
-  subject: subjectOf(request),
+export const buildApprovalCard = (request: OpenRequest): ApprovalCard => ({
+  title: buildCardTitle(request),
+  subject: buildCardSubject(request),
   code: request.kind !== "question",
-  questions: questionsOf(request),
+  questions: buildCardQuestions(request),
   note: request.kind === "question" ? NOT_BUILT : null,
   rows: request.decisions.map((decision) => ({
     decision,
     label: LABELS[decision],
-    describe: describeOf(decision, SUBJECTS[request.kind]),
+    describe: describeDecision(decision, SUBJECTS[request.kind]),
   })),
 });

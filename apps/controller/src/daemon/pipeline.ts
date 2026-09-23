@@ -17,7 +17,7 @@ import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SessionService } from "../sessions";
 import { EvaluationErrorNotifier } from "../subscriptions";
-import { absorbing } from "./absorbing";
+import { absorbFailures } from "./absorbing";
 import { EventRouter } from "./event-router";
 import { Live } from "./live";
 import { buildDeliveries, buildRoutingTables } from "./routing";
@@ -41,7 +41,7 @@ const make = Effect.gen(function* () {
     // One delivery that cannot read its rows must not hold back the next one:
     // they own different rows and neither waits for the other.
     for (const delivery of deliveries) {
-      yield* absorbing(`The delivery of ${delivery.name} failed`, delivery.deliverWaiting());
+      yield* absorbFailures(`The delivery of ${delivery.name} failed`, delivery.deliverWaiting());
     }
   });
 
@@ -55,7 +55,7 @@ const make = Effect.gen(function* () {
       const interval = yield* EventRoutingInterval;
       while (true) {
         yield* Effect.sleep(interval);
-        yield* absorbing("One tick of the event pipeline failed", tick);
+        yield* absorbFailures("One tick of the event pipeline failed", tick);
       }
     }),
   };

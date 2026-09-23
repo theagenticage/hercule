@@ -17,7 +17,7 @@ export interface ThreadRow {
   readonly secondLine: string | null;
 }
 
-export const markOf = (session: Session): ThreadMark => {
+export const decideThreadMark = (session: Session): ThreadMark => {
   if (WORKING_STATUSES.has(session.status)) return "working";
   // An exit that can be resumed takes input like any idle thread, so it reads
   // as one; only an exit that is refused reads as an ending.
@@ -32,7 +32,7 @@ export const markOf = (session: Session): ThreadMark => {
  * offers any more is still what the thread runs under, so it is named as it
  * stands rather than going blank.
  */
-const modelName = (instances: readonly ProviderInstance[], session: Session): string => {
+const findModelName = (instances: readonly ProviderInstance[], session: Session): string => {
   const slug = session.modelSelection.model;
   const instance = instances.find((each) => each.id === session.instanceId);
   for (const snapshot of instance?.snapshots ?? []) {
@@ -42,7 +42,7 @@ const modelName = (instances: readonly ProviderInstance[], session: Session): st
   return slug;
 };
 
-export const threadRows = (
+export const buildThreadRows = (
   sessions: readonly Session[],
   mode: ThreadRows,
   /** The catalogs a meta row's model is named from; a plain row names none. */
@@ -52,8 +52,8 @@ export const threadRows = (
     .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
     .map((session) => ({
       id: session.id,
-      mark: markOf(session),
+      mark: decideThreadMark(session),
       title: session.title,
       activityAt: session.lastActivityAt,
-      secondLine: mode === "meta" ? modelName(instances, session) : null,
+      secondLine: mode === "meta" ? findModelName(instances, session) : null,
     }));

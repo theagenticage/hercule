@@ -1,6 +1,6 @@
 export { useMinuteClock } from "./primitives/clock";
 export { cn } from "./primitives/cn";
-export { Button, buttonClassName, type ButtonVariant } from "./primitives/button";
+export { Button, buildButtonClassName, type ButtonVariant } from "./primitives/button";
 export { Checkbox } from "./primitives/checkbox";
 export { Drawer } from "./primitives/drawer";
 export { Input } from "./primitives/input";

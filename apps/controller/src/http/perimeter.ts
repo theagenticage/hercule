@@ -34,7 +34,7 @@ const isTailscaleV6 = (host: string): boolean =>
  * The line to print before binding, or `undefined` when the bind is inside the
  * supported perimeter.
  */
-export const perimeterWarning = (host: string, port: number): string | undefined => {
+export const buildPerimeterWarning = (host: string, port: number): string | undefined => {
   if (isLoopback(host) || isTailscaleV4(host) || isTailscaleV6(host)) return undefined;
   const where = host === "0.0.0.0" || host === "::" ? "every network interface" : host;
   return (

@@ -6,7 +6,7 @@
 import { readdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import type { WorkspaceDispose, WorkspaceReport } from "@hercule/protocol";
-import { cacheDirOf, cacheRootIn, pruneWorktrees, removeWorktree } from "./git";
+import { buildCacheDir, buildCacheRoot, pruneWorktrees, removeWorktree } from "./git";
 import type { GitEnv } from "./git";
 import type { RegisteredCheckout } from "./registry";
 import type { Substrate } from "./substrate";
@@ -26,11 +26,11 @@ export const tearDown = async (
   env: GitEnv,
 ): Promise<void> => {
   for (const one of checkouts) {
-    await removeWorktree(cacheDirOf(storageDir, one.resourceId), one.path, env);
+    await removeWorktree(buildCacheDir(storageDir, one.resourceId), one.path, env);
   }
   rmSync(root, { recursive: true, force: true });
   for (const one of checkouts) {
-    await pruneWorktrees(cacheDirOf(storageDir, one.resourceId), env);
+    await pruneWorktrees(buildCacheDir(storageDir, one.resourceId), env);
   }
 };
 
@@ -43,12 +43,12 @@ export const tearDown = async (
 const pruneEveryCache = async (substrate: Substrate): Promise<void> => {
   let caches: ReadonlyArray<string>;
   try {
-    caches = readdirSync(cacheRootIn(substrate.storageDir));
+    caches = readdirSync(buildCacheRoot(substrate.storageDir));
   } catch {
     return;
   }
   for (const cache of caches) {
-    await pruneWorktrees(joinPath(cacheRootIn(substrate.storageDir), cache), substrate.gitEnv);
+    await pruneWorktrees(joinPath(buildCacheRoot(substrate.storageDir), cache), substrate.gitEnv);
   }
 };
 

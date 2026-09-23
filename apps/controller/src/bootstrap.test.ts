@@ -16,7 +16,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { HOST_API, PluginError, type Plugin } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "./actor";
-import { boot, bootWith, hashToken, setupUrl, type BootOutcome } from "./bootstrap";
+import { boot, bootWith, hashToken, buildSetupUrl, type BootOutcome } from "./bootstrap";
 import { Plugins } from "./plugins";
 
 /** Listing plugins needs a credential; a boot has none, so the read supplies one. */
@@ -41,7 +41,7 @@ const serve = (argv: ReadonlyArray<string> = []): Promise<BootOutcome> =>
   Effect.runPromise(boot({ argv: ["--home", home, ...argv], env: {}, masterKeyBackend: "file" }));
 
 /** Boot the way `hercule serve` does, and hand the test the error it failed with. */
-const serveError = (argv: ReadonlyArray<string> = [], at: string = home) =>
+const serveAndReadError = (argv: ReadonlyArray<string> = [], at: string = home) =>
   Effect.runPromise(
     boot({ argv: ["--home", at, ...argv], env: {}, masterKeyBackend: "file" }).pipe(Effect.flip),
   );
@@ -56,22 +56,22 @@ const query = <A>(sql: string, at: string = home): ReadonlyArray<A> => {
   }
 };
 
-const tokenIn = (url: string): string => new URL(url).searchParams.get("token")!;
+const readSetupToken = (url: string): string => new URL(url).searchParams.get("token")!;
 
-const setupState = () =>
+const readSetupState = () =>
   query<{ token_hash: string | null; completed_at: string | null }>(
     "SELECT token_hash, completed_at FROM setup_state",
   )[0];
 
-const mode = (path: string): number => statSync(path).mode & 0o777;
+const readFileMode = (path: string): number => statSync(path).mode & 0o777;
 
 describe("the first run", () => {
   it("creates the home layout and the config file, owner-only", async () => {
     const outcome = await serve();
-    expect(mode(home)).toBe(0o700);
+    expect(readFileMode(home)).toBe(0o700);
     for (const directory of ["data", "runner", "logs", "backups", "tls"]) {
       expect(existsSync(join(home, directory))).toBe(true);
-      expect(mode(join(home, directory))).toBe(0o700);
+      expect(readFileMode(join(home, directory))).toBe(0o700);
     }
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("bind.port = 4937");
     expect(outcome.paths.databaseFile).toBe(join(home, "data", "hercule.db"));
@@ -114,21 +114,21 @@ describe("the first run", () => {
     const outcome = await serve();
     expect(outcome.identityId).toMatch(/^[0-9a-f-]{36}$/);
     expect(query("SELECT id FROM controller_identity")).toHaveLength(1);
-    expect(mode(join(home, "master.key"))).toBe(0o600);
+    expect(readFileMode(join(home, "master.key"))).toBe(0o600);
   });
 
   it("writes the one-time setup URL at mode 0600, and stores only its hash", async () => {
     const outcome = await serve();
     const url = outcome.setupUrl!;
-    expect(url).toBe(`http://127.0.0.1:4937/setup?token=${tokenIn(url)}`);
+    expect(url).toBe(`http://127.0.0.1:4937/setup?token=${readSetupToken(url)}`);
     expect(readFileSync(outcome.paths.setupUrlFile, "utf8").trim()).toBe(url);
-    expect(mode(outcome.paths.setupUrlFile)).toBe(0o600);
+    expect(readFileMode(outcome.paths.setupUrlFile)).toBe(0o600);
 
-    const state = setupState();
-    expect(state?.token_hash).toBe(hashToken(tokenIn(url)));
+    const state = readSetupState();
+    expect(state?.token_hash).toBe(hashToken(readSetupToken(url)));
     expect(state?.completed_at).toBeNull();
     // The token itself is nowhere in the database.
-    expect(JSON.stringify(query("SELECT * FROM setup_state"))).not.toContain(tokenIn(url));
+    expect(JSON.stringify(query("SELECT * FROM setup_state"))).not.toContain(readSetupToken(url));
   });
 
   it("writes a Data Root that moves with the home", async () => {
@@ -184,7 +184,7 @@ describe("bootWith", () => {
  * to see what a boot does with one of each; the catalog and the lifecycle are
  * covered where they live.
  */
-const bootPlugin = (id: string, failure?: string): Plugin => ({
+const buildBootPlugin = (id: string, failure?: string): Plugin => ({
   manifest: {
     id,
     displayName: `Plugin ${id}`,
@@ -229,7 +229,10 @@ describe("a boot with a plugin that will not start", () => {
           argv: ["--home", home],
           env: {},
           masterKeyBackend: "file",
-          plugins: [bootPlugin("broken", "the harness binary is missing"), bootPlugin("healthy")],
+          plugins: [
+            buildBootPlugin("broken", "the harness binary is missing"),
+            buildBootPlugin("healthy"),
+          ],
         },
         () =>
           Effect.provideService(
@@ -260,7 +263,7 @@ describe("a second boot", () => {
   it("keeps the identity and the master key, and mints a fresh token", async () => {
     const first = await serve();
     const key = readFileSync(join(home, "master.key"), "utf8");
-    const firstHash = setupState()?.token_hash;
+    const firstHash = readSetupState()?.token_hash;
 
     const second = await serve();
 
@@ -269,8 +272,8 @@ describe("a second boot", () => {
     expect(query("SELECT id FROM controller_identity")).toHaveLength(1);
 
     expect(second.setupUrl).not.toBe(first.setupUrl);
-    expect(setupState()?.token_hash).toBe(hashToken(tokenIn(second.setupUrl!)));
-    expect(setupState()?.token_hash).not.toBe(firstHash);
+    expect(readSetupState()?.token_hash).toBe(hashToken(readSetupToken(second.setupUrl!)));
+    expect(readSetupState()?.token_hash).not.toBe(firstHash);
     expect(readFileSync(second.paths.setupUrlFile, "utf8").trim()).toBe(second.setupUrl);
   });
 
@@ -293,26 +296,26 @@ describe("once setup is complete", () => {
     } finally {
       database.close();
     }
-    expect(setupState()?.token_hash).not.toBeNull();
+    expect(readSetupState()?.token_hash).not.toBeNull();
 
     const second = await serve();
 
     expect(second.setupUrl).toBeUndefined();
     expect(existsSync(first.paths.setupUrlFile)).toBe(false);
-    expect(setupState()?.token_hash).toBeNull();
+    expect(readSetupState()?.token_hash).toBeNull();
   });
 });
 
 describe("the setup URL", () => {
   it("brackets an IPv6 bind host", () => {
-    expect(setupUrl("fd00::1", 4937, "t")).toBe("http://[fd00::1]:4937/setup?token=t");
-    expect(setupUrl("::", 4937, "t")).toBe("http://127.0.0.1:4937/setup?token=t");
+    expect(buildSetupUrl("fd00::1", 4937, "t")).toBe("http://[fd00::1]:4937/setup?token=t");
+    expect(buildSetupUrl("::", 4937, "t")).toBe("http://127.0.0.1:4937/setup?token=t");
   });
 });
 
 describe("a boot that cannot start", () => {
   it("fails with the config error, and creates no database", async () => {
-    const failure = await serveError(["-c", "bind.port=nope"]);
+    const failure = await serveAndReadError(["-c", "bind.port=nope"]);
     expect(failure._tag).toBe("ConfigValueError");
     expect(existsSync(join(home, "data", "hercule.db"))).toBe(false);
   });
@@ -321,7 +324,7 @@ describe("a boot that cannot start", () => {
     await serve();
     rmSync(join(home, "master.key"));
 
-    const failure = await serveError();
+    const failure = await serveAndReadError();
 
     expect(failure._tag).toBe("MasterKeyError");
     expect(failure.message).toContain(join(home, "master.key"));
@@ -335,7 +338,7 @@ describe("a boot that cannot start", () => {
     rmSync(join(home, "data", "hercule.db-wal"), { force: true });
     rmSync(join(home, "data", "hercule.db-shm"), { force: true });
 
-    const failure = await serveError();
+    const failure = await serveAndReadError();
 
     expect(failure._tag).toBe("DatabaseError");
     expect(failure.message).toContain(join(home, "data", "hercule.db"));

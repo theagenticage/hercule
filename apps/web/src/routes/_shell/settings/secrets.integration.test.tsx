@@ -13,7 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hercule/client-core";
 import {
   expectInDocumentOrder,
-  reading,
+  readPageText,
   renderApp,
   stubApi,
   type Handler,
@@ -62,17 +62,17 @@ const CLIENT_SECRET: Ref = {
   createdAt: "2026-09-03T10:45:00.000Z",
 };
 
-const stamp = (at: string): string => {
+const formatStampOrFail = (at: string): string => {
   const reading = formatStamp(new Date(at), ZONE);
   if (reading === undefined) throw new Error(`no stamp for ${at}`);
   return reading;
 };
 
-const pathOf = (ref: Pick<Ref, "ownerKind" | "ownerId" | "name">): string =>
+const buildSecretPath = (ref: Pick<Ref, "ownerKind" | "ownerId" | "name">): string =>
   `/api/v1/secrets/${ref.ownerKind}/${ref.ownerId}/${ref.name}`;
 
 /** A controller holding `refs`, with every write on them answered. */
-const controller = (
+const buildController = (
   refs: () => readonly Ref[],
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
@@ -87,17 +87,17 @@ const controller = (
   ...refs().reduce<Record<string, Handler>>(
     (all, ref) => ({
       ...all,
-      [`PUT ${pathOf(ref)}`]: { body: { ...ref, rotatedAt: "2026-09-13T12:00:00.000Z" } },
-      [`DELETE ${pathOf(ref)}`]: { body: {} },
+      [`PUT ${buildSecretPath(ref)}`]: { body: { ...ref, rotatedAt: "2026-09-13T12:00:00.000Z" } },
+      [`DELETE ${buildSecretPath(ref)}`]: { body: {} },
     }),
     {},
   ),
   ...extra,
 });
 
-const open = async (refs: readonly Ref[], extra: Readonly<Record<string, Handler>> = {}) => {
+const openApp = async (refs: readonly Ref[], extra: Readonly<Record<string, Handler>> = {}) => {
   const held = [...refs];
-  const api = stubApi(controller(() => held, extra));
+  const api = stubApi(buildController(() => held, extra));
   const app = await renderApp({ path: "/settings/secrets", api: api.fetch, token: "held" });
   return {
     ...app,
@@ -115,14 +115,14 @@ const open = async (refs: readonly Ref[], extra: Readonly<Record<string, Handler
  * every screen inside it, and the ticket it fetches is a POST nobody on this
  * screen asked for, so it is not one of them.
  */
-const writes = (api: { readonly calls: readonly { method: string; path: string }[] }) =>
+const listWrites = (api: { readonly calls: readonly { method: string; path: string }[] }) =>
   api.calls.filter((call) => call.method !== "GET" && !call.path.endsWith("/auth/ws-ticket"));
 
-const listings = (api: { readonly calls: readonly { path: string }[] }) =>
+const countSecretReads = (api: { readonly calls: readonly { path: string }[] }) =>
   api.calls.filter((call) => call.path === "/api/v1/secrets").length;
 
 /** The row about one reference: the list item its name is in. */
-const rowFor = async (ref: Ref): Promise<HTMLElement> => {
+const findSecretRow = async (ref: Ref): Promise<HTMLElement> => {
   await screen.findByText(ref.name);
   const row = screen
     .getAllByRole("listitem")
@@ -133,32 +133,32 @@ const rowFor = async (ref: Ref): Promise<HTMLElement> => {
 
 describe("Settings > Secrets", () => {
   it("says who owns each secret, what it is called and when it was last written", async () => {
-    await open([PAT, TOKENS, CLIENT_SECRET]);
+    await openApp([PAT, TOKENS, CLIENT_SECRET]);
 
-    const pat = reading(await rowFor(PAT));
+    const pat = readPageText(await findSecretRow(PAT));
     expect(pat).toContain("connection");
     expect(pat).toContain(PAT.ownerId);
     expect(pat).toContain("pat");
     // Rotated since it was set, so the reading is the rotation.
-    expect(pat).toContain(stamp(PAT.rotatedAt!));
+    expect(pat).toContain(formatStampOrFail(PAT.rotatedAt!));
 
-    const tokens = reading(await rowFor(TOKENS));
+    const tokens = readPageText(await findSecretRow(TOKENS));
     expect(tokens).toContain("oauth.tokens");
-    expect(tokens).toContain(stamp(TOKENS.createdAt));
+    expect(tokens).toContain(formatStampOrFail(TOKENS.createdAt));
 
-    const plugin = reading(await rowFor(CLIENT_SECRET));
+    const plugin = readPageText(await findSecretRow(CLIENT_SECRET));
     expect(plugin).toContain("plugin");
     expect(plugin).toContain("github");
     expect(plugin).toContain("clientSecret");
-    expect(plugin).toContain(stamp(CLIENT_SECRET.createdAt));
+    expect(plugin).toContain(formatStampOrFail(CLIENT_SECRET.createdAt));
   });
 
   it("keeps a value the user typed off the page once it is written", async () => {
     const user = userEvent.setup();
     const VALUE = "ghp-zzz-never-shown-4f19d";
-    const { api } = await open([PAT, TOKENS, CLIENT_SECRET]);
+    const { api } = await openApp([PAT, TOKENS, CLIENT_SECRET]);
 
-    const row = await rowFor(PAT);
+    const row = await findSecretRow(PAT);
     await user.click(within(row).getByRole("button", { name: "Rotate" }));
     await user.type(await screen.findByLabelText("New value"), VALUE);
     const save = screen.getByRole("button", { name: "Save" });
@@ -166,79 +166,79 @@ describe("Settings > Secrets", () => {
     await user.click(save);
 
     await waitFor(() => {
-      expect(writes(api)).toHaveLength(1);
+      expect(listWrites(api)).toHaveLength(1);
     });
     // Not in the text the page reads out, and not held in a field either: an
     // input's value is not text content, so the reading alone would prove
     // nothing.
-    expect(reading()).not.toContain(VALUE);
+    expect(readPageText()).not.toContain(VALUE);
     expect(screen.queryByDisplayValue(VALUE)).toBeNull();
   });
 
   it("rotates a secret and reads the list back", async () => {
     const user = userEvent.setup();
-    const { api } = await open([PAT, TOKENS, CLIENT_SECRET]);
-    const before = listings(api);
+    const { api } = await openApp([PAT, TOKENS, CLIENT_SECRET]);
+    const before = countSecretReads(api);
 
-    const row = await rowFor(PAT);
+    const row = await findSecretRow(PAT);
     await user.click(within(row).getByRole("button", { name: "Rotate" }));
     await user.type(await screen.findByLabelText("New value"), "rotated-1");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(writes(api)).toHaveLength(1);
+      expect(listWrites(api)).toHaveLength(1);
     });
     const written = api.calls.filter((call) => call.method === "PUT");
-    expect(written.map((call) => call.path)).toEqual([pathOf(PAT)]);
+    expect(written.map((call) => call.path)).toEqual([buildSecretPath(PAT)]);
     expect(written[0]?.body).toEqual({ value: "rotated-1" });
 
     // The row's reading comes from a fresh listing, not from the answer.
     await waitFor(() => {
-      expect(listings(api)).toBeGreaterThan(before);
+      expect(countSecretReads(api)).toBeGreaterThan(before);
     });
   });
 
   it("asks for a value before it writes one", async () => {
     const user = userEvent.setup();
-    const { api } = await open([PAT]);
+    const { api } = await openApp([PAT]);
 
-    await user.click(within(await rowFor(PAT)).getByRole("button", { name: "Rotate" }));
+    await user.click(within(await findSecretRow(PAT)).getByRole("button", { name: "Rotate" }));
 
     expect(await screen.findByLabelText("New value")).toBeDefined();
-    expect(writes(api)).toEqual([]);
+    expect(listWrites(api)).toEqual([]);
   });
 
   it("asks before it deletes a secret, and lets the user back out", async () => {
     const user = userEvent.setup();
-    const { api } = await open([PAT, TOKENS, CLIENT_SECRET]);
+    const { api } = await openApp([PAT, TOKENS, CLIENT_SECRET]);
 
-    const row = await rowFor(TOKENS);
+    const row = await findSecretRow(TOKENS);
     await user.click(within(row).getByRole("button", { name: "Delete" }));
 
-    expect(reading(row)).toContain("Delete this secret? Its value cannot be recovered.");
-    expect(writes(api)).toEqual([]);
+    expect(readPageText(row)).toContain("Delete this secret? Its value cannot be recovered.");
+    expect(listWrites(api)).toEqual([]);
     // Cancel comes before Confirm.
     const cancel = within(row).getByRole("button", { name: "Cancel" });
     expectInDocumentOrder([cancel, within(row).getByRole("button", { name: "Confirm" })]);
 
     await user.click(cancel);
 
-    expect(writes(api)).toEqual([]);
+    expect(listWrites(api)).toEqual([]);
     expect(screen.getByText(TOKENS.name)).toBeDefined();
   });
 
   it("deletes a secret once it is confirmed, and drops its row", async () => {
     const user = userEvent.setup();
-    const { api, drop } = await open([PAT, TOKENS, CLIENT_SECRET]);
+    const { api, drop } = await openApp([PAT, TOKENS, CLIENT_SECRET]);
 
-    const row = await rowFor(TOKENS);
+    const row = await findSecretRow(TOKENS);
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     drop(TOKENS);
     await user.click(within(row).getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => {
-      expect(writes(api).map((call) => `${call.method} ${call.path}`)).toEqual([
-        `DELETE ${pathOf(TOKENS)}`,
+      expect(listWrites(api).map((call) => `${call.method} ${call.path}`)).toEqual([
+        `DELETE ${buildSecretPath(TOKENS)}`,
       ]);
     });
     await waitFor(() => {
@@ -261,7 +261,7 @@ describe("Settings > Secrets > setting one", () => {
 
   it("writes the secret the form was filled with", async () => {
     const user = userEvent.setup();
-    const { api } = await open([PAT], {
+    const { api } = await openApp([PAT], {
       "PUT /api/v1/secrets/runner/moss/join-token": {
         body: {
           ownerKind: "runner",
@@ -281,31 +281,31 @@ describe("Settings > Secrets > setting one", () => {
     await user.click(screen.getByRole("button", { name: "Set secret" }));
 
     await waitFor(() => {
-      expect(writes(api)).toHaveLength(1);
+      expect(listWrites(api)).toHaveLength(1);
     });
-    expect(writes(api)[0]).toMatchObject({
+    expect(listWrites(api)[0]).toMatchObject({
       method: "PUT",
       path: "/api/v1/secrets/runner/moss/join-token",
     });
     expect(api.calls.find((call) => call.method === "PUT")?.body).toEqual({
       value: "jt-never-shown-771",
     });
-    expect(reading()).not.toContain("jt-never-shown-771");
+    expect(readPageText()).not.toContain("jt-never-shown-771");
     expect(screen.queryByDisplayValue("jt-never-shown-771")).toBeNull();
   });
 
   it("offers nothing to do to the controller's own key material", async () => {
-    await open([PAT, SIGNING_KEY]);
+    await openApp([PAT, SIGNING_KEY]);
 
-    const core = await rowFor(SIGNING_KEY);
+    const core = await findSecretRow(SIGNING_KEY);
     expect(within(core).queryByRole("button", { name: "Rotate" })).toBeNull();
     expect(within(core).queryByRole("button", { name: "Delete" })).toBeNull();
     // The rows that may be written still offer both.
-    expect(within(await rowFor(PAT)).getByRole("button", { name: "Rotate" })).toBeDefined();
+    expect(within(await findSecretRow(PAT)).getByRole("button", { name: "Rotate" })).toBeDefined();
   });
 
   it("offers the owner kinds a user may write, and not the controller's own", async () => {
-    await open([PAT]);
+    await openApp([PAT]);
 
     const kinds = [...screen.getByLabelText<HTMLSelectElement>("Owner kind").options].map(
       (option) => option.value,
@@ -319,8 +319,8 @@ describe("Settings > Secrets > setting one", () => {
 
 describe("Settings > Secrets > nothing stored", () => {
   it("says what a secret is, rather than showing an empty list", async () => {
-    await open([]);
+    await openApp([]);
 
-    expect(reading()).toContain("No secrets are stored.");
+    expect(readPageText()).toContain("No secrets are stored.");
   });
 });

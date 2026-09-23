@@ -8,13 +8,13 @@
  */
 export { InvalidOptionError, parseGlobalOptions, type GlobalOptions } from "./args";
 export {
-  configFileIn,
-  credentialsFileIn,
+  locateConfigFile,
+  locateCredentialsFile,
   DATABASE_FILE_NAME,
   DEFAULT_HOME_NAME,
-  homePaths,
+  buildHomePaths,
   resolveHomePath,
-  runnerDirIn,
-  setupUrlFileIn,
+  locateRunnerDir,
+  locateSetupUrlFile,
   type HomePaths,
 } from "./paths";

@@ -3,9 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Checkbox, Field, Input, StringList } from "@hercule/ui";
 import {
   queryKeys,
-  runnerConflictField,
-  runnerDraft,
-  runnerPatch,
+  findRunnerConflictField,
+  buildRunnerDraft,
+  buildRunnerPatch,
   type HerculeClient,
   type RunnerDraft,
 } from "@hercule/client-core";
@@ -33,13 +33,13 @@ export function EditForm({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<{ readonly base: RunnerDetail; readonly draft: RunnerDraft }>(
-    () => ({ base: runner, draft: runnerDraft(runner) }),
+    () => ({ base: runner, draft: buildRunnerDraft(runner) }),
   );
   const [sent, setSent] = useState<RunnerUpdateInput>({});
 
-  const edited = Object.keys(runnerPatch(form.base, form.draft)).length > 0;
+  const edited = Object.keys(buildRunnerPatch(form.base, form.draft)).length > 0;
   if (form.base !== runner && !edited) {
-    setForm({ base: runner, draft: runnerDraft(runner) });
+    setForm({ base: runner, draft: buildRunnerDraft(runner) });
   }
 
   const save = useMutation({
@@ -52,14 +52,14 @@ export function EditForm({
       // the patch named, so the form starts again from it: a field that moved
       // on the controller while this form was open is shown rather than held
       // as an edit nobody made.
-      setForm({ base: updated, draft: runnerDraft(updated) });
+      setForm({ base: updated, draft: buildRunnerDraft(updated) });
     },
   });
 
-  const blamed = runnerConflictField(save.error, sent);
+  const blamed = findRunnerConflictField(save.error, sent);
   const message = save.error === null ? null : readErrorMessage(save.error);
   /** What a refusal the controller pinned on one field says, beside that field. */
-  const refusal = (field: "name" | "reserved"): string | undefined =>
+  const readFieldRefusal = (field: "name" | "reserved"): string | undefined =>
     blamed === field ? (message ?? undefined) : undefined;
 
   const edit = (next: Partial<RunnerDraft>): void => {
@@ -69,14 +69,14 @@ export function EditForm({
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    const patch = runnerPatch(form.base, form.draft);
+    const patch = buildRunnerPatch(form.base, form.draft);
     setSent(patch);
     save.mutate(patch);
   };
 
   return (
     <form className="flex flex-col gap-3 border-t border-line-soft pt-3" onSubmit={submit}>
-      <Field id="runner-name" label="Name" error={refusal("name")}>
+      <Field id="runner-name" label="Name" error={readFieldRefusal("name")}>
         <Input
           id="runner-name"
           // A machine has to be called something, and the name is what every
@@ -130,9 +130,9 @@ export function EditForm({
             edit({ reserved: event.target.checked });
           }}
         />
-        {refusal("reserved") === undefined ? null : (
+        {readFieldRefusal("reserved") === undefined ? null : (
           <p className="text-fine text-fail" role="alert">
-            {refusal("reserved")}
+            {readFieldRefusal("reserved")}
           </p>
         )}
       </div>

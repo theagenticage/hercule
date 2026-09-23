@@ -58,9 +58,9 @@ import {
   announce,
   decodeIdCursor,
   encodeIdCursor,
-  keysetOver,
+  buildKeyset,
   nowIso,
-  pageOf,
+  buildPage,
   uuidFromString,
   withTransaction,
 } from "../db";
@@ -111,7 +111,7 @@ const DEFAULT_DIRECTION: SortDirection = "desc";
  * `event.audit`, so an actor kind added later is withheld from them until someone
  * decides it should not be.
  */
-const withoutSecurityEntries = (actor: Actor): boolean =>
+const shouldHideSecurityEntries = (actor: Actor): boolean =>
   actor._tag !== "user" && !(actor._tag === "session" && actor.grants.includes("event.audit"));
 
 /**
@@ -137,7 +137,7 @@ const decodeAgainstKind = (
  * the field they came from, so an issue about a payload key can never be read
  * as one about `kind` or `refs`.
  */
-const refusePayload = (error: Schema.SchemaError): Validation =>
+const createPayloadValidationError = (error: Schema.SchemaError): Validation =>
   createValidationError(
     listDecodeIssues(error).map((issue) => ({ ...issue, path: ["payload", ...issue.path] })),
   );
@@ -204,12 +204,12 @@ const make = Effect.gen(function* () {
         // Hidden in the query rather than dropped from the page that comes
         // back, so a page stays as full as it was asked for and the cursor at
         // its end still points at the next unread row.
-        if (withoutSecurityEntries(actor)) {
+        if (shouldHideSecurityEntries(actor)) {
           where.push(sql`kind NOT IN ${sql.in(SECURITY_KINDS)}`);
         }
         // The log's id is its order, so the walk needs no second column to
         // break a tie on: the id is the whole key.
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["id"],
           after === undefined ? undefined : [after],
@@ -221,7 +221,7 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(EVENT_COLUMNS)} FROM events
           WHERE ${sql.and(where)} ${order} LIMIT ${limit + 1}
         `;
-        const page = yield* pageOf(
+        const page = yield* buildPage(
           rows,
           limit,
           (read) => Effect.succeed(read.map(toEvent)),
@@ -243,7 +243,7 @@ const make = Effect.gen(function* () {
         // An entry this caller may not see answers as an entry that is not
         // there: a hidden row and an id past the head of the log are one
         // answer, so the log's contents cannot be probed by id.
-        const hidden = withoutSecurityEntries(actor)
+        const hidden = shouldHideSecurityEntries(actor)
           ? sql`AND kind NOT IN ${sql.in(SECURITY_KINDS)}`
           : sql``;
         const rows = yield* sql<EventRow>`
@@ -284,7 +284,10 @@ const make = Effect.gen(function* () {
             onSome: Effect.succeed,
           }),
         );
-        yield* Effect.mapError(decodeAgainstKind(payloadSchema, decoded.payload), refusePayload);
+        yield* Effect.mapError(
+          decodeAgainstKind(payloadSchema, decoded.payload),
+          createPayloadValidationError,
+        );
 
         const actor = yield* currentStamp;
         const at = yield* nowIso;

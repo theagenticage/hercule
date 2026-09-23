@@ -32,8 +32,15 @@ import type {
   Session,
   Workspace,
 } from "@hercule/contract";
-import { threadsWorld } from "@hercule/client-core/threads/testing";
-import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
+import {
+  buildErrorBody,
+  pickRow,
+  readPageText,
+  renderApp,
+  stubApi,
+  type Handler,
+} from "../../../app/testing";
 
 const ZONE = "Europe/Amsterdam";
 
@@ -86,7 +93,7 @@ const THINKING: ModelOption = {
   default: true,
 };
 
-const snapshot = (
+const buildSnapshot = (
   runnerId: string,
   identity: string,
   planLabel: string,
@@ -100,7 +107,7 @@ const snapshot = (
   models,
 });
 
-const instance = (
+const buildProviderInstance = (
   id: string,
   name: string,
   displayName: string,
@@ -120,32 +127,42 @@ const instance = (
 });
 
 /** Logged in on the one runner, two models, the default one carrying options. */
-const INSTANCE_A = instance("01a06d02-1000-7000-8000-000000000001", "personal", "Claude Code", [
-  snapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
-    {
-      slug: "claude-sonnet-5",
-      name: "Claude Sonnet 5",
-      isDefault: true,
-      options: [EFFORT, THINKING],
-    },
-    { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
-  ]),
-]);
+const INSTANCE_A = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000001",
+  "personal",
+  "Claude Code",
+  [
+    buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
+      {
+        slug: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        isDefault: true,
+        options: [EFFORT, THINKING],
+      },
+      { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
+    ]),
+  ],
+);
 
 /** A second account of the same provider, one model, no options. */
-const INSTANCE_B = instance("01a06d02-1000-7000-8000-000000000002", "work", "Claude Code", [
-  snapshot(RUNNER.id, "work@example.com", "Claude Pro", [
-    { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
-  ]),
-]);
+const INSTANCE_B = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000002",
+  "work",
+  "Claude Code",
+  [
+    buildSnapshot(RUNNER.id, "work@example.com", "Claude Pro", [
+      { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
+    ]),
+  ],
+);
 
 /**
  * The real first-run state: the instance exists (spec 06 §2, one per shipped
  * provider) but nothing has logged in on the one runner yet, so there is no
- * snapshot at all - `runnerMenu`'s only row dims "not logged in" and its
+ * snapshot at all - `buildRunnerMenu`'s only row dims "not logged in" and its
  * `defaultRunnerId` is null.
  */
-const INSTANCE_FRESH = instance(
+const INSTANCE_FRESH = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000003",
   "Claude Code",
   "Claude Code",
@@ -191,7 +208,7 @@ const NEW_SESSION: Session = {
   unenforced: [],
 };
 
-const controller = (
+const buildController = (
   instances: readonly ProviderInstance[],
   user: Record<string, unknown> = {},
   extra: Readonly<Record<string, Handler>> = {},
@@ -214,13 +231,13 @@ const controller = (
   ...extra,
 });
 
-const open = async (
+const openApp = async (
   instances: readonly ProviderInstance[] = [INSTANCE_A, INSTANCE_B],
   user: Record<string, unknown> = {},
   extra: Readonly<Record<string, Handler>> = {},
   storage: Readonly<Record<string, string>> = {},
 ) => {
-  const api = stubApi(controller(instances, user, extra));
+  const api = stubApi(buildController(instances, user, extra));
   const app = await renderApp({
     path: "/threads/new",
     api: api.fetch,
@@ -233,7 +250,7 @@ const open = async (
 
 describe("Composer: draft defaults (AC-15)", () => {
   it("prefills from the spawn defaults when no thread.* setting is stored", async () => {
-    await open([INSTANCE_A]);
+    await openApp([INSTANCE_A]);
 
     expect(screen.getByRole("heading", { name: "What should the agent do?" })).toBeDefined();
 
@@ -262,7 +279,7 @@ describe("Composer: draft defaults (AC-15)", () => {
   });
 
   it("prefills from the thread.* settings when they are stored", async () => {
-    await open([INSTANCE_A, INSTANCE_B], {
+    await openApp([INSTANCE_A, INSTANCE_B], {
       "thread.instanceId": INSTANCE_B.id,
       "thread.model": "claude-haiku-5",
       "thread.accessMode": "auto",
@@ -280,7 +297,7 @@ describe("Composer: draft defaults (AC-15)", () => {
 
 describe("Composer: a fresh install, nothing logged in on the one runner yet", () => {
   it("shows the pill with only the parts it has, never a dangling separator, when there is no model to offer", async () => {
-    await open([INSTANCE_FRESH]);
+    await openApp([INSTANCE_FRESH]);
 
     // No model to name, and no dangling separator left over from one.
     await waitFor(() => {
@@ -289,7 +306,7 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
   });
 
   it("names the runner in its own trigger, dimmed with its reason, instead of the bare word Runner", async () => {
-    await open([INSTANCE_FRESH]);
+    await openApp([INSTANCE_FRESH]);
 
     await waitFor(() => {
       expect(
@@ -300,22 +317,22 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
   });
 
   it("says why the draft cannot start, with no Log in to offer on a machine the instance was never found on", async () => {
-    await open([INSTANCE_FRESH]);
+    await openApp([INSTANCE_FRESH]);
 
     // Nothing has ever probed this instance on the one runner, so there is no
     // login to offer there - only the reason.
     await waitFor(() => {
-      expect(reading()).toContain(`Can't start yet. Claude Code is not on ${RUNNER.name}.`);
+      expect(readPageText()).toContain(`Can't start yet. Claude Code is not on ${RUNNER.name}.`);
     });
     expect(screen.queryByRole("button", { name: "Log in" })).toBeNull();
   });
 
   it("keeps send disabled with the reason, rather than spawning a payload of empty ids", async () => {
-    // Nothing is logged in, so `runnerMenu` offers no selectable row and the
+    // Nothing is logged in, so `buildRunnerMenu` offers no selectable row and the
     // draft runner, model and profile stay null. Sending would post ids the
     // contract's own `Id` refuses, naming fields the user never touched.
     const user = userEvent.setup();
-    const { api } = await open([INSTANCE_FRESH]);
+    const { api } = await openApp([INSTANCE_FRESH]);
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
 
@@ -323,7 +340,7 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
     await waitFor(() => {
       expect(send.disabled).toBe(true);
     });
-    expect(reading()).toContain(`Claude Code is not on ${RUNNER.name}`);
+    expect(readPageText()).toContain(`Claude Code is not on ${RUNNER.name}`);
     expect(
       api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
     ).toBe(false);
@@ -331,7 +348,7 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
 
   it("keeps send disabled with the reason when no provider instance exists at all", async () => {
     const user = userEvent.setup();
-    await open([]);
+    await openApp([]);
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
 
@@ -339,14 +356,14 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
     await waitFor(() => {
       expect(send.disabled).toBe(true);
     });
-    expect(reading()).toContain("no provider instance is set up");
+    expect(readPageText()).toContain("no provider instance is set up");
   });
 });
 
 describe("Composer: selector popovers (AC-16)", () => {
   it("opens one popover at a time, closes on Esc and on an outside click, and keeps typed text", async () => {
     const user = userEvent.setup();
-    await open();
+    await openApp();
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
 
@@ -388,10 +405,10 @@ describe("Composer: selector popovers (AC-16)", () => {
   // to a project it does not stand in.
   it("reads No workspace as locked text on a draft standing in no project", async () => {
     const user = userEvent.setup();
-    await open();
+    await openApp();
 
     const locked = await screen.findByTitle("Pick a project to work in a repository");
-    expect(reading(locked)).toContain("No workspace");
+    expect(readPageText(locked)).toContain("No workspace");
     expect(locked.closest("button")).toBeNull();
 
     await user.click(locked);
@@ -400,14 +417,14 @@ describe("Composer: selector popovers (AC-16)", () => {
 
   it("opens the runner menu with the state and the capacity beside the machine, and what it is under it", async () => {
     const user = userEvent.setup();
-    await open();
+    await openApp();
 
     await user.click(screen.getByRole("button", { name: "machine moss" }));
 
     // The state word sits in its own colored span, so the row's own text
     // spans several elements - read the dialog's whole text rather than
     // asking for one element whose own text is the exact string.
-    const dialog = reading(await screen.findByRole("dialog"));
+    const dialog = readPageText(await screen.findByRole("dialog"));
     // The machine, then its state and how much of it is taken; what this
     // machine is stands under it. Who is logged in is the model menu's to say.
     expect(dialog).toContain("moss online 0/4");
@@ -419,21 +436,21 @@ describe("Composer: selector popovers (AC-16)", () => {
 describe("Composer: model menu (AC-17)", () => {
   it("groups models per AC-8's rules and offers no free-text entry", async () => {
     const user = userEvent.setup();
-    await open();
+    await openApp();
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     const menu = await screen.findByRole("dialog");
 
     // The other account's own row: who it is and what plan, off its snapshot.
-    expect(reading()).toContain("work@example.com");
-    expect(reading()).toContain("Claude Pro");
+    expect(readPageText()).toContain("work@example.com");
+    expect(readPageText()).toContain("Claude Pro");
 
     // The current instance (A) expanded: both its models listed.
     expect(within(menu).getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     expect(within(menu).getByRole("button", { name: /claude opus 5/i })).toBeDefined();
 
     // The other instance (B) collapsed to one row: "<n> models".
-    expect(reading()).toContain("1 models");
+    expect(readPageText()).toContain("1 models");
 
     expect(screen.queryByText(/custom model/i)).toBeNull();
     expect(screen.queryByPlaceholderText(/model/i)).toBeNull();
@@ -441,7 +458,7 @@ describe("Composer: model menu (AC-17)", () => {
 
   it("renders a select option as a segmented row and a boolean option as an off · on row", async () => {
     const user = userEvent.setup();
-    await open();
+    await openApp();
 
     await user.click(screen.getByRole("button", { name: "medium" }));
 
@@ -462,7 +479,7 @@ describe("Composer: model menu (AC-17)", () => {
 
   it("switches the pill's instance when a model of another instance is chosen", async () => {
     const user = userEvent.setup();
-    await open();
+    await openApp();
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     // Instance B is collapsed to its one-row summary; clicking it is what
@@ -476,7 +493,7 @@ describe("Composer: model menu (AC-17)", () => {
 
   it("changes the options selector's own label when an option is chosen", async () => {
     const user = userEvent.setup();
-    await open();
+    await openApp();
 
     await user.click(screen.getByRole("button", { name: "medium" }));
     // See the AC-17 "renders a select option..." test above: `SegmentedControl`
@@ -492,7 +509,7 @@ describe("Composer: model menu (AC-17)", () => {
 describe("Composer: sending (AC-18)", () => {
   it("spawns with exactly the selectors' values, navigates to the new thread, and never patches settings", async () => {
     const user = userEvent.setup();
-    const { api, router } = await open(
+    const { api, router } = await openApp(
       [INSTANCE_A],
       {},
       {
@@ -529,7 +546,7 @@ describe("Composer: sending (AC-18)", () => {
 
   it("spawns with the model options picked in the pill (AC-5)", async () => {
     const user = userEvent.setup();
-    const { api, router } = await open(
+    const { api, router } = await openApp(
       [INSTANCE_A],
       {},
       {
@@ -568,7 +585,7 @@ describe("Composer: sending (AC-18)", () => {
 
   it("sends on Enter, inserts a newline on Shift+Enter, and never sends an IME's own Enter", async () => {
     const user = userEvent.setup();
-    const { api, router } = await open(
+    const { api, router } = await openApp(
       [INSTANCE_A],
       {},
       {
@@ -609,7 +626,7 @@ describe("Composer: sending (AC-18)", () => {
   });
 
   it("leaves send disabled while the prompt is empty", async () => {
-    await open([INSTANCE_A]);
+    await openApp([INSTANCE_A]);
 
     const send = screen.getByRole<HTMLButtonElement>("button", { name: /send/i });
     expect(send.disabled).toBe(true);
@@ -617,13 +634,13 @@ describe("Composer: sending (AC-18)", () => {
 
   it("shows the API's refusal message under the card and keeps the typed text", async () => {
     const user = userEvent.setup();
-    const { api } = await open(
+    const { api } = await openApp(
       [INSTANCE_A],
       {},
       {
         "POST /api/v1/sessions": {
           status: 409,
-          body: envelope("invalid_state", "moss is not logged in to Claude Code"),
+          body: buildErrorBody("invalid_state", "moss is not logged in to Claude Code"),
         },
       },
     );
@@ -643,7 +660,7 @@ describe("Composer: sending (AC-18)", () => {
 
 describe("Routing: /threads/new is the static route (AD-6)", () => {
   it("renders the composer rather than reading 'new' as a session id", async () => {
-    const { api } = await open([INSTANCE_A]);
+    const { api } = await openApp([INSTANCE_A]);
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "What should the agent do?" })).toBeDefined();
@@ -669,7 +686,7 @@ describe("Routing: /threads/new is the static route (AD-6)", () => {
  */
 
 /** A snapshot of an instance that is on the machine with nobody logged in. */
-const unauthenticated = (runnerId: string): ProviderInstance["snapshots"][number] => ({
+const buildUnauthenticatedSnapshot = (runnerId: string): ProviderInstance["snapshots"][number] => ({
   runnerId,
   probedAt: "2026-09-05T09:10:00.000Z",
   harnessVersion: "2.1.263",
@@ -678,15 +695,18 @@ const unauthenticated = (runnerId: string): ProviderInstance["snapshots"][number
   models: [],
 });
 
-const LOGGED_OUT = instance("01a06d02-1000-7000-8000-000000000004", "Claude Code", "Claude Code", [
-  unauthenticated(RUNNER.id),
-]);
+const LOGGED_OUT = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000004",
+  "Claude Code",
+  "Claude Code",
+  [buildUnauthenticatedSnapshot(RUNNER.id)],
+);
 
 /** The same instance once the login this test drives has landed. */
 const LOGGED_IN: ProviderInstance = {
   ...LOGGED_OUT,
   snapshots: [
-    snapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
+    buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
       { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] },
     ]),
   ],
@@ -698,7 +718,7 @@ describe("Composer: after login the draft re-resolves", () => {
   it("blocks the draft with the login sentence, then picks up the fresh catalog and spawns on it", async () => {
     const user = userEvent.setup();
     let held: readonly ProviderInstance[] = [LOGGED_OUT];
-    const { api } = await open(
+    const { api } = await openApp(
       [LOGGED_OUT],
       {},
       {
@@ -715,7 +735,9 @@ describe("Composer: after login the draft re-resolves", () => {
     // Nothing is logged in: no model to name, and the blocker says who is
     // where and what is missing.
     await waitFor(() => {
-      expect(reading()).toContain("Can't start yet. Claude Code is on moss but not logged in.");
+      expect(readPageText()).toContain(
+        "Can't start yet. Claude Code is on moss but not logged in.",
+      );
     });
     expect(screen.queryByRole("button", { name: /claude sonnet 5/i })).toBeNull();
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
@@ -724,7 +746,7 @@ describe("Composer: after login the draft re-resolves", () => {
     // The login is offered where the blocker is, and runs on the draft's runner.
     await user.click(screen.getByRole("button", { name: "Log in" }));
     await waitFor(() => {
-      expect(reading()).toContain(AUTHORIZE_URL);
+      expect(readPageText()).toContain(AUTHORIZE_URL);
     });
     expect(api.calls.find((call) => call.path.endsWith("/login"))?.body).toEqual({
       runnerId: RUNNER.id,
@@ -738,7 +760,7 @@ describe("Composer: after login the draft re-resolves", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     });
-    expect(reading()).not.toContain("Can't start yet.");
+    expect(readPageText()).not.toContain("Can't start yet.");
     const send = screen.getByRole<HTMLButtonElement>("button", { name: /send/i });
     await waitFor(() => {
       expect(send.disabled).toBe(false);
@@ -763,58 +785,73 @@ describe("Composer: after login the draft re-resolves", () => {
 });
 
 /** Nine models across two accounts: one over the filter threshold. */
-const model = (slug: string, name: string, extra: Record<string, unknown> = {}) => ({
+const buildModel = (slug: string, name: string, extra: Record<string, unknown> = {}) => ({
   slug,
   name,
   options: [],
   ...extra,
 });
 
-const MANY_A = instance("01a06d02-1000-7000-8000-000000000011", "personal", "Claude Code", [
-  snapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
-    model("claude-sonnet-5", "Claude Sonnet 5", { isDefault: true }),
-    model("claude-opus-5", "Claude Opus 5"),
-    model("claude-haiku-5", "Claude Haiku 5"),
-    model("claude-sonnet-4", "Claude Sonnet 4"),
-    model("claude-haiku-4", "Claude Haiku 4"),
-  ]),
-]);
+const MANY_A = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000011",
+  "personal",
+  "Claude Code",
+  [
+    buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
+      buildModel("claude-sonnet-5", "Claude Sonnet 5", { isDefault: true }),
+      buildModel("claude-opus-5", "Claude Opus 5"),
+      buildModel("claude-haiku-5", "Claude Haiku 5"),
+      buildModel("claude-sonnet-4", "Claude Sonnet 4"),
+      buildModel("claude-haiku-4", "Claude Haiku 4"),
+    ]),
+  ],
+);
 
-const MANY_B = instance("01a06d02-1000-7000-8000-000000000012", "work", "Claude Code", [
-  snapshot(RUNNER.id, "work@example.com", "Claude Pro", [
-    model("claude-opus-4", "Claude Opus 4", { isDefault: true }),
-    model("claude-sonnet-3", "Claude Sonnet 3"),
-    model("claude-haiku-3", "Claude Haiku 3"),
-    model("claude-sonnet-2", "Claude Sonnet 2"),
-  ]),
-]);
+const MANY_B = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000012",
+  "work",
+  "Claude Code",
+  [
+    buildSnapshot(RUNNER.id, "work@example.com", "Claude Pro", [
+      buildModel("claude-opus-4", "Claude Opus 4", { isDefault: true }),
+      buildModel("claude-sonnet-3", "Claude Sonnet 3"),
+      buildModel("claude-haiku-3", "Claude Haiku 3"),
+      buildModel("claude-sonnet-2", "Claude Sonnet 2"),
+    ]),
+  ],
+);
 
 /** The same pair one model short of the threshold. */
 const EIGHT_B: ProviderInstance = {
   ...MANY_B,
   snapshots: [
-    snapshot(RUNNER.id, "work@example.com", "Claude Pro", [
-      model("claude-opus-4", "Claude Opus 4", { isDefault: true }),
-      model("claude-sonnet-3", "Claude Sonnet 3"),
-      model("claude-haiku-3", "Claude Haiku 3"),
+    buildSnapshot(RUNNER.id, "work@example.com", "Claude Pro", [
+      buildModel("claude-opus-4", "Claude Opus 4", { isDefault: true }),
+      buildModel("claude-sonnet-3", "Claude Sonnet 3"),
+      buildModel("claude-haiku-3", "Claude Haiku 3"),
     ]),
   ],
 };
 
 /** One legacy model, which the lane folds away. */
-const WITH_LEGACY = instance("01a06d02-1000-7000-8000-000000000013", "personal", "Claude Code", [
-  snapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
-    model("claude-sonnet-5", "Claude Sonnet 5", { isDefault: true }),
-    model("claude-opus-5", "Claude Opus 5"),
-    model("claude-sonnet-4", "Claude Sonnet 4", { isLegacy: true }),
-  ]),
-]);
+const WITH_LEGACY = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000013",
+  "personal",
+  "Claude Code",
+  [
+    buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
+      buildModel("claude-sonnet-5", "Claude Sonnet 5", { isDefault: true }),
+      buildModel("claude-opus-5", "Claude Opus 5"),
+      buildModel("claude-sonnet-4", "Claude Sonnet 4", { isLegacy: true }),
+    ]),
+  ],
+);
 
 /** A second provider with one account, so its rows never name an account. */
 const CODEX: ProviderInstance = {
-  ...instance("01a06d02-1000-7000-8000-000000000014", "openai", "Codex", [
-    snapshot(RUNNER.id, "rogier@openai.test", "Plus", [
-      model("gpt-5-codex", "GPT-5 Codex", { isDefault: true }),
+  ...buildProviderInstance("01a06d02-1000-7000-8000-000000000014", "openai", "Codex", [
+    buildSnapshot(RUNNER.id, "rogier@openai.test", "Plus", [
+      buildModel("gpt-5-codex", "GPT-5 Codex", { isDefault: true }),
     ]),
   ]),
   providerId: "codex",
@@ -823,8 +860,8 @@ const CODEX: ProviderInstance = {
 
 /** Another provider's account, which nobody has logged in to on this machine. */
 const OTHER_LOGGED_OUT: ProviderInstance = {
-  ...instance("01a06d02-1000-7000-8000-000000000015", "openai", "Codex", [
-    unauthenticated(RUNNER.id),
+  ...buildProviderInstance("01a06d02-1000-7000-8000-000000000015", "openai", "Codex", [
+    buildUnauthenticatedSnapshot(RUNNER.id),
   ]),
   providerId: "codex",
   binaryName: "codex",
@@ -833,7 +870,7 @@ const OTHER_LOGGED_OUT: ProviderInstance = {
 const RECENT_KEY = "hercule.recentModels";
 
 /** What `localStorage` holds for a draft whose Recent lane is already written. */
-const recent = (
+const buildRecentStorage = (
   pairs: ReadonlyArray<{ instanceId: string; model: string }>,
 ): Record<string, string> => ({ [RECENT_KEY]: JSON.stringify(pairs) });
 
@@ -849,7 +886,7 @@ const openModelMenu = async (
 describe("Composer: model menu shapes", () => {
   it("(a) offers a focused filter past eight models and narrows every account to what matches", async () => {
     const user = userEvent.setup();
-    await open([MANY_A, MANY_B]);
+    await openApp([MANY_A, MANY_B]);
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
@@ -870,7 +907,7 @@ describe("Composer: model menu shapes", () => {
 
   it("(a) offers no filter at eight models", async () => {
     const user = userEvent.setup();
-    await open([MANY_A, EIGHT_B]);
+    await openApp([MANY_A, EIGHT_B]);
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
@@ -879,18 +916,18 @@ describe("Composer: model menu shapes", () => {
 
   it("(b) lists the recent pairs newest first, naming the account only where there are two", async () => {
     const user = userEvent.setup();
-    await open(
+    await openApp(
       [INSTANCE_A, INSTANCE_B, CODEX],
       {},
       {},
-      recent([
+      buildRecentStorage([
         { instanceId: CODEX.id, model: "gpt-5-codex" },
         { instanceId: INSTANCE_A.id, model: "claude-opus-5" },
       ]),
     );
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
-    const lane = reading(menu);
+    const lane = readPageText(menu);
 
     expect(lane).toContain("Recent");
     // Newest first, both above the current account's own lane.
@@ -900,20 +937,20 @@ describe("Composer: model menu shapes", () => {
     // Claude Code holds two accounts here, so its recent row names one; the
     // single-account provider's row names none.
     const recentOpus = within(menu).getAllByRole("button", { name: /claude opus 5/i })[0];
-    expect(reading(recentOpus ?? null)).toContain("personal");
-    expect(reading(within(menu).getByRole("button", { name: /gpt-5 codex/i }))).not.toContain(
+    expect(readPageText(recentOpus ?? null)).toContain("personal");
+    expect(readPageText(within(menu).getByRole("button", { name: /gpt-5 codex/i }))).not.toContain(
       "openai",
     );
   });
 
   it("(c) folds a legacy model away behind older models (1) until it is opened", async () => {
     const user = userEvent.setup();
-    await open([WITH_LEGACY]);
+    await openApp([WITH_LEGACY]);
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
     expect(within(menu).queryByRole("button", { name: /claude sonnet 4/i })).toBeNull();
-    expect(reading(menu)).toContain("older models (1)");
+    expect(readPageText(menu)).toContain("older models (1)");
 
     await user.click(within(menu).getByRole("button", { name: /older models \(1\)/i }));
 
@@ -922,7 +959,7 @@ describe("Composer: model menu shapes", () => {
 
   it("(d) dims an unauthenticated account to one row that logs in from where it stands", async () => {
     const user = userEvent.setup();
-    const { api } = await open(
+    const { api } = await openApp(
       [INSTANCE_A, OTHER_LOGGED_OUT],
       {},
       {
@@ -932,7 +969,7 @@ describe("Composer: model menu shapes", () => {
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
-    expect(reading(menu)).toContain("not logged in");
+    expect(readPageText(menu)).toContain("not logged in");
     // The account is one row, not a lane of models: it offers nothing of its
     // own to pick.
     expect(within(menu).queryByRole("button", { name: /claude haiku 5/i })).toBeNull();
@@ -940,7 +977,7 @@ describe("Composer: model menu shapes", () => {
     await user.click(within(menu).getByRole("button", { name: "Log in" }));
 
     await waitFor(() => {
-      expect(reading()).toContain(AUTHORIZE_URL);
+      expect(readPageText()).toContain(AUTHORIZE_URL);
     });
     // The row logs in to the account it stands for, not to the one in force,
     // and on the machine the credential will land on.
@@ -952,21 +989,21 @@ describe("Composer: model menu shapes", () => {
 
   it("(e) labels the current lane with the account name when the provider holds two", async () => {
     const user = userEvent.setup();
-    await open([INSTANCE_A, INSTANCE_B]);
+    await openApp([INSTANCE_A, INSTANCE_B]);
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
-    expect(reading(menu)).toContain("personal");
+    expect(readPageText(menu)).toContain("personal");
   });
 
   it("(e) labels the current lane with the provider's name when it holds one", async () => {
     const user = userEvent.setup();
-    await open([INSTANCE_A]);
+    await openApp([INSTANCE_A]);
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
-    expect(reading(menu)).toContain("Claude Code");
-    expect(reading(menu)).not.toContain("personal");
+    expect(readPageText(menu)).toContain("Claude Code");
+    expect(readPageText(menu)).not.toContain("personal");
   });
 });
 
@@ -980,7 +1017,12 @@ describe("Composer: Recent follows the submission home", () => {
 
   it("writes the pair the user picked once the spawn has landed", async () => {
     const user = userEvent.setup();
-    await open([INSTANCE_A], {}, { "POST /api/v1/sessions": { body: NEW_SESSION } }, recent([]));
+    await openApp(
+      [INSTANCE_A],
+      {},
+      { "POST /api/v1/sessions": { body: NEW_SESSION } },
+      buildRecentStorage([]),
+    );
 
     await pickOpusAndSend(user);
 
@@ -993,16 +1035,16 @@ describe("Composer: Recent follows the submission home", () => {
 
   it("writes nothing when the spawn is refused, since nothing was reached", async () => {
     const user = userEvent.setup();
-    const { api } = await open(
+    const { api } = await openApp(
       [INSTANCE_A],
       {},
       {
         "POST /api/v1/sessions": {
           status: 409,
-          body: envelope("invalid_state", "moss is not logged in to Claude Code"),
+          body: buildErrorBody("invalid_state", "moss is not logged in to Claude Code"),
         },
       },
-      recent([]),
+      buildRecentStorage([]),
     );
 
     await pickOpusAndSend(user);
@@ -1025,21 +1067,26 @@ const FAST_MODE: ModelOption = {
 };
 
 /** One model, carrying a select descriptor and a boolean one. */
-const WITH_OPTIONS = instance("01a06d02-1000-7000-8000-000000000016", "personal", "Claude Code", [
-  snapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
-    {
-      slug: "claude-sonnet-5",
-      name: "Claude Sonnet 5",
-      isDefault: true,
-      options: [EFFORT, FAST_MODE],
-    },
-  ]),
-]);
+const WITH_OPTIONS = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000016",
+  "personal",
+  "Claude Code",
+  [
+    buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
+      {
+        slug: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        isDefault: true,
+        options: [EFFORT, FAST_MODE],
+      },
+    ]),
+  ],
+);
 
 describe("Composer: the model options selector's label", () => {
   it("reads the effort choice lower-cased, follows a pick, and appends the bolt with fast mode on", async () => {
     const user = userEvent.setup();
-    await open([WITH_OPTIONS]);
+    await openApp([WITH_OPTIONS]);
 
     // `medium` is the descriptor's own default, lower-cased off its label.
     const selector = await screen.findByRole("button", { name: "medium" });
@@ -1047,8 +1094,8 @@ describe("Composer: the model options selector's label", () => {
     await user.click(selector);
     const menu = await screen.findByRole("dialog");
     // The header names what is being changed, and what it is being changed on.
-    expect(reading(menu)).toContain("Model options");
-    expect(reading(menu)).toContain("Claude Sonnet 5");
+    expect(readPageText(menu)).toContain("Model options");
+    expect(readPageText(menu)).toContain("Claude Sonnet 5");
 
     await user.click(within(menu).getByRole("radio", { name: "High" }));
     await waitFor(() => {
@@ -1076,7 +1123,7 @@ const NO_AUTO: ProviderInstance = {
 describe("Composer: the access mode menu", () => {
   it("lists four modes with no header and names the fallback of one that is not native", async () => {
     const user = userEvent.setup();
-    await open([NO_AUTO]);
+    await openApp([NO_AUTO]);
 
     await user.click(screen.getByRole("button", { name: /approval-required/i }));
     const menu = await screen.findByRole("dialog");
@@ -1088,11 +1135,11 @@ describe("Composer: the access mode menu", () => {
       expect(within(menu).getByText(mode, { exact: true })).toBeDefined();
     }
     // The four modes stand on their own: this menu is the one with no header.
-    expect(reading(menu)).not.toContain("Access mode");
+    expect(readPageText(menu)).not.toContain("Access mode");
 
     // The unsupported mode keeps its row and stays pickable, saying what it
     // will really run as.
-    expect(reading(menu)).toContain("runs as auto-accept-edits on Claude Code Work");
+    expect(readPageText(menu)).toContain("runs as auto-accept-edits on Claude Code Work");
     await user.click(within(menu).getByText("auto", { exact: true }));
     await user.keyboard("{Escape}");
 
@@ -1109,7 +1156,7 @@ describe("Composer: the access mode menu", () => {
    */
   it("shows each mode's meaning and names the provider in the fallback annotation, in the attention hue", async () => {
     const user = userEvent.setup();
-    await open([NO_AUTO]);
+    await openApp([NO_AUTO]);
 
     await user.click(screen.getByRole("button", { name: /approval-required/i }));
     const menu = await screen.findByRole("dialog");
@@ -1123,13 +1170,13 @@ describe("Composer: the access mode menu", () => {
     // Four rows, each carrying its own meaning; the one that falls back says
     // so under its meaning rather than in place of it.
     for (const meaning of MEANINGS) {
-      expect(reading(menu)).toContain(meaning);
+      expect(readPageText(menu)).toContain(meaning);
     }
 
     const annotation = within(menu).getByText("runs as auto-accept-edits on Claude Code Work");
     expect(annotation.className).toContain("text-attn");
     // The provider is named, not alluded to.
-    expect(reading(menu)).not.toContain("on this provider");
+    expect(readPageText(menu)).not.toContain("on this provider");
   });
 });
 
@@ -1140,10 +1187,10 @@ describe("Composer: the access mode menu", () => {
  */
 describe("Draft: the chrome is the screen's first row", () => {
   it("reads Threads / New thread, with no … button and no shell h1", async () => {
-    await open([INSTANCE_A]);
+    await openApp([INSTANCE_A]);
 
     const crumb = await waitFor(() => screen.getByText("Threads /"));
-    expect(reading(crumb.parentElement)).toBe("Threads / New thread");
+    expect(readPageText(crumb.parentElement)).toBe("Threads / New thread");
 
     expect(screen.queryByRole("button", { name: "…" })).toBeNull();
     // The hero "What should the agent do?" is an h2, so level 1 belongs to
@@ -1196,9 +1243,9 @@ const IDS = {
   runbookThread: "01a06d02-7400-7000-8000-000000000002",
 };
 
-const WORLD = threadsWorld(IDS);
+const WORLD = buildThreadsWorld(IDS);
 
-const project = (id: string, name: string): Project => ({
+const buildProject = (id: string, name: string): Project => ({
   id,
   name,
   createdAt: AT,
@@ -1208,11 +1255,11 @@ const project = (id: string, name: string): Project => ({
 const WEBSHOP = WORLD.WEBSHOP_PROJECT;
 const OPS = WORLD.OPS_PROJECT;
 /** A project whose one repo has never been cloned on any machine. */
-const EDGE = project("01a06d02-7000-7000-8000-000000000003", "edge");
+const EDGE = buildProject("01a06d02-7000-7000-8000-000000000003", "edge");
 /** A project with no repo at all. */
-const SANDBOX = project("01a06d02-7000-7000-8000-000000000004", "sandbox");
+const SANDBOX = buildProject("01a06d02-7000-7000-8000-000000000004", "sandbox");
 
-const repo = (
+const buildRepoResource = (
   id: string,
   owner: string,
   name: string,
@@ -1234,9 +1281,11 @@ const repo = (
 const R_WEBSHOP = WORLD.WEBSHOP;
 const R_INFRA = WORLD.INFRA;
 const R_RUNBOOKS = WORLD.RUNBOOKS;
-const R_EDGE = repo("01a06d02-7100-7000-8000-000000000004", "acme", "edge-api", [EDGE.id]);
+const R_EDGE = buildRepoResource("01a06d02-7100-7000-8000-000000000004", "acme", "edge-api", [
+  EDGE.id,
+]);
 
-const checkout = (
+const buildCheckout = (
   id: string,
   resourceId: string,
   form: "clone" | "worktree",
@@ -1245,7 +1294,7 @@ const checkout = (
   defaultBranch: string,
 ) => ({ checkoutId: id, resourceId, form, subdirectory: null, branch, branches, defaultBranch });
 
-const workspace = (
+const buildWorkspace = (
   id: string,
   kind: "primary" | "ephemeral",
   runnerId: string,
@@ -1275,12 +1324,12 @@ const W_PRIMARY_WEBSHOP: Workspace = {
 
 const W_RUN_3F1: Workspace = { ...WORLD.RUN_3F1, designatedConnectionId: GITHUB_ID };
 
-const W_RUN_8A0 = workspace(
+const W_RUN_8A0 = buildWorkspace(
   "01a06d02-7200-7000-8000-000000000003",
   "ephemeral",
   COVE.id,
   [
-    checkout(
+    buildCheckout(
       "01a06d02-7300-7000-8000-000000000003",
       R_WEBSHOP.id,
       "worktree",
@@ -1292,29 +1341,39 @@ const W_RUN_8A0 = workspace(
   ["01a06d02-7400-7000-8000-000000000003"],
 );
 
-const W_PRIMARY_INFRA = workspace("01a06d02-7200-7000-8000-000000000004", "primary", RUNNER.id, [
-  checkout(
-    "01a06d02-7300-7000-8000-000000000004",
-    R_INFRA.id,
-    "clone",
-    "master",
-    ["master", "hetzner-migration"],
-    "master",
-  ),
-]);
+const W_PRIMARY_INFRA = buildWorkspace(
+  "01a06d02-7200-7000-8000-000000000004",
+  "primary",
+  RUNNER.id,
+  [
+    buildCheckout(
+      "01a06d02-7300-7000-8000-000000000004",
+      R_INFRA.id,
+      "clone",
+      "master",
+      ["master", "hetzner-migration"],
+      "master",
+    ),
+  ],
+);
 
-const W_PRIMARY_RUNBOOKS = workspace("01a06d02-7200-7000-8000-000000000005", "primary", RUNNER.id, [
-  checkout(
-    "01a06d02-7300-7000-8000-000000000005",
-    R_RUNBOOKS.id,
-    "clone",
-    "main",
-    ["main"],
-    "main",
-  ),
-]);
+const W_PRIMARY_RUNBOOKS = buildWorkspace(
+  "01a06d02-7200-7000-8000-000000000005",
+  "primary",
+  RUNNER.id,
+  [
+    buildCheckout(
+      "01a06d02-7300-7000-8000-000000000005",
+      R_RUNBOOKS.id,
+      "clone",
+      "main",
+      ["main"],
+      "main",
+    ),
+  ],
+);
 
-const thread = (
+const buildThread = (
   id: string,
   title: string,
   projectId: string | null,
@@ -1334,18 +1393,28 @@ const thread = (
 });
 
 const SESSIONS: readonly Session[] = [
-  thread(IDS.flakyThread, "Fix flaky webhook tests", WEBSHOP.id, W_RUN_3F1.id),
-  thread(IDS.runbookThread, "Write the retry runbook", WEBSHOP.id, W_RUN_3F1.id),
-  thread(
+  buildThread(IDS.flakyThread, "Fix flaky webhook tests", WEBSHOP.id, W_RUN_3F1.id),
+  buildThread(IDS.runbookThread, "Write the retry runbook", WEBSHOP.id, W_RUN_3F1.id),
+  buildThread(
     "01a06d02-7400-7000-8000-000000000003",
     "Runner drain command",
     WEBSHOP.id,
     W_RUN_8A0.id,
     COVE.id,
   ),
-  thread(BUMP_THE_BUN_PIN, "Bump the Bun pin", WEBSHOP.id, W_PRIMARY_WEBSHOP.id),
-  thread("01a06d02-7400-7000-8000-000000000005", "Tidy the promotion runbook", WEBSHOP.id, null),
-  thread("01a06d02-7400-7000-8000-000000000006", "Rotate the Hetzner backups key", OPS.id, null),
+  buildThread(BUMP_THE_BUN_PIN, "Bump the Bun pin", WEBSHOP.id, W_PRIMARY_WEBSHOP.id),
+  buildThread(
+    "01a06d02-7400-7000-8000-000000000005",
+    "Tidy the promotion runbook",
+    WEBSHOP.id,
+    null,
+  ),
+  buildThread(
+    "01a06d02-7400-7000-8000-000000000006",
+    "Rotate the Hetzner backups key",
+    OPS.id,
+    null,
+  ),
 ];
 
 const GITHUB: Connection = {
@@ -1383,7 +1452,7 @@ const RESOURCES: readonly Resource[] = [R_WEBSHOP, R_INFRA, R_RUNBOOKS, R_EDGE];
 const PROJECTS: readonly Project[] = [WEBSHOP, OPS, EDGE, SANDBOX];
 
 /** The catalogs slice 3 adds, over the ones every composer test already stubs. */
-const world = (
+const buildWorldRoutes = (
   overrides: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/projects": { body: { items: PROJECTS } },
@@ -1396,12 +1465,12 @@ const world = (
 });
 
 /** A draft at `path`, with the slice-3 catalogs behind it. */
-const openAt = async (
+const openDraftAt = async (
   path: string,
   user: Record<string, unknown> = {},
   extra: Readonly<Record<string, Handler>> = {},
 ) => {
-  const api = stubApi(controller([INSTANCE_A], user, world(extra)));
+  const api = stubApi(buildController([INSTANCE_A], user, buildWorldRoutes(extra)));
   const app = await renderApp({
     path,
     api: api.fetch,
@@ -1411,7 +1480,7 @@ const openAt = async (
   return { ...app, api };
 };
 
-const inProject = (id: string) => `/threads/new?project=${id}`;
+const buildProjectDraftPath = (id: string) => `/threads/new?project=${id}`;
 
 /** Opens the workspace selector and hands back its menu. */
 const openWorkspaceMenu = async (
@@ -1438,58 +1507,58 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
 
   it("lists one row per project with its repos, threads and workspaces", async () => {
     const user = userEvent.setup();
-    await openAt("/threads/new");
+    await openDraftAt("/threads/new");
 
     const picker = await openPicker(user);
 
-    expect(reading(picker)).toContain("New thread in");
+    expect(readPageText(picker)).toContain("New thread in");
     // One repo, five threads in the project, two ephemeral workspaces.
-    expect(reading(picker)).toContain("1 repo · webshop · 5 threads · 2 workspaces");
+    expect(readPageText(picker)).toContain("1 repo · webshop · 5 threads · 2 workspaces");
     // The plural half of `<n> repo(s) · <repo names>`, with the names listed.
-    expect(reading(picker)).toContain("2 repos · ops-infra, ops-runbooks");
-    expect(reading(picker)).toContain("⌘1");
-    expect(reading(picker)).toContain("⌘2");
+    expect(readPageText(picker)).toContain("2 repos · ops-infra, ops-runbooks");
+    expect(readPageText(picker)).toContain("⌘1");
+    expect(readPageText(picker)).toContain("⌘2");
   });
 
   it("navigates to a draft in the project that was clicked", async () => {
     const user = userEvent.setup();
-    const { router } = await openAt("/threads/new");
+    const { router } = await openDraftAt("/threads/new");
 
     const picker = await openPicker(user);
     await user.click(within(picker).getByRole("button", { name: /ops/ }));
 
     await waitFor(() => {
-      expect(router.state.location.href).toBe(inProject(OPS.id));
+      expect(router.state.location.href).toBe(buildProjectDraftPath(OPS.id));
     });
   });
 
   it("moves with the arrows and picks with Enter", async () => {
     const user = userEvent.setup();
-    const { router } = await openAt("/threads/new");
+    const { router } = await openDraftAt("/threads/new");
 
     await openPicker(user);
     await user.keyboard("{ArrowDown}{Enter}");
 
     await waitFor(() => {
-      expect(router.state.location.href).toBe(inProject(OPS.id));
+      expect(router.state.location.href).toBe(buildProjectDraftPath(OPS.id));
     });
   });
 
   it("picks the first project with its own ⌘1", async () => {
     const user = userEvent.setup();
-    const { router } = await openAt("/threads/new");
+    const { router } = await openDraftAt("/threads/new");
 
     await openPicker(user);
     await user.keyboard("{Meta>}1{/Meta}");
 
     await waitFor(() => {
-      expect(router.state.location.href).toBe(inProject(WEBSHOP.id));
+      expect(router.state.location.href).toBe(buildProjectDraftPath(WEBSHOP.id));
     });
   });
 
   it("closes on Escape without starting anything", async () => {
     const user = userEvent.setup();
-    const { router } = await openAt("/threads/new");
+    const { router } = await openDraftAt("/threads/new");
 
     await openPicker(user);
     await user.keyboard("{Escape}");
@@ -1502,7 +1571,7 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
 
   it("closes on a click past the panel, and on Esc after a click inside it", async () => {
     const user = userEvent.setup();
-    const { router } = await openAt("/threads/new");
+    const { router } = await openDraftAt("/threads/new");
 
     const picker = await openPicker(user);
     // The scrim is the panel's parent: the page behind the picker.
@@ -1519,16 +1588,16 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
-    expect(router.state.location.href).toBe(inProject(WEBSHOP.id));
+    expect(router.state.location.href).toBe(buildProjectDraftPath(WEBSHOP.id));
   });
 
   it("offers New project as the last row when there are projects", async () => {
     const user = userEvent.setup();
-    await openAt("/threads/new");
+    await openDraftAt("/threads/new");
 
     const picker = await openPicker(user);
 
-    const text = reading(picker);
+    const text = readPageText(picker);
     expect(text).toContain("New project");
     expect(text.indexOf("sandbox")).toBeLessThan(text.indexOf("New project"));
   });
@@ -1537,8 +1606,8 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
   // opens the dialog that does.
   it("offers New project and nothing else when there is no project yet, and opens the dialog", async () => {
     const user = userEvent.setup();
-    const created = project("01a06d02-7000-7000-8000-000000000009", "first");
-    const { api, router } = await openAt(
+    const created = buildProject("01a06d02-7000-7000-8000-000000000009", "first");
+    const { api, router } = await openDraftAt(
       "/threads/new",
       {},
       {
@@ -1549,7 +1618,7 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
 
     const picker = await openPicker(user);
 
-    expect(reading(picker)).toContain("New project");
+    expect(readPageText(picker)).toContain("New project");
     expect(within(picker).queryByRole("button", { name: /webshop/ })).toBeNull();
 
     await user.click(within(picker).getByRole("button", { name: "New project" }));
@@ -1559,7 +1628,7 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     await user.click(within(dialog).getByRole("button", { name: "Create project" }));
 
     await waitFor(() => {
-      expect(router.state.location.href).toBe(inProject(created.id));
+      expect(router.state.location.href).toBe(buildProjectDraftPath(created.id));
     });
     expect(
       api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/projects")?.body,
@@ -1567,7 +1636,7 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
   });
 
   it("heads the draft with the project it is in", async () => {
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     expect(
       await screen.findByRole("heading", { name: "What should the agent do in webshop?" }),
@@ -1578,21 +1647,21 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
 describe("Composer: the workspace selector (AC-17)", () => {
   it("heads the menu with what it picks and when it stops being pickable", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     const menu = await openWorkspaceMenu(user);
 
-    expect(reading(menu)).toContain("Workspace");
-    expect(reading(menu)).toContain("locks when the thread starts");
+    expect(readPageText(menu)).toContain("Workspace");
+    expect(readPageText(menu)).toContain("locks when the thread starts");
   });
 
   // D-20c/D-20d: the primary is the Main workspace, and None is not offered.
   it("offers the main workspace, a new worktree and the live workspaces", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     const menu = await openWorkspaceMenu(user);
-    const text = reading(menu);
+    const text = readPageText(menu);
 
     expect(text).toContain("Main workspace");
     expect(text).toContain("on main · you and the agent share the files");
@@ -1609,10 +1678,10 @@ describe("Composer: the workspace selector (AC-17)", () => {
 
   it("names the repo per row and lists New workspace first in a multi-repo project", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(OPS.id));
+    await openDraftAt(buildProjectDraftPath(OPS.id));
 
     const menu = await openWorkspaceMenu(user);
-    const text = reading(menu);
+    const text = readPageText(menu);
 
     expect(text).toContain("a worktree of each repo, side by side, each on a new branch");
     expect(text).toContain("Main workspace of ops-infra");
@@ -1626,35 +1695,35 @@ describe("Composer: the workspace selector (AC-17)", () => {
     // picks none - but it would still be placed on moss, which holds webshop's
     // main workspace. The menu has to ask about that machine, or it says the
     // repo is not cloned on a machine nothing else ever named.
-    const api = stubApi(controller([INSTANCE_FRESH], {}, world()));
+    const api = stubApi(buildController([INSTANCE_FRESH], {}, buildWorldRoutes()));
     await renderApp({
-      path: inProject(WEBSHOP.id),
+      path: buildProjectDraftPath(WEBSHOP.id),
       api: api.fetch,
       token: "held",
       detectLocalRunner: () => Promise.resolve(RUNNER.id),
     });
 
     const menu = await openWorkspaceMenu(user);
-    expect(reading(menu)).toContain("on main · you and the agent share the files");
-    expect(reading(menu)).not.toContain("not cloned");
+    expect(readPageText(menu)).toContain("on main · you and the agent share the files");
+    expect(readPageText(menu)).not.toContain("not cloned");
   });
 
   it("says a repo is not cloned on the machine rather than hiding the row", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(EDGE.id));
+    await openDraftAt(buildProjectDraftPath(EDGE.id));
 
     const menu = await openWorkspaceMenu(user);
 
-    expect(reading(menu)).toContain("not cloned on moss · clones on first use");
+    expect(readPageText(menu)).toContain("not cloned on moss · clones on first use");
   });
 
   // D-20d: a project with no source works in None and says how to change that.
   it("reads None as locked text in a project with no repo", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(SANDBOX.id));
+    await openDraftAt(buildProjectDraftPath(SANDBOX.id));
 
     const locked = await screen.findByTitle("Add a repository to the project to work in one");
-    expect(reading(locked)).toContain("None");
+    expect(readPageText(locked)).toContain("None");
     expect(locked.closest("button")).toBeNull();
 
     await user.click(locked);
@@ -1662,25 +1731,25 @@ describe("Composer: the workspace selector (AC-17)", () => {
   });
 
   it("defaults to the main workspace in a one-repo project and to a worktree in a multi-repo one", async () => {
-    const one = await openAt(inProject(WEBSHOP.id));
+    const one = await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
     expect(await screen.findByRole("button", { name: /^workspace Main workspace$/ })).toBeDefined();
     one.unmount();
 
-    await openAt(inProject(OPS.id));
+    await openDraftAt(buildProjectDraftPath(OPS.id));
     expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
   });
 
   it("follows the stored thread.workspace", async () => {
-    await openAt(inProject(WEBSHOP.id), { "thread.workspace": "ephemeral" });
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id), { "thread.workspace": "ephemeral" });
     expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
   });
 
   it("rewrites the lead sentence as the pick changes", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     await waitFor(() => {
-      expect(reading()).toContain(
+      expect(readPageText()).toContain(
         "It works in the main workspace of webshop on moss, on main. You and the agent share the files.",
       );
     });
@@ -1688,7 +1757,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     await openWorkspaceMenu(user);
     await pickRow(user, /New workspace/);
     await waitFor(() => {
-      expect(reading()).toContain(
+      expect(readPageText()).toContain(
         "It gets its own worktree of webshop, on a new branch from main.",
       );
     });
@@ -1697,7 +1766,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     await pickRow(user, /hercule\/run-3f1/);
     // D-19: joining names the work already going on there, not the workspace.
     await waitFor(() => {
-      expect(reading()).toContain(
+      expect(readPageText()).toContain(
         "It joins “Fix flaky webhook tests” and “Write the retry runbook” there: the agents see each other's edits, on one branch.",
       );
     });
@@ -1706,17 +1775,17 @@ describe("Composer: the workspace selector (AC-17)", () => {
   // D-20d: None is offered only where there is nothing else, and there it is
   // what the draft stands under.
   it("says a draft in a project with no repo works without a checkout", async () => {
-    await openAt(inProject(SANDBOX.id));
+    await openDraftAt(buildProjectDraftPath(SANDBOX.id));
 
     await waitFor(() => {
-      expect(reading()).toContain("It works without a checkout.");
+      expect(readPageText()).toContain("It works without a checkout.");
     });
   });
 
   it("spawns with the project and the main workspace the draft stands in", async () => {
     const user = userEvent.setup();
-    const { api, router } = await openAt(
-      inProject(WEBSHOP.id),
+    const { api, router } = await openDraftAt(
+      buildProjectDraftPath(WEBSHOP.id),
       {},
       { "POST /api/v1/sessions": { body: NEW_SESSION } },
     );
@@ -1745,8 +1814,8 @@ describe("Composer: the workspace selector (AC-17)", () => {
 
   it("spawns with the workspace the user joined instead of the default", async () => {
     const user = userEvent.setup();
-    const { api } = await openAt(
-      inProject(WEBSHOP.id),
+    const { api } = await openDraftAt(
+      buildProjectDraftPath(WEBSHOP.id),
       {},
       { "POST /api/v1/sessions": { body: NEW_SESSION } },
     );
@@ -1773,8 +1842,8 @@ describe("Composer: the workspace selector (AC-17)", () => {
 
   it("spawns with one checkout per repo when a multi-repo project takes a new workspace", async () => {
     const user = userEvent.setup();
-    const { api } = await openAt(
-      inProject(OPS.id),
+    const { api } = await openDraftAt(
+      buildProjectDraftPath(OPS.id),
       {},
       { "POST /api/v1/sessions": { body: NEW_SESSION } },
     );
@@ -1800,7 +1869,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
   });
 
   it("preselects the workspace named in the address", async () => {
-    await openAt(`/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`);
+    await openDraftAt(`/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`);
 
     expect(
       await screen.findByRole("button", { name: /^workspace hercule\/run-3f1$/ }),
@@ -1811,10 +1880,10 @@ describe("Composer: the workspace selector (AC-17)", () => {
 describe("Composer: the branch selector (AC-18)", () => {
   it("lists the main workspace's branches, badges the one it is on and dims one a workspace holds", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     const menu = await openBranchMenu(user, /main/);
-    const text = reading(menu);
+    const text = readPageText(menu);
 
     expect(text).toContain("Branch");
     expect(text).toContain("the checkout switches to it");
@@ -1830,7 +1899,7 @@ describe("Composer: the branch selector (AC-18)", () => {
   // a note about it, so the note is what gives when the row runs out of room.
   it("keeps a held branch whole, cuts the note that holds it, and keeps it right-aligned", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     const menu = await openBranchMenu(user, /main/);
 
@@ -1852,13 +1921,13 @@ describe("Composer: the branch selector (AC-18)", () => {
 
   it("switches the lip and the lead to the branch that was picked", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     await openBranchMenu(user, /main/);
     await pickRow(user, /release\/2\.4/);
 
     await waitFor(() => {
-      expect(reading()).toContain(
+      expect(readPageText()).toContain(
         "It works in the main workspace of webshop on moss, on release/2.4. You and the agent share the files.",
       );
     });
@@ -1867,7 +1936,7 @@ describe("Composer: the branch selector (AC-18)", () => {
 
   it("asks for a base branch on a new workspace, badging the default and saying where it starts", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     await openWorkspaceMenu(user);
     await pickRow(user, /New workspace/);
@@ -1877,7 +1946,7 @@ describe("Composer: the branch selector (AC-18)", () => {
 
     await user.click(lip);
     const menu = await screen.findByRole("dialog");
-    const text = reading(menu);
+    const text = readPageText(menu);
 
     expect(text).toContain("Base branch");
     expect(text).toContain("the new branch starts from it");
@@ -1889,7 +1958,7 @@ describe("Composer: the branch selector (AC-18)", () => {
 
   it("reads the bases side by side, and takes no pick, in a multi-repo project", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(OPS.id));
+    await openDraftAt(buildProjectDraftPath(OPS.id));
 
     const lip = await screen.findByText("from master · main");
     expect(lip.closest("button")).toBeNull();
@@ -1901,7 +1970,7 @@ describe("Composer: the branch selector (AC-18)", () => {
 
   it("reads default, with nothing to pick, on a repo no machine has cloned", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(EDGE.id));
+    await openDraftAt(buildProjectDraftPath(EDGE.id));
 
     const lip = await screen.findByText("default");
     expect(lip.closest("button")).toBeNull();
@@ -1912,7 +1981,7 @@ describe("Composer: the branch selector (AC-18)", () => {
 
   it("is absent on a joined workspace, and on a draft with no workspace at all", async () => {
     const user = userEvent.setup();
-    const joined = await openAt(inProject(WEBSHOP.id));
+    const joined = await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     await openWorkspaceMenu(user);
     await pickRow(user, /hercule\/run-3f1/);
@@ -1923,7 +1992,7 @@ describe("Composer: the branch selector (AC-18)", () => {
     joined.unmount();
 
     // D-20d: None stands alone in a project with no repo, and carries no branch.
-    await openAt(inProject(SANDBOX.id));
+    await openDraftAt(buildProjectDraftPath(SANDBOX.id));
     await waitFor(() => {
       expect(screen.queryByText("Branch")).toBeNull();
     });
@@ -1934,7 +2003,7 @@ describe("Composer: the branch selector (AC-18)", () => {
 describe("Composer: the machine selector follows the workspace (AC-19)", () => {
   it("is read-only, naming the workspace, once the thread joins one", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     await openWorkspaceMenu(user);
     await pickRow(user, /hercule\/run-8a0/);
@@ -1947,12 +2016,12 @@ describe("Composer: the machine selector follows the workspace (AC-19)", () => {
 
   it("keeps a machine without the repo pickable, saying it clones on first use", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(EDGE.id));
+    await openDraftAt(buildProjectDraftPath(EDGE.id));
 
     await user.click(await screen.findByRole("button", { name: /^machine moss/ }));
     const menu = await screen.findByRole("dialog");
 
-    expect(reading(menu)).toContain("edge-api is not cloned there · clones on first use");
+    expect(readPageText(menu)).toContain("edge-api is not cloned there · clones on first use");
     // "not cloned" is a wait, not a refusal: the row stays a button. Asserted
     // on moss rather than on cove (D-15), which this fixture dims for a reason
     // of its own - no provider instance was ever probed there - and which
@@ -1970,9 +2039,9 @@ describe("Composer: the machine selector follows the workspace (AC-19)", () => {
  * ------------------------------------------------------------------ */
 
 describe("The New project dialog (D-20b)", () => {
-  const NEW_PROJECT = project("01a06d02-7000-7000-8000-000000000009", "checkout");
+  const NEW_PROJECT = buildProject("01a06d02-7000-7000-8000-000000000009", "checkout");
 
-  const NEW_REPO = repo("01a06d02-7100-7000-8000-000000000009", "acme", "checkout", [
+  const NEW_REPO = buildRepoResource("01a06d02-7100-7000-8000-000000000009", "acme", "checkout", [
     NEW_PROJECT.id,
   ]);
 
@@ -1984,7 +2053,7 @@ describe("The New project dialog (D-20b)", () => {
 
   it("creates the project, then a resource per source, and opens a draft in it", async () => {
     const user = userEvent.setup();
-    const { api, router } = await openAt(
+    const { api, router } = await openDraftAt(
       "/threads/new",
       {},
       {
@@ -2006,7 +2075,7 @@ describe("The New project dialog (D-20b)", () => {
     await user.click(within(dialog).getByRole("button", { name: "Create project" }));
 
     await waitFor(() => {
-      expect(router.state.location.href).toBe(inProject(NEW_PROJECT.id));
+      expect(router.state.location.href).toBe(buildProjectDraftPath(NEW_PROJECT.id));
     });
     expect(
       api.calls.find((call) => call.method === "POST" && call.path === "/api/v1/projects")?.body,
@@ -2024,7 +2093,7 @@ describe("The New project dialog (D-20b)", () => {
 
   it("offers only the GitHub connections, and says what an account is for", async () => {
     const user = userEvent.setup();
-    await openAt("/threads/new");
+    await openDraftAt("/threads/new");
 
     const dialog = await openDialog(user);
     await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
@@ -2033,12 +2102,12 @@ describe("The New project dialog (D-20b)", () => {
     const offered = [...select.options].map((option) => option.textContent);
     expect(offered).toContain(GITHUB.label);
     expect(offered).not.toContain(SLACK.label);
-    expect(reading(dialog)).toContain("A private repo needs one.");
+    expect(readPageText(dialog)).toContain("A private repo needs one.");
   });
 
   it("refuses a remote git would not take before anything is sent", async () => {
     const user = userEvent.setup();
-    const { api } = await openAt(
+    const { api } = await openDraftAt(
       "/threads/new",
       {},
       { "POST /api/v1/projects": { body: NEW_PROJECT } },
@@ -2064,14 +2133,14 @@ describe("The New project dialog (D-20b)", () => {
 
   it("shows the API's refusal beside the source it was about", async () => {
     const user = userEvent.setup();
-    const { router } = await openAt(
+    const { router } = await openDraftAt(
       "/threads/new",
       {},
       {
         "POST /api/v1/projects": { body: NEW_PROJECT },
         "POST /api/v1/resources": {
           status: 409,
-          body: envelope("conflict", "that repo is already a resource"),
+          body: buildErrorBody("conflict", "that repo is already a resource"),
         },
       },
     );
@@ -2096,14 +2165,14 @@ describe("The New project dialog (D-20b)", () => {
   // way out opens the draft in it, with what was refused simply not made.
   it("opens the draft in the project it made when the dialog is left after a refusal", async () => {
     const user = userEvent.setup();
-    const { router } = await openAt(
+    const { router } = await openDraftAt(
       "/threads/new",
       {},
       {
         "POST /api/v1/projects": { body: NEW_PROJECT },
         "POST /api/v1/resources": {
           status: 409,
-          body: envelope("conflict", "that repo is already a resource"),
+          body: buildErrorBody("conflict", "that repo is already a resource"),
         },
       },
     );
@@ -2121,14 +2190,14 @@ describe("The New project dialog (D-20b)", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
     await waitFor(() => {
-      expect(router.state.location.href).toBe(inProject(NEW_PROJECT.id));
+      expect(router.state.location.href).toBe(buildProjectDraftPath(NEW_PROJECT.id));
     });
     expect(screen.queryByRole("dialog", { name: "New project" })).toBeNull();
   });
 
   it("names the project before anything is sent", async () => {
     const user = userEvent.setup();
-    const { api } = await openAt("/threads/new");
+    const { api } = await openDraftAt("/threads/new");
 
     const dialog = await openDialog(user);
     await user.click(within(dialog).getByRole("button", { name: "Create project" }));
@@ -2146,7 +2215,7 @@ describe("The New project dialog (D-20b)", () => {
   // R6: a modal says what it is and takes the focus, as the picker does.
   it("is a modal dialog named after itself, with the focus in it", async () => {
     const user = userEvent.setup();
-    await openAt("/threads/new");
+    await openDraftAt("/threads/new");
 
     const dialog = await openDialog(user);
     expect(dialog.getAttribute("aria-modal")).toBe("true");
@@ -2155,7 +2224,7 @@ describe("The New project dialog (D-20b)", () => {
 
   it("closes on Cancel and on Esc", async () => {
     const user = userEvent.setup();
-    await openAt("/threads/new");
+    await openDraftAt("/threads/new");
 
     const dialog = await openDialog(user);
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -2172,10 +2241,10 @@ describe("The New project dialog (D-20b)", () => {
 
   it("leaves no add-repo or adopt form in the workspace menu", async () => {
     const user = userEvent.setup();
-    await openAt(inProject(WEBSHOP.id));
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     const menu = await openWorkspaceMenu(user);
-    const text = reading(menu);
+    const text = readPageText(menu);
     expect(text).not.toContain("Add a repo");
     expect(text).not.toContain("Adopt a folder");
   });

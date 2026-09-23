@@ -10,9 +10,9 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Duration, Effect, Exit, Option } from "effect";
 import {
-  checkCondition,
-  checkExpression,
-  checkTemplate,
+  validateCondition,
+  validateExpression,
+  validateTemplate,
   evaluateExpression,
   ExpressionBudget,
   isTemplate,
@@ -21,7 +21,7 @@ import {
 } from "./index";
 
 /** The message an effect failed with, or a thrown report that it succeeded. */
-const failureMessage = <A>(effect: Effect.Effect<A, ExpressionError>): string => {
+const readFailureMessage = <A>(effect: Effect.Effect<A, ExpressionError>): string => {
   const exit = Effect.runSyncExit(effect);
   if (Exit.isSuccess(exit))
     throw new Error(`expected a failure, got ${JSON.stringify(exit.value)}`);
@@ -38,7 +38,7 @@ const failureMessage = <A>(effect: Effect.Effect<A, ExpressionError>): string =>
 const readEvaluatorSummary = (message: string): string => message.slice(message.indexOf(": ") + 2);
 
 /** How many numbers a message spells, which is how a named value is found. */
-const numbersIn = (message: string): number => (message.match(/\d+/g) ?? []).length;
+const countNumbers = (message: string): number => (message.match(/\d+/g) ?? []).length;
 
 /**
  * A sum of `leaves` ones, nested in balance so that the node count grows with
@@ -46,7 +46,7 @@ const numbersIn = (message: string): number => (message.match(/\d+/g) ?? []).len
  * additions would exceed `maxDepth` at the same time as `maxAstNodes`, and the
  * test could not say which limit the message should name.
  */
-const balancedSum = (leaves: number): string => {
+const buildBalancedSum = (leaves: number): string => {
   let terms: ReadonlyArray<string> = Array.from({ length: leaves }, () => "1");
   while (terms.length > 1) {
     const joined: Array<string> = [];
@@ -63,7 +63,7 @@ const buildListSource = (elements: number): string =>
 const buildMapSource = (entries: number): string =>
   `{${Array.from({ length: entries }, (_unused, index) => `"k${index}": ${index}`).join(", ")}}`;
 
-const callWith = (args: number): string =>
+const buildSizeCall = (args: number): string =>
   `size(${Array.from({ length: args }, () => "1").join(", ")})`;
 
 /**
@@ -72,63 +72,67 @@ const callWith = (args: number): string =>
  */
 const parenthesize = (levels: number): string => `${"(".repeat(levels)}true${")".repeat(levels)}`;
 
-describe("checkExpression", () => {
+describe("validateExpression", () => {
   it.each([
     ["an equality over the envelope", `event.kind == "github.pr.opened"`],
     ["a membership test over refs", `"github:pr:o/r#87" in event.refs`],
     ["a presence test on a loose payload", `has(event.payload.subject) && event.payload.x == 1`],
     ["a bounded macro", `event.payload.labels.exists(label, label == "ci")`],
   ])("passes %s and answers nothing else", (_what, source) => {
-    expect(Effect.runSync(checkExpression(source, "event"))).toBeUndefined();
+    expect(Effect.runSync(validateExpression(source, "event"))).toBeUndefined();
   });
 
   it("refuses a syntax error", () => {
-    expect(failureMessage(checkExpression("event.kind ==", "event"))).not.toBe("");
+    expect(readFailureMessage(validateExpression("event.kind ==", "event"))).not.toBe("");
   });
 
   it.each([
-    ["maxAstNodes", () => balancedSum(16384)],
+    ["maxAstNodes", () => buildBalancedSum(16384)],
     ["maxDepth", () => parenthesize(200)],
     ["maxListElements", () => buildListSource(10000)],
     ["maxMapEntries", () => buildMapSource(10000)],
-    ["maxCallArguments", () => callWith(200)],
+    ["maxCallArguments", () => buildSizeCall(200)],
   ])("refuses a source over %s, naming the limit and its value", (limit, build) => {
-    const message = failureMessage(checkExpression(build(), "event"));
+    const message = readFailureMessage(validateExpression(build(), "event"));
 
     expect(message).toContain(limit);
-    expect(numbersIn(message)).toBeGreaterThanOrEqual(1);
+    expect(countNumbers(message)).toBeGreaterThanOrEqual(1);
   });
 
   it("refuses a call to a function nobody registered, naming the function", () => {
-    expect(failureMessage(checkExpression(`sendEmail("rogier")`, "event"))).toContain("sendEmail");
+    expect(readFailureMessage(validateExpression(`sendEmail("rogier")`, "event"))).toContain(
+      "sendEmail",
+    );
   });
 });
 
-describe("checkExpression with a scope", () => {
+describe("validateExpression with a scope", () => {
   it("accepts event in the event scope, and rejects steps", () => {
-    expect(Effect.runSync(checkExpression(`event.payload.number > 3`, "event"))).toBeUndefined();
+    expect(Effect.runSync(validateExpression(`event.payload.number > 3`, "event"))).toBeUndefined();
 
-    const message = failureMessage(checkExpression(`steps.review.output.id == "x"`, "event"));
+    const message = readFailureMessage(
+      validateExpression(`steps.review.output.id == "x"`, "event"),
+    );
     expect(message).toContain("steps");
     expect(message).toContain("can read only event");
   });
 
   it("accepts inputs and steps in the run scope, and explains how to get a value from the event", () => {
     expect(
-      Effect.runSync(checkExpression(`has(inputs.pr) && steps.review.output.ok`, "run")),
+      Effect.runSync(validateExpression(`has(inputs.pr) && steps.review.output.ok`, "run")),
     ).toBeUndefined();
 
-    const message = failureMessage(checkExpression(`event.kind == "task.updated"`, "run"));
+    const message = readFailureMessage(validateExpression(`event.kind == "task.updated"`, "run"));
     expect(message).toContain("can read only inputs and steps");
     expect(message).toContain("inputs.<name>");
   });
 
   it("rejects a variable that no scope declares, and names it in the message", () => {
-    expect(failureMessage(checkExpression(`request.id == 1`, "run"))).toContain("request");
+    expect(readFailureMessage(validateExpression(`request.id == 1`, "run"))).toContain("request");
   });
 });
 
-describe("checkCondition", () => {
+describe("validateCondition", () => {
   it("accepts a source of type bool, and a source of type dyn", () => {
     for (const [source, scope] of [
       [`event.payload.number > 3`, "event"],
@@ -136,62 +140,64 @@ describe("checkCondition", () => {
       [`event.payload.merged`, "event"],
       [`steps.review.output.approved`, "run"],
     ] as const) {
-      expect(Effect.runSync(checkCondition(source, scope)), source).toBeUndefined();
+      expect(Effect.runSync(validateCondition(source, scope)), source).toBeUndefined();
     }
   });
 
   it("rejects a source whose type is known and is not bool, and names the type", () => {
-    const text = failureMessage(checkCondition(`'yes'`, "run"));
+    const text = readFailureMessage(validateCondition(`'yes'`, "run"));
     expect(text).toContain("string");
     expect(text).toContain("true or false");
 
-    expect(failureMessage(checkCondition(`size(inputs.labels)`, "run"))).toContain("int");
+    expect(readFailureMessage(validateCondition(`size(inputs.labels)`, "run"))).toContain("int");
   });
 
-  it("rejects what checkExpression rejects, with the same message", () => {
-    expect(failureMessage(checkCondition(`steps.x.output.ok`, "event"))).toBe(
-      failureMessage(checkExpression(`steps.x.output.ok`, "event")),
+  it("rejects what validateExpression rejects, with the same message", () => {
+    expect(readFailureMessage(validateCondition(`steps.x.output.ok`, "event"))).toBe(
+      readFailureMessage(validateExpression(`steps.x.output.ok`, "event")),
     );
   });
 });
 
-describe("checkTemplate", () => {
+describe("validateTemplate", () => {
   it("accepts a string with no expressions, and expressions that read inputs and steps", () => {
     for (const template of [
       "Review the pull request.",
       "Review {{ inputs.prUrl }}. The last reviewer said {{ steps.review.output.notes }}.",
       "{{inputs.count + 1}}",
     ]) {
-      expect(Effect.runSync(checkTemplate(template)), template).toBeUndefined();
+      expect(Effect.runSync(validateTemplate(template)), template).toBeUndefined();
     }
   });
 
   it("accepts {{ '{{' }}, which is how a literal {{ is written", () => {
-    expect(Effect.runSync(checkTemplate("Write {{ '{{' }} where a template starts."))).toBe(
+    expect(Effect.runSync(validateTemplate("Write {{ '{{' }} where a template starts."))).toBe(
       undefined,
     );
   });
 
   it("rejects a {{ with no closing }}, and gives its character position", () => {
-    const message = failureMessage(checkTemplate("Review {{ inputs.prUrl }} and {{ steps.x"));
+    const message = readFailureMessage(
+      validateTemplate("Review {{ inputs.prUrl }} and {{ steps.x"),
+    );
     expect(message).toContain("character 31");
     expect(message).toContain("}}");
   });
 
   it("rejects the first expression that is not valid in the run scope, and gives its character position", () => {
-    const syntax = failureMessage(checkTemplate("Review {{ inputs.prUrl + }}."));
+    const syntax = readFailureMessage(validateTemplate("Review {{ inputs.prUrl + }}."));
     expect(syntax).toContain("character 8");
     expect(syntax).toContain("not valid CEL");
 
-    const scoped = failureMessage(checkTemplate("{{ inputs.a }} {{ event.payload.title }}"));
+    const scoped = readFailureMessage(validateTemplate("{{ inputs.a }} {{ event.payload.title }}"));
     expect(scoped).toContain("character 16");
     expect(scoped).toContain("event");
   });
 
   it("counts an emoji before the {{ as one character", () => {
     // The emoji is two UTF-16 code units, so counting code units would give character 4.
-    expect(failureMessage(checkTemplate("😀 {{ inputs.a"))).toContain("character 3 ");
-    expect(failureMessage(checkTemplate("😀 {{ event.id }}"))).toContain("character 3 ");
+    expect(readFailureMessage(validateTemplate("😀 {{ inputs.a"))).toContain("character 3 ");
+    expect(readFailureMessage(validateTemplate("😀 {{ event.id }}"))).toContain("character 3 ");
   });
 });
 
@@ -209,12 +215,12 @@ describe("parseExpression", () => {
   });
 
   it("refuses a syntax error", () => {
-    expect(failureMessage(parseExpression("event.kind =="))).not.toBe("");
+    expect(readFailureMessage(parseExpression("event.kind =="))).not.toBe("");
   });
 
   it("returns only the reason, as a stored health message needs, and not the fix that validation adds", () => {
-    const parsed = failureMessage(parseExpression("event.kind =="));
-    const checked = failureMessage(checkExpression("event.kind ==", "event"));
+    const parsed = readFailureMessage(parseExpression("event.kind =="));
+    const checked = readFailureMessage(validateExpression("event.kind ==", "event"));
 
     expect(parsed).toMatch(/^that expression is not valid CEL: /);
     expect(checked).toMatch(/^This expression is not valid CEL: /);
@@ -223,7 +229,9 @@ describe("parseExpression", () => {
   });
 
   it("refuses a source over a structural limit, naming the limit", () => {
-    expect(failureMessage(parseExpression(buildListSource(10000)))).toContain("maxListElements");
+    expect(readFailureMessage(parseExpression(buildListSource(10000)))).toContain(
+      "maxListElements",
+    );
   });
 
   it("answers, for a compiled source, what the source itself answers", () => {
@@ -249,8 +257,8 @@ describe("parseExpression", () => {
 
     // A caller reading the refusal reads the same complaint whichever of the
     // two it called, so compiling a source first tells it nothing new.
-    expect(failureMessage(parseExpression(source))).toContain(
-      readEvaluatorSummary(failureMessage(evaluateExpression(source, {}))),
+    expect(readFailureMessage(parseExpression(source))).toContain(
+      readEvaluatorSummary(readFailureMessage(evaluateExpression(source, {}))),
     );
   });
 });
@@ -269,15 +277,15 @@ describe("evaluateExpression over the wall-clock budget", () => {
     Effect.provideService(effect, ExpressionBudget, Duration.zero);
 
   it("reports the overrun with the budget and the elapsed time, and remembers nothing", () => {
-    const first = failureMessage(withBudget(evaluateExpression(source, context)));
+    const first = readFailureMessage(withBudget(evaluateExpression(source, context)));
 
     expect(first.toLowerCase()).toContain("budget");
-    expect(numbersIn(first)).toBeGreaterThanOrEqual(2);
+    expect(countNumbers(first)).toBeGreaterThanOrEqual(2);
 
     // The wrapper does not retire an expression that went over: the same
     // source runs again and reports again, because the router re-evaluates
     // it on the next tick.
-    const second = failureMessage(withBudget(evaluateExpression(source, context)));
+    const second = readFailureMessage(withBudget(evaluateExpression(source, context)));
     expect(second.toLowerCase()).toContain("budget");
 
     // An overrun leaves the shared environment usable for everything else:

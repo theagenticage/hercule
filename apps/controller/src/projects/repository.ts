@@ -14,9 +14,9 @@ import type { Project, SortDirection } from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -80,7 +80,7 @@ const toProject = (row: ProjectRow): Project => ({
   ...(row.deleted_at === null ? {} : { deletedAt: row.deleted_at }),
 });
 
-const sortKeyOf = (project: Project, field: ProjectSortField): string => {
+const readSortKey = (project: Project, field: ProjectSortField): string => {
   switch (field) {
     case "name":
       return project.name;
@@ -147,7 +147,7 @@ const make = Effect.gen(function* () {
           request.cursor === undefined
             ? undefined
             : yield* decodeCursor(request.cursor, scope, "string");
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           [SORT_COLUMN[request.field], "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -157,11 +157,11 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(COLUMNS)} FROM projects
           WHERE deleted_at IS NULL AND ${keyset} ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toProject)),
-          (last) => encodeCursor(scope, sortKeyOf(last, request.field), last.id),
+          (last) => encodeCursor(scope, readSortKey(last, request.field), last.id),
         );
       }),
   };

@@ -3,55 +3,65 @@ import { Effect, Schema } from "effect";
 import { MAX_FILTER_VALUES, MAX_PROVENANCE_APPEND, MAX_TASK_LABELS } from "../index";
 import { TaskCreateInput, TaskFilter, TaskUpdateInput } from "./task";
 
-const outcome = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeOutcome = <S extends Schema.Codec<unknown, unknown, never, never>>(
   schema: S,
   input: unknown,
 ) => Effect.runSyncExit(Schema.decodeUnknownEffect(schema)(input))._tag;
 
-const labels = (count: number) =>
+const buildLabels = (count: number) =>
   Array.from({ length: count }, (_, index) => `label-${String(index)}`);
 
 describe("the bounds on a task's lists", () => {
   it("takes a list at the cap and refuses the one past it", () => {
     expect(
-      outcome(TaskCreateInput, { title: "t", description: "", labels: labels(MAX_TASK_LABELS) }),
-    ).toBe("Success");
-    expect(
-      outcome(TaskCreateInput, {
+      decodeOutcome(TaskCreateInput, {
         title: "t",
         description: "",
-        labels: labels(MAX_TASK_LABELS + 1),
+        labels: buildLabels(MAX_TASK_LABELS),
+      }),
+    ).toBe("Success");
+    expect(
+      decodeOutcome(TaskCreateInput, {
+        title: "t",
+        description: "",
+        labels: buildLabels(MAX_TASK_LABELS + 1),
       }),
     ).toBe("Failure");
   });
 
   it("bounds both sides of a label edit", () => {
-    expect(outcome(TaskUpdateInput, { addLabels: labels(MAX_TASK_LABELS + 1) })).toBe("Failure");
-    expect(outcome(TaskUpdateInput, { removeLabels: labels(MAX_TASK_LABELS + 1) })).toBe("Failure");
-  });
-
-  it("bounds one call's provenance append", () => {
-    const entries = (count: number) =>
-      Array.from({ length: count }, (_, index) => ({
-        ref: `github:issue:owner/repo#${String(index)}`,
-      }));
-    expect(outcome(TaskUpdateInput, { provenance: entries(MAX_PROVENANCE_APPEND) })).toBe(
-      "Success",
+    expect(decodeOutcome(TaskUpdateInput, { addLabels: buildLabels(MAX_TASK_LABELS + 1) })).toBe(
+      "Failure",
     );
-    expect(outcome(TaskUpdateInput, { provenance: entries(MAX_PROVENANCE_APPEND + 1) })).toBe(
+    expect(decodeOutcome(TaskUpdateInput, { removeLabels: buildLabels(MAX_TASK_LABELS + 1) })).toBe(
       "Failure",
     );
   });
 
-  it("bounds every any-of list a filter takes", () => {
-    expect(outcome(TaskFilter, { labels: labels(MAX_FILTER_VALUES + 1) })).toBe("Failure");
+  it("bounds one call's provenance append", () => {
+    const buildEntries = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        ref: `github:issue:owner/repo#${String(index)}`,
+      }));
     expect(
-      outcome(TaskFilter, {
+      decodeOutcome(TaskUpdateInput, { provenance: buildEntries(MAX_PROVENANCE_APPEND) }),
+    ).toBe("Success");
+    expect(
+      decodeOutcome(TaskUpdateInput, { provenance: buildEntries(MAX_PROVENANCE_APPEND + 1) }),
+    ).toBe("Failure");
+  });
+
+  it("bounds every any-of list a filter takes", () => {
+    expect(decodeOutcome(TaskFilter, { labels: buildLabels(MAX_FILTER_VALUES + 1) })).toBe(
+      "Failure",
+    );
+    expect(
+      decodeOutcome(TaskFilter, {
         status: Array.from({ length: MAX_FILTER_VALUES + 1 }, () => "open"),
       }),
     ).toBe("Failure");
     expect(
-      outcome(TaskFilter, {
+      decodeOutcome(TaskFilter, {
         refs: Array.from({ length: MAX_FILTER_VALUES + 1 }, () => "github:issue:owner/repo#1"),
       }),
     ).toBe("Failure");

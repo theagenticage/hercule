@@ -1,8 +1,8 @@
 import type { JSX } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ageOf } from "@hercule/client-core";
-import { EmptyState, buttonClassName, useMinuteClock } from "@hercule/ui";
+import { formatAge } from "@hercule/client-core";
+import { EmptyState, buildButtonClassName, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { workflowsQuery } from "../../../app/queries";
 import { WorkflowRow } from "./-row";
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/_shell/workflows/")({
 /** Renders the New workflow button. It is a link, because it opens a page of its own. */
 function NewWorkflowLink(): JSX.Element {
   return (
-    <Link to="/workflows/new" className={buttonClassName("form", "self-start")}>
+    <Link to="/workflows/new" className={buildButtonClassName("form", "self-start")}>
       New workflow
     </Link>
   );
@@ -58,7 +58,7 @@ function Workflows(): JSX.Element {
             key={workflow.id}
             client={client}
             workflow={workflow}
-            age={ageOf(workflow.updatedAt, now)}
+            age={formatAge(workflow.updatedAt, now)}
           />
         ))}
       </ul>

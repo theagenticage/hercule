@@ -46,14 +46,14 @@ import {
 } from "@hercule/contract";
 import { requireGrant, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
-import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { canonicalRemoteOf, isClonableRemote } from "./remote";
 import { composeResource, resourceRepository, type StoredResource } from "./repository";
 
 const QueryInput = Schema.Struct({
   ...ResourceFilter.fields,
-  ...pageInput(RESOURCE_SORT_FIELDS),
+  ...buildPageInputFields(RESOURCE_SORT_FIELDS),
 });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
@@ -85,14 +85,14 @@ const NO_SUCH_RESOURCE = "no such resource";
 const REPO_IS_ITS_REMOTE = "a repo is named by its remote, so it takes no label";
 
 /** What a kind that is never checked out has no use for. */
-const noCheckout = (kind: string): string =>
+const describeNoCheckout = (kind: string): string =>
   `a ${kind} is never checked out, so it has no setup command and nothing to include`;
 
 /**
  * Which of the two checkout-only fields a non-repo was given, if either: they
  * are refused rather than stored where nothing would ever read them.
  */
-const offRepo = (given: {
+const findRepoOnlyField = (given: {
   readonly setupCommand?: unknown;
   readonly workspaceInclude?: unknown;
 }): "setupCommand" | "workspaceInclude" | undefined =>
@@ -116,7 +116,9 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const audit = yield* AuditLog;
 
-  const stored = (id: string): Effect.Effect<StoredResource, NotFound | SqlError> =>
+  const readStoredResourceOrFail = (
+    id: string,
+  ): Effect.Effect<StoredResource, NotFound | SqlError> =>
     Effect.flatMap(
       resources.one(id),
       Option.match({
@@ -125,13 +127,13 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const composed = (row: StoredResource): Effect.Effect<Resource, SqlError> =>
+  const readResourceRecord = (row: StoredResource): Effect.Effect<Resource, SqlError> =>
     Effect.map(resources.projectsOf([row.id]), (projects) =>
       composeResource(row, projects.get(row.id) ?? []),
     );
 
   /** The connection a resource may name, or the issue saying why it may not. */
-  const namedConnection = (
+  const validateNamedConnection = (
     kind: ResourceKind,
     connectionId: string,
   ): Effect.Effect<void, Validation | SqlError> =>
@@ -152,7 +154,7 @@ const make = Effect.gen(function* () {
     });
 
   /** Every project named has to exist, or the link would point at nothing. */
-  const namedProjects = (
+  const validateNamedProjects = (
     projectIds: ReadonlyArray<string>,
   ): Effect.Effect<void, Validation | SqlError> =>
     Effect.gen(function* () {
@@ -171,7 +173,7 @@ const make = Effect.gen(function* () {
    * The canonical form of a remote, refusing one that names no repository and
    * one another resource already holds.
    */
-  const freeRemote = (
+  const canonicalizeRemoteOrFail = (
     remote: string,
     self: string | undefined,
   ): Effect.Effect<string, Validation | Conflict | SqlError> =>
@@ -219,7 +221,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("resource.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        return yield* Effect.flatMap(stored(id), composed);
+        return yield* Effect.flatMap(readStoredResourceOrFail(id), readResourceRecord);
       }),
 
     create: (
@@ -253,27 +255,29 @@ const make = Effect.gen(function* () {
               ]),
             );
           }
-          const off = offRepo(decoded);
+          const off = findRepoOnlyField(decoded);
           if (off !== undefined) {
             return yield* Effect.fail(
-              createValidationError([{ path: [off], message: noCheckout(decoded.kind) }]),
+              createValidationError([{ path: [off], message: describeNoCheckout(decoded.kind) }]),
             );
           }
         }
         if (decoded.connectionId !== undefined) {
-          yield* namedConnection(decoded.kind, decoded.connectionId);
+          yield* validateNamedConnection(decoded.kind, decoded.connectionId);
         }
         // A project named twice is the same link: what the caller asked for is
         // the set, and the join table holds one row per pair.
         const projectIds = [...new Set(decoded.projectIds ?? [])];
-        yield* namedProjects(projectIds);
+        yield* validateNamedProjects(projectIds);
 
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
             const canonicalRemote =
-              decoded.remote === undefined ? null : yield* freeRemote(decoded.remote, undefined);
+              decoded.remote === undefined
+                ? null
+                : yield* canonicalizeRemoteOrFail(decoded.remote, undefined);
             const row = yield* resources.insert({
               kind: decoded.kind,
               remote: decoded.remote ?? null,
@@ -317,9 +321,9 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const before = yield* stored(id);
+            const before = yield* readStoredResourceOrFail(id);
             if (patch.connectionId !== undefined && patch.connectionId !== null) {
-              yield* namedConnection(before.kind, patch.connectionId);
+              yield* validateNamedConnection(before.kind, patch.connectionId);
             }
             if (before.kind === "repo") {
               if (patch.label !== undefined && patch.label !== null) {
@@ -335,15 +339,19 @@ const make = Effect.gen(function* () {
                   ]),
                 );
               }
-              const off = offRepo(patch);
+              const off = findRepoOnlyField(patch);
               if (off !== undefined) {
                 return yield* Effect.fail(
-                  createValidationError([{ path: [off], message: noCheckout(before.kind) }]),
+                  createValidationError([
+                    { path: [off], message: describeNoCheckout(before.kind) },
+                  ]),
                 );
               }
             }
             const canonicalRemote =
-              patch.remote === undefined ? undefined : yield* freeRemote(patch.remote, id);
+              patch.remote === undefined
+                ? undefined
+                : yield* canonicalizeRemoteOrFail(patch.remote, id);
             yield* resources.update(
               id,
               {
@@ -360,7 +368,7 @@ const make = Effect.gen(function* () {
             );
             if (patch.projectIds !== undefined) {
               const projectIds = [...new Set(patch.projectIds)];
-              yield* namedProjects(projectIds);
+              yield* validateNamedProjects(projectIds);
               yield* resources.setProjects(id, projectIds);
             }
             yield* audit.append({
@@ -370,7 +378,7 @@ const make = Effect.gen(function* () {
               at,
             });
             // Read back, so what the caller gets is the row that was written.
-            return yield* Effect.flatMap(stored(id), composed);
+            return yield* Effect.flatMap(readStoredResourceOrFail(id), readResourceRecord);
           }),
         );
       }),
@@ -385,7 +393,10 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const resource = yield* Effect.flatMap(stored(id), composed);
+            const resource = yield* Effect.flatMap(
+              readStoredResourceOrFail(id),
+              readResourceRecord,
+            );
             if (yield* resources.standsOn(id)) {
               return yield* Effect.fail(createInvalidStateError(STANDS_ON));
             }

@@ -20,7 +20,7 @@ import { withTransaction } from "../db";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../runners";
 import { SessionService } from "../sessions";
 import { WorkspaceService } from "../workspaces";
-import { absorbing, forking } from "./absorbing";
+import { absorbFailures, forkAndAbsorbFailures } from "./absorbing";
 import { Dispatch } from "./dispatch";
 import { Live } from "./live";
 
@@ -32,7 +32,7 @@ const make = Effect.gen(function* () {
   const { dispatch } = yield* Dispatch;
   const { flush } = yield* Live;
 
-  const applying = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
+  const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
       case "workspaceReported":
         return Effect.gen(function* () {
@@ -59,7 +59,7 @@ const make = Effect.gen(function* () {
           // After the commit, and forked: a working area that came up releases
           // the sessions waiting on it, and that reaches the machine.
           if (settled?.moved === "ready") {
-            yield* forking(
+            yield* forkAndAbsorbFailures(
               "A ready working area could not be dispatched",
               dispatch(traffic.runnerId),
             );
@@ -77,11 +77,14 @@ const make = Effect.gen(function* () {
         // what a machine now has room for is a transaction and a credential
         // read per session, and the rest of the fleet must not wait behind one
         // machine's.
-        return forking("A freed slot could not be dispatched", dispatch(traffic.runnerId));
+        return forkAndAbsorbFailures(
+          "A freed slot could not be dispatched",
+          dispatch(traffic.runnerId),
+        );
     }
   };
 
-  const ingesting = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
+  const ingestSessionTraffic = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       if (traffic.frame._tag === "sessionsReport") {
         const ended = yield* sessions.bound(traffic.runnerId, traffic.frame.sessions);
@@ -94,7 +97,10 @@ const make = Effect.gen(function* () {
         for (const id of ended) {
           yield* connections.tell(traffic.runnerId, sessions.stopping(id));
         }
-        yield* forking("A runner's report could not be dispatched", dispatch(traffic.runnerId));
+        yield* forkAndAbsorbFailures(
+          "A runner's report could not be dispatched",
+          dispatch(traffic.runnerId),
+        );
         return;
       }
       const { seq, event } = traffic.frame;
@@ -118,20 +124,26 @@ const make = Effect.gen(function* () {
       // A session that has gone idle can take what is queued for it; one that
       // has exited has left its machine a slot free.
       if (applied.moved === "idle") {
-        yield* forking("A session's queued input could not be sent", flush(event.sessionId));
+        yield* forkAndAbsorbFailures(
+          "A session's queued input could not be sent",
+          flush(event.sessionId),
+        );
       }
       if (applied.moved === "exited") {
-        yield* forking("A freed slot could not be dispatched", dispatch(traffic.runnerId));
+        yield* forkAndAbsorbFailures(
+          "A freed slot could not be dispatched",
+          dispatch(traffic.runnerId),
+        );
       }
     });
 
   return {
     driving: Stream.runForEach(connections.fleetTraffic, (traffic) =>
-      absorbing("A runner's report could not be applied", applying(traffic)),
+      absorbFailures("A runner's report could not be applied", applyFleetTraffic(traffic)),
     ),
 
     ingesting: Stream.runForEach(connections.sessionTraffic, (traffic) =>
-      absorbing("A session report could not be recorded", ingesting(traffic)),
+      absorbFailures("A session report could not be recorded", ingestSessionTraffic(traffic)),
     ),
   };
 });

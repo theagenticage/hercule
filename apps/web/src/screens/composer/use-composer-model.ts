@@ -3,15 +3,15 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   applyPick,
-  composerFields,
-  composerPlaceholder,
-  effectiveConfig,
+  buildComposerFields,
+  buildComposerPlaceholder,
+  computeEffectiveConfig,
   pushRecent,
   queryKeys,
-  resumeBlockedReason,
-  runnerForPick,
-  submission,
-  threadConfig,
+  findResumeBlockedReason,
+  findRunnerForPick,
+  buildSubmission,
+  readThreadConfig,
   type ComposerFields,
   type ComposerPick,
   type HerculeClient,
@@ -84,11 +84,11 @@ export function useComposerModel(
   const [recent, setRecent] = useState(readRecent);
 
   const session = thread.kind === "active" ? thread.session : null;
-  const base = threadConfig(thread);
-  const config = effectiveConfig(base, picks);
-  const fields = composerFields(catalogs, config, thread.kind);
+  const base = readThreadConfig(thread);
+  const config = computeEffectiveConfig(base, picks);
+  const fields = buildComposerFields(catalogs, config, thread.kind);
   // Recent follows the submission home, and holds only what was picked.
-  const remember = (): void => {
+  const rememberRecentModel = (): void => {
     const model = picks.model ?? null;
     if (model === null || config.instanceId === null) return;
     const next = pushRecent(recent, { instanceId: config.instanceId, model });
@@ -98,7 +98,7 @@ export function useComposerModel(
   const spawn = useMutation({
     mutationFn: (payload: SessionSpawnInput) => client.session.spawn({ payload }),
     onSuccess: (created) => {
-      remember();
+      rememberRecentModel();
       void navigate({ to: "/threads/$sessionId", params: { sessionId: created.id } });
     },
   });
@@ -106,7 +106,7 @@ export function useComposerModel(
     mutationFn: (sent: { readonly id: string; readonly payload: SessionInputPayload }) =>
       client.session.input({ params: { id: sent.id }, payload: sent.payload }),
     onSuccess: async (_answer, sent) => {
-      remember();
+      rememberRecentModel();
       // The picks are cleared only once the row that holds them is in the cache.
       await queryClient.invalidateQueries({ queryKey: queryKeys.session(sent.id) });
       setMessage("");
@@ -121,7 +121,7 @@ export function useComposerModel(
       queryClient.setQueryData(queryKeys.session(updated.id), updated);
     },
   });
-  const readOnly = session === null ? null : resumeBlockedReason(session);
+  const readOnly = session === null ? null : findResumeBlockedReason(session);
   const busy = session?.status === "busy";
 
   return {
@@ -131,7 +131,7 @@ export function useComposerModel(
     picks,
     recent,
     message,
-    placeholder: composerPlaceholder({
+    placeholder: buildComposerPlaceholder({
       readOnly,
       busy,
       active: session !== null,
@@ -154,8 +154,8 @@ export function useComposerModel(
       // included: a pick the user never touched is still where the thread
       // works, and a workspace that already stands settles the machine too.
       const workspace = fields.workspace.value;
-      const settled = runnerForPick(workspace, catalogs.workspaces ?? []);
-      const sent = submission(
+      const settled = findRunnerForPick(workspace, catalogs.workspaces ?? []);
+      const sent = buildSubmission(
         thread,
         thread.kind === "draft"
           ? { ...picks, workspace, ...(settled === null ? {} : { runnerId: settled }) }

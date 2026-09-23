@@ -14,7 +14,7 @@
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
-  loopbackEndpoints,
+  listLoopbackEndpoints,
   queryKeys,
   RUNNING_STATUSES,
   type HerculeClient,
@@ -327,7 +327,7 @@ export const localRunnerQuery = (
 ) =>
   queryOptions({
     queryKey: queryKeys.localRunner(
-      loopbackEndpoints(runners).map(({ id, port }) => `${id}:${String(port)}`),
+      listLoopbackEndpoints(runners).map(({ id, port }) => `${id}:${String(port)}`),
     ),
     queryFn: () => detect(runners),
     retry: false,

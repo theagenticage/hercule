@@ -467,7 +467,7 @@ export const RunnerToController = Schema.Union([
 export type RunnerToController = Schema.Schema.Type<typeof RunnerToController>;
 
 /**
- * The controller's opening frame. `signature` is over `signedChallenge`, made
+ * The controller's opening frame. `signature` is over `encodeChallengeBytes`, made
  * with the key `publicKey` names, which is how a runner recognises its own
  * controller at whatever address it answers on.
  */
@@ -499,7 +499,7 @@ export type ControllerHello = Schema.Schema.Type<typeof ControllerHello>;
  * and a nonce is standard base64, whose alphabet has no colon, so the last
  * colon always separates the two halves.
  */
-export const signedChallenge = (runnerId: string, nonce: string): Uint8Array<ArrayBuffer> =>
+export const encodeChallengeBytes = (runnerId: string, nonce: string): Uint8Array<ArrayBuffer> =>
   new TextEncoder().encode(`hercule:runner-hello:${runnerId}:${nonce}`);
 
 /**

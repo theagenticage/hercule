@@ -67,7 +67,7 @@ export function ProviderLogin({
   };
 
   /** Nothing was relayed, so all that is left is to stop showing the code. */
-  const done = (): void => {
+  const finishLogin = (): void => {
     close();
     onLoggedIn();
   };
@@ -107,7 +107,7 @@ export function ProviderLogin({
             {/* The site is the one part of a long opaque URL a reader can
                 check, and naming it is what tells them to. */}
             <p className="text-row text-muted">
-              You will sign in at <b className="font-emph text-ink">{siteOf(url)}</b>.
+              You will sign in at <b className="font-emph text-ink">{parseSiteHost(url)}</b>.
             </p>
             <a
               href={url}
@@ -177,7 +177,7 @@ export function ProviderLogin({
                 instance&apos;s <code className="font-mono text-ink">$CODEX_HOME</code>.
               </p>
               <div className="-ml-2">
-                <Button variant="primary" onClick={done}>
+                <Button variant="primary" onClick={finishLogin}>
                   Done
                 </Button>
               </div>
@@ -194,7 +194,7 @@ export function ProviderLogin({
   );
 }
 
-const siteOf = (url: string | undefined): string => {
+const parseSiteHost = (url: string | undefined): string => {
   try {
     return new URL(url ?? "").host;
   } catch {

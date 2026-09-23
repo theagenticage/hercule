@@ -37,7 +37,7 @@ export const secret = (words: {
 const SECRET_MARKER = "x-secret";
 
 /** An annotation is declared as `unknown`, so each one is read at its own type. */
-const said = (ast: SchemaAST.AST, word: "title" | "description"): string | undefined => {
+const readAnnotation = (ast: SchemaAST.AST, word: "title" | "description"): string | undefined => {
   const value = ast.annotations?.[word];
   return typeof value === "string" ? value : undefined;
 };
@@ -58,7 +58,7 @@ const isSecret = (ast: SchemaAST.AST): boolean =>
  * drops an annotation it does not know - which is also why the marker is put
  * back by hand below.
  */
-export const secretFields = (
+export const listSecretFields = (
   schema: Schema.Top,
 ): ReadonlyArray<{
   readonly name: string;
@@ -73,8 +73,8 @@ export const secretFields = (
     return [
       {
         name,
-        title: said(type, "title") ?? name,
-        description: said(type, "description") ?? "",
+        title: readAnnotation(type, "title") ?? name,
+        description: readAnnotation(type, "description") ?? "",
       },
     ];
   });
@@ -96,7 +96,7 @@ const derivesAsEmptyStruct = (root: JsonSchema.JsonSchema): boolean => {
 };
 
 /** Why one property cannot be rendered, or `undefined` when it can. */
-const unsupportedProperty = (property: JsonSchema.JsonSchema): string | undefined => {
+const findUnsupportedReason = (property: JsonSchema.JsonSchema): string | undefined => {
   // A select renders string options; a number or boolean enum would need a
   // widget that does not exist.
   if ("enum" in property && property.type !== "string") {
@@ -145,14 +145,14 @@ export const deriveConfigJsonSchema = (
     );
   }
 
-  const marked = new Set(secretFields(schema).map((field) => field.name));
+  const marked = new Set(listSecretFields(schema).map((field) => field.name));
   const rendered: Record<string, JsonSchema.JsonSchema> = {};
   for (const [name, property] of Object.entries(properties)) {
     const reason = marked.has(name)
       ? property.type === "string"
         ? undefined
         : "is marked secret, which only a string can be: nothing else has a masked input"
-      : unsupportedProperty(property);
+      : findUnsupportedReason(property);
     if (reason !== undefined) {
       return Result.fail(
         new UnsupportedConfigSchema({ message: `the config property "${name}" ${reason}` }),
@@ -195,7 +195,7 @@ export const decodeAgainst = (
  * and a credential written into one is refused by name rather than saved.
  */
 export const excludeSecretFields = (schema: Schema.Top): Schema.Top => {
-  const marked = new Set(secretFields(schema).map((field) => field.name));
+  const marked = new Set(listSecretFields(schema).map((field) => field.name));
   if (marked.size === 0) return schema;
   // `fields` is public on `Schema.Struct` but not on `Schema.Top`, which is
   // what a plugin's config schema arrives as, and effect 4.0.0-rc.112 exports

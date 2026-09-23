@@ -6,7 +6,7 @@
  * starts it and every command goes through `argv`, stdin, stdout and the exit
  * code - the same surface a shell sees.
  *
- * The processes are started with `Bun.spawn` rather than `spawnHercule`, which
+ * The processes are started with `Bun.spawn` rather than `spawnOwnBinary`, which
  * inherits stdio: a test has to read what the command printed.
  */
 import {
@@ -39,7 +39,7 @@ const ENTRYPOINT = join(ROOT, "packages/hercule/src/main.ts");
  * that runs it, and the dispatcher's source when it is run on its own with no
  * build behind it.
  */
-export function releaseBinary(): string | undefined {
+export function findReleaseBinary(): string | undefined {
   const built = join(ROOT, "hercule");
   return existsSync(built) ? built : undefined;
 }
@@ -56,7 +56,7 @@ const BUN = process.execPath.endsWith("/bun") ? process.execPath : "bun";
  * variable. A developer with `HERCULE_HOME` or `HERCULE_TOKEN` set in their shell
  * must not change what these tests exercise.
  */
-function cleanEnv(): Record<string, string> {
+function buildCleanEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>
@@ -72,7 +72,7 @@ function cleanEnv(): Record<string, string> {
  * `HERCULE_LIVE_SESSION_TEST` can turn it off again with a `0` rather than having
  * to unset it.
  */
-export function liveSessionsAsked(): boolean {
+export function isLiveSessionTestEnabled(): boolean {
   const asked = process.env["HERCULE_LIVE_SESSION_TEST"];
   return asked !== undefined && asked !== "" && asked !== "0";
 }
@@ -98,7 +98,7 @@ export function liveSessionsAsked(): boolean {
 export const LENT_CREDENTIALS = process.env["HERCULE_E2E_CLAUDE_CREDENTIALS"];
 
 /** Whether either of the two login routes is open for this run. */
-export function loginLent(): boolean {
+export function isLoginAvailable(): boolean {
   return LENT_CREDENTIALS !== undefined || process.env["ANTHROPIC_API_KEY"] !== undefined;
 }
 
@@ -137,7 +137,7 @@ export interface Ran {
  * closing would only move the race. `startController` treats a bind failure as
  * an ordinary outcome and picks another number instead.
  */
-function candidatePort(): number {
+function pickCandidatePort(): number {
   return 20_000 + Math.floor(Math.random() * 40_000);
 }
 
@@ -154,7 +154,7 @@ function candidatePort(): number {
  * so a home without it is a controller that cannot boot; git reads nothing
  * under `Library`, so the scrub still holds.
  */
-export function temporaryHome(gitconfig?: string): { home: string; remove: () => void } {
+export function createTemporaryHome(gitconfig?: string): { home: string; remove: () => void } {
   const home = mkdtempSync(join(tmpdir(), "hercule-e2e-"));
   if (gitconfig !== undefined) {
     writeFileSync(join(home, ".gitconfig"), gitconfig);
@@ -176,7 +176,7 @@ export function temporaryHome(gitconfig?: string): { home: string; remove: () =>
  * - plus one fixed identity, so a commit made here needs no configuration of
  * its own to succeed.
  */
-export function gitEnv(home: string): Record<string, string> {
+export function buildGitEnv(home: string): Record<string, string> {
   return {
     PATH: process.env["PATH"] ?? "",
     HOME: home,
@@ -230,9 +230,15 @@ export async function startController(options: {
   const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
   let last: Error | undefined;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const port = options.port ?? candidatePort();
+    const port = options.port ?? pickCandidatePort();
     try {
-      return await startOn(command, options.home, port, options.timeoutMs, options.env);
+      return await startControllerOnPort(
+        command,
+        options.home,
+        port,
+        options.timeoutMs,
+        options.env,
+      );
     } catch (error) {
       last = error as Error;
       if (!/in use/.test(last.message)) throw last;
@@ -245,7 +251,7 @@ export async function startController(options: {
 const OUTPUT_DRAIN_BOUND_MS = 5_000;
 
 /** One attempt: spawn on this port and wait for it to answer. */
-async function startOn(
+async function startControllerOnPort(
   command: ReadonlyArray<string>,
   home: string,
   port: number,
@@ -257,7 +263,7 @@ async function startOn(
 
   const child = Bun.spawn([...command, "serve", "-c", `bind.port=${String(port)}`], {
     cwd: ROOT,
-    env: { ...cleanEnv(), ...env, HERCULE_HOME: home },
+    env: { ...buildCleanEnv(), ...env, HERCULE_HOME: home },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -268,11 +274,11 @@ async function startOn(
   };
   const drained = Promise.all([drain(child.stdout), drain(child.stderr)]);
 
-  const output = (): string => chunks.join("");
+  const readOutput = (): string => chunks.join("");
   const deadline = Date.now() + (timeoutMs ?? 20_000);
   for (;;) {
     if (child.exitCode !== null) {
-      throw new Error(`hercule serve exited with ${String(child.exitCode)}:\n${output()}`);
+      throw new Error(`hercule serve exited with ${String(child.exitCode)}:\n${readOutput()}`);
     }
     try {
       const response = await fetch(`${url}/api/v1/setup`);
@@ -280,14 +286,14 @@ async function startOn(
     } catch {
       // Not listening yet.
     }
-    if (Date.now() > deadline) throw new Error(`hercule serve never answered:\n${output()}`);
+    if (Date.now() > deadline) throw new Error(`hercule serve never answered:\n${readOutput()}`);
     await Bun.sleep(50);
   }
 
   return {
     url,
     port,
-    output,
+    output: readOutput,
     stop: async () => {
       child.kill("SIGTERM");
       await child.exited;
@@ -307,7 +313,7 @@ async function startOn(
  * Run the CLI once, the way a shell would: arguments in `argv`, content on
  * stdin, and nothing shared with the caller but the environment it is given.
  */
-export async function cli(
+export async function runCli(
   args: ReadonlyArray<string>,
   options: {
     readonly home: string;
@@ -320,7 +326,7 @@ export async function cli(
   const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
   const child = Bun.spawn([...command, ...args], {
     cwd: ROOT,
-    env: { ...cleanEnv(), HERCULE_HOME: options.home, ...options.env },
+    env: { ...buildCleanEnv(), HERCULE_HOME: options.home, ...options.env },
     stdin: options.stdin === undefined ? "ignore" : new TextEncoder().encode(options.stdin),
     stdout: "pipe",
     stderr: "pipe",
@@ -342,7 +348,7 @@ export const PASSWORD = "correct horse battery staple";
  * expresses. Reading the file is the only way to get one: the key is printed
  * nowhere, by design.
  */
-export function apiKeyIn(home: string): string {
+export function readApiKey(home: string): string {
   const credentials = JSON.parse(readFileSync(join(home, "credentials.json"), "utf8")) as {
     readonly apiKey: string;
   };
@@ -363,7 +369,7 @@ export async function completeSetup(options: {
   const setupUrl = readFileSync(join(options.home, "setup-url"), "utf8").trim();
   const token = new URL(setupUrl).searchParams.get("token");
   if (token === null) throw new Error(`no setup token in ${setupUrl}`);
-  return cli(
+  return runCli(
     [
       "setup",
       "complete",
@@ -386,7 +392,7 @@ export async function completeSetup(options: {
 }
 
 /** The CLI's `--json` output, parsed. Fails loudly with the command's own output. */
-export function jsonOf(ran: Ran): unknown {
+export function parseJsonOutput(ran: Ran): unknown {
   try {
     return JSON.parse(ran.stdout || ran.stderr);
   } catch {
@@ -399,11 +405,11 @@ export function jsonOf(ran: Ran): unknown {
  * exit is the command's own output, raised: a test that reports "not JSON"
  * about an error envelope says nothing about what went wrong.
  */
-export function jsonOk<A>(ran: Ran): A {
+export function parseJsonOutputOrFail<A>(ran: Ran): A {
   if (ran.code !== 0) {
     throw new Error(`exit ${String(ran.code)}:\n${ran.stdout}\n${ran.stderr}`);
   }
-  return jsonOf(ran) as A;
+  return parseJsonOutput(ran) as A;
 }
 
 /** One page of a listing, as the CLI prints it with `--json`. */
@@ -431,7 +437,7 @@ export interface Instance {
  * Every Provider Instance, over HTTP rather than through the CLI: the snapshots
  * are what these tests wait on, and waiting is a loop, not a command.
  */
-export async function instancesOf(options: {
+export async function listInstances(options: {
   readonly url: string;
   readonly apiKey: string;
 }): Promise<ReadonlyArray<Instance>> {
@@ -455,8 +461,11 @@ export async function waitForEnrolledRunner(options: {
 }): Promise<string> {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   for (;;) {
-    const ran = await cli(["runner", "list", "--json"], options);
-    const id = ran.code === 0 ? jsonOk<Page<{ readonly id: string }>>(ran).items[0]?.id : undefined;
+    const ran = await runCli(["runner", "list", "--json"], options);
+    const id =
+      ran.code === 0
+        ? parseJsonOutputOrFail<Page<{ readonly id: string }>>(ran).items[0]?.id
+        : undefined;
     if (id !== undefined && existsSync(join(options.home, "runner", "runner.json"))) return id;
     if (Date.now() > deadline) throw new Error(`no runner dialled the controller:\n${ran.stdout}`);
     await Bun.sleep(500);
@@ -468,7 +477,7 @@ export async function readClaudeInstance(options: {
   readonly url: string;
   readonly apiKey: string;
 }): Promise<Instance> {
-  const found = (await instancesOf(options)).find((one) => one.providerId === "claude-code");
+  const found = (await listInstances(options)).find((one) => one.providerId === "claude-code");
   if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
   return found;
 }
@@ -487,12 +496,12 @@ export async function probeUntilLoggedIn(options: {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   let last: string;
   for (;;) {
-    const ran = await cli(
+    const ran = await runCli(
       ["runner", "probe", options.runnerId, "--instance", options.instanceId, "--json"],
       options,
     );
     if (ran.code === 0) {
-      const snapshot = jsonOk<Snapshot>(ran);
+      const snapshot = parseJsonOutputOrFail<Snapshot>(ran);
       if (snapshot.auth.status === "ok") return snapshot;
       last = `${snapshot.auth.status}: ${snapshot.auth.message ?? "no message"}`;
     } else {
@@ -542,13 +551,13 @@ export interface Session {
 }
 
 /** Where a session got to, read back the way an operator reads it. */
-export async function sessionOf(options: {
+export async function readSession(options: {
   readonly home: string;
   readonly binary: string;
   readonly id: string;
 }): Promise<Session> {
-  return jsonOk<Session>(
-    await cli(["session", "read", options.id, "--json"], {
+  return parseJsonOutputOrFail<Session>(
+    await runCli(["session", "read", options.id, "--json"], {
       home: options.home,
       binary: options.binary,
     }),
@@ -562,13 +571,13 @@ export interface Row {
 }
 
 /** A session's whole transcript, in order. */
-export async function transcriptOf(options: {
+export async function readTranscript(options: {
   readonly home: string;
   readonly binary: string;
   readonly id: string;
 }): Promise<ReadonlyArray<Row>> {
-  return jsonOk<{ items: ReadonlyArray<Row> }>(
-    await cli(["transcript", "read", options.id, "--json", "--all"], {
+  return parseJsonOutputOrFail<{ items: ReadonlyArray<Row> }>(
+    await runCli(["transcript", "read", options.id, "--json", "--all"], {
       home: options.home,
       binary: options.binary,
     }),
@@ -579,7 +588,7 @@ export async function transcriptOf(options: {
  * Waits until a session's transcript holds `tag`, and says what it held instead
  * - and where the session got to - when it never does.
  */
-export async function untilTag(options: {
+export async function waitForTranscriptTag(options: {
   readonly home: string;
   readonly binary: string;
   readonly id: string;
@@ -588,10 +597,10 @@ export async function untilTag(options: {
 }): Promise<ReadonlyArray<Row>> {
   const deadline = Date.now() + options.timeoutMs;
   for (;;) {
-    const rows = await transcriptOf(options);
+    const rows = await readTranscript(options);
     if (rows.some((row) => row.event._tag === options.tag)) return rows;
     if (Date.now() > deadline) {
-      const session = await sessionOf(options);
+      const session = await readSession(options);
       throw new Error(
         `no ${options.tag} within ${String(options.timeoutMs / 1000)}s: the session reads ` +
           `${session.status} and its transcript holds ` +
@@ -603,7 +612,7 @@ export async function untilTag(options: {
 }
 
 /** Everything a session said, as one string: the coalesced assistant text. */
-export function saidIn(rows: ReadonlyArray<Row>): string {
+export function collectAssistantText(rows: ReadonlyArray<Row>): string {
   return rows
     .flatMap((row) =>
       row.event._tag === "content.delta" && row.event["streamKind"] === "assistant_text"

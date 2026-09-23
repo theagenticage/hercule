@@ -14,7 +14,7 @@ const run = <A, E>(
   effect: Effect.Effect<A, E, Settings | PermissionProfiles | SqlClient.SqlClient>,
 ) => Effect.runPromise(effect.pipe(Effect.provide(layer)));
 
-const grantsOf = (name: string) =>
+const readProfileByName = (name: string) =>
   Effect.gen(function* () {
     const profiles = yield* PermissionProfiles;
     const profile = yield* profiles.getByName(name);
@@ -27,7 +27,7 @@ const grantsOf = (name: string) =>
  */
 describe("the shipped permission profiles", () => {
   it("seeds assistant with the orchestration surface plus read on everything but secrets", async () => {
-    const profile = await run(Effect.flatMap(seed, () => grantsOf("assistant")));
+    const profile = await run(Effect.flatMap(seed, () => readProfileByName("assistant")));
     expect([...profile.grants].sort()).toEqual(
       [
         "task.read",
@@ -66,7 +66,7 @@ describe("the shipped permission profiles", () => {
   });
 
   it("seeds worker with the trust floor for workflow agent steps", async () => {
-    const profile = await run(Effect.flatMap(seed, () => grantsOf("worker")));
+    const profile = await run(Effect.flatMap(seed, () => readProfileByName("worker")));
     expect([...profile.grants].sort()).toEqual(
       [
         "task.read",
@@ -95,7 +95,7 @@ describe("the shipped permission profiles", () => {
   it("seeds unrestricted at user parity, withholding nothing", async () => {
     const [unrestricted, assistant] = await run(
       Effect.flatMap(seed, () =>
-        Effect.all([grantsOf("unrestricted"), grantsOf("assistant")] as const),
+        Effect.all([readProfileByName("unrestricted"), readProfileByName("assistant")] as const),
       ),
     );
     for (const grant of assistant.grants) expect(unrestricted.grants).toContain(grant);
@@ -204,7 +204,10 @@ describe("seeding twice", () => {
         yield* sql`UPDATE permission_profiles SET grants = '["task.read"]' WHERE name = 'worker'`;
         yield* sql`UPDATE settings SET value = '7' WHERE scope = 'controller' AND key = 'retention.events'`;
         yield* seed;
-        return [yield* grantsOf("worker"), yield* settings.get("retention.events")] as const;
+        return [
+          yield* readProfileByName("worker"),
+          yield* settings.get("retention.events"),
+        ] as const;
       }),
     );
     expect(profile.grants).toEqual(["task.read"]);

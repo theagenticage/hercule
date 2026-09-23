@@ -100,7 +100,7 @@ const decodeBase64 = (encoded: string, source: string): Bytes => {
 };
 
 /** The key file, mode 0600. Its mode is the whole protection, so it is checked on read. */
-export const fileStore = (path: string): KeyStore => {
+export const createFileStore = (path: string): KeyStore => {
   const read: Effect.Effect<Bytes | undefined, MasterKeyError> = Effect.try({
     try: () => {
       if (!existsSync(path)) return undefined;
@@ -178,9 +178,12 @@ export const spawnSecurity: SecurityRunner = async (argv) => {
 };
 
 /** The macOS login keychain, one item per Hercule Home. */
-export const keychainStore = (account: string, run: SecurityRunner = spawnSecurity): KeyStore => {
+export const createKeychainStore = (
+  account: string,
+  run: SecurityRunner = spawnSecurity,
+): KeyStore => {
   const item = `the ${KEYCHAIN_SERVICE} keychain item for account ${account}`;
-  const security = (argv: ReadonlyArray<string>, failure: string) =>
+  const runSecurity = (argv: ReadonlyArray<string>, failure: string) =>
     Effect.tryPromise({
       try: () => run(argv),
       // No cause: it would carry the argv, and the write command's argv carries
@@ -190,7 +193,7 @@ export const keychainStore = (account: string, run: SecurityRunner = spawnSecuri
     });
 
   const read: Effect.Effect<Bytes | undefined, MasterKeyError> = Effect.gen(function* () {
-    const result = yield* security(
+    const result = yield* runSecurity(
       ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
       "Cannot run `security` to read the master key from the login keychain.",
     );
@@ -217,7 +220,7 @@ export const keychainStore = (account: string, run: SecurityRunner = spawnSecuri
     // read back, and only a keychain that still has no item is a real failure.
     write: (bytes) =>
       Effect.gen(function* () {
-        const result = yield* security(
+        const result = yield* runSecurity(
           [
             "security",
             "add-generic-password",
@@ -274,7 +277,9 @@ export const masterKeyLayer = (
     Effect.gen(function* () {
       const home = yield* HerculeHome;
       const store =
-        backend === "keychain" ? keychainStore(home.home) : fileStore(home.masterKeyFile);
+        backend === "keychain"
+          ? createKeychainStore(home.home)
+          : createFileStore(home.masterKeyFile);
 
       let bytes = yield* store.read;
       if (bytes === undefined) {

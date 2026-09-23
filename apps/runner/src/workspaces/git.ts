@@ -50,14 +50,17 @@ export const switchBranch = (dir: string, branch: string, env: GitEnv): Promise<
  * because whatever comes back is written down as the branch the machine found,
  * and a sentence in that column is a branch name nobody can act on.
  */
-export const currentBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
+export const readCurrentBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
   const shown = await runGit(["-C", dir, "branch", "--show-current"], { env });
   if (!shown.ok || shown.stdout.length === 0) return null;
   return shown.stdout;
 };
 
 /** Every branch the user can switch to in that working copy. */
-export const localBranches = async (dir: string, env: GitEnv): Promise<ReadonlyArray<string>> => {
+export const listLocalBranches = async (
+  dir: string,
+  env: GitEnv,
+): Promise<ReadonlyArray<string>> => {
   const listed = await runGit(
     ["-C", dir, "for-each-ref", "--format=%(refname:short)", "refs/heads"],
     { env },
@@ -66,7 +69,7 @@ export const localBranches = async (dir: string, env: GitEnv): Promise<ReadonlyA
 };
 
 /** What `origin/HEAD` points at, or null where nothing set it. */
-export const defaultBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
+export const readDefaultBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
   const head = await runGit(["-C", dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], {
     env,
   });
@@ -75,10 +78,10 @@ export const defaultBranch = async (dir: string, env: GitEnv): Promise<string | 
   return target.length === 0 ? null : target;
 };
 
-export const cacheDirOf = (storageDir: string, resourceId: string): string =>
+export const buildCacheDir = (storageDir: string, resourceId: string): string =>
   joinPath(storageDir, "cache", `${resourceId}.git`);
 
-export const cacheRootIn = (storageDir: string): string => joinPath(storageDir, "cache");
+export const buildCacheRoot = (storageDir: string): string => joinPath(storageDir, "cache");
 
 /**
  * The bare repository every working copy of one resource is made from.
@@ -103,7 +106,7 @@ export const ensureCache = async (options: {
   /** The branch the cache now heads on, for callers that would otherwise re-ask. */
   readonly defaultBranch?: string;
 }> => {
-  const path = cacheDirOf(options.storageDir, options.resourceId);
+  const path = buildCacheDir(options.storageDir, options.resourceId);
   const { env, remote } = options;
   const known = await runGit(["-C", path, "rev-parse", "--git-dir"], { env });
   if (!known.ok) {
@@ -134,7 +137,7 @@ export const ensureCache = async (options: {
  * what the cache refreshes, falling back to the base branch as the cache holds
  * it for a repository whose remote was never reachable.
  */
-export const startPointFor = async (
+export const findStartPoint = async (
   cache: string,
   base: string,
   env: GitEnv,

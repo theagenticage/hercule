@@ -9,14 +9,14 @@
  */
 import { ApiError, type HerculeClient } from "@hercule/client-core";
 import { UsageError } from "../exit";
-import { coerce, said, type Arguments } from "./args";
-import { commandOf, type Command, type Field } from "./tree";
+import { coerceFieldValue, formatFieldName, type Arguments } from "./args";
+import { findCommandById, type Command, type Field } from "./tree";
 
 /** The operations, as the dynamic tree reaches them: `client[entity][verb](request)`. */
 type Callable = Record<string, Record<string, (request?: unknown) => Promise<unknown>>>;
 
 /** The operation's own function on the client, found by the two halves of its id. */
-const callableOf = (client: HerculeClient, command: Command) => {
+const findOperationFunction = (client: HerculeClient, command: Command) => {
   const [entity, verb] = command.id.split(".") as [string, string];
   return (client as unknown as Callable)[entity]![verb]!;
 };
@@ -36,7 +36,7 @@ interface Page {
  * Small fixed listings - plugins, provider instances - answer with the whole
  * array. Nothing to follow, so it is read as a single page that ends.
  */
-const pageOf = (answer: unknown): Page =>
+const toPage = (answer: unknown): Page =>
   Array.isArray(answer)
     ? { items: answer as ReadonlyArray<Record<string, unknown>> }
     : (answer as Page);
@@ -58,13 +58,13 @@ const readAll = async (
   params: Record<string, string | number> | undefined,
   from?: string,
 ): Promise<ReadonlyArray<Record<string, unknown>>> => {
-  const call = callableOf(client, command);
+  const call = findOperationFunction(client, command);
   const items: Array<Record<string, unknown>> = [];
   let cursor: string | undefined = from;
   const addressed = params === undefined ? {} : { params };
 
   for (;;) {
-    const page = pageOf(
+    const page = toPage(
       await call({ ...addressed, query: cursor === undefined ? query : { ...query, cursor } }),
     );
     items.push(...page.items);
@@ -93,12 +93,12 @@ const resolveTail = async (
   // nothing is sent, exactly as for a tail nothing can resolve.
   if (text.length < MIN_TAIL) {
     throw new UsageError(
-      `${said(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
+      `${formatFieldName(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
       command.spelling,
     );
   }
 
-  const listing = commandOf(field.resolves!)!;
+  const listing = findCommandById(field.resolves!)!;
   const noun = listing.words[0]!;
 
   // Ordered by creation, not by the listing's own default. A keyset walk never
@@ -135,10 +135,10 @@ const LOOKS_LIKE_A_TAIL = /^[0-9a-f]{8,}$/;
  * rather than sent, because sending it would answer `not_found` and teach the
  * caller that the id was wrong.
  */
-const asWritten = (command: Command, field: Field, text: string): string => {
+const validateWrittenId = (command: Command, field: Field, text: string): string => {
   if (field.holdsAnId && LOOKS_LIKE_A_TAIL.test(text) && !CANONICAL_ID.test(text)) {
     throw new UsageError(
-      `${said(field)}: ${text} reads as an id tail, and nothing lists these ids to resolve it against; give the full id`,
+      `${formatFieldName(field)}: ${text} reads as an id tail, and nothing lists these ids to resolve it against; give the full id`,
       command.spelling,
     );
   }
@@ -165,7 +165,7 @@ const resolveTails = async (
     if (typeof given !== "string") continue;
     resolved[field.name] =
       field.resolves === undefined
-        ? asWritten(command, field, given)
+        ? validateWrittenId(command, field, given)
         : await resolveTail(client, command, field, given);
   }
   return resolved;
@@ -189,7 +189,7 @@ export const execute = async (
     // is still a usage error and nothing has been sent. A numeric path
     // parameter is the value itself, never a tail of a longer id: the event log
     // numbers its rows, and `42` is row 42.
-    const value = coerce(field, args.positionals[index]!, command.spelling);
+    const value = coerceFieldValue(field, args.positionals[index]!, command.spelling);
     // A bare word is a route parameter or a payload field, and it travels in
     // the half of the request its own field names.
     if (field.carriedIn === "payload") writtenPayload[field.name] = value;
@@ -235,7 +235,7 @@ export const execute = async (
   if (command.paged || command.query.length > 0) request["query"] = query;
   if (payloadFields.length > 0) request["payload"] = payload;
 
-  const call = callableOf(client, command);
+  const call = findOperationFunction(client, command);
   return {
     kind: "value",
     value: await call(Object.keys(request).length === 0 ? undefined : request),

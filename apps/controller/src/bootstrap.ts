@@ -21,7 +21,7 @@ import type { HomePaths } from "@hercule/home";
 import * as config from "./config";
 import { BootstrapConfig, HerculeHome, HerculeHomeError, type ConfigError } from "./config";
 import {
-  databaseError,
+  createDatabaseError,
   migrate,
   openDatabase,
   withTransaction,
@@ -90,7 +90,7 @@ export { hashToken };
 /** The two bind hosts that mean "every interface"; a URL needs a reachable one instead. */
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
 
-/** What a boot leaves behind. `setupUrl` is absent once setup is complete. */
+/** What a boot leaves behind. `buildSetupUrl` is absent once setup is complete. */
 export interface BootOutcome {
   readonly paths: HomePaths;
   readonly identityId: string;
@@ -119,15 +119,15 @@ export type BootError =
  * is resolved, so by here it is a host and nothing else; a value `URL` will not
  * take is a defect, not a URL nobody can open.
  */
-export function controllerOrigin(bindHost: string, bindPort: number): string {
+export function buildControllerOrigin(bindHost: string, bindPort: number): string {
   const host = WILDCARD_HOSTS.has(bindHost) ? "127.0.0.1" : bindHost;
   const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
   return `http://${authority}:${bindPort}`;
 }
 
 /** The one-time setup URL, at the address a browser on this machine can open. */
-export function setupUrl(bindHost: string, bindPort: number, token: string): string {
-  const url = new URL("/setup", controllerOrigin(bindHost, bindPort));
+export function buildSetupUrl(bindHost: string, bindPort: number, token: string): string {
+  const url = new URL("/setup", buildControllerOrigin(bindHost, bindPort));
   url.searchParams.set("token", token);
   return url.toString();
 }
@@ -177,7 +177,7 @@ const ensureSetupUrl = (
       `,
     );
 
-    const url = setupUrl(bootstrap.bindHost, bootstrap.bindPort, token);
+    const url = buildSetupUrl(bootstrap.bindHost, bootstrap.bindPort, token);
     yield* Effect.try({
       try: () => {
         // `mode` applies only when the file is created, so the file the previous
@@ -342,7 +342,7 @@ export const bootWith = <A, E>(
           ? undefined
           : yield* startLocalRunner(
               options.localRunner,
-              controllerOrigin(bootstrap.bindHost, bootstrap.bindPort),
+              buildControllerOrigin(bootstrap.bindHost, bootstrap.bindPort),
               paths.home,
             );
 
@@ -353,7 +353,9 @@ export const bootWith = <A, E>(
       Effect.provide(withPlugins.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
       // A statement the database refused reads as one line naming the file; a
       // controller that fails at boot has said nothing else yet.
-      Effect.catchTag("SqlError", (error) => Effect.fail(databaseError(paths.databaseFile, error))),
+      Effect.catchTag("SqlError", (error) =>
+        Effect.fail(createDatabaseError(paths.databaseFile, error)),
+      ),
     );
   });
 

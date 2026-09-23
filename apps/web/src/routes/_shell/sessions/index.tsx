@@ -1,7 +1,13 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ageOf, headlineOf, lanesOf, threadRows, type LaneKind } from "@hercule/client-core";
+import {
+  formatAge,
+  buildHeadline,
+  buildLanes,
+  buildThreadRows,
+  type LaneKind,
+} from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import { Group, LaneLabel, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
@@ -43,16 +49,16 @@ function AllSessions(): JSX.Element {
   const providerNames = new Map(instances.map((instance) => [instance.id, instance.displayName]));
   const sessionsById = new Map<string, Session>(sessions.map((session) => [session.id, session]));
 
-  // `headlineOf` already reads "No sessions yet" when the list is empty, and
+  // `buildHeadline` already reads "No sessions yet" when the list is empty, and
   // an empty list leaves every lane empty too - so the empty state is just
   // this same header with nothing rendered below it, not a second block
   // repeating what the header already says.
-  const lanes = lanesOf(sessions).filter((lane) => lane.sessions.length > 0);
+  const lanes = buildLanes(sessions).filter((lane) => lane.sessions.length > 0);
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-row text-muted">{headlineOf(sessions, now)}</p>
+        <p className="text-row text-muted">{buildHeadline(sessions, now)}</p>
         <CreateThreadLink />
       </div>
 
@@ -60,14 +66,14 @@ function AllSessions(): JSX.Element {
         <section key={lane.kind}>
           <LaneLabel>{LANE_LABELS[lane.kind]}</LaneLabel>
           <Group>
-            {threadRows(lane.sessions, "plain", instances).map((row) => {
+            {buildThreadRows(lane.sessions, "plain", instances).map((row) => {
               const instanceId = sessionsById.get(row.id)?.instanceId;
               return (
                 <ThreadRowView
                   key={row.id}
                   mark={row.mark}
                   title={row.title}
-                  age={ageOf(row.activityAt, now)}
+                  age={formatAge(row.activityAt, now)}
                   secondLine={
                     instanceId === undefined ? null : (providerNames.get(instanceId) ?? null)
                   }

@@ -52,10 +52,10 @@ export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 
 const GONE = "pi stopped talking";
 
-const describe = (error: unknown): string =>
+const describeError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-export const rpcOver = (
+export const makeRpc = (
   child: PiChild,
   /**
    * One line that was not an answer to a command, decoded where it could be:
@@ -121,7 +121,7 @@ export const rpcOver = (
           child.write(`${JSON.stringify({ ...command, id })}\n`);
         } catch (error) {
           pending.delete(id);
-          return Effect.fail(describe(error));
+          return Effect.fail(describeError(error));
         }
         return Deferred.await(settled).pipe(
           Effect.timeoutOrElse({

@@ -31,7 +31,7 @@ import {
   TaskUpdateInput,
   type OperationId,
 } from "@hercule/contract";
-import { asPluginError, describeFieldIssues } from "./errors";
+import { toPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
 import type { NewContribution } from "./repository";
 
@@ -153,7 +153,7 @@ export const registerWorkflowActionContribution = (
   Effect.gen(function* () {
     const names = yield* Effect.mapError(
       decodeWorkflowActionNames({ id: contribution.id, displayName: contribution.displayName }),
-      asPluginError,
+      toPluginError,
     );
     const id = `${pluginId}/${names.id}`;
     const header = yield* Effect.mapError(

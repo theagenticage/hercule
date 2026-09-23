@@ -7,7 +7,7 @@
  * With one thread and no draft there is no strip at all: the row is the title.
  */
 import type { Session, Workspace } from "@hercule/contract";
-import { markOf, type ThreadMark } from "./rows";
+import { decideThreadMark, type ThreadMark } from "./rows";
 
 export interface ThreadTab {
   /** Null on the draft being written, which is not a session yet. */
@@ -18,7 +18,7 @@ export interface ThreadTab {
   readonly active: boolean;
 }
 
-export const siblingTabs = ({
+export const buildSiblingTabs = ({
   workspace,
   sessions,
   activeSessionId,
@@ -39,7 +39,7 @@ export const siblingTabs = ({
     tabs.push({
       sessionId: session.id,
       title: session.title,
-      mark: markOf(session),
+      mark: decideThreadMark(session),
       active: session.id === activeSessionId,
     });
   }

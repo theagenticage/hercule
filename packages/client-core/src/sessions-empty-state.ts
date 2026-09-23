@@ -5,7 +5,7 @@
  * does not work out what one is.
  */
 import type { ProviderInstance, Runner } from "@hercule/contract";
-import { providerRows, type ProviderRow } from "./provider-rows";
+import { buildProviderRows, type ProviderRow } from "./provider-rows";
 
 /**
  * Where the credential goes is what the reader needs to know before entering
@@ -41,7 +41,7 @@ export type SessionsEmptyState =
   /** Something on this machine is logged in and ready to run a thread. */
   | { readonly kind: "ready"; readonly name: string };
 
-export const sessionsEmptyState = (
+export const decideSessionsEmptyState = (
   localRunner: Runner | null,
   instances: ReadonlyArray<ProviderInstance>,
 ): SessionsEmptyState => {
@@ -49,7 +49,7 @@ export const sessionsEmptyState = (
   // logged in to than one that is not there at all.
   if (localRunner === null || localRunner.connectivity !== "online") return { kind: "no-runner" };
 
-  const rows = providerRows(localRunner, instances);
+  const rows = buildProviderRows(localRunner, instances);
   // A logged-in harness wins: a "log in" headline over a working install would
   // read as broken.
   const ready = rows.find((row) => row.loggedIn);

@@ -12,26 +12,26 @@ import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
 import {
   addBranch,
-  userCheckout,
-  checkout,
+  cloneUserCheckout,
+  buildCheckout,
   cleanTemporaries,
-  contentsOf,
-  git,
-  id,
+  hashContents,
+  runGitOrThrow,
+  createId,
   makeRemote,
-  provisionFrame,
-  temporary,
+  buildProvisionFrame,
+  createTemporaryDir,
 } from "./testing";
 
 afterAll(cleanTemporaries);
 
-const storage = (): string => temporary("hercule-storage-");
+const createStorageDir = (): string => createTemporaryDir("hercule-storage-");
 
-const cacheOf = (storageDir: string, resourceId: string): string =>
+const buildCacheDir = (storageDir: string, resourceId: string): string =>
   join(storageDir, "cache", `${resourceId}.git`);
 
 /** Whether a process is gone, given the moment it takes a signal to land. */
-const goneWithin = async (pid: number, within: number): Promise<boolean> => {
+const isGoneWithin = async (pid: number, within: number): Promise<boolean> => {
   const until = Date.now() + within;
   while (Date.now() < until) {
     try {
@@ -47,23 +47,23 @@ const goneWithin = async (pid: number, within: number): Promise<boolean> => {
 describe("a primary cloned fresh", () => {
   it("clones from the cache into the runner's own directory and points origin at the remote", async () => {
     const remote = makeRemote();
-    const head = git(remote.work, "rev-parse", "HEAD");
-    const storageDir = storage();
-    const resourceId = id();
+    const head = runGitOrThrow(remote.work, "rev-parse", "HEAD");
+    const storageDir = createStorageDir();
+    const resourceId = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         kind: "primary",
-        checkouts: [checkout({ resourceId, remote: remote.url })],
+        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
 
     expect(report.status).toBe("ready");
     const directory = join(storageDir, "primaries", resourceId);
-    expect(git(directory, "rev-parse", "HEAD")).toBe(head);
-    expect(git(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(runGitOrThrow(directory, "rev-parse", "HEAD")).toBe(head);
+    expect(runGitOrThrow(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
     // Fetching and pushing must reach the real remote, not the local cache.
-    expect(git(directory, "remote", "get-url", "origin")).toBe(remote.url);
+    expect(runGitOrThrow(directory, "remote", "get-url", "origin")).toBe(remote.url);
     expect(report.checkouts?.[0]?.branch).toBe("main");
     expect(report.checkouts?.[0]?.defaultBranch).toBe("main");
     // Hardlinked objects: one copy on disk however many primaries there are.
@@ -81,18 +81,18 @@ describe("a primary cloned fresh", () => {
    */
   it("leaves a checkout of the same repository the user already has untouched", async () => {
     const remote = makeRemote();
-    const mine = userCheckout(remote);
-    git(mine, "checkout", "-b", "local-only");
+    const mine = cloneUserCheckout(remote);
+    runGitOrThrow(mine, "checkout", "-b", "local-only");
     writeFileSync(join(mine, "scratch.txt"), "mine\n");
-    const before = contentsOf(mine);
-    const head = git(mine, "rev-parse", "HEAD");
-    const storageDir = storage();
-    const resourceId = id();
+    const before = hashContents(mine);
+    const head = runGitOrThrow(mine, "rev-parse", "HEAD");
+    const storageDir = createStorageDir();
+    const resourceId = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         kind: "primary",
-        checkouts: [checkout({ resourceId, remote: remote.url })],
+        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
 
@@ -100,9 +100,9 @@ describe("a primary cloned fresh", () => {
     // Hercule's own clone, somewhere else entirely.
     expect(report.checkouts?.[0]?.branch).toBe("main");
     expect(existsSync(join(storageDir, "primaries", resourceId))).toBe(true);
-    expect(contentsOf(mine)).toBe(before);
-    expect(git(mine, "rev-parse", "HEAD")).toBe(head);
-    expect(git(mine, "rev-parse", "--abbrev-ref", "HEAD")).toBe("local-only");
+    expect(hashContents(mine)).toBe(before);
+    expect(runGitOrThrow(mine, "rev-parse", "HEAD")).toBe(head);
+    expect(runGitOrThrow(mine, "rev-parse", "--abbrev-ref", "HEAD")).toBe("local-only");
   });
 });
 
@@ -110,16 +110,16 @@ describe("an ephemeral workspace", () => {
   it("is a worktree on a new branch, from the base branch that was asked for", async () => {
     const remote = makeRemote();
     const base = addBranch(remote, "release");
-    const storageDir = storage();
-    const workspaceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: remote.url,
             branch: "hercule/run-3f1a2b4c",
             baseBranch: "release",
@@ -130,30 +130,32 @@ describe("an ephemeral workspace", () => {
 
     expect(report.status).toBe("ready");
     const directory = join(storageDir, "workspaces", workspaceId);
-    expect(git(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("hercule/run-3f1a2b4c");
-    expect(git(directory, "rev-parse", "HEAD")).toBe(base);
+    expect(runGitOrThrow(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+      "hercule/run-3f1a2b4c",
+    );
+    expect(runGitOrThrow(directory, "rev-parse", "HEAD")).toBe(base);
     expect(report.checkouts?.[0]?.branch).toBe("hercule/run-3f1a2b4c");
   });
 
   it("puts each repository under its own subdirectory when there are several", async () => {
     const web = makeRemote();
     const api = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: web.url,
             subdirectory: "web",
             branch: "hercule/run-00000001",
           }),
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: api.url,
             subdirectory: "api",
             branch: "hercule/run-00000001",
@@ -164,10 +166,10 @@ describe("an ephemeral workspace", () => {
 
     expect(report.status).toBe("ready");
     const root = join(storageDir, "workspaces", workspaceId);
-    expect(git(join(root, "web"), "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+    expect(runGitOrThrow(join(root, "web"), "rev-parse", "--abbrev-ref", "HEAD")).toBe(
       "hercule/run-00000001",
     );
-    expect(git(join(root, "api"), "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+    expect(runGitOrThrow(join(root, "api"), "rev-parse", "--abbrev-ref", "HEAD")).toBe(
       "hercule/run-00000001",
     );
     expect(report.checkouts?.map((one) => one.branch)).toEqual([
@@ -177,11 +179,11 @@ describe("an ephemeral workspace", () => {
   });
 
   it("with no checkouts is an empty directory", async () => {
-    const storageDir = storage();
-    const workspaceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({ workspaceId, kind: "ephemeral", checkouts: [] }),
+      buildProvisionFrame({ workspaceId, kind: "ephemeral", checkouts: [] }),
     );
 
     expect(report.status).toBe("ready");
@@ -194,28 +196,32 @@ describe("an ephemeral workspace", () => {
 describe("a cache that has seen the branches agents made", () => {
   it("still provisions once an agent's branch is on the remote too", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const resourceId = id();
+    const storageDir = createStorageDir();
+    const resourceId = createId();
     const workspaces = makeWorkspaces({ storageDir });
-    const first = id();
+    const first = createId();
     await workspaces.provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId: first,
         kind: "ephemeral",
-        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-aaaaaaaa" })],
+        checkouts: [
+          buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-aaaaaaaa" }),
+        ],
       }),
     );
     // What an agent does with its worktree: it commits and pushes the branch.
     const directory = join(storageDir, "workspaces", first);
     writeFileSync(join(directory, "work.txt"), "what the agent did\n");
-    git(directory, "add", ".");
-    git(directory, "commit", "-m", "the agent's work");
-    git(directory, "push", remote.path, "hercule/run-aaaaaaaa");
+    runGitOrThrow(directory, "add", ".");
+    runGitOrThrow(directory, "commit", "-m", "the agent's work");
+    runGitOrThrow(directory, "push", remote.path, "hercule/run-aaaaaaaa");
 
     const second = await workspaces.provision(
-      provisionFrame({
+      buildProvisionFrame({
         kind: "ephemeral",
-        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-bbbbbbbb" })],
+        checkouts: [
+          buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-bbbbbbbb" }),
+        ],
       }),
     );
 
@@ -227,31 +233,33 @@ describe("a cache that has seen the branches agents made", () => {
 
   it("gives a worktree off the primary's cache the repository's own remote", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const resourceId = id();
+    const storageDir = createStorageDir();
+    const resourceId = createId();
     const workspaces = makeWorkspaces({ storageDir });
     await workspaces.provision(
-      provisionFrame({
+      buildProvisionFrame({
         kind: "primary",
-        checkouts: [checkout({ resourceId, remote: remote.url })],
+        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
-    const workspaceId = id();
+    const workspaceId = createId();
 
     const report = await workspaces.provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
-        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-cccccccc" })],
+        checkouts: [
+          buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-cccccccc" }),
+        ],
       }),
     );
 
     expect(report.status).toBe("ready");
     // Without this the agent's push would go to a bare repository on this
     // machine that nobody ever reads.
-    expect(git(join(storageDir, "workspaces", workspaceId), "remote", "get-url", "origin")).toBe(
-      remote.url,
-    );
+    expect(
+      runGitOrThrow(join(storageDir, "workspaces", workspaceId), "remote", "get-url", "origin"),
+    ).toBe(remote.url);
     // And the branch it was told to start from is the repository's own default.
     expect(report.checkouts?.[0]?.defaultBranch).toBe("main");
   });
@@ -259,23 +267,23 @@ describe("a cache that has seen the branches agents made", () => {
   it("removes the worktrees it made when a later repository cannot be", async () => {
     const web = makeRemote();
     const api = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const webResource = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const webResource = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({
+          buildCheckout({
             resourceId: webResource,
             remote: web.url,
             subdirectory: "web",
             branch: "hercule/run-dddddddd",
           }),
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: api.url,
             subdirectory: "api",
             branch: "hercule/run-dddddddd",
@@ -289,26 +297,28 @@ describe("a cache that has seen the branches agents made", () => {
     const root = join(storageDir, "workspaces", workspaceId);
     expect(existsSync(root)).toBe(false);
     // And no cache is left believing a worktree of its own lives over there.
-    expect(git(cacheOf(storageDir, webResource), "worktree", "list")).not.toContain(root);
+    expect(runGitOrThrow(buildCacheDir(storageDir, webResource), "worktree", "list")).not.toContain(
+      root,
+    );
   });
 });
 
 describe("the setup command", () => {
   it("runs in the checkout, with the environment the runner's git uses", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
 
     const report = await makeWorkspaces({
       storageDir,
       gitEnv: { HERCULE_RUNNER_SOCKET: "/tmp/hercule-test.sock" },
     }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: remote.url,
             branch: "hercule/run-5e5e5e5e",
             setupCommand: 'printf "%s\\n" "$HERCULE_RUNNER_SOCKET" > setup-ran.txt',
@@ -325,16 +335,16 @@ describe("the setup command", () => {
 
   it("fails the workspace with its last 20 lines, leaving the directory in place", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: remote.url,
             branch: "hercule/run-6f6f6f6f",
             setupCommand: "for i in $(seq 1 30); do echo line$i; done; exit 3",
@@ -356,16 +366,16 @@ describe("the setup command", () => {
 describe("a setup command that will not finish", () => {
   it("is stopped at the deadline and reported, rather than left to hold the session", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
 
     const report = await makeWorkspaces({ storageDir, setupDeadlineMs: 250 }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: remote.url,
             branch: "hercule/run-9d9d9d9d",
             setupCommand: "echo installing; sleep 60",
@@ -385,14 +395,14 @@ describe("a setup command that will not finish", () => {
 describe("a workspace whose setup command failed", () => {
   it("is re-reported when the frame comes again, rather than made a second time", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const frame = provisionFrame({
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const frame = buildProvisionFrame({
       workspaceId,
       kind: "ephemeral",
       checkouts: [
-        checkout({
-          resourceId: id(),
+        buildCheckout({
+          resourceId: createId(),
           remote: remote.url,
           branch: "hercule/run-7c7c7c7c",
           setupCommand: "echo could not install; exit 7",
@@ -419,14 +429,14 @@ describe("a workspace whose setup command failed", () => {
 
   it("takes everything the setup command started down with it at the deadline", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
+    const storageDir = createStorageDir();
 
     const report = await makeWorkspaces({ storageDir, setupDeadlineMs: 250 }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         kind: "ephemeral",
         checkouts: [
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: remote.url,
             branch: "hercule/run-8e8e8e8e",
             // A watcher of its own, which is what an install that hangs looks
@@ -442,12 +452,12 @@ describe("a workspace whose setup command failed", () => {
     expect(started).toBeGreaterThan(0);
     // Killing the shell alone would leave this running, holding the workspace
     // the machine is about to give up on.
-    expect(await goneWithin(started, 2_000)).toBe(true);
+    expect(await isGoneWithin(started, 2_000)).toBe(true);
   });
 });
 
 describe(".workspaceinclude", () => {
-  const withInclude = (folder: string, lines: string): void => {
+  const writeWorkspaceInclude = (folder: string, lines: string): void => {
     writeFileSync(join(folder, ".workspaceinclude"), lines);
     writeFileSync(join(folder, ".env"), "SECRET=local\n");
     mkdirSync(join(folder, "config"), { recursive: true });
@@ -456,28 +466,28 @@ describe(".workspaceinclude", () => {
 
   it("copies what the primary lists into the worktree", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const resourceId = id();
+    const storageDir = createStorageDir();
+    const resourceId = createId();
     const workspaces = makeWorkspaces({ storageDir });
     await workspaces.provision(
-      provisionFrame({
+      buildProvisionFrame({
         kind: "primary",
-        checkouts: [checkout({ resourceId, remote: remote.url })],
+        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
     // The primary is Hercule's own clone, so what it lists is written there.
-    withInclude(
+    writeWorkspaceInclude(
       join(storageDir, "primaries", resourceId),
       "# what the agent needs\n\n.env\nconfig/local.json\n",
     );
-    const workspaceId = id();
+    const workspaceId = createId();
 
     const report = await workspaces.provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({
+          buildCheckout({
             resourceId,
             remote: remote.url,
             branch: "hercule/run-7a7a7a7a",
@@ -498,16 +508,16 @@ describe(".workspaceinclude", () => {
 
   it("warns rather than fails when this machine holds no primary of the repository", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
 
     const report = await makeWorkspaces({ storageDir }).provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
         checkouts: [
-          checkout({
-            resourceId: id(),
+          buildCheckout({
+            resourceId: createId(),
             remote: remote.url,
             branch: "hercule/run-8b8b8b8b",
             workspaceInclude: true,
@@ -522,7 +532,12 @@ describe(".workspaceinclude", () => {
     expect(report.warnings?.[0] ?? "").toContain("no primary");
     expect(report.warnings?.[0] ?? "").toContain(".workspaceinclude skipped");
     expect(
-      git(join(storageDir, "workspaces", workspaceId), "rev-parse", "--abbrev-ref", "HEAD"),
+      runGitOrThrow(
+        join(storageDir, "workspaces", workspaceId),
+        "rev-parse",
+        "--abbrev-ref",
+        "HEAD",
+      ),
     ).toBe("hercule/run-8b8b8b8b");
   });
 });

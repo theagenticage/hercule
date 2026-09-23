@@ -11,13 +11,13 @@ import type { FetchLike } from "./client";
 
 export const IDENTITY_TIMEOUT_MS = 1000;
 
-const identityUrl = (port: number): string => `http://127.0.0.1:${String(port)}/identity`;
+const buildIdentityUrl = (port: number): string => `http://127.0.0.1:${String(port)}/identity`;
 
 /**
  * Nothing else about the answer is checked, because the id is compared against
  * one the caller already holds and anything else fails that comparison.
  */
-const identityIn = async (response: Response): Promise<unknown> => {
+const readRunnerId = async (response: Response): Promise<unknown> => {
   return ((await response.json()) as { readonly runnerId?: unknown }).runnerId;
 };
 
@@ -25,7 +25,7 @@ const identityIn = async (response: Response): Promise<unknown> => {
  * The wait is bounded here rather than left to the browser: a port that accepts
  * a connection and says nothing would keep detection pending for the page's life.
  */
-const whoIsOn = (port: number, fetch: FetchLike, timeoutMs: number): Promise<unknown> =>
+const fetchRunnerIdOnPort = (port: number, fetch: FetchLike, timeoutMs: number): Promise<unknown> =>
   new Promise((resolve) => {
     const control = new AbortController();
     const expiry = setTimeout(() => {
@@ -36,8 +36,8 @@ const whoIsOn = (port: number, fetch: FetchLike, timeoutMs: number): Promise<unk
       clearTimeout(expiry);
       resolve(id);
     };
-    void fetch(identityUrl(port), { signal: control.signal })
-      .then(identityIn)
+    void fetch(buildIdentityUrl(port), { signal: control.signal })
+      .then(readRunnerId)
       .then(settle, () => settle(undefined));
   });
 
@@ -50,7 +50,7 @@ export interface LoopbackEndpoint {
  * Exported because what is asked is what an answer depends on, and a caller
  * caching that answer has to key it on the same set.
  */
-export const loopbackEndpoints = (
+export const listLoopbackEndpoints = (
   runners: ReadonlyArray<Runner>,
 ): ReadonlyArray<LoopbackEndpoint> =>
   runners.flatMap((runner) =>
@@ -72,9 +72,9 @@ export const detectLocalRunner = async (
   timeoutMs: number = IDENTITY_TIMEOUT_MS,
 ): Promise<string | null> => {
   const answers = await Promise.all(
-    loopbackEndpoints(runners).map(async ({ id, port }) => ({
+    listLoopbackEndpoints(runners).map(async ({ id, port }) => ({
       id,
-      answered: await whoIsOn(port, fetch, timeoutMs),
+      answered: await fetchRunnerIdOnPort(port, fetch, timeoutMs),
     })),
   );
   return answers.find(({ id, answered }) => answered === id)?.id ?? null;

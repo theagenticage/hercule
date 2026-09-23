@@ -6,8 +6,8 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { RPC_DEADLINE, rpcOver, type Rpc } from "./rpc";
-import { lines } from "./testing";
+import { RPC_DEADLINE, makeRpc, type Rpc } from "./rpc";
+import { createLines } from "./testing";
 
 interface Peer {
   readonly rpc: Rpc;
@@ -19,13 +19,13 @@ interface Peer {
   readonly notifications: Array<{ readonly method: string; readonly params: unknown }>;
 }
 
-const peering = (): Peer => {
-  const stdout = lines();
+const createPeer = (): Peer => {
+  const stdout = createLines();
   const writes: Array<string> = [];
   const warnings: Array<string> = [];
   const serverRequests: Array<{ readonly id: string | number; readonly method: string }> = [];
   const notifications: Array<{ readonly method: string; readonly params: unknown }> = [];
-  const rpc = rpcOver(
+  const rpc = makeRpc(
     {
       write: (text: string) => void writes.push(text),
       stdout: stdout.iterable,
@@ -42,21 +42,21 @@ const peering = (): Peer => {
 const WAIT_MS = 5_000;
 
 /** Waits for something the codec has done, or gives up and says what it was. */
-const until = (what: string, ready: () => boolean): Effect.Effect<void> =>
+const waitUntil = (what: string, ready: () => boolean): Effect.Effect<void> =>
   Effect.gen(function* () {
     const deadline = Date.now() + WAIT_MS;
     while (!ready() && Date.now() < deadline) yield* Effect.sleep(1);
     expect(ready(), `the codec never ${what}`).toBe(true);
   });
 
-const frameOf = (written: string): Record<string, unknown> =>
+const parseFrame = (written: string): Record<string, unknown> =>
   JSON.parse(written) as Record<string, unknown>;
 
 /** A peer whose stdin has closed: every write to it throws. */
-const deaf = (): Peer => {
-  const stdout = lines();
+const createDeafPeer = (): Peer => {
+  const stdout = createLines();
   const warnings: Array<string> = [];
-  const rpc = rpcOver(
+  const rpc = makeRpc(
     {
       write: () => {
         throw new Error("EPIPE");
@@ -81,7 +81,7 @@ const deaf = (): Peer => {
 
 describe("a peer that cannot be written to", () => {
   it("reports it once and throws at nobody", () => {
-    const peer = deaf();
+    const peer = createDeafPeer();
 
     // A reply thrown out of would be a defect in whoever was answering a
     // request, and the turn it belonged to would hang either way.
@@ -95,7 +95,7 @@ describe("a peer that cannot be written to", () => {
   });
 
   it("fails the request it could not send", async () => {
-    const peer = deaf();
+    const peer = createDeafPeer();
 
     const failure = await Effect.runPromise(Effect.flip(peer.rpc.request("initialize", {})));
 
@@ -105,7 +105,7 @@ describe("a peer that cannot be written to", () => {
 
 describe("what the codec writes", () => {
   it("writes one line per request, with no jsonrpc key on it", async () => {
-    const peer = peering();
+    const peer = createPeer();
 
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -113,13 +113,13 @@ describe("what the codec writes", () => {
         const asked = yield* Effect.forkChild(
           peer.rpc.request("initialize", { clientInfo: { name: "hercule" } }),
         );
-        yield* until("wrote the request", () => peer.writes.length === 1);
+        yield* waitUntil("wrote the request", () => peer.writes.length === 1);
 
         const written = peer.writes[0]!;
         // Line-delimited: the peer reads one frame per newline and nothing else.
         expect(written.endsWith("\n")).toBe(true);
         expect(written.trimEnd()).not.toContain("\n");
-        const frame = frameOf(written);
+        const frame = parseFrame(written);
         expect(typeof frame["id"]).toBe("number");
         expect(frame["method"]).toBe("initialize");
         expect(frame["params"]).toEqual({ clientInfo: { name: "hercule" } });
@@ -135,16 +135,16 @@ describe("what the codec writes", () => {
   });
 
   it("mints a fresh id per request, so two in flight do not answer each other", async () => {
-    const peer = peering();
+    const peer = createPeer();
 
     await Effect.runPromise(
       Effect.gen(function* () {
         const pumping = yield* Effect.forkChild(peer.rpc.pump);
         const first = yield* Effect.forkChild(peer.rpc.request("account/read", {}));
         const second = yield* Effect.forkChild(peer.rpc.request("model/list", {}));
-        yield* until("wrote both requests", () => peer.writes.length === 2);
+        yield* waitUntil("wrote both requests", () => peer.writes.length === 2);
 
-        const ids = peer.writes.map((written) => frameOf(written)["id"]);
+        const ids = peer.writes.map((written) => parseFrame(written)["id"]);
         expect(new Set(ids).size).toBe(2);
 
         // Answered out of order, which is what the ids are for.
@@ -160,7 +160,7 @@ describe("what the codec writes", () => {
 
 describe("how the codec sorts what comes back", () => {
   it("fails the request an error reply names, with the code and the message", async () => {
-    const peer = peering();
+    const peer = createPeer();
 
     const failure = await Effect.runPromise(
       Effect.gen(function* () {
@@ -168,12 +168,12 @@ describe("how the codec sorts what comes back", () => {
         const asked = yield* Effect.forkChild(
           Effect.flip(peer.rpc.request("turn/start", { threadId: "t-1" })),
         );
-        yield* until("wrote the request", () => peer.writes.length === 1);
+        yield* waitUntil("wrote the request", () => peer.writes.length === 1);
 
         peer.answer(
           JSON.stringify({
             error: { code: -32600, message: "thread not found: 00000000-0000-0000-0000-0" },
-            id: frameOf(peer.writes[0]!)["id"],
+            id: parseFrame(peer.writes[0]!)["id"],
           }),
         );
         const error = yield* Fiber.join(asked);
@@ -189,7 +189,7 @@ describe("how the codec sorts what comes back", () => {
   });
 
   it("delivers a frame with a method and an id as a server request", async () => {
-    const peer = peering();
+    const peer = createPeer();
 
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -201,7 +201,7 @@ describe("how the codec sorts what comes back", () => {
             params: { command: ["rm", "-rf", "."] },
           }),
         );
-        yield* until("delivered the server request", () => peer.serverRequests.length === 1);
+        yield* waitUntil("delivered the server request", () => peer.serverRequests.length === 1);
         yield* Fiber.interrupt(pumping);
       }),
     );
@@ -215,7 +215,7 @@ describe("how the codec sorts what comes back", () => {
   });
 
   it("delivers a frame with a method and no id as a notification", async () => {
-    const peer = peering();
+    const peer = createPeer();
 
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -226,7 +226,7 @@ describe("how the codec sorts what comes back", () => {
             params: { status: "disabled" },
           }),
         );
-        yield* until("delivered the notification", () => peer.notifications.length === 1);
+        yield* waitUntil("delivered the notification", () => peer.notifications.length === 1);
         yield* Fiber.interrupt(pumping);
       }),
     );
@@ -241,19 +241,19 @@ describe("how the codec sorts what comes back", () => {
 
 describe("a peer that answers badly, or not at all", () => {
   it("warns once about a line that is not JSON, and keeps reading the stream", async () => {
-    const peer = peering();
+    const peer = createPeer();
 
     await Effect.runPromise(
       Effect.gen(function* () {
         const pumping = yield* Effect.forkChild(peer.rpc.pump);
         const asked = yield* Effect.forkChild(peer.rpc.request("account/read", {}));
-        yield* until("wrote the request", () => peer.writes.length === 1);
+        yield* waitUntil("wrote the request", () => peer.writes.length === 1);
 
         peer.answer("codex: warning: this is not a frame");
-        yield* until("warned about the line", () => peer.warnings.length === 1);
+        yield* waitUntil("warned about the line", () => peer.warnings.length === 1);
         // One bad line must not take the socket down: the answer after it lands.
         peer.answer(
-          JSON.stringify({ id: frameOf(peer.writes[0]!)["id"], result: { account: null } }),
+          JSON.stringify({ id: parseFrame(peer.writes[0]!)["id"], result: { account: null } }),
         );
         expect(yield* Fiber.join(asked)).toEqual({ account: null });
         yield* Fiber.interrupt(pumping);
@@ -264,7 +264,7 @@ describe("a peer that answers badly, or not at all", () => {
   });
 
   it("gives up on a request nothing ever answers, rather than waiting for ever", async () => {
-    const peer = peering();
+    const peer = createPeer();
 
     const failure = await Effect.runPromise(
       Effect.provide(

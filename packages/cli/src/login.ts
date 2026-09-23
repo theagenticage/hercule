@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createClient, type HerculeClient } from "@hercule/client-core";
-import { credentialsFileIn } from "@hercule/home";
+import { locateCredentialsFile } from "@hercule/home";
 import { tokenize } from "./commands/args";
 import { UsageError } from "./exit";
 import type { Io } from "./io";
@@ -45,7 +45,7 @@ const HELP = [
   "  --json             print { url, apiKeyId, name }; the key itself is never printed",
 ];
 
-export const loginHelp = (): ReadonlyArray<string> => HELP;
+export const getLoginHelp = (): ReadonlyArray<string> => HELP;
 
 /** The URL as the client wants it: an origin, with no trailing slash. */
 const normalizeUrl = (text: string): string => {
@@ -69,7 +69,7 @@ const normalizeUrl = (text: string): string => {
  * it over the target replaces the credential atomically.
  */
 const writeCredentials = (home: string, url: string, apiKey: string): string => {
-  const path = credentialsFileIn(home);
+  const path = locateCredentialsFile(home);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {

@@ -11,7 +11,7 @@ import { deriveConfigJsonSchema, type ProviderDefinition } from "@hercule/plugin
 import { pi } from "./index";
 
 /** The definition the plugin hands the catalog, captured from its registration. */
-const registered = (): ProviderDefinition => {
+const captureProviderDefinition = (): ProviderDefinition => {
   const definitions: Array<ProviderDefinition> = [];
   Effect.runSync(
     Effect.orDie(
@@ -31,7 +31,7 @@ const registered = (): ProviderDefinition => {
 
 describe("the pi provider's config", () => {
   it("declares the Z.ai key as its one secret-valued field", () => {
-    const result = deriveConfigJsonSchema(registered().configSchema);
+    const result = deriveConfigJsonSchema(captureProviderDefinition().configSchema);
 
     expect(Result.isSuccess(result)).toBe(true);
     if (!Result.isSuccess(result)) return;

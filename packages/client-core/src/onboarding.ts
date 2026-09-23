@@ -16,5 +16,5 @@ export const ONBOARDING_STEPS = ["timezone"] as const;
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 /** The first step not yet completed, or `null` when there is none left. */
-export const nextOnboardingStep = (completedSteps: readonly string[]): OnboardingStep | null =>
+export const findNextOnboardingStep = (completedSteps: readonly string[]): OnboardingStep | null =>
   ONBOARDING_STEPS.find((step) => !completedSteps.includes(step)) ?? null;

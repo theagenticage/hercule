@@ -14,7 +14,7 @@ const EMBEDDED = "/$bunfs/";
 /** A word the shell git runs the helper through would read as more than a word. */
 const QUOTABLE = /[^A-Za-z0-9_@%+=:,./-]/;
 
-const quoted = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'`;
+const quoteShellWord = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'`;
 
 /**
  * The helper, as an absolute command. git runs a `credential.helper` that looks
@@ -24,9 +24,9 @@ const quoted = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'`;
  * Uncompiled, the interpreter is Bun and the script has to be named: that is
  * what makes the helper work from a checkout as well as from the binary.
  */
-const helperCommand = (): string =>
+const buildHelperCommand = (): string =>
   [process.execPath, ...(Bun.main.startsWith(EMBEDDED) ? [] : [Bun.main]), "git-credential"]
-    .map((word, at) => (at > 0 && QUOTABLE.test(word) ? quoted(word) : word))
+    .map((word, at) => (at > 0 && QUOTABLE.test(word) ? quoteShellWord(word) : word))
     .join(" ");
 
 export interface GitIdentity {
@@ -40,13 +40,13 @@ export interface GitIdentity {
  * any repository. `credential.useHttpPath` is what keeps one repository's token
  * from being sent to another on the same host.
  */
-export const gitCredentialEnv = (options: {
+export const buildGitCredentialEnv = (options: {
   readonly socketPath: string;
   readonly identity?: GitIdentity | undefined;
 }): Record<string, string> => {
   const pairs: Array<readonly [string, string]> = [
     ["credential.helper", ""],
-    ["credential.helper", helperCommand()],
+    ["credential.helper", buildHelperCommand()],
     ["credential.useHttpPath", "true"],
     ...(options.identity === undefined
       ? []
@@ -68,4 +68,4 @@ export const gitCredentialEnv = (options: {
 };
 
 /** Where the daemon listens, under the runner's own storage directory. */
-export const socketPathIn = (storageDir: string): string => joinPath(storageDir, "daemon.sock");
+export const buildSocketPath = (storageDir: string): string => joinPath(storageDir, "daemon.sock");

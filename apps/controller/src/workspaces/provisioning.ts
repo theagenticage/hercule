@@ -31,7 +31,7 @@ interface CheckoutPlan {
   readonly baseBranch?: string;
 }
 
-export const provisionFrame = (
+export const buildProvisionFrame = (
   workspace: StoredWorkspace,
   plans: ReadonlyArray<CheckoutPlan>,
 ): WorkspaceProvision => ({
@@ -111,7 +111,7 @@ export const openWorkspace = (
     });
     return {
       workspace,
-      frame: provisionFrame(
+      frame: buildProvisionFrame(
         workspace,
         input.checkouts.map((checkout, index) => ({
           checkout: rows[index]!,

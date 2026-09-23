@@ -24,7 +24,7 @@ const LABELS: Record<ThemeChoice, string> = { light: "Light", dark: "Dark", syst
  * pre-paint script has already carried a stored choice there, and a browser
  * with storage denied still gets to choose for the visit it is on.
  */
-const choiceOfDocument = (): ThemeChoice => {
+const readDocumentThemeChoice = (): ThemeChoice => {
   const theme = document.documentElement.dataset.theme;
   return theme === "light" || theme === "dark" ? theme : "system";
 };
@@ -53,7 +53,7 @@ const applyChoice = (choice: ThemeChoice): void => {
  * while a click is the commitment that closes it.
  */
 export function ThemeSelector(): JSX.Element {
-  const [choice, setChoice] = useState(choiceOfDocument);
+  const [choice, setChoice] = useState(readDocumentThemeChoice);
   const [open, setOpen] = useState(false);
   const labelId = useId();
   const rows = useRef(new Map<ThemeChoice, HTMLButtonElement>());

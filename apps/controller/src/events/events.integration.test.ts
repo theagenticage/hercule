@@ -19,15 +19,15 @@ import {
   completeSetup,
   get,
   post,
-  readRefusal,
+  readErrorBody,
   send,
   USERNAME,
   withServer,
   type ServerHarness,
 } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
+import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
-  agentOn,
+  spawnAgentUnder,
   createProfile,
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
@@ -61,7 +61,7 @@ const emit = (base: string, token: string, body: unknown): Promise<Response> =>
   post(base, "/api/v1/events/emit", body, token);
 
 /** Emits and asserts it was taken, for the cases whose subject is something else. */
-const emitted = async (base: string, token: string, body: unknown): Promise<number> => {
+const emitEventOrFail = async (base: string, token: string, body: unknown): Promise<number> => {
   const response = await emit(base, token, body);
   expect(response.ok, await response.clone().text()).toBe(true);
   return ((await response.json()) as { readonly eventId: number }).eventId;
@@ -70,7 +70,7 @@ const emitted = async (base: string, token: string, body: unknown): Promise<numb
 const enrich = (base: string, token: string, id: number, body: unknown): Promise<Response> =>
   post(base, `/api/v1/events/${String(id)}/enrich`, body, token);
 
-const enriched = async (
+const enrichEventOrFail = async (
   base: string,
   token: string,
   id: number,
@@ -88,7 +88,7 @@ const readEvent = async (base: string, token: string, id: number): Promise<Event
 };
 
 /** Every entry the log holds of one kind, which is how "no row" is asserted. */
-const eventsOfKind = async (
+const listEventsOfKind = async (
   base: string,
   token: string,
   kind: string,
@@ -103,7 +103,7 @@ const eventsOfKind = async (
  * boot and the setup leave their own - so the count is of the population this
  * operation writes to, not of the table.
  */
-const manualEvents = (sql: ServerHarness["sql"]): Promise<number> =>
+const countManualEvents = (sql: ServerHarness["sql"]): Promise<number> =>
   Effect.runPromise(
     Effect.orDie(
       Effect.map(
@@ -133,7 +133,7 @@ const withEvents = (
  * that lacks `event.emit`. The github plugin rides along, because the call that
  * is refused must otherwise be a call that would have worked.
  */
-const PROVIDER = providerDefinition("full-provider", { token: "t" });
+const PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
 
 const FACTS: RunnerFacts = {
   os: "darwin",
@@ -150,18 +150,18 @@ const MODELS: ReadonlyArray<ModelDescriptor> = [
   { slug: "fast", name: "Fast", isDefault: true, options: [] },
 ];
 
-const registry = (): ReadonlyArray<Plugin> => [
-  fixture({ id: "providers", definitions: [PROVIDER] }).plugin,
+const buildPlugins = (): ReadonlyArray<Plugin> => [
+  createPluginFixture({ id: "providers", definitions: [PROVIDER] }).plugin,
   github,
 ];
 
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
-  sharedWithFleet(body, { plugins: registry(), facts: FACTS, models: MODELS });
+  sharedWithFleet(body, { plugins: buildPlugins(), facts: FACTS, models: MODELS });
 
 /** A session on a profile that reads the log and may not write to it. */
 const spawnLogReader = async (arranged: Arranged): Promise<string> => {
   const profile = await createProfile(arranged, "log-reader", ["event.read"]);
-  return (await agentOn(arranged, profile)).token;
+  return (await spawnAgentUnder(arranged, profile)).token;
 };
 
 describe("POST /events/emit", () => {
@@ -169,7 +169,7 @@ describe("POST /events/emit", () => {
     await withEvents(async ({ base }, token) => {
       const before = Date.now();
 
-      const eventId = await emitted(base, token, {
+      const eventId = await emitEventOrFail(base, token, {
         kind: KIND,
         payload: PAYLOAD,
         refs: [REF],
@@ -208,12 +208,12 @@ describe("POST /events/emit", () => {
         payload: PAYLOAD,
       });
 
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
       expect(refusal.text).toContain("acme.nothing.happened");
-      expect(await eventsOfKind(base, token, "acme.nothing.happened")).toEqual([]);
-      expect(await manualEvents(sql)).toBe(0);
+      expect(await listEventsOfKind(base, token, "acme.nothing.happened")).toEqual([]);
+      expect(await countManualEvents(sql)).toBe(0);
     });
   });
 
@@ -224,13 +224,13 @@ describe("POST /events/emit", () => {
         payload: { subject: { repo: 42 } },
       });
 
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
       expect(refusal.issues.length).toBeGreaterThan(0);
       expect(refusal.issues.flat()).toContain("subject");
-      expect(await eventsOfKind(base, token, KIND)).toEqual([]);
-      expect(await manualEvents(sql)).toBe(0);
+      expect(await listEventsOfKind(base, token, KIND)).toEqual([]);
+      expect(await countManualEvents(sql)).toBe(0);
     });
   });
 
@@ -242,11 +242,11 @@ describe("POST /events/emit", () => {
         refs: [REF, "not-an-external-ref"],
       });
 
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
       expect(refusal.text).toContain("not-an-external-ref");
-      expect(await manualEvents(sql)).toBe(0);
+      expect(await countManualEvents(sql)).toBe(0);
     });
   });
 
@@ -258,11 +258,11 @@ describe("POST /events/emit", () => {
         connectionId: NOBODY,
       });
 
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
       expect(refusal.text).toContain(NOBODY);
-      expect(await manualEvents(sql)).toBe(0);
+      expect(await countManualEvents(sql)).toBe(0);
     });
   });
 
@@ -270,11 +270,11 @@ describe("POST /events/emit", () => {
     await withEvents(async ({ base, sql }, token) => {
       const body = { kind: KIND, payload: PAYLOAD, dedupKey: "issue-42-opened" };
 
-      const first = await emitted(base, token, body);
-      const again = await emitted(base, token, body);
+      const first = await emitEventOrFail(base, token, body);
+      const again = await emitEventOrFail(base, token, body);
 
       expect(again).toBe(first);
-      expect(await manualEvents(sql)).toBe(1);
+      expect(await countManualEvents(sql)).toBe(1);
     });
   });
 
@@ -282,11 +282,11 @@ describe("POST /events/emit", () => {
     await withEvents(async ({ base, sql }, token) => {
       const body = { kind: KIND, payload: PAYLOAD, refs: [REF] };
 
-      const first = await emitted(base, token, body);
-      const second = await emitted(base, token, body);
+      const first = await emitEventOrFail(base, token, body);
+      const second = await emitEventOrFail(base, token, body);
 
       expect(second).not.toBe(first);
-      expect(await manualEvents(sql)).toBe(2);
+      expect(await countManualEvents(sql)).toBe(2);
       const one = await readEvent(base, token, first);
       const other = await readEvent(base, token, second);
       expect(one.dedupKey.length).toBeGreaterThan(0);
@@ -301,11 +301,11 @@ describe("POST /events/emit", () => {
 
       const response = await emit(base, token, { kind: KIND, payload: PAYLOAD });
 
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(403);
       expect(refusal.code).toBe("forbidden");
       expect(refusal.grant).toBe("event.emit");
-      expect(await eventsOfKind(base, arranged.token, KIND)).toEqual([]);
+      expect(await listEventsOfKind(base, arranged.token, KIND)).toEqual([]);
     });
   });
 });
@@ -313,7 +313,7 @@ describe("POST /events/emit", () => {
 describe("POST /events/:id/enrich", () => {
   it("overwrites the system and the url that were given, and leaves the rest as it was", async () => {
     await withEvents(async ({ base }, token) => {
-      const eventId = await emitted(base, token, {
+      const eventId = await emitEventOrFail(base, token, {
         kind: KIND,
         payload: PAYLOAD,
         refs: [REF],
@@ -321,7 +321,7 @@ describe("POST /events/:id/enrich", () => {
       });
       const before = await readEvent(base, token, eventId);
 
-      await enriched(base, token, eventId, {
+      await enrichEventOrFail(base, token, eventId, {
         system: "sentry",
         url: "https://sentry.io/issues/123",
         refs: ["sentry:issue:123"],
@@ -342,13 +342,13 @@ describe("POST /events/:id/enrich", () => {
 
   it("unions the refs, keeping the old ones and adding no duplicate", async () => {
     await withEvents(async ({ base }, token) => {
-      const eventId = await emitted(base, token, {
+      const eventId = await emitEventOrFail(base, token, {
         kind: KIND,
         payload: PAYLOAD,
         refs: [REF],
       });
 
-      await enriched(base, token, eventId, { refs: [REF, SECOND_REF] });
+      await enrichEventOrFail(base, token, eventId, { refs: [REF, SECOND_REF] });
 
       const after = await readEvent(base, token, eventId);
       expect([...after.refs].sort()).toEqual([REF, SECOND_REF].sort());
@@ -357,10 +357,14 @@ describe("POST /events/:id/enrich", () => {
 
   it("leaves the system and the url alone when neither is given", async () => {
     await withEvents(async ({ base }, token) => {
-      const eventId = await emitted(base, token, { kind: KIND, payload: PAYLOAD, refs: [REF] });
+      const eventId = await emitEventOrFail(base, token, {
+        kind: KIND,
+        payload: PAYLOAD,
+        refs: [REF],
+      });
       const before = await readEvent(base, token, eventId);
 
-      await enriched(base, token, eventId, { refs: [SECOND_REF] });
+      await enrichEventOrFail(base, token, eventId, { refs: [SECOND_REF] });
 
       const after = await readEvent(base, token, eventId);
       expect(after.system).toBe(before.system);
@@ -371,11 +375,11 @@ describe("POST /events/:id/enrich", () => {
 
   it("answers not_found for an id the log does not hold", async () => {
     await withEvents(async ({ base }, token) => {
-      const eventId = await emitted(base, token, { kind: KIND, payload: PAYLOAD });
+      const eventId = await emitEventOrFail(base, token, { kind: KIND, payload: PAYLOAD });
 
       const response = await enrich(base, token, eventId + 1000, { system: "sentry" });
 
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
     });
@@ -396,7 +400,7 @@ describe("POST /events/:id/enrich", () => {
         refs: ["sentry:issue:123"],
       });
 
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
       const after = await readEvent(base, token, before.id);
@@ -411,7 +415,7 @@ describe("POST /events/:id/enrich", () => {
    * and not by luck: amending one would both rewrite what happened to the
    * user's account and tell the caller it is there.
    */
-  it("answers not_found for a security entry too, and leaves it as it was", async () => {
+  it("answers not_found for a security entry too, and leaves it was", async () => {
     await withEvents(async ({ base, audit }, token) => {
       // A login that cannot succeed is what writes one of these.
       const refusedLogin = await send("POST", base, "/api/v1/auth/login", {
@@ -425,7 +429,7 @@ describe("POST /events/:id/enrich", () => {
         refs: ["sentry:issue:123"],
       });
 
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
       const after = await readEvent(base, token, before.id);
@@ -436,9 +440,13 @@ describe("POST /events/:id/enrich", () => {
 
   it("stamps the amendment with the caller, as an audit entry beside the event", async () => {
     await withEvents(async ({ base, sql, audit }, token) => {
-      const eventId = await emitted(base, token, { kind: KIND, payload: PAYLOAD, refs: [REF] });
+      const eventId = await emitEventOrFail(base, token, {
+        kind: KIND,
+        payload: PAYLOAD,
+        refs: [REF],
+      });
 
-      await enriched(base, token, eventId, {
+      await enrichEventOrFail(base, token, eventId, {
         url: "https://sentry.io/issues/123",
         refs: [SECOND_REF],
       });
@@ -458,7 +466,7 @@ describe("POST /events/:id/enrich", () => {
 
       // The entry is an audit kind, so it is not one of the events the router
       // evaluates: the manual population still holds the one emit above.
-      expect(await manualEvents(sql)).toBe(1);
+      expect(await countManualEvents(sql)).toBe(1);
       const entry = await readEvent(base, token, entries[0]!.id);
       expect(entry.source).toBe("platform");
     });
@@ -467,12 +475,12 @@ describe("POST /events/:id/enrich", () => {
   it("refuses a credential that was never given event.emit, naming the grant", async () => {
     await withFleet(async (arranged) => {
       const base = arranged.harness.base;
-      const eventId = await emitted(base, arranged.token, { kind: KIND, payload: PAYLOAD });
+      const eventId = await emitEventOrFail(base, arranged.token, { kind: KIND, payload: PAYLOAD });
       const token = await spawnLogReader(arranged);
 
       const response = await enrich(base, token, eventId, { system: "sentry" });
 
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(403);
       expect(refusal.code).toBe("forbidden");
       expect(refusal.grant).toBe("event.emit");

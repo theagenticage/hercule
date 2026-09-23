@@ -9,13 +9,13 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ageOf, formatStamp } from "@hercule/client-core";
+import { formatAge, formatStamp } from "@hercule/client-core";
 import type { ProviderSecretField, Session } from "@hercule/contract";
 import {
-  envelope,
+  buildErrorBody,
   expectInDocumentOrder,
   readCurrentNavItems,
-  reading,
+  readPageText,
   renderApp,
   stubApi,
   type Call,
@@ -25,7 +25,7 @@ import {
   CONTROLLER_VERSION,
   GIB,
   MOSS as MACHINE,
-  sessionFixture,
+  buildSessionFixture,
   ZONE,
   type Fixture,
 } from "./-fixtures";
@@ -69,7 +69,7 @@ interface Snapshot {
   readonly models: ReadonlyArray<{ slug: string; name: string; options: readonly never[] }>;
 }
 
-const instance = (
+const buildProviderInstance = (
   id: string,
   providerId: string,
   displayName: string,
@@ -88,24 +88,24 @@ const instance = (
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-const model = (slug: string, name: string) => ({ slug, name, options: [] as const });
+const buildModel = (slug: string, name: string) => ({ slug, name, options: [] as const });
 
-const snapshot = (fields: Partial<Snapshot> & Pick<Snapshot, "auth">): Snapshot => ({
+const buildSnapshot = (fields: Partial<Snapshot> & Pick<Snapshot, "auth">): Snapshot => ({
   runnerId: MOSS.id,
   probedAt: "2026-09-05T09:14:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok",
-  models: [model("default", "Default"), model("claude-opus-4-8", "Opus 4.8")],
+  models: [buildModel("default", "Default"), buildModel("claude-opus-4-8", "Opus 4.8")],
   ...fields,
 });
 
-const LOGGED_IN = snapshot({
+const LOGGED_IN = buildSnapshot({
   auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
 });
 
-const NOT_LOGGED_IN = snapshot({ auth: { status: "unauthenticated" }, models: [] });
+const NOT_LOGGED_IN = buildSnapshot({ auth: { status: "unauthenticated" }, models: [] });
 
-const NO_ADAPTER = snapshot({
+const NO_ADAPTER = buildSnapshot({
   harnessVersion: null,
   versionVerdict: "unknown",
   auth: { status: "error", message: "no adapter for codex in this runner build" },
@@ -115,19 +115,19 @@ const NO_ADAPTER = snapshot({
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 const CODEX_ID = "01a06d02-1000-7000-8000-000000000002";
 
-const claudeCode = (snapshots: readonly Snapshot[]) =>
-  instance(CLAUDE_ID, "claude-code", "Claude Code", snapshots);
+const buildClaudeCodeInstance = (snapshots: readonly Snapshot[]) =>
+  buildProviderInstance(CLAUDE_ID, "claude-code", "Claude Code", snapshots);
 
-const CODEX = instance(CODEX_ID, "codex", "Codex", [NO_ADAPTER]);
+const CODEX = buildProviderInstance(CODEX_ID, "codex", "Codex", [NO_ADAPTER]);
 
-const INSTANCES = [claudeCode([LOGGED_IN]), CODEX];
+const INSTANCES = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
 
 /** A controller answering for itself, for the runner given, and for its writes. */
-const controller = (
+const buildController = (
   runner: Fixture,
   options: {
     readonly defaultRunnerId?: string | null;
-    readonly instances?: ReadonlyArray<ReturnType<typeof instance>>;
+    readonly instances?: ReadonlyArray<ReturnType<typeof buildProviderInstance>>;
     readonly extra?: Readonly<Record<string, Handler>>;
   } = {},
 ): Readonly<Record<string, Handler>> => ({
@@ -154,21 +154,21 @@ const controller = (
   ...options.extra,
 });
 
-const open = async (
+const openApp = async (
   runner: Fixture,
   options: {
     readonly defaultRunnerId?: string | null;
-    readonly instances?: ReadonlyArray<ReturnType<typeof instance>>;
+    readonly instances?: ReadonlyArray<ReturnType<typeof buildProviderInstance>>;
     readonly extra?: Readonly<Record<string, Handler>>;
   } = {},
 ) => {
-  const api = stubApi(controller(runner, options));
+  const api = stubApi(buildController(runner, options));
   const app = await renderApp({ path: `/fleet/${runner.id}`, api: api.fetch, token: "held" });
   return { ...app, api };
 };
 
 /** Everything this page sent about the runner, in order. */
-const writesTo = (api: { readonly calls: readonly Call[] }, id: string) =>
+const listWritesTo = (api: { readonly calls: readonly Call[] }, id: string) =>
   api.calls.filter(
     (call) => call.method !== "GET" && call.path.startsWith(`/api/v1/runners/${id}`),
   );
@@ -181,20 +181,20 @@ const showsSize = (text: string, bytes: number): boolean =>
   new RegExp(`(^|[^\\d.])${(bytes / 1024 ** 3).toFixed(0)} ?GiB`).test(text);
 
 /** The field holding the machine's name. */
-const nameField = () => screen.getByLabelText<HTMLInputElement>(/name/i);
+const getNameField = () => screen.getByLabelText<HTMLInputElement>(/name/i);
 
 /** The control saying whether the machine is the owner's alone. */
-const reservedField = () => screen.getByRole("checkbox", { name: /personal machine|reserved/i });
+const getReservedField = () => screen.getByRole("checkbox", { name: /personal machine|reserved/i });
 
 /** Whether a control is ticked, whichever way the control says so. */
-const ticked = (control: HTMLElement): boolean =>
+const isTicked = (control: HTMLElement): boolean =>
   control.getAttribute("aria-checked") === "true" || (control as HTMLInputElement).checked;
 
 /**
  * The smallest part of the page holding both a message and the field it is
  * about. A message is beside its field when that part holds no other field.
  */
-const around = (message: HTMLElement, field: HTMLElement): HTMLElement => {
+const findMessageGroup = (message: HTMLElement, field: HTMLElement): HTMLElement => {
   let group: HTMLElement = message;
   while (group.parentElement !== null && !group.contains(field)) {
     group = group.parentElement;
@@ -202,24 +202,24 @@ const around = (message: HTMLElement, field: HTMLElement): HTMLElement => {
   return group;
 };
 
-const action = (name: RegExp) => screen.getByRole("button", { name });
+const getActionButton = (name: RegExp) => screen.getByRole("button", { name });
 
 describe("Runner", () => {
   // A runner's page is under the Fleet path, so the sidebar highlights Fleet.
   it("highlights Fleet in the sidebar", async () => {
-    await open(MOSS);
+    await openApp(MOSS);
     await waitFor(() => {
-      expect(reading()).toContain(MOSS.name);
+      expect(readPageText()).toContain(MOSS.name);
     });
 
     expect(readCurrentNavItems()).toEqual(["Fleet"]);
   });
 
   it("says what the machine is, where it stands and what it may run", async () => {
-    await open(MOSS);
+    await openApp(MOSS);
 
     const shown = await waitFor(() => {
-      const text = reading();
+      const text = readPageText();
       expect(text).toContain(MOSS.name);
       return text;
     });
@@ -239,8 +239,8 @@ describe("Runner", () => {
     expect(shown).toContain("2.50.1");
     expect(showsSize(shown, MOSS.facts!.totalMemoryBytes), `memory in: ${shown}`).toBe(true);
 
-    expect(nameField().value).toBe(MOSS.name);
-    expect(ticked(reservedField())).toBe(false);
+    expect(getNameField().value).toBe(MOSS.name);
+    expect(isTicked(getReservedField())).toBe(false);
     expect(screen.getByLabelText<HTMLInputElement>(/session/i).value).toBe(
       String(MOSS.maxConcurrentSessions),
     );
@@ -250,10 +250,10 @@ describe("Runner", () => {
   });
 
   it("says a machine is the owner's own when it is", async () => {
-    await open({ ...MOSS, reserved: true });
+    await openApp({ ...MOSS, reserved: true });
 
     await waitFor(() => {
-      expect(ticked(reservedField())).toBe(true);
+      expect(isTicked(getReservedField())).toBe(true);
     });
   });
 });
@@ -266,83 +266,83 @@ describe("Runner > saving", () => {
 
   it("sends the fields the owner changed and nothing else, and says it landed", async () => {
     const user = userEvent.setup();
-    const { api } = await open(MOSS, {
+    const { api } = await openApp(MOSS, {
       extra: { [`PATCH /api/v1/runners/${MOSS.id}`]: applyPatch(MOSS) },
     });
 
     await waitFor(() => {
-      expect(nameField().value).toBe(MOSS.name);
+      expect(getNameField().value).toBe(MOSS.name);
     });
     // Nothing has been touched, so there is no patch to send and Save says so.
-    expect(action(/^save$/i).hasAttribute("disabled")).toBe(true);
+    expect(getActionButton(/^save$/i).hasAttribute("disabled")).toBe(true);
 
-    await user.clear(nameField());
-    await user.type(nameField(), "moss-2");
-    await user.click(action(/^save$/i));
+    await user.clear(getNameField());
+    await user.type(getNameField(), "moss-2");
+    await user.click(getActionButton(/^save$/i));
 
     expect((await screen.findByRole("status")).textContent).toMatch(/saved/i);
-    expect(writesTo(api, MOSS.id)).toHaveLength(1);
-    expect(writesTo(api, MOSS.id)[0]?.body).toEqual({ name: "moss-2" });
+    expect(listWritesTo(api, MOSS.id)).toHaveLength(1);
+    expect(listWritesTo(api, MOSS.id)[0]?.body).toEqual({ name: "moss-2" });
 
     // The name is now what was saved, so the next write carries only the tick.
-    await user.click(reservedField());
-    await user.click(action(/^save$/i));
+    await user.click(getReservedField());
+    await user.click(getActionButton(/^save$/i));
 
     await waitFor(() => {
-      expect(writesTo(api, MOSS.id)).toHaveLength(2);
+      expect(listWritesTo(api, MOSS.id)).toHaveLength(2);
     });
-    expect(writesTo(api, MOSS.id)[1]?.body).toEqual({ reserved: true });
+    expect(listWritesTo(api, MOSS.id)[1]?.body).toEqual({ reserved: true });
   });
 
   it("puts a refused name beside the name", async () => {
     const user = userEvent.setup();
     const complaint = "another runner is already called hetzner-01";
-    const { api } = await open(MOSS, {
+    const { api } = await openApp(MOSS, {
       extra: {
         [`PATCH /api/v1/runners/${MOSS.id}`]: {
           status: 409,
-          body: envelope("conflict", complaint),
+          body: buildErrorBody("conflict", complaint),
         },
       },
     });
 
     await waitFor(() => {
-      expect(nameField().value).toBe(MOSS.name);
+      expect(getNameField().value).toBe(MOSS.name);
     });
-    await user.clear(nameField());
-    await user.type(nameField(), "hetzner-01");
-    await user.click(action(/^save$/i));
+    await user.clear(getNameField());
+    await user.type(getNameField(), "hetzner-01");
+    await user.click(getActionButton(/^save$/i));
 
     const shown = await screen.findByText(new RegExp(complaint));
-    const group = around(shown, nameField());
-    expect(group.contains(nameField())).toBe(true);
-    expect(group.contains(reservedField())).toBe(false);
-    expect(writesTo(api, MOSS.id)).toHaveLength(1);
+    const group = findMessageGroup(shown, getNameField());
+    expect(group.contains(getNameField())).toBe(true);
+    expect(group.contains(getReservedField())).toBe(false);
+    expect(listWritesTo(api, MOSS.id)).toHaveLength(1);
   });
 
   it("puts a refused reserved beside the tick", async () => {
     const user = userEvent.setup();
     const complaint = "the default runner cannot be reserved";
-    await open(MOSS, {
+    await openApp(MOSS, {
       defaultRunnerId: MOSS.id,
       extra: {
         [`PATCH /api/v1/runners/${MOSS.id}`]: {
           status: 409,
-          body: envelope("conflict", complaint),
+          body: buildErrorBody("conflict", complaint),
         },
       },
     });
 
     await waitFor(() => {
-      expect(ticked(reservedField())).toBe(false);
+      expect(isTicked(getReservedField())).toBe(false);
     });
-    await user.click(reservedField());
-    await user.click(action(/^save$/i));
+    await user.click(getReservedField());
+    await user.click(getActionButton(/^save$/i));
 
     const shown = await screen.findByText(new RegExp(complaint));
-    const group = around(shown, reservedField());
-    expect(group.contains(reservedField())).toBe(true);
-    expect(group.contains(nameField())).toBe(false);
+    const group = findMessageGroup(shown, getReservedField());
+    expect(group.contains(getReservedField())).toBe(true);
+    expect(group.contains(getNameField())).toBe(false);
   });
 });
 
@@ -350,16 +350,16 @@ describe("Runner > moves", () => {
   it("drains the machine and shows that it is draining", async () => {
     const user = userEvent.setup();
     const draining: Fixture = { ...ONLINE, lifecycle: "draining" };
-    const { api } = await open(ONLINE, {
+    const { api } = await openApp(ONLINE, {
       extra: { [`POST /api/v1/runners/${ONLINE.id}/drain`]: { body: draining } },
     });
 
     await user.click(await screen.findByRole("button", { name: /^drain$/i }));
 
     await waitFor(() => {
-      expect(reading()).toContain("draining");
+      expect(readPageText()).toContain("draining");
     });
-    expect(writesTo(api, ONLINE.id).map((call) => call.path)).toEqual([
+    expect(listWritesTo(api, ONLINE.id).map((call) => call.path)).toEqual([
       `/api/v1/runners/${ONLINE.id}/drain`,
     ]);
   });
@@ -367,16 +367,16 @@ describe("Runner > moves", () => {
   it("calls a drain off again", async () => {
     const user = userEvent.setup();
     const draining: Fixture = { ...ONLINE, lifecycle: "draining" };
-    const { api } = await open(draining, {
+    const { api } = await openApp(draining, {
       extra: { [`POST /api/v1/runners/${draining.id}/undrain`]: { body: ONLINE } },
     });
 
     await user.click(await screen.findByRole("button", { name: /^undrain$/i }));
 
     await waitFor(() => {
-      expect(reading()).not.toContain("draining");
+      expect(readPageText()).not.toContain("draining");
     });
-    expect(writesTo(api, draining.id).map((call) => call.path)).toEqual([
+    expect(listWritesTo(api, draining.id).map((call) => call.path)).toEqual([
       `/api/v1/runners/${draining.id}/undrain`,
     ]);
   });
@@ -387,17 +387,17 @@ describe("Runner > moves", () => {
       ...ONLINE,
       facts: { ...ONLINE.facts!, totalMemoryBytes: 32 * GIB, arch: "x64" },
     };
-    const { api } = await open(ONLINE, {
+    const { api } = await openApp(ONLINE, {
       extra: { [`POST /api/v1/runners/${ONLINE.id}/refresh-facts`]: { body: probed } },
     });
 
     await user.click(await screen.findByRole("button", { name: /refresh facts/i }));
 
     await waitFor(() => {
-      expect(reading()).toContain("x64");
+      expect(readPageText()).toContain("x64");
     });
-    expect(showsSize(reading(), 32 * GIB), `the new memory in: ${reading()}`).toBe(true);
-    expect(writesTo(api, ONLINE.id).map((call) => call.path)).toEqual([
+    expect(showsSize(readPageText(), 32 * GIB), `the new memory in: ${readPageText()}`).toBe(true);
+    expect(listWritesTo(api, ONLINE.id).map((call) => call.path)).toEqual([
       `/api/v1/runners/${ONLINE.id}/refresh-facts`,
     ]);
   });
@@ -413,7 +413,7 @@ describe("Runner > moves", () => {
       facts: { ...ONLINE.facts!, totalMemoryBytes: 8 * GIB },
       maxConcurrentSessions: 4,
     };
-    const { api } = await open(ONLINE, {
+    const { api } = await openApp(ONLINE, {
       // The answer to a patch is the machine as it now stands, cap included.
       extra: {
         [`POST /api/v1/runners/${ONLINE.id}/refresh-facts`]: { body: probed },
@@ -424,25 +424,25 @@ describe("Runner > moves", () => {
     });
 
     await waitFor(() => {
-      expect(nameField().value).toBe(ONLINE.name);
+      expect(getNameField().value).toBe(ONLINE.name);
     });
-    await user.clear(nameField());
-    await user.type(nameField(), "moss-2");
+    await user.clear(getNameField());
+    await user.type(getNameField(), "moss-2");
 
     await user.click(await screen.findByRole("button", { name: /refresh facts/i }));
 
     // The re-probe changed the cap, but a half-typed form is not overwritten,
     // so the field still holds what the reader is working from.
     await waitFor(() => {
-      expect(reading()).toContain("8 GiB");
+      expect(readPageText()).toContain("8 GiB");
     });
-    expect(nameField().value).toBe("moss-2");
+    expect(getNameField().value).toBe("moss-2");
 
-    await user.click(action(/^save$/i));
+    await user.click(getActionButton(/^save$/i));
     await screen.findByRole("status");
 
     // Only the name. The cap the re-probe moved is not the user's to send.
-    const first = writesTo(api, ONLINE.id).filter((call) => call.method === "PATCH");
+    const first = listWritesTo(api, ONLINE.id).filter((call) => call.method === "PATCH");
     expect(first).toHaveLength(1);
     expect(first[0]?.body).toEqual({ name: "moss-2" });
 
@@ -454,19 +454,19 @@ describe("Runner > moves", () => {
 
     // The answer to the save above is what the next patch is measured against,
     // whole, so nothing is left to send and Save is no longer offered.
-    expect(action(/^save$/i).hasAttribute("disabled")).toBe(true);
-    await user.click(action(/^save$/i));
-    expect(writesTo(api, ONLINE.id).filter((call) => call.method === "PATCH")).toHaveLength(1);
+    expect(getActionButton(/^save$/i).hasAttribute("disabled")).toBe(true);
+    await user.click(getActionButton(/^save$/i));
+    expect(listWritesTo(api, ONLINE.id).filter((call) => call.method === "PATCH")).toHaveLength(1);
   });
 
   it("says what a refused move was refused with", async () => {
     const user = userEvent.setup();
     const complaint = "the runner did not answer within 10s";
-    const { api } = await open(ONLINE, {
+    const { api } = await openApp(ONLINE, {
       extra: {
         [`POST /api/v1/runners/${ONLINE.id}/refresh-facts`]: {
           status: 409,
-          body: envelope("invalid_state", complaint),
+          body: buildErrorBody("invalid_state", complaint),
         },
       },
     });
@@ -474,17 +474,17 @@ describe("Runner > moves", () => {
     await user.click(await screen.findByRole("button", { name: /refresh facts/i }));
 
     expect((await screen.findByRole("alert")).textContent).toContain(complaint);
-    expect(writesTo(api, ONLINE.id)).toHaveLength(1);
+    expect(listWritesTo(api, ONLINE.id)).toHaveLength(1);
   });
 
   it("drops what a refused move said once another move succeeds", async () => {
     const user = userEvent.setup();
     const complaint = "the runner did not answer within 10s";
-    await open(ONLINE, {
+    await openApp(ONLINE, {
       extra: {
         [`POST /api/v1/runners/${ONLINE.id}/refresh-facts`]: {
           status: 409,
-          body: envelope("invalid_state", complaint),
+          body: buildErrorBody("invalid_state", complaint),
         },
         [`POST /api/v1/runners/${ONLINE.id}/drain`]: {
           body: { ...ONLINE, lifecycle: "draining" },
@@ -495,44 +495,44 @@ describe("Runner > moves", () => {
     await user.click(await screen.findByRole("button", { name: /refresh facts/i }));
     expect((await screen.findByRole("alert")).textContent).toContain(complaint);
 
-    await user.click(action(/^drain$/i));
+    await user.click(getActionButton(/^drain$/i));
 
     // The drain worked, so the refusal above it is not this page's state any
     // more; leaving it there reads as the drain having failed.
     await waitFor(() => {
-      expect(reading()).toContain("draining");
+      expect(readPageText()).toContain("draining");
     });
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(reading()).not.toContain(complaint);
+    expect(readPageText()).not.toContain(complaint);
   });
 });
 
 describe("Runner > retiring", () => {
-  const retired = (runner: Fixture): Fixture => ({ ...runner, lifecycle: "retired" });
+  const buildRetiredRunner = (runner: Fixture): Fixture => ({ ...runner, lifecycle: "retired" });
 
   it("asks before it retires, and sends nothing until the question is answered", async () => {
     const user = userEvent.setup();
-    const { api } = await open(ONLINE, {
-      extra: { [`POST /api/v1/runners/${ONLINE.id}/retire`]: { body: retired(ONLINE) } },
+    const { api } = await openApp(ONLINE, {
+      extra: { [`POST /api/v1/runners/${ONLINE.id}/retire`]: { body: buildRetiredRunner(ONLINE) } },
     });
 
     await user.click(await screen.findByRole("button", { name: /^retire$/i }));
-    expect(writesTo(api, ONLINE.id)).toEqual([]);
+    expect(listWritesTo(api, ONLINE.id)).toEqual([]);
     // Cancel comes before Confirm.
-    expectInDocumentOrder([action(/^cancel$/i), action(/^confirm$/i)]);
+    expectInDocumentOrder([getActionButton(/^cancel$/i), getActionButton(/^confirm$/i)]);
 
     // Backing out leaves the machine as it was.
-    await user.click(action(/^cancel$/i));
-    expect(writesTo(api, ONLINE.id)).toEqual([]);
-    expect(reading()).not.toContain("retired");
+    await user.click(getActionButton(/^cancel$/i));
+    expect(listWritesTo(api, ONLINE.id)).toEqual([]);
+    expect(readPageText()).not.toContain("retired");
 
     await user.click(await screen.findByRole("button", { name: /^retire$/i }));
-    await user.click(action(/^confirm$/i));
+    await user.click(getActionButton(/^confirm$/i));
 
     await waitFor(() => {
-      expect(reading()).toContain("retired");
+      expect(readPageText()).toContain("retired");
     });
-    const sent = writesTo(api, ONLINE.id);
+    const sent = listWritesTo(api, ONLINE.id);
     expect(sent.map((call) => call.path)).toEqual([`/api/v1/runners/${ONLINE.id}/retire`]);
     // A machine the controller can account for is not forced.
     expect((sent[0]?.body as { force?: boolean } | undefined)?.force).not.toBe(true);
@@ -540,32 +540,32 @@ describe("Runner > retiring", () => {
 
   it("says that retiring a machine it cannot reach forces it, and forces it", async () => {
     const user = userEvent.setup();
-    const { api } = await open(LOST, {
-      extra: { [`POST /api/v1/runners/${LOST.id}/retire`]: { body: retired(LOST) } },
+    const { api } = await openApp(LOST, {
+      extra: { [`POST /api/v1/runners/${LOST.id}/retire`]: { body: buildRetiredRunner(LOST) } },
     });
 
     await user.click(await screen.findByRole("button", { name: /^retire$/i }));
 
-    expect(reading()).toContain("This runner is unreachable; retiring it now forces it");
+    expect(readPageText()).toContain("This runner is unreachable; retiring it now forces it");
 
-    await user.click(action(/^confirm$/i));
+    await user.click(getActionButton(/^confirm$/i));
 
     await waitFor(() => {
-      expect(writesTo(api, LOST.id)).toHaveLength(1);
+      expect(listWritesTo(api, LOST.id)).toHaveLength(1);
     });
-    expect(writesTo(api, LOST.id)[0]?.body).toEqual({ force: true });
+    expect(listWritesTo(api, LOST.id)[0]?.body).toEqual({ force: true });
   });
 
   // The default-runner sentence and the case where neither sentence applies are
-  // pinned exactly, and in every combination, by retireQuestion's unit test. Only
+  // pinned exactly, and in every combination, by buildRetireQuestion's unit test. Only
   // the unreachable case is driven through the browser, because it is the one
   // that also has to prove `force: true` reaches the wire.
 
   it("offers nothing to do to a machine that has been retired", async () => {
-    await open(retired(MOSS));
+    await openApp(buildRetiredRunner(MOSS));
 
     await waitFor(() => {
-      expect(reading()).toContain("retired");
+      expect(readPageText()).toContain("retired");
     });
     const page = within(document.body);
     for (const move of [/^drain$/i, /^undrain$/i, /^retire$/i, /refresh facts/i]) {
@@ -579,14 +579,15 @@ describe("Runner > providers", () => {
 
   const INVALID = "Invalid code. Please make sure the full code was copied.";
 
-  const row = (name: string): Promise<HTMLElement> => screen.findByRole("group", { name });
+  const findInstanceRow = (name: string): Promise<HTMLElement> =>
+    screen.findByRole("group", { name });
 
-  const claudeRow = () => row("Claude Code");
+  const findClaudeRow = () => findInstanceRow("Claude Code");
 
   it("says what each instance last reported on this machine", async () => {
-    await open(ONLINE);
+    await openApp(ONLINE);
 
-    const claude = reading(await claudeRow());
+    const claude = readPageText(await findClaudeRow());
     expect(claude).toContain("2.1.263");
     expect(claude).toContain("rogier@example.com");
     expect(claude).toContain("Claude Max");
@@ -594,14 +595,14 @@ describe("Runner > providers", () => {
     // A version the build was tested against is remarked on with nothing at all.
     expect(claude).not.toMatch(/below|above|untested/i);
 
-    expect(reading(await row("Codex"))).toContain("no adapter");
+    expect(readPageText(await findInstanceRow("Codex"))).toContain("no adapter");
   });
 
   it("marks a harness older than the one this build talks to", async () => {
-    await open(ONLINE, {
+    await openApp(ONLINE, {
       instances: [
-        claudeCode([
-          snapshot({
+        buildClaudeCodeInstance([
+          buildSnapshot({
             harnessVersion: "2.0.9",
             versionVerdict: "below-floor",
             auth: LOGGED_IN.auth,
@@ -611,15 +612,15 @@ describe("Runner > providers", () => {
       ],
     });
 
-    const claude = reading(await claudeRow());
+    const claude = readPageText(await findClaudeRow());
     expect(claude).toContain("2.0.9");
     expect(claude).toMatch(/below/i);
   });
 
   it("offers to log in again and to re-probe a harness that is on the machine", async () => {
-    await open(ONLINE);
+    await openApp(ONLINE);
 
-    const claude = within(await claudeRow());
+    const claude = within(await findClaudeRow());
     expect(claude.getByRole("button", { name: /log in again/i })).toBeDefined();
     expect(claude.getByRole("button", { name: /probe now/i })).toBeDefined();
     // Nothing to install: the machine reported the binary.
@@ -627,33 +628,33 @@ describe("Runner > providers", () => {
   });
 
   it("offers to install a harness that is missing, and cannot for a provider it has no adapter for", async () => {
-    await open(BARE, { instances: [claudeCode([]), CODEX] });
+    await openApp(BARE, { instances: [buildClaudeCodeInstance([]), CODEX] });
 
-    const claude = within(await claudeRow());
+    const claude = within(await findClaudeRow());
     expect(claude.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(false);
     // There is nothing to log in to until the harness is on the machine.
     expect(claude.queryByRole("button", { name: /log in/i })).toBeNull();
 
-    const codexRow = await row("Codex");
+    const codexRow = await findInstanceRow("Codex");
     const codex = within(codexRow);
     expect(codex.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(true);
     // Said before the user presses anything, rather than discovered by failing.
-    expect(reading(codexRow)).toMatch(/no adapter/i);
+    expect(readPageText(codexRow)).toMatch(/no adapter/i);
   });
 
   it("logs in through the dialog and shows the account the machine came back with", async () => {
     const user = userEvent.setup();
-    let held = [claudeCode([NOT_LOGGED_IN]), CODEX];
-    const { api } = await open(ONLINE, {
+    let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
+    const { api } = await openApp(ONLINE, {
       instances: held,
       extra: {
         "GET /api/v1/providers": () => ({ body: held }),
         [`POST /api/v1/providers/${CLAUDE_ID}/login`]: { body: { url: AUTHORIZE_URL } },
         [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: (call: Call) => {
           if ((call.body as { code: string }).code !== "the-whole-code") {
-            return { status: 400, body: envelope("validation", INVALID) };
+            return { status: 400, body: buildErrorBody("validation", INVALID) };
           }
-          held = [claudeCode([LOGGED_IN]), CODEX];
+          held = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
           return { body: LOGGED_IN };
         },
         // Every finished login is followed by a probe: what the machine holds
@@ -662,41 +663,41 @@ describe("Runner > providers", () => {
       },
     });
 
-    await user.click(within(await claudeRow()).getByRole("button", { name: /log in/i }));
+    await user.click(within(await findClaudeRow()).getByRole("button", { name: /log in/i }));
 
     // The user reads the URL on this screen and opens it wherever they like:
     // the machine running the harness may have no browser at all.
     await waitFor(() => {
-      expect(reading()).toContain(AUTHORIZE_URL);
+      expect(readPageText()).toContain(AUTHORIZE_URL);
     });
     // And is told which site they are about to sign in at, which is the one
     // part of a long opaque address they can check before they do.
-    expect(reading()).toContain("You will sign in at claude.ai");
+    expect(readPageText()).toContain("You will sign in at claude.ai");
     expect(api.calls.filter((call) => call.path.endsWith("/login"))[0]?.body).toEqual({
       runnerId: ONLINE.id,
     });
 
-    const code = () => screen.getByLabelText<HTMLInputElement>("Code", { exact: true });
-    await user.type(code(), "half-a-code");
+    const getCodeField = () => screen.getByLabelText<HTMLInputElement>("Code", { exact: true });
+    await user.type(getCodeField(), "half-a-code");
     await user.click(screen.getByRole("button", { name: /submit/i }));
 
     expect((await screen.findByText(new RegExp(INVALID))).textContent).toContain("Invalid code");
-    await user.clear(code());
-    await user.type(code(), "the-whole-code");
+    await user.clear(getCodeField());
+    await user.type(getCodeField(), "the-whole-code");
     await user.click(screen.getByRole("button", { name: /submit/i }));
 
     await waitFor(() => {
       expect(screen.queryByLabelText("Code", { exact: true })).toBeNull();
     });
     await waitFor(() => {
-      expect(reading()).toContain("rogier@example.com");
+      expect(readPageText()).toContain("rogier@example.com");
     });
   });
 
   it("finishes a printed-code login with no paste and asks the machine about it", async () => {
     const user = userEvent.setup();
-    let held = [claudeCode([NOT_LOGGED_IN]), CODEX];
-    const { api } = await open(ONLINE, {
+    let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
+    const { api } = await openApp(ONLINE, {
       instances: held,
       extra: {
         "GET /api/v1/providers": () => ({ body: held }),
@@ -704,16 +705,16 @@ describe("Runner > providers", () => {
           body: { url: AUTHORIZE_URL, userCode: "CH61-0FI2N" },
         },
         [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => {
-          held = [claudeCode([LOGGED_IN]), CODEX];
+          held = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
           return { body: LOGGED_IN };
         },
       },
     });
 
-    await user.click(within(await claudeRow()).getByRole("button", { name: /log in/i }));
+    await user.click(within(await findClaudeRow()).getByRole("button", { name: /log in/i }));
 
     await waitFor(() => {
-      expect(reading()).toContain("CH61-0FI2N");
+      expect(readPageText()).toContain("CH61-0FI2N");
     });
     // The browser finishes this login with the vendor; Hercule is told it is over.
     await user.click(screen.getByRole("button", { name: "Done" }));
@@ -721,7 +722,7 @@ describe("Runner > providers", () => {
     // The credential is on the machine and the stored snapshot predates it, so
     // the account only appears if the machine is asked again.
     await waitFor(() => {
-      expect(reading()).toContain("rogier@example.com");
+      expect(readPageText()).toContain("rogier@example.com");
     });
     const asked = api.calls.filter((call) => call.path.endsWith("/probe"));
     expect(asked).toHaveLength(1);
@@ -731,22 +732,22 @@ describe("Runner > providers", () => {
 
   it("probes one instance on demand and shows what came back", async () => {
     const user = userEvent.setup();
-    const fresh = snapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth });
+    const fresh = buildSnapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth });
     let held = INSTANCES;
-    const { api } = await open(ONLINE, {
+    const { api } = await openApp(ONLINE, {
       extra: {
         "GET /api/v1/providers": () => ({ body: held }),
         [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => {
-          held = [claudeCode([fresh]), CODEX];
+          held = [buildClaudeCodeInstance([fresh]), CODEX];
           return { body: fresh };
         },
       },
     });
 
-    await user.click(within(await claudeRow()).getByRole("button", { name: /probe now/i }));
+    await user.click(within(await findClaudeRow()).getByRole("button", { name: /probe now/i }));
 
     await waitFor(() => {
-      expect(reading()).toContain("2.1.300");
+      expect(readPageText()).toContain("2.1.300");
     });
     const asked = api.calls.filter((call) => call.path.endsWith("/probe"));
     // One instance, not the machine's whole set: the button is on the row.
@@ -756,20 +757,23 @@ describe("Runner > providers", () => {
 
   it("reads the card again when a snapshot changes elsewhere", async () => {
     let held = INSTANCES;
-    const { live } = await open(ONLINE, {
+    const { live } = await openApp(ONLINE, {
       extra: { "GET /api/v1/providers": () => ({ body: held }) },
     });
 
     await waitFor(() => {
       expect(live.topics()).toContain("provider");
     });
-    held = [claudeCode([snapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth })]), CODEX];
+    held = [
+      buildClaudeCodeInstance([buildSnapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth })]),
+      CODEX,
+    ];
     act(() => {
       live.push("provider", { _tag: "invalidate", ids: [CLAUDE_ID], kind: "updated" });
     });
 
     await waitFor(() => {
-      expect(reading()).toContain("2.1.300");
+      expect(readPageText()).toContain("2.1.300");
     });
   });
 });
@@ -778,29 +782,29 @@ describe("Runner > sessions", () => {
   /** A machine with two slots, which is what makes a queue possible at all. */
   const TWO: Fixture = { ...ONLINE, maxConcurrentSessions: 2 };
 
-  const minutesAgo = (minutes: number): string =>
+  const buildTimestampMinutesAgo = (minutes: number): string =>
     new Date(Date.now() - minutes * 60_000).toISOString();
 
-  const RUNNING = sessionFixture({
+  const RUNNING = buildSessionFixture({
     id: "01a06d02-2000-7000-8000-00000000000a",
     title: "Fix the login bug",
     status: "busy",
-    at: minutesAgo(200),
+    at: buildTimestampMinutesAgo(200),
   });
 
   /** Queued out of order in the fixture, so an ordered reading is the page's doing. */
-  const WAITED_LESS = sessionFixture({
+  const WAITED_LESS = buildSessionFixture({
     id: "01a06d02-2000-7000-8000-00000000000c",
     title: "Write the changelog",
     status: "queued",
-    at: minutesAgo(5),
+    at: buildTimestampMinutesAgo(5),
   });
 
-  const WAITED_LONGEST = sessionFixture({
+  const WAITED_LONGEST = buildSessionFixture({
     id: "01a06d02-2000-7000-8000-00000000000b",
     title: "Investigate the flaky test",
     status: "queued",
-    at: minutesAgo(130),
+    at: buildTimestampMinutesAgo(130),
   });
 
   /**
@@ -808,7 +812,7 @@ describe("Runner > sessions", () => {
    * asked for. Written as a filter rather than a fixed body so the page is free
    * to ask once for the machine's sessions or once per status.
    */
-  const listing = (sessions: () => readonly Session[]) => (call: Call) => {
+  const buildSessionListingHandler = (sessions: () => readonly Session[]) => (call: Call) => {
     const asked = new URLSearchParams(call.search);
     const runnerId = asked.get("runnerId");
     // A status filter is one bare key or several repeated ones - the page
@@ -826,24 +830,24 @@ describe("Runner > sessions", () => {
   };
 
   /** The page itself, without the shell's own thread list beside it. */
-  const page = () => reading(screen.getByRole("main"));
+  const readMainText = () => readPageText(screen.getByRole("main"));
 
   /** Every reading of the session list this browser has made. */
-  const listings = (api: { readonly calls: readonly Call[] }) =>
+  const listSessionReads = (api: { readonly calls: readonly Call[] }) =>
     api.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/sessions");
 
-  const openWith = (runner: Fixture, sessions: () => readonly Session[]) =>
-    open(runner, { extra: { "GET /api/v1/sessions": listing(sessions) } });
+  const openAppWithSessions = (runner: Fixture, sessions: () => readonly Session[]) =>
+    openApp(runner, { extra: { "GET /api/v1/sessions": buildSessionListingHandler(sessions) } });
 
   it("says how full the machine is and lists what is waiting for a slot", async () => {
     const held = [RUNNING, WAITED_LESS, WAITED_LONGEST];
-    await openWith(TWO, () => held);
+    await openAppWithSessions(TWO, () => held);
 
     await waitFor(() => {
-      expect(page()).toContain("1 running of 2 · 2 queued");
+      expect(readMainText()).toContain("1 running of 2 · 2 queued");
     });
 
-    const shown = page();
+    const shown = readMainText();
     // Oldest first: the session that has waited longest is the next to start,
     // and a queue that read newest first would say the opposite.
     expect(shown.indexOf(WAITED_LONGEST.title)).toBeGreaterThan(-1);
@@ -851,8 +855,8 @@ describe("Runner > sessions", () => {
 
     // Each row carries how long it has been waiting, read the same way every
     // other row in the app reads an age.
-    expect(shown).toContain(ageOf(WAITED_LONGEST.createdAt, new Date()));
-    expect(shown).toContain(ageOf(WAITED_LESS.createdAt, new Date()));
+    expect(shown).toContain(formatAge(WAITED_LONGEST.createdAt, new Date()));
+    expect(shown).toContain(formatAge(WAITED_LESS.createdAt, new Date()));
 
     // The rows are the queue. A running session holds a slot, which the line
     // above has already said; listing it again would read as waiting.
@@ -863,33 +867,33 @@ describe("Runner > sessions", () => {
     // The loader reads it, so nothing below the route suspends: a reader never
     // sees the machine's facts arrive with its capacity still blank.
     const held = [RUNNING, WAITED_LESS, WAITED_LONGEST];
-    await openWith(TWO, () => held);
+    await openAppWithSessions(TWO, () => held);
 
-    expect(page()).toContain("1 running of 2 · 2 queued");
+    expect(readMainText()).toContain("1 running of 2 · 2 queued");
   });
 
   it("says only how full the machine is when nothing is waiting", async () => {
     const held = [RUNNING];
-    await openWith(TWO, () => held);
+    await openAppWithSessions(TWO, () => held);
 
     await waitFor(() => {
-      expect(page()).toContain("1 running of 2");
+      expect(readMainText()).toContain("1 running of 2");
     });
-    expect(page()).not.toMatch(/queued/i);
-    expect(page()).not.toContain(RUNNING.title);
+    expect(readMainText()).not.toMatch(/queued/i);
+    expect(readMainText()).not.toContain(RUNNING.title);
   });
 
   it("reads the list again when a session moves elsewhere", async () => {
     let held: readonly Session[] = [RUNNING, WAITED_LESS, WAITED_LONGEST];
-    const { api, live } = await openWith(TWO, () => held);
+    const { api, live } = await openAppWithSessions(TWO, () => held);
 
     await waitFor(() => {
-      expect(page()).toContain("1 running of 2 · 2 queued");
+      expect(readMainText()).toContain("1 running of 2 · 2 queued");
     });
     await waitFor(() => {
       expect(live.topics()).toContain("session");
     });
-    const before = listings(api).length;
+    const before = listSessionReads(api).length;
 
     // The controller started the one that had waited longest.
     held = [RUNNING, WAITED_LESS, { ...WAITED_LONGEST, status: "starting" }];
@@ -898,12 +902,12 @@ describe("Runner > sessions", () => {
     });
 
     await waitFor(() => {
-      expect(page()).toContain("2 running of 2 · 1 queued");
+      expect(readMainText()).toContain("2 running of 2 · 1 queued");
     });
     // The page says so because it read the list again, not because the push
     // carried the session with it.
-    expect(listings(api).length).toBeGreaterThan(before);
-    expect(page()).not.toContain(WAITED_LONGEST.title);
+    expect(listSessionReads(api).length).toBeGreaterThan(before);
+    expect(readMainText()).not.toContain(WAITED_LONGEST.title);
   });
 });
 
@@ -934,21 +938,21 @@ describe("Runner > a provider that needs a key", () => {
     },
   };
 
-  const PI_SNAPSHOT = snapshot({
+  const PI_SNAPSHOT = buildSnapshot({
     harnessVersion: "0.85.1",
     auth: { status: "unauthenticated" },
     models: [],
   });
 
-  const pi = (set: boolean) => ({
-    ...instance(PI_ID, "pi", "pi", [PI_SNAPSHOT]),
+  const buildPiInstance = (set: boolean) => ({
+    ...buildProviderInstance(PI_ID, "pi", "pi", [PI_SNAPSHOT]),
     secretFields: [{ name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set }],
   });
 
-  const piRow = () => screen.findByRole("group", { name: "pi" });
+  const findPiRow = () => screen.findByRole("group", { name: "pi" });
 
   /** The calls that wrote the key, with what they wrote. */
-  const wroteKey = (api: { readonly calls: readonly Call[] }) =>
+  const listKeyWrites = (api: { readonly calls: readonly Call[] }) =>
     api.calls.filter(
       (call) =>
         call.method === "PUT" &&
@@ -957,13 +961,13 @@ describe("Runner > a provider that needs a key", () => {
 
   it("asks for the key in the plugin's own words, masked, and writes it where it belongs", async () => {
     const user = userEvent.setup();
-    let held: ReadonlyArray<ReturnType<typeof instance>> = [pi(false)];
-    const { api } = await open(WITH_PI, {
+    let held: ReadonlyArray<ReturnType<typeof buildProviderInstance>> = [buildPiInstance(false)];
+    const { api } = await openApp(WITH_PI, {
       instances: held,
       extra: {
         "GET /api/v1/providers": () => ({ body: held }),
         [SECRET_PATH]: () => {
-          held = [pi(true)];
+          held = [buildPiInstance(true)];
           return {
             body: {
               ownerKind: "provider-instance",
@@ -980,13 +984,13 @@ describe("Runner > a provider that needs a key", () => {
     });
 
     await user.click(
-      within(await piRow()).getByRole("button", { name: new RegExp(KEY_TITLE, "i") }),
+      within(await findPiRow()).getByRole("button", { name: new RegExp(KEY_TITLE, "i") }),
     );
 
     // The form is the field: the plugin's title heads it and the plugin's
     // sentence says where to get one.
     const form = await screen.findByRole("dialog", { name: KEY_TITLE });
-    expect(reading(form)).toContain(KEY_DESCRIPTION);
+    expect(readPageText(form)).toContain(KEY_DESCRIPTION);
 
     const field = within(form).getByLabelText<HTMLInputElement>(KEY_TITLE, { exact: true });
     // A paid credential is never on screen in the clear.
@@ -996,21 +1000,21 @@ describe("Runner > a provider that needs a key", () => {
     // round trip away.
     const save = within(form).getByRole("button", { name: /save/i });
     await user.click(save);
-    expect(wroteKey(api)).toEqual([]);
+    expect(listKeyWrites(api)).toEqual([]);
 
     await user.type(field, KEY_VALUE);
     await user.click(within(form).getByRole("button", { name: /save/i }));
 
     await waitFor(() => {
-      expect(wroteKey(api)).toHaveLength(1);
+      expect(listKeyWrites(api)).toHaveLength(1);
     });
-    expect(wroteKey(api)[0]?.body).toEqual({ value: KEY_VALUE });
+    expect(listKeyWrites(api)[0]?.body).toEqual({ value: KEY_VALUE });
 
-    const probes = () => api.calls.filter((call) => call.path.endsWith("/probe"));
+    const listProbeCalls = () => api.calls.filter((call) => call.path.endsWith("/probe"));
     await waitFor(() => {
-      expect(probes()).toHaveLength(1);
+      expect(listProbeCalls()).toHaveLength(1);
     });
-    expect(probes()[0]?.body).toEqual({ instanceId: PI_ID });
+    expect(listProbeCalls()[0]?.body).toEqual({ instanceId: PI_ID });
 
     // The form is done with, and the row now says the key is there and offers
     // to put another one in its place.
@@ -1019,17 +1023,17 @@ describe("Runner > a provider that needs a key", () => {
     });
     await waitFor(async () => {
       expect(
-        within(await piRow()).getByRole("button", { name: `Replace ${KEY_TITLE}` }),
+        within(await findPiRow()).getByRole("button", { name: `Replace ${KEY_TITLE}` }),
       ).toBeDefined();
     });
     // The value itself never comes back to the page.
-    expect(reading()).not.toContain(KEY_VALUE);
+    expect(readPageText()).not.toContain(KEY_VALUE);
   });
 
   it("offers to replace a key that is already set", async () => {
-    await open(WITH_PI, { instances: [pi(true)] });
+    await openApp(WITH_PI, { instances: [buildPiInstance(true)] });
 
-    const row = within(await piRow());
+    const row = within(await findPiRow());
     expect(row.getByRole("button", { name: `Replace ${KEY_TITLE}` })).toBeDefined();
     // The OAuth login is another provider's flow; pi has no vendor to redirect
     // to, so the row must not offer one.

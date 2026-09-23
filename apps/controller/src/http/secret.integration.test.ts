@@ -13,14 +13,14 @@ import { completeSetup, send, withServer } from "./testing";
 const OWNER = "connection/0198e4b0-0000-7000-8000-000000000001";
 const VALUE = "ghp_a-real-looking-token";
 
-const secretsPath = (owner: string, name: string) => `/api/v1/secrets/${owner}/${name}`;
+const buildSecretsPath = (owner: string, name: string) => `/api/v1/secrets/${owner}/${name}`;
 
 describe("secret.*", () => {
   it("stores, lists, rotates and removes, and never puts a value on the wire", async () => {
     await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
 
-      const created = await send("PUT", base, secretsPath(OWNER, "api-token"), {
+      const created = await send("PUT", base, buildSecretsPath(OWNER, "api-token"), {
         body: { value: VALUE },
         token,
       });
@@ -48,7 +48,7 @@ describe("secret.*", () => {
         ],
       });
 
-      const rotated = await send("PUT", base, secretsPath(OWNER, "api-token"), {
+      const rotated = await send("PUT", base, buildSecretsPath(OWNER, "api-token"), {
         body: { value: "a-rotated-token" },
         token,
       });
@@ -56,7 +56,7 @@ describe("secret.*", () => {
         expect.any(String),
       );
 
-      const removed = await send("DELETE", base, secretsPath(OWNER, "api-token"), { token });
+      const removed = await send("DELETE", base, buildSecretsPath(OWNER, "api-token"), { token });
       expect(removed.status).toBe(200);
 
       const empty = await send("GET", base, "/api/v1/secrets?ownerKind=connection", { token });
@@ -75,7 +75,7 @@ describe("secret.*", () => {
   it("answers 404 for a name nobody stored", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
-      const response = await send("DELETE", base, secretsPath(OWNER, "absent"), { token });
+      const response = await send("DELETE", base, buildSecretsPath(OWNER, "absent"), { token });
 
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
@@ -85,7 +85,7 @@ describe("secret.*", () => {
   it("refuses a write to the core owner: that is the controller's own key material", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
-      const response = await send("PUT", base, secretsPath("core/controller", "signing-key"), {
+      const response = await send("PUT", base, buildSecretsPath("core/controller", "signing-key"), {
         body: { value: VALUE },
         token,
       });
@@ -98,7 +98,7 @@ describe("secret.*", () => {
   it("refuses an owner id holding the separator the encryption is bound with", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
-      const response = await send("PUT", base, secretsPath("plugin/a%7Cb", "k"), {
+      const response = await send("PUT", base, buildSecretsPath("plugin/a%7Cb", "k"), {
         body: { value: VALUE },
         token,
       });

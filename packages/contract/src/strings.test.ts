@@ -13,7 +13,7 @@ const decode = (schema: unknown, input: unknown) =>
     ._tag;
 
 /** One endpoint of a group, by the identifier the group declares it under. */
-const endpointOf = (group: unknown, identifier: string): Record<string, unknown> => {
+const findEndpoint = (group: unknown, identifier: string): Record<string, unknown> => {
   const endpoints = (group as { endpoints: Record<string, unknown> }).endpoints;
   const endpoint = endpoints[identifier];
   if (endpoint === undefined) throw new Error(`no endpoint ${identifier}`);
@@ -24,8 +24,8 @@ const endpointOf = (group: unknown, identifier: string): Record<string, unknown>
  * What an endpoint validates its JSON request body against. `payload` is a map
  * from content type to the schemas declared for it; the API speaks JSON only.
  */
-const payloadOf = (group: unknown, identifier: string): unknown => {
-  const byContentType = endpointOf(group, identifier)["payload"] as Map<
+const readPayloadSchema = (group: unknown, identifier: string): unknown => {
+  const byContentType = findEndpoint(group, identifier)["payload"] as Map<
     string,
     { readonly schemas: ReadonlyArray<unknown> }
   >;
@@ -40,7 +40,7 @@ const HUGE = "x".repeat(20_000);
 
 describe("bounds on free text", () => {
   it("caps the login username and password, so an anonymous caller cannot write megabytes", () => {
-    const login = payloadOf(auth, "login");
+    const login = readPayloadSchema(auth, "login");
     expect(decode(login, { username: "rogier", password: PASSWORD })).toBe("Success");
     expect(decode(login, { username: HUGE, password: PASSWORD })).toBe("Failure");
     expect(decode(login, { username: "rogier", password: TOO_LONG_PASSWORD })).toBe("Failure");
@@ -50,7 +50,7 @@ describe("bounds on free text", () => {
   });
 
   it("applies the password policy where a password is chosen", () => {
-    const complete = payloadOf(setup, "complete");
+    const complete = readPayloadSchema(setup, "complete");
     const shortest = "x".repeat(MIN_PASSWORD_LENGTH);
     expect(decode(complete, { username: "r", password: shortest, timezone: "UTC" })).toBe(
       "Success",
@@ -60,25 +60,25 @@ describe("bounds on free text", () => {
     );
     expect(decode(complete, { username: "r", password: PASSWORD, timezone: HUGE })).toBe("Failure");
 
-    const setPassword = payloadOf(user, "setPassword");
+    const setPassword = readPayloadSchema(user, "setPassword");
     expect(decode(setPassword, { current: PASSWORD, next: PASSWORD })).toBe("Success");
     expect(decode(setPassword, { current: PASSWORD, next: "short" })).toBe("Failure");
     expect(decode(setPassword, { current: TOO_LONG_PASSWORD, next: PASSWORD })).toBe("Failure");
   });
 
   it("caps the names a caller chooses", () => {
-    expect(decode(payloadOf(apiKey, "create"), { name: "x".repeat(128) })).toBe("Success");
-    expect(decode(payloadOf(apiKey, "create"), { name: "x".repeat(129) })).toBe("Failure");
-    expect(decode(payloadOf(profile, "create"), { name: "x".repeat(128), grants: [] })).toBe(
-      "Success",
-    );
-    expect(decode(payloadOf(profile, "create"), { name: "x".repeat(129), grants: [] })).toBe(
-      "Failure",
-    );
+    expect(decode(readPayloadSchema(apiKey, "create"), { name: "x".repeat(128) })).toBe("Success");
+    expect(decode(readPayloadSchema(apiKey, "create"), { name: "x".repeat(129) })).toBe("Failure");
+    expect(
+      decode(readPayloadSchema(profile, "create"), { name: "x".repeat(128), grants: [] }),
+    ).toBe("Success");
+    expect(
+      decode(readPayloadSchema(profile, "create"), { name: "x".repeat(129), grants: [] }),
+    ).toBe("Failure");
   });
 
   it("caps both halves of a secret's owner and its name", () => {
-    const params = endpointOf(secret, "set")["params"];
+    const params = findEndpoint(secret, "set")["params"];
     const owner = { ownerKind: "plugin", ownerId: "x".repeat(256) };
     expect(decode(params, { ...owner, name: "x".repeat(256) })).toBe("Success");
     expect(decode(params, { ...owner, name: "x".repeat(257) })).toBe("Failure");
@@ -88,7 +88,7 @@ describe("bounds on free text", () => {
   });
 
   it("caps a secret's value, which is the largest thing the API accepts", () => {
-    const set = payloadOf(secret, "set");
+    const set = readPayloadSchema(secret, "set");
     expect(decode(set, { value: "x".repeat(MAX_SECRET_VALUE_LENGTH) })).toBe("Success");
     expect(decode(set, { value: "x".repeat(MAX_SECRET_VALUE_LENGTH + 1) })).toBe("Failure");
     expect(decode(set, { value: "" })).toBe("Failure");

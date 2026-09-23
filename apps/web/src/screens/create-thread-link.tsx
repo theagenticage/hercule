@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { buttonClassName } from "@hercule/ui";
+import { buildButtonClassName } from "@hercule/ui";
 
 /**
  * Create new thread, wherever it appears as a plain primary affordance: the
@@ -9,7 +9,7 @@ import { buttonClassName } from "@hercule/ui";
  */
 export function CreateThreadLink(): JSX.Element {
   return (
-    <Link to="/threads/new" className={buttonClassName("primary", undefined)}>
+    <Link to="/threads/new" className={buildButtonClassName("primary", undefined)}>
       Create new thread
     </Link>
   );

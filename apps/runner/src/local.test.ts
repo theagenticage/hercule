@@ -14,7 +14,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runnerDirIn } from "@hercule/home";
+import { locateRunnerDir } from "@hercule/home";
 
 /** The dispatcher, run from source: `hercule` before it is compiled. */
 const HERCULE = join(
@@ -33,7 +33,7 @@ afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-const temporaryHome = (): string => {
+const createTemporaryHome = (): string => {
   const home = mkdtempSync(join(tmpdir(), "hercule-local-runner-"));
   homes.push(home);
   return home;
@@ -42,11 +42,11 @@ const temporaryHome = (): string => {
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** A home this machine has already joined from, pointed at this address. */
-const enrolledAt = (controllerUrl: string, runnerId: string): string => {
-  const home = temporaryHome();
-  mkdirSync(runnerDirIn(home), { recursive: true });
+const createEnrolledHome = (controllerUrl: string, runnerId: string): string => {
+  const home = createTemporaryHome();
+  mkdirSync(locateRunnerDir(home), { recursive: true });
   writeFileSync(
-    join(runnerDirIn(home), "runner.json"),
+    join(locateRunnerDir(home), "runner.json"),
     JSON.stringify({
       runnerId,
       credential: "the-credential-the-join-handed-back",
@@ -76,7 +76,7 @@ interface Child {
   readonly kill: () => void;
 }
 
-const spawnLocal = (home: string): Child => {
+const spawnLocalRunner = (home: string): Child => {
   const process_ = Bun.spawn(
     [process.execPath, "run", HERCULE, "runner", "--local", "--home", home],
     {
@@ -110,7 +110,7 @@ const spawnLocal = (home: string): Child => {
 };
 
 /** Waits for a condition, or gives up and lets the assertion say what it saw. */
-const until = async (ready: () => boolean, within = 10_000): Promise<void> => {
+const waitUntil = async (ready: () => boolean, within = 10_000): Promise<void> => {
   for (let waited = 0; waited < within && !ready(); waited += 20) await delay(20);
 };
 
@@ -129,10 +129,12 @@ describe("hercule runner --local", () => {
         return new Response("no", { status: 401 });
       },
     });
-    const child = spawnLocal(enrolledAt(`http://127.0.0.1:${String(server.port)}`, runnerId));
+    const child = spawnLocalRunner(
+      createEnrolledHome(`http://127.0.0.1:${String(server.port)}`, runnerId),
+    );
 
     try {
-      await until(() => asked.length > 0);
+      await waitUntil(() => asked.length > 0);
       // Whatever it has printed by the time it dials is all it prints before
       // dialing, and it is one line, with no room in it for anything else.
       expect(child.out()).toBe(`{"runnerId":"${runnerId}"}\n`);
@@ -166,11 +168,11 @@ describe("hercule runner --local", () => {
       },
     });
     // No `runner.json`: this machine has never joined anything.
-    const home = temporaryHome();
-    const child = spawnLocal(home);
+    const home = createTemporaryHome();
+    const child = spawnLocalRunner(home);
 
     try {
-      await until(() => child.out() !== "");
+      await waitUntil(() => child.out() !== "");
       expect(child.out()).toBe('{"join":true}\n');
       // The token never touches argv or the environment; it arrives here.
       child.write(
@@ -178,7 +180,7 @@ describe("hercule runner --local", () => {
       );
       child.closeStdin();
 
-      await until(() => asked.some((one) => one.path === "/api/v1/runners/join"));
+      await waitUntil(() => asked.some((one) => one.path === "/api/v1/runners/join"));
       const join = asked.find((one) => one.path === "/api/v1/runners/join");
       expect(join, `it never joined; it said ${JSON.stringify(child.err())}`).toBeDefined();
       expect(join?.authorization).toBe(`Bearer ${token}`);
@@ -196,12 +198,12 @@ describe("hercule runner --local", () => {
     const port = Number(server.port);
     await server.stop(true);
 
-    const child = spawnLocal(temporaryHome());
+    const child = spawnLocalRunner(createTemporaryHome());
     let asked = 0;
     let listener: ReturnType<typeof Bun.serve> | undefined;
 
     try {
-      await until(() => child.out() !== "");
+      await waitUntil(() => child.out() !== "");
       expect(child.out()).toBe('{"join":true}\n');
       child.write(
         `${JSON.stringify({ controllerUrl: `http://127.0.0.1:${String(port)}`, token })}\n`,
@@ -231,7 +233,7 @@ describe("hercule runner --local", () => {
         },
       });
 
-      await until(() => asked > 0);
+      await waitUntil(() => asked > 0);
       expect(asked, `it gave up before the controller was there; it said ${child.err()}`).toBe(1);
     } finally {
       child.kill();
@@ -240,9 +242,9 @@ describe("hercule runner --local", () => {
   }, 30_000);
 
   it("gives up, saying so, when nobody hands it a token", async () => {
-    const child = spawnLocal(temporaryHome());
+    const child = spawnLocalRunner(createTemporaryHome());
 
-    await until(() => child.out() !== "");
+    await waitUntil(() => child.out() !== "");
     expect(child.out()).toBe('{"join":true}\n');
     // The controller closed the pipe without writing: there is nothing this
     // runner can do and nothing it should sit waiting for.

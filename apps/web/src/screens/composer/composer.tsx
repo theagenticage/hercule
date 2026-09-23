@@ -2,16 +2,16 @@ import { useRef, useState, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  branchField,
-  draftSubject,
-  modelMenu,
-  optionsLabel,
-  pendingModelNote,
-  projectRepos,
+  buildBranchField,
+  findDraftSubject,
+  buildModelMenu,
+  buildOptionsLabel,
+  buildPendingModelNote,
+  listProjectRepos,
   queryKeys,
-  runnerForPick,
+  findRunnerForPick,
   withBranch,
-  workspaceMenu,
+  buildWorkspaceMenu,
   type Thread,
 } from "@hercule/client-core";
 import {
@@ -28,7 +28,7 @@ import { AccessModeSelector } from "./access-mode-selector";
 import { AttachButton, SendButton, StopButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
-import { loginSlot } from "./login-slot";
+import { buildLoginSlot } from "./login-slot";
 import { ModelOptionsSelector } from "./model-options-selector";
 import { ModelSelector } from "./model-selector";
 import { MessageBox } from "./message-box";
@@ -39,7 +39,7 @@ type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "branch" |
 /**
  * The composer: what the thread runs with, and the message about to go to it. One
  * component for a draft and an active thread - `useComposerModel` holds the
- * difference, and every lock, dimming and blocker comes from `composerFields`.
+ * difference, and every lock, dimming and blocker comes from `buildComposerFields`.
  */
 export function Composer({
   thread,
@@ -76,26 +76,26 @@ export function Composer({
   const [filter, setFilter] = useState("");
   const model = useComposerModel(thread, catalogs, client, onSend);
   const fields = model.fields;
-  const pending = pendingModelNote(model.kind, model.picks);
-  const login = loginSlot(client, () => {
+  const pending = buildPendingModelNote(model.kind, model.picks);
+  const login = buildLoginSlot(client, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   });
   // A click opening B is also a click outside A, so closing clears only the selector asking to.
-  const openChange = (key: SelectorKey, next: boolean): void => {
+  const handleOpenChange = (key: SelectorKey, next: boolean): void => {
     setOpen((current) => (next ? key : current === key ? null : current));
     if (key === "model" && !next) setFilter("");
   };
   // The catalog behind the model pill is worth resolving only while it is on show.
   const models =
     open === "model"
-      ? modelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent })
+      ? buildModelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent })
       : null;
   const projectId = model.config.projectId ?? null;
   const project = projects.find((each) => each.id === projectId);
   const pick = fields.workspace.value;
-  const menu = workspaceMenu({
+  const menu = buildWorkspaceMenu({
     project,
-    repos: projectRepos(resources, projectId),
+    repos: listProjectRepos(resources, projectId),
     workspaces,
     sessions,
     runners,
@@ -105,7 +105,7 @@ export function Composer({
     runnerId: fields.machine.runnerId,
     pick,
   });
-  const branch = branchField(pick, { workspaces, runnerId: fields.machine.runnerId });
+  const branch = buildBranchField(pick, { workspaces, runnerId: fields.machine.runnerId });
   const cannotSend = fields.blocked !== null || model.readOnly !== null || model.sending;
   const canSend = !cannotSend && model.message.trim() !== "";
   return (
@@ -113,7 +113,7 @@ export function Composer({
     <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
       {fields.lead === null ? null : (
         <DraftHero
-          subject={draftSubject(pick, workspaces, projectId, projects)}
+          subject={findDraftSubject(pick, workspaces, projectId, projects)}
           lead={fields.lead}
           blocked={fields.blocked}
           loginSlot={login}
@@ -141,7 +141,7 @@ export function Composer({
             locked={fields.accessMode.locked}
             open={open === "accessMode"}
             onOpenChange={(next) => {
-              openChange("accessMode", next);
+              handleOpenChange("accessMode", next);
             }}
             onPick={(mode) => {
               model.pick({ kind: "accessMode", value: mode });
@@ -155,12 +155,12 @@ export function Composer({
               <ModelOptionsSelector
                 descriptors={fields.options}
                 selected={model.config.options}
-                label={optionsLabel(fields.options, model.config.options)}
+                label={buildOptionsLabel(fields.options, model.config.options)}
                 modelName={fields.model.pill.name}
                 disabled={model.readOnly !== null}
                 open={open === "options"}
                 onOpenChange={(next) => {
-                  openChange("options", next);
+                  handleOpenChange("options", next);
                 }}
                 onPick={(id, value) => {
                   model.pick({ kind: "option", id, value });
@@ -176,7 +176,7 @@ export function Composer({
                 disabled={model.readOnly !== null}
                 open={open === "model"}
                 onOpenChange={(next) => {
-                  openChange("model", next);
+                  handleOpenChange("model", next);
                 }}
                 onPick={model.pick}
                 loginSlot={login}
@@ -200,11 +200,11 @@ export function Composer({
         machine={fields.machine}
         pill={pill}
         open={open === "workspace" || open === "branch" || open === "machine" ? open : null}
-        onOpenChange={openChange}
+        onOpenChange={handleOpenChange}
         onPickWorkspace={(picked) => {
           // A workspace that already stands settles the machine too, which is
-          // `runnerForPick`'s to say rather than this component's.
-          const settled = runnerForPick(picked, workspaces);
+          // `findRunnerForPick`'s to say rather than this component's.
+          const settled = findRunnerForPick(picked, workspaces);
           if (settled === null) model.pick({ kind: "workspace", value: picked });
           else
             model.pick({ kind: "workspace", value: picked }, { kind: "runnerId", value: settled });

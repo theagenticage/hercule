@@ -46,7 +46,7 @@ export interface Arguments {
  * from stdin has no flag to name, and naming one would send the reader looking
  * for a flag that does not exist.
  */
-export const said = (field: Field): string =>
+export const formatFieldName = (field: Field): string =>
   field.stdin
     ? `${field.name} (on stdin)`
     : field.positional
@@ -61,7 +61,7 @@ export const said = (field: Field): string =>
  * spelling is never sent. The schema's own refusal is what the writer reads:
  * it knows the forms the word may take, and this loop does not.
  */
-export const coerce = (field: Field, text: string, help: string): unknown => {
+export const coerceFieldValue = (field: Field, text: string, help: string): unknown => {
   if (field.decodeShorthand !== undefined) {
     try {
       // For a query field the derived client encodes the decoded value back to
@@ -73,11 +73,14 @@ export const coerce = (field: Field, text: string, help: string): unknown => {
       // around it is the decoder's wrapper and says nothing a writer can act
       // on.
       const refusal = failure instanceof Error ? failure.message : String(failure);
-      throw new UsageError(`${said(field)}: ${refusal}`, help);
+      throw new UsageError(`${formatFieldName(field)}: ${refusal}`, help);
     }
   }
   if (field.choices !== undefined && !field.choices.includes(text)) {
-    throw new UsageError(`${said(field)}: ${text} is not one of ${field.choices.join(", ")}`, help);
+    throw new UsageError(
+      `${formatFieldName(field)}: ${text} is not one of ${field.choices.join(", ")}`,
+      help,
+    );
   }
   switch (field.kind) {
     case "string":
@@ -85,19 +88,19 @@ export const coerce = (field: Field, text: string, help: string): unknown => {
     case "number": {
       const value = Number(text);
       if (!Number.isFinite(value))
-        throw new UsageError(`${said(field)}: ${text} is not a number`, help);
+        throw new UsageError(`${formatFieldName(field)}: ${text} is not a number`, help);
       return value;
     }
     case "boolean": {
       if (text === "true") return true;
       if (text === "false") return false;
-      throw new UsageError(`${said(field)}: ${text} is not true or false`, help);
+      throw new UsageError(`${formatFieldName(field)}: ${text} is not true or false`, help);
     }
     case "json":
       try {
         return JSON.parse(text);
       } catch {
-        throw new UsageError(`${said(field)}: ${text} is not valid JSON`, help);
+        throw new UsageError(`${formatFieldName(field)}: ${text} is not valid JSON`, help);
       }
   }
 };
@@ -112,10 +115,10 @@ export const coerce = (field: Field, text: string, help: string): unknown => {
  * which is the trade every command line that spells null makes. Content read
  * from stdin is a document and never a shortcut, so it does not pass here.
  */
-const written = (field: Field, text: string, help: string): unknown =>
-  field.nullable && text === "null" ? null : coerce(field, text, help);
+const parseWrittenValue = (field: Field, text: string, help: string): unknown =>
+  field.nullable && text === "null" ? null : coerceFieldValue(field, text, help);
 
-const set = (into: Record<string, unknown>, field: Field, value: unknown): void => {
+const assignFieldValue = (into: Record<string, unknown>, field: Field, value: unknown): void => {
   if (!field.repeated) {
     into[field.name] = value;
     return;
@@ -287,7 +290,11 @@ export const parseArguments = async (
         help,
       );
     }
-    set(payloadField === undefined ? query : payload, field, written(field, value(), help));
+    assignFieldValue(
+      payloadField === undefined ? query : payload,
+      field,
+      parseWrittenValue(field, value(), help),
+    );
   }
 
   // A required content field is read unasked; an optional one only where its
@@ -319,7 +326,7 @@ export const parseArguments = async (
     const text = (await readStdin()).replace(/\r?\n$/, "");
     if (reading.length === 1) {
       const field = reading[0]!;
-      payload[field.name] = coerce(field, text, help);
+      payload[field.name] = coerceFieldValue(field, text, help);
     } else {
       // Split at `\r\n` too, so no line of a Windows file keeps a trailing `\r`.
       const lines = text.split(/\r?\n/);
@@ -332,7 +339,7 @@ export const parseArguments = async (
         );
       }
       reading.forEach((field, index) => {
-        payload[field.name] = coerce(field, lines[index]!, help);
+        payload[field.name] = coerceFieldValue(field, lines[index]!, help);
       });
     }
   }

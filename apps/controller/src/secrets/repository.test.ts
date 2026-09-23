@@ -9,7 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { homePaths, HerculeHome } from "../config";
+import { buildHomePaths, HerculeHome } from "../config";
 import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { masterKeyLayer } from "./masterKey";
@@ -21,32 +21,34 @@ const TOKEN = "ghp_a-real-looking-token";
 let homes: Array<string> = [];
 
 /** A master key file in its own temporary home; a second home is a different key. */
-const keyIn = (): Layer.Layer<HerculeHome> => {
+const buildHomeLayer = (): Layer.Layer<HerculeHome> => {
   const home = mkdtempSync(join(tmpdir(), "hercule-secrets-"));
   homes.push(home);
-  return Layer.succeed(HerculeHome, HerculeHome.of(homePaths(home, join(home, "data"))));
+  return Layer.succeed(HerculeHome, HerculeHome.of(buildHomePaths(home, join(home, "data"))));
 };
 
 /** The real repository over a `:memory:` database with the real migrations. */
-const stack = (home: Layer.Layer<HerculeHome> = keyIn()) =>
+const buildStack = (home: Layer.Layer<HerculeHome> = buildHomeLayer()) =>
   secretsLayer.pipe(
     Layer.provide(masterKeyLayer("file").pipe(Layer.provide(home))),
     Layer.provideMerge(TestDatabase),
   );
 
-const run = <A, E>(effect: Effect.Effect<A, E, Secrets | SqlClient.SqlClient>, layer = stack()) =>
-  Effect.runPromise(effect.pipe(Effect.provide(layer)));
+const run = <A, E>(
+  effect: Effect.Effect<A, E, Secrets | SqlClient.SqlClient>,
+  layer = buildStack(),
+) => Effect.runPromise(effect.pipe(Effect.provide(layer)));
 
 const runExit = <A, E>(
   effect: Effect.Effect<A, E, Secrets | SqlClient.SqlClient>,
-  layer = stack(),
+  layer = buildStack(),
 ) => Effect.runPromiseExit(effect.pipe(Effect.provide(layer)));
 
 /** What a log line or a template literal would print for a value. */
-const printed = (value: { readonly toString: () => string }): string => value.toString();
+const printValue = (value: { readonly toString: () => string }): string => value.toString();
 
 /** The typed error a failed exit carries, so a test asserts on the tag, not on prose. */
-const failureOf = <E>(exit: Exit.Exit<unknown, E>): E | undefined =>
+const findFailure = <E>(exit: Exit.Exit<unknown, E>): E | undefined =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
 
 beforeEach(() => {
@@ -157,12 +159,12 @@ describe("secrets", () => {
         secrets.set(CONNECTION, "oauth|token", Redacted.make(TOKEN)),
       ),
     );
-    expect(failureOf(written)?._tag).toBe("SecretNameError");
+    expect(findFailure(written)?._tag).toBe("SecretNameError");
 
     const read = await runExit(
       Effect.flatMap(Secrets, (secrets) => secrets.get(CONNECTION, "oauth|token")),
     );
-    expect(failureOf(read)?._tag).toBe("SecretNameError");
+    expect(findFailure(read)?._tag).toBe("SecretNameError");
   });
 
   it("fails to decrypt a row whose owner or name was edited behind its back", async () => {
@@ -175,14 +177,14 @@ describe("secrets", () => {
         return yield* secrets.get(CONNECTION, "renamed");
       }),
     );
-    expect(failureOf(exit)?._tag).toBe("SecretDecryptError");
+    expect(findFailure(exit)?._tag).toBe("SecretDecryptError");
     expect(String(exit)).not.toContain(TOKEN);
   });
 
   it("fails to decrypt under a different master key", async () => {
     const database = TestDatabase;
     const written = secretsLayer.pipe(
-      Layer.provide(masterKeyLayer("file").pipe(Layer.provide(keyIn()))),
+      Layer.provide(masterKeyLayer("file").pipe(Layer.provide(buildHomeLayer()))),
       Layer.provideMerge(database),
     );
 
@@ -217,13 +219,13 @@ describe("secrets", () => {
       }).pipe(
         Effect.provide(
           secretsLayer.pipe(
-            Layer.provide(masterKeyLayer("file").pipe(Layer.provide(keyIn()))),
+            Layer.provide(masterKeyLayer("file").pipe(Layer.provide(buildHomeLayer()))),
             Layer.provideMerge(TestDatabase),
           ),
         ),
       ),
     );
-    expect(failureOf(other)?._tag).toBe("SecretDecryptError");
+    expect(findFailure(other)?._tag).toBe("SecretDecryptError");
   });
 
   it("keeps values out of returned records, strings and JSON", async () => {
@@ -236,7 +238,7 @@ describe("secrets", () => {
       }),
     );
     expect(JSON.stringify(ref)).not.toContain(TOKEN);
-    expect(printed(value)).toBe("<redacted>");
+    expect(printValue(value)).toBe("<redacted>");
     expect(JSON.stringify(value)).not.toContain(TOKEN);
   });
 

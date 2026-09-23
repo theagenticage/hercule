@@ -26,10 +26,10 @@ import type {
   TurnInput,
 } from "@hercule/protocol";
 import type { ProviderAdapter, ProviderRunnerContext } from "../index";
-import { userMessage } from "../events";
-import { probeFailed } from "../probe";
+import { buildUserMessage } from "../events";
+import { buildFailedProbe } from "../probe";
 import { runProcess, spawnPi, type Run } from "../process";
-import { fact, text } from "../text";
+import { truncateFact, truncateMessage } from "../text";
 import { now } from "../../report";
 import {
   ACCESS_MODE_VARIABLE,
@@ -39,14 +39,14 @@ import {
   SUBMIT_RESULT_TOOL,
 } from "./extension";
 import {
-  ending,
+  endTurn,
   normalize,
   buildNormalizingState,
   type Normalizing,
   type RunningTool,
 } from "./normalize";
-import { DEFAULT_THINKING, piInstall, probing, ZAI } from "./probe";
-import { rpcOver, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
+import { DEFAULT_THINKING, makePiInstall, makeProbe, ZAI } from "./probe";
+import { makeRpc, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
 
 export const PI = "pi";
 
@@ -159,7 +159,7 @@ const DECISIONS: readonly [ApprovalDecision, ...ReadonlyArray<ApprovalDecision>]
 ];
 
 /** What pi reads each answer as: no decision made, or yes, or no. */
-const answerFor = (decision: ApprovalDecision): Record<string, unknown> =>
+const buildDialogAnswer = (decision: ApprovalDecision): Record<string, unknown> =>
   decision === "cancel" ? { cancelled: true } : { confirmed: decision === "allow" };
 
 /**
@@ -174,7 +174,7 @@ const APPROVALS: Readonly<Partial<Record<ItemKind, ParkKind>>> = {
 };
 
 /** A string argument pi's tool was called with. */
-const stringArg = (item: RunningTool, name: string): string => {
+const readStringArg = (item: RunningTool, name: string): string => {
   const value = item.args?.[name];
   return typeof value === "string" ? value : "";
 };
@@ -184,15 +184,19 @@ const stringArg = (item: RunningTool, name: string): string => {
  * not from the question: pi's own dialog carries no more than which call it is
  * about, and a surface renders the command, the path or the tool's name.
  */
-const requestFor = (requestId: string, item: RunningTool, kind: ParkKind): OpenRequest => {
+const buildOpenRequest = (requestId: string, item: RunningTool, kind: ParkKind): OpenRequest => {
   const common = { requestId, itemId: item.itemId, decisions: DECISIONS };
   if (kind === "command_approval") {
-    return { ...common, kind, detail: { command: text(stringArg(item, "command")) } };
+    return {
+      ...common,
+      kind,
+      detail: { command: truncateMessage(readStringArg(item, "command")) },
+    };
   }
   if (kind === "file_change_approval") {
-    return { ...common, kind, detail: { paths: [fact(stringArg(item, "path"))] } };
+    return { ...common, kind, detail: { paths: [truncateFact(readStringArg(item, "path"))] } };
   }
-  return { ...common, kind, detail: { toolName: fact(item.toolName) } };
+  return { ...common, kind, detail: { toolName: truncateFact(item.toolName) } };
 };
 
 /** One question pi is holding a tool call on, and the call it is about. */
@@ -215,7 +219,7 @@ const parseHeldCall = (message: unknown): Record<string, unknown> => {
   }
 };
 
-const stringIn = (record: Record<string, unknown>, key: string): string =>
+const readString = (record: Record<string, unknown>, key: string): string =>
   typeof record[key] === "string" ? record[key] : "";
 
 /**
@@ -223,7 +227,7 @@ const stringIn = (record: Record<string, unknown>, key: string): string =>
  * its notifications and status updates as requests too, and they are told
  * nothing back.
  */
-const dialogOf = (frame: unknown): Dialog | undefined => {
+const parseDialog = (frame: unknown): Dialog | undefined => {
   if (typeof frame !== "object" || frame === null) return undefined;
   const asked = frame as Record<string, unknown>;
   const id = asked["id"];
@@ -234,7 +238,7 @@ const dialogOf = (frame: unknown): Dialog | undefined => {
   ) {
     return undefined;
   }
-  return { id, toolCallId: stringIn(parseHeldCall(asked["message"]), "toolCallId") };
+  return { id, toolCallId: readString(parseHeldCall(asked["message"]), "toolCallId") };
 };
 
 /** Whether this frame is pi saying it has no more turns of its own to run. */
@@ -264,9 +268,9 @@ const owesAnswer = (state: Normalizing): boolean =>
  * Every session's transcript sits in the instance's own directory, named for
  * the moment it started and the session it is.
  */
-const sessionsDir = (home: string): string => join(home, "sessions");
+const buildSessionsDir = (home: string): string => join(home, "sessions");
 
-const extensionPath = (home: string): string => join(home, EXTENSION_FILE);
+const buildExtensionPath = (home: string): string => join(home, EXTENSION_FILE);
 
 /**
  * Where the Agent's instructions for one session are written, beside the
@@ -277,7 +281,7 @@ const extensionPath = (home: string): string => join(home, EXTENSION_FILE);
  * a prompt that reads like a filename, such as `AGENTS.md`, would otherwise
  * become whatever that file says.
  */
-const systemPromptPath = (home: string, sessionId: string): string =>
+const buildSystemPromptPath = (home: string, sessionId: string): string =>
   join(home, `system-prompt-${sessionId}.txt`);
 
 const getSessionThinkingLevel = (selection: ModelSelection): string => {
@@ -290,15 +294,15 @@ const getSessionThinkingLevel = (selection: ModelSelection): string => {
  * the sessions recorded for the current directory and asks on stdin - Hercule's
  * own JSON channel - when it has to look wider, so a path is what it is given.
  */
-const transcriptOf = (home: string, nativeSessionId: string): string | undefined => {
+const findTranscript = (home: string, nativeSessionId: string): string | undefined => {
   let names: ReadonlyArray<string>;
   try {
-    names = readdirSync(sessionsDir(home));
+    names = readdirSync(buildSessionsDir(home));
   } catch {
     return undefined;
   }
   const found = names.find((name) => name.endsWith(`_${nativeSessionId}.jsonl`));
-  return found === undefined ? undefined : join(sessionsDir(home), found);
+  return found === undefined ? undefined : join(buildSessionsDir(home), found);
 };
 
 /**
@@ -319,7 +323,7 @@ const PI_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>
  * takes the transcript instead: pi refuses the two together, because the
  * session the transcript is already carries its own id.
  */
-const argvFor = (
+const buildArgv = (
   spec: SessionSpec,
   ctx: ProviderRunnerContext,
   sessionId: string,
@@ -342,9 +346,9 @@ const argvFor = (
     "--no-approve",
     "--offline",
     "-e",
-    extensionPath(ctx.home),
+    buildExtensionPath(ctx.home),
     "--session-dir",
-    sessionsDir(ctx.home),
+    buildSessionsDir(ctx.home),
     ...(resuming ? ["--session", transcript] : ["--session-id", sessionId]),
     ...(spec.continue?.mode === "fork" && transcript !== undefined ? ["--fork", transcript] : []),
     "--model",
@@ -355,7 +359,7 @@ const argvFor = (
     // `prepare` wrote it to rather than sent as the text.
     ...(spec.systemPrompt === undefined
       ? []
-      : ["--append-system-prompt", systemPromptPath(ctx.home, sessionId)]),
+      : ["--append-system-prompt", buildSystemPromptPath(ctx.home, sessionId)]),
     // An empty value excludes nothing, and pi reads a flag with nothing after
     // it as a flag it does not know. So an empty list is left out, and is sent
     // in neither of those two forms.
@@ -363,9 +367,9 @@ const argvFor = (
   ];
 };
 
-export const piAdapter = (seam: PiSeam): ProviderAdapter => {
+export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
-  // run here and keeps `adapterFor` the synchronous lookup every other caller
+  // run here and keeps `findAdapter` the synchronous lookup every other caller
   // already treats it as.
   const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
   const sessions = new Map<string, Held>();
@@ -381,7 +385,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       eventId: crypto.randomUUID(),
       sessionId,
       at: now(),
-      message: text(message),
+      message: truncateMessage(message),
     });
   };
 
@@ -398,10 +402,10 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /** Tells pi what was decided about the call it is holding. */
-  const tell = (held: Held, dialogId: string, decision: ApprovalDecision): void => {
+  const sendDecision = (held: Held, dialogId: string, decision: ApprovalDecision): void => {
     attempt(() =>
       held.child.write(
-        `${JSON.stringify({ type: "extension_ui_response", id: dialogId, ...answerFor(decision) })}\n`,
+        `${JSON.stringify({ type: "extension_ui_response", id: dialogId, ...buildDialogAnswer(decision) })}\n`,
       ),
     );
   };
@@ -418,7 +422,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
     // What the transcript says the call ended as: a refusal is the user's own
     // answer, not something that went wrong with the call.
     if (decision !== "allow") held.state.declined.add(park.toolCallId);
-    tell(held, park.dialogId, decision);
+    sendDecision(held, park.dialogId, decision);
     emit({
       _tag: "request.resolved",
       eventId: crypto.randomUUID(),
@@ -436,7 +440,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
    * an error on the message that was in flight, and this turn ended because
    * the system asked for it to end.
    */
-  const abort = (
+  const abortTurn = (
     held: Held,
     reason: NonNullable<Normalizing["endedBySystem"]>,
   ): Effect.Effect<void> =>
@@ -449,7 +453,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   const openPark = (held: Held, dialog: Dialog): void => {
     const sessionId = held.binding.sessionId;
     if (held.park !== undefined) {
-      tell(held, dialog.id, "deny");
+      sendDecision(held, dialog.id, "deny");
       warn(
         sessionId,
         "pi asked a second thing while the first was still unanswered; Hercule asks one at a time, so this one was refused and can be asked again",
@@ -461,11 +465,15 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       // A card overlays the call it is about, and there is no such call
       // running. Refusing is the only answer that does not leave pi holding a
       // call nothing will ever answer.
-      tell(held, dialog.id, "deny");
+      sendDecision(held, dialog.id, "deny");
       warn(sessionId, "pi asked about a tool call it is not running, so it was refused");
       return;
     }
-    const request = requestFor(crypto.randomUUID(), item, APPROVALS[item.kind] ?? "tool_approval");
+    const request = buildOpenRequest(
+      crypto.randomUUID(),
+      item,
+      APPROVALS[item.kind] ?? "tool_approval",
+    );
     held.park = { request, dialogId: dialog.id, toolCallId: dialog.toolCallId };
     emit({
       _tag: "request.opened",
@@ -481,7 +489,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
    * the exit is reported. `message` is what pi complained about on its way
    * out, which is both why the turn failed and what the exit says.
    */
-  const exit = (sessionId: string, reason: ExitReason, message?: string): void => {
+  const exitSession = (sessionId: string, reason: ExitReason, message?: string): void => {
     const held = sessions.get(sessionId);
     // A pi that left on its own and a supervisor that stopped it are one end,
     // and a second exit would be a second row for it.
@@ -499,7 +507,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
     // left running is one that spins for as long as the session is looked at.
     // How it ended is who ended it: a stop is the one the user asked for, and
     // a pi that went by itself mid-turn failed, with what it complained about.
-    for (const event of ending(
+    for (const event of endTurn(
       held.state,
       held.stopping
         ? { state: "interrupted" }
@@ -516,7 +524,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       sessionId,
       at: now(),
       reason,
-      ...(message === undefined || message === "" ? {} : { message: text(message) }),
+      ...(message === undefined || message === "" ? {} : { message: truncateMessage(message) }),
     });
   };
 
@@ -534,7 +542,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
           // Nothing can settle this turn now. A turn left open would make the
           // session read as working for as long as anyone looks at it.
           warn(held.binding.sessionId, `pi refused to be asked again for an answer: ${error}`);
-          for (const event of ending(held.state)) emit(event);
+          for (const event of endTurn(held.state)) emit(event);
         }),
       ),
     );
@@ -550,7 +558,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       held.binding.sessionId,
       `pi refused ${String(MAX_REFUSED_ANSWERS)} answers to ${SUBMIT_RESULT_TOOL} because they do not satisfy this session's output schema; the turn was ended on the last of them`,
     );
-    Effect.runFork(abort(held, "schema"));
+    Effect.runFork(abortTurn(held, "schema"));
   };
 
   /**
@@ -568,7 +576,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       askAgain(held);
       return;
     }
-    const dialog = dialogOf(frame);
+    const dialog = parseDialog(frame);
     // A question is not a report of what pi did: it is answered here, and the
     // normalizer never sees it.
     if (dialog !== undefined) {
@@ -592,7 +600,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /** What pi complained about on its way out, which is why it is kept. */
-  const watch = (held: Held): void => {
+  const watchChild = (held: Held): void => {
     const child = held.child;
     const sessionId = held.binding.sessionId;
     const complaints: Array<string> = [];
@@ -608,7 +616,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         // it already said is still worth reporting.
       }
     })();
-    const gone = async (code: number | undefined): Promise<void> => {
+    const onChildGone = async (code: number | undefined): Promise<void> => {
       // A stop is waiting on this and reports the reason it was given; a pi
       // that left by itself has nobody else to say so.
       if (held.stopping) return;
@@ -616,9 +624,9 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
       // lands, and a crash reported without it is a session that died for no
       // stated reason.
       await drained;
-      exit(sessionId, "process_exit", code === 0 ? "" : complaints.join("\n"));
+      exitSession(sessionId, "process_exit", code === 0 ? "" : complaints.join("\n"));
     };
-    void child.exited.then(gone, () => gone(undefined));
+    void child.exited.then(onChildGone, () => onChildGone(undefined));
   };
 
   /**
@@ -628,7 +636,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
    * of the file that had reached the disk: a session with no approval hook, or
    * with half its instructions.
    */
-  const putFile = (path: string, content: string): void => {
+  const writeFileAtomically = (path: string, content: string): void => {
     const written = `${path}.${process.pid}.${crypto.randomUUID()}`;
     try {
       writeFileSync(written, content, { mode: 0o600 });
@@ -642,17 +650,17 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   /** The home pi keeps this instance's sessions and this session's files in. */
-  const prepare = (ctx: ProviderRunnerContext, sessionId: string, spec: SessionSpec): void => {
-    mkdirSync(sessionsDir(ctx.home), { recursive: true, mode: 0o700 });
+  const prepareHome = (ctx: ProviderRunnerContext, sessionId: string, spec: SessionSpec): void => {
+    mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 });
     // Written again at every start rather than once, so the approval hook a
     // session runs behind is always this build's hook.
-    putFile(extensionPath(ctx.home), EXTENSION_SOURCE);
+    writeFileAtomically(buildExtensionPath(ctx.home), EXTENSION_SOURCE);
     if (spec.systemPrompt !== undefined) {
-      putFile(systemPromptPath(ctx.home, sessionId), spec.systemPrompt);
+      writeFileAtomically(buildSystemPromptPath(ctx.home, sessionId), spec.systemPrompt);
     }
   };
 
-  const envFor = (
+  const buildEnv = (
     ctx: ProviderRunnerContext,
     extra: Readonly<Record<string, string>> = {},
   ): Record<string, string | undefined> => {
@@ -673,9 +681,9 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
     return env;
   };
 
-  const probe = probing(seam.spawn, seam.run);
+  const probe = makeProbe(seam.spawn, seam.run);
 
-  const hosting = (sessionId: string): Effect.Effect<Held, string> =>
+  const getHostedSession = (sessionId: string): Effect.Effect<Held, string> =>
     Effect.suspend(() => {
       const held = sessions.get(sessionId);
       return held === undefined
@@ -689,7 +697,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
    * refusal: prompting anyway would run the turn on the model the user
    * replaced.
    */
-  const selecting = (held: Held, selection: ModelSelection): Effect.Effect<void, string> =>
+  const selectModel = (held: Held, selection: ModelSelection): Effect.Effect<void, string> =>
     Effect.gen(function* () {
       yield* held.rpc.send({ type: "set_model", provider: ZAI, modelId: selection.model });
       // Set here rather than after the level: pi is already on this model, and
@@ -711,8 +719,8 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
     // the adapter on the context; nothing else in it is the adapter's.
     probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> =>
       ctx.binary === undefined
-        ? Effect.succeed(probeFailed(null, `no ${PI_BINARY} on this machine`))
-        : probe(ctx.binary, envFor(ctx)),
+        ? Effect.succeed(buildFailedProbe(null, `no ${PI_BINARY} on this machine`))
+        : probe(ctx.binary, buildEnv(ctx)),
 
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {
@@ -726,7 +734,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         }
         const carried = spec.continue;
         const transcript =
-          carried === undefined ? undefined : transcriptOf(ctx.home, carried.nativeSessionId);
+          carried === undefined ? undefined : findTranscript(ctx.home, carried.nativeSessionId);
         if (carried !== undefined && transcript === undefined) {
           // Launching without it would start a pi on an empty session under a
           // resumed session's id, which is a conversation that lost its past
@@ -739,13 +747,13 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         // the file, and the file must be removed whether the session ends or
         // never starts.
         const instructions =
-          spec.systemPrompt === undefined ? undefined : systemPromptPath(ctx.home, sessionId);
+          spec.systemPrompt === undefined ? undefined : buildSystemPromptPath(ctx.home, sessionId);
         const child = yield* Effect.try({
           try: () => {
-            prepare(ctx, sessionId, spec);
+            prepareHome(ctx, sessionId, spec);
             return seam.spawn(
-              [binary, ...argvFor(spec, ctx, sessionId, transcript)],
-              envFor(ctx, {
+              [binary, ...buildArgv(spec, ctx, sessionId, transcript)],
+              buildEnv(ctx, {
                 [ACCESS_MODE_VARIABLE]: spec.accessMode,
                 // The schema travels in the environment and not on the argv,
                 // so the launch stays exactly what this adapter wrote,
@@ -774,7 +782,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         const nativeSessionId = carried?.mode === "resume" ? carried.nativeSessionId : sessionId;
         const state = buildNormalizingState(sessionId, nativeSessionId, spec.outputSchema);
         state.model = spec.modelSelection.model;
-        const rpc = rpcOver(child, (line, frame) => onLine(sessionId, line, frame));
+        const rpc = makeRpc(child, (line, frame) => onLine(sessionId, line, frame));
         const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };
         const held: Held = {
           binding,
@@ -786,7 +794,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
           park: undefined,
         };
         sessions.set(sessionId, held);
-        watch(held);
+        watchChild(held);
         Effect.runFork(rpc.pump);
         // The native id rides the event, because the controller has no other
         // way to learn it: a session started after hello is never named again.
@@ -802,8 +810,8 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
 
     sendInput: (sessionId: string, input: TurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
-        const held = yield* hosting(sessionId);
-        if (input.modelSelection !== undefined) yield* selecting(held, input.modelSelection);
+        const held = yield* getHostedSession(sessionId);
+        if (input.modelSelection !== undefined) yield* selectModel(held, input.modelSelection);
         // A turn is in flight exactly while the state holds its id, which is
         // what makes an input a steer: it folds into that turn rather than
         // opening a second one and leaving the first with nobody to end it.
@@ -821,7 +829,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
               if (!steered) held.state.turnId = undefined;
             }),
         );
-        for (const event of userMessage({
+        for (const event of buildUserMessage({
           sessionId,
           turnId,
           text: input.text,
@@ -843,7 +851,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         // abort that was meant to end it.
         resolvePark(held, "cancel");
         // The turn completing on `events` is the whole report.
-        return held.state.turnId === undefined ? Effect.void : abort(held, "interrupt");
+        return held.state.turnId === undefined ? Effect.void : abortTurn(held, "interrupt");
       }),
 
     respondToRequest: (
@@ -863,7 +871,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
         // A cancel refuses the call and ends the turn with it: pi reads a
         // refusal as one tool it may not run, and would carry on with the rest
         // of what it had planned.
-        return decision === "cancel" ? abort(held, "interrupt") : Effect.void;
+        return decision === "cancel" ? abortTurn(held, "interrupt") : Effect.void;
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
@@ -881,7 +889,7 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
           STOP_DEADLINE,
         );
         if (Option.isSome(yield* leaving)) {
-          exit(sessionId, reason);
+          exitSession(sessionId, reason);
           return;
         }
         // A pi that did not take the cue is killed: nothing further will make
@@ -896,13 +904,13 @@ export const piAdapter = (seam: PiSeam): ProviderAdapter => {
             `pi did not stop within ${Duration.format(Duration.times(STOP_DEADLINE, 2))} of being asked, and may still be running`,
           );
         }
-        exit(sessionId, reason);
+        exitSession(sessionId, reason);
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
 
-    install: piInstall(seam.run),
+    install: makePiInstall(seam.run),
   };
 };
 
-export const pi: ProviderAdapter = piAdapter({ spawn: spawnPi, run: runProcess });
+export const pi: ProviderAdapter = makePiAdapter({ spawn: spawnPi, run: runProcess });

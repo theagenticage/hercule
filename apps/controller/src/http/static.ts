@@ -115,7 +115,7 @@ const CONTENT_TYPE: Readonly<Record<string, string>> = {
   woff2: "font/woff2",
 };
 
-const contentTypeOf = (path: string): string =>
+const detectContentType = (path: string): string =>
   CONTENT_TYPE[path.slice(path.lastIndexOf(".") + 1).toLowerCase()] ?? "application/octet-stream";
 
 /**
@@ -125,22 +125,25 @@ const contentTypeOf = (path: string): string =>
  * `//` as an authority and hands back `/x`, which would turn an API path into a
  * deep link.
  */
-const pathOf = (url: string): string => {
+const stripQueryAndFragment = (url: string): string => {
   const end = url.search(/[?#]/);
   return end === -1 ? url : url.slice(0, end);
 };
 
 /** Whether the router matched nothing, which is the only way the bundle is reached. */
-const routeNotFound = (cause: Cause.Cause<unknown>): boolean =>
+const isRouteNotFound = (cause: Cause.Cause<unknown>): boolean =>
   cause.reasons.some((reason) => {
     if (reason._tag === "Interrupt") return false;
     const error = reason._tag === "Fail" ? reason.error : reason.defect;
     return HttpServerError.isHttpServerError(error) && error.reason._tag === "RouteNotFound";
   });
 
-const respond = (file: string, cacheControl: string): HttpServerResponse.HttpServerResponse =>
+const buildFileResponse = (
+  file: string,
+  cacheControl: string,
+): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.raw(Bun.file(file), {
-    contentType: contentTypeOf(file),
+    contentType: detectContentType(file),
     headers: {
       "cache-control": cacheControl,
       "content-security-policy": CONTENT_SECURITY_POLICY,
@@ -152,16 +155,17 @@ const respond = (file: string, cacheControl: string): HttpServerResponse.HttpSer
   });
 
 /** What the bundle answers this request with, or nothing when it owns none of it. */
-const answer = (
+const findBundleResponse = (
   bundle: WebBundle,
   request: HttpServerRequest.HttpServerRequest,
 ): HttpServerResponse.HttpServerResponse | undefined => {
   if (request.method !== "GET" && request.method !== "HEAD") return undefined;
-  const path = pathOf(request.url);
+  const path = stripQueryAndFragment(request.url);
   if (API_PATH.test(path)) return undefined;
   const file = bundle.files.get(path);
-  if (file !== undefined) return respond(file, path.startsWith(ASSETS) ? IMMUTABLE : REVALIDATE);
-  return path.startsWith(ASSETS) ? undefined : respond(bundle.index, REVALIDATE);
+  if (file !== undefined)
+    return buildFileResponse(file, path.startsWith(ASSETS) ? IMMUTABLE : REVALIDATE);
+  return path.startsWith(ASSETS) ? undefined : buildFileResponse(bundle.index, REVALIDATE);
 };
 
 /**
@@ -183,9 +187,9 @@ export const withWebBundle =
     bundle === undefined
       ? app
       : Effect.catchCause(app, (cause) =>
-          routeNotFound(cause)
+          isRouteNotFound(cause)
             ? Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
-                const response = answer(bundle, request);
+                const response = findBundleResponse(bundle, request);
                 return response === undefined ? Effect.failCause(cause) : Effect.succeed(response);
               })
             : Effect.failCause(cause),

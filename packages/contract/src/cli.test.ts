@@ -42,7 +42,7 @@ const visible = rows.filter(([, row]) => row.hidden !== true);
  * field. Hidden
  * fields are left out, like hidden rows.
  */
-const fields = (): ReadonlyArray<[string, string, FieldRow]> =>
+const listVisibleFields = (): ReadonlyArray<[string, string, FieldRow]> =>
   visible.flatMap(([id, row]) =>
     Object.entries(row.fields ?? {})
       .filter(([, field]) => field.hidden !== true)
@@ -50,8 +50,10 @@ const fields = (): ReadonlyArray<[string, string, FieldRow]> =>
   );
 
 /** The `resolves` every visible field declares, keyed `<operation> <field>`. */
-const resolvers = (): Record<string, string | undefined> =>
-  Object.fromEntries(fields().map(([id, name, field]) => [`${id} ${name}`, field.resolves]));
+const collectResolvers = (): Record<string, string | undefined> =>
+  Object.fromEntries(
+    listVisibleFields().map(([id, name, field]) => [`${id} ${name}`, field.resolves]),
+  );
 
 /** The three operations a programmatic client calls and a terminal never does. */
 const HIDDEN = ["auth.login", "auth.logout", "auth.wsTicket"];
@@ -350,7 +352,7 @@ describe("what a visible row says", () => {
   });
 
   it("gives every field a non-empty line", () => {
-    for (const [id, name, field] of fields()) {
+    for (const [id, name, field] of listVisibleFields()) {
       expect(field.help?.trim(), `${id} field ${name} has no help`).toBeTruthy();
     }
   });
@@ -368,7 +370,7 @@ describe("the nouns", () => {
 
 describe("the stdin fields", () => {
   it("marks exactly the fields the spec names", () => {
-    const marked = fields()
+    const marked = listVisibleFields()
       .filter(([id, , field]) => field.stdin === true && id !== "user.setPassword")
       .map(([id, name]) => `${id} ${name}`);
     expect(marked.sort()).toEqual([...STDIN_FIELDS].sort());
@@ -385,7 +387,7 @@ describe("the stdin fields", () => {
 describe("the resolvers", () => {
   it("names the listing every resolvable field resolves through", () => {
     const named = Object.fromEntries(
-      Object.entries(resolvers()).filter(([, target]) => target !== undefined),
+      Object.entries(collectResolvers()).filter(([, target]) => target !== undefined),
     );
     expect(named).toEqual(RESOLVES);
   });
@@ -398,7 +400,7 @@ describe("the resolvers", () => {
       "plugin.configure id",
       "input.update inputId",
     ]) {
-      expect(resolvers()[name], `${name} should take a full id`).toBeUndefined();
+      expect(collectResolvers()[name], `${name} should take a full id`).toBeUndefined();
     }
   });
 });

@@ -6,7 +6,7 @@
  * screen and not.
  *
  * No portable API says "the machine woke", so the loop takes a stream of signals
- * and nothing else; `reconnectSignals` below guesses at them, and a platform
+ * and nothing else; `streamReconnectSignals` below guesses at them, and a platform
  * source can replace it without the loop knowing.
  */
 import * as Cause from "effect/Cause";
@@ -99,19 +99,19 @@ export interface MachineReadings {
 }
 
 /** Compares each tick with the one before, so it holds nothing but the last reading. */
-export const reconnectSignals = (readings: MachineReadings): Stream.Stream<void> => {
+export const streamReconnectSignals = (readings: MachineReadings): Stream.Stream<void> => {
   const interval = Duration.toMillis(HEURISTIC_INTERVAL);
   const gapLimit = Duration.toMillis(CLOCK_GAP_LIMIT);
-  const reading = () => ({ at: readings.now(), addresses: readings.addresses().join(",") });
+  const takeReading = () => ({ at: readings.now(), addresses: readings.addresses().join(",") });
   // Taken when the stream is run, not when it is built: a baseline from minutes
   // ago makes the first tick look like a long sleep.
   return Stream.suspend(() =>
-    Stream.unfold(reading(), (previous) =>
+    Stream.unfold(takeReading(), (previous) =>
       Effect.gen(function* () {
         let last = previous;
         while (true) {
           yield* Effect.sleep(HEURISTIC_INTERVAL);
-          const next = reading();
+          const next = takeReading();
           // Anything much past one interval is time the machine was not running.
           const slept = next.at - last.at > interval + gapLimit;
           const moved = next.addresses !== last.addresses;

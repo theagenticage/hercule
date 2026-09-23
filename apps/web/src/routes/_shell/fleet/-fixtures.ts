@@ -107,7 +107,7 @@ const BASE_SESSION: Session = {
  * `lastActivityAt` - are the same; `at` sets both, which is what lets a test
  * name a session's age without deciding which of the two the row reads.
  */
-export const sessionFixture = (
+export const buildSessionFixture = (
   overrides: Partial<Session> & { readonly id: string; readonly at?: string },
 ): Session => {
   const { at, ...fields } = overrides;

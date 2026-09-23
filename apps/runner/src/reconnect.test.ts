@@ -20,12 +20,12 @@ import {
   RECONNECT_BASE,
   RECONNECT_CAP,
   reconnect,
-  reconnectSignals,
+  streamReconnectSignals,
 } from "./reconnect";
 import { RunnerRetired } from "./socket";
 
 /** A connection attempt that never gets anywhere, counted. */
-const failing = (count: { at: number }) =>
+const buildFailingAttempt = (count: { at: number }) =>
   Effect.suspend(() => {
     count.at += 1;
     return Effect.fail("the controller is not answering" as const);
@@ -46,7 +46,7 @@ describe("the reconnect schedule", () => {
       Effect.gen(function* () {
         const count = { at: 0 };
         const loop = yield* Effect.forkChild(
-          reconnect({ attempt: failing(count), signals: Stream.never }),
+          reconnect({ attempt: buildFailingAttempt(count), signals: Stream.never }),
         );
 
         yield* settle;
@@ -75,7 +75,7 @@ describe("the reconnect schedule", () => {
         const count = { at: 0 };
         const signals = yield* Queue.unbounded<void>();
         const loop = yield* Effect.forkChild(
-          reconnect({ attempt: failing(count), signals: Stream.fromQueue(signals) }),
+          reconnect({ attempt: buildFailingAttempt(count), signals: Stream.fromQueue(signals) }),
         );
 
         yield* settle;
@@ -208,7 +208,7 @@ describe("the reconnect schedule", () => {
 
 describe("the reconnect source", () => {
   /** Collects what the source emits, for as long as the fiber lives. */
-  const collecting = (source: Stream.Stream<void>) =>
+  const collectEmissions = (source: Stream.Stream<void>) =>
     Effect.gen(function* () {
       const seen = { count: 0 };
       const fiber = yield* Effect.forkChild(
@@ -226,8 +226,8 @@ describe("the reconnect source", () => {
       Effect.gen(function* () {
         const wall = { at: Date.parse("2026-09-05T10:00:00.000Z") };
         const addresses = ["192.168.1.10"];
-        const { seen, fiber } = yield* collecting(
-          reconnectSignals({ now: () => wall.at, addresses: () => addresses }),
+        const { seen, fiber } = yield* collectEmissions(
+          streamReconnectSignals({ now: () => wall.at, addresses: () => addresses }),
         );
 
         // A tick where the wall clock moved the way the timer did: nothing
@@ -254,10 +254,10 @@ describe("the reconnect source", () => {
       Effect.gen(function* () {
         const wall = { at: Date.parse("2026-09-05T10:00:00.000Z") };
         const addresses = ["192.168.1.10"];
-        const source = reconnectSignals({ now: () => wall.at, addresses: () => addresses });
+        const source = streamReconnectSignals({ now: () => wall.at, addresses: () => addresses });
 
         // A long first run: nothing happens to the machine, so nothing is said.
-        const first = yield* collecting(source);
+        const first = yield* collectEmissions(source);
         for (let tick = 0; tick < 30; tick++) {
           wall.at += Duration.toMillis(HEURISTIC_INTERVAL);
           yield* TestClock.adjust(HEURISTIC_INTERVAL);
@@ -268,7 +268,7 @@ describe("the reconnect source", () => {
 
         // A second run compares against what it reads now, not against what the
         // first run started from half a minute ago.
-        const second = yield* collecting(source);
+        const second = yield* collectEmissions(source);
         wall.at += Duration.toMillis(HEURISTIC_INTERVAL);
         yield* TestClock.adjust(HEURISTIC_INTERVAL);
         yield* settle;
@@ -289,8 +289,8 @@ describe("the reconnect source", () => {
           yield* TestClock.adjust(HEURISTIC_INTERVAL);
           yield* settle;
         });
-        const { seen, fiber } = yield* collecting(
-          reconnectSignals({ now: () => wall.at, addresses: () => addresses }),
+        const { seen, fiber } = yield* collectEmissions(
+          streamReconnectSignals({ now: () => wall.at, addresses: () => addresses }),
         );
 
         yield* tick;

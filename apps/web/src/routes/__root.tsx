@@ -1,6 +1,6 @@
 import { createRootRouteWithContext, Outlet, redirect } from "@tanstack/react-router";
 import type { RouterContext } from "../app/context";
-import { entryDeps, resolveEntry } from "../app/entry-guard";
+import { buildEntryDeps, resolveEntry } from "../app/entry-guard";
 
 /**
  * Every navigation passes the entry guard before its route loads, so a deep
@@ -16,7 +16,7 @@ import { entryDeps, resolveEntry } from "../app/entry-guard";
  */
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ context, location }) => {
-    const deps = entryDeps(context);
+    const deps = buildEntryDeps(context);
     const elsewhere = await resolveEntry(deps, location.pathname);
     if (deps.hasToken()) context.live.start();
     else await context.live.stop();

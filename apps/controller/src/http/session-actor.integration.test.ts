@@ -14,16 +14,16 @@ import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import type { Session, Task } from "@hercule/contract";
 import {
-  agentOn,
+  spawnAgentUnder,
   at,
-  profileNamed,
+  readProfileNamed,
   createProfile,
-  report,
-  sessionWhen,
-  spawn,
-  startFrames,
+  reportEvent,
+  waitForSession,
+  spawnSession,
+  waitForStartFrames,
   readSessionToken,
-  until,
+  waitUntil,
   WAIT_DEADLINE_MS,
   withAgentFleet as withFleet,
   type Agent,
@@ -62,18 +62,18 @@ const parseRefusal = async (response: Response): Promise<Refusal> => {
 };
 
 /** A worker: the shipped profile with task read, create and update, and no delete. */
-const worker = async (arranged: Arranged): Promise<Agent> =>
-  agentOn(arranged, await profileNamed(arranged, "worker"));
+const createWorkerAgent = async (arranged: Arranged): Promise<Agent> =>
+  spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
 
-const exits = async (arranged: Arranged, session: Session): Promise<void> => {
-  report(arranged.wire, 2, {
+const exitSession = async (arranged: Arranged, session: Session): Promise<void> => {
+  reportEvent(arranged.wire, 2, {
     eventId: crypto.randomUUID(),
     sessionId: session.id,
     at,
     _tag: "session.exited",
     reason: "stopped",
   });
-  await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+  await waitForSession(arranged, session.id, (one) => one.status === "exited");
 };
 
 const createTask = (
@@ -93,7 +93,7 @@ interface EventRow {
   readonly actor: string | null;
 }
 
-const eventsOfKind = async (
+const listEventsOfKind = async (
   base: string,
   token: string,
   kind: string,
@@ -106,7 +106,7 @@ const eventsOfKind = async (
 describe("the token the controller mints for a session", () => {
   it("rides on the start frame, and is never the plaintext the session row holds", async () => {
     await withFleet(async (arranged) => {
-      const { token } = await worker(arranged);
+      const { token } = await createWorkerAgent(arranged);
 
       // The token works, which is the only proof that the hash the row holds
       // was taken from this string.
@@ -123,8 +123,8 @@ describe("the token the controller mints for a session", () => {
 
   it("is replaced by a fresh one when the session is resumed, killing the old one", async () => {
     await withFleet(async (arranged) => {
-      const { session, token } = await worker(arranged);
-      await exits(arranged, session);
+      const { session, token } = await createWorkerAgent(arranged);
+      await exitSession(arranged, session);
 
       // Input to an exited session with a transcript resumes it in place: the
       // same session id, started again, under a token of its own.
@@ -136,18 +136,18 @@ describe("the token the controller mints for a session", () => {
       );
       expect(resumed.status, await resumed.clone().text()).toBe(200);
 
-      const frames = await startFrames(arranged, session.id, 2);
+      const frames = await waitForStartFrames(arranged, session.id, 2);
       const next = readSessionToken(frames[1]!);
       expect(next).not.toBe(token);
 
-      report(arranged.wire, 1, {
+      reportEvent(arranged.wire, 1, {
         eventId: crypto.randomUUID(),
         sessionId: session.id,
         at,
         _tag: "session.started",
         providerRefs: { nativeSessionId: "native-1" },
       });
-      await sessionWhen(arranged, session.id, (one) => one.status === "idle");
+      await waitForSession(arranged, session.id, (one) => one.status === "idle");
 
       const fresh = await get(arranged.harness.base, "/api/v1/tasks", next);
       expect(fresh.status, await fresh.clone().text()).toBe(200);
@@ -162,7 +162,7 @@ describe("the token the controller mints for a session", () => {
 describe("what a session token may reach", () => {
   it("creates and updates a task on the worker profile, and is refused the delete by name", async () => {
     await withFleet(async (arranged) => {
-      const { token } = await worker(arranged);
+      const { token } = await createWorkerAgent(arranged);
       const base = arranged.harness.base;
 
       const created = await createTask(base, token, { title: "the agent's own task" });
@@ -195,7 +195,7 @@ describe("what a session token may reach", () => {
       // A profile that reads tasks and nothing else, so the operation whose
       // body could be malformed is one this session may not reach.
       const reader = await createProfile(arranged, "reader", ["task.read"]);
-      const { token } = await agentOn(arranged, reader);
+      const { token } = await spawnAgentUnder(arranged, reader);
       const base = arranged.harness.base;
 
       const task = (await (
@@ -224,7 +224,7 @@ describe("what a session token may reach", () => {
 
   it("answers 401 to a token no session holds", async () => {
     await withFleet(async (arranged) => {
-      await worker(arranged);
+      await createWorkerAgent(arranged);
       const response = await get(
         arranged.harness.base,
         "/api/v1/tasks",
@@ -239,10 +239,10 @@ describe("what a session token may reach", () => {
 describe("when a session token stops working", () => {
   it("dies with the session the machine reports has exited", async () => {
     await withFleet(async (arranged) => {
-      const { session, token } = await worker(arranged);
+      const { session, token } = await createWorkerAgent(arranged);
       expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
 
-      await exits(arranged, session);
+      await exitSession(arranged, session);
 
       const after = await get(arranged.harness.base, "/api/v1/tasks", token);
       expect(after.status).toBe(401);
@@ -252,7 +252,7 @@ describe("when a session token stops working", () => {
 
   it("dies with the session a retired runner's machine can no longer run", async () => {
     await withFleet(async (arranged) => {
-      const { session, token } = await worker(arranged);
+      const { session, token } = await createWorkerAgent(arranged);
       expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
 
       const retired = await post(
@@ -262,7 +262,7 @@ describe("when a session token stops working", () => {
         arranged.token,
       );
       expect(retired.status, await retired.clone().text()).toBe(200);
-      await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
 
       const after = await get(arranged.harness.base, "/api/v1/tasks", token);
       expect(after.status).toBe(401);
@@ -273,11 +273,11 @@ describe("when a session token stops working", () => {
   it("dies with the session whose machine drops and never comes back", async () => {
     await withFleet(
       async (arranged) => {
-        const { session, token } = await worker(arranged);
+        const { session, token } = await createWorkerAgent(arranged);
         expect((await get(arranged.harness.base, "/api/v1/tasks", token)).status).toBe(200);
 
         arranged.wire.close();
-        await until("marked the runner unreachable", async () => {
+        await waitUntil("marked the runner unreachable", async () => {
           const response = await get(
             arranged.harness.base,
             `/api/v1/runners/${arranged.runnerId}`,
@@ -300,7 +300,7 @@ describe("when a session token stops working", () => {
           `),
         );
 
-        await sessionWhen(arranged, session.id, (one) => one.status === "exited");
+        await waitForSession(arranged, session.id, (one) => one.status === "exited");
         const after = await get(arranged.harness.base, "/api/v1/tasks", token);
         expect(after.status).toBe(401);
         expect((await parseRefusal(after)).code).toBe("unauthenticated");
@@ -311,8 +311,8 @@ describe("when a session token stops working", () => {
 
   it("loses a grant the very next call after the profile is edited", async () => {
     await withFleet(async (arranged) => {
-      const profile = await profileNamed(arranged, "worker");
-      const { token } = await agentOn(arranged, profile);
+      const profile = await readProfileNamed(arranged, "worker");
+      const { token } = await spawnAgentUnder(arranged, profile);
       const base = arranged.harness.base;
 
       const before = await createTask(base, token, { title: "while the grant is held" });
@@ -338,7 +338,7 @@ describe("when a session token stops working", () => {
 describe("a session may not spawn a Thread", () => {
   it("refuses a session actor's spawn by naming session.spawn, and lets the user through", async () => {
     await withFleet(async (arranged) => {
-      const { token } = await worker(arranged);
+      const { token } = await createWorkerAgent(arranged);
 
       const refused = await post(
         arranged.harness.base,
@@ -355,7 +355,7 @@ describe("a session may not spawn a Thread", () => {
       });
 
       // The same call by the user, which is whose Thread it would be.
-      const mine = await spawn(arranged, { prompt: "and one of my own" });
+      const mine = await spawnSession(arranged, { prompt: "and one of my own" });
       expect(mine.status, await mine.clone().text()).toBe(200);
     });
   });
@@ -364,7 +364,10 @@ describe("a session may not spawn a Thread", () => {
     await withFleet(async (arranged) => {
       // The assistant profile holds `session.spawn`, so the static grant check
       // passes and the refusal has to come from the operation itself.
-      const { token } = await agentOn(arranged, await profileNamed(arranged, "assistant"));
+      const { token } = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "assistant"),
+      );
 
       const refused = await post(
         arranged.harness.base,
@@ -388,20 +391,20 @@ describe("a session forking a session", () => {
     await withFleet(async (arranged) => {
       // The assistant profile is the shipped one that holds `session.spawn`,
       // which is what `session.continue` asks for.
-      const assistant = await profileNamed(arranged, "assistant");
-      const mine = await agentOn(arranged, assistant);
+      const assistant = await readProfileNamed(arranged, "assistant");
+      const mine = await spawnAgentUnder(arranged, assistant);
       const base = arranged.harness.base;
 
       // Two parents to choose between, each exited with a transcript on a live
       // machine and so forkable: one on this session's own profile, one on a
       // narrower profile that is not its to reach into. Neither is the
       // session doing the asking, whose own token dies when it exits.
-      const sibling = await agentOn(arranged, assistant);
-      const stranger = await worker(arranged);
-      await exits(arranged, sibling.session);
-      await exits(arranged, stranger.session);
+      const sibling = await spawnAgentUnder(arranged, assistant);
+      const stranger = await createWorkerAgent(arranged);
+      await exitSession(arranged, sibling.session);
+      await exitSession(arranged, stranger.session);
 
-      const carryOn = (id: string): Promise<Response> =>
+      const continueSession = (id: string): Promise<Response> =>
         post(
           base,
           `/api/v1/sessions/${id}/continue`,
@@ -409,13 +412,13 @@ describe("a session forking a session", () => {
           mine.token,
         );
 
-      const theirs = await carryOn(stranger.session.id);
+      const theirs = await continueSession(stranger.session.id);
       expect(theirs.status).toBe(403);
       const refusal = await parseRefusal(theirs);
       expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
       expect(refusal.message.toLowerCase()).toContain("profile");
 
-      const own = await carryOn(sibling.session.id);
+      const own = await continueSession(sibling.session.id);
       expect(own.status, await own.clone().text()).toBe(200);
       expect((await own.json()) as Session).toMatchObject({
         permissionProfileId: assistant.id,
@@ -428,7 +431,7 @@ describe("a session forking a session", () => {
 describe("what the record says made the change", () => {
   it("stamps a session's task and its event log rows session:<id>, where the user's say user", async () => {
     await withFleet(async (arranged) => {
-      const { session, token } = await worker(arranged);
+      const { session, token } = await createWorkerAgent(arranged);
       const base = arranged.harness.base;
       const stamp = `session:${session.id}`;
 
@@ -458,9 +461,9 @@ describe("what the record says made the change", () => {
       const userTask = (await theirs.json()) as Task;
       expect(userTask.provenance.map((entry) => entry.actor)).toEqual(["user"]);
 
-      const createdRows = await eventsOfKind(base, arranged.token, "task.created");
+      const createdRows = await listEventsOfKind(base, arranged.token, "task.created");
       expect(createdRows.map((row) => row.actor)).toEqual(expect.arrayContaining([stamp, "user"]));
-      const updatedRows = await eventsOfKind(base, arranged.token, "task.updated");
+      const updatedRows = await listEventsOfKind(base, arranged.token, "task.updated");
       expect(updatedRows.map((row) => row.actor)).toEqual([stamp]);
     });
   });

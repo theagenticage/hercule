@@ -43,16 +43,16 @@ const USER: Actor = {
   credential: { kind: "login", id: "0199e0e7-2222-7000-8000-000000000000", tokenHash: "hash" },
 };
 
-const failure = <A, E>(effect: Effect.Effect<A, E, Provided>) =>
+const runError = <A, E>(effect: Effect.Effect<A, E, Provided>) =>
   Effect.runPromise(Effect.flip(effect).pipe(Effect.provide(layer)) as Effect.Effect<E>);
 
 /** Runs one scenario against a fresh database, with the user behind it. */
-const asUser = <A, E>(effect: Effect.Effect<A, E, Provided>): Promise<A> =>
+const runAsUser = <A, E>(effect: Effect.Effect<A, E, Provided>): Promise<A> =>
   Effect.runPromise(
     effect.pipe(Effect.provideService(CurrentActor, USER), Effect.provide(layer), Effect.orDie),
   );
 
-const insert = (
+const insertRunner = (
   name: string,
   lifecycle: RunnerLifecycle = "active",
   labels: ReadonlyArray<string> = [],
@@ -73,8 +73,8 @@ const insert = (
 describe("a caller with no actor", () => {
   it("is refused infra.read by query and read, before anything is looked up", async () => {
     const errors = await Promise.all([
-      failure(Effect.flatMap(RunnerService, (runners) => runners.query({}))),
-      failure(Effect.flatMap(RunnerService, (runners) => runners.read({ id: UNKNOWN_ID }))),
+      runError(Effect.flatMap(RunnerService, (runners) => runners.query({}))),
+      runError(Effect.flatMap(RunnerService, (runners) => runners.read({ id: UNKNOWN_ID }))),
     ]);
     for (const error of errors) {
       expect(error).toMatchObject({
@@ -84,7 +84,7 @@ describe("a caller with no actor", () => {
   });
 
   it("is refused infra.write by update, before anything is looked up", async () => {
-    const error = await failure(
+    const error = await runError(
       Effect.flatMap(RunnerService, (runners) => runners.update({ id: UNKNOWN_ID, name: "iris" })),
     );
     expect(error).toMatchObject({
@@ -93,7 +93,7 @@ describe("a caller with no actor", () => {
   });
 
   it("is refused infra.write by createJoinToken, before a token is minted", async () => {
-    const error = await failure(
+    const error = await runError(
       Effect.flatMap(RunnerService, (runners) => runners.createJoinToken()),
     );
     expect(error).toMatchObject({
@@ -111,12 +111,12 @@ describe("a caller with no actor", () => {
 
 describe("the refusals the state machine makes on its own", () => {
   it("refuses each lifecycle move the runner is not standing where it needs to be for", async () => {
-    const { errors, after, trail } = await asUser(
+    const { errors, after, trail } = await runAsUser(
       Effect.gen(function* () {
         const runners = yield* RunnerService;
-        const active = yield* insert("iris", "active");
-        const draining = yield* insert("atlas", "draining");
-        const retired = yield* insert("vega", "retired");
+        const active = yield* insertRunner("iris", "active");
+        const draining = yield* insertRunner("atlas", "draining");
+        const retired = yield* insertRunner("vega", "retired");
 
         const errors = yield* Effect.forEach(
           [
@@ -148,11 +148,11 @@ describe("the refusals the state machine makes on its own", () => {
   });
 
   it("refuses a name another runner holds, takes one nobody does, and reads case as its own", async () => {
-    const { taken, refused, cased, free } = await asUser(
+    const { taken, refused, cased, free } = await runAsUser(
       Effect.gen(function* () {
         const runners = yield* RunnerService;
-        const iris = yield* insert("iris", "active", ["gpu"]);
-        yield* insert("atlas");
+        const iris = yield* insertRunner("iris", "active", ["gpu"]);
+        yield* insertRunner("atlas");
         const taken = yield* Effect.flip(runners.update({ id: iris.id, name: "atlas" }));
         return {
           taken,
@@ -173,10 +173,10 @@ describe("the refusals the state machine makes on its own", () => {
   });
 
   it("refuses to reserve the runner the fleet falls back on, and leaves it alone", async () => {
-    const { error, after } = await asUser(
+    const { error, after } = await runAsUser(
       Effect.gen(function* () {
         const runners = yield* RunnerService;
-        const chosen = yield* insert("iris");
+        const chosen = yield* insertRunner("iris");
         yield* (yield* Settings).setDefaultRunnerId(chosen.id, yield* nowIso);
         return {
           error: yield* Effect.flip(runners.update({ id: chosen.id, reserved: true })),

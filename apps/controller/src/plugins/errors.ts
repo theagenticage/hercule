@@ -33,5 +33,5 @@ export const describeFieldIssues = (error: Schema.SchemaError): string =>
   truncateMessage(listDecodeIssues(error).map(formatIssue).join("; "));
 
 /** The same, as the failure the registration surfaces declare. */
-export const asPluginError = (error: Schema.SchemaError): PluginError =>
+export const toPluginError = (error: Schema.SchemaError): PluginError =>
   new PluginError({ message: describeFieldIssues(error) });

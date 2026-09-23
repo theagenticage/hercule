@@ -17,7 +17,7 @@ import {
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
-import { logins, type LoginCommand } from "./login";
+import { makeLogins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
 
 export interface ProviderRunnerContext {
@@ -145,13 +145,13 @@ export const adapters: ReadonlyArray<ProviderAdapter> = [...ADAPTERS.values()];
 
 export const ADAPTER_IDS: ReadonlyArray<string> = [...ADAPTERS.keys()];
 
-export const adapterFor = (providerId: string): ProviderAdapter | undefined =>
+export const findAdapter = (providerId: string): ProviderAdapter | undefined =>
   ADAPTERS.get(providerId);
 
 /** One per process, not per connection: a child outlives a socket that drops. */
-export const providerLogins = logins(spawnLogin);
+export const providerLogins = makeLogins(spawnLogin);
 
-export { PROBE_DEADLINE, probeFailed } from "./probe";
+export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 
-export const noAdapterFor = (providerId: string): string =>
+export const describeMissingAdapter = (providerId: string): string =>
   `no adapter for ${providerId} in this runner build`;

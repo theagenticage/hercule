@@ -139,7 +139,7 @@ const handlers = live.toLayer(
      * token itself was never kept - only the hash it resolved through - which
      * is all a second lookup needs.
      */
-    const stillThere = (actor: UserActor): Effect.Effect<boolean, Internal> =>
+    const isCredentialLive = (actor: UserActor): Effect.Effect<boolean, Internal> =>
       Effect.mapError(credentials.stillLive(actor.credential), () =>
         createInternalError(UNREADABLE),
       );
@@ -176,7 +176,7 @@ const handlers = live.toLayer(
             if (alive === undefined) {
               // A database that will not answer is not grounds for logging
               // anybody out; the round after this one asks again.
-              alive = yield* Effect.catchCause(stillThere(actor), (cause) =>
+              alive = yield* Effect.catchCause(isCredentialLive(actor), (cause) =>
                 Effect.as(
                   Effect.logError("a live connection's credential could not be re-checked", cause),
                   true,
@@ -195,7 +195,7 @@ const handlers = live.toLayer(
      * re-resolves the credential, so a client that keeps talking learns at once
      * that it has been logged out.
      */
-    const caller = (
+    const identifyCaller = (
       client: Rpc.ServerClient,
     ): Effect.Effect<
       { readonly connection: Connection; readonly actor: UserActor },
@@ -208,7 +208,7 @@ const handlers = live.toLayer(
           return yield* Effect.fail(createUnauthenticatedError(HELLO_FIRST));
         }
         if (connection.gone) return yield* Effect.fail(createUnauthenticatedError(CREDENTIAL_GONE));
-        if (yield* stillThere(actor)) return { connection, actor };
+        if (yield* isCredentialLive(actor)) return { connection, actor };
         yield* revoke(connection);
         return yield* Effect.fail(createUnauthenticatedError(CREDENTIAL_GONE));
       });
@@ -219,7 +219,7 @@ const handlers = live.toLayer(
      * again once the subscription exists, because a revocation that ran while it
      * was being taken out would have swept a set this queue was not yet in.
      */
-    const held = <E, R>(
+    const holdSubscription = <E, R>(
       connection: Connection,
       subscription: Effect.Effect<LiveQueue, E, R>,
     ): Effect.Effect<LiveQueue, E, R | Scope.Scope> =>
@@ -276,7 +276,7 @@ const handlers = live.toLayer(
               // A ticket outlives the credential that fetched it by up to five
               // minutes, so the greeting checks that credential rather than
               // trusting what the ticket was minted for.
-              if (Option.isNone(actor) || !(yield* stillThere(actor.value))) {
+              if (Option.isNone(actor) || !(yield* isCredentialLive(actor.value))) {
                 return yield* Effect.fail(createUnauthenticatedError(TICKET_REFUSED));
               }
               connection.actor = actor.value;
@@ -290,7 +290,7 @@ const handlers = live.toLayer(
 
       subscribe: (payload, options) =>
         Effect.gen(function* () {
-          const { connection, actor } = yield* caller(options.client);
+          const { connection, actor } = yield* identifyCaller(options.client);
           const topic = yield* Effect.mapError(
             decodeTopic(payload.topic),
             createDecodeValidationError,
@@ -312,7 +312,7 @@ const handlers = live.toLayer(
             // exactly what reading the transcript over HTTP needs - the same
             // operation the `:stream` topic below names.
             yield* Effect.provideService(requireGrant("transcript.read"), CurrentActor, actor);
-            return yield* held(connection, topics.tapSession(session.sessionId));
+            return yield* holdSubscription(connection, topics.tapSession(session.sessionId));
           }
 
           if (session?.kind === "stream") {
@@ -320,7 +320,10 @@ const handlers = live.toLayer(
             // The transcript's deltas are the transcript, so this stream needs
             // what reading it over HTTP needs.
             yield* Effect.provideService(requireGrant("transcript.read"), CurrentActor, actor);
-            return yield* held(connection, topics.followSession(session.sessionId, cursor));
+            return yield* holdSubscription(
+              connection,
+              topics.followSession(session.sessionId, cursor),
+            );
           }
 
           if (!isAppendOnlyLiveTopic(topic)) {
@@ -336,16 +339,16 @@ const handlers = live.toLayer(
             }
             // A mutable topic carries no records, so being greeted is the whole
             // of what it asks for.
-            return yield* held(connection, topics.subscribe(topic));
+            return yield* holdSubscription(connection, topics.subscribe(topic));
           }
           const cursor = yield* parsePosition(payload.cursor);
           // The log's deltas are the log, so this stream needs what reading the
           // log over HTTP needs.
           yield* Effect.provideService(requireGrant("event.query"), CurrentActor, actor);
-          return yield* held(connection, topics.follow(cursor));
+          return yield* holdSubscription(connection, topics.follow(cursor));
         }),
 
-      ping: (_payload, options) => Effect.as(caller(options.client), {}),
+      ping: (_payload, options) => Effect.as(identifyCaller(options.client), {}),
     };
   }),
 );

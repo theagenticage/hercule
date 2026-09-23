@@ -10,7 +10,7 @@
  * runner drops, which loses the event and leaves the park hanging.
  */
 import type { OpenRequest } from "@hercule/protocol";
-import { fact, text } from "./text";
+import { truncateFact, truncateMessage } from "./text";
 
 /** One question as the protocol carries it: the vendor's shape mapped over. */
 type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["questions"][number];
@@ -24,7 +24,7 @@ type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["q
  * An option the protocol has no field for - the Claude SDK's `preview` - is
  * left behind, and one with no label has nothing to show, so it is dropped.
  */
-const optionsIn = (given: unknown): ReadonlyArray<Question["options"][number]> => {
+const parseOptions = (given: unknown): ReadonlyArray<Question["options"][number]> => {
   if (!Array.isArray(given)) return [];
   return given.flatMap((one: unknown) => {
     if (typeof one !== "object" || one === null) return [];
@@ -33,7 +33,7 @@ const optionsIn = (given: unknown): ReadonlyArray<Question["options"][number]> =
       readonly description?: unknown;
     };
     if (typeof label !== "string" || label === "" || typeof description !== "string") return [];
-    return [{ label: fact(label), description: text(description) }];
+    return [{ label: truncateFact(label), description: truncateMessage(description) }];
   });
 };
 
@@ -43,7 +43,7 @@ const optionsIn = (given: unknown): ReadonlyArray<Question["options"][number]> =
  * header is a word the agent never wrote. A harness with no field for
  * `multiSelect` asks for one answer, which is what its absence reads as.
  */
-const questionsIn = (given: unknown): ReadonlyArray<Question> => {
+const parseQuestions = (given: unknown): ReadonlyArray<Question> => {
   if (!Array.isArray(given)) return [];
   return given.flatMap((one: unknown) => {
     if (typeof one !== "object" || one === null) return [];
@@ -57,9 +57,9 @@ const questionsIn = (given: unknown): ReadonlyArray<Question> => {
     if (typeof header !== "string" || header === "") return [];
     return [
       {
-        question: text(question),
-        header: fact(header),
-        options: optionsIn(options),
+        question: truncateMessage(question),
+        header: truncateFact(header),
+        options: parseOptions(options),
         multiSelect: multiSelect === true,
       },
     ];
@@ -76,14 +76,14 @@ const questionsIn = (given: unknown): ReadonlyArray<Question> => {
  * the controller refuses, which the runner drops, leaving the park hanging,
  * while the ask under it is still refusable.
  */
-export const questionRequest = (
+export const buildQuestionRequest = (
   identity: { readonly requestId: string; readonly itemId: string },
   toolName: string,
   given: unknown,
 ): OpenRequest => {
-  const [first, ...rest] = questionsIn(given);
+  const [first, ...rest] = parseQuestions(given);
   const common = { ...identity, decisions: ["deny", "cancel"] } as const;
   return first === undefined
-    ? { ...common, kind: "tool_approval", detail: { toolName: fact(toolName) } }
+    ? { ...common, kind: "tool_approval", detail: { toolName: truncateFact(toolName) } }
     : { ...common, kind: "question", detail: { questions: [first, ...rest] } };
 };

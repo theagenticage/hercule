@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import type { Session } from "@hercule/contract";
-import { headlineOf } from "@hercule/client-core";
+import { buildHeadline } from "@hercule/client-core";
 import { renderApp, stubApi, type Handler } from "../../../app/testing";
 
 /**
@@ -13,7 +13,7 @@ import { renderApp, stubApi, type Handler } from "../../../app/testing";
  * Threads face (with its own Create new thread) is shown on `/sessions` too,
  * so a query for the link by name alone finds two.
  */
-const screenCreateThread = (): HTMLElement =>
+const getScreenCreateThreadLink = (): HTMLElement =>
   screen
     .getAllByRole("link", { name: /create new thread/i })
     .filter((link) => link.closest("nav") === null)[0]!;
@@ -38,7 +38,7 @@ const DECLARED = {
 
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 
-const claudeCode = () => ({
+const buildClaudeCodeInstance = () => ({
   id: CLAUDE_ID,
   providerId: "claude-code",
   name: "Claude Code",
@@ -76,26 +76,26 @@ const BASE_SESSION: Session = {
   unenforced: [],
 };
 
-const session = (overrides: Partial<Session> & { id: string }): Session => ({
+const buildSession = (overrides: Partial<Session> & { id: string }): Session => ({
   ...BASE_SESSION,
   ...overrides,
 });
 
-const BUSY = session({
+const BUSY = buildSession({
   id: "01a06d02-2000-7000-8000-000000000001",
   title: "Fix the login bug",
   status: "busy",
   lastActivityAt: "2026-09-08T11:50:00.000Z",
 });
 
-const IDLE = session({
+const IDLE = buildSession({
   id: "01a06d02-2000-7000-8000-000000000002",
   title: "Write the changelog",
   status: "idle",
   lastActivityAt: "2026-09-08T10:00:00.000Z",
 });
 
-const SETTLED = session({
+const SETTLED = buildSession({
   id: "01a06d02-2000-7000-8000-000000000003",
   title: "Investigate the flaky test",
   status: "exited",
@@ -105,7 +105,7 @@ const SETTLED = session({
 
 const THREE_STATUSES: readonly Session[] = [BUSY, IDLE, SETTLED];
 
-const controller = (
+const buildController = (
   sessions: readonly Session[],
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
@@ -117,15 +117,15 @@ const controller = (
     },
   },
   "GET /api/v1/sessions": { body: { items: sessions } },
-  "GET /api/v1/providers": { body: [claudeCode()] },
+  "GET /api/v1/providers": { body: [buildClaudeCodeInstance()] },
   ...extra,
 });
 
-const open = async (
+const openApp = async (
   sessions: readonly Session[],
   extra: Readonly<Record<string, Handler>> = {},
 ) => {
-  const api = stubApi(controller(sessions, extra));
+  const api = stubApi(buildController(sessions, extra));
   const app = await renderApp({ path: "/sessions", api: api.fetch, token: "held" });
   return { ...app, api };
 };
@@ -135,9 +135,9 @@ describe("All sessions", () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     try {
-      await open(THREE_STATUSES);
+      await openApp(THREE_STATUSES);
 
-      const headline = headlineOf(THREE_STATUSES, NOW);
+      const headline = buildHeadline(THREE_STATUSES, NOW);
       expect(headline).toBe("1 running · 1 idle · 1 settled this week");
       // `renderApp` has already awaited `router.load()`, so the screen is in
       // its final state; a `findBy*`/`waitFor` would poll on a real timer
@@ -149,7 +149,7 @@ describe("All sessions", () => {
   });
 
   it("offers Create new thread once on the screen itself, linking to /threads/new", async () => {
-    await open(THREE_STATUSES);
+    await openApp(THREE_STATUSES);
 
     await screen.findAllByRole("link", { name: /create new thread/i });
     // The sidebar's Threads face carries its own Create new thread too, shown
@@ -162,7 +162,7 @@ describe("All sessions", () => {
   });
 
   it("renders exactly the non-empty lanes, Running, Idle and Settled, and not the always-empty ones", async () => {
-    await open(THREE_STATUSES);
+    await openApp(THREE_STATUSES);
 
     expect(await screen.findByText("Running")).toBeDefined();
     expect(screen.getByText("Idle")).toBeDefined();
@@ -172,7 +172,7 @@ describe("All sessions", () => {
   });
 
   it("shows one row per session, with its title and provider display name", async () => {
-    await open(THREE_STATUSES);
+    await openApp(THREE_STATUSES);
 
     // The sidebar's Threads face carries every session's title too, shown on
     // /sessions as well, so a title is looked for on the screen itself.
@@ -187,10 +187,10 @@ describe("All sessions", () => {
   });
 
   it("reads No sessions yet with Create new thread, and no lane headings, when there are none", async () => {
-    await open([]);
+    await openApp([]);
 
     expect(await screen.findByText("No sessions yet")).toBeDefined();
-    expect(screenCreateThread().getAttribute("href")).toBe("/threads/new");
+    expect(getScreenCreateThreadLink().getAttribute("href")).toBe("/threads/new");
     expect(screen.queryByText("Running")).toBeNull();
     expect(screen.queryByText("Idle")).toBeNull();
     expect(screen.queryByText("Settled")).toBeNull();

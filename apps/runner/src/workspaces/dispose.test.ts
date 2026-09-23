@@ -8,48 +8,53 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
 import {
-  checkout,
+  buildCheckout,
   cleanTemporaries,
-  contentsOf,
-  git,
-  id,
+  hashContents,
+  runGitOrThrow,
+  createId,
   makeRemote,
-  provisionFrame,
-  temporary,
+  buildProvisionFrame,
+  createTemporaryDir,
 } from "./testing";
 
 afterAll(cleanTemporaries);
 
-const storage = (): string => temporary("hercule-storage-");
+const createStorageDir = (): string => createTemporaryDir("hercule-storage-");
 
-const disposing = (workspaceId: string) => ({ _tag: "workspaceDispose", workspaceId }) as const;
+const buildDisposeFrame = (workspaceId: string) =>
+  ({ _tag: "workspaceDispose", workspaceId }) as const;
 
 describe("disposing an ephemeral workspace", () => {
   it("removes the worktree and the directory, and keeps the branch in the cache", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const resourceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const resourceId = createId();
     const workspaces = makeWorkspaces({ storageDir });
     await workspaces.provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "ephemeral",
-        checkouts: [checkout({ resourceId, remote: remote.url, branch: "hercule/run-4d4d4d4d" })],
+        checkouts: [
+          buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-4d4d4d4d" }),
+        ],
       }),
     );
     const directory = join(storageDir, "workspaces", workspaceId);
     const cache = join(storageDir, "cache", `${resourceId}.git`);
 
-    const report = await workspaces.dispose(disposing(workspaceId));
+    const report = await workspaces.dispose(buildDisposeFrame(workspaceId));
 
     expect(report.status).toBe("deleted");
     expect(report.workspaceId).toBe(workspaceId);
     expect(existsSync(directory)).toBe(false);
     // The work the agent did is not thrown away with the directory.
-    expect(git(cache, "rev-parse", "--verify", "hercule/run-4d4d4d4d")).toMatch(/^[0-9a-f]{40}$/);
+    expect(runGitOrThrow(cache, "rev-parse", "--verify", "hercule/run-4d4d4d4d")).toMatch(
+      /^[0-9a-f]{40}$/,
+    );
     // And git no longer believes a worktree lives there.
-    expect(git(cache, "worktree", "list")).not.toContain(directory);
+    expect(runGitOrThrow(cache, "worktree", "list")).not.toContain(directory);
     // A restart must not resurrect it.
     expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
   });
@@ -60,26 +65,26 @@ describe("disposing a primary", () => {
   // is that clone rather than a folder of the user's that was adopted.
   it("refuses, and leaves the main workspace where it is", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
-    const resourceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
+    const resourceId = createId();
     const workspaces = makeWorkspaces({ storageDir });
     await workspaces.provision(
-      provisionFrame({
+      buildProvisionFrame({
         workspaceId,
         kind: "primary",
-        checkouts: [checkout({ resourceId, remote: remote.url })],
+        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
     const directory = join(storageDir, "primaries", resourceId);
-    const before = contentsOf(directory);
+    const before = hashContents(directory);
 
-    const report = await workspaces.dispose(disposing(workspaceId));
+    const report = await workspaces.dispose(buildDisposeFrame(workspaceId));
 
     expect(report.status).toBe("failed");
     expect(report.message).toBe("a primary is never torn down");
     expect(existsSync(directory)).toBe(true);
-    expect(contentsOf(directory)).toBe(before);
+    expect(hashContents(directory)).toBe(before);
     // Still the runner's, so a session can still be placed in it.
     expect(workspaces.resolve(workspaceId)?.cwd).toBe(directory);
   });
@@ -87,9 +92,11 @@ describe("disposing a primary", () => {
 
 describe("disposing something this runner never had", () => {
   it("reports deleted rather than failing", async () => {
-    const workspaceId = id();
+    const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir: storage() }).dispose(disposing(workspaceId));
+    const report = await makeWorkspaces({ storageDir: createStorageDir() }).dispose(
+      buildDisposeFrame(workspaceId),
+    );
 
     // The controller must be able to retry a dispose it did not see answered.
     expect(report.status).toBe("deleted");
@@ -105,20 +112,24 @@ describe("disposing a workspace that is still being provisioned", () => {
    */
   it("waits for the provisioning to finish, then leaves nothing behind", async () => {
     const remote = makeRemote();
-    const storageDir = storage();
-    const workspaceId = id();
+    const storageDir = createStorageDir();
+    const workspaceId = createId();
     const workspaces = makeWorkspaces({ storageDir });
-    const frame = provisionFrame({
+    const frame = buildProvisionFrame({
       workspaceId,
       kind: "ephemeral",
       checkouts: [
-        checkout({ resourceId: id(), remote: remote.url, branch: "hercule/run-2e2e2e2e" }),
+        buildCheckout({
+          resourceId: createId(),
+          remote: remote.url,
+          branch: "hercule/run-2e2e2e2e",
+        }),
       ],
     });
 
     const [, disposed] = await Promise.all([
       workspaces.provision(frame),
-      workspaces.dispose(disposing(workspaceId)),
+      workspaces.dispose(buildDisposeFrame(workspaceId)),
     ]);
 
     expect(disposed.status).toBe("deleted");

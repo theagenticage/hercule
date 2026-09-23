@@ -7,7 +7,14 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ProviderSecretField, Runner } from "@hercule/contract";
-import { envelope, renderApp, stubApi, type Call, type Handler } from "../../app/testing";
+import {
+  buildErrorBody,
+  readPageText,
+  renderApp,
+  stubApi,
+  type Call,
+  type Handler,
+} from "../../app/testing";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -59,7 +66,7 @@ const DECLARED = {
 
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 
-const snapshot = (auth: Readonly<Record<string, string>>) => ({
+const buildSnapshot = (auth: Readonly<Record<string, string>>) => ({
   runnerId: MOSS.id,
   probedAt: "2026-09-05T09:14:00.000Z",
   harnessVersion: "2.1.263",
@@ -68,7 +75,7 @@ const snapshot = (auth: Readonly<Record<string, string>>) => ({
   models: [{ slug: "default", name: "Default", options: [] }],
 });
 
-const claudeCode = (snapshots: ReadonlyArray<ReturnType<typeof snapshot>>) => ({
+const buildClaudeCodeInstance = (snapshots: ReadonlyArray<ReturnType<typeof buildSnapshot>>) => ({
   id: CLAUDE_ID,
   providerId: "claude-code",
   name: "Claude Code",
@@ -82,19 +89,19 @@ const claudeCode = (snapshots: ReadonlyArray<ReturnType<typeof snapshot>>) => ({
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-const LOGGED_IN = snapshot({
+const LOGGED_IN = buildSnapshot({
   status: "ok",
   identity: "rogier@example.com",
   planLabel: "Claude Max",
 });
 
-const NOT_LOGGED_IN = snapshot({ status: "unauthenticated" });
+const NOT_LOGGED_IN = buildSnapshot({ status: "unauthenticated" });
 
 const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=challenge";
 
-const controller = (
+const buildController = (
   runners: ReadonlyArray<Runner>,
-  instances: ReadonlyArray<ReturnType<typeof claudeCode>>,
+  instances: ReadonlyArray<ReturnType<typeof buildClaudeCodeInstance>>,
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/setup": { body: { complete: true } },
@@ -117,13 +124,13 @@ const controller = (
   ...extra,
 });
 
-const open = async (options: {
+const openApp = async (options: {
   readonly runners: ReadonlyArray<Runner>;
-  readonly instances: ReadonlyArray<ReturnType<typeof claudeCode>>;
+  readonly instances: ReadonlyArray<ReturnType<typeof buildClaudeCodeInstance>>;
   readonly local?: string | null;
   readonly extra?: Readonly<Record<string, Handler>>;
 }) => {
-  const api = stubApi(controller(options.runners, options.instances, options.extra));
+  const api = stubApi(buildController(options.runners, options.instances, options.extra));
   const app = await renderApp({
     path: "/",
     api: api.fetch,
@@ -133,13 +140,11 @@ const open = async (options: {
   return { ...app, api };
 };
 
-const reading = (): string => (document.body.textContent ?? "").replace(/\s+/g, " ").trim();
-
 /**
  * The screen's own control: the sidebar's thread list carries one too. It is a
  * disabled button until the machine is ready, then a real link to the composer.
  */
-const newThread = (): HTMLElement => {
+const getNewThreadControl = (): HTMLElement => {
   const found = [
     ...screen.queryAllByRole("button", { name: /create new thread/i }),
     ...screen.queryAllByRole("link", { name: /create new thread/i }),
@@ -150,19 +155,19 @@ const newThread = (): HTMLElement => {
 
 describe("Sessions", () => {
   it("says a thread needs a machine when nothing answered on this one", async () => {
-    await open({ runners: [], instances: [claudeCode([])], local: null });
+    await openApp({ runners: [], instances: [buildClaudeCodeInstance([])], local: null });
 
     await waitFor(() => {
-      expect(reading()).toContain("No runner has been detected on this machine.");
+      expect(readPageText()).toContain("No runner has been detected on this machine.");
     });
-    expect(newThread().hasAttribute("disabled")).toBe(true);
+    expect(getNewThreadControl().hasAttribute("disabled")).toBe(true);
   });
 
   it("sends the user to Fleet when the machine has no harness on it", async () => {
-    await open({ runners: [BARE], instances: [claudeCode([])], local: BARE.id });
+    await openApp({ runners: [BARE], instances: [buildClaudeCodeInstance([])], local: BARE.id });
 
     await waitFor(() => {
-      expect(reading()).toContain("No coding harness was found on this machine.");
+      expect(readPageText()).toContain("No coding harness was found on this machine.");
     });
     // The install is a move on the machine, so the screen points at the page
     // that makes it rather than describing what to type.
@@ -172,30 +177,38 @@ describe("Sessions", () => {
   });
 
   it("offers a login for a harness that is there and not logged in", async () => {
-    await open({ runners: [MOSS], instances: [claudeCode([NOT_LOGGED_IN])], local: MOSS.id });
+    await openApp({
+      runners: [MOSS],
+      instances: [buildClaudeCodeInstance([NOT_LOGGED_IN])],
+      local: MOSS.id,
+    });
 
     await waitFor(() => {
-      expect(reading()).toContain("Claude Code was found on this machine.");
+      expect(readPageText()).toContain("Claude Code was found on this machine.");
     });
     expect(screen.getByRole("button", { name: /log in/i })).toBeDefined();
-    expect(newThread().hasAttribute("disabled")).toBe(true);
+    expect(getNewThreadControl().hasAttribute("disabled")).toBe(true);
   });
 
   it("is ready once the harness on this machine is logged in", async () => {
-    await open({ runners: [MOSS], instances: [claudeCode([LOGGED_IN])], local: MOSS.id });
+    await openApp({
+      runners: [MOSS],
+      instances: [buildClaudeCodeInstance([LOGGED_IN])],
+      local: MOSS.id,
+    });
 
     await waitFor(() => {
-      expect(reading()).toContain("Claude Code is ready.");
+      expect(readPageText()).toContain("Claude Code is ready.");
     });
     // Ready means a thread actually starts from here now: a link to the
     // composer, not a disabled placeholder.
-    expect(newThread().getAttribute("href")).toBe("/threads/new");
+    expect(getNewThreadControl().getAttribute("href")).toBe("/threads/new");
   });
 
   it("logs in from here, against the machine this browser is on", async () => {
     const user = userEvent.setup();
-    let held = [claudeCode([NOT_LOGGED_IN])];
-    const { api } = await open({
+    let held = [buildClaudeCodeInstance([NOT_LOGGED_IN])];
+    const { api } = await openApp({
       runners: [MOSS],
       instances: held,
       local: MOSS.id,
@@ -204,9 +217,9 @@ describe("Sessions", () => {
         [`POST /api/v1/providers/${CLAUDE_ID}/login`]: { body: { url: AUTHORIZE_URL } },
         [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: (call: Call) => {
           if ((call.body as { code: string }).code !== "the-whole-code") {
-            return { status: 400, body: envelope("validation", "Invalid code.") };
+            return { status: 400, body: buildErrorBody("validation", "Invalid code.") };
           }
-          held = [claudeCode([LOGGED_IN])];
+          held = [buildClaudeCodeInstance([LOGGED_IN])];
           return { body: LOGGED_IN };
         },
         // Every finished login is followed by a probe: what the machine holds
@@ -218,7 +231,7 @@ describe("Sessions", () => {
     await user.click(await screen.findByRole("button", { name: /log in/i }));
 
     await waitFor(() => {
-      expect(reading()).toContain(AUTHORIZE_URL);
+      expect(readPageText()).toContain(AUTHORIZE_URL);
     });
     // The login runs on this machine, whatever else the fleet holds.
     expect(api.calls.filter((call) => call.path.endsWith("/login"))[0]?.body).toEqual({
@@ -230,22 +243,22 @@ describe("Sessions", () => {
 
     // Finishing the login moves the screen on, without a reload.
     await waitFor(() => {
-      expect(reading()).toContain("Claude Code is ready.");
+      expect(readPageText()).toContain("Claude Code is ready.");
     });
   });
 
   it("says why the screen did not move on when the probe after a login fails", async () => {
     const user = userEvent.setup();
-    await open({
+    await openApp({
       runners: [MOSS],
-      instances: [claudeCode([NOT_LOGGED_IN])],
+      instances: [buildClaudeCodeInstance([NOT_LOGGED_IN])],
       local: MOSS.id,
       extra: {
         [`POST /api/v1/providers/${CLAUDE_ID}/login`]: { body: { url: AUTHORIZE_URL } },
         [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: { body: LOGGED_IN },
         [`POST /api/v1/runners/${MOSS.id}/probe`]: {
           status: 500,
-          body: envelope("internal", "moss stopped answering"),
+          body: buildErrorBody("internal", "moss stopped answering"),
         },
       },
     });
@@ -278,10 +291,10 @@ describe("Sessions > a harness that needs a key", () => {
     },
   };
 
-  const PI_SNAPSHOT = snapshot({ status: "unauthenticated" });
+  const PI_SNAPSHOT = buildSnapshot({ status: "unauthenticated" });
 
-  const pi = (set: boolean) => ({
-    ...claudeCode([PI_SNAPSHOT]),
+  const buildPiInstance = (set: boolean) => ({
+    ...buildClaudeCodeInstance([PI_SNAPSHOT]),
     id: PI_ID,
     providerId: "pi",
     name: "pi",
@@ -292,8 +305,8 @@ describe("Sessions > a harness that needs a key", () => {
 
   it("asks for the key here, and moves on once it is saved", async () => {
     const user = userEvent.setup();
-    let held = [pi(false)];
-    const { api } = await open({
+    let held = [buildPiInstance(false)];
+    const { api } = await openApp({
       runners: [WITH_PI],
       instances: held,
       local: WITH_PI.id,
@@ -302,8 +315,8 @@ describe("Sessions > a harness that needs a key", () => {
         [`PUT /api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`]: () => {
           held = [
             {
-              ...pi(true),
-              snapshots: [snapshot({ status: "ok", backend: "api_key" })],
+              ...buildPiInstance(true),
+              snapshots: [buildSnapshot({ status: "ok", backend: "api_key" })],
             },
           ];
           return {
@@ -316,7 +329,7 @@ describe("Sessions > a harness that needs a key", () => {
           };
         },
         [`POST /api/v1/runners/${WITH_PI.id}/probe`]: () => ({
-          body: snapshot({ status: "ok", backend: "api_key" }),
+          body: buildSnapshot({ status: "ok", backend: "api_key" }),
         }),
       },
     });
@@ -333,12 +346,12 @@ describe("Sessions > a harness that needs a key", () => {
 
     // Saved, probed, and the screen moves on without a reload.
     await waitFor(() => {
-      expect(reading()).toContain("pi is ready.");
+      expect(readPageText()).toContain("pi is ready.");
     });
     const wrote = api.calls.filter((call) => call.method === "PUT");
     expect(wrote).toHaveLength(1);
     expect(wrote[0]?.path).toBe(`/api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`);
     expect(wrote[0]?.body).toEqual({ value: KEY_VALUE });
-    expect(reading()).not.toContain(KEY_VALUE);
+    expect(readPageText()).not.toContain(KEY_VALUE);
   });
 });

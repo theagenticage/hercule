@@ -12,7 +12,7 @@
  * the user.
  */
 import { readFileSync } from "node:fs";
-import { credentialsFileIn } from "@hercule/home";
+import { locateCredentialsFile } from "@hercule/home";
 
 /** The contents of `<home>/credentials.json`, exactly as `hercule login` writes it. */
 export interface CredentialFile {
@@ -37,7 +37,7 @@ export class CredentialError extends Error {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 /** True when this process was started by the runner inside a session. */
-export const inSession = (env: Env): boolean => env["HERCULE_SESSION"] === "1";
+export const isInSession = (env: Env): boolean => env["HERCULE_SESSION"] === "1";
 
 /**
  * Read the credential file, or `undefined` when there is none.
@@ -102,9 +102,9 @@ export const resolveCredential = (home: string, env: Env): Credential => {
     );
   }
 
-  const path = credentialsFileIn(home);
+  const path = locateCredentialsFile(home);
 
-  if (inSession(env)) {
+  if (isInSession(env)) {
     throw new CredentialError(
       `HERCULE_SESSION=1 and no HERCULE_TOKEN. Inside a session the CLI refuses the credential file (${path}), so it cannot act as the user by accident.`,
     );
@@ -130,10 +130,10 @@ export const resolveCredential = (home: string, env: Env): Credential => {
 export const resolveUrl = (home: string, env: Env): string => {
   const envUrl = env["HERCULE_API_URL"];
   if (envUrl !== undefined && envUrl !== "") return envUrl;
-  if (inSession(env)) {
+  if (isInSession(env)) {
     throw new CredentialError("HERCULE_SESSION=1 and no HERCULE_API_URL. Set HERCULE_API_URL.");
   }
-  const file = readCredentialFile(credentialsFileIn(home));
+  const file = readCredentialFile(locateCredentialsFile(home));
   if (file === undefined) {
     throw new CredentialError(
       `No controller URL. Set HERCULE_API_URL, or run \`hercule login <url>\`.`,

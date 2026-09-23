@@ -4,7 +4,7 @@
  * the upgrade and buys nothing else anywhere in Hercule.
  *
  * The proof runs the other way too: `greet` signs the runner's nonce beside its
- * id, and `signedChallenge` in `@hercule/protocol` says why both are in there.
+ * id, and `encodeChallengeBytes` in `@hercule/protocol` says why both are in there.
  *
  * Liveness is a protocol frame, never a WebSocket control frame: Bun answers a
  * control ping in the runtime, which would prove the machine is up rather than
@@ -33,14 +33,14 @@ import {
   PROTOCOL_VERSION,
   RunnerFactsRequest,
   RunnerToController,
-  signedChallenge,
+  encodeChallengeBytes,
   type ControllerHello,
   type RunnerHello,
 } from "@hercule/protocol";
-import { bearerOf } from "../http/bearer";
-import { responseFor } from "../http/envelope";
+import { readBearerToken } from "../http/bearer";
+import { buildErrorResponse } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
-import { newConnection, RunnerConnections, type Connection, type Departure } from "./connections";
+import { mintConnection, RunnerConnections, type Connection, type Departure } from "./connections";
 
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
 
@@ -93,13 +93,13 @@ const decodeFrame = Schema.decodeUnknownEffect(RunnerToController);
 const decodePeerVersion = Schema.decodeUnknownEffect(PeerVersion);
 const encodeFrame = Schema.encodeUnknownSync(ControllerToRunner);
 
-const asText = (message: typeof ControllerToRunner.Type): string =>
+const encodeFrameText = (message: typeof ControllerToRunner.Type): string =>
   JSON.stringify(encodeFrame(message));
 
-const FACTS_REQUEST = asText({ _tag: "factsRequest" } satisfies RunnerFactsRequest);
+const FACTS_REQUEST = encodeFrameText({ _tag: "factsRequest" } satisfies RunnerFactsRequest);
 
 /** What both ends offer, which is the only thing either may use. */
-const negotiated = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
+const negotiateCapabilities = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
   CAPABILITIES.filter((capability) => theirs.includes(capability));
 
 /**
@@ -107,14 +107,14 @@ const negotiated = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
  * the runner already dialled again, and `departure` stays `unreachable` until a
  * `Goodbye` makes it an announcement.
  */
-const hold = (runnerId: string, socket: Socket.Socket) =>
+const holdConnection = (runnerId: string, socket: Socket.Socket) =>
   Effect.gen(function* () {
     const connections = yield* RunnerConnections;
     const identity = yield* ControllerIdentity;
     const pings = yield* RunnerPingSchedule;
     const write = yield* socket.writer;
 
-    const mine: Connection = newConnection();
+    const mine: Connection = mintConnection();
     let greeted = false;
     let departure: Departure = "unreachable";
     let lastHeard = yield* Clock.currentTimeMillis;
@@ -122,7 +122,8 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
     /** Resolves with what the service asked this connection to go out with. */
     const asked = Deferred.makeUnsafe<Socket.CloseEvent>();
 
-    const refuse = (reason: string) => write(new Socket.CloseEvent(PROTOCOL_ERROR, reason));
+    const closeWithProtocolError = (reason: string) =>
+      write(new Socket.CloseEvent(PROTOCOL_ERROR, reason));
 
     const greet = (hello: RunnerHello) =>
       Effect.gen(function* () {
@@ -132,7 +133,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
           // bug rather than a state to answer.
           return yield* Effect.die("the controller has no identity row");
         }
-        const signature = yield* identity.sign(signedChallenge(runnerId, hello.nonce));
+        const signature = yield* identity.sign(encodeChallengeBytes(runnerId, hello.nonce));
         const answer: ControllerHello = {
           _tag: "controllerHello",
           protocolVersion: PROTOCOL_VERSION,
@@ -154,43 +155,43 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
             // A write that fails is a connection that is going; the operation
             // waiting on the answer meets that as its deadline.
             askForFacts: Effect.ignore(write(FACTS_REQUEST)),
-            ask: (request) => Effect.ignore(write(asText(request))),
+            ask: (request) => Effect.ignore(write(encodeFrameText(request))),
           },
           {
             binaryVersion: hello.binaryVersion,
             protocolVersion: hello.protocolVersion,
-            negotiatedCapabilities: negotiated(hello.capabilities),
+            negotiatedCapabilities: negotiateCapabilities(hello.capabilities),
             facts: hello.facts,
           },
         );
         greeted = true;
-        yield* write(asText(answer));
+        yield* write(encodeFrameText(answer));
         // After the answer, because the runner drops every frame that reaches
         // it before the controller's hello: a sweep announced any earlier can
         // have its first probe thrown away.
         yield* connections.arrived(runnerId);
       });
 
-    const handle = (raw: string) =>
+    const handleFrame = (raw: string) =>
       Effect.gen(function* () {
         const parsed = yield* Effect.option(
           Effect.try({ try: () => JSON.parse(raw) as unknown, catch: () => undefined }),
         );
-        if (Option.isNone(parsed)) return yield* refuse(UNREADABLE);
+        if (Option.isNone(parsed)) return yield* closeWithProtocolError(UNREADABLE);
         // Read before the frame, because a later peer's hello will not decode
         // here and would otherwise be called gibberish rather than a mismatch.
         const version = yield* Effect.option(decodePeerVersion(parsed.value));
         if (Option.isSome(version) && version.value.protocolVersion !== PROTOCOL_VERSION) {
-          return yield* refuse(WRONG_VERSION);
+          return yield* closeWithProtocolError(WRONG_VERSION);
         }
         const frame = yield* Effect.option(decodeFrame(parsed.value));
-        if (Option.isNone(frame)) return yield* refuse(UNREADABLE);
+        if (Option.isNone(frame)) return yield* closeWithProtocolError(UNREADABLE);
         const message = frame.value;
         switch (message._tag) {
           case "runnerHello":
             // Without this a runner could make the controller sign and write for
             // every frame it cares to send.
-            if (greeted) return yield* refuse(GREETED_ALREADY);
+            if (greeted) return yield* closeWithProtocolError(GREETED_ALREADY);
             return yield* greet(message);
           case "pong":
             // The only frame that counts as an answer, and only from a
@@ -241,7 +242,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
     // The transport forks a fiber per frame, so two arriving together would
     // otherwise run the exchange twice over the same four variables.
     const frames = yield* Semaphore.make(1);
-    const receive = (raw: string) => frames.withPermits(1)(handle(raw));
+    const receiveFrame = (raw: string) => frames.withPermits(1)(handleFrame(raw));
 
     /** Raced against the receive loop, so neither outlives the other by a frame. */
     const ask = Effect.gen(function* () {
@@ -250,7 +251,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
         if ((yield* Clock.currentTimeMillis) - lastHeard > Duration.toMillis(pings.silence)) {
           return yield* write(new Socket.CloseEvent(GOING_AWAY_CLOSE_CODE, SILENT));
         }
-        yield* write(asText({ _tag: "ping" }));
+        yield* write(encodeFrameText({ _tag: "ping" }));
       }
     });
 
@@ -265,7 +266,7 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
 
     yield* Effect.ensuring(
       Effect.race(
-        Effect.tapCause(socket.runString(receive), (cause) =>
+        Effect.tapCause(socket.runString(receiveFrame), (cause) =>
           Effect.logError("A runner's connection ended in an error", cause),
         ).pipe(Effect.ignore),
         Effect.race(ask, closeWhenAsked),
@@ -280,24 +281,26 @@ const hold = (runnerId: string, socket: Socket.Socket) =>
 export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, (request) =>
   Effect.gen(function* () {
     const connections = yield* RunnerConnections;
-    const credential = bearerOf(request);
-    if (credential === undefined) return responseFor(createUnauthenticatedError(NO_CREDENTIAL));
+    const credential = readBearerToken(request);
+    if (credential === undefined)
+      return buildErrorResponse(createUnauthenticatedError(NO_CREDENTIAL));
     // A database that will not answer is not a credential that was refused, and
     // a runner told `unauthenticated` stops presenting a credential still good.
     const admitted = yield* Effect.catch(connections.admits(credential), (error) =>
       Effect.as(Effect.logError("A runner's credential could not be resolved", error), undefined),
     );
-    if (admitted === undefined) return responseFor(createInternalError("something went wrong"));
+    if (admitted === undefined)
+      return buildErrorResponse(createInternalError("something went wrong"));
     if (Option.isNone(admitted)) {
       const retired = yield* Effect.catch(connections.wasRetired(credential), (error) =>
         Effect.as(Effect.logError("A refused credential could not be looked up", error), false),
       );
-      return responseFor(createUnauthenticatedError(retired ? RETIRED : UNKNOWN_CREDENTIAL));
+      return buildErrorResponse(createUnauthenticatedError(retired ? RETIRED : UNKNOWN_CREDENTIAL));
     }
 
     const socket = yield* request.upgrade;
     // Once the connection is up there is nobody left to answer with a status.
-    yield* hold(admitted.value, socket);
+    yield* holdConnection(admitted.value, socket);
     return HttpServerResponse.empty();
   }).pipe(Effect.withSpan("runner.socket")),
 );

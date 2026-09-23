@@ -45,7 +45,7 @@ import * as HttpServer from "effect/unstable/http/HttpServer";
 import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import { ALL_OPERATIONS, api, createValidationError } from "@hercule/contract";
-import { responseFor, withEnvelope } from "./envelope";
+import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { OAuthCallbackRouteLayer } from "../connections";
@@ -117,12 +117,12 @@ const routerLayer = HttpApiBuilder.layer(api).pipe(
  * text body of their own, which is the one failure that would leave the
  * envelope. It is bad input, so it answers as one.
  */
-const jsonOnly = <E, R>(
+const rewriteUnsupportedMediaType = <E, R>(
   app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> =>
   Effect.map(app, (response) =>
     response.status === 415
-      ? responseFor(
+      ? buildErrorResponse(
           createValidationError([
             { path: [], message: "the request body must be application/json" },
           ]),
@@ -169,7 +169,7 @@ export const webBundle: Effect.Effect<WebBundle | undefined> = Effect.tryPromise
  */
 const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.layer));
 
-const application = (bundle: WebBundle | undefined) =>
+const buildApplication = (bundle: WebBundle | undefined) =>
   Effect.map(
     HttpRouter.toHttpEffect(
       Layer.mergeAll(
@@ -180,7 +180,7 @@ const application = (bundle: WebBundle | undefined) =>
         OAuthCallbackRouteLayer,
       ),
     ),
-    (routes) => withEnvelope(withWebBundle(bundle)(jsonOnly(routes))),
+    (routes) => withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes))),
   );
 
 /**
@@ -224,5 +224,5 @@ export const serve = (bundle: WebBundle | undefined) =>
     // event log. It reads its own position from the database, so the clock is
     // forked here like the rest and needs nothing to have happened before it.
     yield* Effect.forkScoped(Effect.flatMap(Pipeline, (pipeline) => pipeline.driving));
-    yield* Effect.flatMap(application(bundle), HttpServer.serveEffect());
+    yield* Effect.flatMap(buildApplication(bundle), HttpServer.serveEffect());
   });

@@ -35,7 +35,7 @@ export const PARKED_COMMAND = "echo parked";
 
 export const PARKED_OUTPUT = "parked";
 
-const chunk = (choice: Record<string, unknown>): string =>
+const formatChunk = (choice: Record<string, unknown>): string =>
   `data: ${JSON.stringify({
     id: "chatcmpl-hercule",
     object: "chat.completion.chunk",
@@ -44,7 +44,7 @@ const chunk = (choice: Record<string, unknown>): string =>
     choices: [{ index: 0, ...choice }],
   })}\n\n`;
 
-const call = (
+const buildToolCallDelta = (
   index: number,
   name: string,
   args: Record<string, string>,
@@ -55,31 +55,31 @@ const call = (
   function: { name, arguments: JSON.stringify(args) },
 });
 
-const toolCall = (firstTurn: FakeModelFirstTurn): string =>
+const buildToolCallReply = (firstTurn: FakeModelFirstTurn): string =>
   [
-    chunk({ delta: { role: "assistant", content: "" }, finish_reason: null }),
-    chunk({
+    formatChunk({ delta: { role: "assistant", content: "" }, finish_reason: null }),
+    formatChunk({
       delta: {
         tool_calls: [
           ...(firstTurn.writes === undefined
             ? []
-            : [call(0, "write", { path: firstTurn.writes, content: "written\n" })]),
-          call(firstTurn.writes === undefined ? 0 : 1, "bash", {
+            : [buildToolCallDelta(0, "write", { path: firstTurn.writes, content: "written\n" })]),
+          buildToolCallDelta(firstTurn.writes === undefined ? 0 : 1, "bash", {
             command: firstTurn.command ?? PARKED_COMMAND,
           }),
         ],
       },
       finish_reason: null,
     }),
-    chunk({ delta: {}, finish_reason: "tool_calls" }),
+    formatChunk({ delta: {}, finish_reason: "tool_calls" }),
     "data: [DONE]\n\n",
   ].join("");
 
-const words = (): string =>
+const buildTextReply = (): string =>
   [
-    chunk({ delta: { role: "assistant", content: "" }, finish_reason: null }),
-    chunk({ delta: { content: "Done." }, finish_reason: null }),
-    chunk({ delta: {}, finish_reason: "stop" }),
+    formatChunk({ delta: { role: "assistant", content: "" }, finish_reason: null }),
+    formatChunk({ delta: { content: "Done." }, finish_reason: null }),
+    formatChunk({ delta: {}, finish_reason: "stop" }),
     "data: [DONE]\n\n",
   ].join("");
 
@@ -97,7 +97,7 @@ export const startFakeModelServer = (firstTurn: FakeModelFirstTurn = {}): FakeMo
       }
       await request.text();
       asked += 1;
-      return new Response(asked === 1 ? toolCall(firstTurn) : words(), {
+      return new Response(asked === 1 ? buildToolCallReply(firstTurn) : buildTextReply(), {
         headers: {
           "content-type": "text/event-stream",
           "cache-control": "no-cache",

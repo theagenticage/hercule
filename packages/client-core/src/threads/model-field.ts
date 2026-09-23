@@ -22,7 +22,7 @@ export interface ThreadModelField {
   readonly options: readonly ThreadModelFieldOption[];
 }
 
-export const threadModelField = (
+export const buildThreadModelField = (
   instance: Pick<ProviderInstance, "snapshots">,
   localRunnerId: string | null,
   current: string | undefined,

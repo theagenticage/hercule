@@ -11,12 +11,12 @@
  */
 import type { Project, Resource, Runner, Session, Workspace } from "@hercule/contract";
 import {
-  pickKey,
-  projectWorkspaces,
-  readyPrimary,
-  repoName,
-  workspaceLabel,
-  workspaceName,
+  buildPickKey,
+  listProjectWorkspaces,
+  findReadyPrimary,
+  formatRepoName,
+  formatWorkspaceLabel,
+  formatWorkspaceName,
   type WorkspacePick,
 } from "./workspaces";
 
@@ -42,7 +42,7 @@ export interface WorkspaceMenu {
 const NONE: WorkspacePick = { kind: "none" };
 
 /** `2 threads · “Fix flaky webhook tests”, “Write the retry runbook”`. */
-const threadsIn = (workspace: Workspace, sessions: readonly Session[]): string | null => {
+const describeThreadsIn = (workspace: Workspace, sessions: readonly Session[]): string | null => {
   const titles = workspace.sessionIds.map(
     (id) => sessions.find((session) => session.id === id)?.title ?? null,
   );
@@ -53,7 +53,7 @@ const threadsIn = (workspace: Workspace, sessions: readonly Session[]): string |
   return named.length === 0 ? head : `${head} · ${named.map((title) => `“${title}”`).join(", ")}`;
 };
 
-export const workspaceMenu = ({
+export const buildWorkspaceMenu = ({
   project,
   repos,
   workspaces,
@@ -76,7 +76,7 @@ export const workspaceMenu = ({
     kind: "ephemeral",
     checkouts: repos.map((repo) => ({ resourceId: repo.id })),
   };
-  const current = pickKey(pick);
+  const current = buildPickKey(pick);
   const rows: WorkspaceMenuRow[] = [];
 
   // A project with several repos opens a worktree of each by default, so that
@@ -85,26 +85,26 @@ export const workspaceMenu = ({
     repos.length === 0
       ? null
       : {
-          key: pickKey(freshPick),
+          key: buildPickKey(freshPick),
           pick: freshPick,
           name: "New workspace",
           mono: false,
           note: null,
           sub:
             repos.length === 1
-              ? `a fresh worktree of ${repoName(repos[0])} on a new branch`
+              ? `a fresh worktree of ${formatRepoName(repos[0])} on a new branch`
               : "a worktree of each repo, side by side, each on a new branch",
-          current: current === pickKey(freshPick),
+          current: current === buildPickKey(freshPick),
         };
 
   const shared = repos.map((repo): WorkspaceMenuRow => {
-    const primary = readyPrimary(workspaces, repo.id, runnerId);
+    const primary = findReadyPrimary(workspaces, repo.id, runnerId);
     const branch = primary?.checkouts[0]?.branch ?? null;
     const sharedPick: WorkspacePick = { kind: "primary", resourceId: repo.id };
     return {
-      key: pickKey(sharedPick),
+      key: buildPickKey(sharedPick),
       pick: sharedPick,
-      name: repos.length === 1 ? "Main workspace" : `Main workspace of ${repoName(repo)}`,
+      name: repos.length === 1 ? "Main workspace" : `Main workspace of ${formatRepoName(repo)}`,
       mono: false,
       // The machine stands at the right of every row that has one, the shared
       // checkout included: it is on a machine as much as a worktree is.
@@ -113,23 +113,23 @@ export const workspaceMenu = ({
         branch === null
           ? `not cloned on ${machine} · clones on first use`
           : `on ${branch} · you and the agent share the files`,
-      current: current === pickKey(sharedPick),
+      current: current === buildPickKey(sharedPick),
     };
   });
 
   if (repos.length > 1 && fresh !== null) rows.push(fresh, ...shared);
   else if (fresh !== null) rows.push(...shared, fresh);
 
-  for (const workspace of projectWorkspaces(workspaces, repos)) {
+  for (const workspace of listProjectWorkspaces(workspaces, repos)) {
     const joinPick: WorkspacePick = { kind: "existing", workspaceId: workspace.id };
     rows.push({
-      key: pickKey(joinPick),
+      key: buildPickKey(joinPick),
       pick: joinPick,
-      name: workspaceName(workspace),
+      name: formatWorkspaceName(workspace),
       mono: true,
       note: runners.find((each) => each.id === workspace.runnerId)?.name ?? null,
-      sub: threadsIn(workspace, sessions),
-      current: current === pickKey(joinPick),
+      sub: describeThreadsIn(workspace, sessions),
+      current: current === buildPickKey(joinPick),
     });
   }
 
@@ -139,13 +139,13 @@ export const workspaceMenu = ({
   const none = project === undefined ? "No workspace" : "None";
   if (repos.length === 0) {
     rows.push({
-      key: pickKey(NONE),
+      key: buildPickKey(NONE),
       pick: NONE,
       name: none,
       mono: false,
       note: null,
       sub: "the agent works without a checkout",
-      current: current === pickKey(NONE),
+      current: current === buildPickKey(NONE),
     });
   }
 
@@ -157,7 +157,7 @@ export const workspaceMenu = ({
   return {
     label:
       rows.find((row) => row.current)?.name ??
-      (joined === undefined ? none : workspaceLabel(joined, repos, runners)),
+      (joined === undefined ? none : formatWorkspaceLabel(joined, repos, runners)),
     rows,
   };
 };

@@ -6,7 +6,7 @@ import { Effect, Layer, Option, Redacted } from "effect";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
-import { homePaths, HerculeHome } from "../config";
+import { buildHomePaths, HerculeHome } from "../config";
 import { masterKeyLayer } from "./masterKey";
 import { Secrets, secretsLayer } from "./repository";
 import { Secret, SecretLayer } from "./service";
@@ -14,7 +14,7 @@ import { Secret, SecretLayer } from "./service";
 const CONNECTION = { kind: "connection", id: "0198e4b0-0000-7000-8000-000000000001" } as const;
 
 /** The two halves of an owner, as an operation's input carries them. */
-const ownerOf = (owner: { kind: "connection"; id: string }) => ({
+const buildOwnerFields = (owner: { kind: "connection"; id: string }) => ({
   ownerKind: owner.kind,
   ownerId: owner.id,
 });
@@ -35,14 +35,14 @@ afterEach(() => {
 });
 
 /** The real service over the real repository, a `:memory:` database and a key file. */
-const stack = () => {
+const buildStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-secret-service-"));
   homes.push(home);
   return SecretLayer.pipe(
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
 };
 
@@ -52,7 +52,7 @@ type Services = Secret | Secrets | AuditLog;
 const run = <A, E>(body: (secret: Secret["Service"]) => Effect.Effect<A, E, Services>) =>
   Effect.runPromise(
     Effect.flatMap(Secret, body).pipe(
-      Effect.provide(stack()),
+      Effect.provide(buildStack()),
       Effect.provideService(CurrentActor, USER),
     ),
   );
@@ -60,7 +60,7 @@ const run = <A, E>(body: (secret: Secret["Service"]) => Effect.Effect<A, E, Serv
 describe("secret.set", () => {
   it("stores a value and answers with the reference, never the value", async () => {
     const ref = await run((secret) =>
-      secret.set({ ...ownerOf(CONNECTION), name: "token", value: VALUE }),
+      secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: VALUE }),
     );
 
     expect(Object.keys(ref).sort()).toEqual(["createdAt", "name", "ownerId", "ownerKind"]);
@@ -76,8 +76,16 @@ describe("secret.set", () => {
   it("rotates on the second write, keeping createdAt and stamping rotatedAt", async () => {
     const [first, second] = await run((secret) =>
       Effect.gen(function* () {
-        const one = yield* secret.set({ ...ownerOf(CONNECTION), name: "token", value: VALUE });
-        const two = yield* secret.set({ ...ownerOf(CONNECTION), name: "token", value: "rotated" });
+        const one = yield* secret.set({
+          ...buildOwnerFields(CONNECTION),
+          name: "token",
+          value: VALUE,
+        });
+        const two = yield* secret.set({
+          ...buildOwnerFields(CONNECTION),
+          name: "token",
+          value: "rotated",
+        });
         return [one, two] as const;
       }),
     );
@@ -90,7 +98,7 @@ describe("secret.set", () => {
   it("stores what was written, so the value is readable in this process only", async () => {
     const value = await run((secret) =>
       Effect.gen(function* () {
-        yield* secret.set({ ...ownerOf(CONNECTION), name: "token", value: VALUE });
+        yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: VALUE });
         const secrets = yield* Secrets;
         return yield* secrets.get(CONNECTION, "token");
       }),
@@ -102,8 +110,8 @@ describe("secret.set", () => {
   it("audits the write as created and then as rotated, naming no value", async () => {
     const rows = await run((secret) =>
       Effect.gen(function* () {
-        yield* secret.set({ ...ownerOf(CONNECTION), name: "token", value: VALUE });
-        yield* secret.set({ ...ownerOf(CONNECTION), name: "token", value: "rotated" });
+        yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: VALUE });
+        yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: "rotated" });
         const log = yield* AuditLog;
         return {
           created: yield* log.listByKind("secret.created"),
@@ -147,8 +155,8 @@ describe("secret.query", () => {
   it("lists references by name, with no value field anywhere", async () => {
     const page = await run((secret) =>
       Effect.gen(function* () {
-        yield* secret.set({ ...ownerOf(CONNECTION), name: "b", value: VALUE });
-        yield* secret.set({ ...ownerOf(CONNECTION), name: "a", value: VALUE });
+        yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "b", value: VALUE });
+        yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "a", value: VALUE });
         return yield* secret.query({});
       }),
     );
@@ -162,7 +170,7 @@ describe("secret.query", () => {
   it("filters by owner, so one connection never sees another's names", async () => {
     const page = await run((secret) =>
       Effect.gen(function* () {
-        yield* secret.set({ ...ownerOf(CONNECTION), name: "mine", value: VALUE });
+        yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "mine", value: VALUE });
         yield* secret.set({ ownerKind: "plugin", ownerId: "slack", name: "theirs", value: VALUE });
         return yield* secret.query({ ownerKind: "plugin", ownerId: "slack" });
       }),
@@ -175,7 +183,7 @@ describe("secret.query", () => {
     const pages = await run((secret) =>
       Effect.gen(function* () {
         for (const name of ["a", "b", "c"]) {
-          yield* secret.set({ ...ownerOf(CONNECTION), name, value: VALUE });
+          yield* secret.set({ ...buildOwnerFields(CONNECTION), name, value: VALUE });
         }
         const first = yield* secret.query({ limit: 2 });
         const cursor = first.nextCursor;
@@ -195,7 +203,7 @@ describe("secret.query", () => {
     const page = await run((secret) =>
       Effect.gen(function* () {
         for (const name of ["a", "b"]) {
-          yield* secret.set({ ...ownerOf(CONNECTION), name, value: VALUE });
+          yield* secret.set({ ...buildOwnerFields(CONNECTION), name, value: VALUE });
         }
         return yield* secret.query({ sort: { field: "name", direction: "desc" } });
       }),
@@ -215,8 +223,8 @@ describe("secret.delete", () => {
   it("removes the value and audits the removal", async () => {
     const result = await run((secret) =>
       Effect.gen(function* () {
-        yield* secret.set({ ...ownerOf(CONNECTION), name: "token", value: VALUE });
-        yield* secret.delete({ ...ownerOf(CONNECTION), name: "token" });
+        yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: VALUE });
+        yield* secret.delete({ ...buildOwnerFields(CONNECTION), name: "token" });
         const secrets = yield* Secrets;
         const log = yield* AuditLog;
         return {
@@ -233,7 +241,7 @@ describe("secret.delete", () => {
 
   it("answers not_found for a name nobody stored", async () => {
     const failure = await run((secret) =>
-      Effect.flip(secret.delete({ ...ownerOf(CONNECTION), name: "absent" })),
+      Effect.flip(secret.delete({ ...buildOwnerFields(CONNECTION), name: "absent" })),
     );
 
     expect(failure).toMatchObject({ error: { code: "not_found" } });
@@ -252,7 +260,7 @@ describe("the grant check", () => {
   it("runs before anything else, for the in-process caller the transport never gated", async () => {
     const failure = await Effect.runPromise(
       Effect.flatMap(Secret, (secret) => Effect.flip(secret.query({}))).pipe(
-        Effect.provide(stack()),
+        Effect.provide(buildStack()),
       ),
     );
 

@@ -53,12 +53,12 @@ afterAll(async () => {
   for (const one of roots.splice(0)) await rm(one, { recursive: true, force: true });
 });
 
-const depLint = (fixture: string, script = join(root, "scripts/dep-lint.ts")) =>
+const runDepLint = (fixture: string, script = join(root, "scripts/dep-lint.ts")) =>
   run("bun", ["run", script, join(dir, `${fixture}.ts`)], { cwd: root });
 
 /** Resolves to the failure dep-lint exited with, or fails the test. */
-async function failure(fixture: string): Promise<{ code?: number; stderr?: string }> {
-  const error = await depLint(fixture).then(
+async function readDepLintFailure(fixture: string): Promise<{ code?: number; stderr?: string }> {
+  const error = await runDepLint(fixture).then(
     () => undefined,
     (e: { code?: number; stderr?: string }) => e,
   );
@@ -68,32 +68,32 @@ async function failure(fixture: string): Promise<{ code?: number; stderr?: strin
 
 describe("dep-lint", () => {
   it("passes an entrypoint that links nothing forbidden", async () => {
-    const { stdout } = await depLint("clean");
+    const { stdout } = await runDepLint("clean");
     expect(stdout).toContain("is clean");
   });
 
   it("passes an entrypoint that only names the DB engine in a comment or a type", async () => {
-    const { stdout } = await depLint("type-only");
+    const { stdout } = await runDepLint("type-only");
     expect(stdout).toContain("is clean");
   });
 
   it.each(["db-static", "db-bare", "db-dynamic"])(
     "fails on the DB engine reached by %s",
     async (fixture) => {
-      const error = await failure(fixture);
+      const error = await readDepLintFailure(fixture);
       expect(error.code).toBe(1);
       expect(error.stderr).toContain("the DB engine");
     },
   );
 
   it("fails on the plugin host", async () => {
-    const error = await failure("plugin-host");
+    const error = await readDepLintFailure("plugin-host");
     expect(error.code).toBe(1);
     expect(error.stderr).toContain("the plugin host");
   });
 
   it("fails on the web bundle", async () => {
-    const error = await failure("web");
+    const error = await readDepLintFailure("web");
     expect(error.code).toBe(1);
     expect(error.stderr).toContain("the web bundle");
   });
@@ -113,7 +113,7 @@ describe("the vendor SDK's per-platform CLI packages", () => {
    * how the failing direction is proven without writing into this repository's
    * own store.
    */
-  const scriptOver = async (...packages: ReadonlyArray<string>): Promise<string> => {
+  const createScriptRoot = async (...packages: ReadonlyArray<string>): Promise<string> => {
     const one = await mkdtemp(join(tmpdir(), "hercule-dep-lint-root-"));
     roots.push(one);
     await mkdir(join(one, "scripts"), { recursive: true });
@@ -134,9 +134,9 @@ describe("the vendor SDK's per-platform CLI packages", () => {
   // Without the SDK there are no per-platform packages beside it either, so the
   // platform check alone would call an install that never happened clean.
   it("fail the check when the SDK itself is not installed", async () => {
-    const script = await scriptOver("effect@4.0.0");
+    const script = await createScriptRoot("effect@4.0.0");
 
-    const refusal = await depLint("clean", script).then(
+    const refusal = await runDepLint("clean", script).then(
       () => undefined,
       (thrown: { readonly stderr: string }) => thrown,
     );
@@ -146,9 +146,9 @@ describe("the vendor SDK's per-platform CLI packages", () => {
   });
 
   it("fail the check when one finds its way into the store", async () => {
-    const script = await scriptOver(`${SDK}@0.3.263`, `${SDK}-darwin-arm64@0.3.263`);
+    const script = await createScriptRoot(`${SDK}@0.3.263`, `${SDK}-darwin-arm64@0.3.263`);
 
-    const refusal = await depLint("clean", script).then(
+    const refusal = await runDepLint("clean", script).then(
       () => undefined,
       (thrown: { readonly stderr: string }) => thrown,
     );

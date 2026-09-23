@@ -42,15 +42,15 @@ export const webBundle: WebBundle | undefined = undefined;
   );
   console.log("gen-web-bundle: no apps/web/dist; the controller will serve the API alone.");
 } else {
-  const name = (index: number): string => `file${String(index)}`;
+  const buildImportName = (index: number): string => `file${String(index)}`;
   const imports = urlPaths
     .map(
       (path, index) =>
-        `import ${name(index)} from "../../../web/dist${path}" with { type: "file" };`,
+        `import ${buildImportName(index)} from "../../../web/dist${path}" with { type: "file" };`,
     )
     .join("\n");
   const entries = urlPaths
-    .map((path, index) => `    [${JSON.stringify(path)}, ${name(index)}],`)
+    .map((path, index) => `    [${JSON.stringify(path)}, ${buildImportName(index)}],`)
     .join("\n");
   const index = urlPaths.indexOf("/index.html");
   if (index === -1) throw new Error("apps/web/dist has no index.html");
@@ -60,7 +60,7 @@ export const webBundle: WebBundle | undefined = undefined;
     `${header}${imports}
 
 export const webBundle: WebBundle | undefined = {
-  index: ${name(index)},
+  index: ${buildImportName(index)},
   files: new Map([
 ${entries}
   ]),

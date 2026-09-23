@@ -17,7 +17,7 @@ export {
   deriveConfigJsonSchema,
   decodeAgainst,
   secret,
-  secretFields,
+  listSecretFields,
   excludeSecretFields,
   UnsupportedConfigSchema,
 } from "./config-schema";

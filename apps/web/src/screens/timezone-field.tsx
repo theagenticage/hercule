@@ -1,9 +1,9 @@
 import type { JSX } from "react";
-import { supportedTimezones } from "@hercule/client-core";
+import { listSupportedTimezones } from "@hercule/client-core";
 import { Select } from "@hercule/ui";
 
 /** The zones on offer never change within a page load, so they are read once. */
-const ZONES = supportedTimezones();
+const ZONES = listSupportedTimezones();
 
 /**
  * The timezone control, shared by the onboarding step and Settings > Profile.

@@ -39,10 +39,10 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   decodeCursor,
   encodeCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
   nowIso,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -68,7 +68,7 @@ export interface SecretOwner {
 export const CORE_OWNER: SecretOwner = { kind: "core", id: "controller" };
 
 /** The owner a provider instance's credentials are written and read under. */
-export const providerInstanceOwner = (instanceId: string): SecretOwner => ({
+export const buildProviderInstanceOwner = (instanceId: string): SecretOwner => ({
   kind: "provider-instance",
   id: instanceId,
 });
@@ -126,7 +126,7 @@ const decoder = new TextDecoder();
 /** AES-GCM's nonce size; the only one it is specified for. */
 const NONCE_BYTES = 12;
 
-const associatedData = (owner: SecretOwner, name: string): Bytes =>
+const buildAssociatedData = (owner: SecretOwner, name: string): Bytes =>
   encoder.encode(`${owner.kind}|${owner.id}|${name}`);
 
 /** The associated data has exactly one reading only while nothing in it holds the separator. */
@@ -224,7 +224,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
       const sql = yield* SqlClient.SqlClient;
       const { key } = yield* MasterKey;
 
-      const decryptFailed = (owner: SecretOwner, name: string) =>
+      const createDecryptError = (owner: SecretOwner, name: string) =>
         new SecretDecryptError({
           ownerKind: owner.kind,
           ownerId: owner.id,
@@ -242,7 +242,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
           const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
           const ciphertext = yield* Effect.promise(() =>
             crypto.subtle.encrypt(
-              { name: "AES-GCM", iv: nonce, additionalData: associatedData(owner, name) },
+              { name: "AES-GCM", iv: nonce, additionalData: buildAssociatedData(owner, name) },
               key,
               encoder.encode(plaintext),
             ),
@@ -254,11 +254,11 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
         Effect.tryPromise({
           try: () =>
             crypto.subtle.decrypt(
-              { name: "AES-GCM", iv: nonce, additionalData: associatedData(owner, name) },
+              { name: "AES-GCM", iv: nonce, additionalData: buildAssociatedData(owner, name) },
               key,
               ciphertext,
             ),
-          catch: () => decryptFailed(owner, name),
+          catch: () => createDecryptError(owner, name),
         }).pipe(Effect.map((plaintext) => decoder.decode(new Uint8Array(plaintext))));
 
       return Secrets.of({
@@ -371,7 +371,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
               request.ownerId === undefined ? sql`` : sql`AND owner_id = ${request.ownerId}`;
             // `(name, id)` rather than name alone: names repeat across owners
             // and an id does not, so a page boundary is unambiguous.
-            const { keyset, order } = keysetOver(
+            const { keyset, order } = buildKeyset(
               sql,
               ["name", "id"],
               after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -390,7 +390,7 @@ export const secretsLayer: Layer.Layer<Secrets, never, MasterKey | SqlClient.Sql
               WHERE 1 = 1 ${byKind} ${byId} AND ${keyset}
               ${order} LIMIT ${request.limit + 1}
             `;
-            return yield* pageOf(
+            return yield* buildPage(
               rows,
               request.limit,
               (read) =>

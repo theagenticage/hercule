@@ -18,7 +18,7 @@ import type {
   ThreadWorkspace,
   Workspace,
 } from "@hercule/contract";
-import { projectTone, type ProjectTone } from "./tone";
+import { pickProjectTone, type ProjectTone } from "./tone";
 
 /**
  * What the composer's workspace selector holds: the contract's own spelling,
@@ -32,7 +32,7 @@ export type WorkspacePick = SpawnWorkspace | { readonly kind: "none" };
  * remote, so it falls back to the label it carries; a resource the catalog no
  * longer holds still has to read as something in a sentence.
  */
-export const repoName = (resource: Resource | undefined): string => {
+export const formatRepoName = (resource: Resource | undefined): string => {
   if (resource === undefined) return "the repo";
   const canonical = resource.canonicalRemote;
   if (canonical === null) return resource.label ?? resource.remote ?? "";
@@ -40,7 +40,7 @@ export const repoName = (resource: Resource | undefined): string => {
 };
 
 /** The repos filed under one project, in the catalog's own order. */
-export const projectRepos = (
+export const listProjectRepos = (
   resources: readonly Resource[],
   projectId: string | null,
 ): readonly Resource[] =>
@@ -52,7 +52,7 @@ export const projectRepos = (
  * What a workspace is called where it stands for itself: the branch its first
  * checkout sits on. A scratch workspace has no checkout and so no name.
  */
-export const workspaceName = (workspace: Workspace): string =>
+export const formatWorkspaceName = (workspace: Workspace): string =>
   workspace.checkouts[0]?.branch ?? "workspace";
 
 /**
@@ -72,32 +72,32 @@ export interface WorkspaceLabel {
   readonly keep: string;
 }
 
-export const workspaceLabelParts = (
+export const buildWorkspaceLabelParts = (
   workspace: Workspace,
   resources: readonly Resource[],
   runners: readonly Runner[],
 ): WorkspaceLabel => {
-  if (workspace.kind !== "primary") return { clip: workspaceName(workspace), keep: "" };
+  if (workspace.kind !== "primary") return { clip: formatWorkspaceName(workspace), keep: "" };
   const resource = resources.find((each) => each.id === workspace.checkouts[0]?.resourceId);
   const runner = runners.find((each) => each.id === workspace.runnerId);
   return {
-    clip: repoName(resource),
+    clip: formatRepoName(resource),
     keep: ` · ${runner?.name ?? "unknown machine"}`,
   };
 };
 
 /** The same label read whole, which is what a tooltip and a reader get. */
-export const labelText = (label: WorkspaceLabel): string => `${label.clip}${label.keep}`;
+export const joinLabelText = (label: WorkspaceLabel): string => `${label.clip}${label.keep}`;
 
 /** What a workspace is called in the sidebar, whichever kind it is. */
-export const workspaceLabel = (
+export const formatWorkspaceLabel = (
   workspace: Workspace,
   resources: readonly Resource[],
   runners: readonly Runner[],
-): string => labelText(workspaceLabelParts(workspace, resources, runners));
+): string => joinLabelText(buildWorkspaceLabelParts(workspace, resources, runners));
 
 /** The repo's main workspace on one machine, where that machine holds one. */
-export const readyPrimary = (
+export const findReadyPrimary = (
   workspaces: readonly Workspace[],
   resourceId: string,
   runnerId: string | null,
@@ -111,7 +111,7 @@ export const readyPrimary = (
   );
 
 /** The live worktrees a project's threads could join, whichever machine they stand on. */
-export const projectWorkspaces = (
+export const listProjectWorkspaces = (
   workspaces: readonly Workspace[],
   repos: readonly Resource[],
 ): readonly Workspace[] =>
@@ -133,13 +133,13 @@ export const projectWorkspaces = (
  * Only a `ready` workspace is read: a dead one's branches are gone, and a
  * failed clone never had any.
  */
-export const baseBranchOf = (
+export const findBaseBranch = (
   workspaces: readonly Workspace[],
   resourceId: string,
   runnerId: string | null,
 ): string | null => {
   const ready = workspaces.filter((each) => each.status === "ready");
-  const here = readyPrimary(ready, resourceId, runnerId)?.checkouts.find(
+  const here = findReadyPrimary(ready, resourceId, runnerId)?.checkouts.find(
     (checkout) => checkout.resourceId === resourceId,
   );
   if (here?.defaultBranch != null) return here.defaultBranch;
@@ -163,7 +163,7 @@ export const NO_WORKSPACE_REASON = "Add a repository to the project to work in o
 export const NO_PROJECT_REASON = "Pick a project to work in a repository";
 
 /** What tells two picks apart. A branch is a choice inside a pick, not a pick. */
-export const pickKey = (pick: WorkspacePick): string => {
+export const buildPickKey = (pick: WorkspacePick): string => {
   switch (pick.kind) {
     case "none":
       return "none";
@@ -201,7 +201,7 @@ export const withBranch = (pick: WorkspacePick, branch: string): WorkspacePick =
  * stands is on one machine and never moves (spec 02 §Workspace), so joining it
  * takes the machine with it. Null where the pick leaves the machine free.
  */
-export const runnerForPick = (
+export const findRunnerForPick = (
   pick: WorkspacePick,
   workspaces: readonly Workspace[],
 ): string | null =>
@@ -214,7 +214,7 @@ export interface DraftSubject {
   readonly label: string;
   /** The project whose hue the name wears; null where a workspace names it. */
   readonly projectId: string | null;
-  /** That hue, read the one way every surface reads it (`projectTone`). */
+  /** That hue, read the one way every surface reads it (`pickProjectTone`). */
   readonly tone: ProjectTone | null;
 }
 
@@ -223,7 +223,7 @@ export interface DraftSubject {
  * else the project it stands in, else nothing - "What should the agent do?"
  * (spec 14 §The composer).
  */
-export const draftSubject = (
+export const findDraftSubject = (
   pick: WorkspacePick,
   workspaces: readonly Workspace[],
   projectId: string | null,
@@ -231,11 +231,12 @@ export const draftSubject = (
 ): DraftSubject | null => {
   const joined =
     pick.kind === "existing" ? workspaces.find((each) => each.id === pick.workspaceId) : undefined;
-  if (joined !== undefined) return { label: workspaceName(joined), projectId: null, tone: null };
+  if (joined !== undefined)
+    return { label: formatWorkspaceName(joined), projectId: null, tone: null };
   const project = projects.find((each) => each.id === projectId);
   return project === undefined
     ? null
-    : { label: project.name, projectId: project.id, tone: projectTone(project.id, projects) };
+    : { label: project.name, projectId: project.id, tone: pickProjectTone(project.id, projects) };
 };
 
 /**
@@ -244,8 +245,9 @@ export const draftSubject = (
  * dropped it - reads as unset, so the rule below decides rather than a value
  * nobody can set any more.
  */
-export const preferredWorkspaceOf = (stored: string | null | undefined): ThreadWorkspace | null =>
-  stored === "primary" || stored === "ephemeral" ? stored : null;
+export const parsePreferredWorkspace = (
+  stored: string | null | undefined,
+): ThreadWorkspace | null => (stored === "primary" || stored === "ephemeral" ? stored : null);
 
 /**
  * The workspace a draft opens in before the user touches anything: the stored
@@ -258,13 +260,13 @@ export const preferredWorkspaceOf = (stored: string | null | undefined): ThreadW
  * project with no repo (D-20d); a project that holds one falls back to the
  * rule rather than starting a thread outside the repo the user picked.
  */
-export const defaultWorkspacePick = (
+export const decideDefaultWorkspacePick = (
   repos: readonly Resource[],
   preferred: ThreadWorkspace | null,
 ): WorkspacePick => {
   const first = repos[0];
   if (first === undefined) return { kind: "none" };
-  const mode = preferredWorkspaceOf(preferred) ?? (repos.length === 1 ? "primary" : "ephemeral");
+  const mode = parsePreferredWorkspace(preferred) ?? (repos.length === 1 ? "primary" : "ephemeral");
   if (mode === "primary") return { kind: "primary", resourceId: first.id };
   return { kind: "ephemeral", checkouts: repos.map((repo) => ({ resourceId: repo.id })) };
 };
@@ -292,7 +294,7 @@ export interface Phrase {
 }
 
 /** The same sentence as plain words, which is what a reader hears. */
-export const phraseText = (parts: readonly Phrase[]): string =>
+export const joinPhraseText = (parts: readonly Phrase[]): string =>
   parts.map((part) => part.text).join("");
 
 /**
@@ -300,7 +302,7 @@ export const phraseText = (parts: readonly Phrase[]): string =>
  * most, and the rest counted (D-19). A thread the listing does not hold is one
  * the reader cannot be told about, so it is counted with the rest.
  */
-const titlesIn = (workspace: Workspace, sessions: readonly Session[]): string => {
+const describeThreadTitles = (workspace: Workspace, sessions: readonly Session[]): string => {
   const titles = workspace.sessionIds.map(
     (id) => sessions.find((session) => session.id === id)?.title ?? null,
   );
@@ -318,7 +320,7 @@ const titlesIn = (workspace: Workspace, sessions: readonly Session[]): string =>
  * joining a workspace is being written into files that already stand, so it
  * says which (spec 14 §The composer).
  */
-export const composerPlaceholder = ({
+export const buildComposerPlaceholder = ({
   readOnly,
   busy,
   active,
@@ -340,7 +342,7 @@ export const composerPlaceholder = ({
     pick.kind === "existing" ? workspaces.find((each) => each.id === pick.workspaceId) : undefined;
   return joined === undefined
     ? "Say what you want done…"
-    : `Say what this thread should do in ${workspaceName(joined)}…`;
+    : `Say what this thread should do in ${formatWorkspaceName(joined)}…`;
 };
 
 /**
@@ -349,7 +351,7 @@ export const composerPlaceholder = ({
  * cloned yet has no branch to name, so that clause is left out rather than
  * filled with a word for "we do not know".
  */
-export const workspaceLead = (
+export const buildWorkspaceLead = (
   pick: WorkspacePick,
   reading: WorkspaceReading,
 ): readonly Phrase[] => {
@@ -357,10 +359,11 @@ export const workspaceLead = (
     case "none":
       return [{ text: "It works without a checkout." }];
     case "primary": {
-      const repo = repoName(reading.resources.find((each) => each.id === pick.resourceId));
+      const repo = formatRepoName(reading.resources.find((each) => each.id === pick.resourceId));
       const branch =
         pick.branch ??
-        readyPrimary(reading.workspaces, pick.resourceId, reading.runnerId)?.checkouts[0]?.branch ??
+        findReadyPrimary(reading.workspaces, pick.resourceId, reading.runnerId)?.checkouts[0]
+          ?.branch ??
         null;
       const where: readonly Phrase[] =
         branch === null
@@ -377,9 +380,9 @@ export const workspaceLead = (
       if (only === undefined) {
         return [{ text: "It gets a worktree of each repo, side by side, each on a new branch." }];
       }
-      const repo = repoName(reading.resources.find((each) => each.id === only.resourceId));
+      const repo = formatRepoName(reading.resources.find((each) => each.id === only.resourceId));
       const base =
-        only.baseBranch ?? baseBranchOf(reading.workspaces, only.resourceId, reading.runnerId);
+        only.baseBranch ?? findBaseBranch(reading.workspaces, only.resourceId, reading.runnerId);
       const from: readonly Phrase[] =
         base === null ? [{ text: "its default branch" }] : [{ text: base, mono: true }];
       return [
@@ -390,8 +393,9 @@ export const workspaceLead = (
     }
     case "existing": {
       const joined = reading.workspaces.find((each) => each.id === pick.workspaceId);
-      const name = joined === undefined ? "that workspace" : workspaceName(joined);
-      const threads = joined === undefined ? "" : titlesIn(joined, reading.sessions ?? []);
+      const name = joined === undefined ? "that workspace" : formatWorkspaceName(joined);
+      const threads =
+        joined === undefined ? "" : describeThreadTitles(joined, reading.sessions ?? []);
       // What the draft joins is the work already going on there, named; a
       // workspace holding nothing yet is named after itself (D-19).
       const subject = threads === "" ? `“${name}”` : threads;

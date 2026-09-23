@@ -2,11 +2,11 @@ import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input, LaneLabel } from "@hercule/ui";
 import {
-  configIssues,
-  credentialFieldsOf,
+  readConfigIssues,
+  listCredentialFields,
   queryKeys,
-  redirectUriFor,
-  setupFlowOf,
+  buildRedirectUri,
+  decideSetupFlow,
   type ConnectionType,
   type HerculeClient,
 } from "@hercule/client-core";
@@ -37,8 +37,8 @@ export function ConnectionSetup({
   readonly onDone: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
-  const flow = setupFlowOf(type);
-  const fields = credentialFieldsOf(type);
+  const flow = decideSetupFlow(type);
+  const fields = listCredentialFields(type);
   const redirects = flow === "oauth";
 
   const [pasted, setPasted] = useState<Readonly<Record<string, string>>>({});
@@ -81,7 +81,7 @@ export function ConnectionSetup({
 
   // The type answers which credential it refused, so that message belongs under
   // the field it named; anything else refused is the form's own to say.
-  const issues = configIssues(submit.error, fields, "credentials");
+  const issues = readConfigIssues(submit.error, fields, "credentials");
   const failure = issues.rest ? submit.error : null;
 
   // The same column the rows and the offers sit in: a form that spans the
@@ -131,7 +131,7 @@ export function ConnectionSetup({
         <p className="max-w-[52ch] text-row text-muted">
           Register this redirect URI with the provider:{" "}
           <code className="font-mono text-fine break-all text-ink">
-            {redirectUriFor(window.location.origin)}
+            {buildRedirectUri(window.location.origin)}
           </code>
         </p>
       ) : null}

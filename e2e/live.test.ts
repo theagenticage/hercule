@@ -12,22 +12,22 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createClient, createLive, queryKeysFor } from "../packages/client-core/src/index";
+import { createClient, createLive, buildQueryKeys } from "../packages/client-core/src/index";
 import type { LiveQueryKey } from "../packages/client-core/src/index";
 import {
   PASSWORD,
   ROOT,
   USERNAME,
-  apiKeyIn,
-  cli,
+  readApiKey,
+  runCli,
   completeSetup,
-  jsonOf,
+  parseJsonOutput,
   startController,
-  temporaryHome,
+  createTemporaryHome,
   type Controller,
 } from "./harness";
 
-const state = temporaryHome();
+const state = createTemporaryHome();
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -36,17 +36,17 @@ let url: string;
 let token: string;
 
 /** The CLI, as the binary, under the credential file the login wrote. */
-const hercule = (args: ReadonlyArray<string>, stdin?: string) =>
-  cli(args, { home: state.home, binary, stdin });
+const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
+  runCli(args, { home: state.home, binary, stdin });
 
 /** Fails with the command's own output rather than on an undefined field. */
-const ok = (ran: { code: number; stdout: string; stderr: string }): unknown => {
+const expectJsonOutput = (ran: { code: number; stdout: string; stderr: string }): unknown => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
-  return jsonOf(ran);
+  return parseJsonOutput(ran);
 };
 
 /** Waits for something a socket delivers, and says what it was waiting for. */
-const until = async (what: string, done: () => boolean): Promise<void> => {
+const waitUntil = async (what: string, done: () => boolean): Promise<void> => {
   const deadline = Date.now() + 10_000;
   while (!done()) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
@@ -66,13 +66,13 @@ beforeAll(async () => {
   const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-  const login = await hercule(
+  const login = await runLoggedInCli(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-live"],
     PASSWORD,
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
 
-  token = apiKeyIn(state.home);
+  token = readApiKey(state.home);
 }, 90_000);
 
 afterAll(async () => {
@@ -85,7 +85,7 @@ describe("the binary serving live topics", () => {
     // A watched controller always has an open socket, and the listener's drain
     // waits for every connection, so without a deadline `hercule serve` could not
     // be stopped while anybody was looking at it.
-    const home = temporaryHome();
+    const home = createTemporaryHome();
     let its: Controller | undefined;
     try {
       its = await startController({ home: home.home, binary });
@@ -130,7 +130,7 @@ describe("the binary serving live topics", () => {
     expect(ticket.ticket.length).toBeGreaterThanOrEqual(43);
 
     // Hidden means absent, not undocumented: the spelling is an unknown command.
-    const ran = await hercule(["auth", "ws-ticket", "--json"]);
+    const ran = await runLoggedInCli(["auth", "ws-ticket", "--json"]);
     expect(ran.code).toBe(2);
   }, 30_000);
 
@@ -147,15 +147,15 @@ describe("the binary serving live topics", () => {
     try {
       // The greeting sweeps every mutable subscription, so the first call is
       // how this test knows the socket is up before the CLI mutates anything.
-      await until("the connection to greet", () => calls.length > 0);
+      await waitUntil("the connection to greet", () => calls.length > 0);
       const greeted = calls.length;
 
-      const created = ok(
-        await hercule(["task", "create", "--title", "live from the binary", "--json"], ""),
+      const created = expectJsonOutput(
+        await runLoggedInCli(["task", "create", "--title", "live from the binary", "--json"], ""),
       ) as { readonly id: string };
 
-      await until("the task invalidation", () => calls.length > greeted);
-      expect(calls[greeted]).toEqual(queryKeysFor("task", [created.id]));
+      await waitUntil("the task invalidation", () => calls.length > greeted);
+      expect(calls[greeted]).toEqual(buildQueryKeys("task", [created.id]));
     } finally {
       unsubscribe();
       await live.stop();

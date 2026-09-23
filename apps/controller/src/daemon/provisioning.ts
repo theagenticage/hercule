@@ -32,7 +32,7 @@ import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
 import { RunnerConnections } from "../runners";
 import { WorkspaceService } from "../workspaces";
-import { absorbing, forking } from "./absorbing";
+import { absorbFailures, forkAndAbsorbFailures } from "./absorbing";
 
 const Identified = Schema.Struct({ id: Id });
 
@@ -139,13 +139,16 @@ const make = Effect.gen(function* () {
     driving: Effect.all(
       [
         Stream.runForEach(connections.arrivals, (runnerId) =>
-          forking("A machine could not be told what it still owes", resendProvisioning(runnerId)),
+          forkAndAbsorbFailures(
+            "A machine could not be told what it still owes",
+            resendProvisioning(runnerId),
+          ),
         ),
         Effect.gen(function* () {
           const interval = yield* WorkspaceSweepInterval;
           while (true) {
             yield* Effect.sleep(interval);
-            yield* absorbing("The workspace expiry sweep failed", sweep);
+            yield* absorbFailures("The workspace expiry sweep failed", sweep);
           }
         }),
       ],

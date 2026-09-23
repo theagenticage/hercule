@@ -33,29 +33,30 @@ interface Note {
   readonly params: unknown;
 }
 
-const note = (method: string, params: Record<string, unknown>): Note => ({ method, params });
+const buildNote = (method: string, params: Record<string, unknown>): Note => ({ method, params });
 
-const state = () => buildNormalizingState(SESSION, THREAD, undefined);
+const buildTestState = () => buildNormalizingState(SESSION, THREAD, undefined);
 
-const through = (
+const normalizeNotes = (
   running: ReturnType<typeof buildNormalizingState>,
   notes: ReadonlyArray<Note>,
 ): ReadonlyArray<ProviderEvent> => notes.flatMap((frame) => normalize(running, frame));
 
 /** A whole sequence against a state of its own, which is the common case. */
-const fresh = (notes: ReadonlyArray<Note>): ReadonlyArray<ProviderEvent> => through(state(), notes);
+const normalizeFromStart = (notes: ReadonlyArray<Note>): ReadonlyArray<ProviderEvent> =>
+  normalizeNotes(buildTestState(), notes);
 
-const tags = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+const listEventTags = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
   events.map((event) => event._tag);
 
-const only = <Tag extends ProviderEvent["_tag"]>(
+const filterByTag = <Tag extends ProviderEvent["_tag"]>(
   events: ReadonlyArray<ProviderEvent>,
   tag: Tag,
 ): ReadonlyArray<Extract<ProviderEvent, { _tag: Tag }>> =>
   events.filter((event): event is Extract<ProviderEvent, { _tag: Tag }> => event._tag === tag);
 
 /** A turn as `Turn` shapes it, trimmed to what a normalizer could read. */
-const turn = (status: string) => ({
+const buildTurn = (status: string) => ({
   id: TURN,
   items: [],
   itemsView: "full",
@@ -76,40 +77,40 @@ const MESSAGE = {
   questions: null,
 };
 
-const TURN_STARTED = note("turn/started", { threadId: THREAD, turn: turn("inProgress") });
+const TURN_STARTED = buildNote("turn/started", { threadId: THREAD, turn: buildTurn("inProgress") });
 
-const ITEM_STARTED = note("item/started", {
+const ITEM_STARTED = buildNote("item/started", {
   item: { ...MESSAGE, text: "" },
   threadId: THREAD,
   turnId: TURN,
   startedAtMs: 1789373122124,
 });
 
-const delta = (method: string, extra: Record<string, unknown>): Note =>
-  note(method, { threadId: THREAD, turnId: TURN, itemId: ITEM, ...extra });
+const buildDeltaNote = (method: string, extra: Record<string, unknown>): Note =>
+  buildNote(method, { threadId: THREAD, turnId: TURN, itemId: ITEM, ...extra });
 
-const ITEM_COMPLETED = note("item/completed", {
+const ITEM_COMPLETED = buildNote("item/completed", {
   item: MESSAGE,
   threadId: THREAD,
   turnId: TURN,
   completedAtMs: 1789373123124,
 });
 
-const completing = (status: string): Note =>
-  note("turn/completed", { threadId: THREAD, turn: turn(status) });
+const buildTurnCompleted = (status: string): Note =>
+  buildNote("turn/completed", { threadId: THREAD, turn: buildTurn(status) });
 
 describe("what a whole Codex turn normalizes to", () => {
   it("reports the turn, the item, its deltas and both completions, in that order", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       TURN_STARTED,
       ITEM_STARTED,
-      delta("item/agentMessage/delta", { delta: "Hel" }),
-      delta("item/agentMessage/delta", { delta: "lo" }),
+      buildDeltaNote("item/agentMessage/delta", { delta: "Hel" }),
+      buildDeltaNote("item/agentMessage/delta", { delta: "lo" }),
       ITEM_COMPLETED,
-      completing("completed"),
+      buildTurnCompleted("completed"),
     ]);
 
-    expect(tags(events)).toEqual([
+    expect(listEventTags(events)).toEqual([
       "turn.started",
       "item.started",
       "content.delta",
@@ -117,27 +118,30 @@ describe("what a whole Codex turn normalizes to", () => {
       "item.completed",
       "turn.completed",
     ]);
-    expect(only(events, "turn.started")[0]).toMatchObject({ turnId: TURN });
-    expect(only(events, "item.started")[0]).toMatchObject({
+    expect(filterByTag(events, "turn.started")[0]).toMatchObject({ turnId: TURN });
+    expect(filterByTag(events, "item.started")[0]).toMatchObject({
       turnId: TURN,
       itemId: ITEM,
       kind: "assistant_message",
     });
-    expect(only(events, "content.delta").map((event) => event.delta)).toEqual(["Hel", "lo"]);
-    expect(only(events, "item.completed")[0]).toMatchObject({
+    expect(filterByTag(events, "content.delta").map((event) => event.delta)).toEqual(["Hel", "lo"]);
+    expect(filterByTag(events, "item.completed")[0]).toMatchObject({
       itemId: ITEM,
       status: "completed",
     });
-    expect(only(events, "turn.completed")[0]).toMatchObject({ turnId: TURN, state: "completed" });
+    expect(filterByTag(events, "turn.completed")[0]).toMatchObject({
+      turnId: TURN,
+      state: "completed",
+    });
   });
 
   it("files every event under the app-server channel and names the native thread", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       TURN_STARTED,
       ITEM_STARTED,
-      delta("item/agentMessage/delta", { delta: "Hel" }),
+      buildDeltaNote("item/agentMessage/delta", { delta: "Hel" }),
       ITEM_COMPLETED,
-      completing("completed"),
+      buildTurnCompleted("completed"),
     ]);
 
     expect(events).not.toEqual([]);
@@ -159,18 +163,18 @@ describe("what a whole Codex turn normalizes to", () => {
     ];
 
     for (const [status, ended] of ends) {
-      const events = fresh([TURN_STARTED, completing(status)]);
+      const events = normalizeFromStart([TURN_STARTED, buildTurnCompleted(status)]);
 
-      expect(only(events, "turn.completed")[0]?.state, status).toBe(ended);
+      expect(filterByTag(events, "turn.completed")[0]?.state, status).toBe(ended);
     }
   });
 
   it("says nothing about a turn that is still running", () => {
     // `inProgress` is a status the notification may carry; a turn that has not
     // ended is not a boundary, and reporting one would close it downstream.
-    const events = fresh([TURN_STARTED, completing("inProgress")]);
+    const events = normalizeFromStart([TURN_STARTED, buildTurnCompleted("inProgress")]);
 
-    expect(only(events, "turn.completed")).toEqual([]);
+    expect(filterByTag(events, "turn.completed")).toEqual([]);
   });
 });
 
@@ -239,8 +243,8 @@ const ITEMS: ReadonlyArray<readonly [Record<string, unknown>, string | null]> = 
   [{ type: "somethingCodexGrew", id: "i20" }, "unknown"],
 ];
 
-const completed = (item: Record<string, unknown>): Note =>
-  note("item/completed", {
+const buildItemCompleted = (item: Record<string, unknown>): Note =>
+  buildNote("item/completed", {
     item,
     threadId: THREAD,
     turnId: TURN,
@@ -250,10 +254,10 @@ const completed = (item: Record<string, unknown>): Note =>
 describe("the kind each Codex item is reported as", () => {
   it("maps every item type this release has, and calls the rest unknown", () => {
     for (const [item, kind] of ITEMS) {
-      const events = fresh([completed(item)]);
+      const events = normalizeFromStart([buildItemCompleted(item)]);
 
       expect(
-        only(events, "item.completed").map((event) => event.kind),
+        filterByTag(events, "item.completed").map((event) => event.kind),
         item["type"] as string,
       ).toEqual(kind === null ? [] : [kind]);
     }
@@ -262,9 +266,9 @@ describe("the kind each Codex item is reported as", () => {
   it("keeps the payload of an item it has no kind for, so nothing is lost", () => {
     const item = { type: "somethingCodexGrew", id: "i20", note: "kept" };
 
-    const events = fresh([completed(item)]);
+    const events = normalizeFromStart([buildItemCompleted(item)]);
 
-    const reported = only(events, "item.completed")[0];
+    const reported = filterByTag(events, "item.completed")[0];
     expect(reported?.kind).toBe("unknown");
     expect(reported?.raw).toMatchObject({ source: SOURCE });
     expect(JSON.stringify(reported?.raw?.payload)).toContain("somethingCodexGrew");
@@ -273,8 +277,8 @@ describe("the kind each Codex item is reported as", () => {
   it("reports a command and a patch the user refused as declined, not as failed", () => {
     // A declined item is the user's answer, and a surface that read it as a
     // failure would show the agent as broken rather than as refused.
-    const command = fresh([
-      completed({
+    const command = normalizeFromStart([
+      buildItemCompleted({
         type: "commandExecution",
         id: "i4",
         command: "rm -rf /",
@@ -283,73 +287,85 @@ describe("the kind each Codex item is reported as", () => {
         commandActions: [],
       }),
     ]);
-    const patch = fresh([
-      completed({ type: "fileChange", id: "i5", changes: [], status: "declined" }),
+    const patch = normalizeFromStart([
+      buildItemCompleted({ type: "fileChange", id: "i5", changes: [], status: "declined" }),
     ]);
 
-    expect(only(command, "item.completed")[0]?.status).toBe("declined");
-    expect(only(patch, "item.completed")[0]?.status).toBe("declined");
+    expect(filterByTag(command, "item.completed")[0]?.status).toBe("declined");
+    expect(filterByTag(patch, "item.completed")[0]?.status).toBe("declined");
   });
 });
 
 const REASONING = "reason_0";
 
-const reasoning = (method: string, extra: Record<string, unknown>): Note =>
-  note(method, { threadId: THREAD, turnId: TURN, itemId: REASONING, ...extra });
+const buildReasoningNote = (method: string, extra: Record<string, unknown>): Note =>
+  buildNote(method, { threadId: THREAD, turnId: TURN, itemId: REASONING, ...extra });
 
-const summaryDelta = (text: string): Note =>
-  reasoning("item/reasoning/summaryTextDelta", { delta: text, summaryIndex: 0 });
+const buildSummaryDelta = (text: string): Note =>
+  buildReasoningNote("item/reasoning/summaryTextDelta", { delta: text, summaryIndex: 0 });
 
-const rawDelta = (text: string): Note =>
-  reasoning("item/reasoning/textDelta", { delta: text, contentIndex: 0 });
+const buildRawDelta = (text: string): Note =>
+  buildReasoningNote("item/reasoning/textDelta", { delta: text, contentIndex: 0 });
 
-const streamed = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<readonly [string, string]> =>
-  only(events, "content.delta").map((event) => [event.streamKind, event.delta] as const);
+const listStreamedDeltas = (
+  events: ReadonlyArray<ProviderEvent>,
+): ReadonlyArray<readonly [string, string]> =>
+  filterByTag(events, "content.delta").map((event) => [event.streamKind, event.delta] as const);
 
 describe("which reasoning channel a session streams", () => {
   it("streams the summary when the summary is all Codex sends", () => {
-    const events = fresh([summaryDelta("Weighing "), summaryDelta("the options")]);
+    const events = normalizeFromStart([
+      buildSummaryDelta("Weighing "),
+      buildSummaryDelta("the options"),
+    ]);
 
-    expect(streamed(events)).toEqual([
+    expect(listStreamedDeltas(events)).toEqual([
       ["reasoning_text", "Weighing "],
       ["reasoning_text", "the options"],
     ]);
   });
 
   it("streams raw reasoning only, once raw came first", () => {
-    const running = state();
+    const running = buildTestState();
 
-    const first = through(running, [rawDelta("Because ")]);
-    const second = through(running, [summaryDelta("Weighing the options")]);
+    const first = normalizeNotes(running, [buildRawDelta("Because ")]);
+    const second = normalizeNotes(running, [buildSummaryDelta("Weighing the options")]);
 
-    expect(streamed(first)).toEqual([["reasoning_text", "Because "]]);
+    expect(listStreamedDeltas(first)).toEqual([["reasoning_text", "Because "]]);
     // The summary is the same thinking said twice: emitting both would double
     // the item's text, and there is no third stream kind to put it on.
-    expect(streamed(second)).toEqual([]);
+    expect(listStreamedDeltas(second)).toEqual([]);
   });
 
   it("switches to raw when raw follows a summary, and drops the summary after it", () => {
-    const running = state();
+    const running = buildTestState();
 
-    const opened = through(running, [summaryDelta("Weighing ")]);
-    const switched = through(running, [rawDelta("Because ")]);
-    const after = through(running, [summaryDelta("the options"), rawDelta("it is faster")]);
+    const opened = normalizeNotes(running, [buildSummaryDelta("Weighing ")]);
+    const switched = normalizeNotes(running, [buildRawDelta("Because ")]);
+    const after = normalizeNotes(running, [
+      buildSummaryDelta("the options"),
+      buildRawDelta("it is faster"),
+    ]);
 
-    expect(streamed(opened)).toEqual([["reasoning_text", "Weighing "]]);
-    expect(streamed(switched)).toEqual([["reasoning_text", "Because "]]);
-    expect(streamed(after)).toEqual([["reasoning_text", "it is faster"]]);
+    expect(listStreamedDeltas(opened)).toEqual([["reasoning_text", "Weighing "]]);
+    expect(listStreamedDeltas(switched)).toEqual([["reasoning_text", "Because "]]);
+    expect(listStreamedDeltas(after)).toEqual([["reasoning_text", "it is faster"]]);
   });
 
-  it("streams an assistant message as text and a command's output as output", () => {
-    const message = fresh([delta("item/agentMessage/delta", { delta: "Hello" })]);
-    const output = fresh([delta("item/commandExecution/outputDelta", { delta: "hi\n" })]);
+  it("streams an assistant message as text and a command's output", () => {
+    const message = normalizeFromStart([
+      buildDeltaNote("item/agentMessage/delta", { delta: "Hello" }),
+    ]);
+    const output = normalizeFromStart([
+      buildDeltaNote("item/commandExecution/outputDelta", { delta: "hi\n" }),
+    ]);
 
-    expect(streamed(message)).toEqual([["assistant_text", "Hello"]]);
-    expect(streamed(output)).toEqual([["command_output", "hi\n"]]);
+    expect(listStreamedDeltas(message)).toEqual([["assistant_text", "Hello"]]);
+    expect(listStreamedDeltas(output)).toEqual([["command_output", "hi\n"]]);
   });
 });
 
-const breakdown = (input: number, cached: number, output: number) => ({
+const buildTokenBreakdown = (input: number, cached: number, output: number) => ({
   totalTokens: input + output,
   inputTokens: input,
   cachedInputTokens: cached,
@@ -358,18 +374,21 @@ const breakdown = (input: number, cached: number, output: number) => ({
   reasoningOutputTokens: 0,
 });
 
-const USAGE = note("thread/tokenUsage/updated", {
+const USAGE = buildNote("thread/tokenUsage/updated", {
   threadId: THREAD,
   turnId: TURN,
   tokenUsage: {
-    total: breakdown(1200, 800, 340),
-    last: breakdown(100, 40, 12),
+    total: buildTokenBreakdown(1200, 800, 340),
+    last: buildTokenBreakdown(100, 40, 12),
     modelContextWindow: 272000,
   },
 });
 
-const failing = (codexErrorInfo: unknown, options: { readonly willRetry?: boolean } = {}): Note =>
-  note("error", {
+const buildErrorNote = (
+  codexErrorInfo: unknown,
+  options: { readonly willRetry?: boolean } = {},
+): Note =>
+  buildNote("error", {
     error: {
       message: "the model provider rejected the request",
       codexErrorInfo,
@@ -383,11 +402,11 @@ const failing = (codexErrorInfo: unknown, options: { readonly willRetry?: boolea
 
 describe("what a session reports about its usage and its failures", () => {
   it("reports the running total, not what the last turn cost", () => {
-    const events = fresh([USAGE]);
+    const events = normalizeFromStart([USAGE]);
 
     // `last` is one turn's; the taxonomy's snapshot is cumulative, and
     // reporting `last` would make the session look like it never grew.
-    expect(only(events, "session.usage.updated")[0]?.usage).toMatchObject({
+    expect(filterByTag(events, "session.usage.updated")[0]?.usage).toMatchObject({
       inputTokens: 1200,
       outputTokens: 340,
       cacheReadTokens: 800,
@@ -395,31 +414,33 @@ describe("what a session reports about its usage and its failures", () => {
   });
 
   it("names the error class Codex named, whichever shape it named it in", () => {
-    const string = fresh([failing("usageLimitExceeded")]);
-    const object = fresh([failing({ httpConnectionFailed: { httpStatusCode: 503 } })]);
-    const absent = fresh([failing(null)]);
+    const string = normalizeFromStart([buildErrorNote("usageLimitExceeded")]);
+    const object = normalizeFromStart([
+      buildErrorNote({ httpConnectionFailed: { httpStatusCode: 503 } }),
+    ]);
+    const absent = normalizeFromStart([buildErrorNote(null)]);
 
-    expect(only(string, "runtime.error")[0]?.class).toBe("usageLimitExceeded");
-    expect(only(object, "runtime.error")[0]?.class).toBe("httpConnectionFailed");
+    expect(filterByTag(string, "runtime.error")[0]?.class).toBe("usageLimitExceeded");
+    expect(filterByTag(object, "runtime.error")[0]?.class).toBe("httpConnectionFailed");
     // An error with no class is still an error: reporting nothing would lose it.
-    expect(only(absent, "runtime.error")[0]?.class).toBe("unknown");
+    expect(filterByTag(absent, "runtime.error")[0]?.class).toBe("unknown");
   });
 
   it("warns rather than fails when Codex says it is retrying by itself", () => {
-    const events = fresh([failing("serverOverloaded", { willRetry: true })]);
+    const events = normalizeFromStart([buildErrorNote("serverOverloaded", { willRetry: true })]);
 
-    expect(tags(events)).toEqual(["runtime.warning"]);
-    expect(only(events, "runtime.warning")[0]?.message).not.toBe("");
+    expect(listEventTags(events)).toEqual(["runtime.warning"]);
+    expect(filterByTag(events, "runtime.warning")[0]?.message).not.toBe("");
   });
 });
 
-const detailOf = (events: ReadonlyArray<ProviderEvent>): unknown =>
-  only(events, "item.completed")[0]?.detail;
+const readItemDetail = (events: ReadonlyArray<ProviderEvent>): unknown =>
+  filterByTag(events, "item.completed")[0]?.detail;
 
 describe("what a surface reads off an item without opening it", () => {
   it("names the command a shell item ran and the path a patch touched", () => {
-    const command = fresh([
-      completed({
+    const command = normalizeFromStart([
+      buildItemCompleted({
         type: "commandExecution",
         id: "i4",
         command: "pnpm test",
@@ -428,16 +449,16 @@ describe("what a surface reads off an item without opening it", () => {
         commandActions: [],
       }),
     ]);
-    const one = fresh([
-      completed({
+    const one = normalizeFromStart([
+      buildItemCompleted({
         type: "fileChange",
         id: "i5",
         status: "completed",
         changes: [{ path: "/tmp/work/a.ts", kind: "update", diff: "" }],
       }),
     ]);
-    const many = fresh([
-      completed({
+    const many = normalizeFromStart([
+      buildItemCompleted({
         type: "fileChange",
         id: "i6",
         status: "completed",
@@ -448,18 +469,18 @@ describe("what a surface reads off an item without opening it", () => {
       }),
     ]);
 
-    expect(detailOf(command)).toEqual({ command: "pnpm test" });
-    expect(detailOf(one)).toEqual({ path: "/tmp/work/a.ts" });
+    expect(readItemDetail(command)).toEqual({ command: "pnpm test" });
+    expect(readItemDetail(one)).toEqual({ path: "/tmp/work/a.ts" });
     // The first path is the row; the rest are there for a reader who opens it.
-    expect(detailOf(many)).toEqual({
+    expect(readItemDetail(many)).toEqual({
       path: "/tmp/work/a.ts",
       paths: ["/tmp/work/a.ts", "/tmp/work/b.ts"],
     });
   });
 
   it("names the tool a call reached for, and says whose tool it was", () => {
-    const mcp = fresh([
-      completed({
+    const mcp = normalizeFromStart([
+      buildItemCompleted({
         type: "mcpToolCall",
         id: "i7",
         server: "files",
@@ -467,22 +488,34 @@ describe("what a surface reads off an item without opening it", () => {
         status: "completed",
       }),
     ]);
-    const dynamic = fresh([
-      completed({ type: "dynamicToolCall", id: "i8", tool: "lookup", status: "completed" }),
+    const dynamic = normalizeFromStart([
+      buildItemCompleted({
+        type: "dynamicToolCall",
+        id: "i8",
+        tool: "lookup",
+        status: "completed",
+      }),
     ]);
-    const output = fresh([
-      completed({ type: "functionCallOutput", id: "i9", name: "lookup", output: { content: "" } }),
+    const output = normalizeFromStart([
+      buildItemCompleted({
+        type: "functionCallOutput",
+        id: "i9",
+        name: "lookup",
+        output: { content: "" },
+      }),
     ]);
 
-    expect(detailOf(mcp)).toEqual({ name: "files/read", kind: "mcp" });
-    expect(detailOf(dynamic)).toEqual({ name: "lookup", kind: "native" });
-    expect(detailOf(output)).toEqual({ name: "lookup", kind: "native" });
+    expect(readItemDetail(mcp)).toEqual({ name: "files/read", kind: "mcp" });
+    expect(readItemDetail(dynamic)).toEqual({ name: "lookup", kind: "native" });
+    expect(readItemDetail(output)).toEqual({ name: "lookup", kind: "native" });
   });
 
   it("names what a search looked for and which collab tool a subagent used", () => {
-    const search = fresh([completed({ type: "webSearch", id: "i10", query: "codex app-server" })]);
-    const collab = fresh([
-      completed({
+    const search = normalizeFromStart([
+      buildItemCompleted({ type: "webSearch", id: "i10", query: "codex app-server" }),
+    ]);
+    const collab = normalizeFromStart([
+      buildItemCompleted({
         type: "collabAgentToolCall",
         id: "i11",
         tool: "spawnAgent",
@@ -492,8 +525,8 @@ describe("what a surface reads off an item without opening it", () => {
       }),
     ]);
 
-    expect(detailOf(search)).toEqual({ description: "codex app-server" });
-    expect(detailOf(collab)).toEqual({ name: "spawnAgent" });
+    expect(readItemDetail(search)).toEqual({ description: "codex app-server" });
+    expect(readItemDetail(collab)).toEqual({ name: "spawnAgent" });
   });
 
   it("says nothing about an item whose own text is the whole of it", () => {
@@ -506,13 +539,16 @@ describe("what a surface reads off an item without opening it", () => {
       { type: "contextCompaction", id: "i15" },
       { type: "somethingCodexGrew", id: "i16" },
     ]) {
-      expect(detailOf(fresh([completed(item)])), item.type).toBeUndefined();
+      expect(
+        readItemDetail(normalizeFromStart([buildItemCompleted(item)])),
+        item.type,
+      ).toBeUndefined();
     }
   });
 
   it("reports an item Codex opens with the same detail it closes it with", () => {
-    const opened = fresh([
-      note("item/started", {
+    const opened = normalizeFromStart([
+      buildNote("item/started", {
         item: {
           type: "commandExecution",
           id: "i4",
@@ -527,6 +563,6 @@ describe("what a surface reads off an item without opening it", () => {
       }),
     ]);
 
-    expect(only(opened, "item.started")[0]?.detail).toEqual({ command: "pnpm test" });
+    expect(filterByTag(opened, "item.started")[0]?.detail).toEqual({ command: "pnpm test" });
   });
 });

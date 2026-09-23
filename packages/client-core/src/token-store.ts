@@ -30,10 +30,10 @@ export interface TokenStore {
   write(token: string | null): void;
 }
 
-export const tokenStorageKey = (origin: string): string => `hercule:token:${origin}`;
+export const buildTokenStorageKey = (origin: string): string => `hercule:token:${origin}`;
 
 /** The browser's `localStorage`, or nothing where reaching it throws. */
-const localStorageOrNone = (): StorageLike | undefined => {
+const findLocalStorage = (): StorageLike | undefined => {
   try {
     return globalThis.localStorage;
   } catch {
@@ -43,9 +43,9 @@ const localStorageOrNone = (): StorageLike | undefined => {
 
 export const createTokenStore = (
   origin: string,
-  storage: StorageLike | undefined = localStorageOrNone(),
+  storage: StorageLike | undefined = findLocalStorage(),
 ): TokenStore => {
-  const key = tokenStorageKey(origin);
+  const key = buildTokenStorageKey(origin);
   return {
     read: () => {
       try {

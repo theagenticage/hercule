@@ -24,7 +24,7 @@ const GLYPHS: Record<TaskPriority, PriorityReading> = {
 };
 
 /** The bars and the grey one priority is drawn with. */
-export const priorityGlyph = (priority: TaskPriority): PriorityReading => GLYPHS[priority];
+export const readPriorityGlyph = (priority: TaskPriority): PriorityReading => GLYPHS[priority];
 
 /** The statuses a task is no longer worked on in. */
 const SETTLED: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["done", "cancelled"]);
@@ -33,7 +33,7 @@ const SETTLED: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["done", "cancelled
  * Whether a row steps back out of the way. Work that is finished and work that
  * was never urgent both recede, so what is left reads as what is left to do.
  */
-export const taskRecedes = (task: {
+export const shouldTaskRecede = (task: {
   readonly status: TaskStatus;
   readonly priority: TaskPriority;
 }): boolean => SETTLED.has(task.status) || task.priority === "low";
@@ -42,7 +42,7 @@ export const taskRecedes = (task: {
  * What one provenance entry points at, as one line. An entry names at least one
  * of the three, and an entry naming several says all of them.
  */
-export const provenanceTarget = (entry: ProvenanceEntry): string => {
+export const describeProvenanceTarget = (entry: ProvenanceEntry): string => {
   const parts: string[] = [];
   if (entry.ref !== undefined) parts.push(entry.ref);
   if (entry.eventId !== undefined) parts.push(`event ${String(entry.eventId)}`);

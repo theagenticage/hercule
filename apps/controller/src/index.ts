@@ -18,11 +18,11 @@ import type * as Scope from "effect/Scope";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { BootstrapConfig } from "./config";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
-import { bodyLimits, operationLayers, perimeterWarning, serve, webBundle } from "./http";
+import { bodyLimits, operationLayers, buildPerimeterWarning, serve, webBundle } from "./http";
 import { LOCAL_RUNNER } from "./runners";
 import { EvaluationErrorNotifierLayer } from "./subscriptions";
 
-export { boot, bootWith, hashToken, setupUrl } from "./bootstrap";
+export { boot, bootWith, hashToken, buildSetupUrl } from "./bootstrap";
 export type { BootError, BootOptions, BootOutcome, ControllerServices } from "./bootstrap";
 
 /**
@@ -140,7 +140,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
     const bundle = yield* webBundle;
     yield* serve(bundle);
 
-    const warning = perimeterWarning(bootstrap.bindHost, bootstrap.bindPort);
+    const warning = buildPerimeterWarning(bootstrap.bindHost, bootstrap.bindPort);
     if (warning !== undefined) console.warn(`hercule: ${warning}`);
     console.log(`Hercule is listening on http://${bootstrap.bindHost}:${bootstrap.bindPort}.`);
     report(outcome, bundle !== undefined);

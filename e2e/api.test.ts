@@ -13,17 +13,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   PASSWORD,
   USERNAME,
-  cli,
-  jsonOf,
+  runCli,
+  parseJsonOutput,
   startController,
-  temporaryHome,
+  createTemporaryHome,
   type Controller,
 } from "./harness";
 
 /** The home the controller and the CLI share; the CLI writes its credential here. */
-const state = temporaryHome();
+const state = createTemporaryHome();
 /** A home with no credential file, for the environment-variable cases. */
-const bare = temporaryHome();
+const bare = createTemporaryHome();
 
 let controller: Controller;
 let port: number;
@@ -37,20 +37,20 @@ const credentialsFile = join(state.home, "credentials.json");
 const setupUrlFile = join(state.home, "setup-url");
 
 /** The CLI under the credential file in the shared home. */
-const hercule = (args: ReadonlyArray<string>, stdin?: string) =>
-  cli(args, { home: state.home, stdin });
+const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
+  runCli(args, { home: state.home, stdin });
 
 /**
  * The CLI before a credential file exists. `setup read` and `setup complete`
  * carry no credential, so the only thing that can say which controller they
  * mean is `HERCULE_API_URL`.
  */
-const beforeLogin = (args: ReadonlyArray<string>, stdin?: string) =>
-  cli(args, { home: state.home, env: { HERCULE_API_URL: url }, stdin });
+const runCliBeforeLogin = (args: ReadonlyArray<string>, stdin?: string) =>
+  runCli(args, { home: state.home, env: { HERCULE_API_URL: url }, stdin });
 
 /** The CLI with no credential file, carrying a token in the environment. */
-const withToken = (token: string, args: ReadonlyArray<string>, stdin?: string) =>
-  cli(args, { home: bare.home, env: { HERCULE_TOKEN: token, HERCULE_API_URL: url }, stdin });
+const runCliWithToken = (token: string, args: ReadonlyArray<string>, stdin?: string) =>
+  runCli(args, { home: bare.home, env: { HERCULE_TOKEN: token, HERCULE_API_URL: url }, stdin });
 
 beforeAll(async () => {
   controller = await startController({ home: state.home });
@@ -96,7 +96,7 @@ describe("the first run and everything after it", () => {
     const token = new URL(setupUrl).searchParams.get("token");
     expect(token).toBeTypeOf("string");
 
-    const completed = await beforeLogin(
+    const completed = await runCliBeforeLogin(
       [
         "setup",
         "complete",
@@ -112,18 +112,18 @@ describe("the first run and everything after it", () => {
       PASSWORD,
     );
     expect(completed.code).toBe(0);
-    setupBearer = (jsonOf(completed) as { token: string }).token;
+    setupBearer = (parseJsonOutput(completed) as { token: string }).token;
     expect(setupBearer).toBeTruthy();
 
     // The one-time URL is spent, so the file it lived in is gone.
     expect(existsSync(setupUrlFile)).toBe(false);
 
-    const read = await beforeLogin(["setup", "read", "--json"]);
-    expect(jsonOf(read)).toEqual({ complete: true });
+    const read = await runCliBeforeLogin(["setup", "read", "--json"]);
+    expect(parseJsonOutput(read)).toEqual({ complete: true });
 
     // A second completion cannot get through: the token was cleared, so the
     // setup gate answers before `invalid_state` is ever reached.
-    const again = await beforeLogin(
+    const again = await runCliBeforeLogin(
       [
         "setup",
         "complete",
@@ -139,13 +139,13 @@ describe("the first run and everything after it", () => {
       PASSWORD,
     );
     expect(again.code).toBe(1);
-    expect(jsonOf(again)).toEqual({
+    expect(parseJsonOutput(again)).toEqual({
       error: { code: "unauthenticated", message: expect.any(String) as string },
     });
   }, 15_000);
 
   it("3. logs in and writes a 0600 credential file that never shows the key", async () => {
-    const login = await hercule(
+    const login = await runLoggedInCli(
       ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-laptop"],
       PASSWORD,
     );
@@ -166,19 +166,23 @@ describe("the first run and everything after it", () => {
     expect(login.stdout).not.toContain(PASSWORD);
     expect(controller.output()).not.toContain(apiKey);
 
-    const json = await hercule(
+    const json = await runLoggedInCli(
       ["login", url, "--username", USERNAME, "--password-stdin", "--json"],
       PASSWORD,
     );
     expect(json.code).toBe(0);
-    expect(Object.keys(jsonOf(json) as object).sort()).toEqual(["apiKeyId", "name", "url"]);
+    expect(Object.keys(parseJsonOutput(json) as object).sort()).toEqual([
+      "apiKeyId",
+      "name",
+      "url",
+    ]);
     expect(json.stdout).not.toContain(PASSWORD);
   }, 15_000);
 
   it("4a. lists the key login minted, without its token", async () => {
-    const keys = await hercule(["api-key", "list", "--json"]);
+    const keys = await runLoggedInCli(["api-key", "list", "--json"]);
     expect(keys.code).toBe(0);
-    const items = (jsonOf(keys) as { items: Array<Record<string, unknown>> }).items;
+    const items = (parseJsonOutput(keys) as { items: Array<Record<string, unknown>> }).items;
     const named = items.find((item) => item.name === "e2e-laptop");
     expect(named).toBeDefined();
     expect(named).not.toHaveProperty("token");
@@ -191,14 +195,17 @@ describe("the first run and everything after it", () => {
     // The runner the controller spawned joins moments after the listener comes
     // up, and it is another process: under load the join can land after this
     // step would otherwise have read the setting.
-    let identity = await hercule(["controller", "read", "--json"]);
+    let identity = await runLoggedInCli(["controller", "read", "--json"]);
     for (let waited = 0; waited < 10_000; waited += 100) {
-      if ((jsonOf(identity) as { defaultRunnerId: string | null }).defaultRunnerId !== null) break;
+      if (
+        (parseJsonOutput(identity) as { defaultRunnerId: string | null }).defaultRunnerId !== null
+      )
+        break;
       await new Promise((resolve) => setTimeout(resolve, 100));
-      identity = await hercule(["controller", "read", "--json"]);
+      identity = await runLoggedInCli(["controller", "read", "--json"]);
     }
     expect(identity.code).toBe(0);
-    expect(jsonOf(identity)).toEqual({
+    expect(parseJsonOutput(identity)).toEqual({
       id: expect.any(String) as string,
       publicKey: expect.any(String) as string,
       version: expect.any(String) as string,
@@ -207,16 +214,16 @@ describe("the first run and everything after it", () => {
       defaultRunnerId: expect.any(String) as string,
     });
 
-    const settings = await hercule(["settings", "read", "--json"]);
+    const settings = await runLoggedInCli(["settings", "read", "--json"]);
     expect(settings.code).toBe(0);
-    const state = jsonOf(settings) as { user: { timezone: string } };
+    const state = parseJsonOutput(settings) as { user: { timezone: string } };
     expect(state.user.timezone).toBe("Europe/Amsterdam");
   });
 
   it("4c. lists the shipped profiles, creates one, and resolves an id tail", async () => {
-    const shipped = await hercule(["profile", "list", "--json"]);
+    const shipped = await runLoggedInCli(["profile", "list", "--json"]);
     const profiles = (
-      jsonOf(shipped) as { items: Array<{ id: string; name: string; shipped: boolean }> }
+      parseJsonOutput(shipped) as { items: Array<{ id: string; name: string; shipped: boolean }> }
     ).items;
     expect(profiles.map((profile) => profile.name).sort()).toEqual([
       "assistant",
@@ -225,7 +232,7 @@ describe("the first run and everything after it", () => {
     ]);
     expect(profiles.every((profile) => profile.shipped)).toBe(true);
 
-    const created = await hercule([
+    const created = await runLoggedInCli([
       "profile",
       "create",
       "--name",
@@ -235,28 +242,28 @@ describe("the first run and everything after it", () => {
       "--json",
     ]);
     expect(created.code).toBe(0);
-    const { id } = jsonOf(created) as { id: string };
+    const { id } = parseJsonOutput(created) as { id: string };
 
-    const byTail = await hercule(["profile", "read", id.slice(-8), "--json"]);
+    const byTail = await runLoggedInCli(["profile", "read", id.slice(-8), "--json"]);
     expect(byTail.code).toBe(0);
-    expect((jsonOf(byTail) as { id: string }).id).toBe(id);
+    expect((parseJsonOutput(byTail) as { id: string }).id).toBe(id);
   });
 
   it("4d. refuses to delete a shipped profile, on stderr, with exit 1", async () => {
     const assistant = (
-      jsonOf(await hercule(["profile", "list", "--json"])) as {
+      parseJsonOutput(await runLoggedInCli(["profile", "list", "--json"])) as {
         items: Array<{ id: string; name: string }>;
       }
     ).items.find((profile) => profile.name === "assistant")!;
 
-    const refused = await hercule(["profile", "delete", assistant.id.slice(-8)]);
+    const refused = await runLoggedInCli(["profile", "delete", assistant.id.slice(-8)]);
     expect(refused.code).toBe(1);
     expect(refused.stdout).toBe("");
     expect(refused.stderr).toContain("assistant");
 
     // Under `--json` too: the envelope is on stderr, so a caller piping stdout
     // into a parser is never handed an error where a result was expected.
-    const asJson = await hercule(["profile", "delete", assistant.id, "--json"]);
+    const asJson = await runLoggedInCli(["profile", "delete", assistant.id, "--json"]);
     expect(asJson.code).toBe(1);
     expect(asJson.stdout).toBe("");
     expect(JSON.parse(asJson.stderr)).toEqual({
@@ -266,32 +273,44 @@ describe("the first run and everything after it", () => {
 
   it("4e. stores a secret by reference and never reads its value back", async () => {
     const secretValue = "s3cret-value-nobody-should-see";
-    const set = await hercule(
+    const set = await runLoggedInCli(
       ["secret", "set", "plugin", "p1", "key1", "--value-stdin", "--json"],
       secretValue,
     );
     expect(set.code).toBe(0);
-    expect(jsonOf(set)).toMatchObject({ ownerKind: "plugin", ownerId: "p1", name: "key1" });
+    expect(parseJsonOutput(set)).toMatchObject({
+      ownerKind: "plugin",
+      ownerId: "p1",
+      name: "key1",
+    });
 
-    const listed = await hercule(["secret", "list", "--owner-kind", "plugin", "--json"]);
+    const listed = await runLoggedInCli(["secret", "list", "--owner-kind", "plugin", "--json"]);
     expect(listed.code).toBe(0);
-    expect((jsonOf(listed) as { items: Array<object> }).items).toContainEqual(
+    expect((parseJsonOutput(listed) as { items: Array<object> }).items).toContainEqual(
       expect.objectContaining({ ownerKind: "plugin", ownerId: "p1", name: "key1" }),
     );
     expect(listed.stdout).not.toContain(secretValue);
 
     // `--value` does not exist: a secret never sits in argv.
-    const inArgv = await hercule(["secret", "set", "plugin", "p1", "key2", "--value", secretValue]);
+    const inArgv = await runLoggedInCli([
+      "secret",
+      "set",
+      "plugin",
+      "p1",
+      "key2",
+      "--value",
+      secretValue,
+    ]);
     expect(inArgv.code).toBe(2);
     expect(inArgv.stderr).toContain("--value-stdin");
 
     // The `core` owner is the controller's own key material.
-    const core = await hercule(
+    const core = await runLoggedInCli(
       ["secret", "set", "core", "controller", "x", "--value-stdin", "--json"],
       "x",
     );
     expect(core.code).toBe(1);
-    expect(jsonOf(core)).toMatchObject({ error: { code: "validation" } });
+    expect(parseJsonOutput(core)).toMatchObject({ error: { code: "validation" } });
   });
 
   // 403 cannot be reached end to end yet: the only actor is the user, who holds
@@ -301,7 +320,7 @@ describe("the first run and everything after it", () => {
   // the case belongs here.
 
   it("5. resolves credentials from the environment, and refuses the file in a session", async () => {
-    const inSession = await cli(["controller", "read"], {
+    const inSession = await runCli(["controller", "read"], {
       home: state.home,
       env: { HERCULE_SESSION: "1" },
     });
@@ -309,44 +328,44 @@ describe("the first run and everything after it", () => {
     expect(inSession.stderr).toContain("HERCULE_SESSION");
     expect(inSession.stderr).toContain(credentialsFile);
 
-    const byEnv = await withToken(apiKey, ["controller", "read", "--json"]);
+    const byEnv = await runCliWithToken(apiKey, ["controller", "read", "--json"]);
     expect(byEnv.code).toBe(0);
-    expect(jsonOf(byEnv)).toHaveProperty("publicKey");
+    expect(parseJsonOutput(byEnv)).toHaveProperty("publicKey");
 
-    const throwaway = jsonOf(
-      await hercule(["api-key", "create", "--name", "throwaway", "--json"]),
+    const throwaway = parseJsonOutput(
+      await runLoggedInCli(["api-key", "create", "--name", "throwaway", "--json"]),
     ) as { id: string; token: string };
-    expect(await withToken(throwaway.token, ["controller", "read", "--json"])).toMatchObject({
+    expect(await runCliWithToken(throwaway.token, ["controller", "read", "--json"])).toMatchObject({
       code: 0,
     });
 
-    const revoked = await hercule(["api-key", "revoke", throwaway.id, "--json"]);
+    const revoked = await runLoggedInCli(["api-key", "revoke", throwaway.id, "--json"]);
     expect(revoked.code).toBe(0);
 
-    const dead = await withToken(throwaway.token, ["controller", "read", "--json"]);
+    const dead = await runCliWithToken(throwaway.token, ["controller", "read", "--json"]);
     expect(dead.code).toBe(1);
-    expect(jsonOf(dead)).toEqual({
+    expect(parseJsonOutput(dead)).toEqual({
       error: { code: "unauthenticated", message: expect.any(String) as string },
     });
   });
 
   it("6. prints help at any position, naming the grant the operation needs", async () => {
-    const help = await hercule(["profile", "create", "--help"]);
+    const help = await runLoggedInCli(["profile", "create", "--help"]);
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("permission.write");
     expect(help.stdout).toContain("POST /api/v1/profiles");
 
-    const late = await hercule(["profile", "create", "--name", "x", "--help"]);
+    const late = await runLoggedInCli(["profile", "create", "--name", "x", "--help"]);
     expect(late.stdout).toBe(help.stdout);
   });
 
   it("7. prints exactly what the route returned under --json", async () => {
-    const viaCli = await hercule(["profile", "list", "--json"]);
+    const viaCli = await runLoggedInCli(["profile", "list", "--json"]);
     const viaFetch = await fetch(`${url}/api/v1/profiles`, {
       headers: { authorization: `Bearer ${apiKey}` },
     });
     expect(viaFetch.status).toBe(200);
-    expect(jsonOf(viaCli)).toEqual(await viaFetch.json());
+    expect(parseJsonOutput(viaCli)).toEqual(await viaFetch.json());
   });
 
   it("8. logs out a login bearer, and refuses to log out an API key", async () => {
@@ -415,11 +434,11 @@ describe("the first run and everything after it", () => {
     expect(controller.output()).toContain("Hercule is set up.");
     expect(existsSync(setupUrlFile)).toBe(false);
 
-    const read = await hercule(["setup", "read", "--json"]);
-    expect(jsonOf(read)).toEqual({ complete: true });
+    const read = await runLoggedInCli(["setup", "read", "--json"]);
+    expect(parseJsonOutput(read)).toEqual({ complete: true });
 
     // The key from before the restart still works: nothing lived in memory.
-    const identity = await hercule(["controller", "read", "--json"]);
+    const identity = await runLoggedInCli(["controller", "read", "--json"]);
     expect(identity.code).toBe(0);
   }, 30_000);
 });

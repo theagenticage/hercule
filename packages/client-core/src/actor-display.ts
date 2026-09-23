@@ -7,7 +7,7 @@
  * thread that made the record. Reading the stamp is a reading of the domain, so
  * it lives here with a test rather than inside a component.
  */
-import { idTail } from "./id-tail";
+import { toIdTail } from "./id-tail";
 
 export interface ActorReading {
   /** What to print. */
@@ -17,11 +17,11 @@ export interface ActorReading {
 }
 
 /** What one actor stamp says on screen. */
-export const actorReading = (actor: string): ActorReading => {
+export const describeActor = (actor: string): ActorReading => {
   if (actor === "user") return { label: "you", sessionId: undefined };
   if (actor.startsWith("session:")) {
     const sessionId = actor.slice("session:".length);
-    return { label: `session ${idTail(sessionId)}`, sessionId };
+    return { label: `session ${toIdTail(sessionId)}`, sessionId };
   }
   // `system` - and anything a later widening of the stamps adds - reads as it
   // arrived.

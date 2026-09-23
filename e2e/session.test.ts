@@ -21,25 +21,25 @@ import {
   PASSWORD,
   ROOT,
   USERNAME,
-  apiKeyIn,
-  cli,
+  readApiKey,
+  runCli,
   completeSetup,
-  instancesOf,
-  jsonOk,
-  liveSessionsAsked,
-  sessionOf,
+  listInstances,
+  parseJsonOutputOrFail,
+  isLiveSessionTestEnabled,
+  readSession,
   startController,
-  temporaryHome,
-  untilTag,
+  createTemporaryHome,
+  waitForTranscriptTag,
   type Controller,
   type Instance,
   type Session,
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
-const wanted = liveSessionsAsked();
+const wanted = isLiveSessionTestEnabled();
 
-const state = temporaryHome();
+const state = createTemporaryHome();
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -56,10 +56,10 @@ const LOGIN_DEADLINE_MS = 60_000;
  * The Claude instance once a machine has probed it, or `undefined` if no
  * machine ever reported a usable login for it.
  */
-const loggedIn = async (): Promise<Instance | undefined> => {
+const waitForLoggedInInstance = async (): Promise<Instance | undefined> => {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   for (;;) {
-    const claude = (await instancesOf({ url, apiKey })).find(
+    const claude = (await listInstances({ url, apiKey })).find(
       (one) => one.providerId === "claude-code",
     );
     if (claude?.snapshots.some((snapshot) => snapshot.auth.status === "ok") === true) return claude;
@@ -68,10 +68,10 @@ const loggedIn = async (): Promise<Instance | undefined> => {
   }
 };
 
-const read = (id: string): Promise<Session> => sessionOf({ home: state.home, binary, id });
+const read = (id: string): Promise<Session> => readSession({ home: state.home, binary, id });
 
-const until = (id: string, tag: string) =>
-  untilTag({ home: state.home, binary, id, tag, timeoutMs: TURN_DEADLINE_MS });
+const waitForTag = (id: string, tag: string) =>
+  waitForTranscriptTag({ home: state.home, binary, id, tag, timeoutMs: TURN_DEADLINE_MS });
 
 beforeAll(async () => {
   if (!wanted) return;
@@ -86,12 +86,12 @@ beforeAll(async () => {
   const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-  const login = await cli(
+  const login = await runCli(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-session"],
     { home: state.home, binary, stdin: PASSWORD },
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
-  apiKey = apiKeyIn(state.home);
+  apiKey = readApiKey(state.home);
 }, 120_000);
 
 afterAll(async () => {
@@ -103,7 +103,7 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
   it(
     "spawns a workspace-less thread, answers one prompt, and reads back as a bracketed turn",
     async (ctx) => {
-      const instance = await loggedIn();
+      const instance = await waitForLoggedInInstance();
       if (instance === undefined) {
         ctx.skip(
           "no machine reports a logged-in claude-code instance. A session runs against the " +
@@ -119,14 +119,14 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
       );
       const haiku = slugs.find((slug) => slug.includes("haiku"));
 
-      const ran = await cli(
+      const ran = await runCli(
         ["session", "spawn", ...(haiku === undefined ? [] : ["--model", haiku]), "--json"],
         { home: state.home, binary, stdin: "Reply with the single word ready. Use no tools." },
       );
-      const session = jsonOk<Session>(ran);
+      const session = parseJsonOutputOrFail<Session>(ran);
       expect(session.status).toBe("starting");
 
-      const rows = await until(session.id, "turn.completed");
+      const rows = await waitForTag(session.id, "turn.completed");
 
       // The turn is bracketed: a completion the controller could not pair with
       // a start would not be a turn at all.
@@ -157,12 +157,12 @@ describe.skipIf(!wanted)("a real Claude Code session through the binary", () => 
   it(
     "teaches the command that reads the session back",
     async (ctx) => {
-      if ((await loggedIn()) === undefined) {
+      if ((await waitForLoggedInInstance()) === undefined) {
         ctx.skip("no machine reports a logged-in claude-code instance");
         return;
       }
 
-      const ran = await cli(["session", "spawn"], {
+      const ran = await runCli(["session", "spawn"], {
         home: state.home,
         binary,
         stdin: "Reply with the single word ready. Use no tools.",

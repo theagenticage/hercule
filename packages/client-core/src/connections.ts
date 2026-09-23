@@ -15,14 +15,16 @@ import { GITHUB_CONNECTION_TYPE, type Connection, type PluginDetail } from "@her
  * composer's add-repo form and Settings > Threads - and which type counts is a
  * domain fact, not a filter each screen rewrites.
  */
-export const githubConnections = (connections: readonly Connection[]): readonly Connection[] =>
+export const filterGitHubConnections = (
+  connections: readonly Connection[],
+): readonly Connection[] =>
   connections.filter((connection) => connection.type === GITHUB_CONNECTION_TYPE);
 
 /** The path the controller serves the provider's redirect on. */
 const CALLBACK_PATH = "/oauth/callback";
 
 /** The redirect URI to register for this origin, with no doubled slash. */
-export const redirectUriFor = (origin: string): string =>
+export const buildRedirectUri = (origin: string): string =>
   `${origin.replace(/\/+$/, "")}${CALLBACK_PATH}`;
 
 /** One secret a setup asks the user to paste. */
@@ -69,7 +71,7 @@ const asDefinition = (value: unknown): Record<string, unknown> | undefined =>
  * fetches is the whole of it. Whether the plugin is enabled is not asked:
  * `register()` ran either way, so the type can still validate what is pasted.
  */
-export const connectionTypes = (
+export const listConnectionTypes = (
   plugins: ReadonlyArray<PluginDetail>,
 ): ReadonlyArray<ConnectionType> =>
   plugins.flatMap((plugin) =>
@@ -101,7 +103,7 @@ export const connectionTypes = (
  * from a newer host can carry a step kind this build cannot render, which is
  * what `unknown` is: a screen says so rather than guessing.
  */
-export const setupFlowOf = (
+export const decideSetupFlow = (
   type: ConnectionType,
 ): "oauth" | "credentials" | "pairing" | "unknown" => {
   if (type.setup.some((step) => step.kind === "oauth")) return "oauth";
@@ -111,5 +113,5 @@ export const setupFlowOf = (
 };
 
 /** The secrets this type's setup asks the user to paste, in the order declared. */
-export const credentialFieldsOf = (type: ConnectionType): ReadonlyArray<CredentialField> =>
+export const listCredentialFields = (type: ConnectionType): ReadonlyArray<CredentialField> =>
   type.setup.flatMap((step) => (step.kind === "credentials" ? [...step.fields] : []));

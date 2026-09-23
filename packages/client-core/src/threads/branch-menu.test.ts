@@ -7,8 +7,8 @@
  * merely joins.
  */
 import { describe, expect, it } from "vitest";
-import { branchField } from "./branch-menu";
-import { phraseText } from "./workspaces";
+import { buildBranchField } from "./branch-menu";
+import { joinPhraseText } from "./workspaces";
 import {
   COVE,
   MOSS,
@@ -16,14 +16,14 @@ import {
   RUN_3F1,
   WEBSHOP,
   INFRA,
-  workspace,
-  checkout,
+  buildWorkspace,
+  buildCheckout,
 } from "./workspaces.testing";
 
 const around = { workspaces: [PRIMARY, RUN_3F1], runnerId: MOSS.id };
 
-describe("branchField: a main workspace", () => {
-  const field = branchField({ kind: "primary", resourceId: WEBSHOP.id }, around);
+describe("buildBranchField: a main workspace", () => {
+  const field = buildBranchField({ kind: "primary", resourceId: WEBSHOP.id }, around);
 
   it("asks which branch the checkout switches to, reading the one it is on", () => {
     expect(field?.header).toBe("Branch");
@@ -41,7 +41,7 @@ describe("branchField: a main workspace", () => {
   });
 
   it("dims nothing for a worktree on another machine, which holds no branch here", () => {
-    const elsewhere = branchField(
+    const elsewhere = buildBranchField(
       { kind: "primary", resourceId: WEBSHOP.id },
       {
         workspaces: [PRIMARY, { ...RUN_3F1, runnerId: COVE.id }],
@@ -54,13 +54,13 @@ describe("branchField: a main workspace", () => {
 
   it("reads the branch the draft picked, not the one the checkout is on", () => {
     expect(
-      branchField({ kind: "primary", resourceId: WEBSHOP.id, branch: "release/2.4" }, around)
+      buildBranchField({ kind: "primary", resourceId: WEBSHOP.id, branch: "release/2.4" }, around)
         ?.label,
     ).toBe("release/2.4");
   });
 
   it("takes no pick on a repo this machine has never cloned", () => {
-    const fresh = branchField({ kind: "primary", resourceId: INFRA.id }, around);
+    const fresh = buildBranchField({ kind: "primary", resourceId: INFRA.id }, around);
 
     expect(fresh?.label).toBe("default");
     expect(fresh?.locked).not.toBeNull();
@@ -70,10 +70,10 @@ describe("branchField: a main workspace", () => {
   // D-21: the machine reports `branch: null` where it could not read one, and
   // a branch nobody can name is not one to switch from.
   it("takes no pick on a checkout whose branch the machine could not read", () => {
-    const unread = branchField(
+    const unread = buildBranchField(
       { kind: "primary", resourceId: WEBSHOP.id },
       {
-        workspaces: [{ ...PRIMARY, checkouts: [checkout(WEBSHOP.id, null)] }],
+        workspaces: [{ ...PRIMARY, checkouts: [buildCheckout(WEBSHOP.id, null)] }],
         runnerId: MOSS.id,
       },
     );
@@ -84,9 +84,9 @@ describe("branchField: a main workspace", () => {
   });
 });
 
-describe("branchField: a fresh worktree", () => {
+describe("buildBranchField: a fresh worktree", () => {
   it("asks what the new branch starts from, badging the default and saying what is made", () => {
-    const field = branchField(
+    const field = buildBranchField(
       { kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }] },
       around,
     );
@@ -94,7 +94,7 @@ describe("branchField: a fresh worktree", () => {
     expect(field?.header).toBe("Base branch");
     expect(field?.label).toBe("from main");
     expect(field?.rows.find((row) => row.branch === "main")?.badge).toBe("default");
-    expect(phraseText(field?.foot ?? [])).toBe(
+    expect(joinPhraseText(field?.foot ?? [])).toBe(
       "The new branch is hercule/run-…, named after the thread, and starts from origin/main when the remote has it.",
     );
     // The two git words in it are mono, as a git word is everywhere.
@@ -103,11 +103,11 @@ describe("branchField: a fresh worktree", () => {
   });
 
   it("badges the checked-out branch current where it is not the default", () => {
-    const onRelease = workspace({
+    const onRelease = buildWorkspace({
       id: "ws-release",
-      checkouts: [checkout(WEBSHOP.id, "release/2.4", ["main", "release/2.4"], "main")],
+      checkouts: [buildCheckout(WEBSHOP.id, "release/2.4", ["main", "release/2.4"], "main")],
     });
-    const field = branchField(
+    const field = buildBranchField(
       { kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }] },
       {
         workspaces: [onRelease],
@@ -122,11 +122,11 @@ describe("branchField: a fresh worktree", () => {
   });
 
   it("reads the bases side by side, and takes no pick, over several repos", () => {
-    const infra = workspace({
+    const infra = buildWorkspace({
       id: "ws-infra",
-      checkouts: [checkout(INFRA.id, "master", ["master"], "master")],
+      checkouts: [buildCheckout(INFRA.id, "master", ["master"], "master")],
     });
-    const field = branchField(
+    const field = buildBranchField(
       { kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }, { resourceId: INFRA.id }] },
       { workspaces: [PRIMARY, infra], runnerId: MOSS.id },
     );
@@ -136,7 +136,7 @@ describe("branchField: a fresh worktree", () => {
   });
 
   it("names no branch at all where one of the repos has never been cloned", () => {
-    const field = branchField(
+    const field = buildBranchField(
       { kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }, { resourceId: INFRA.id }] },
       around,
     );
@@ -145,12 +145,12 @@ describe("branchField: a fresh worktree", () => {
   });
 });
 
-describe("branchField: where there is no branch to speak of", () => {
+describe("buildBranchField: where there is no branch to speak of", () => {
   it("is absent on a workspace the thread joins, which is named after its branch", () => {
-    expect(branchField({ kind: "existing", workspaceId: RUN_3F1.id }, around)).toBeNull();
+    expect(buildBranchField({ kind: "existing", workspaceId: RUN_3F1.id }, around)).toBeNull();
   });
 
   it("is absent on a thread with no checkout", () => {
-    expect(branchField({ kind: "none" }, around)).toBeNull();
+    expect(buildBranchField({ kind: "none" }, around)).toBeNull();
   });
 });

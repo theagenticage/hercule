@@ -12,9 +12,9 @@ import { GITHUB_CONNECTION_TYPE, type SortDirection } from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -110,7 +110,7 @@ const buildCursorScope = (field: ConnectionSortField, direction: SortDirection):
  * The JSON columns are written by this repository alone, so a column that does
  * not parse is a broken database rather than something a caller can act on.
  */
-const jsonOf = <A>(text: string): A => JSON.parse(text) as A;
+const parseJson = <A>(text: string): A => JSON.parse(text) as A;
 
 const toConnection = (row: ConnectionRow): StoredConnection => ({
   id: uuidToString(row.id),
@@ -120,13 +120,13 @@ const toConnection = (row: ConnectionRow): StoredConnection => ({
   displayName: row.display_name,
   status: row.status,
   statusDetail: row.status_detail ?? undefined,
-  labels: jsonOf<ReadonlyArray<string>>(row.labels),
-  config: jsonOf<Record<string, Schema.Json>>(row.config),
+  labels: parseJson<ReadonlyArray<string>>(row.labels),
+  config: parseJson<Record<string, Schema.Json>>(row.config),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
 
-const sortKeyOf = (connection: StoredConnection, field: ConnectionSortField): string =>
+const readSortKey = (connection: StoredConnection, field: ConnectionSortField): string =>
   field === "label" ? connection.label : connection.createdAt;
 
 const make = Effect.gen(function* () {
@@ -236,7 +236,7 @@ const make = Effect.gen(function* () {
             : yield* decodeCursor(request.cursor, scope, "string");
         const byType = request.type === undefined ? sql`` : sql`AND type = ${request.type}`;
         const byStatus = request.status === undefined ? sql`` : sql`AND status = ${request.status}`;
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           [SORT_COLUMN[request.field], "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -247,11 +247,11 @@ const make = Effect.gen(function* () {
           WHERE 1 = 1 ${byType} ${byStatus} AND ${keyset}
           ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toConnection)),
-          (last) => encodeCursor(scope, sortKeyOf(last, request.field), last.id),
+          (last) => encodeCursor(scope, readSortKey(last, request.field), last.id),
         );
       }),
   };

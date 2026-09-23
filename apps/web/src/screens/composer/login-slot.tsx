@@ -9,7 +9,7 @@ import { ProviderLogin } from "../provider-login";
  * it names its machine too - a credential lands on one machine and works only
  * there (spec 06 §3.1).
  */
-export const loginSlot =
+export const buildLoginSlot =
   (client: HerculeClient, onLoggedIn: () => void) =>
   (login: LoginTarget, className: string): ReactNode => (
     <ProviderLogin

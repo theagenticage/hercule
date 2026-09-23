@@ -246,7 +246,10 @@ const Decisions = Schema.NonEmptyArray(ApprovalDecision);
  * render the card from it, and a vendor-shaped payload there would make what
  * the user reads a function of which harness answered (ADR 0007).
  */
-const openRequest = <const K extends string, F extends Schema.Struct.Fields>(kind: K, detail: F) =>
+const defineOpenRequest = <const K extends string, F extends Schema.Struct.Fields>(
+  kind: K,
+  detail: F,
+) =>
   Schema.Struct({
     requestId: Fact,
     /** The item the request is about, so a surface can overlay it in place. */
@@ -259,13 +262,13 @@ const openRequest = <const K extends string, F extends Schema.Struct.Fields>(kin
 /** A rename carries two paths, a multi-file edit more, so it is a list. */
 const Paths = Schema.Array(Fact);
 
-const CommandApproval = openRequest("command_approval", { command: Message });
+const CommandApproval = defineOpenRequest("command_approval", { command: Message });
 
-const FileChangeApproval = openRequest("file_change_approval", { paths: Paths });
+const FileChangeApproval = defineOpenRequest("file_change_approval", { paths: Paths });
 
-const FileReadApproval = openRequest("file_read_approval", { paths: Paths });
+const FileReadApproval = defineOpenRequest("file_read_approval", { paths: Paths });
 
-const ToolApproval = openRequest("tool_approval", { toolName: Fact });
+const ToolApproval = defineOpenRequest("tool_approval", { toolName: Fact });
 
 /**
  * One question in a `question` request: the chip it is labelled with, the
@@ -287,7 +290,9 @@ const Question = Schema.Struct({
 });
 
 /** A harness asks one to four at a time, so the request carries a list. */
-const QuestionRequest = openRequest("question", { questions: Schema.NonEmptyArray(Question) });
+const QuestionRequest = defineOpenRequest("question", {
+  questions: Schema.NonEmptyArray(Question),
+});
 
 /**
  * The request a session is parked on, as the row that holds it and the API
@@ -348,18 +353,18 @@ const base = {
   raw: Schema.optionalKey(Schema.Struct({ source: Fact, payload: Schema.Json })),
 };
 
-const event = <const Tag extends string, Fields extends Schema.Struct.Fields>(
+const defineEvent = <const Tag extends string, Fields extends Schema.Struct.Fields>(
   tag: Tag,
   fields: Fields,
 ) => Schema.Struct({ _tag: Schema.Literal(tag), ...base, ...fields });
 
-const SessionStarted = event("session.started", {});
+const SessionStarted = defineEvent("session.started", {});
 
 /**
  * `message` carries what the exit was, where the reason alone does not say it:
  * a workspace that could not be made says why in the machine's own words.
  */
-const SessionExited = event("session.exited", {
+const SessionExited = defineEvent("session.exited", {
   reason: ExitReason,
   message: Schema.optionalKey(Message),
 });
@@ -381,9 +386,9 @@ export type StructuredResult = Schema.Schema.Type<typeof StructuredResult>;
  * A completion the controller cannot bracket against its start is not a turn
  * boundary, so the id is required on both.
  */
-const TurnStarted = event("turn.started", { turnId: Fact, model: Schema.optionalKey(Fact) });
+const TurnStarted = defineEvent("turn.started", { turnId: Fact, model: Schema.optionalKey(Fact) });
 
-const TurnCompleted = event("turn.completed", {
+const TurnCompleted = defineEvent("turn.completed", {
   turnId: Fact,
   state: TurnState,
   usage: Schema.optionalKey(Usage),
@@ -411,22 +416,22 @@ const itemFields = {
   detail: Schema.optionalKey(Schema.Json),
 };
 
-const ItemStarted = event("item.started", itemFields);
+const ItemStarted = defineEvent("item.started", itemFields);
 
-const ItemCompleted = event("item.completed", { ...itemFields, status: ItemStatus });
+const ItemCompleted = defineEvent("item.completed", { ...itemFields, status: ItemStatus });
 
 /** Append-only text for one (item, streamKind). Unbounded: cutting it loses output. */
-const ContentDelta = event("content.delta", {
+const ContentDelta = defineEvent("content.delta", {
   turnId: Fact,
   itemId: Fact,
   streamKind: StreamKind,
   delta: Schema.String,
 });
 
-const SessionUsageUpdated = event("session.usage.updated", { usage: Usage });
+const SessionUsageUpdated = defineEvent("session.usage.updated", { usage: Usage });
 
 /** Either may fire inside a turn or between turns, so the turn id is optional. */
-const RuntimeWarning = event("runtime.warning", {
+const RuntimeWarning = defineEvent("runtime.warning", {
   turnId: Schema.optionalKey(Fact),
   message: Message,
 });
@@ -436,7 +441,7 @@ const RuntimeWarning = event("runtime.warning", {
  * reference set adapters map into, with `unknown` for the rest; it stays a
  * string so a class this build has not heard of still reaches the user.
  */
-const RuntimeError = event("runtime.error", {
+const RuntimeError = defineEvent("runtime.error", {
   turnId: Schema.optionalKey(Fact),
   class: Fact,
   message: Schema.optionalKey(Message),
@@ -448,13 +453,13 @@ const RuntimeError = event("runtime.error", {
  * the row and the API hold is exactly what arrived, whatever the envelope
  * around it grows to carry.
  */
-const RequestOpened = event("request.opened", { request: OpenRequest });
+const RequestOpened = defineEvent("request.opened", { request: OpenRequest });
 
 /**
  * The park is over, whoever ended it: the user's answer, the turn being
  * interrupted, or the harness withdrawing the question.
  */
-const RequestResolved = event("request.resolved", {
+const RequestResolved = defineEvent("request.resolved", {
   requestId: Fact,
   decision: ApprovalDecision,
 });

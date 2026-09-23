@@ -203,7 +203,7 @@ export interface CompiledExpression {
 /**
  * The compiled program, for a caller that evaluates one source against many
  * contexts and does not want it read again for each of them. It only parses:
- * it does not type-check the source the way `checkExpression` does. The guard
+ * it does not type-check the source the way `validateExpression` does. The guard
  * is not lost by compiling: what a caller hands the program to is
  * `evaluateExpression`, which takes a program as readily as a source.
  */
@@ -241,7 +241,7 @@ const typeCheckSource = (
  * user is waiting on this validation, so the error message also explains how
  * to fix the source.
  */
-export const checkExpression = (
+export const validateExpression = (
   source: string,
   scope: ExpressionScope,
 ): Effect.Effect<void, ExpressionError> => Effect.asVoid(typeCheckSource(source, scope));
@@ -254,7 +254,7 @@ export const checkExpression = (
  * A `dyn` source is accepted, because its type is known only when it is
  * evaluated.
  */
-export const checkCondition = (
+export const validateCondition = (
   source: string,
   scope: ExpressionScope,
 ): Effect.Effect<void, ExpressionError> =>
@@ -324,7 +324,7 @@ const countCharactersBefore = (text: string, offset: number): number =>
  * template). The message gives the position of the first error as a character
  * number, counted from 1, because a template can contain many expressions.
  */
-export const checkTemplate = (template: string): Effect.Effect<void, ExpressionError> =>
+export const validateTemplate = (template: string): Effect.Effect<void, ExpressionError> =>
   Effect.suspend(() => {
     const read = parseTemplateExpressions(template);
     if (Result.isFailure(read)) {
@@ -340,7 +340,7 @@ export const checkTemplate = (template: string): Effect.Effect<void, ExpressionE
       read.success,
       (expression) =>
         Effect.mapError(
-          checkExpression(expression.source, "run"),
+          validateExpression(expression.source, "run"),
           (error) =>
             new ExpressionError({
               message: `The expression that starts with the {{ at character ${String(countCharactersBefore(template, expression.offset) + 1)} and ends at the next }} is not valid. ${error.message}`,

@@ -46,7 +46,7 @@ const make = Effect.gen(function* () {
   /** How many times anything has been dropped. See the note above. */
   let dropped = 0;
 
-  const drop = (holds: (actor: SessionActor) => boolean): void => {
+  const dropHeldActors = (holds: (actor: SessionActor) => boolean): void => {
     dropped += 1;
     for (const [hash, actor] of held) if (holds(actor)) held.delete(hash);
   };
@@ -86,12 +86,12 @@ const make = Effect.gen(function* () {
     forgetSessions: (sessionIds: ReadonlyArray<string>): void => {
       if (sessionIds.length === 0) return;
       const ended = new Set(sessionIds);
-      drop((actor) => ended.has(actor.sessionId));
+      dropHeldActors((actor) => ended.has(actor.sessionId));
     },
 
     /** Forgets every session on this profile: its grants have been rewritten. */
     forgetProfile: (profileId: string): void => {
-      drop((actor) => actor.profileId === profileId);
+      dropHeldActors((actor) => actor.profileId === profileId);
     },
   };
 });

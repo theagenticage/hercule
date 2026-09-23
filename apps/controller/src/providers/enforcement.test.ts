@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderDefinition } from "@hercule/plugin-host";
-import { providerDefinition } from "../plugins/testing";
+import { buildProviderDefinition } from "../plugins/testing";
 import { listUnenforcedFields } from "./enforcement";
 
-const ENFORCING: ProviderDefinition = providerDefinition("claude-provider");
+const ENFORCING: ProviderDefinition = buildProviderDefinition("claude-provider");
 
 const IGNORING: ProviderDefinition = {
-  ...providerDefinition("codex-provider"),
+  ...buildProviderDefinition("codex-provider"),
   declared: { ...ENFORCING.declared, disallowedTools: "unsupported" },
 };
 

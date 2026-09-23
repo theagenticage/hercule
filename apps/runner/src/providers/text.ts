@@ -7,12 +7,12 @@
 import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "@hercule/protocol";
 
 /** An id, a name, a version: short by nature, and simply cut when it is not. */
-export const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
+export const truncateFact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
 
 /**
  * The same cut for the longer fields: free text a harness wrote, not an id. It
  * says where it cut, because a command read as whole is a command the user
  * approved something else than.
  */
-export const text = (value: string): string =>
+export const truncateMessage = (value: string): string =>
   value.length > MAX_MESSAGE_LENGTH ? `${value.slice(0, MAX_MESSAGE_LENGTH - 1)}…` : value;

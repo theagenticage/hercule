@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient } from "@hercule/client-core";
 import { ProviderLogin } from "./provider-login";
-import { expectInDocumentOrder, reading, stubApi, type Handler } from "../app/testing";
+import { expectInDocumentOrder, readPageText, stubApi, type Handler } from "../app/testing";
 
 const BASE = "http://controller.test";
 
@@ -34,11 +34,11 @@ const SNAPSHOT = {
   models: [],
 };
 
-const sentCodes = (api: ReturnType<typeof stubApi>) =>
+const listSentCodes = (api: ReturnType<typeof stubApi>) =>
   api.calls.filter((call) => call.path.endsWith("/login-code"));
 
 /** Mounts the panel and presses the button that starts a login. */
-const opened = async (handlers: Readonly<Record<string, Handler>>) => {
+const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
   const api = stubApi(handlers);
   const onLoggedIn = vi.fn();
   const user = userEvent.setup();
@@ -62,18 +62,18 @@ const opened = async (handlers: Readonly<Record<string, Handler>>) => {
 
 describe("a login the vendor printed a code for", () => {
   it("shows the code, asks for nothing, and is done when the user says so", async () => {
-    const { api, user, onLoggedIn } = await opened({
+    const { api, user, onLoggedIn } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE } },
       [LOGIN_CODE]: { body: SNAPSHOT },
     });
 
     await waitFor(() => {
-      expect(reading()).toContain(USER_CODE);
+      expect(readPageText()).toContain(USER_CODE);
     });
-    expect(reading()).toContain(DEVICE_URL);
+    expect(readPageText()).toContain(DEVICE_URL);
     // What to do when the browser cannot reach this machine at all.
-    expect(reading()).toContain("ssh -L 1455:localhost:1455");
-    expect(reading()).toContain("auth.json");
+    expect(readPageText()).toContain("ssh -L 1455:localhost:1455");
+    expect(readPageText()).toContain("auth.json");
     // Both are long enough to mistype and neither can be read off a terminal.
     expect(screen.getByRole("button", { name: "Copy code" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Copy address" })).toBeDefined();
@@ -85,7 +85,7 @@ describe("a login the vendor printed a code for", () => {
 
     // Nothing is relayed and nothing is waited on: the browser and the vendor
     // finish this between themselves.
-    expect(sentCodes(api)).toEqual([]);
+    expect(listSentCodes(api)).toEqual([]);
     expect(onLoggedIn).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Done" }));
@@ -93,13 +93,13 @@ describe("a login the vendor printed a code for", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(onLoggedIn).toHaveBeenCalledTimes(1);
-    expect(sentCodes(api)).toEqual([]);
+    expect(listSentCodes(api)).toEqual([]);
   });
 });
 
 describe("a login the vendor wants a code pasted into", () => {
   it("asks for the code and waits for the user to send it", async () => {
-    const { api } = await opened({
+    const { api } = await openLoginPanel({
       [LOGIN]: { body: { url: PASTE_URL } },
       [LOGIN_CODE]: { body: SNAPSHOT },
     });
@@ -112,6 +112,6 @@ describe("a login the vendor wants a code pasted into", () => {
       screen.getByRole("button", { name: "Cancel" }),
       screen.getByRole("button", { name: /submit/i }),
     ]);
-    expect(sentCodes(api)).toEqual([]);
+    expect(listSentCodes(api)).toEqual([]);
   });
 });

@@ -43,12 +43,15 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { taskRepository, type TaskOrder } from "./repository";
 
 /** What listing takes: the filter, and how much of it in what order. */
-const QueryInput = Schema.Struct({ ...TaskFilter.fields, ...pageInput(TASK_SORT_FIELDS) });
+const QueryInput = Schema.Struct({
+  ...TaskFilter.fields,
+  ...buildPageInputFields(TASK_SORT_FIELDS),
+});
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
@@ -100,7 +103,7 @@ const NO_SUCH_PROJECT = "no such project";
 const SCALARS = ["title", "description", "status", "priority"] as const;
 
 /** A value carried twice is carried once. */
-const unique = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
+const removeDuplicates = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
 
 /**
  * How a listing is ordered.
@@ -109,7 +112,7 @@ const unique = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(va
  * would mean two paging strategies chosen per request, and ignoring the sort
  * would answer in an order nobody asked for without saying so.
  */
-const orderOf = (
+const chooseOrder = (
   text: QueryInput["text"],
   sort: QueryInput["sort"],
 ): Effect.Effect<TaskOrder, Validation> => {
@@ -131,7 +134,7 @@ const make = Effect.gen(function* () {
   const tasks = yield* taskRepository;
   const audit = yield* AuditLog;
 
-  const live = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
+  const readLiveTaskOrFail = (id: string): Effect.Effect<Task, NotFound | SqlError> =>
     Effect.flatMap(
       tasks.live(id),
       Option.match({
@@ -141,7 +144,7 @@ const make = Effect.gen(function* () {
     );
 
   /** A project a task points at has to be one that is there to point at. */
-  const requireProject = (
+  const ensureProjectExists = (
     id: string | null | undefined,
   ): Effect.Effect<void, NotFound | SqlError> =>
     id === undefined || id === null
@@ -159,7 +162,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("task.query");
         const decoded = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         const { limit, cursor, sort, text, ...filter } = decoded;
-        const order = yield* orderOf(text, sort);
+        const order = yield* chooseOrder(text, sort);
         const listing = yield* refuseCursor(
           tasks.list(filter, { limit: limit ?? DEFAULT_PAGE_LIMIT, cursor, order }),
         );
@@ -176,7 +179,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        return yield* live(id);
+        return yield* readLiveTaskOrFail(id);
       }),
 
     /** Writes down a piece of intent. */
@@ -193,13 +196,13 @@ const make = Effect.gen(function* () {
             // that records it carry the same instant.
             const at = yield* nowIso;
             const actor = yield* currentStamp;
-            yield* requireProject(decoded.projectId);
+            yield* ensureProjectExists(decoded.projectId);
             const task = yield* tasks.insert({
               title: decoded.title,
               description: decoded.description,
               status: "open",
               priority: decoded.priority ?? "normal",
-              labels: unique(decoded.labels ?? []),
+              labels: removeDuplicates(decoded.labels ?? []),
               projectId: decoded.projectId,
               provenance: decoded.provenance ?? [],
               at,
@@ -241,8 +244,8 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             const actor = yield* currentStamp;
-            const before = yield* live(id);
-            yield* requireProject(patch.projectId);
+            const before = yield* readLiveTaskOrFail(id);
+            yield* ensureProjectExists(patch.projectId);
 
             const changes: Record<string, ScalarChange | ListChange> = {};
             const edit: Record<string, unknown> = {};
@@ -262,8 +265,8 @@ const make = Effect.gen(function* () {
             // A label named on both sides is added and removed in one call,
             // which leaves the task carrying it: reporting it as removed would
             // fire every workflow watching for that label to come off.
-            const adding = unique(patch.addLabels ?? []);
-            const removed = unique(patch.removeLabels ?? []).filter(
+            const adding = removeDuplicates(patch.addLabels ?? []);
+            const removed = removeDuplicates(patch.removeLabels ?? []).filter(
               (label) => !adding.includes(label) && before.labels.includes(label),
             );
             const kept = before.labels.filter((label) => !removed.includes(label));
@@ -310,7 +313,7 @@ const make = Effect.gen(function* () {
             });
             // Read back rather than merge in memory: what the caller gets is
             // then the row that was written, whatever the edit touched.
-            return yield* live(id);
+            return yield* readLiveTaskOrFail(id);
           }),
         );
       }),
@@ -333,7 +336,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             const actor = yield* currentStamp;
-            const task = yield* live(id);
+            const task = yield* readLiveTaskOrFail(id);
             yield* tasks.softDelete(id, at);
             // The final snapshot, because nothing can read the row afterwards.
             yield* audit.append({
