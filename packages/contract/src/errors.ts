@@ -185,22 +185,69 @@ export const capExceeded = (details: CapDetails, message: string): CapExceeded =
 export const internal = (message: string): Internal =>
   new Internal({ error: { code: "internal", message } });
 
-const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
+/**
+ * One issue as a line of text: its path, with the keys joined by dots, and
+ * then its message. An issue with an empty path is its message alone. The CLI
+ * prints each issue as this line, and the controller tells a plugin about each
+ * field it registered wrong in this line, so an issue reads the same in both
+ * places.
+ */
+export const describeIssue = (issue: Issue): string =>
+  issue.path.length === 0 ? issue.message : `${issue.path.join(".")}: ${issue.message}`;
+
+const formatStandardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
 /**
- * A decode failure as the contract's `issues` list: one entry per thing wrong,
- * so a caller fixes every field in one retry. Path segments are stringified
- * because a JSON document has no other kind of key.
+ * Every issue of a decode failure, each at its path, in the contract's
+ * vocabulary: one entry per thing wrong, so a caller fixes every field in one
+ * retry. Path segments are stringified because a JSON document has no other
+ * kind of key.
+ *
+ * The walk goes through the pointers, the encodings, the groups of issues and
+ * the unions whose members each failed, to the leaves. `describeLeaf` gives
+ * the issues that one leaf stands for, in words of the caller's own, or
+ * `undefined` to describe the leaf in the schema library's words. An empty
+ * list leaves the leaf out. `path` is the place of the decoded value, which
+ * each path starts with. The checks of a workflow word their issues through
+ * this walk, so each of them reads the failure in the same way.
+ */
+export const listSchemaIssues = (
+  issue: SchemaIssue.Issue,
+  options: {
+    readonly path?: ReadonlyArray<string>;
+    readonly describeLeaf?: (
+      leaf: SchemaIssue.Issue,
+      path: ReadonlyArray<string>,
+    ) => ReadonlyArray<Issue> | undefined;
+  } = {},
+): ReadonlyArray<Issue> => {
+  const walk = (node: SchemaIssue.Issue, path: ReadonlyArray<string>): ReadonlyArray<Issue> => {
+    if (node._tag === "Pointer") return walk(node.issue, [...path, ...node.path.map(String)]);
+    if (node._tag === "Encoding") return walk(node.issue, path);
+    if (node._tag === "Composite" || (node._tag === "AnyOf" && node.issues.length > 0)) {
+      return node.issues.flatMap((child) => walk(child, path));
+    }
+    return (
+      options.describeLeaf?.(node, path) ??
+      formatStandardIssues(node).issues.map((formatted) => ({
+        path: [...path, ...(formatted.path ?? []).map(String)],
+        message: formatted.message,
+      }))
+    );
+  };
+  return walk(issue, options.path ?? []);
+};
+
+/**
+ * A decode failure as the contract's `issues` list, in the schema library's
+ * words.
  *
  * The wire vocabulary names no schema library, and this is the one place the
  * two meet: the transport decodes a request with it and a service decodes an
  * in-process call with it, so the same bad input reads the same either way.
  */
 export const issuesOf = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
-  standardIssues(error.issue).issues.map((issue) => ({
-    path: (issue.path ?? []).map(String),
-    message: issue.message,
-  }));
+  listSchemaIssues(error.issue);
 
 /** A decode failure as the error the operation answers with. */
 export const validationOf = (error: Schema.SchemaError): Validation => validation(issuesOf(error));

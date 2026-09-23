@@ -14,7 +14,7 @@ export {
   type AuditKind,
   type AuditRow,
 } from "./audit-log";
-export { EventKindCatalog, type NameableEventKind } from "./catalog";
+export { EventKindCatalog, type DeclaredEventKindWithConnectionType } from "./catalog";
 export { CRON_TICK_EVENT_KIND, EventKinds, EventKindsLayer, isCoreEventKind } from "./kinds";
 export {
   advanceConsumerCursor,

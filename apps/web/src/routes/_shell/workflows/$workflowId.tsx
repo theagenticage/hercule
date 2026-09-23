@@ -4,13 +4,9 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { isNotFound } from "@hercule/client-core";
 import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import {
-  agentsQuery,
-  eventKindsQuery,
-  workflowActionsQuery,
-  workflowQuery,
-} from "../../../app/queries";
-import { WorkflowPage } from "./-page";
+import { workflowQuery } from "../../../app/queries";
+import { prefetchWorkflowCatalog } from "./-catalog";
+import { WorkflowEditorPage } from "./-page";
 import { validateWorkflowViewSearch } from "./-view";
 
 export const Route = createFileRoute("/_shell/workflows/$workflowId")({
@@ -26,16 +22,14 @@ export const Route = createFileRoute("/_shell/workflows/$workflowId")({
         // bookmark, says so. It does not say that the screen failed.
         throw isNotFound(error) ? notFound() : error;
       }),
-      queryClient.ensureQueryData(workflowActionsQuery(client)),
-      queryClient.ensureQueryData(eventKindsQuery(client)),
-      queryClient.ensureQueryData(agentsQuery(client)),
+      prefetchWorkflowCatalog(client, queryClient),
     ]);
   },
   component: StoredWorkflow,
   notFoundComponent: DeletedWorkflow,
 });
 
-/** A stored workflow, written from its text as it is stored. */
+/** A stored workflow, written from its source as it is stored. */
 function StoredWorkflow(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
   const { workflowId } = Route.useParams();
@@ -51,9 +45,9 @@ function StoredWorkflow(): JSX.Element {
   const isGone = isNotFound(read.error);
 
   return (
-    <WorkflowPage
+    <WorkflowEditorPage
       // Each workflow has a page of its own: nothing that one workflow's
-      // page holds, such as the answer of a check or the undo history,
+      // page holds, such as the marks in its text or the undo history,
       // carries over to the next.
       key={workflowId}
       client={client}

@@ -22,10 +22,10 @@ import {
 import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hercule/home";
 import { Result } from "effect";
 import { parseArguments, said } from "./commands/args";
-import type { WorkflowIssues } from "@hercule/contract";
+import { describeIssue, type WorkflowIssues } from "@hercule/contract";
 import { execute, type Outcome } from "./commands/execute";
 import { commandHelp, nounHelp, rootHelp, shellExample } from "./commands/help";
-import { describeIssue, renderHuman } from "./commands/render";
+import { renderHuman } from "./commands/render";
 import { commandAt, wordsAfter, type Command } from "./commands/tree";
 import { CredentialError, resolveCredential, resolveUrl, type Env } from "./credentials";
 import { EXIT, UsageError } from "./exit";

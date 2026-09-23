@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { Result } from "effect";
 import * as FastCheck from "effect/testing/FastCheck";
+import { nestInLists } from "@hercule/protocol/testing";
 import {
   decodeWorkflowDefinition,
   parseWorkflowSource,
@@ -112,8 +113,16 @@ const CEL_EXPRESSIONS = [
   'inputs.pr_url != ""',
 ];
 
-/** A step, trigger or input name: a CEL identifier, because an expression reads it. */
-const identifierArbitrary = FastCheck.stringMatching(/^[a-z][a-z0-9_]{0,11}$/);
+/** The ids and names the contract refuses, repeated here because the contract does not export them. */
+const UNREADABLE_FIELD_NAMES = new Set(["in", "true", "false", "null", "constructor", "__proto__"]);
+
+/**
+ * A step, trigger or input name: a CEL identifier, because an expression reads
+ * it, and not a word that an expression cannot read as a field name.
+ */
+const identifierArbitrary = FastCheck.stringMatching(/^[a-z][a-z0-9_]{0,11}$/).filter(
+  (word) => !UNREADABLE_FIELD_NAMES.has(word),
+);
 
 const plainTextArbitrary = FastCheck.array(FastCheck.constantFrom(...PLAIN_WORDS), {
   minLength: 1,
@@ -508,6 +517,27 @@ steps:
     expect(listIssuePaths(issues)).toEqual([["steps", "0", "kind"]]);
   });
 
+  it("points an agent that is not an id at it, and says where the id of an Agent is shown", () => {
+    const issues = collectIssues(`name: agent by name
+steps:
+  - id: file_task
+    kind: action
+    action: task.create
+  - id: review
+    kind: agent
+    agent: nobody
+    prompt: Review the pull request.
+`);
+    expect(issues).toEqual([
+      {
+        path: ["steps", "1", "agent"],
+        message:
+          '"nobody" is not the id of an Agent. Write the id of an Agent. ' +
+          "The command hercule agent list shows the id of each Agent.",
+      },
+    ]);
+  });
+
   it("points two steps that share an id at the second one", () => {
     const issues = collectIssues(`name: two steps, one id
 steps:
@@ -603,10 +633,6 @@ const ONE_STEP = `steps:
     kind: action
     action: task.create
 `;
-
-/** A value nested in lists this many levels deep. */
-const nestInLists = (levels: number): unknown =>
-  Array.from({ length: levels }).reduce<unknown>((inner) => [inner], "bottom");
 
 describe("parsing a source that copies one part of itself into another", () => {
   it("refuses an alias to an anchor that does not exist, at the alias, and does not throw", () => {

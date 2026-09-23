@@ -25,18 +25,18 @@ import { defineConfig } from "vitest/config";
 const reactPackages = ["apps/web", "packages/ui"];
 
 /**
- * Tests of code that more than one JavaScript engine runs. The contract's
- * parse of a workflow runs in the controller under Bun and in the browser.
- * Client-core's reading of a workflow runs in the browser, which is V8 in
- * Chrome and JavaScriptCore in Safari. These tests run in both projects, so
- * both engines run them: JavaScriptCore under Bun, and V8 under Node. The
- * engines have different limits, such as how many arguments one call can
- * take.
+ * Tests of code whose result can depend on the JavaScript engine. The
+ * contract's parse of a workflow runs in the controller under Bun and in the
+ * browser, and client-core's reading of a workflow runs that parse in the
+ * browser, which is V8 in Chrome and JavaScriptCore in Safari. The engines
+ * have different limits, such as how many arguments one call can take, and a
+ * long source reaches them. These tests run in both projects, so both engines
+ * run them: JavaScriptCore under Bun, and V8 under Node. Completion and the
+ * graph only read what the parse answers and reach no such limit, so their
+ * tests run on one engine.
  */
 const bothEngineTests = [
   "packages/contract/src/groups/workflow-source.test.ts",
-  "packages/client-core/src/workflow-completion.test.ts",
-  "packages/client-core/src/workflow-graph.test.ts",
   "packages/client-core/src/workflow-source.test.ts",
 ];
 

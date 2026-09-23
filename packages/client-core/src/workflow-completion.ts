@@ -1,16 +1,17 @@
 /**
- * What the editor offers to write at the cursor in a workflow's text. The keys
- * and the fixed values come from the definition's schema in the contract, so
- * the offers follow the shape that a save checks. The ids that a step and a
- * trigger name come from what the controller knows: its action catalog, its
- * agents and its event kinds.
+ * What the editor offers to write at the cursor in a workflow's source. The
+ * keys and the fixed values come from the definition's schema in the
+ * contract, so the offers follow the shape that a save validates. The ids
+ * that a step and a trigger name come from what the controller knows: its
+ * action catalog, its agents and its event kinds.
  *
  * The mapping that the cursor writes into is found in the YAML document of the
- * one parse of the text. The line up to the cursor is read as text, because a
- * key that the author has half written is not a key in the document yet.
+ * one parse of the source, and the lines are the lines that the parse counted.
+ * The line up to the cursor is read as text, because a key that the author has
+ * half written is not a key in the document yet.
  */
 import { SchemaAST } from "effect";
-import { isMap, isNode, isScalar, isSeq, type YAMLMap } from "yaml";
+import { isMap, isNode, isScalar, isSeq, type LineCounter, type YAMLMap } from "yaml";
 import {
   readFieldNotation,
   spellPathKey,
@@ -21,9 +22,9 @@ import {
   type WorkflowAction,
 } from "@hercule/contract";
 import { idTail } from "./id-tail";
-import type { WorkflowSourceReading } from "./workflow-source";
+import { findLineEnd, findLineStart, type WorkflowSourceReading } from "./workflow-source";
 
-/** What a workflow's text can name that the controller knows. */
+/** What a workflow's source can name that the controller knows. */
 export interface WorkflowCatalog {
   readonly actions: ReadonlyArray<Pick<WorkflowAction, "id" | "displayName" | "description">>;
   readonly agents: ReadonlyArray<Pick<Agent, "id" | "name">>;
@@ -61,7 +62,7 @@ const KEY_BEFORE_CURSOR = /^( *)((?:- +)?)(\w*)$/;
 interface CursorLine {
   /** The offset of the first character of the line. */
   readonly start: number;
-  /** The offset of the line break that ends the line, or of the end of the text. */
+  /** The offset of the line break that ends the line, or of the end of the source. */
   readonly end: number;
   /** The column of the `- ` that starts a list item on the line, if the line has one. */
   readonly itemColumn: number | undefined;
@@ -73,21 +74,30 @@ interface CursorLine {
   readonly typed: string;
 }
 
+/** A parsed source and the lines that the parse counted in it. */
+interface CursorSource {
+  readonly source: string;
+  readonly lines: LineCounter;
+}
+
 /**
  * What the cursor's line writes up to the cursor, or `undefined` for a line
  * that writes neither a key nor a value after a key there.
  */
-const readCursorLine = (text: string, position: number): CursorLine | undefined => {
-  const start = text.lastIndexOf("\n", position - 1) + 1;
-  const lineBreak = text.indexOf("\n", position);
-  const before = text.slice(start, position);
+const readCursorLine = (
+  source: string,
+  lines: LineCounter,
+  position: number,
+): CursorLine | undefined => {
+  const start = findLineStart(lines, position);
+  const before = source.slice(start, position);
   const value = VALUE_BEFORE_CURSOR.exec(before);
   const match = value ?? KEY_BEFORE_CURSOR.exec(before);
   if (match === null) return undefined;
   const [, indent = "", item = ""] = match;
   return {
     start,
-    end: lineBreak === -1 ? text.length : lineBreak,
+    end: findLineEnd(source, lines, position),
     itemColumn: item === "" ? undefined : indent.length,
     keyColumn: indent.length + item.length,
     key: value?.[3],
@@ -100,8 +110,7 @@ const readNodeStart = (node: unknown): number | undefined =>
   isNode(node) ? node.range?.[0] : undefined;
 
 /** The column of an offset in its line, counted from 0. */
-const findColumn = (text: string, offset: number): number =>
-  offset - (text.lastIndexOf("\n", offset - 1) + 1);
+const findColumn = (lines: LineCounter, offset: number): number => lines.linePos(offset).col - 1;
 
 /**
  * The path of the mapping that the cursor's line writes a key of, and the
@@ -115,7 +124,7 @@ const findColumn = (text: string, offset: number): number =>
  * the column of the line's key.
  */
 const findCursorMapping = (
-  text: string,
+  lines: LineCounter,
   contents: unknown,
   line: CursorLine,
 ): { readonly path: ReadonlyArray<string>; readonly nodes: ReadonlyArray<unknown> } | undefined => {
@@ -125,7 +134,7 @@ const findCursorMapping = (
   for (;;) {
     nodes.push(node);
     if (isMap(node)) {
-      const column = findColumn(text, readNodeStart(node) ?? 0);
+      const column = findColumn(lines, readNodeStart(node) ?? 0);
       if (line.keyColumn === column) return { path, nodes };
       if (line.keyColumn < column) return undefined;
       const pair = node.items.findLast(
@@ -135,7 +144,7 @@ const findCursorMapping = (
       path.push(spellPathKey(pair.key));
       node = pair.value;
     } else if (isSeq(node)) {
-      const column = findColumn(text, readNodeStart(node) ?? 0);
+      const column = findColumn(lines, readNodeStart(node) ?? 0);
       if (line.itemColumn === column) {
         // The line starts an item of this list.
         const index = node.items.findIndex((item) => (readNodeStart(item) ?? -1) >= line.start);
@@ -268,35 +277,39 @@ const listCatalogValues = (
 };
 
 /**
- * The key of a pair as it stands in the text, or `undefined` for the key that
- * the cursor's line writes, which is still being typed. The parser reads a
- * word that the author has started on the line above a key as the first word
- * of that key, as in `pr kind: agent`. The key on the later line is written,
- * so it is the last line of such a key's text.
+ * The key of a pair as it stands in the source, or `undefined` for the key
+ * that the cursor's line writes, which is still being typed. The parser reads
+ * a word that the author has started on the line above a key as the first
+ * word of that key, as in `pr kind: agent`. The key on the later line is
+ * written, so it is the last line of such a key's text.
  */
-const readWrittenKey = (text: string, key: unknown, line: CursorLine): string | undefined => {
+const readWrittenKey = (
+  { source, lines }: CursorSource,
+  key: unknown,
+  line: CursorLine,
+): string | undefined => {
   const range = isNode(key) ? key.range : undefined;
   if (range === undefined || range === null || range[0] < line.start || range[0] > line.end) {
     return spellPathKey(key);
   }
   if (range[1] <= line.end) return undefined;
-  return text.slice(text.lastIndexOf("\n", range[1] - 1) + 1, range[1]).trim();
+  return source.slice(findLineStart(lines, range[1] - 1), range[1]).trim();
 };
 
-/** The pairs of a mapping that the text has written, each with its key as written. */
+/** The pairs of a mapping that the source has written, each with its key as written. */
 const listWrittenPairs = (
-  text: string,
+  cursorSource: CursorSource,
   mapping: YAMLMap,
   line: CursorLine,
 ): ReadonlyArray<{ readonly key: string; readonly value: unknown }> =>
   mapping.items.flatMap((pair) => {
-    const key = readWrittenKey(text, pair.key, line);
+    const key = readWrittenKey(cursorSource, pair.key, line);
     return key === undefined ? [] : [{ key, value: pair.value }];
   });
 
 /**
- * What to offer at an offset of a workflow's text: after `key: `, the values
- * that the key takes, and where the line writes a key, each key of the
+ * What to offer at an offset of a workflow's source: after `key: `, the
+ * values that the key takes, and where the line writes a key, each key of the
  * mapping that the mapping does not have yet, above or below the line. A key
  * or a value that the cursor's line writes is being typed, so it does not
  * count as written.
@@ -306,15 +319,19 @@ export const listWorkflowCompletions = (
   position: number,
   catalog: WorkflowCatalog,
 ): CompletionList | undefined => {
-  const { text, document } = reading;
-  const line = readCursorLine(text, position);
-  if (line === undefined || document === undefined) return undefined;
-  const place = findCursorMapping(text, document.contents, line);
+  const { source, document, lines } = reading;
+  if (document === undefined || lines === undefined) return undefined;
+  const line = readCursorLine(source, lines, position);
+  if (line === undefined) return undefined;
+  const place = findCursorMapping(lines, document.contents, line);
   if (place === undefined) return undefined;
+  const cursorSource: CursorSource = { source, lines };
 
   const readKind = (node: unknown): string | undefined => {
     if (!isMap(node)) return undefined;
-    const kind = listWrittenPairs(text, node, line).findLast((pair) => pair.key === "kind")?.value;
+    const kind = listWrittenPairs(cursorSource, node, line).findLast(
+      (pair) => pair.key === "kind",
+    )?.value;
     return isScalar(kind) ? String(kind.value) : undefined;
   };
   let types: ReadonlyArray<SchemaAST.AST> = [WorkflowDefinition.ast];
@@ -342,7 +359,7 @@ export const listWorkflowCompletions = (
     );
   }
   const written = new Set(
-    isMap(mapping) ? listWrittenPairs(text, mapping, line).map((pair) => pair.key) : [],
+    isMap(mapping) ? listWrittenPairs(cursorSource, mapping, line).map((pair) => pair.key) : [],
   );
   // Each key once, in the order of the schema, with the notation of its value.
   const keys = new Map<string, FieldNotation | undefined>();

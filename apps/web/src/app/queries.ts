@@ -356,6 +356,28 @@ export const workflowQuery = (client: HerculeClient, id: string) =>
     retry: false,
   });
 
+/**
+ * What the controller finds in a workflow's source when it validates the
+ * source as a save would. The answer names the source it is about, so a
+ * reader that shows the answer about an earlier source while the next one is
+ * validated can tell the two apart.
+ *
+ * A failure is said at once rather than retried, because the page says why
+ * the validation could not run and validates again when the live connection
+ * comes back. The page validates a source when the author stops typing, and
+ * again only after a failure, so a return to the window asks nothing again.
+ */
+export const workflowValidationQuery = (client: HerculeClient, source: string) =>
+  queryOptions({
+    queryKey: queryKeys.workflowValidation(source),
+    queryFn: async () => ({
+      source,
+      issues: await client.workflow.validate({ payload: { source } }),
+    }),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
 /** Every action a step can name, which the editor completes after `action:`. */
 export const workflowActionsQuery = (client: HerculeClient) =>
   queryOptions({

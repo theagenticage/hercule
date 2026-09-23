@@ -15,8 +15,14 @@ import type * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 
-/** An event kind that a trigger can name. */
-export interface NameableEventKind {
+/**
+ * An event kind that a trigger can name, as the controller holds it: the
+ * contract's `DeclaredEventKind`, with the qualified Connection type in place
+ * of `connectionRequired`. The check of a trigger compares the type with the
+ * type of the Connection that the trigger names. A client of the API needs to
+ * know only whether a trigger names a Connection.
+ */
+export interface DeclaredEventKindWithConnectionType {
   readonly kind: string;
   /** One line that says what an event of this kind means. */
   readonly description: string;
@@ -38,6 +44,8 @@ export class EventKindCatalog extends Context.Service<
      * disabled, or that did not start, are not in it: no event of theirs
      * arrives while the plugin does not run.
      */
-    readonly listActiveEventKinds: () => Effect.Effect<ReadonlyArray<NameableEventKind>>;
+    readonly listActiveEventKinds: () => Effect.Effect<
+      ReadonlyArray<DeclaredEventKindWithConnectionType>
+    >;
   }
 >()("hercule/controller/events/EventKindCatalog") {}

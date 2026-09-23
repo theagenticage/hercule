@@ -29,7 +29,14 @@ import {
   type WorkflowGraphNode,
 } from "@hercule/client-core";
 import { Button, cn } from "@hercule/ui";
-import { computeGraphLayout, type EdgeRoute, type Point, type Size } from "./layout";
+import {
+  computeGraphLayout,
+  LARGEST_PLACED_ZOOM,
+  placeDrawing,
+  type EdgeRoute,
+  type Point,
+  type Size,
+} from "./layout";
 
 /**
  * Every card has one size, so the layout knows it before anything is drawn.
@@ -68,16 +75,8 @@ const EDGE_COLOUR = "color-mix(in oklch, var(--faint), var(--muted) 20%)";
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 1.5;
-/**
- * The smallest zoom that the graph is placed at by itself. The kind of a card
- * is set at 10.5 px, the smallest size of the type scale, so a smaller zoom
- * would draw it smaller than the type scale allows.
- */
-const LEGIBLE_ZOOM = 1;
 /** The space around the drawing, as a part of the pane, when the author asks to see all of it. */
 const FIT_PADDING = 0.08;
-/** The space between the pane's edge and the drawing. */
-const PANE_MARGIN = 16;
 
 /** What a card calls the kind of its node. */
 const KIND_LABELS: Record<WorkflowGraphNode["kind"], string> = {
@@ -284,23 +283,13 @@ function ArrowMarker({ id }: { readonly id: string }): JSX.Element {
 }
 
 /**
- * The offset on one axis that places a drawing in the pane at the legible
- * zoom: a drawing that fits the pane is centred in it, and a larger one
- * starts at the pane's edge, where the triggers are, and the author pans to
- * the rest.
- */
-const findViewportOffset = (paneSize: number, drawingSize: number): number => {
-  const scaledSize = drawingSize * LEGIBLE_ZOOM;
-  return scaledSize + 2 * PANE_MARGIN <= paneSize ? (paneSize - scaledSize) / 2 : PANE_MARGIN;
-};
-
-/**
  * Places the drawing in the pane. On its own, it draws the drawing at the
- * legible zoom and never smaller. It places the drawing again when the pane
- * changes size and when the graph gains or loses a node, and not at each
- * keystroke that changes a label or an id, so that a place the author panned
- * to stays. "Fit to view" is the author asking to see all of the drawing, so
- * it makes the drawing as small as it must be to fit.
+ * legible zoom and never smaller, and a small drawing larger, as
+ * `placeDrawing` says. It places the drawing again when the pane changes
+ * size and when the graph gains or loses a node, and not at each keystroke
+ * that changes a label or an id, so that a place the author panned to stays.
+ * "Fit to view" is the author asking to see all of the drawing, so it makes
+ * the drawing as small as it must be to fit.
  */
 function DrawingPlacement({
   size,
@@ -312,16 +301,12 @@ function DrawingPlacement({
   const { setViewport } = useReactFlow();
   const paneWidth = useStore((state) => state.width);
   const paneHeight = useStore((state) => state.height);
-  const placeAtLegibleZoom = useEffectEvent(() => {
+  const placeInPane = useEffectEvent(() => {
     if (paneWidth === 0 || paneHeight === 0) return;
-    void setViewport({
-      x: findViewportOffset(paneWidth, size.width),
-      y: findViewportOffset(paneHeight, size.height),
-      zoom: LEGIBLE_ZOOM,
-    });
+    void setViewport(placeDrawing({ width: paneWidth, height: paneHeight }, size));
   });
   useEffect(() => {
-    placeAtLegibleZoom();
+    placeInPane();
   }, [paneWidth, paneHeight, nodeCount]);
   const fitToView = () => {
     if (paneWidth === 0 || paneHeight === 0) return;
@@ -331,7 +316,7 @@ function DrawingPlacement({
         paneWidth,
         paneHeight,
         MIN_ZOOM,
-        LEGIBLE_ZOOM,
+        LARGEST_PLACED_ZOOM,
         FIT_PADDING,
       ),
     );

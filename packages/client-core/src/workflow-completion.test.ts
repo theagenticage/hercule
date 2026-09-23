@@ -1,9 +1,9 @@
 /**
- * What the editor offers at the cursor in a workflow's text. Each test writes
- * a text with the cursor where the author leaves it while typing: at the end,
- * or on a line above keys that are written already. It reads the offers there.
- * The keys and the fixed values come from the definition's schema, and the ids
- * from the catalog.
+ * What the editor offers at the cursor in a workflow's source. Each test
+ * writes a source with the cursor where the author leaves it while typing: at
+ * the end, or on a line above keys that are written already. It reads the
+ * offers there. The keys and the fixed values come from the definition's
+ * schema, and the ids from the catalog.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -24,23 +24,23 @@ const CATALOG: WorkflowCatalog = {
   ],
 };
 
-/** The offers at the end of a text written as lines. */
+/** The offers at the end of a source written as lines. */
 const completeAtEnd = (lines: ReadonlyArray<string>): CompletionList | undefined => {
-  const text = lines.join("\n");
-  return listWorkflowCompletions(readWorkflowSource(text), text.length, CATALOG);
+  const source = lines.join("\n");
+  return listWorkflowCompletions(readWorkflowSource(source), source.length, CATALOG);
 };
 
-/** Marks the cursor in a text that `completeAtMark` reads. It is not a part of the text. */
+/** Marks the cursor in a source that `completeAtMark` reads. It is not a part of the source. */
 const CURSOR = "‸";
 
-/** The offers at the cursor mark of a text written as lines, joined with a line break. */
+/** The offers at the cursor mark of a source written as lines, joined with a line break. */
 const completeAtMark = (
   lines: ReadonlyArray<string>,
   lineBreak = "\n",
 ): CompletionList | undefined => {
   const marked = lines.join(lineBreak);
-  const text = marked.replace(CURSOR, "");
-  return listWorkflowCompletions(readWorkflowSource(text), marked.indexOf(CURSOR), CATALOG);
+  const source = marked.replace(CURSOR, "");
+  return listWorkflowCompletions(readWorkflowSource(source), marked.indexOf(CURSOR), CATALOG);
 };
 
 const listLabels = (completions: CompletionList | undefined): ReadonlyArray<string> =>
@@ -104,10 +104,10 @@ describe("listWorkflowCompletions", () => {
   });
 
   it("replaces the part of a key that the author typed, which does not count as written", () => {
-    const text = ["name: Review", "steps:", "  - id: review", "    kind: agent", "    pro"];
-    const completions = completeAtEnd(text);
+    const lines = ["name: Review", "steps:", "  - id: review", "    kind: agent", "    pro"];
+    const completions = completeAtEnd(lines);
 
-    expect(completions?.from).toBe(text.join("\n").length - "pro".length);
+    expect(completions?.from).toBe(lines.join("\n").length - "pro".length);
     expect(listLabels(completions)).toContain("prompt");
   });
 
@@ -213,10 +213,10 @@ describe("listWorkflowCompletions", () => {
   it("tells two agents with one name apart by the tail of each one's id", () => {
     const other = "0199e0e7-1111-7000-8000-0000000000cd";
     const lines = ["name: Review", "steps:", "  - id: review", "    kind: agent", "    agent: "];
-    const text = lines.join("\n");
+    const source = lines.join("\n");
 
     expect(
-      listWorkflowCompletions(readWorkflowSource(text), text.length, {
+      listWorkflowCompletions(readWorkflowSource(source), source.length, {
         ...CATALOG,
         agents: [
           { id: AGENT_ID, name: "Reviewer" },
@@ -272,7 +272,7 @@ describe("listWorkflowCompletions", () => {
     ).toEqual(AGENT_STEP_KEYS_AFTER_AGENT.filter((key) => key !== "prompt" && key !== "join"));
   });
 
-  it("offers a key at the top of the text above the keys written there", () => {
+  it("offers a key at the top of the source above the keys written there", () => {
     expect(listLabels(completeAtMark(["name: Review", `st${CURSOR}`, "steps: []", ""]))).toEqual([
       "description",
       "inputs",
@@ -282,7 +282,7 @@ describe("listWorkflowCompletions", () => {
     ]);
   });
 
-  it("reads a text with \\r\\n line breaks as it reads one with \\n line breaks", () => {
+  it("reads a source with \\r\\n line breaks as it reads one with \\n line breaks", () => {
     const lines = ["name: Review", "steps:", "  - id: review", "    kind: agent", `    ${CURSOR}`];
 
     expect(completeAtMark(lines, "\r\n")?.offers).toEqual(completeAtMark(lines)?.offers);

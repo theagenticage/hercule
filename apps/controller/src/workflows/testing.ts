@@ -1,13 +1,13 @@
 /**
- * What the workflow HTTP tests build on: a controller past first-run setup with
- * a provider for Agents and a local GitHub for triggers, the calls that make,
- * change and list what a case needs, and the read of what a refusal names.
- * Written once here, so two suites that check different rules arrange the same
- * controller.
+ * What the workflow tests build on: a controller past first-run setup with a
+ * provider for Agents and a local GitHub for triggers, the calls that make,
+ * change and list what a case needs, the read of what a refusal names, and
+ * the sources that the cases send. Written once here, so the suites that check
+ * different rules arrange the same controller and send the same sources.
  */
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
-import type { Issue } from "@hercule/contract";
+import type { Issue, Trigger, Workflow } from "@hercule/contract";
 import {
   ConnectionValidationFailed,
   HOST_API,
@@ -25,6 +25,7 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
+import type { WorkflowPage } from "./service";
 
 /** A canonical UUIDv7 that names nothing on this controller. */
 export const ABSENT_ID = "0192f0a1-0000-7000-8000-00000000dead";
@@ -41,7 +42,7 @@ export const AGENT_PROVIDER = providerDefinition("test-provider", { token: "t" }
  * belongs to, which no test may do. The words it declares, and the qualified
  * ids the host makes from them, are the shipped ones.
  */
-export const localGithubPlugin: Plugin = {
+const localGithubPlugin: Plugin = {
   manifest: {
     id: "github",
     displayName: "GitHub",
@@ -110,39 +111,72 @@ export const withSetUpController = (
     },
   );
 
-/** A workflow as `workflow.read` answers it. */
-export interface WorkflowRecord {
-  readonly id: string;
-  readonly enabled: boolean;
-  readonly source: string;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
+/**
+ * An action step that files a task, as YAML lines under `steps:`. Most cases
+ * need steps that are valid in every way, so that the one broken element is
+ * the only thing refused. Each extra line is written under the step.
+ */
+export const buildTaskStep = (id: string, ...extraLines: ReadonlyArray<string>): string =>
+  [
+    `  - id: ${id}`,
+    "    kind: action",
+    "    action: task.create",
+    "    params:",
+    `      title: File the ${id} task`,
+    "      description: Filed by a workflow.",
+    ...extraLines.map((line) => `    ${line}`),
+  ].join("\n");
 
-/** A workflow as one `workflow.query` item answers it. */
-export interface WorkflowItem {
-  readonly id: string;
-  readonly name: string;
-  readonly description?: string;
-  readonly enabled: boolean;
-  readonly updatedAt: string;
-}
+/**
+ * The smallest workflow a controller accepts: one step that files a task.
+ * `description` is the description of the workflow, where a case needs one.
+ */
+export const buildFileTaskSource = (name: string, description?: string): string =>
+  [
+    `name: ${name}`,
+    ...(description === undefined ? [] : [`description: ${description}`]),
+    "steps:",
+    buildTaskStep("file_task"),
+    "",
+  ].join("\n");
 
-/** A trigger as one `trigger.query` item answers it. */
-export interface TriggerItem {
-  readonly workflowId: string;
-  readonly workflowName: string;
-  readonly triggerId: string;
-  readonly kind: string;
-  readonly eventKind: string;
-  readonly connectionId?: string;
-  readonly filter?: string;
-  readonly schedule?: string;
-  readonly timezone?: string;
-  readonly status?: string;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
+// The sources below are refused by the parse, before any check of meaning.
+// Each one is broken in one place and valid in every other way, so a refusal
+// names exactly the place that is broken.
+
+/** Line 9 of this source has a stray word after a closing quote, at column 20. */
+export const SYNTAX_ERROR_SOURCE = `# A workflow with one broken line.
+name: broken
+
+steps:
+  - id: file_task
+    kind: action
+    action: task.create
+    params:
+      title: "one" two
+      description: body
+`;
+
+/** A step with a kind that does not exist. */
+export const WRONG_KIND_SOURCE = `name: wrong kind
+steps:
+  - id: file_task
+    kind: script
+    action: task.create
+`;
+
+/** Two steps with one id. */
+export const DUPLICATE_STEP_ID_SOURCE = `name: two steps, one id
+steps:
+${buildTaskStep("file_task")}
+${buildTaskStep("file_task")}
+`;
+
+/** A step id that is not snake_case. The snake_case spelling is open_pr. */
+export const KEBAB_CASE_STEP_ID_SOURCE = `name: kebab step
+steps:
+${buildTaskStep("open-pr")}
+`;
 
 export const createWorkflow = (base: string, token: string, body: unknown): Promise<Response> =>
   post(base, "/api/v1/workflows", body, token);
@@ -177,16 +211,11 @@ export const createWorkflowOrFail = async (
   base: string,
   token: string,
   body: unknown,
-): Promise<WorkflowRecord> => {
+): Promise<Workflow> => {
   const response = await createWorkflow(base, token, body);
   expect([200, 201], await response.clone().text()).toContain(response.status);
-  return ((await response.json()) as { workflow: WorkflowRecord }).workflow;
+  return ((await response.json()) as { workflow: Workflow }).workflow;
 };
-
-export interface WorkflowPage {
-  readonly items: ReadonlyArray<WorkflowItem>;
-  readonly nextCursor?: string;
-}
 
 export const queryWorkflows = async (
   base: string,
@@ -202,10 +231,10 @@ export const queryTriggers = async (
   base: string,
   token: string,
   query = "",
-): Promise<ReadonlyArray<TriggerItem>> => {
+): Promise<ReadonlyArray<Trigger>> => {
   const response = await get(base, `/api/v1/triggers${query}`, token);
   expect(response.status, await response.clone().text()).toBe(200);
-  return ((await response.json()) as { items: ReadonlyArray<TriggerItem> }).items;
+  return ((await response.json()) as { items: ReadonlyArray<Trigger> }).items;
 };
 
 /** A refusal left no workflow and no trigger row behind. */

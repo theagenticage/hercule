@@ -16,7 +16,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as Fiber from "effect/Fiber";
-import { renderWorkflowSource, type WorkflowDefinition } from "@hercule/contract";
+import {
+  renderWorkflowSource,
+  type Trigger,
+  type Workflow,
+  type WorkflowDefinition,
+  type WorkflowSummary,
+} from "@hercule/contract";
+import { nestInLists } from "@hercule/protocol/testing";
 import {
   collecting,
   del,
@@ -31,19 +38,21 @@ import { agentOn, profileNamed, WAIT_DEADLINE_MS, withAgentFleet } from "../sess
 import {
   ABSENT_ID,
   ACCEPTED_GITHUB_TOKEN,
+  buildFileTaskSource,
   createAgent,
   createConnection,
   createWorkflow,
   createWorkflowOrFail,
+  DUPLICATE_STEP_ID_SOURCE,
   expectNothingStored,
+  KEBAB_CASE_STEP_ID_SOURCE,
   queryTriggers,
   queryWorkflows,
   readIssues,
+  SYNTAX_ERROR_SOURCE,
   updateWorkflow,
   withSetUpController,
-  type TriggerItem,
-  type WorkflowItem,
-  type WorkflowRecord,
+  WRONG_KIND_SOURCE,
 } from "./testing";
 
 /**
@@ -57,42 +66,27 @@ const updateWorkflowOrFail = async (
   token: string,
   id: string,
   body: unknown,
-): Promise<WorkflowRecord> => {
+): Promise<Workflow> => {
   const response = await updateWorkflow(base, token, id, body);
   expect(response.status, await response.clone().text()).toBe(200);
-  return ((await response.json()) as { workflow: WorkflowRecord }).workflow;
+  return ((await response.json()) as { workflow: Workflow }).workflow;
 };
 
 const deleteWorkflow = (base: string, token: string, id: string): Promise<Response> =>
   del(base, `/api/v1/workflows/${id}`, token);
 
-const readWorkflow = async (base: string, token: string, id: string): Promise<WorkflowRecord> => {
+const readWorkflow = async (base: string, token: string, id: string): Promise<Workflow> => {
   const response = await get(base, `/api/v1/workflows/${id}`, token);
   expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as WorkflowRecord;
+  return (await response.json()) as Workflow;
 };
 
-const sortTriggerIds = (items: ReadonlyArray<TriggerItem>): ReadonlyArray<string> =>
+const sortTriggerIds = (items: ReadonlyArray<Trigger>): ReadonlyArray<string> =>
   items.map((item) => item.triggerId).sort();
 
 /** Waits long enough that the next write lands in a later millisecond. */
 const waitForNextMillisecond = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 10));
-
-/** The smallest workflow every case can save: one step that files a task. */
-const buildFileTaskSource = (name: string, description?: string): string =>
-  [
-    `name: ${name}`,
-    ...(description === undefined ? [] : [`description: ${description}`]),
-    "steps:",
-    "  - id: file_task",
-    "    kind: action",
-    "    action: task.create",
-    "    params:",
-    "      title: Look at the overnight failures",
-    "      description: Filed by a workflow.",
-    "",
-  ].join("\n");
 
 /**
  * Everything a formatter would change: comments, blank lines, keys out of
@@ -134,42 +128,6 @@ const FILE_TASK_DEFINITION = {
   description: "Files one task.\nWritten as an object, not as text.",
   name: "File a task",
 };
-
-/** Line 9 of this source has a stray word after a closing quote, at column 20. */
-const SYNTAX_ERROR_SOURCE = `# A workflow with one broken line.
-name: broken
-
-steps:
-  - id: file_task
-    kind: action
-    action: task.create
-    params:
-      title: "one" two
-      description: body
-`;
-
-const WRONG_KIND_SOURCE = `name: wrong kind
-steps:
-  - id: file_task
-    kind: script
-    action: task.create
-`;
-
-const DUPLICATE_STEP_ID_SOURCE = `name: two steps, one id
-steps:
-  - id: file_task
-    kind: action
-    action: task.create
-    params:
-      title: One
-      description: The first.
-  - id: file_task
-    kind: action
-    action: task.create
-    params:
-      title: Two
-      description: The second.
-`;
 
 const DUPLICATE_TRIGGER_ID_SOURCE = `name: three triggers, two ids
 triggers:
@@ -223,16 +181,6 @@ triggers:
     source:
       kind: cron.tick
     schedule: "0 2 * * *"
-`;
-
-const KEBAB_CASE_STEP_ID_SOURCE = `name: kebab step
-steps:
-  - id: open-pr
-    kind: action
-    action: task.create
-    params:
-      title: One
-      description: The first.
 `;
 
 const KEBAB_CASE_TRIGGER_ID_SOURCE = `name: kebab trigger
@@ -340,7 +288,7 @@ describe("workflow.create with a source", () => {
       // The save answers with the record and the warnings of the save, apart.
       expect(Object.keys(saveAnswer).sort()).toEqual(["warnings", "workflow"]);
       expect(saveAnswer["warnings"]).toEqual([]);
-      const workflow = saveAnswer["workflow"] as WorkflowRecord;
+      const workflow = saveAnswer["workflow"] as Workflow;
 
       const stored = await readWorkflow(base, token, workflow.id);
       expect(Object.keys(stored).sort()).toEqual([
@@ -632,7 +580,7 @@ describe("whether a workflow is enabled", () => {
 describe("workflow.query", () => {
   it("pages through every workflow once, each item the five fields its definition gives", async () => {
     await withSetUpController(async ({ base, token }) => {
-      const workflows: Array<WorkflowRecord> = [];
+      const workflows: Array<Workflow> = [];
       for (let index = 0; index < 5; index++) {
         const description = index % 2 === 0 ? `Workflow number ${String(index)}.` : undefined;
         workflows.push(
@@ -643,7 +591,7 @@ describe("workflow.query", () => {
         await waitForNextMillisecond();
       }
 
-      const listedItems: Array<WorkflowItem> = [];
+      const listedItems: Array<WorkflowSummary> = [];
       let cursor: string | undefined;
       for (let pageCount = 0; pageCount < 10; pageCount++) {
         const cursorParameter = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
@@ -766,7 +714,7 @@ describe("trigger.query", () => {
         if (index > 0) expect(item.createdAt <= allTriggers[index - 1]!.createdAt).toBe(true);
       }
 
-      const findTrigger = (items: ReadonlyArray<TriggerItem>, triggerId: string): TriggerItem => {
+      const findTrigger = (items: ReadonlyArray<Trigger>, triggerId: string): Trigger => {
         const found = items.find((item) => item.triggerId === triggerId);
         expect(found, triggerId).toBeDefined();
         return found!;
@@ -1091,10 +1039,6 @@ describe("what a workflow subscription is told", () => {
     });
   });
 });
-
-/** A value nested in lists this many levels deep. */
-const nestInLists = (levels: number): unknown =>
-  Array.from({ length: levels }).reduce<unknown>((inner) => [inner], "bottom");
 
 describe("a save the controller refuses with a validation error, never an internal one", () => {
   it("refuses an alias, half of a surrogate pair, and a value nested thousands of levels deep", async () => {

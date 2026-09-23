@@ -41,10 +41,12 @@ export {
   Validation,
   capExceeded,
   conflict,
+  describeIssue,
   forbidden,
   internal,
   invalidState,
   issuesOf,
+  listSchemaIssues,
   notFound,
   unauthenticated,
   validation,
@@ -304,6 +306,8 @@ export {
   WorkflowSummary,
   WorkflowUpdateInput,
   WorkflowValidateInput,
+} from "./groups/workflow";
+export {
   ANY_CONNECTION,
   decodeWorkflowDefinition,
   limitIssues,
@@ -311,7 +315,7 @@ export {
   readFieldNotation,
   WorkflowDefinition,
   type FieldNotation,
-} from "./groups/workflow";
+} from "./groups/workflow-definition";
 export {
   parseWorkflowDocument,
   parseWorkflowSource,
@@ -319,7 +323,7 @@ export {
   spellPathKey,
 } from "./groups/workflow-source";
 export { STARTER_WORKFLOW_SOURCE } from "./groups/workflow-starter";
-export { excerptMessage, quoteWritten } from "./excerpts";
+export { cutShort, excerptMessage, joinNames, quoteWritten } from "./excerpts";
 export { WorkflowAction } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";
 export {

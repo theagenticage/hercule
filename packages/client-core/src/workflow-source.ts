@@ -1,13 +1,13 @@
 /**
- * How the browser reads a workflow's text: the one parse of the text, the
- * place in the text of each problem that the parse or the controller names,
- * which of those problems are true of the text that the author sees, and
+ * How the browser reads a workflow's source: the one parse of the source, the
+ * place in the source of each problem that the parse or the controller names,
+ * which of those problems are true of the source that the author sees, and
  * their count in words.
  *
  * The controller names a problem by its path into the definition and never by
  * a position, so that the contract stays free of positions. The place is
- * found here, in the YAML document of the same parse, so a text is parsed once
- * however many problems are placed in it.
+ * found here, in the YAML document of the same parse, so a source is parsed
+ * once however many problems are placed in it.
  */
 import { Result } from "effect";
 import {
@@ -31,52 +31,64 @@ import {
 /** How much a problem stops: an error stops a save, a warning does not. */
 type IssueSeverity = "error" | "warning";
 
-/** A problem of a workflow's text, and the place in the text that it is about. */
+/**
+ * A problem of a workflow's source, and the place in the source that it is
+ * about. The line of the place is not here: the editor moves a mark with the
+ * text that the author types, and says the line of the mark where it is then.
+ */
 export interface LocatedIssue extends Issue {
   readonly severity: IssueSeverity;
   /** The offset of the first character of the place. */
   readonly from: number;
   /** The offset after the last character of the place. */
   readonly to: number;
-  /** The line of `from`, counted from 1. */
-  readonly line: number;
 }
 
-/** A workflow's text, as the one parse of it reads. */
+/** A workflow's source, as the one parse of it reads. */
 export interface WorkflowSourceReading {
-  readonly text: string;
-  /** The YAML document of the text. Absent for a text too long to parse. */
+  readonly source: string;
+  /** The YAML document of the source. Absent for a source too long to parse. */
   readonly document: Document.Parsed | undefined;
-  /** Where each line of the text starts. Absent with `document`. */
+  /** Where each line of the source starts. Absent with `document`. */
   readonly lines: LineCounter | undefined;
-  /** What the text says. Absent when the text has a problem that `issues` names. */
+  /** What the source says. Absent when the source has a problem that `issues` names. */
   readonly definition?: WorkflowDefinition;
-  /** Each problem that stops the text from being a definition, at its place. */
+  /** Each problem that stops the source from being a definition, at its place. */
   readonly issues: ReadonlyArray<LocatedIssue>;
 }
 
-/** The parts of a reading that give the place and the line of an offset. */
-type TextPlaces = Pick<WorkflowSourceReading, "text" | "document" | "lines">;
+/** The parts of a reading that give the place of a path. */
+type SourcePlaces = Pick<WorkflowSourceReading, "source" | "document" | "lines">;
 
-/** A problem at the offsets `from` and `to` of a text, kept inside the text. */
+/** The offset of the first character of the line that holds an offset. */
+export const findLineStart = (lines: LineCounter, offset: number): number =>
+  offset - lines.linePos(offset).col + 1;
+
+/**
+ * The offset of the line break that ends the line that holds an offset, or
+ * the end of the source on the last line. A line break is the `\n` that the
+ * parse starts a new line after, and a `\r` before it stays in its line.
+ */
+export const findLineEnd = (source: string, lines: LineCounter, offset: number): number => {
+  const nextLineStart = lines.lineStarts[lines.linePos(offset).line];
+  return nextLineStart === undefined ? source.length : nextLineStart - 1;
+};
+
+/** A problem at the offsets `from` and `to` of a source, kept inside the source. */
 const placeIssue = (
-  { text, lines }: TextPlaces,
+  source: string,
   issue: Issue,
   severity: IssueSeverity,
   from: number,
   to: number,
 ): LocatedIssue => {
-  const start = Math.min(Math.max(from, 0), text.length);
-  const end = Math.min(Math.max(to, start), text.length);
+  const start = Math.min(Math.max(from, 0), source.length);
   return {
     severity,
     path: issue.path,
     message: issue.message,
     from: start,
-    to: end,
-    // A text too long to parse has no line counter. Its one problem is at
-    // its start, on line 1.
-    line: lines?.linePos(start).line ?? 1,
+    to: Math.min(Math.max(to, start), source.length),
   };
 };
 
@@ -85,30 +97,27 @@ const placeIssue = (
  * white space. A mark on the white space or the line break at the end of a
  * line would reach past the text that the mark is about.
  */
-const findContentEnd = (text: string, from: number, to: number): number => {
+const findContentEnd = (source: string, from: number, to: number): number => {
   let end = to;
-  while (end > from && /\s/.test(text[end - 1] ?? "")) end -= 1;
+  while (end > from && /\s/.test(source[end - 1] ?? "")) end -= 1;
   return end;
 };
 
 /**
  * The end of the mark of a problem that the parser found at a place in the
- * text. The parser often marks only the one character where a problem starts,
- * and a mark of one character is hard to see, so such a mark goes on to the
- * end of the line.
+ * source. The parser often marks only the one character where a problem
+ * starts, and a mark of one character is hard to see, so such a mark goes on
+ * to the end of the line.
  */
-const findParseMarkEnd = (text: string, from: number, to: number): number => {
-  if (to - from > 1) return to;
-  const lineEnd = text.indexOf("\n", from);
-  return Math.max(to, findContentEnd(text, from, lineEnd === -1 ? text.length : lineEnd));
-};
+const findParseMarkEnd = (source: string, lines: LineCounter, from: number, to: number): number =>
+  to - from > 1 ? to : Math.max(to, findContentEnd(source, from, findLineEnd(source, lines, from)));
 
 /** A node or a pair of the YAML document: the thing that a path into the definition names. */
 type IssuePlace = Node | Pair<unknown, unknown>;
 
 /**
  * The node or the pair that a path names, or `undefined` for a path that leads
- * nowhere in the text. A path that ends at a key names the pair of that key,
+ * nowhere in the source. A path that ends at a key names the pair of that key,
  * so a problem about the key and a problem about its value have one place.
  * Where the definition reads a key twice in one mapping, it reads the last
  * one, and a path names that one. A key that a mapping does not have, or a key
@@ -138,7 +147,7 @@ const findIssuePlace = (
   return isNode(place) || isPair(place) ? place : undefined;
 };
 
-/** The offsets in the text where a place starts and ends. A pair runs from its key through its value. */
+/** The offsets in the source where a place starts and ends. A pair runs from its key through its value. */
 const readPlaceRange = (place: IssuePlace): readonly [number, number] | undefined => {
   const first = isPair(place) ? place.key : place;
   const last = isPair(place) ? (place.value ?? place.key) : place;
@@ -148,38 +157,32 @@ const readPlaceRange = (place: IssuePlace): readonly [number, number] | undefine
 };
 
 /**
- * A problem at the place in the text that its path names, marked on the
+ * A problem at the place in the source that its path names, marked on the
  * first line of the place only. A problem about a step, a list or a mapping
  * of fields is then marked on the line that starts it, and the marks of the
  * problems inside it stay visible. A problem whose path is empty, or leads
- * nowhere in the text, is placed at the start of the document, because a mark
- * under the whole text would hide every other mark.
+ * nowhere in the source, is placed at the start of the document, because a
+ * mark under the whole source would hide every other mark.
  */
 const placeIssueAtPath = (
-  reading: TextPlaces,
+  { source, document, lines }: SourcePlaces,
   issue: Issue,
   severity: IssueSeverity,
 ): LocatedIssue => {
   const place =
-    reading.document === undefined || issue.path.length === 0
+    document === undefined || issue.path.length === 0
       ? undefined
-      : findIssuePlace(reading.document, issue.path);
+      : findIssuePlace(document, issue.path);
   const range = place === undefined ? undefined : readPlaceRange(place);
-  if (range === undefined) return placeIssue(reading, issue, severity, 0, 0);
+  // A source with a document has its line counter too.
+  if (range === undefined || lines === undefined) return placeIssue(source, issue, severity, 0, 0);
   const [from, end] = range;
-  const lineEnd = reading.text.indexOf("\n", from);
-  const firstLineEnd = lineEnd === -1 ? end : Math.min(end, lineEnd);
-  return placeIssue(
-    reading,
-    issue,
-    severity,
-    from,
-    findContentEnd(reading.text, from, firstLineEnd),
-  );
+  const firstLineEnd = Math.min(end, findLineEnd(source, lines, from));
+  return placeIssue(source, issue, severity, from, findContentEnd(source, from, firstLineEnd));
 };
 
 /**
- * Each problem that the controller names, at the place in the text that its
+ * Each problem that the controller names, at the place in the source that its
  * path names. The controller sends an empty path only with the problem that
  * counts the problems a long refusal leaves out, and that problem is placed at
  * the start of the document, as a problem whose path leads nowhere is.
@@ -191,68 +194,77 @@ export const locateIssues = (
 ): ReadonlyArray<LocatedIssue> => issues.map((issue) => placeIssueAtPath(reading, issue, severity));
 
 /**
- * Reads a workflow's text with the one parse that the controller uses too, so
- * the editor shows the problems that a save would be refused with. A problem
- * of the YAML itself is placed where the parser found it, and a problem of the
- * definition at its path.
+ * Reads a workflow's source with the one parse that the controller uses too,
+ * so the editor shows the problems that a save would be refused with. A
+ * problem of the YAML itself is placed where the parser found it, and a
+ * problem of the definition at its path.
  */
-export const readWorkflowSource = (text: string): WorkflowSourceReading => {
-  const { document, lines, result } = parseWorkflowDocument(text);
-  const places: TextPlaces = { text, document, lines };
+export const readWorkflowSource = (source: string): WorkflowSourceReading => {
+  const { document, lines, result } = parseWorkflowDocument(source);
+  const places: SourcePlaces = { source, document, lines };
   if (Result.isSuccess(result)) {
     return { ...places, definition: result.success, issues: [] };
   }
   return {
     ...places,
     issues: result.failure.map((issue) =>
-      issue.range === undefined
+      // Only a parsed source has a problem with a range, and a parsed source
+      // has its line counter.
+      issue.range === undefined || lines === undefined
         ? placeIssueAtPath(places, issue, "error")
         : placeIssue(
-            places,
+            source,
             issue,
             "error",
             issue.range[0],
-            findParseMarkEnd(text, ...issue.range),
+            findParseMarkEnd(source, lines, ...issue.range),
           ),
     ),
   };
 };
 
-/** What the controller answered when it checked one text: its problems, or why the check failed. */
+/**
+ * What the controller answered when it validated one source: its problems, or
+ * why the validation failed.
+ */
 export type WorkflowValidation =
-  | { readonly text: string; readonly issues: WorkflowIssues }
-  | { readonly text: string; readonly reason: string };
+  | { readonly source: string; readonly issues: WorkflowIssues }
+  | { readonly source: string; readonly reason: string };
 
-/** How far the check of a text has come. */
-export type WorkflowCheckState =
-  /** Every problem of the text is known: the parse's, or the controller's answer about this text. */
-  | { readonly status: "checked" }
-  /** The text parses, and the controller's answer about it is still to come. */
-  | { readonly status: "checking" }
-  /** The text parses, and the controller could not check it, for the reason that `reason` gives. */
+/** How far the validation of a source has come. */
+export type WorkflowValidationState =
+  /** Every problem of the source is known: the parse's, or the controller's answer about this source. */
+  | { readonly status: "validated" }
+  /** The source parses, and the controller's answer about it is still to come. */
+  | { readonly status: "validating" }
+  /** The source parses, and the controller could not validate it, for the reason that `reason` gives. */
   | { readonly status: "failed"; readonly reason: string };
 
-/** How far the check of a text has come, and the problems of the text once they are known, errors first. */
+/**
+ * How far the validation of a source has come, and the problems of the
+ * source once they are known, errors first.
+ */
 type WorkflowIssueState =
-  | { readonly status: "checked"; readonly issues: ReadonlyArray<LocatedIssue> }
-  | Exclude<WorkflowCheckState, { readonly status: "checked" }>;
+  | { readonly status: "validated"; readonly issues: ReadonlyArray<LocatedIssue> }
+  | Exclude<WorkflowValidationState, { readonly status: "validated" }>;
 
 /**
- * How far the check of a reading's text has come. A problem of the parse
- * wins, because the controller refuses a text that does not parse with the
- * same problems. The controller's answer is true only of the text that it
- * checked, so an answer about another text says nothing of this one: the
- * problems of this text stay unknown until the controller answers about it.
+ * How far the validation of a reading's source has come. A problem of the
+ * parse wins, because the controller refuses a source that does not parse
+ * with the same problems. The controller's answer is true only of the source
+ * that it validated, so an answer about another source says nothing of this
+ * one: the problems of this source stay unknown until the controller answers
+ * about it.
  */
 export const decideIssueState = (
   reading: WorkflowSourceReading,
   validation: WorkflowValidation | undefined,
 ): WorkflowIssueState => {
-  if (reading.issues.length > 0) return { status: "checked", issues: reading.issues };
-  if (validation?.text !== reading.text) return { status: "checking" };
+  if (reading.issues.length > 0) return { status: "validated", issues: reading.issues };
+  if (validation?.source !== reading.source) return { status: "validating" };
   if ("reason" in validation) return { status: "failed", reason: validation.reason };
   return {
-    status: "checked",
+    status: "validated",
     issues: [
       ...locateIssues(reading, validation.issues.errors, "error"),
       ...locateIssues(reading, validation.issues.warnings, "warning"),
@@ -260,6 +272,6 @@ export const decideIssueState = (
   };
 };
 
-/** How many problems a text has, in words: "1 problem", "3 problems". */
+/** How many problems a source has, in words: "1 problem", "3 problems". */
 export const formatProblemCount = (count: number): string =>
   `${String(count)} ${count === 1 ? "problem" : "problems"}`;

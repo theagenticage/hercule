@@ -3,6 +3,8 @@
  * stored: the inputs, the triggers, the steps with their actions, params and
  * agents, the edges, the graph as a whole, and the expression at every place.
  * The parse in `@hercule/contract` has checked the shape and the ids already.
+ * The graph, which holds the nodes that an edge may join and the rules about
+ * the graph as a whole, is in `./graph`, and the checks here call it.
  *
  * Every problem is named by its path into the definition, so the author can
  * correct them in one round and an editor can show each one at its place.
@@ -26,20 +28,21 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
-import * as SchemaIssue from "effect/SchemaIssue";
+import type * as SchemaIssue from "effect/SchemaIssue";
 import {
   ANY_CONNECTION,
   excerptMessage,
   isId,
+  joinNames,
   limitIssues,
-  listEntrySteps,
+  listSchemaIssues,
   quoteWritten,
   type Issue,
   type WorkflowDefinition,
   type WorkflowIssues,
 } from "@hercule/contract";
 import { lintOutputSchema } from "@hercule/protocol";
-import { CRON_TICK_EVENT_KIND, type NameableEventKind } from "../events";
+import { CRON_TICK_EVENT_KIND, type DeclaredEventKindWithConnectionType } from "../events";
 import {
   checkCondition,
   checkExpression,
@@ -49,6 +52,7 @@ import {
   type ExpressionScope,
 } from "../expressions";
 import type { RegisteredWorkflowAction } from "../plugins";
+import { listEdgeEndIssues, listGraphIssues, type GraphEdge, type GraphNodes } from "./graph";
 
 /**
  * What a definition names, as the controller holds it now. Each collection
@@ -58,7 +62,7 @@ export interface ResolvedReferences {
   /** The actions a step can name, by id. */
   readonly actions: ReadonlyMap<string, RegisteredWorkflowAction>;
   /** The event kinds a trigger can name, by kind. */
-  readonly eventKinds: ReadonlyMap<string, NameableEventKind>;
+  readonly eventKinds: ReadonlyMap<string, DeclaredEventKindWithConnectionType>;
   /** The ids of the Agents that the definition names and that exist. */
   readonly agentIds: ReadonlySet<string>;
   /** The qualified type of each Connection that the definition names and that exists, by the Connection's id. */
@@ -74,25 +78,6 @@ type Step = WorkflowDefinition["steps"][number];
 type ActionStep = Extract<Step, { readonly kind: "action" }>;
 type AgentStep = Extract<Step, { readonly kind: "agent" }>;
 type Edge = NonNullable<WorkflowDefinition["edges"]>[number];
-
-/** The most names that a message lists. */
-const MAX_LISTED_NAMES = 5;
-
-/**
- * Names in an English list: `a`, `a and b`, `a, b and c`. A list of more than
- * `MAX_LISTED_NAMES` names gives the first ones and the number of the others,
- * such as `a, b, c, d, e and 3 more`, so a message does not grow with the
- * number of names that the author wrote.
- */
-const joinNames = (names: ReadonlyArray<string>): string => {
-  const listed =
-    names.length <= MAX_LISTED_NAMES
-      ? names
-      : [...names.slice(0, MAX_LISTED_NAMES), `${String(names.length - MAX_LISTED_NAMES)} more`];
-  return listed.length <= 1
-    ? listed.join("")
-    : `${listed.slice(0, -1).join(", ")} and ${listed.at(-1)!}`;
-};
 
 /** The ids of the Agents a definition names, each one once. */
 export const listNamedAgentIds = (definition: WorkflowDefinition): ReadonlyArray<string> => [
@@ -202,7 +187,7 @@ const listInputIssues = (
 const listEventSourceIssues = (
   trigger: Trigger,
   index: number,
-  eventKind: NameableEventKind | undefined,
+  eventKind: DeclaredEventKindWithConnectionType | undefined,
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
   const path = ["triggers", String(index), "source"];
@@ -499,16 +484,11 @@ const isAboutRenderedValue = (issue: SchemaIssue.Issue): boolean => {
 };
 
 /**
- * The words of a decode issue about params. A key that the input does not
- * declare gets words of its own, because the schema library says only that
- * it expected no such key.
+ * The words of a key that the action's input does not declare. The schema
+ * library says only that it expected no such key.
  */
-const formatParamIssue = SchemaIssue.makeFormatterStandardSchemaV1({
-  leafHook: (issue) =>
-    issue._tag === "UnexpectedKey"
-      ? "No field has this name at this place of the action's input. Remove the field, or correct its name."
-      : SchemaIssue.defaultLeafHook(issue),
-});
+const UNKNOWN_PARAM_FIELD =
+  "No field has this name at this place of the action's input. Remove the field, or correct its name.";
 
 /**
  * Each problem that a decode of the params found, at its path in the
@@ -520,20 +500,16 @@ const listParamIssues = (
   issue: SchemaIssue.Issue,
   path: ReadonlyArray<string>,
   templatePaths: ReadonlySet<string>,
-): ReadonlyArray<Issue> => {
-  if (isAboutRenderedValue(issue) && templatePaths.has(JSON.stringify(path))) return [];
-  if (issue._tag === "Pointer") {
-    return listParamIssues(issue.issue, [...path, ...issue.path.map(String)], templatePaths);
-  }
-  if (issue._tag === "Encoding") return listParamIssues(issue.issue, path, templatePaths);
-  if (issue._tag === "Composite" || (issue._tag === "AnyOf" && issue.issues.length > 0)) {
-    return issue.issues.flatMap((child) => listParamIssues(child, path, templatePaths));
-  }
-  return formatParamIssue(issue).issues.map((formatted) => ({
-    path: [...path, ...(formatted.path ?? []).map(String)],
-    message: formatted.message,
-  }));
-};
+): ReadonlyArray<Issue> =>
+  listSchemaIssues(issue, {
+    path,
+    describeLeaf: (leaf, leafPath) => {
+      if (isAboutRenderedValue(leaf) && templatePaths.has(JSON.stringify(leafPath))) return [];
+      return leaf._tag === "UnexpectedKey"
+        ? [{ path: leafPath, message: UNKNOWN_PARAM_FIELD }]
+        : undefined;
+    },
+  });
 
 /**
  * An action step's action and its params: the action is one a step can name,
@@ -665,232 +641,11 @@ const checkStep = (
   );
 };
 
-/** An edge whose two ends name nodes it may join: a step or a signal trigger, to a step. */
-interface GraphEdge {
-  readonly index: number;
-  readonly from: string;
-  readonly to: string;
-  /** Whether the edge carries `maxTraversals`, which bounds how often a loop through it runs. */
-  readonly capped: boolean;
-}
-
-/** The ids of the steps and of the triggers: what an edge may name. */
-interface GraphNodes {
-  readonly stepIds: ReadonlySet<string>;
-  readonly signalIds: ReadonlySet<string>;
-  readonly startIds: ReadonlySet<string>;
-}
-
-/** Why a start trigger cannot be an end of an edge. */
-const START_TRIGGER_HAS_NO_EDGES =
-  "A start trigger starts runs, and does not continue one, so it cannot have edges. " +
-  "Remove the edge: a run starts at its entry steps.";
-
-/** Each end of an edge that names no node it may join. */
-const listEdgeEndIssues = (edge: Edge, index: number, nodes: GraphNodes): ReadonlyArray<Issue> => {
-  const path = ["edges", String(index)];
-  const issues: Array<Issue> = [];
-  if (nodes.startIds.has(edge.from)) {
-    issues.push({
-      path: [...path, "from"],
-      message: `${quoteWritten(edge.from)} is a start trigger. ${START_TRIGGER_HAS_NO_EDGES}`,
-    });
-  } else if (!nodes.stepIds.has(edge.from) && !nodes.signalIds.has(edge.from)) {
-    issues.push({
-      path: [...path, "from"],
-      message: `No step or signal trigger has the id ${quoteWritten(edge.from)}. An edge starts at a step or at a signal trigger. Write the id of one.`,
-    });
-  }
-  if (nodes.startIds.has(edge.to)) {
-    issues.push({
-      path: [...path, "to"],
-      message: `${quoteWritten(edge.to)} is a start trigger. ${START_TRIGGER_HAS_NO_EDGES}`,
-    });
-  } else if (nodes.signalIds.has(edge.to)) {
-    issues.push({
-      path: [...path, "to"],
-      message:
-        `${quoteWritten(edge.to)} is a signal trigger. A signal trigger fires when its event reaches the run, ` +
-        "so no edge can lead into it. Lead the edge into a step.",
-    });
-  } else if (!nodes.stepIds.has(edge.to)) {
-    issues.push({
-      path: [...path, "to"],
-      message: `No step has the id ${quoteWritten(edge.to)}. An edge leads into a step. Write the id of one.`,
-    });
-  }
-  return issues;
-};
-
 /** An edge's condition, which lets the edge fire where it gives true. */
 const checkEdgeCondition = (edge: Edge, index: number): Effect.Effect<ReadonlyArray<Issue>> =>
   edge.condition === undefined
     ? Effect.succeed([])
     : listCheckIssues(["edges", String(index), "condition"], checkCondition(edge.condition, "run"));
-
-/** The nodes each node's edges lead to, by node. A node with no edge out is not in it. */
-const buildSuccessorMap = (
-  edges: ReadonlyArray<GraphEdge>,
-): ReadonlyMap<string, ReadonlyArray<string>> => {
-  const successors = new Map<string, Array<string>>();
-  for (const edge of edges) {
-    const known = successors.get(edge.from);
-    if (known === undefined) successors.set(edge.from, [edge.to]);
-    else known.push(edge.to);
-  }
-  return successors;
-};
-
-/**
- * The sets of nodes that loops go through: each strongly connected component
- * that holds a loop, which is one of more than one node, or one node with an
- * edge to itself. Tarjan's algorithm, with a stack of its own in place of
- * recursion, so a large graph cannot exhaust the call stack.
- */
-const findLoops = (
-  nodeIds: ReadonlyArray<string>,
-  edges: ReadonlyArray<GraphEdge>,
-): ReadonlyArray<ReadonlySet<string>> => {
-  const successors = buildSuccessorMap(edges);
-  const order = new Map<string, number>();
-  const lowest = new Map<string, number>();
-  const stack: Array<string> = [];
-  const onStack = new Set<string>();
-  const loops: Array<ReadonlySet<string>> = [];
-  const enter = (id: string): void => {
-    order.set(id, order.size);
-    lowest.set(id, order.get(id)!);
-    stack.push(id);
-    onStack.add(id);
-  };
-  for (const root of nodeIds) {
-    if (order.has(root)) continue;
-    enter(root);
-    const walk: Array<{ readonly id: string; next: number }> = [{ id: root, next: 0 }];
-    while (walk.length > 0) {
-      const frame = walk.at(-1)!;
-      const next = successors.get(frame.id)?.[frame.next];
-      if (next !== undefined) {
-        frame.next += 1;
-        if (!order.has(next)) {
-          enter(next);
-          walk.push({ id: next, next: 0 });
-        } else if (onStack.has(next)) {
-          lowest.set(frame.id, Math.min(lowest.get(frame.id)!, order.get(next)!));
-        }
-        continue;
-      }
-      walk.pop();
-      const parent = walk.at(-1);
-      if (parent !== undefined) {
-        lowest.set(parent.id, Math.min(lowest.get(parent.id)!, lowest.get(frame.id)!));
-      }
-      if (lowest.get(frame.id) !== order.get(frame.id)) continue;
-      const component = new Set<string>();
-      for (let member = stack.pop()!; ; member = stack.pop()!) {
-        onStack.delete(member);
-        component.add(member);
-        if (member === frame.id) break;
-      }
-      if (component.size > 1 || (successors.get(frame.id) ?? []).includes(frame.id)) {
-        loops.push(component);
-      }
-    }
-  }
-  return loops;
-};
-
-/**
- * The rules about the graph as a whole, over the edges whose ends are valid:
- * a loop has an edge with `maxTraversals`, a step inside a loop does not join
- * with `all`, a run has a step to begin at, and each step is reached from
- * where a run begins.
- */
-const listGraphIssues = (
-  definition: WorkflowDefinition,
-  edges: ReadonlyArray<GraphEdge>,
-  nodes: GraphNodes,
-): ReadonlyArray<Issue> => {
-  const { steps } = definition;
-  const issues: Array<Issue> = [];
-  const stepIds = steps.map((step) => step.id);
-  const nodeIds = [...nodes.signalIds, ...stepIds];
-  const sortInStepOrder = (loop: ReadonlySet<string>): ReadonlyArray<string> =>
-    stepIds.filter((id) => loop.has(id));
-
-  // A loop of edges that carry no maxTraversals, when every edge that carries
-  // one is taken away. It is named at its first edge in definition order.
-  for (const loop of findLoops(
-    nodeIds,
-    edges.filter((edge) => !edge.capped),
-  )) {
-    const first = edges.find((edge) => !edge.capped && loop.has(edge.from) && loop.has(edge.to))!;
-    const names = joinNames(sortInStepOrder(loop).map(quoteWritten));
-    issues.push({
-      path: ["edges", String(first.index)],
-      message:
-        `${loop.size === 1 ? `The step ${names} leads into itself` : `The steps ${names} form a loop`}, ` +
-        "and no edge of the loop has maxTraversals, so a run could go round the loop without end. " +
-        "Add maxTraversals to one edge of the loop.",
-    });
-  }
-
-  // `all` waits for every incoming edge, and the edge that comes back round a
-  // loop cannot fire before the step runs the first time.
-  const inLoop = new Set(findLoops(nodeIds, edges).flatMap((loop) => [...loop]));
-  for (const [index, step] of steps.entries()) {
-    if (step.join === "all" && inLoop.has(step.id)) {
-      issues.push({
-        path: ["steps", String(index), "join"],
-        message:
-          "This step is inside a loop, so join: all can never run it: the edge that comes back round the loop " +
-          "cannot fire before this step runs. Write join: any, or remove join.",
-      });
-    }
-  }
-
-  // A run begins at every entry step.
-  const entryIds = listEntrySteps(definition).map((step) => step.id);
-  if (steps.length > 0 && entryIds.length === 0) {
-    // The run most likely begins in the loop that leaves every step with an
-    // edge into it, so the refusal is placed at a step another step leads into.
-    const ledIntoByStep = new Set(
-      edges.filter((edge) => nodes.stepIds.has(edge.from)).map((edge) => edge.to),
-    );
-    const index = Math.max(
-      steps.findIndex((step) => ledIntoByStep.has(step.id)),
-      0,
-    );
-    issues.push({
-      path: ["steps", String(index)],
-      message:
-        "No step begins a run of this workflow: an edge leads into every step, so no step starts when a run starts. " +
-        "Write entry: true on this step, or on the step where a run begins.",
-    });
-    // Without an entry step every step is unreached, and that is this one
-    // problem, which is named once.
-    return issues;
-  }
-
-  const successors = buildSuccessorMap(edges);
-  const reached = new Set<string>([...entryIds, ...nodes.signalIds]);
-  // The set grows while it is walked, and a walk of a set visits what is added
-  // behind the walk too, so this is a breadth-first search.
-  for (const id of reached) {
-    for (const next of successors.get(id) ?? []) reached.add(next);
-  }
-  for (const [index, step] of steps.entries()) {
-    if (!reached.has(step.id)) {
-      issues.push({
-        path: ["steps", String(index)],
-        message:
-          "No path leads to this step from an entry step or from a signal trigger, so a run never runs it. " +
-          "Add an edge that leads into it, or write entry: true on it if a run begins here.",
-      });
-    }
-  }
-  return issues;
-};
 
 /**
  * The one warning. A run ends by itself when a terminal step completes, or

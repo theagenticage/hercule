@@ -18,7 +18,12 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
-import { STARTER_WORKFLOW_SOURCE, type Issue } from "@hercule/contract";
+import {
+  STARTER_WORKFLOW_SOURCE,
+  type Issue,
+  type WorkflowIssues,
+  type WorkflowSaved,
+} from "@hercule/contract";
 import { HOST_API, registerConnectionType, type Plugin } from "@hercule/plugin-host";
 import { lintOutputSchema } from "@hercule/protocol";
 import { get, post, readRefusal } from "../http/testing";
@@ -27,13 +32,19 @@ import { agentOn, profileNamed, WAIT_DEADLINE_MS, withAgentFleet } from "../sess
 import {
   ABSENT_ID,
   ACCEPTED_GITHUB_TOKEN,
+  buildFileTaskSource,
+  buildTaskStep,
   createAgent,
   createConnection,
   createWorkflow,
+  DUPLICATE_STEP_ID_SOURCE,
   expectNothingStored,
+  KEBAB_CASE_STEP_ID_SOURCE,
   readIssues,
+  SYNTAX_ERROR_SOURCE,
   updateWorkflow,
   withSetUpController,
+  WRONG_KIND_SOURCE,
   type SetUpController,
 } from "./testing";
 
@@ -110,19 +121,13 @@ const withArrangedController = (
     [localMailPlugin, notesPlugin],
   );
 
-/** What `workflow.validate` answers: the problems that stop a save, and the ones that do not. */
-interface ValidationAnswer {
-  readonly errors: ReadonlyArray<Issue>;
-  readonly warnings: ReadonlyArray<Issue>;
-}
-
 const validateWorkflow = (base: string, token: string, body: unknown): Promise<Response> =>
   post(base, "/api/v1/workflows/validate", body, token);
 
 /** The answer of a check the controller took, whatever it found in the workflow. */
-const readValidationAnswer = async (response: Response): Promise<ValidationAnswer> => {
+const readValidationAnswer = async (response: Response): Promise<WorkflowIssues> => {
   expect(response.status, await response.clone().text()).toBe(200);
-  const answer = (await response.json()) as ValidationAnswer;
+  const answer = (await response.json()) as WorkflowIssues;
   expect(Object.keys(answer).sort()).toEqual(["errors", "warnings"]);
   return answer;
 };
@@ -174,7 +179,7 @@ const expectAccepted = async (
   controller: ArrangedController,
   description: string,
   source: string,
-): Promise<ValidationAnswer> => {
+): Promise<WorkflowIssues> => {
   const { base, token } = controller;
   const response = await createWorkflow(base, token, { source });
   expect([200, 201], `${description}: ${await response.clone().text()}`).toContain(response.status);
@@ -195,71 +200,28 @@ const disablePlugin = async (base: string, token: string, id: string): Promise<v
   expect(response.status, await response.clone().text()).toBe(200);
 };
 
-/**
- * An action step that files a task, as YAML lines under `steps:`. Most
- * fixtures need steps that are valid in every way, so that the one broken
- * element is the only thing refused. Each extra line is written under the step.
- */
-const buildTaskStep = (id: string, ...extraLines: ReadonlyArray<string>): string =>
-  [
-    `  - id: ${id}`,
-    "    kind: action",
-    "    action: task.create",
-    "    params:",
-    `      title: File the ${id} task`,
-    "      description: Filed by a workflow.",
-    ...extraLines.map((line) => `    ${line}`),
-  ].join("\n");
-
 /** The smallest workflow a controller accepts: one step that files a task. */
-const FILE_TASK_SOURCE = `name: File a task
-steps:
-${buildTaskStep("file_task")}
-`;
+const FILE_TASK_SOURCE = buildFileTaskSource("File a task");
 
 /* ------------------------------------------------------------------------ */
 /* Fixtures for a source the parse refuses, before any check of meaning.     */
 /* ------------------------------------------------------------------------ */
 
 const PARSE_REFUSALS: ReadonlyArray<RefusalFixture> = [
-  {
-    description: "a YAML syntax error",
-    build: () => `name: broken
-steps:
-  - id: file_task
-    kind: action
-    action: task.create
-    params:
-      title: "one" two
-      description: body
-`,
-    paths: [[]],
-  },
+  { description: "a YAML syntax error", build: () => SYNTAX_ERROR_SOURCE, paths: [[]] },
   {
     description: "a step kind that does not exist",
-    build: () => `name: wrong kind
-steps:
-  - id: file_task
-    kind: script
-    action: task.create
-`,
+    build: () => WRONG_KIND_SOURCE,
     paths: [["steps", "0", "kind"]],
   },
   {
     description: "two steps with one id",
-    build: () => `name: two steps, one id
-steps:
-${buildTaskStep("file_task")}
-${buildTaskStep("file_task")}
-`,
+    build: () => DUPLICATE_STEP_ID_SOURCE,
     paths: [["steps", "1", "id"]],
   },
   {
     description: "a step id that is not snake_case",
-    build: () => `name: kebab step
-steps:
-${buildTaskStep("open-pr")}
-`,
+    build: () => KEBAB_CASE_STEP_ID_SOURCE,
     paths: [["steps", "0", "id"]],
   },
 ];
@@ -1851,15 +1813,9 @@ edges:
     to: follow_up
 `;
 
-/** What a save answers: the stored record, and the warnings of this save. */
-interface SaveAnswer {
-  readonly workflow: { readonly id: string };
-  readonly warnings: ReadonlyArray<Issue>;
-}
-
-const readSaveAnswer = async (response: Response): Promise<SaveAnswer> => {
+const readSaveAnswer = async (response: Response): Promise<WorkflowSaved> => {
   expect([200, 201], await response.clone().text()).toContain(response.status);
-  return (await response.json()) as SaveAnswer;
+  return (await response.json()) as WorkflowSaved;
 };
 
 /** The one warning a run that only cancellation can end is given. */

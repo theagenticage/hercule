@@ -3,4 +3,9 @@
  * this file, so that its insides, and the libraries behind them, can change
  * without a change anywhere else.
  */
-export { WorkflowEditor, type WorkflowEditorHandle } from "./workflow-editor";
+export {
+  WorkflowEditor,
+  type MarkedIssue,
+  type WorkflowEditorHandle,
+  type WorkflowView,
+} from "./workflow-editor";

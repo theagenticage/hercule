@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input } from "@hercule/ui";
 import { formatStamp, queryKeys, type HerculeClient } from "@hercule/client-core";
 import type { SecretRef } from "@hercule/contract";
+import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
@@ -139,28 +140,19 @@ export function SecretRow({
         </form>
       ) : null}
 
-      {/* Asked in place rather than behind a browser dialog, like every other
-          question this app puts to the reader. */}
       {confirmingDelete ? (
-        <div className="flex flex-wrap items-center gap-1.5 text-row text-muted">
-          <span>Delete this secret? Its value cannot be recovered.</span>
-          <Button
-            onClick={() => {
-              setConfirmingDelete(false);
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              setConfirmingDelete(false);
-              remove.mutate();
-            }}
-          >
-            Confirm
-          </Button>
-        </div>
+        <InPlaceQuestion
+          question="Delete this secret? Its value cannot be recovered."
+          declineLabel="Cancel"
+          acceptLabel="Confirm"
+          onDecline={() => {
+            setConfirmingDelete(false);
+          }}
+          onAccept={() => {
+            setConfirmingDelete(false);
+            remove.mutate();
+          }}
+        />
       ) : null}
 
       <SaveStatus

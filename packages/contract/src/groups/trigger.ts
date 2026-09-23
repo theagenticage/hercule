@@ -19,7 +19,7 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { Timezone } from "../strings";
 import { EventKind } from "./event";
-import { ConnectionSelection } from "./workflow";
+import { ConnectionSelection } from "./workflow-definition";
 
 /** A start trigger starts runs. A signal trigger resumes a run that is live. */
 export const TriggerKind = Schema.Literals(["start", "signal"]);

@@ -15,7 +15,7 @@ import {
   MAX_OUTPUT_SCHEMA_LENGTH,
   OutputSchema,
 } from "./output-schema";
-import { FIXTURE_SCHEMA, IMPOSSIBLE_SCHEMA } from "./output-schema.testing";
+import { FIXTURE_SCHEMA, IMPOSSIBLE_SCHEMA, nestInLists } from "./output-schema.testing";
 
 /** Every shape the subset allows, in one document. */
 const ACCEPTED = {
@@ -312,20 +312,16 @@ describe("the size bound on a schema", () => {
 describe("the depth bound on a schema", () => {
   const decode = Schema.decodeUnknownResult(OutputSchema);
 
-  /** A value nested in arrays this many levels deep. */
-  const nestInArrays = (levels: number): unknown =>
-    Array.from({ length: levels }).reduce<unknown>((inner) => [inner], "bottom");
-
   it("takes a schema at the bound, and refuses one level past it", () => {
     // The schema object itself is the first level.
-    expect(decode({ items: nestInArrays(MAX_JSON_DEPTH - 1) })._tag).toBe("Success");
-    const refused = decode({ items: nestInArrays(MAX_JSON_DEPTH) });
+    expect(decode({ items: nestInLists(MAX_JSON_DEPTH - 1) })._tag).toBe("Success");
+    const refused = decode({ items: nestInLists(MAX_JSON_DEPTH) });
     expect(refused._tag).toBe("Failure");
     expect(JSON.stringify(refused)).toContain(`${String(MAX_JSON_DEPTH)} levels`);
   });
 
   it("refuses a schema a hundred thousand levels deep, and does not throw", () => {
-    const refused = decode({ items: nestInArrays(100_000) });
+    const refused = decode({ items: nestInLists(100_000) });
     expect(refused._tag).toBe("Failure");
     expect(JSON.stringify(refused)).toContain(`${String(MAX_JSON_DEPTH)} levels`);
   });

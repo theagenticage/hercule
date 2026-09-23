@@ -12,6 +12,7 @@ import { AuditLog, EventKindsLayer } from "../events";
 import { EventKindCatalogLayer, PluginHost } from "../plugins";
 import { pluginStack } from "../plugins/testing";
 import { WorkflowService, WorkflowServiceLayer } from "./index";
+import { buildFileTaskSource } from "./testing";
 
 type Deps = WorkflowService | AuditLog | PluginHost | SqlClient.SqlClient;
 
@@ -47,21 +48,11 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     ),
   );
 
-/** The text of a param that no audit entry may repeat. */
+/** The description of each workflow here: text of the source that no audit entry may repeat. */
 const SECRET_TEXT = "Read the private notes and say nothing of them";
 
-const buildSource = (name: string): string =>
-  [
-    `name: ${name}`,
-    "steps:",
-    "  - id: file_task",
-    "    kind: action",
-    "    action: task.create",
-    "    params:",
-    "      title: Look at the private notes",
-    `      description: ${SECRET_TEXT}`,
-    "",
-  ].join("\n");
+/** A workflow that files one task, with the text no audit entry may repeat. */
+const buildSource = (name: string): string => buildFileTaskSource(name, SECRET_TEXT);
 
 describe("the workflow listing", () => {
   it("answers the workflow changed last first when the caller names no order", async () => {

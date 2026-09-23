@@ -6,7 +6,14 @@
  * route runs through a node, or through the label of another edge.
  */
 import { describe, expect, it } from "vitest";
-import { computeGraphLayout, type EdgeRoute, type Point, type Size } from "./layout";
+import {
+  computeGraphLayout,
+  LARGEST_PLACED_ZOOM,
+  placeDrawing,
+  type EdgeRoute,
+  type Point,
+  type Size,
+} from "./layout";
 
 const CARD: Size = { width: 144, height: 52 };
 const LABEL: Size = { width: 120, height: 20 };
@@ -319,4 +326,27 @@ describe("computeGraphLayout", () => {
       expectClearDrawing(layout, edges);
     },
   );
+});
+
+describe("placeDrawing", () => {
+  it("draws a small drawing larger, up to its largest zoom, and a large one at the legible zoom from the pane's edge", () => {
+    const pane: Size = { width: 1200, height: 800 };
+
+    // Three cards in a row fit the pane at the largest zoom, centred.
+    const small: Size = { width: 520, height: 52 };
+    expect(placeDrawing(pane, small)).toEqual({
+      x: (1200 - 520 * LARGEST_PLACED_ZOOM) / 2,
+      y: (800 - 52 * LARGEST_PLACED_ZOOM) / 2,
+      zoom: LARGEST_PLACED_ZOOM,
+    });
+
+    // A drawing that fits only a little larger is drawn as large as it fits.
+    const wide: Size = { width: 1052, height: 200 };
+    expect(placeDrawing(pane, wide).zoom).toBeCloseTo((1200 - 2 * 16) / 1052);
+
+    // A drawing wider than the pane is drawn at the legible zoom and starts
+    // at the pane's edge, and it is centred on the axis where it fits.
+    const large: Size = { width: 2000, height: 300 };
+    expect(placeDrawing(pane, large)).toEqual({ x: 16, y: (800 - 300) / 2, zoom: 1 });
+  });
 });

@@ -1,8 +1,9 @@
-import { useState, type JSX, type ReactNode } from "react";
-import { flushSync } from "react-dom";
+import type { JSX, ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { Button, SegmentedControl, SegmentedControlItem } from "@hercule/ui";
-import { readWorkflowView, WORKFLOW_VIEWS, type WorkflowView } from "./-view";
+import type { WorkflowHeaderStatus } from "@hercule/client-core";
+import { Button, SegmentedControl, SegmentedControlItem, cn } from "@hercule/ui";
+import type { WorkflowView } from "../../../screens/workflow-editor";
+import { readWorkflowView, WORKFLOW_VIEWS } from "./-view";
 
 /** What the view control calls each view. */
 const VIEW_LABELS: Readonly<Record<WorkflowView, string>> = {
@@ -81,52 +82,56 @@ export function WorkflowHeader({
   );
 }
 
+const STATUS_TONE: Readonly<Record<WorkflowHeaderStatus["tone"], string>> = {
+  muted: "text-muted",
+  attn: "text-attn",
+  fail: "text-fail",
+};
+
 /**
- * A question asked in place of the header's buttons, rather than behind a
- * browser dialog, like every other question this app puts to the reader.
- *
- * The answer that declines comes first and the answer that accepts comes
- * last, as everywhere in the app. The focus moves to the answer that
- * declines, so a key press that follows the question cannot accept it. After
- * that answer, the focus goes back to the element that asked. The page keeps
- * its own buttons mounted, and hidden, while a question shows, so that
- * element is still there when the question goes. Each question has a key of
- * its own, so a question that takes the place of another starts again: it
- * takes the focus, and it keeps the element that asked it.
+ * What the header of a workflow's page holds at its right: what the page's
+ * last write said, Delete for a stored workflow, and Save. A question takes
+ * their place while it shows. They are hidden then, and not removed, so the
+ * focus can go back to the button that asked.
  */
-export function HeaderQuestion({
-  question,
-  declineLabel,
-  acceptLabel,
-  onDecline,
-  onAccept,
+export function WorkflowHeaderActions({
+  isHidden,
+  status,
+  canDelete,
+  isDeleteDisabled,
+  isSaveDisabled,
+  onDelete,
+  onSave,
 }: {
-  readonly question: string;
-  readonly declineLabel: string;
-  readonly acceptLabel: string;
-  readonly onDecline: () => void;
-  readonly onAccept: () => void;
+  readonly isHidden: boolean;
+  readonly status: WorkflowHeaderStatus | undefined;
+  readonly canDelete: boolean;
+  readonly isDeleteDisabled: boolean;
+  readonly isSaveDisabled: boolean;
+  readonly onDelete: () => void;
+  readonly onSave: () => void;
 }): JSX.Element {
-  // The first render comes before the answer that declines takes the focus,
-  // so the element with the focus is the element that asked.
-  const [asker] = useState(() => document.activeElement);
   return (
-    <>
-      <span className="min-w-0 truncate text-row text-muted">{question}</span>
-      <Button
-        autoFocus
-        onClick={() => {
-          // The element that asked can take the focus only after the page
-          // has rendered without the question.
-          flushSync(onDecline);
-          if (asker instanceof HTMLElement) asker.focus();
-        }}
-      >
-        {declineLabel}
+    <div hidden={isHidden} className="flex min-w-0 items-center gap-1.5">
+      {status === undefined ? null : (
+        <span
+          role={status.tone === "fail" ? "alert" : "status"}
+          title={status.text}
+          className={cn("min-w-0 truncate text-fine", STATUS_TONE[status.tone])}
+        >
+          {status.text}
+        </span>
+      )}
+      {canDelete ? (
+        <Button disabled={isDeleteDisabled} onClick={onDelete}>
+          Delete
+        </Button>
+      ) : null}
+      {/* `aria-disabled`, and not `disabled`, so that Save keeps the focus
+          while its write is in flight and after it lands. */}
+      <Button variant="form" aria-disabled={isSaveDisabled} onClick={onSave}>
+        Save
       </Button>
-      <Button variant="primary" onClick={onAccept}>
-        {acceptLabel}
-      </Button>
-    </>
+    </div>
   );
 }

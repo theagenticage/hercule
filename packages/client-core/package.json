@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/live/socket-stub.ts",
-    "./threads/testing": "./src/threads/workspaces.testing.ts"
+    "./threads/testing": "./src/threads/workspaces.testing.ts",
+    "./workflow-source/testing": "./src/workflow-source.testing.ts"
   },
   "dependencies": {
     "@hercule/contract": "workspace:*",

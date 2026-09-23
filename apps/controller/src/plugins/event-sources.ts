@@ -12,7 +12,7 @@ import type * as JsonSchema from "effect/JsonSchema";
 import * as Schema from "effect/Schema";
 import { EventSourceNames, PluginError, type EventSourceDefinition } from "@hercule/plugin-host";
 import { MAX_EVENT_KIND_LENGTH, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
-import { isCoreEventKind, type NameableEventKind } from "../events";
+import { isCoreEventKind, type DeclaredEventKindWithConnectionType } from "../events";
 import { asPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
 import type { NewContribution } from "./repository";
@@ -23,7 +23,7 @@ import type { NewContribution } from "./repository";
  * plugin's events always arrive through a Connection, so the Connection type
  * is always present.
  */
-export interface RegisteredEventKind extends NameableEventKind {
+export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType {
   readonly pluginId: string;
   readonly connectionType: string;
   readonly schema: Schema.Top;

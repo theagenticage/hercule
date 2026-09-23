@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { DeclaredEventKind, Forbidden } from "@hercule/contract";
 import { requireGrant } from "../actor";
-import { EventKindCatalog, type NameableEventKind } from "./catalog";
+import { EventKindCatalog, type DeclaredEventKindWithConnectionType } from "./catalog";
 
 /** The one event kind whose triggers carry a schedule. The Scheduler emits it. */
 export const CRON_TICK_EVENT_KIND = "cron.tick";
@@ -19,7 +19,7 @@ export const CRON_TICK_EVENT_KIND = "cron.tick";
  * because the core is their source: the Scheduler for `cron.tick`, and the
  * controller itself for the kinds about runs and tasks.
  */
-const CORE_EVENT_KINDS: ReadonlyArray<NameableEventKind> = [
+const CORE_EVENT_KINDS: ReadonlyArray<DeclaredEventKindWithConnectionType> = [
   {
     kind: CRON_TICK_EVENT_KIND,
     description: "The schedule of a cron trigger came due. The trigger names its schedule.",
@@ -45,7 +45,7 @@ const make = Effect.gen(function* () {
   const catalog = yield* EventKindCatalog;
 
   /** Every kind a trigger can name, ordered by kind. */
-  const list = (): Effect.Effect<ReadonlyArray<NameableEventKind>> =>
+  const list = (): Effect.Effect<ReadonlyArray<DeclaredEventKindWithConnectionType>> =>
     Effect.map(catalog.listActiveEventKinds(), (pluginKinds) =>
       [...CORE_EVENT_KINDS, ...pluginKinds].sort((left, right) =>
         left.kind.localeCompare(right.kind),

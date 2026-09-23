@@ -54,6 +54,11 @@ export const queryKeys = {
   workflows: (): LiveQueryKey => ["workflows"],
   workflow: (id?: string): LiveQueryKey => (id === undefined ? ["workflow"] : ["workflow", id]),
   /**
+   * Not a live topic: the answer about a source is keyed by the source itself,
+   * so a source that was validated before answers from the cache.
+   */
+  workflowValidation: (source: string): LiveQueryKey => ["workflow-validation", source],
+  /**
    * Not a live topic: the two catalogs change only when a plugin is turned on
    * or off, and the editor reads them again each time it opens.
    */

@@ -16,23 +16,24 @@
  *   focus out of the editor, and user-event sends no key code. The keyboard
  *   tests add the key code that a browser sends.
  *
- * The parent owns the text, as the workflow screen does. The diagnostics
- * tests give the editor each new text as the parent does after a keystroke,
- * so a fake clock can measure the wait before validation. user-event cannot
- * type under a fake clock: Testing Library waits for a timer after each
- * action, and a fake clock never lets that timer fire.
+ * The parent owns the source and the controller's answer about it, as the
+ * workflow screen does. The diagnostics tests give the editor each new source
+ * and each answer as the screen does. When the controller validates a
+ * source, and which answer the screen hands on, is the screen's to decide,
+ * and the screen's tests check it.
  */
 import { createRef, useState, type ComponentProps, type Ref } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
+import { findUniqueOffset } from "@hercule/client-core/workflow-source/testing";
 import type { Issue } from "@hercule/contract";
 import { WorkflowEditor, type WorkflowEditorHandle } from ".";
 
 type EditorProps = ComponentProps<typeof WorkflowEditor>;
-type Validate = EditorProps["validate"];
+type Validation = EditorProps["validation"];
 type ReportIssues = EditorProps["onIssuesChange"];
-type ReportCheckState = EditorProps["onCheckStateChange"];
+type ReportValidationState = EditorProps["onValidationStateChange"];
 
 const REVIEWER_ID = "0199e0e7-1111-7000-8000-0000000000ab";
 const FIXER_ID = "0199e0e7-1111-7000-8000-0000000000ac";
@@ -64,27 +65,12 @@ const CATALOG: EditorProps["catalog"] = {
   ],
 };
 
-/** A validation that finds nothing. */
-const answerNoIssues: Validate = () => Promise.resolve({ errors: [], warnings: [] });
-
 /**
- * The offset of a fragment that the text holds exactly once. A fragment that
- * occurs twice would make the expected place a guess.
- */
-const findUniqueOffset = (text: string, fragment: string): number => {
-  const first = text.indexOf(fragment);
-  if (first === -1 || text.indexOf(fragment, first + 1) !== -1) {
-    throw new Error(`The text does not hold ${JSON.stringify(fragment)} exactly once.`);
-  }
-  return first;
-};
-
-/**
- * A valid workflow whose step `review` names the given action, as the text
+ * A valid workflow whose step `review` names the given action, as the source
  * reads while the author types that action. One line for each item, so line N
  * is item N - 1.
  */
-const buildReviewWorkflowText = (action: string): string =>
+const buildReviewWorkflowSource = (action: string): string =>
   [
     "# Review labelled pull requests.",
     "name: Review",
@@ -109,7 +95,7 @@ const buildReviewWorkflowText = (action: string): string =>
   ].join("\n");
 
 /** A loop that starts at `implement`, with one capped edge back into it. */
-const LOOP_TEXT = [
+const LOOP_SOURCE = [
   "name: Implement a task",
   "triggers:",
   "  - id: assigned",
@@ -165,7 +151,7 @@ const LOOP_TEXT = [
   "",
 ].join("\n");
 
-/** The id of each step and each trigger of `LOOP_TEXT`. */
+/** The id of each step and each trigger of `LOOP_SOURCE`. */
 const LOOP_NODE_IDS = [
   "assigned",
   "checks_failed",
@@ -176,11 +162,11 @@ const LOOP_NODE_IDS = [
   "task_done",
 ];
 
-/** `LOOP_TEXT` with a mapping inside a compact mapping on line 28, which YAML does not allow. */
-const BROKEN_LOOP_TEXT = LOOP_TEXT.replace("    entry: true\n", "    entry: true: yes\n");
+/** `LOOP_SOURCE` with a mapping inside a compact mapping on line 28, which YAML does not allow. */
+const BROKEN_LOOP_SOURCE = LOOP_SOURCE.replace("    entry: true\n", "    entry: true: yes\n");
 
 /** A workflow of two steps in a line, and a trigger that starts it. */
-const LINEAR_TEXT = [
+const LINEAR_SOURCE = [
   "name: Review labelled pull requests",
   "triggers:",
   "  - id: labelled",
@@ -202,43 +188,49 @@ const LINEAR_TEXT = [
   "",
 ].join("\n");
 
+/** An answer of the controller about `source` that names `issues`. */
+const buildAnswer = (
+  source: string,
+  issues: { readonly errors?: ReadonlyArray<Issue>; readonly warnings?: ReadonlyArray<Issue> },
+): Validation => ({
+  source,
+  issues: { errors: issues.errors ?? [], warnings: issues.warnings ?? [] },
+});
+
 /**
- * Mounts the editor as a parent that owns the text does. `changeSource` gives
- * the editor a new text, as the parent does after each keystroke.
+ * Mounts the editor as a parent that owns the source and the controller's
+ * answer does. `update` gives the editor a new source, a new answer, or both,
+ * as the parent does after a keystroke or when an answer arrives.
  */
 const renderEditor = (options: {
   readonly source: string;
-  readonly validate: Validate;
+  readonly validation?: Validation;
   readonly onIssuesChange: ReportIssues;
-  readonly onCheckStateChange?: ReportCheckState;
-  readonly onNameChange?: EditorProps["onNameChange"];
+  readonly onValidationStateChange?: ReportValidationState;
   readonly view: EditorProps["view"];
 }) => {
-  const buildEditorElement = (source: string) => (
+  const shown = { source: options.source, validation: options.validation };
+  const buildEditorElement = () => (
     <WorkflowEditor
-      source={source}
+      source={shown.source}
       onSourceChange={() => {}}
       view={options.view}
       catalog={CATALOG}
-      validate={options.validate}
+      validation={shown.validation}
       onIssuesChange={options.onIssuesChange}
-      onCheckStateChange={options.onCheckStateChange ?? (() => {})}
-      onNameChange={options.onNameChange ?? (() => {})}
+      onValidationStateChange={options.onValidationStateChange ?? (() => {})}
+      onNameChange={() => {}}
     />
   );
-  const { rerender } = render(buildEditorElement(options.source));
+  const { rerender } = render(buildEditorElement());
   return {
-    changeSource: (source: string) => {
-      rerender(buildEditorElement(source));
+    update: (change: { readonly source?: string; readonly validation?: Validation }) => {
+      if (change.source !== undefined) shown.source = change.source;
+      if ("validation" in change) shown.validation = change.validation;
+      rerender(buildEditorElement());
     },
   };
 };
-
-/** Moves the fake clock on, and lets React and the promises it settles catch up. */
-const advanceClock = (milliseconds: number) =>
-  act(async () => {
-    await vi.advanceTimersByTimeAsync(milliseconds);
-  });
 
 /**
  * The text under the editor's underlines of one severity, in the order of the
@@ -257,14 +249,13 @@ const hasErrorOnLine = (line: number): boolean => {
 };
 
 /**
- * The editor inside a parent that keeps the text, as the workflow screen does,
- * with a button after the editor for focus to move to.
+ * The editor inside a parent that keeps the source, as the workflow screen
+ * does, with a button after the editor for focus to move to. No answer of the
+ * controller has come.
  */
 function EditorHost(props: {
   readonly initialSource: string;
   readonly onSourceChange: (source: string) => void;
-  readonly validate?: Validate;
-  readonly onIssuesChange?: ReportIssues;
 }) {
   const [source, setSource] = useState(props.initialSource);
   return (
@@ -277,9 +268,9 @@ function EditorHost(props: {
         }}
         view="yaml"
         catalog={CATALOG}
-        validate={props.validate ?? answerNoIssues}
-        onIssuesChange={props.onIssuesChange ?? (() => {})}
-        onCheckStateChange={() => {}}
+        validation={undefined}
+        onIssuesChange={() => {}}
+        onValidationStateChange={() => {}}
         onNameChange={() => {}}
       />
       <button type="button">Save</button>
@@ -287,26 +278,22 @@ function EditorHost(props: {
   );
 }
 
-/** Mounts the editor on a text, focuses it, and puts the cursor at the end of the text. */
-const openEditorAtEnd = async (
-  initialSource: string,
-  options: Pick<ComponentProps<typeof EditorHost>, "validate" | "onIssuesChange"> = {},
-) => {
-  const text = { current: initialSource };
+/** Mounts the editor on a source, focuses it, and puts the cursor at the end of the text. */
+const openEditorAtEnd = async (initialSource: string) => {
+  const typed = { current: initialSource };
   const user = userEvent.setup();
   render(
     <EditorHost
       initialSource={initialSource}
       onSourceChange={(next) => {
-        text.current = next;
+        typed.current = next;
       }}
-      {...options}
     />,
   );
   const textbox = screen.getByRole("textbox", { name: "Workflow source" });
   await user.click(textbox);
   await user.keyboard("{Control>}{End}{/Control}");
-  return { user, textbox, readSource: () => text.current };
+  return { user, textbox, readSource: () => typed.current };
 };
 
 /** Asks for completions at the cursor, as Ctrl+Space does, and waits for the list. */
@@ -347,7 +334,7 @@ const addBrowserKeyCode = (event: KeyboardEvent): void => {
   if (keyCode !== undefined) Object.defineProperty(event, "keyCode", { value: keyCode });
 };
 
-/** A text that ends where a new key of an agent step starts. */
+/** A source that ends where a new key of an agent step starts. */
 const AGENT_STEP_AT_NEW_KEY = [
   "name: Review",
   "steps:",
@@ -357,7 +344,7 @@ const AGENT_STEP_AT_NEW_KEY = [
   "    ",
 ].join("\n");
 
-/** A text that ends where a new key of an action step starts. */
+/** A source that ends where a new key of an action step starts. */
 const ACTION_STEP_AT_NEW_KEY = [
   "name: Review",
   "steps:",
@@ -379,7 +366,7 @@ describe("completion", () => {
   it.each([
     {
       kind: "agent",
-      text: AGENT_STEP_AT_NEW_KEY,
+      source: AGENT_STEP_AT_NEW_KEY,
       // id, kind and agent are written already.
       offered: [
         "name",
@@ -397,12 +384,12 @@ describe("completion", () => {
     },
     {
       kind: "action",
-      text: ACTION_STEP_AT_NEW_KEY,
+      source: ACTION_STEP_AT_NEW_KEY,
       // id, kind and action are written already.
       offered: ["name", "params", "condition", "join", "entry", "terminal"],
     },
   ])("offers the keys of an $kind step that the step does not have yet", async (example) => {
-    const { user } = await openEditorAtEnd(example.text);
+    const { user } = await openEditorAtEnd(example.source);
 
     expect(sortCompletionLabels(await requestCompletions(user))).toEqual(
       [...example.offered].sort((a, b) => a.localeCompare(b)),
@@ -448,20 +435,20 @@ describe("completion", () => {
   });
 
   it("offers the agents by name after agent:, and writes the id of the one picked", async () => {
-    const text = [
+    const source = [
       "name: Review",
       "steps:",
       "  - id: review",
       "    kind: agent",
       "    agent: ",
     ].join("\n");
-    const { user, readSource } = await openEditorAtEnd(text);
+    const { user, readSource } = await openEditorAtEnd(source);
 
     const options = await requestCompletions(user);
     expect(sortCompletionLabels(options)).toEqual(["Fixer", "Reviewer"]);
 
     await user.click(findCompletion(options, "Reviewer"));
-    expect(readSource()).toBe(`${text}${REVIEWER_ID}`);
+    expect(readSource()).toBe(`${source}${REVIEWER_ID}`);
   });
 
   it("offers the catalog's event kinds after kind: in a trigger's source", async () => {
@@ -536,26 +523,24 @@ describe("the keyboard", () => {
 });
 
 /**
- * The editor inside a parent that keeps the text, with a handle on the
+ * The editor inside a parent that keeps the source, with a handle on the
  * editor, as the workflow screen does.
  */
 function HostWithHandle({
   parentSource,
   view,
   onSourceChange,
-  validate,
+  validation,
   onIssuesChange,
-  onCheckStateChange,
   onNameChange,
   ref,
 }: {
-  /** The text that the parent wrote last, in place of the author's. */
+  /** The source that the parent wrote last, in place of the author's. */
   readonly parentSource: string;
   readonly view: EditorProps["view"];
   readonly onSourceChange: (source: string) => void;
-  readonly validate: Validate;
+  readonly validation: Validation;
   readonly onIssuesChange: ReportIssues;
-  readonly onCheckStateChange: ReportCheckState;
   readonly onNameChange: EditorProps["onNameChange"];
   readonly ref: Ref<WorkflowEditorHandle>;
 }) {
@@ -575,9 +560,9 @@ function HostWithHandle({
       }}
       view={view}
       catalog={CATALOG}
-      validate={validate}
+      validation={validation}
       onIssuesChange={onIssuesChange}
-      onCheckStateChange={onCheckStateChange}
+      onValidationStateChange={() => {}}
       onNameChange={onNameChange}
     />
   );
@@ -585,19 +570,20 @@ function HostWithHandle({
 
 /**
  * Mounts the editor with a handle. `changeView` shows another view, as the
- * screen's control does, and `replaceSource` writes a text in place of the
- * author's, as the screen does when it shows another workflow.
+ * screen's control does, and `replaceSource` writes a source in place of the
+ * author's, as the screen does when it shows another workflow. The answer of
+ * the controller stays as it is given, as while the answer about the next
+ * source is to come.
  */
 const renderEditorWithHandle = (options: {
   readonly source: string;
   readonly view: EditorProps["view"];
-  readonly validate?: Validate;
+  readonly validation?: Validation;
   readonly onIssuesChange?: ReportIssues;
-  readonly onCheckStateChange?: ReportCheckState;
   readonly onNameChange?: EditorProps["onNameChange"];
 }) => {
   const handle = createRef<WorkflowEditorHandle>();
-  const text = { current: options.source };
+  const typed = { current: options.source };
   const shown = { view: options.view, parentSource: options.source };
   const buildHost = () => (
     <HostWithHandle
@@ -605,26 +591,19 @@ const renderEditorWithHandle = (options: {
       view={shown.view}
       ref={handle}
       onSourceChange={(next) => {
-        text.current = next;
+        typed.current = next;
       }}
-      validate={options.validate ?? answerNoIssues}
+      validation={options.validation}
       onIssuesChange={options.onIssuesChange ?? (() => {})}
-      onCheckStateChange={options.onCheckStateChange ?? (() => {})}
       onNameChange={options.onNameChange ?? (() => {})}
     />
   );
   const { rerender } = render(buildHost());
   return {
     user: userEvent.setup(),
-    readSource: () => text.current,
+    readSource: () => typed.current,
     moveCursorToLine: (line: number) => {
       act(() => handle.current?.moveCursorToLine(line));
-    },
-    markSaveRefusal: (source: string, errors: ReadonlyArray<Issue>) => {
-      act(() => handle.current?.markSaveRefusal(source, errors));
-    },
-    checkAgain: () => {
-      act(() => handle.current?.checkAgain());
     },
     changeView: (view: EditorProps["view"]) => {
       shown.view = view;
@@ -632,29 +611,26 @@ const renderEditorWithHandle = (options: {
     },
     replaceSource: (source: string) => {
       shown.parentSource = source;
-      text.current = source;
+      typed.current = source;
       rerender(buildHost());
     },
   };
 };
 
 describe("typing", () => {
-  it("keeps the marks of the last answer, moving with the text, and tells the parent of them while the answer about the new text is to come", async () => {
-    const text = buildReviewWorkflowText("task.creat");
+  it("keeps the marks of the last answer, moving with the text, and tells the parent of them while the answer about the new source is to come", async () => {
+    const source = buildReviewWorkflowSource("task.creat");
     const error: Issue = {
       path: ["steps", "1", "action"],
       message: "task.creat is not an action.",
     };
     const onIssuesChange = vi.fn<ReportIssues>();
+    // The answer is about the first source, and no answer about a later
+    // source comes.
     const { user, readSource, moveCursorToLine } = renderEditorWithHandle({
-      source: text,
+      source,
       view: "yaml",
-      // The answer about the first text comes at once, and the answer about
-      // any later text never comes.
-      validate: (source) =>
-        source === text
-          ? Promise.resolve({ errors: [error], warnings: [] })
-          : new Promise(() => {}),
+      validation: buildAnswer(source, { errors: [error] }),
       onIssuesChange,
     });
     await waitFor(() => {
@@ -669,7 +645,7 @@ describe("typing", () => {
     moveCursorToLine(18);
     await user.keyboard("{ArrowLeft}e");
 
-    expect(readSource()).toBe(`# More.\n${buildReviewWorkflowText("task.create")}`);
+    expect(readSource()).toBe(`# More.\n${buildReviewWorkflowSource("task.create")}`);
     expect(readUnderlinedText("error")).toBe("action: task.creat");
     const from = findUniqueOffset(readSource(), "action: task.create\nedges");
     expect(onIssuesChange.mock.lastCall?.[0]).toEqual([
@@ -677,24 +653,46 @@ describe("typing", () => {
     ]);
   });
 
-  it("keeps each \\r\\n of a text as the author types, and marks its problems at their places", async () => {
-    const text = buildReviewWorkflowText("task.create")
+  it("clears the marks of the parse once the source parses again, while the answer about it is to come", async () => {
+    const source = buildReviewWorkflowSource("task.create");
+    const onIssuesChange = vi.fn<ReportIssues>();
+    const { user, moveCursorToLine } = renderEditorWithHandle({
+      source,
+      view: "yaml",
+      validation: buildAnswer(source, {}),
+      onIssuesChange,
+    });
+
+    // The author writes a mapping inside a compact mapping on line 16, which
+    // YAML does not allow, and then takes the mapping out again. The source
+    // is then another source than the one that the answer is about.
+    moveCursorToLine(16);
+    await user.keyboard("{End}e: x");
+    expect(hasErrorOnLine(16)).toBe(true);
+    await user.keyboard("{Backspace}{Backspace}{Backspace}");
+
+    expect(hasErrorOnLine(16)).toBe(false);
+    expect(onIssuesChange.mock.lastCall?.[0]).toEqual([]);
+  });
+
+  it("keeps each \\r\\n of a source as the author types, and marks its problems at their places", async () => {
+    const source = buildReviewWorkflowSource("task.create")
       .replace("  - id: review\n    kind: action", "  - id: review\n    kind: acton")
       .replaceAll("\n", "\r\n");
-    const { user, readSource } = await openEditorAtEnd(text);
+    const { user, readSource } = await openEditorAtEnd(source);
 
     expect(readUnderlinedText("error")).toBe("kind: acton");
 
     await user.keyboard("#{Enter}#");
 
-    expect(readSource().startsWith(`${text}#\r\n`)).toBe(true);
+    expect(readSource().startsWith(`${source}#\r\n`)).toBe(true);
     expect(readSource().replaceAll("\r\n", "")).not.toMatch(/[\r\n]/);
     expect(readUnderlinedText("error")).toBe("kind: acton");
   });
 
   it("moves the cursor to a line when the text shows again, after the graph view hid it", async () => {
     const { user, readSource, moveCursorToLine, changeView } = renderEditorWithHandle({
-      source: LINEAR_TEXT,
+      source: LINEAR_SOURCE,
       view: "graph",
     });
 
@@ -707,51 +705,10 @@ describe("typing", () => {
 });
 
 describe("diagnostics", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  /** The texts a validation was asked about, in the order it was asked. */
-  const listValidatedSources = (validate: Mock<Validate>) =>
-    validate.mock.calls.map(([source]) => source);
-
-  it("validates about 400 ms after the text stops changing, with the text as it is then", async () => {
-    const validate = vi.fn<Validate>(answerNoIssues);
-    const { changeSource } = renderEditor({
-      source: buildReviewWorkflowText("task.c"),
-      validate,
-      onIssuesChange: () => {},
-      view: "yaml",
-    });
-
-    changeSource(buildReviewWorkflowText("task.cre"));
-    await advanceClock(200);
-    changeSource(buildReviewWorkflowText("task.creat"));
-    await advanceClock(200);
-
-    // The last change was 200 ms ago: the author may still be typing.
-    expect(listValidatedSources(validate)).not.toContain(buildReviewWorkflowText("task.cre"));
-    expect(listValidatedSources(validate)).not.toContain(buildReviewWorkflowText("task.creat"));
-
-    await advanceClock(800);
-
-    expect(
-      listValidatedSources(validate).filter(
-        (source) => source === buildReviewWorkflowText("task.creat"),
-      ),
-    ).toHaveLength(1);
-    // The text that stood for only 200 ms is never validated.
-    expect(listValidatedSources(validate)).not.toContain(buildReviewWorkflowText("task.cre"));
-  });
-
-  it("underlines each issue that validation answers at its path, and gives the parent the same issues, errors first", async () => {
-    const text = buildReviewWorkflowText("task.creat");
-    // The warning's place comes before the error's place in the text, so an
-    // order by place would put the warning first.
+  it("underlines each issue that validation answers at its path, and gives the parent the same issues, errors first", () => {
+    const source = buildReviewWorkflowSource("task.creat");
+    // The warning's place comes before the error's place in the source, so
+    // an order by place would put the warning first.
     const error: Issue = {
       path: ["steps", "1", "action"],
       message: "task.creat is not an action. Write one of task.create, task.update, task.query.",
@@ -760,25 +717,19 @@ describe("diagnostics", () => {
       path: ["triggers", "0", "source", "filter"],
       message: "This filter admits every labelled pull request.",
     };
-    const validate = vi.fn<Validate>(() =>
-      Promise.resolve({ errors: [error], warnings: [warning] }),
-    );
     const onIssuesChange = vi.fn<ReportIssues>();
-    const { changeSource } = renderEditor({
-      source: buildReviewWorkflowText("task.cre"),
-      validate,
+    const { update } = renderEditor({
+      source: buildReviewWorkflowSource("task.cre"),
       onIssuesChange,
       view: "yaml",
     });
 
-    changeSource(text);
-    await advanceClock(1000);
+    update({ source, validation: buildAnswer(source, { errors: [error], warnings: [warning] }) });
 
-    expect(listValidatedSources(validate)).toContain(text);
     expect(readUnderlinedText("error")).toBe("action: task.creat");
     expect(readUnderlinedText("warning")).toBe("filter: event.payload.number > 3");
-    const actionFrom = findUniqueOffset(text, "action: task.creat\n");
-    const filterFrom = findUniqueOffset(text, "filter: event.payload.number > 3");
+    const actionFrom = findUniqueOffset(source, "action: task.creat\n");
+    const filterFrom = findUniqueOffset(source, "filter: event.payload.number > 3");
     expect(onIssuesChange.mock.lastCall?.[0]).toEqual([
       {
         severity: "error",
@@ -797,20 +748,19 @@ describe("diagnostics", () => {
     ]);
   });
 
-  it("places an issue whose path names nothing in the text at the document start", async () => {
-    // The text has two steps. A validation that answered before the author
+  it("places an issue whose path names nothing in the source at the document start", () => {
+    // The source has two steps. A validation that answered before the author
     // removed a step can name a third or a fourth one.
+    const source = buildReviewWorkflowSource("task.creat");
     const error: Issue = { path: ["steps", "3", "action"], message: "This action is unknown." };
     const onIssuesChange = vi.fn<ReportIssues>();
-    const { changeSource } = renderEditor({
-      source: buildReviewWorkflowText("task.cre"),
-      validate: () => Promise.resolve({ errors: [error], warnings: [] }),
+    const { update } = renderEditor({
+      source: buildReviewWorkflowSource("task.cre"),
       onIssuesChange,
       view: "yaml",
     });
 
-    changeSource(buildReviewWorkflowText("task.creat"));
-    await advanceClock(1000);
+    update({ source, validation: buildAnswer(source, { errors: [error] }) });
 
     expect(onIssuesChange.mock.lastCall?.[0]).toEqual([
       { severity: "error", ...error, from: 0, to: expect.any(Number) as unknown, line: 1 },
@@ -818,24 +768,18 @@ describe("diagnostics", () => {
     expect(hasErrorOnLine(1)).toBe(true);
   });
 
-  it("underlines a YAML syntax error as soon as the text changes, without waiting for validation", async () => {
-    const text = buildReviewWorkflowText("task.create");
+  it("underlines a YAML syntax error as soon as the source changes, without waiting for validation", () => {
+    const source = buildReviewWorkflowSource("task.create");
     // Line 16 holds a mapping inside a compact mapping, which YAML does not allow.
-    const broken = text.replace(
+    const broken = source.replace(
       "    action: task.create\nedges:",
       "    action: task: create\nedges:",
     );
     const onIssuesChange = vi.fn<ReportIssues>();
-    // A validation that never answers: each mark comes from the editor's own parse.
-    const { changeSource } = renderEditor({
-      source: text,
-      validate: () => new Promise(() => {}),
-      onIssuesChange,
-      view: "yaml",
-    });
+    // No answer comes: each mark comes from the editor's own parse.
+    const { update } = renderEditor({ source, onIssuesChange, view: "yaml" });
 
-    changeSource(broken);
-    await advanceClock(50);
+    update({ source: broken });
 
     expect(hasErrorOnLine(16)).toBe(true);
     expect(onIssuesChange.mock.lastCall?.[0]).toEqual([
@@ -850,22 +794,16 @@ describe("diagnostics", () => {
     ]);
   });
 
-  it("underlines a shape error from its key through its value as soon as the text changes, without waiting for validation", async () => {
-    const text = buildReviewWorkflowText("task.create");
-    const broken = text.replace(
+  it("underlines a shape error from its key through its value as soon as the source changes, without waiting for validation", () => {
+    const source = buildReviewWorkflowSource("task.create");
+    const broken = source.replace(
       "  - id: review\n    kind: action",
       "  - id: review\n    kind: acton",
     );
     const onIssuesChange = vi.fn<ReportIssues>();
-    const { changeSource } = renderEditor({
-      source: text,
-      validate: () => new Promise(() => {}),
-      onIssuesChange,
-      view: "yaml",
-    });
+    const { update } = renderEditor({ source, onIssuesChange, view: "yaml" });
 
-    changeSource(broken);
-    await advanceClock(50);
+    update({ source: broken });
 
     expect(readUnderlinedText("error")).toBe("kind: acton");
     const from = findUniqueOffset(broken, "kind: acton");
@@ -881,125 +819,87 @@ describe("diagnostics", () => {
     ]);
   });
 
-  it("reports how far the check has come: checking until the answer arrives, then checked", async () => {
-    const onCheckStateChange = vi.fn<ReportCheckState>();
-    const { changeSource } = renderEditor({
-      source: buildReviewWorkflowText("task.cre"),
-      validate: answerNoIssues,
+  it("reports how far the validation has come: validating until the answer about the source arrives, then validated", () => {
+    const source = buildReviewWorkflowSource("task.cre");
+    const onValidationStateChange = vi.fn<ReportValidationState>();
+    const { update } = renderEditor({
+      source,
       onIssuesChange: () => {},
-      onCheckStateChange,
+      onValidationStateChange,
       view: "yaml",
     });
-    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checking" });
+    expect(onValidationStateChange.mock.lastCall?.[0]).toEqual({ status: "validating" });
 
-    await advanceClock(1000);
-    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checked" });
+    update({ validation: buildAnswer(source, {}) });
+    expect(onValidationStateChange.mock.lastCall?.[0]).toEqual({ status: "validated" });
 
-    changeSource(buildReviewWorkflowText("task.creat"));
-    await advanceClock(50);
-    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checking" });
+    // The answer is about the source before.
+    update({ source: buildReviewWorkflowSource("task.creat") });
+    expect(onValidationStateChange.mock.lastCall?.[0]).toEqual({ status: "validating" });
 
-    // The problems of a text that does not parse are the parse's, known at once.
-    changeSource(buildReviewWorkflowText("task: creat"));
-    await advanceClock(50);
-    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checked" });
+    // The problems of a source that does not parse are the parse's, known at once.
+    update({ source: buildReviewWorkflowSource("task: creat") });
+    expect(onValidationStateChange.mock.lastCall?.[0]).toEqual({ status: "validated" });
   });
 
-  it("checks the text again when asked after a check could not run, and not while an answer stands", async () => {
-    let isReachable = false;
-    const validate = vi.fn<Validate>(() =>
-      isReachable
-        ? Promise.resolve({ errors: [], warnings: [] })
-        : Promise.reject(new Error("The controller cannot be reached.")),
-    );
-    const onCheckStateChange = vi.fn<ReportCheckState>();
-    const { checkAgain } = renderEditorWithHandle({
-      source: buildReviewWorkflowText("task.create"),
-      view: "yaml",
-      validate,
-      onCheckStateChange,
-    });
-    await advanceClock(1000);
-    expect(onCheckStateChange.mock.lastCall?.[0]).toMatchObject({ status: "failed" });
-
-    isReachable = true;
-    checkAgain();
-    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checking" });
-    await advanceClock(1000);
-    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checked" });
-    expect(validate).toHaveBeenCalledTimes(2);
-
-    // An answer about the text stands, so a second request checks nothing.
-    checkAgain();
-    await advanceClock(1000);
-    expect(validate).toHaveBeenCalledTimes(2);
-    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checked" });
-  });
-
-  it("reports why the controller cannot check the text apart from the issues, until the text changes", async () => {
+  it("reports why the controller cannot validate the source apart from the issues, until the source changes", () => {
+    const source = buildReviewWorkflowSource("task.creat");
     const onIssuesChange = vi.fn<ReportIssues>();
-    const onCheckStateChange = vi.fn<ReportCheckState>();
-    const { changeSource } = renderEditor({
-      source: buildReviewWorkflowText("task.cre"),
-      validate: () => Promise.reject(new Error("The controller cannot be reached.")),
+    const onValidationStateChange = vi.fn<ReportValidationState>();
+    const { update } = renderEditor({
+      source: buildReviewWorkflowSource("task.cre"),
       onIssuesChange,
-      onCheckStateChange,
+      onValidationStateChange,
       view: "yaml",
     });
 
-    changeSource(buildReviewWorkflowText("task.creat"));
-    await advanceClock(1000);
+    update({ source, validation: { source, reason: "The controller cannot be reached." } });
 
-    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({
+    expect(onValidationStateChange.mock.lastCall?.[0]).toEqual({
       status: "failed",
-      reason: expect.stringContaining("The controller cannot be reached.") as unknown,
+      reason: "The controller cannot be reached.",
     });
-    // A failed check is not a problem of the text.
+    // A failed validation is not a problem of the source.
     expect(onIssuesChange.mock.lastCall?.[0]).toEqual([]);
 
-    // The failure was about the text before, and a new check waits for the author to stop typing.
-    changeSource(buildReviewWorkflowText("task.create"));
-    await advanceClock(50);
+    // The failure was about the source before, and the answer about the new
+    // source is to come.
+    update({ source: buildReviewWorkflowSource("task.create") });
 
-    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checking" });
+    expect(onValidationStateChange.mock.lastCall?.[0]).toEqual({ status: "validating" });
   });
 
-  it("reports only the issues of the text in hand, and not the answer about an earlier text", async () => {
-    const text = buildReviewWorkflowText("task.creat");
+  it("reports only the issues of the source in hand, and not the answer about an earlier source", () => {
+    const source = buildReviewWorkflowSource("task.creat");
     const error: Issue = {
       path: ["steps", "1", "action"],
       message: "task.creat is not an action.",
     };
-    // The answer about the first text comes at once. The answer about any
-    // later text never comes.
-    const validate = vi.fn<Validate>((source) =>
-      source === text ? Promise.resolve({ errors: [error], warnings: [] }) : new Promise(() => {}),
-    );
     const onIssuesChange = vi.fn<ReportIssues>();
-    const { changeSource } = renderEditor({
-      source: buildReviewWorkflowText("task.cre"),
-      validate,
+    const { update } = renderEditor({
+      source: buildReviewWorkflowSource("task.cre"),
       onIssuesChange,
       view: "yaml",
     });
-    changeSource(text);
-    await advanceClock(1000);
+    update({ source, validation: buildAnswer(source, { errors: [error] }) });
     expect(onIssuesChange.mock.lastCall?.[0]).toMatchObject([error]);
 
-    // The author takes the step out. The path of the old answer names
-    // nothing now, and it is not placed at the document start either.
-    changeSource(text.replace("  - id: review\n    kind: action\n    action: task.creat\n", ""));
-    await advanceClock(1000);
+    // The author takes the step out, and the answer about the new source is
+    // to come. The path of the old answer names nothing now, and it is not
+    // placed at the document start either.
+    update({
+      source: source.replace("  - id: review\n    kind: action\n    action: task.creat\n", ""),
+    });
 
     expect(onIssuesChange.mock.lastCall?.[0]).toEqual([]);
   });
 });
 
-describe("the screen's view of the text", () => {
-  it("tells the parent the workflow's name, and keeps the last name while the text does not parse", async () => {
+describe("the screen's view of the source", () => {
+  it("tells the parent the workflow's name, and keeps the last name while the source does not parse", async () => {
     const onNameChange = vi.fn<EditorProps["onNameChange"]>();
     const { user, readSource, moveCursorToLine } = renderEditorWithHandle({
-      source: buildReviewWorkflowText("task.create"),
+      source: buildReviewWorkflowSource("task.create"),
       view: "yaml",
       onNameChange,
     });
@@ -1010,57 +910,20 @@ describe("the screen's view of the text", () => {
     expect(readSource().split("\n")[1]).toBe("name: Reviewed");
     expect(onNameChange.mock.lastCall?.[0]).toBe("Reviewed");
 
-    // The graph keeps showing the last text that read as a workflow, and so
+    // The graph keeps showing the last source that read as a workflow, and so
     // does the name.
     await user.keyboard(": x");
     expect(readSource().split("\n")[1]).toBe("name: Reviewed: x");
     expect(onNameChange.mock.lastCall?.[0]).toBe("Reviewed");
   });
-
-  it("marks the errors of a refused save in place of the last check's errors, and keeps its warnings", async () => {
-    const text = buildReviewWorkflowText("task.creat");
-    const warning: Issue = {
-      path: ["triggers", "0", "source", "filter"],
-      message: "This filter admits every labelled pull request.",
-    };
-    const refused: Issue = {
-      path: ["steps", "1", "action"],
-      message: "task.creat is not an action.",
-    };
-    const onIssuesChange = vi.fn<ReportIssues>();
-    const { markSaveRefusal } = renderEditorWithHandle({
-      source: text,
-      view: "yaml",
-      validate: () => Promise.resolve({ errors: [], warnings: [warning] }),
-      onIssuesChange,
-    });
-    await waitFor(() => {
-      expect(readUnderlinedText("warning")).toBe("filter: event.payload.number > 3");
-    });
-
-    // A refusal of another text is about a text the editor does not hold.
-    markSaveRefusal(buildReviewWorkflowText("task.create"), [refused]);
-    expect(readUnderlinedText("error")).toBe("");
-
-    markSaveRefusal(text, [refused]);
-
-    await waitFor(() => {
-      expect(readUnderlinedText("error")).toBe("action: task.creat");
-    });
-    expect(readUnderlinedText("warning")).toBe("filter: event.payload.number > 3");
-    expect(onIssuesChange.mock.lastCall?.[0]).toMatchObject([
-      { severity: "error", ...refused, line: 16 },
-      { severity: "warning", ...warning, line: 9 },
-    ]);
-  });
 });
 
 describe("the graph", () => {
   const renderGraphOf = (source: string) =>
-    renderEditor({ source, validate: answerNoIssues, onIssuesChange: () => {}, view: "split" });
+    renderEditor({ source, onIssuesChange: () => {}, view: "split" });
 
   it("draws a node for each step and trigger, with each edge's condition and cap", async () => {
-    renderGraphOf(LOOP_TEXT);
+    renderGraphOf(LOOP_SOURCE);
     const graph = screen.getByRole("region", { name: "Workflow graph" });
 
     // findByText refuses two matches, so each id shows once.
@@ -1071,12 +934,12 @@ describe("the graph", () => {
     expect(await within(graph).findByText("max 3")).toBeDefined();
   });
 
-  it("redraws when the text changes to another valid workflow", async () => {
-    const { changeSource } = renderGraphOf(LOOP_TEXT);
+  it("redraws when the source changes to another valid workflow", async () => {
+    const { update } = renderGraphOf(LOOP_SOURCE);
     const graph = screen.getByRole("region", { name: "Workflow graph" });
     await within(graph).findByText("implement");
 
-    changeSource(LINEAR_TEXT);
+    update({ source: LINEAR_SOURCE });
 
     expect(await within(graph).findByText("open_task")).toBeDefined();
     expect(within(graph).getByText("labelled")).toBeDefined();
@@ -1094,11 +957,11 @@ describe("the graph", () => {
     expect(within(graph).queryByText("max 3")).toBeNull();
   });
 
-  it("keeps the last good graph, with a note, while the text does not parse", async () => {
-    // The author breaks the text: a text that the parent writes is another
-    // text, which the graph of the text before says nothing of.
+  it("keeps the last good graph, with a note, while the source does not parse", async () => {
+    // The author breaks the source: a source that the parent writes is
+    // another source, which the graph of the source before says nothing of.
     const { user, readSource, moveCursorToLine, replaceSource } = renderEditorWithHandle({
-      source: LOOP_TEXT,
+      source: LOOP_SOURCE,
       view: "split",
     });
     const graph = screen.getByRole("region", { name: "Workflow graph" });
@@ -1106,7 +969,7 @@ describe("the graph", () => {
 
     moveCursorToLine(29);
     await user.keyboard("{ArrowLeft}: yes");
-    expect(readSource()).toBe(BROKEN_LOOP_TEXT);
+    expect(readSource()).toBe(BROKEN_LOOP_SOURCE);
 
     expect(await within(graph).findByText(/last version that did/i)).toBeDefined();
     for (const id of LOOP_NODE_IDS) {
@@ -1114,18 +977,18 @@ describe("the graph", () => {
     }
     expect(within(graph).getByText("max 3")).toBeDefined();
 
-    replaceSource(LINEAR_TEXT);
+    replaceSource(LINEAR_SOURCE);
 
     expect(await within(graph).findByText("open_task")).toBeDefined();
     expect(within(graph).queryByText(/last version that did/i)).toBeNull();
   });
 
-  it("forgets the last good graph when the parent writes another text that does not parse", async () => {
-    const { replaceSource } = renderEditorWithHandle({ source: LOOP_TEXT, view: "split" });
+  it("forgets the last good graph when the parent writes another source that does not parse", async () => {
+    const { replaceSource } = renderEditorWithHandle({ source: LOOP_SOURCE, view: "split" });
     const graph = screen.getByRole("region", { name: "Workflow graph" });
     await within(graph).findByText("implement");
 
-    replaceSource(BROKEN_LOOP_TEXT);
+    replaceSource(BROKEN_LOOP_SOURCE);
 
     expect(
       await within(graph).findByText("The graph appears when the text reads as a workflow."),
@@ -1135,7 +998,7 @@ describe("the graph", () => {
 
   it("draws an edge from a step to itself with its cap", async () => {
     renderGraphOf(
-      LINEAR_TEXT.replace(
+      LINEAR_SOURCE.replace(
         "edges:\n",
         "edges:\n  - from: review\n    to: review\n    condition: steps.review.output.again\n    maxTraversals: 2\n",
       ),

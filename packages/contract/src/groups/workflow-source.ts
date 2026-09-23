@@ -4,8 +4,8 @@
  * both call them, so two programs can never disagree about what a text means
  * or about how an object is written as text.
  *
- * They sit apart from the definition's shape in `./workflow`, because they
- * need the YAML library and the shape does not. The web app's first paint
+ * They sit apart from the definition's shape in `./workflow-definition`,
+ * because they need the YAML library and the shape does not. The web app's first paint
  * loads the shapes of the whole API, and the YAML library loads only with the
  * pages that edit a workflow.
  */
@@ -25,7 +25,7 @@ import {
 } from "yaml";
 import type { Issue } from "../errors";
 import { excerptMessage } from "../excerpts";
-import { decodeWorkflowDefinition, limitIssues, WorkflowDefinition } from "./workflow";
+import { decodeWorkflowDefinition, limitIssues, WorkflowDefinition } from "./workflow-definition";
 
 /**
  * The longest text of a workflow the API stores, in characters, whether the

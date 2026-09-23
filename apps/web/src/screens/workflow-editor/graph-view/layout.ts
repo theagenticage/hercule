@@ -386,3 +386,51 @@ export const computeGraphLayout = (
     size: { width: maxX - minX, height: maxY - minY },
   };
 };
+
+/**
+ * The smallest zoom that a drawing is placed at by itself. The kind of a card
+ * is set at 10.5 px, the smallest size of the type scale, so a smaller zoom
+ * would draw it smaller than the type scale allows.
+ */
+const LEGIBLE_ZOOM = 1;
+
+/**
+ * The largest zoom that a drawing is placed or fitted at. A small drawing is
+ * drawn larger than the legible zoom, so that it does not look lost in a
+ * large pane. It is not drawn larger than this, so that its cards stay in
+ * scale with the text beside the graph.
+ */
+export const LARGEST_PLACED_ZOOM = 1.25;
+
+/** The space between the pane's edge and the drawing. */
+const PANE_MARGIN = 16;
+
+/** Where a drawing sits in a pane: the offset of its origin, and its zoom. */
+export interface DrawingPlace extends Point {
+  readonly zoom: number;
+}
+
+/**
+ * Where a drawing goes in a pane when the author has not moved it. The zoom
+ * is the largest zoom up to `LARGEST_PLACED_ZOOM` at which the drawing fits
+ * the pane with a margin, and never less than the legible zoom. On each axis,
+ * a drawing that fits the pane at that zoom is centred in it, and a larger
+ * one starts at the pane's edge, where the triggers are, and the author pans
+ * to the rest.
+ */
+export const placeDrawing = (pane: Size, drawing: Size): DrawingPlace => {
+  const fittingZoom = Math.min(
+    (pane.width - 2 * PANE_MARGIN) / drawing.width,
+    (pane.height - 2 * PANE_MARGIN) / drawing.height,
+  );
+  const zoom = Math.min(LARGEST_PLACED_ZOOM, Math.max(LEGIBLE_ZOOM, fittingZoom));
+  const findOffset = (paneSize: number, drawingSize: number): number => {
+    const scaledSize = drawingSize * zoom;
+    return scaledSize + 2 * PANE_MARGIN <= paneSize ? (paneSize - scaledSize) / 2 : PANE_MARGIN;
+  };
+  return {
+    x: findOffset(pane.width, drawing.width),
+    y: findOffset(pane.height, drawing.height),
+    zoom,
+  };
+};

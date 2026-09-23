@@ -11,6 +11,7 @@ import {
 } from "@hercule/client-core";
 import type { PluginDetail, PluginStatus } from "@hercule/contract";
 import { ConfigForm } from "../../../screens/plugins/config-form";
+import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
@@ -162,27 +163,20 @@ export function PluginCard({
       </div>
 
       {/* Wiping is not undoable and nothing else on this screen is, so the
-          question is asked in place rather than behind a browser dialog. */}
+          press asks first. */}
       {confirmingReset ? (
-        <div className="flex flex-wrap items-center gap-1.5 text-row text-muted">
-          <span>Wipe everything this plugin has stored?</span>
-          <Button
-            onClick={() => {
-              setConfirmingReset(false);
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => {
-              setConfirmingReset(false);
-              reset.mutate();
-            }}
-          >
-            Confirm
-          </Button>
-        </div>
+        <InPlaceQuestion
+          question="Wipe everything this plugin has stored?"
+          declineLabel="Cancel"
+          acceptLabel="Confirm"
+          onDecline={() => {
+            setConfirmingReset(false);
+          }}
+          onAccept={() => {
+            setConfirmingReset(false);
+            reset.mutate();
+          }}
+        />
       ) : null}
     </FormCard>
   );

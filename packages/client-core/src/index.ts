@@ -146,9 +146,9 @@ export {
   locateIssues,
   readWorkflowSource,
   type LocatedIssue,
-  type WorkflowCheckState,
   type WorkflowSourceReading,
   type WorkflowValidation,
+  type WorkflowValidationState,
 } from "./workflow-source";
 export {
   editDraft,
@@ -156,3 +156,8 @@ export {
   markDraftSaved,
   type WorkflowDraft,
 } from "./workflow-draft";
+export {
+  decideWorkflowHeaderStatus,
+  type WorkflowHeaderFacts,
+  type WorkflowHeaderStatus,
+} from "./workflow-header-status";

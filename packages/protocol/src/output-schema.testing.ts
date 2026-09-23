@@ -6,8 +6,16 @@
  * one nothing can: `answer` has to be both `a` and `b`, which is inside the
  * subset and outside what any value can satisfy, so every harness has to reach
  * a schema failure its own way.
+ *
+ * Beside them is the value that each test of the depth bound, `MAX_JSON_DEPTH`,
+ * builds. The bound is declared in this package, and each package that
+ * applies it tests it with this value.
  */
 import type { OutputSchema } from "./output-schema";
+
+/** A value nested in lists this many levels deep. */
+export const nestInLists = (levels: number): unknown =>
+  Array.from({ length: levels }).reduce<unknown>((inner) => [inner], "bottom");
 
 export const FIXTURE_SCHEMA: OutputSchema = {
   type: "object",

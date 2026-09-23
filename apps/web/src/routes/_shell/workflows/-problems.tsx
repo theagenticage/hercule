@@ -1,10 +1,7 @@
 import type { JSX } from "react";
-import {
-  formatProblemCount,
-  type LocatedIssue,
-  type WorkflowCheckState,
-} from "@hercule/client-core";
+import { formatProblemCount, type WorkflowValidationState } from "@hercule/client-core";
 import { cn } from "@hercule/ui";
+import type { MarkedIssue } from "../../../screens/workflow-editor";
 
 /**
  * The problems that the text shows marked, under the editor in every view:
@@ -15,19 +12,19 @@ import { cn } from "@hercule/ui";
  * it. The editor and the graph above it keep their size, and their place,
  * when the first problem comes or the last one goes.
  *
- * "No problems." is said only when the check has answered, because until
- * then a text with no marks can still have problems. A check that could not
- * run is said apart from the problems, because it is not a problem of the
- * text.
+ * "No problems." is said only when the validation has answered, because
+ * until then a source with no marks can still have problems. A validation
+ * that could not run is said apart from the problems, because it is not a
+ * problem of the source.
  */
 export function ProblemsPanel({
   issues,
-  checkState,
+  validationState,
   onIssueClick,
 }: {
-  readonly issues: ReadonlyArray<LocatedIssue>;
-  readonly checkState: WorkflowCheckState;
-  readonly onIssueClick: (issue: LocatedIssue) => void;
+  readonly issues: ReadonlyArray<MarkedIssue>;
+  readonly validationState: WorkflowValidationState;
+  readonly onIssueClick: (issue: MarkedIssue) => void;
 }): JSX.Element {
   return (
     <section
@@ -39,16 +36,16 @@ export function ProblemsPanel({
       <div className="flex items-baseline gap-2.5 px-4 py-2 text-meta">
         {issues.length > 0 ? (
           <span className="font-emph text-ink">{formatProblemCount(issues.length)}</span>
-        ) : checkState.status === "checked" ? (
+        ) : validationState.status === "validated" ? (
           <span className="text-muted">No problems.</span>
         ) : null}
         {/* The spaces between the parts of the panel are for the text that a
             screen reader reads: a flex row or column draws no space of its own. */}{" "}
-        {checkState.status === "checking" ? (
+        {validationState.status === "validating" ? (
           <span className="text-faint">Checking…</span>
-        ) : checkState.status === "failed" ? (
-          <span className="min-w-0 truncate text-fail" title={checkState.reason}>
-            {`Not checked: ${checkState.reason}`}
+        ) : validationState.status === "failed" ? (
+          <span className="min-w-0 truncate text-fail" title={validationState.reason}>
+            {`Not checked: ${validationState.reason}`}
           </span>
         ) : null}
       </div>{" "}

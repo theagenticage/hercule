@@ -1,17 +1,16 @@
 /**
- * The workflow editor: a workflow's YAML text, with completion and a mark on
+ * The workflow editor: a workflow's YAML source, with completion and a mark on
  * each problem, and the graph of the workflow beside it.
  *
- * Each text is read once, with the parse that the controller uses too. That
+ * Each source is read once, with the parse that the controller uses too. That
  * reading gives the problems of the YAML and of the shape at once, the graph,
- * and the place of the cursor for completion. About 400 ms after the author
- * stops typing, the controller checks the rest: actions, agents, expressions
- * and the graph's rules. Its answer is about the text that it checked and no
- * other. While the author types on, the marks of the last answer move with
- * the text, until the answer about the new text replaces them. A refused save
- * is an answer about its text too, and its errors are marked in place of the
- * last check's. The parent hears of each problem that the text shows marked,
- * at the place of its mark.
+ * and the place of the cursor for completion. The parent brings the
+ * controller's answer about the rest: actions, agents, expressions and the
+ * graph's rules. An answer is about the source that the controller validated
+ * and no other. While the author types on, the marks of the last answer move
+ * with the text, until the answer about the new source replaces them. The
+ * parent hears of each problem that the text shows marked, at the place of
+ * its mark.
  */
 import {
   useEffect,
@@ -24,7 +23,6 @@ import {
   type JSX,
   type Ref,
 } from "react";
-import type { Issue, WorkflowIssues } from "@hercule/contract";
 import {
   buildWorkflowGraph,
   decideIssueState,
@@ -32,28 +30,34 @@ import {
   readWorkflowSource,
   type LocatedIssue,
   type WorkflowCatalog,
-  type WorkflowCheckState,
   type WorkflowSourceReading,
   type WorkflowValidation,
+  type WorkflowValidationState,
 } from "@hercule/client-core";
 import { cn } from "@hercule/ui";
-import { readErrorMessage } from "../save-status";
 import { GraphView } from "./graph-view/graph-view";
 import { TextEditor, type TextEditorHandle } from "./text-editor/text-editor";
 
-/** How long the text must stay unchanged before the controller checks it. */
-const VALIDATION_DELAY_MS = 400;
-
 /**
- * How many readings the reader keeps. The render reads the parent's text, and
- * the completion reads the editor's text. While the parent sends the editor's
- * texts back some keystrokes late, the two read different texts in turn, and
- * the reader keeps the readings of the texts between them, so that each text
- * is parsed once.
+ * How many readings the reader keeps. The render reads the parent's source,
+ * and the completion reads the editor's text. While the parent sends the
+ * editor's texts back some keystrokes late, the two read different sources in
+ * turn, and the reader keeps the readings of the sources between them, so
+ * that each source is parsed once.
  */
 const KEPT_READINGS = 8;
 
 const NO_ISSUES: ReadonlyArray<LocatedIssue> = [];
+
+/** What the editor shows: the text alone, the graph alone, or the two side by side. */
+export type WorkflowView = "yaml" | "graph" | "split";
+
+/**
+ * A problem as the text shows it marked: at the place of its mark now, which
+ * moves with the text that the author types, and on the line of that place,
+ * counted from 1.
+ */
+export type MarkedIssue = LocatedIssue & { readonly line: number };
 
 export interface WorkflowEditorHandle {
   /**
@@ -63,60 +67,53 @@ export interface WorkflowEditorHandle {
    * again.
    */
   moveCursorToLine: (line: number) => void;
-  /**
-   * Marks the errors that the controller refused a save of `source` with, in
-   * place of the errors of the last answer about that text. A refusal is an
-   * answer about its text as a check is, and the last answer to arrive wins:
-   * a check of the same text that answers after the refusal replaces its
-   * errors. The warnings of a check of the same text stay, because a refusal
-   * names errors only. A refusal of a text that the editor no longer holds
-   * changes nothing.
-   */
-  markSaveRefusal: (source: string, errors: ReadonlyArray<Issue>) => void;
-  /**
-   * Checks the text again when the last check of it could not run, as when
-   * the controller could not be reached. An answer about the text stands, so
-   * a call when there is one changes nothing.
-   */
-  checkAgain: () => void;
 }
 
 interface WorkflowEditorProps {
-  /** The workflow's YAML text. The parent owns it, and passes each change back in. */
+  /** The workflow's YAML source. The parent owns it, and passes each change back in. */
   readonly source: string;
   readonly onSourceChange: (source: string) => void;
-  /** The text alone, the graph alone, or the two side by side. */
-  readonly view: "yaml" | "graph" | "split";
+  readonly view: WorkflowView;
   readonly catalog: WorkflowCatalog;
-  /** Checks a text as a save would, on the controller, and stores nothing. */
-  readonly validate: (source: string) => Promise<WorkflowIssues>;
+  /**
+   * The controller's last answer about a source: its problems, or why it
+   * could not validate the source. Absent before the first answer, and while
+   * the controller validates again a source that it could not validate. An
+   * answer about another source than `source` says nothing of `source`, and
+   * the marks of that answer stay until the answer about `source` comes.
+   */
+  readonly validation: WorkflowValidation | undefined;
   /**
    * Receives the problems that the text shows marked, errors first, each at
    * the place of its mark, each time they or their places change. The parse's
-   * problems are marked at once. While the controller's answer about the text
-   * is still to come, the marks of its last answer stay, and move with the
-   * text that the author types.
+   * problems are marked at once. While the controller's answer about the
+   * source is still to come, the marks of its last answer stay, and move with
+   * the text that the author types.
    */
-  readonly onIssuesChange: (issues: ReadonlyArray<LocatedIssue>) => void;
-  /** Receives how far the check of the text has come, each time that changes. */
-  readonly onCheckStateChange: (state: WorkflowCheckState) => void;
+  readonly onIssuesChange: (issues: ReadonlyArray<MarkedIssue>) => void;
   /**
-   * Receives the name that the text gives the workflow, each time it changes.
-   * While the text does not read as a workflow, it is the name of the last
-   * text that did, as the graph shows that text too.
+   * Receives how far the validation of the source has come, each time that
+   * changes. The problems of a source that does not parse are the parse's,
+   * and they are known at once.
+   */
+  readonly onValidationStateChange: (state: WorkflowValidationState) => void;
+  /**
+   * Receives the name that the source gives the workflow, each time it
+   * changes. While the source does not read as a workflow, it is the name of
+   * the last source that did, as the graph shows that source too.
    */
   readonly onNameChange: (name: string | undefined) => void;
   readonly ref?: Ref<WorkflowEditorHandle>;
 }
 
-/** A reader that parses each text once, and keeps the readings of the last few texts. */
+/** A reader that parses each source once, and keeps the readings of the last few sources. */
 const createSourceReader = () => {
   const readings = new Map<string, WorkflowSourceReading>();
-  return (text: string): WorkflowSourceReading => {
-    const reading = readings.get(text) ?? readWorkflowSource(text);
+  return (source: string): WorkflowSourceReading => {
+    const reading = readings.get(source) ?? readWorkflowSource(source);
     // The newest reading goes last, so the oldest is the first to go.
-    readings.delete(text);
-    readings.set(text, reading);
+    readings.delete(source);
+    readings.set(source, reading);
     for (const [oldest] of readings) {
       if (readings.size <= KEPT_READINGS) break;
       readings.delete(oldest);
@@ -130,9 +127,9 @@ export function WorkflowEditor({
   onSourceChange,
   view,
   catalog,
-  validate,
+  validation,
   onIssuesChange,
-  onCheckStateChange,
+  onValidationStateChange,
   onNameChange,
   ref,
 }: WorkflowEditorProps): JSX.Element {
@@ -140,10 +137,10 @@ export function WorkflowEditor({
   const reading = readSource(source);
   const hasDefinition = reading.definition !== undefined;
 
-  // The last definition that a text of the author gave, which the graph keeps
-  // showing while the text does not give one. A text that the parent puts in
-  // place of the author's is another text, and the definition of the text
-  // before it says nothing of it.
+  // The last definition that a source of the author gave, which the graph
+  // keeps showing while the source does not give one. A source that the
+  // parent puts in place of the author's is another source, and the
+  // definition of the source before it says nothing of it.
   const [lastDefinition, setLastDefinition] = useState(reading.definition);
   if (reading.definition !== undefined && reading.definition !== lastDefinition) {
     setLastDefinition(reading.definition);
@@ -152,61 +149,40 @@ export function WorkflowEditor({
     setLastDefinition(reading.definition);
   };
 
-  // The controller's last answer. The marks of a text that does not parse are
-  // the parse's, and they replace the marks of the answer, so the answer goes.
-  const [validation, setValidation] = useState<WorkflowValidation>();
-  if (!hasDefinition && validation !== undefined) setValidation(undefined);
-
-  // Each call of `checkAgain` that asks for a check starts one more round.
-  const [checkRound, setCheckRound] = useState(0);
-  const requestValidation = useEffectEvent((text: string) => validate(text));
-  useEffect(() => {
-    // A text that does not parse gets the parse's problems from the
-    // controller too, and the editor shows those already.
-    if (!hasDefinition) return;
-    // An answer about a text that has changed since is not kept.
-    let isCurrent = true;
-    const timer = setTimeout(() => {
-      requestValidation(source).then(
-        (issues) => {
-          if (isCurrent) setValidation({ text: source, issues });
-        },
-        (error: unknown) => {
-          if (isCurrent) setValidation({ text: source, reason: readErrorMessage(error) });
-        },
-      );
-    }, VALIDATION_DELAY_MS);
-    return () => {
-      isCurrent = false;
-      clearTimeout(timer);
-    };
-  }, [source, hasDefinition, checkRound]);
-
   const issueState = useMemo(() => decideIssueState(reading, validation), [reading, validation]);
-  // While the answer about this text is still to come, the marks of the last
-  // answer stay and move with the text. A failed check is not a problem of
-  // the text, so it clears the marks.
+  // Whether the marks in the text come from an answer of the controller.
+  // While the answer about the next source is to come, the marks of an
+  // answer stay and move with the text. The marks of the parse do not stay:
+  // they are about a source that did not parse, and the parse of the source
+  // now finds no problem. A failed validation is not a problem of the source,
+  // so it clears the marks.
+  const [isMarkedByAnswer, setIsMarkedByAnswer] = useState(false);
+  const isMarkedByAnswerNow =
+    issueState.status === "validated"
+      ? reading.issues.length === 0
+      : issueState.status === "validating" && isMarkedByAnswer;
+  if (isMarkedByAnswerNow !== isMarkedByAnswer) setIsMarkedByAnswer(isMarkedByAnswerNow);
   const diagnostics =
-    issueState.status === "checked"
+    issueState.status === "validated"
       ? issueState.issues
-      : issueState.status === "checking" && validation !== undefined
+      : isMarkedByAnswerNow
         ? undefined
         : NO_ISSUES;
 
-  // The parent hears of the check state when it changes, and not when only
-  // the problems change.
-  const checkStatus = issueState.status;
-  const checkFailureReason = issueState.status === "failed" ? issueState.reason : undefined;
-  const reportCheckState = useEffectEvent(() => {
-    onCheckStateChange(
+  // The parent hears of the validation state when it changes, and not when
+  // only the problems change.
+  const validationStatus = issueState.status;
+  const validationFailureReason = issueState.status === "failed" ? issueState.reason : undefined;
+  const reportValidationState = useEffectEvent(() => {
+    onValidationStateChange(
       issueState.status === "failed"
         ? { status: "failed", reason: issueState.reason }
         : { status: issueState.status },
     );
   });
   useEffect(() => {
-    reportCheckState();
-  }, [checkStatus, checkFailureReason]);
+    reportValidationState();
+  }, [validationStatus, validationFailureReason]);
 
   const drawnDefinition = reading.definition ?? lastDefinition;
   const graph = useMemo(
@@ -242,23 +218,8 @@ export function WorkflowEditor({
         if (isTextShown) textEditor.current?.moveCursorToLine(line);
         else pendingLine.current = line;
       },
-      markSaveRefusal: (refused, errors) => {
-        if (refused !== source) return;
-        setValidation((last) => ({
-          text: refused,
-          issues: {
-            errors,
-            warnings: last?.text === refused && "issues" in last ? last.issues.warnings : [],
-          },
-        }));
-      },
-      checkAgain: () => {
-        if (issueState.status !== "failed") return;
-        setValidation(undefined);
-        setCheckRound((round) => round + 1);
-      },
     }),
-    [isTextShown, source, issueState.status],
+    [isTextShown],
   );
 
   const graphNote =
@@ -279,8 +240,8 @@ export function WorkflowEditor({
           onTextReplace={forgetLastDefinition}
           diagnostics={diagnostics}
           onDiagnosticsChange={onIssuesChange}
-          completionSource={(text, offset) =>
-            listWorkflowCompletions(readSource(text), offset, catalog)
+          completionSource={(typedSource, offset) =>
+            listWorkflowCompletions(readSource(typedSource), offset, catalog)
           }
         />
       </div>

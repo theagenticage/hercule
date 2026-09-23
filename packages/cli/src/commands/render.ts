@@ -6,13 +6,14 @@
  * object becomes aligned key-value lines, and ids are shortened to the tail the
  * CLI accepts back as an argument.
  */
-import type {
-  Issue,
-  StructuredResult,
-  Workflow,
-  WorkflowAction,
-  WorkflowIssues,
-  WorkflowSaved,
+import {
+  cutShort,
+  describeIssue,
+  type StructuredResult,
+  type Workflow,
+  type WorkflowAction,
+  type WorkflowIssues,
+  type WorkflowSaved,
 } from "@hercule/contract";
 import type { Outcome } from "./execute";
 import type { Command } from "./tree";
@@ -131,10 +132,8 @@ const TRANSCRIPT_FIELD = 100;
  * output, and a transcript is read for its shape - `hercule transcript read
  * --json` is what hands back the text in full.
  */
-const brief = (value: unknown): string => {
-  const text = cell(value).replace(/\s+/g, " ").trim();
-  return text.length > TRANSCRIPT_FIELD ? `${text.slice(0, TRANSCRIPT_FIELD)}...` : text;
-};
+const brief = (value: unknown): string =>
+  cutShort(cell(value).replace(/\s+/g, " ").trim(), TRANSCRIPT_FIELD);
 
 /**
  * Describes what a turn answered under its session's output schema, as a
@@ -181,13 +180,6 @@ const transcriptLine = (row: Record<string, unknown>): string => {
  */
 const transcript = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
   rows.length === 0 ? ["no results"] : rows.map(transcriptLine);
-
-/**
- * One issue as a line: its path, with the keys joined by dots, and then its
- * message. An issue with an empty path is its message alone.
- */
-export const describeIssue = (issue: Issue): string =>
-  issue.path.length === 0 ? issue.message : `${issue.path.join(".")}: ${issue.message}`;
 
 /**
  * What a workflow save answers, without the source the caller has just sent:
