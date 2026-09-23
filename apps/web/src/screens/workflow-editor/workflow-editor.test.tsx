@@ -447,6 +447,19 @@ describe("completion", () => {
     ]);
   });
 
+  it("replaces the whole value that the cursor is inside with the action id picked", async () => {
+    const lines = ["name: Review", "steps:", "  - id: open_task", "    kind: action"];
+    const { user, readSource } = await openEditorAtEnd(
+      [...lines, "    action: task.create"].join("\n"),
+    );
+    // The cursor goes between "task." and "create".
+    await user.keyboard("{ArrowLeft>6/}");
+
+    await user.click(findCompletion(await requestCompletions(user), "task.update"));
+
+    expect(readSource()).toBe([...lines, "    action: task.update"].join("\n"));
+  });
+
   it("offers the agents by name after agent:, and writes the id of the one picked", async () => {
     const source = [
       "name: Review",
@@ -1007,6 +1020,32 @@ describe("the graph", () => {
       await within(graph).findByText("The graph appears when the text reads as a workflow."),
     ).toBeDefined();
     expect(within(graph).queryByText("implement")).toBeNull();
+  });
+
+  it("widens a card to fit a long id, and makes room for it in the layout", async () => {
+    // 29 characters, which a card grows to show, and 41, which is past the widest card.
+    const longId = "changes_requested_by_reviewer";
+    const tooLongId = "open_a_task_for_the_labelled_pull_request";
+    renderGraphOf(LINEAR_SOURCE.replaceAll("labelled", longId).replaceAll("open_task", tooLongId));
+    const graph = screen.getByRole("region", { name: "Workflow graph" });
+    await within(graph).findByText(longId);
+    /** The box of a card, as the graph library's style of the node gives it. */
+    const readCardBox = (id: string) => {
+      const style = graph.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)?.style;
+      const [, x = "NaN"] = /translate\(([-\d.]+)px/.exec(style?.transform ?? "") ?? [];
+      return { x: Number(x), width: Number.parseFloat(style?.width ?? "NaN") };
+    };
+    const [trigger, task, review] = [longId, tooLongId, "review"].map(readCardBox);
+
+    expect(review?.width).toBe(136);
+    expect(trigger?.width).toBeGreaterThan(136);
+    expect(task?.width).toBeGreaterThan(trigger?.width ?? Infinity);
+    // Only the id past the widest card is cut, and its title holds the whole id.
+    expect(within(graph).getByText(longId).title).toBe("");
+    expect(within(graph).getByText(tooLongId).title).toBe(tooLongId);
+    // Each card starts to the right of the wide card before it.
+    expect((trigger?.x ?? 0) + (trigger?.width ?? 0)).toBeLessThan(task?.x ?? -Infinity);
+    expect((task?.x ?? 0) + (task?.width ?? 0)).toBeLessThan(review?.x ?? -Infinity);
   });
 
   it("draws an edge from a step to itself with its cap", async () => {

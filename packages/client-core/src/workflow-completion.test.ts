@@ -108,7 +108,43 @@ describe("listWorkflowCompletions", () => {
     const completions = completeAtEnd(lines);
 
     expect(completions?.from).toBe(lines.join("\n").length - "pro".length);
+    expect(completions?.to).toBe(lines.join("\n").length);
     expect(listLabels(completions)).toContain("prompt");
+  });
+
+  it.each([
+    { case: "at the start of a value", line: `    action: ${CURSOR}task.create`, lineBreak: "\n" },
+    { case: "inside a value", line: `    action: task.${CURSOR}create`, lineBreak: "\n" },
+    { case: "at the end of a value", line: `    action: task.create${CURSOR}`, lineBreak: "\n" },
+    {
+      case: "before a comment",
+      line: `    action: ta${CURSOR}sk.create  # first`,
+      lineBreak: "\n",
+    },
+    { case: "in \\r\\n text", line: `    action: task.cr${CURSOR}eate`, lineBreak: "\r\n" },
+  ])("replaces the whole value with the cursor $case", ({ line, lineBreak }) => {
+    const lines = ["name: Review", "steps:", "  - id: open_task", "    kind: action", line];
+    const marked = [...lines, "  - id: review", "    kind: action", "    action: task.create"].join(
+      lineBreak,
+    );
+    const source = marked.replace(CURSOR, "");
+    const completions = listWorkflowCompletions(
+      readWorkflowSource(source),
+      marked.indexOf(CURSOR),
+      CATALOG,
+    );
+
+    expect(listLabels(completions)).toEqual(["task.create"]);
+    expect(source.slice(completions?.from, completions?.to)).toBe("task.create");
+  });
+
+  it("replaces nothing after the cursor in an empty value, or in a value that is only a comment", () => {
+    for (const line of [`    action: ${CURSOR}`, `    action: ${CURSOR}# to do`]) {
+      const completions = completeAtMark(["name: Review", "steps:", "  - id: open_task", line]);
+
+      expect(listLabels(completions), line).toEqual(["task.create"]);
+      expect(completions?.to, line).toBe(completions?.from);
+    }
   });
 
   it("offers the keys of each step kind in a new list item, before the step says its kind", () => {
@@ -119,14 +155,13 @@ describe("listWorkflowCompletions", () => {
   });
 
   it("writes a prompt as a block on the next line, and an expression in double quotes", () => {
-    const offers = completeAtEnd([
-      "name: Review",
-      "steps:",
-      "  - id: review",
-      "    kind: agent",
-      "    ",
-    ])?.offers;
+    const lines = ["name: Review", "steps:", "  - id: review", "    kind: agent", "    "];
+    const completions = completeAtEnd(lines);
+    const offers = completions?.offers;
 
+    // A key's offer writes at the cursor and replaces nothing.
+    expect(completions?.from).toBe(lines.join("\n").length);
+    expect(completions?.to).toBe(lines.join("\n").length);
     expect(offers?.find((offer) => offer.label === "prompt")).toEqual({
       label: "prompt",
       text: "prompt: |\n      ",

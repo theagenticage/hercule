@@ -1,9 +1,9 @@
 /**
  * The layout of the graph: where each node goes, and where each edge and its
- * label run. The graph is read from left to right. Each edge leaves the middle
- * of a side of its source and enters the middle of a side of its target,
- * where the cards' handles are, and everything drawn is inside the size. No
- * route runs through a node, or through the label of another edge.
+ * label run. The graph is read from left to right. Each edge leaves a side of
+ * its source and enters a side of its target, at a point of its own, clear of
+ * the corners, and everything drawn is inside the size. No route runs through
+ * a node, or through the label of another edge.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -17,6 +17,8 @@ import {
 
 const CARD: Size = { width: 144, height: 52 };
 const LABEL: Size = { width: 120, height: 20 };
+/** The part at each end of a card's side where no edge attaches. */
+const SIDE_MARGIN = 14;
 
 type Layout = ReturnType<typeof computeGraphLayout>;
 type LayoutEdges = Parameters<typeof computeGraphLayout>[1];
@@ -63,8 +65,8 @@ const crossesBox = (from: Point, to: Point, box: Box): boolean => {
 
 /**
  * Each node, point and label of a layout lies inside its size, no label
- * covers a node or another label, and no route runs through a node or the
- * label of another edge.
+ * covers a node or another label, no route runs through a node or the label
+ * of another edge, and no two edges meet a card at one point.
  */
 const expectClearDrawing = (layout: Layout, edges: LayoutEdges): void => {
   const { width, height } = layout.size;
@@ -89,6 +91,11 @@ const expectClearDrawing = (layout: Layout, edges: LayoutEdges): void => {
       );
     }
   }
+  const ends = edges.flatMap((edge) => {
+    const { points } = readRoute(layout, edge.id);
+    return [points[0], points.at(-1)].map((point) => `${String(point?.x)},${String(point?.y)}`);
+  });
+  expect(new Set(ends).size, "the points where the edges meet the cards").toBe(ends.length);
   for (const edge of edges) {
     const { points } = readRoute(layout, edge.id);
     for (const point of points) {
@@ -109,11 +116,18 @@ const expectClearDrawing = (layout: Layout, edges: LayoutEdges): void => {
   }
 };
 
+/** Whether a point lies on the left or the right side of a card, clear of the margin at each end. */
+const isOnSide = (point: Point | undefined, card: Point, side: "left" | "right"): boolean =>
+  point !== undefined &&
+  point.x === card.x + (side === "right" ? CARD.width : 0) &&
+  point.y >= card.y + SIDE_MARGIN &&
+  point.y <= card.y + CARD.height - SIDE_MARGIN;
+
 /**
- * The route of an edge starts at the middle of a side of the source and ends
- * at the middle of a side of the target, and it meets each side at a right
- * angle. `direction` is `forward` for an edge that leaves the source's right
- * side and enters the target's left side, and `back` for the other way.
+ * The route of an edge starts on a side of the source and ends on a side of
+ * the target, clear of the corners, and it meets each side at a right angle.
+ * `direction` is `forward` for an edge that leaves the source's right side and
+ * enters the target's left side, and `back` for the other way.
  */
 const expectHandleToHandle = (
   layout: Layout,
@@ -123,19 +137,11 @@ const expectHandleToHandle = (
   direction: "forward" | "back" = "forward",
 ): void => {
   const { points } = readRoute(layout, id);
-  const source = readNode(layout, from);
-  const target = readNode(layout, to);
   const isForward = direction === "forward";
   const [first, second] = points;
   const [beforeLast, last] = points.slice(-2);
-  expect(first).toEqual({
-    x: source.x + (isForward ? CARD.width : 0),
-    y: source.y + CARD.height / 2,
-  });
-  expect(last).toEqual({
-    x: target.x + (isForward ? 0 : CARD.width),
-    y: target.y + CARD.height / 2,
-  });
+  expect(isOnSide(first, readNode(layout, from), isForward ? "right" : "left"), id).toBe(true);
+  expect(isOnSide(last, readNode(layout, to), isForward ? "left" : "right"), id).toBe(true);
   expect(second?.y).toBe(first?.y);
   expect(Math.sign((second?.x ?? 0) - (first?.x ?? 0))).toBe(isForward ? 1 : -1);
   expect(beforeLast?.y).toBe(last?.y);
@@ -157,7 +163,11 @@ describe("computeGraphLayout", () => {
       { id: "e0", from: "start", to: "open_task" },
       { id: "e1", from: "open_task", to: "review" },
     ];
-    const layout = computeGraphLayout(buildNodes("start", "open_task", "review"), edges);
+    const layout = computeGraphLayout(
+      buildNodes("start", "open_task", "review"),
+      edges,
+      SIDE_MARGIN,
+    );
 
     expect(readNode(layout, "start").x + CARD.width).toBeLessThan(readNode(layout, "open_task").x);
     expect(readNode(layout, "open_task").x + CARD.width).toBeLessThan(readNode(layout, "review").x);
@@ -168,7 +178,7 @@ describe("computeGraphLayout", () => {
 
   it("puts a label between the two ends of its edge, on the edge's route", () => {
     const edges = [{ id: "e0", from: "review", to: "comment", label: LABEL }];
-    const layout = computeGraphLayout(buildNodes("review", "comment"), edges);
+    const layout = computeGraphLayout(buildNodes("review", "comment"), edges, SIDE_MARGIN);
     const route = readRoute(layout, "e0");
     const labelBox = buildLabelBox(route.label ?? { x: -Infinity, y: -Infinity });
 
@@ -187,7 +197,11 @@ describe("computeGraphLayout", () => {
       { id: "e1", from: "nightly", to: "review" },
       { id: "loop", from: "nightly", to: "nightly", label: LABEL },
     ];
-    const layout = computeGraphLayout(buildNodes("labelled", "nightly", "review"), edges);
+    const layout = computeGraphLayout(
+      buildNodes("labelled", "nightly", "review"),
+      edges,
+      SIDE_MARGIN,
+    );
     const nightly = readNode(layout, "nightly");
     const loop = readRoute(layout, "loop");
 
@@ -203,7 +217,7 @@ describe("computeGraphLayout", () => {
       { id: "inner", from: "poll", to: "poll", label: LABEL },
       { id: "outer", from: "poll", to: "poll", label: LABEL },
     ];
-    const layout = computeGraphLayout(buildNodes("poll"), edges);
+    const layout = computeGraphLayout(buildNodes("poll"), edges, SIDE_MARGIN);
     const [inner, outer] = [readRoute(layout, "inner"), readRoute(layout, "outer")];
 
     expect(Math.min(...outer.points.map((point) => point.y))).toBeLessThan(
@@ -221,13 +235,43 @@ describe("computeGraphLayout", () => {
       { id: "e1", from: "open_pr", to: "review" },
       { id: "back", from: "review", to: "implement", label: LABEL, closesLoop: true },
     ];
-    const layout = computeGraphLayout(buildNodes("implement", "open_pr", "review"), edges);
+    const layout = computeGraphLayout(
+      buildNodes("implement", "open_pr", "review"),
+      edges,
+      SIDE_MARGIN,
+    );
 
     expect(readNode(layout, "implement").x).toBeLessThan(readNode(layout, "open_pr").x);
     expect(readNode(layout, "open_pr").x).toBeLessThan(readNode(layout, "review").x);
     expectHandleToHandle(layout, "back", "review", "implement", "back");
     expectHandleToHandle(layout, "e0", "implement", "open_pr");
     expectHandleToHandle(layout, "e1", "open_pr", "review");
+    expectClearDrawing(layout, edges);
+  });
+
+  it("gives two edges on one side of a card two points of their own, clear of the corners", () => {
+    const edges = [
+      { id: "forward", from: "implement", to: "review" },
+      { id: "back", from: "review", to: "implement", label: LABEL, closesLoop: true },
+    ];
+    const layout = computeGraphLayout(buildNodes("implement", "review"), edges, SIDE_MARGIN);
+    const [forward, back] = [readRoute(layout, "forward").points, readRoute(layout, "back").points];
+    // Both edges attach to the right side of implement and to the left side of review.
+    const atImplement = [forward[0], back.at(-1)];
+    const atReview = [forward.at(-1), back[0]];
+
+    for (const point of atImplement) {
+      expect(isOnSide(point, readNode(layout, "implement"), "right")).toBe(true);
+    }
+    for (const point of atReview) {
+      expect(isOnSide(point, readNode(layout, "review"), "left")).toBe(true);
+    }
+    expect(atImplement[0]?.y).not.toBe(atImplement[1]?.y);
+    expect(atReview[0]?.y).not.toBe(atReview[1]?.y);
+    // The edge that is higher at one card is higher at the other, so the two do not cross.
+    expect(Math.sign((atImplement[0]?.y ?? 0) - (atImplement[1]?.y ?? 0))).toBe(
+      Math.sign((atReview[0]?.y ?? 0) - (atReview[1]?.y ?? 0)),
+    );
     expectClearDrawing(layout, edges);
   });
 
@@ -243,6 +287,7 @@ describe("computeGraphLayout", () => {
     const layout = computeGraphLayout(
       buildNodes("rerun_review", "review", "open_pr", "implement", "assigned"),
       edges,
+      SIDE_MARGIN,
     );
     const readX = (id: string) => readNode(layout, id).x;
 
@@ -255,7 +300,7 @@ describe("computeGraphLayout", () => {
 
   it("draws an edge forward when it closes no loop, even when it is marked as one that does", () => {
     const edges = [{ id: "e0", from: "open_task", to: "review", closesLoop: true }];
-    const layout = computeGraphLayout(buildNodes("open_task", "review"), edges);
+    const layout = computeGraphLayout(buildNodes("open_task", "review"), edges, SIDE_MARGIN);
 
     expect(readNode(layout, "open_task").x).toBeLessThan(readNode(layout, "review").x);
     expectHandleToHandle(layout, "e0", "open_task", "review");
@@ -269,7 +314,11 @@ describe("computeGraphLayout", () => {
       { id: "retry", from: "test", to: "plan", label: LABEL, closesLoop: true },
       { id: "redo", from: "ship", to: "plan", label: { width: 160, height: 20 }, closesLoop: true },
     ];
-    const layout = computeGraphLayout(buildNodes("plan", "build", "test", "ship"), edges);
+    const layout = computeGraphLayout(
+      buildNodes("plan", "build", "test", "ship"),
+      edges,
+      SIDE_MARGIN,
+    );
 
     expectHandleToHandle(layout, "retry", "test", "plan", "back");
     expectHandleToHandle(layout, "redo", "ship", "plan", "back");
@@ -285,7 +334,7 @@ describe("computeGraphLayout", () => {
       { id: "e3", from: "a", to: "b" },
       { id: "e4", from: "a", to: "b" },
     ];
-    const layout = computeGraphLayout(buildNodes("a", "b", "c"), edges);
+    const layout = computeGraphLayout(buildNodes("a", "b", "c"), edges, SIDE_MARGIN);
 
     for (const id of ["e1", "e3", "e4"]) expectHandleToHandle(layout, id, "a", "b");
     expectClearDrawing(layout, edges);
@@ -316,7 +365,7 @@ describe("computeGraphLayout", () => {
           };
         }),
       ];
-      const layout = computeGraphLayout(buildNodes(...ids), edges);
+      const layout = computeGraphLayout(buildNodes(...ids), edges, SIDE_MARGIN);
 
       // The line through every node goes from left to right, and the edges
       // that go back to an earlier node are the ones drawn backwards.

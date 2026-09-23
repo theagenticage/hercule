@@ -123,14 +123,19 @@ const convertOffsetToPosition = (state: EditorState, offset: number): number => 
 const convertPositionToOffset = (state: EditorState, position: number): number =>
   position + (state.doc.lineAt(position).number - 1) * (state.lineBreak.length - 1);
 
-/** An offer in the form the editor library takes, which writes the offer's text and places the cursor. */
-const buildLibraryCompletion = (offer: CompletionOffer): Completion => ({
+/**
+ * An offer in the form the editor library takes, which writes the offer's
+ * text and places the cursor. The library gives the range from the start of
+ * the replaced text to the cursor. The offer replaces `rest` more characters
+ * after the cursor, which are in the cursor's line.
+ */
+const buildLibraryCompletion = (offer: CompletionOffer, rest: number): Completion => ({
   label: offer.label,
   ...(offer.detail === undefined ? {} : { detail: offer.detail }),
   apply: (view, completion, from, to) => {
     view.dispatch({
       // A text of lines, which the editor writes with the line break of its text.
-      changes: { from, to, insert: Text.of(offer.text.split("\n")) },
+      changes: { from, to: to + rest, insert: Text.of(offer.text.split("\n")) },
       // Each line break of the offer's text is one position in the editor.
       selection: { anchor: from + (offer.cursor ?? offer.text.length) },
       userEvent: "input.complete",
@@ -271,17 +276,25 @@ export function TextEditor<D extends TextDiagnostic>({
           icons: false,
           override: [
             (context) => {
-              const found = findCompletions(
-                context.state.sliceDoc(),
-                convertPositionToOffset(context.state, context.pos),
-              );
+              const offset = convertPositionToOffset(context.state, context.pos);
+              const found = findCompletions(context.state.sliceDoc(), offset);
               if (found === undefined) return null;
               const from = convertOffsetToPosition(context.state, found.from);
               // While the author types, the list opens once a word is
               // started. An empty line or a new value opens it only when
               // the author asks, so the list does not follow each space.
               if (!context.explicit && from === context.pos) return null;
-              return { from, options: found.offers.map(buildLibraryCompletion) };
+              // The library matches the offers against the text from `from`
+              // to the end of the result. So the result ends at the cursor,
+              // and each offer replaces the rest of the text by itself. The
+              // rest is in the cursor's line, which holds no line break, so
+              // its offsets and its positions in the editor are equal in
+              // number.
+              const rest = found.to - offset;
+              return {
+                from,
+                options: found.offers.map((offer) => buildLibraryCompletion(offer, rest)),
+              };
             },
           ],
         }),

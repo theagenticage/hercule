@@ -3,12 +3,12 @@
  * that imports the layout engine, so the engine can be replaced here alone.
  *
  * The engine places the nodes and the labels, and routes each edge through
- * points of its own, with room for each label. An edge leaves its source at
- * the middle of the side of the source that its route leaves, and enters its
- * target at the middle of the side that its route enters, where the cards'
- * handles are, so an arrow never lands on a corner. An edge from a node to
- * itself is not the engine's: it runs out of the node to the right, over the
- * top of the node, and into the node from the left.
+ * points of its own, with room for each label. An edge leaves its source on
+ * the side of the source that its route leaves, and enters its target on the
+ * side that its route enters. The edges on one side of a node share the side,
+ * each at a point of its own, clear of the node's corners. An edge from a
+ * node to itself is not the engine's: it runs out of the node to the right,
+ * over the top of the node, and into the node from the left.
  */
 import { graphlib, layout, type EdgeLabel, type GraphLabel, type NodeLabel } from "@dagrejs/dagre";
 
@@ -122,17 +122,16 @@ const findLoopEdges = (edges: ReadonlyArray<LayoutEdge>): ReadonlySet<LayoutEdge
 };
 
 /**
- * The route of a loop from the right side of `card` to its left side, along
- * the line at `overpassY` above it. The loop turns up and down `turnOffset`
- * to the side of the card.
+ * The route of a loop from `start` on the right side of a card to `end` on
+ * its left side, along the line at `overpassY` above the card. The loop turns
+ * up and down `turnOffset` to the side of the card.
  */
 const routeLoopOverCard = (
-  card: Box,
+  start: Point,
+  end: Point,
   overpassY: number,
   turnOffset: number,
 ): ReadonlyArray<Point> => {
-  const start = { x: card.x + card.width, y: card.y + card.height / 2 };
-  const end = { x: card.x, y: start.y };
   const corners = [
     { x: start.x + turnOffset, y: start.y },
     { x: start.x + turnOffset, y: overpassY },
@@ -141,6 +140,14 @@ const routeLoopOverCard = (
   ];
   return [start, ...corners.flatMap((corner) => [corner, corner]), end];
 };
+
+/** One end of an edge on a side of a card, and its place among the edges of that side. */
+interface SideAttachment {
+  /** Which end of which edge: `start <edge id>` or `end <edge id>`. */
+  readonly key: string;
+  /** The place from top to bottom: by the first number, then by the second. */
+  readonly order: readonly [number, number];
+}
 
 /** Where a loop from a node to itself runs, from the top of the node. */
 interface LoopPlan {
@@ -187,10 +194,13 @@ const planLoops = (
  * Places each node and routes each edge. An edge that closes a loop is given
  * to the engine the other way round, so the engine ranks it as the edge that
  * goes back. An edge from a node to itself is given room above its node.
+ * `sideMargin` is the part at each end of a node's side where no edge
+ * attaches: a rounded corner of the card, and room for half an arrowhead.
  */
 export const computeGraphLayout = (
   nodes: ReadonlyArray<LayoutNode>,
   edges: ReadonlyArray<LayoutEdge>,
+  sideMargin: number,
 ): GraphLayout => {
   const selfLoops = edges.filter((edge) => edge.from === edge.to);
   const routedEdges = edges.filter((edge) => edge.from !== edge.to);
@@ -279,8 +289,53 @@ export const computeGraphLayout = (
         : placeLabel(edge, { x: drawn.x, y: drawn.y });
     // The engine's points run from the node that it was given first.
     const points = isBackwards ? [...drawn.points!].reverse() : drawn.points!;
-    return { edge, points, label };
+    // 1 where the edge runs from left to right, and -1 where it runs back.
+    const direction = Math.sign(points.at(-1)!.x - points[0]!.x);
+    return { edge, points, label, direction };
   });
+
+  // The edges that attach to one side of a card share the side. They are
+  // spread evenly along it, clear of the margin at each end, so no two edges
+  // meet the card at one point, and no arrowhead lands on a corner. From top
+  // to bottom they go in the order of where each one runs beside the card, so
+  // that they do not cross there. A loop from a card to itself runs over the
+  // top of the card, so it attaches above the other edges. An inner loop
+  // attaches above an outer one, which turns further out.
+  const sides = new Map<
+    string,
+    { readonly card: Box; readonly attachments: Array<SideAttachment> }
+  >();
+  const attach = (nodeId: string, side: number, attachment: SideAttachment): void => {
+    const key = `${String(side)} ${nodeId}`;
+    const found = sides.get(key) ?? { card: cards.get(nodeId)!, attachments: [] };
+    found.attachments.push(attachment);
+    sides.set(key, found);
+  };
+  for (const [id, plans] of loopPlans) {
+    for (const [index, { edge }] of plans.entries()) {
+      attach(id, 1, { key: `start ${edge.id}`, order: [0, index] });
+      attach(id, -1, { key: `end ${edge.id}`, order: [0, index] });
+    }
+  }
+  // The engine's points next to each end tell where the edge runs beside
+  // the card, because an edge crosses each rank at the engine's point.
+  for (const { edge, points, direction } of drawnEdges) {
+    attach(edge.from, direction, { key: `start ${edge.id}`, order: [1, points[1]!.y] });
+    attach(edge.to, -direction, { key: `end ${edge.id}`, order: [1, points.at(-2)!.y] });
+  }
+  const attachmentYs = new Map<string, number>();
+  for (const { card, attachments } of sides.values()) {
+    attachments.sort((a, b) => a.order[0] - b.order[0] || a.order[1] - b.order[1]);
+    const span = card.height - 2 * sideMargin;
+    for (const [index, { key: attachmentKey }] of attachments.entries()) {
+      attachmentYs.set(
+        attachmentKey,
+        attachments.length === 1
+          ? card.y + card.height / 2
+          : card.y + sideMargin + (span * index) / (attachments.length - 1),
+      );
+    }
+  }
 
   // Half the width of each rank, by the line through the rank's middle. The
   // engine centres each node, each label and each point of an edge in its
@@ -295,27 +350,27 @@ export const computeGraphLayout = (
     rankHalfWidths.set(label.x, Math.max(rankHalfWidths.get(label.x) ?? 0, edge.label.width / 2));
   }
 
+  // The point of a card's side that faces `side` where an end of an edge
+  // attaches.
+  const findHandle = (id: string, side: number, attachmentKey: string): Point => {
+    const card = cards.get(id)!;
+    return { x: card.x + (side > 0 ? card.width : 0), y: attachmentYs.get(attachmentKey)! };
+  };
+
   // The engine keeps the nodes and the labels of a rank apart, and leaves the
   // space between two ranks free. So an edge that crosses each rank level, at
   // the engine's point, and turns only between ranks, never runs through a
-  // node or a label. At each end it runs level out of the middle of the
-  // card's side, far enough to meet the side at a right angle.
-  for (const { edge, points, label } of drawnEdges) {
-    // 1 where the edge runs from left to right, and -1 where it runs back.
-    const direction = Math.sign(points.at(-1)!.x - points[0]!.x);
-    // The middle of the side of a node's card that faces `side`, and the
-    // point level with it where the edge leaves the node's rank.
-    const findHandle = (id: string, side: number): Point => {
-      const centre = centres.get(id)!;
-      return { x: centre.x + (side * cards.get(id)!.width) / 2, y: centre.y };
-    };
-    const findRankSide = (id: string, side: number): Point => {
+  // node or a label. At each end it runs level out of the card's side, far
+  // enough to meet the side at a right angle.
+  for (const { edge, points, label, direction } of drawnEdges) {
+    // The point level with a handle where the edge leaves the node's rank.
+    const findRankSide = (id: string, side: number, handle: Point): Point => {
       const centre = centres.get(id)!;
       const reach = Math.max(
         rankHalfWidths.get(centre.x)!,
         cards.get(id)!.width / 2 + STRAIGHT_RUN,
       );
-      return { x: centre.x + side * reach, y: centre.y };
+      return { x: centre.x + side * reach, y: handle.y };
     };
     // Each point is given twice, so that the curve is level before it
     // reaches the rank.
@@ -330,13 +385,15 @@ export const computeGraphLayout = (
             { x: point.x + direction * halfWidth, y: point.y },
           ];
     };
+    const start = findHandle(edge.from, direction, `start ${edge.id}`);
+    const end = findHandle(edge.to, -direction, `end ${edge.id}`);
     routes.set(edge.id, {
       points: [
-        findHandle(edge.from, direction),
-        findRankSide(edge.from, direction),
+        start,
+        findRankSide(edge.from, direction, start),
         ...points.slice(1, -1).flatMap(crossRank),
-        findRankSide(edge.to, -direction),
-        findHandle(edge.to, -direction),
+        findRankSide(edge.to, -direction, end),
+        end,
       ],
       ...(label === undefined ? {} : { label }),
     });
@@ -348,7 +405,12 @@ export const computeGraphLayout = (
       const overpassY = card.y - rise;
       const label = placeLabel(edge, { x: card.x + card.width / 2, y: overpassY });
       routes.set(edge.id, {
-        points: routeLoopOverCard(card, overpassY, turnOffset),
+        points: routeLoopOverCard(
+          findHandle(id, 1, `start ${edge.id}`),
+          findHandle(id, -1, `end ${edge.id}`),
+          overpassY,
+          turnOffset,
+        ),
         ...(label === undefined ? {} : { label }),
       });
     }

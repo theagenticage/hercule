@@ -498,16 +498,50 @@ const listKinds = (union: SchemaAST.Union): ReadonlyArray<string> =>
       : [],
   );
 
+/** Words as a list of choices: `a, b or c`. */
+const joinChoices = (words: ReadonlyArray<string>): string =>
+  `${words.slice(0, -1).join(", ")} or ${String(words.at(-1))}`;
+
+/**
+ * The kind of value that a type takes, in the words that a message uses, or
+ * `undefined` for a type that takes more than one plain value.
+ */
+const describeValueKind = (ast: SchemaAST.AST): string | undefined => {
+  if (SchemaAST.isString(ast)) return "text";
+  if (SchemaAST.isNumber(ast)) return "a number";
+  if (SchemaAST.isBoolean(ast)) return "true or false";
+  if (SchemaAST.isUnion(ast) && ast.types.every(SchemaAST.isLiteral)) {
+    return joinChoices(ast.types.map((literal) => String(literal.literal)));
+  }
+  return undefined;
+};
+
+/**
+ * The problem of a key that the author wrote with no value after it, such as
+ * `action:` alone. YAML reads the value as null.
+ */
+const describeEmptyValue = (
+  ast: SchemaAST.AST,
+  path: ReadonlyArray<string>,
+): ReadonlyArray<Issue> | undefined => {
+  const kind = describeValueKind(ast);
+  return kind === undefined
+    ? undefined
+    : [{ path, message: `Write a value here. ${String(path.at(-1))} takes ${kind}.` }];
+};
+
 /**
  * The problems that one leaf of a failed decode of the definition stands for,
  * or `undefined` for a leaf that the schema library words well enough. `value`
  * is the whole value that was decoded, where a message reads what was written.
  *
- * Three problems are said here and not by the schema library, which describes
+ * Four problems are said here and not by the schema library, which describes
  * a shape it expected as a line of TypeScript. A key that is missing is named
- * with what to do. A value that must be a mapping and is not one says so. A
- * union whose members are told apart by `kind` refuses an unknown kind at
- * `kind`, because the author only wrote one wrong word.
+ * with what to do. A key with no value after it, where one plain value
+ * belongs, is named with the kind of value to write. A value that must be a
+ * mapping and is not one says so. A union whose members are told apart by
+ * `kind` refuses an unknown kind at `kind`, because the author only wrote one
+ * wrong word.
  */
 const describeDefinitionLeaf = (
   leaf: SchemaIssue.Issue,
@@ -518,14 +552,20 @@ const describeDefinitionLeaf = (
     case "MissingKey":
       return [{ path, message: `Add ${String(path.at(-1))}. It is necessary here.` }];
     case "InvalidType": {
-      if (!SchemaAST.isObjects(leaf.ast)) return undefined;
-      const written = describeWritten(readValueAt(value, path));
-      return [{ path, message: `Write a mapping of fields here, not ${written}.` }];
+      const written = readValueAt(value, path);
+      if (!SchemaAST.isObjects(leaf.ast)) {
+        return written === null ? describeEmptyValue(leaf.ast, path) : undefined;
+      }
+      return [
+        { path, message: `Write a mapping of fields here, not ${describeWritten(written)}.` },
+      ];
     }
     case "AnyOf": {
       const kinds = listKinds(leaf.ast);
-      if (kinds.length === 0) return undefined;
-      const choices = `${kinds.slice(0, -1).join(", ")} or ${String(kinds.at(-1))}`;
+      if (kinds.length === 0) {
+        return readValueAt(value, path) === null ? describeEmptyValue(leaf.ast, path) : undefined;
+      }
+      const choices = joinChoices(kinds);
       const written = readValueAt(value, path);
       if (!isRecord(written)) {
         return [

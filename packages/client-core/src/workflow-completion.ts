@@ -43,9 +43,15 @@ export interface CompletionOffer {
   readonly cursor?: number;
 }
 
-/** The offers at the cursor, and the offset where the text that they replace starts. */
+/**
+ * The offers at the cursor, and the offsets where the text that they replace
+ * starts and ends. An offer of a key replaces the part of the key before the
+ * cursor. An offer of a value replaces the whole value, also the part after
+ * the cursor, so that no part of the old value stays beside the new one.
+ */
 export interface CompletionList {
   readonly from: number;
+  readonly to: number;
   readonly offers: ReadonlyArray<CompletionOffer>;
 }
 
@@ -57,6 +63,13 @@ const VALUE_BEFORE_CURSOR = /^( *)((?:- +)?)(\w+): +([^\s#]*)$/;
 
 /** The line up to the cursor, where it writes a key or nothing yet: `ke`, maybe after `- `. */
 const KEY_BEFORE_CURSOR = /^( *)((?:- +)?)(\w*)$/;
+
+/**
+ * The text that follows a value in its line: a comment and the white space
+ * before the comment, or white space alone. A `#` at the start of the value
+ * starts a comment too, because a space comes before each value.
+ */
+const AFTER_VALUE = /(?:(?:^|\s+)#[^]*|\s*)$/;
 
 /** What the line of the cursor writes, as far as the cursor. */
 interface CursorLine {
@@ -344,10 +357,11 @@ export const listWorkflowCompletions = (
   }
   const mapping = place.nodes.at(-1);
   const shapes = narrowShapes(types, readKind(mapping));
+  const from = position - line.typed.length;
   const buildCompletionList = (
     offers: ReadonlyArray<CompletionOffer>,
-  ): CompletionList | undefined =>
-    offers.length === 0 ? undefined : { from: position - line.typed.length, offers };
+    to: number,
+  ): CompletionList | undefined => (offers.length === 0 ? undefined : { from, to, offers });
 
   if (line.key !== undefined) {
     return buildCompletionList(
@@ -356,6 +370,7 @@ export const listWorkflowCompletions = (
           label: value,
           text: value,
         })),
+      from + source.slice(from, line.end).search(AFTER_VALUE),
     );
   }
   const written = new Set(
@@ -370,5 +385,6 @@ export const listWorkflowCompletions = (
     [...keys]
       .filter(([key]) => !written.has(key))
       .map(([key, notation]) => buildKeyOffer(key, notation, line.keyColumn)),
+    position,
   );
 };

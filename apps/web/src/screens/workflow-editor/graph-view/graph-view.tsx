@@ -39,21 +39,55 @@ import {
 } from "./layout";
 
 /**
- * Every card has one size, so the layout knows it before anything is drawn.
- * The width holds the kind of a card and an id of 14 characters. A longer id
- * is cut short, and the whole id is the title of the card's id.
+ * Each glyph of IBM Plex Mono, the face of the ids and the edge labels, is
+ * 0.6em wide. So the width of a text in that face follows from its
+ * characters, and the layout knows the size of each card and each label
+ * before anything is drawn. Each is drawn with the same sizes, padding and
+ * borders as it is measured with, so nothing overlaps a card.
  */
-const CARD_SIZE: Size = { width: 136, height: 52 };
+const MONO_GLYPH_WIDTH = 0.6;
 
+/** The width of a text set in IBM Plex Mono at a font size. */
+const measureMonoText = (text: string, fontSize: number): number =>
+  Math.ceil([...text].length * fontSize * MONO_GLYPH_WIDTH);
+
+const CARD_HEIGHT = 52;
+/** The width of a card with a short id. It holds the kind of each card, and an id of 14 characters. */
+const MIN_CARD_WIDTH = 136;
+/** The id of a card is set at the meta size of the type scale, `text-meta`. */
+const ID_FONT_SIZE = 12.5;
+/** The space between a card's border and its text. */
+const CARD_PADDING = 12;
+/** A card's border, `border`. */
+const CARD_BORDER = 1;
 /**
- * An edge label is set in IBM Plex Mono at the fine size of the type scale,
- * `text-fine`, and each glyph of that face is 0.6em wide. So the width of a
- * label follows from its characters. The layout gets that width, and the
- * label is drawn with the same padding, gap and widths as it is measured
- * with, so no label overlaps a card.
+ * The most characters of an id that a card grows to show. A longer id is cut
+ * short, and the whole id is the title of the card's id.
  */
+const MAX_ID_CHARACTERS = 32;
+/** The radius of a card's corners, `rounded-card`. */
+const CARD_CORNER_RADIUS = 10;
+/** The width and the height of an arrowhead. */
+const ARROWHEAD_SIZE = 9;
+/**
+ * The part at each end of a card's side where no edge attaches: the rounded
+ * corner, and half an arrowhead, so that an arrowhead lands only on the
+ * straight part of the side.
+ */
+const SIDE_MARGIN = CARD_CORNER_RADIUS + ARROWHEAD_SIZE / 2;
+
+/** The size of a node's card: wide enough for its id, up to an id of `MAX_ID_CHARACTERS`. */
+const measureCard = (node: WorkflowGraphNode): Size => ({
+  width: Math.max(
+    MIN_CARD_WIDTH,
+    measureMonoText(node.id.slice(0, MAX_ID_CHARACTERS), ID_FONT_SIZE) +
+      2 * (CARD_PADDING + CARD_BORDER),
+  ),
+  height: CARD_HEIGHT,
+});
+
+/** An edge label is set at the fine size of the type scale, `text-fine`. */
 const LABEL_FONT_SIZE = 12;
-const LABEL_CHARACTER_WIDTH = LABEL_FONT_SIZE * 0.6;
 const LABEL_HEIGHT = 20;
 const LABEL_PADDING = 6;
 const LABEL_GAP = 6;
@@ -100,16 +134,16 @@ const formatConditionLabel = (edge: WorkflowGraphEdge): string | undefined => {
     : `…${characters.slice(1 - MAX_CONDITION_CHARACTERS).join("")}`;
 };
 
-const measureText = (text: string): number => Math.ceil([...text].length * LABEL_CHARACTER_WIDTH);
-
 /** The size an edge's label is drawn at, or `undefined` for an edge with nothing to say. */
 const measureLabel = (edge: WorkflowGraphEdge): Size | undefined => {
   const condition = formatConditionLabel(edge);
   const badge = formatTraversalBadge(edge);
   if (condition === undefined && badge === undefined) return undefined;
-  const conditionWidth = condition === undefined ? 0 : measureText(condition);
+  const conditionWidth = condition === undefined ? 0 : measureMonoText(condition, LABEL_FONT_SIZE);
   const badgeWidth =
-    badge === undefined ? 0 : measureText(badge) + 2 * (BADGE_PADDING + BADGE_BORDER);
+    badge === undefined
+      ? 0
+      : measureMonoText(badge, LABEL_FONT_SIZE) + 2 * (BADGE_PADDING + BADGE_BORDER);
   const gap = conditionWidth > 0 && badgeWidth > 0 ? LABEL_GAP : 0;
   return { width: conditionWidth + gap + badgeWidth + 2 * LABEL_PADDING, height: LABEL_HEIGHT };
 };
@@ -171,8 +205,9 @@ function WorkflowNodeCard({ data }: NodeProps<DrawnWorkflowNode>): JSX.Element {
   const isTrigger = node.kind === "start" || node.kind === "signal";
   return (
     <div
+      style={{ paddingInline: CARD_PADDING }}
       className={cn(
-        "flex h-full w-full flex-col justify-center gap-0.5 rounded-card border border-line px-3",
+        "flex h-full w-full flex-col justify-center gap-0.5 rounded-card border border-line",
         isTrigger ? "bg-surface" : "bg-raised shadow-card",
       )}
     >
@@ -189,7 +224,10 @@ function WorkflowNodeCard({ data }: NodeProps<DrawnWorkflowNode>): JSX.Element {
       <span className="truncate text-label leading-[14px] font-emph tracking-[0.1em] text-faint uppercase">
         {KIND_LABELS[node.kind]}
       </span>
-      <span className="truncate font-mono text-meta leading-5 font-emph text-ink" title={node.id}>
+      <span
+        className="truncate font-mono text-meta leading-5 font-emph text-ink"
+        title={node.id.length > MAX_ID_CHARACTERS ? node.id : undefined}
+      >
         {node.id}
       </span>
     </div>
@@ -263,8 +301,8 @@ function ArrowMarker({ id }: { readonly id: string }): JSX.Element {
           viewBox="0 0 10 10"
           refX={9}
           refY={5}
-          markerWidth={9}
-          markerHeight={9}
+          markerWidth={ARROWHEAD_SIZE}
+          markerHeight={ARROWHEAD_SIZE}
           markerUnits="userSpaceOnUse"
           orient="auto-start-reverse"
         >
@@ -347,7 +385,7 @@ export function GraphView({
   const drawing = useMemo(() => {
     const edges = graph.edges.map((edge, index) => ({ id: `edge-${String(index)}`, edge }));
     const layout = computeGraphLayout(
-      graph.nodes.map((node) => ({ id: node.id, ...CARD_SIZE })),
+      graph.nodes.map((node) => ({ id: node.id, ...measureCard(node) })),
       edges.map(({ id, edge }) => {
         const label = measureLabel(edge);
         return {
@@ -361,21 +399,27 @@ export function GraphView({
           closesLoop: edge.maxTraversals !== undefined,
         };
       }),
+      SIDE_MARGIN,
     );
-    const nodes: Array<DrawnWorkflowNode> = graph.nodes.map((node) => ({
-      id: node.id,
-      type: "card",
-      position: layout.nodes.get(node.id)!,
-      data: { node },
-      ...CARD_SIZE,
-      // Where the edges attach, given before the cards are measured, so the
-      // edges are drawn in the first frame.
-      handles: HANDLES.map((handle) => ({
-        ...handle,
-        x: handle.position === Position.Left ? 0 : CARD_SIZE.width,
-        y: CARD_SIZE.height / 2,
-      })),
-    }));
+    const nodes: Array<DrawnWorkflowNode> = graph.nodes.map((node) => {
+      const size = measureCard(node);
+      return {
+        id: node.id,
+        type: "card",
+        position: layout.nodes.get(node.id)!,
+        data: { node },
+        ...size,
+        // The handles that the edges name, given before the cards are
+        // measured, so that the edges are drawn in the first frame. The
+        // curves come from the layout, so the place of a handle on its side
+        // does not move a curve.
+        handles: HANDLES.map((handle) => ({
+          ...handle,
+          x: handle.position === Position.Left ? 0 : size.width,
+          y: size.height / 2,
+        })),
+      };
+    });
     const routes: Array<DrawnWorkflowEdge> = edges.map(({ id, edge }) => {
       const route = layout.edges.get(id)!;
       // The side of each card that the route leaves and enters: the route

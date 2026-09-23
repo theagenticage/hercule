@@ -517,6 +517,34 @@ steps:
     expect(listIssuePaths(issues)).toEqual([["steps", "0", "kind"]]);
   });
 
+  it("says what kind of value to write after a key with no value, where one plain value belongs", () => {
+    const issues = collectIssues(`name:
+steps:
+  - id: file_task
+    kind: action
+    action:
+    join:
+    entry: ~
+edges:
+  - from: file_task
+    to: file_task
+    maxTraversals:
+`);
+    expect(issues).toEqual([
+      { path: ["name"], message: "Write a value here. name takes text." },
+      { path: ["steps", "0", "action"], message: "Write a value here. action takes text." },
+      { path: ["steps", "0", "join"], message: "Write a value here. join takes any or all." },
+      {
+        path: ["steps", "0", "entry"],
+        message: "Write a value here. entry takes true or false.",
+      },
+      {
+        path: ["edges", "0", "maxTraversals"],
+        message: "Write a value here. maxTraversals takes a number.",
+      },
+    ]);
+  });
+
   it("points an agent that is not an id at it, and says where the id of an Agent is shown", () => {
     const issues = collectIssues(`name: agent by name
 steps:
