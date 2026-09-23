@@ -14,15 +14,15 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { lintOutputSchema, type AccessMode, type SessionSpec } from "@hercule/protocol";
 import {
   ACCESS_MODE_CHAIN,
-  forbidden,
+  createForbiddenError,
   Id,
-  invalidState,
-  notFound,
+  createInvalidStateError,
+  createNotFoundError,
   nearestSupportedAccessMode,
   SESSION_CONTINUE_FIELDS,
   SessionSpawnInput,
-  validation,
-  validationOf,
+  createValidationError,
+  createDecodeValidationError,
   type Forbidden,
   type InvalidState,
   type NotFound,
@@ -93,7 +93,7 @@ const refuseAgentOwnedFields = (spawn: SessionSpawnInput): Effect.Effect<void, V
   for (const field of ["instanceId", "permissionProfileId"] as const) {
     if (spawn[field] !== undefined) {
       return Effect.fail(
-        validation([
+        createValidationError([
           { path: [field], message: `${field} comes from the agent this session is spawned from` },
         ]),
       );
@@ -188,7 +188,7 @@ const make = Effect.gen(function* () {
       const found = snapshots.find(
         (snapshot) => loggedIn(snapshot) && placeable.has(snapshot.runnerId),
       );
-      if (found === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
+      if (found === undefined) return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       return found;
     });
 
@@ -207,16 +207,18 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const found = yield* runners.read(runnerId);
       if (Option.isNone(found)) {
-        return yield* Effect.fail(validation([{ path: ["runnerId"], message: NO_SUCH_RUNNER }]));
+        return yield* Effect.fail(
+          createValidationError([{ path: ["runnerId"], message: NO_SUCH_RUNNER }]),
+        );
       }
       const runner = found.value;
       if (runner.lifecycle !== "active") {
         return yield* Effect.fail(
-          invalidState(runner.lifecycle === "retired" ? RETIRED : DRAINING),
+          createInvalidStateError(runner.lifecycle === "retired" ? RETIRED : DRAINING),
         );
       }
       const snapshot = snapshots.find((one) => one.runnerId === runnerId && loggedIn(one));
-      if (snapshot === undefined) return yield* Effect.fail(invalidState(NO_PLACEMENT));
+      if (snapshot === undefined) return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       return snapshot;
     });
 
@@ -236,12 +238,12 @@ const make = Effect.gen(function* () {
   > =>
     Effect.gen(function* () {
       const row = yield* agents.read(agentId);
-      if (Option.isNone(row)) return yield* Effect.fail(notFound(NO_SUCH_AGENT));
+      if (Option.isNone(row)) return yield* Effect.fail(createNotFoundError(NO_SUCH_AGENT));
       const agent = row.value;
       const profile = yield* profiles.getById(agent.permissionProfileId);
       if (Option.isNone(profile)) {
         return yield* Effect.fail(
-          invalidState(
+          createInvalidStateError(
             `the agent's permission profile ${agent.permissionProfileId} no longer exists; ` +
               "point the agent at another profile, then spawn again",
           ),
@@ -305,7 +307,9 @@ const make = Effect.gen(function* () {
     return issues.length === 0
       ? Effect.succeed(schema)
       : Effect.fail(
-          validation(issues.map((issue) => ({ path: ["outputSchema"], message: issue }))),
+          createValidationError(
+            issues.map((issue) => ({ path: ["outputSchema"], message: issue })),
+          ),
         );
   };
 
@@ -317,7 +321,7 @@ const make = Effect.gen(function* () {
       const found = yield* profiles.getById(profileId);
       if (Option.isNone(found)) {
         return yield* Effect.fail(
-          validation([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
+          createValidationError([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
         );
       }
     });
@@ -329,7 +333,9 @@ const make = Effect.gen(function* () {
         if (loggedIn(snapshot)) return snapshot.instanceId;
       }
       return yield* Effect.fail(
-        invalidState("no provider instance has a logged-in machine; log in on one first"),
+        createInvalidStateError(
+          "no provider instance has a logged-in machine; log in on one first",
+        ),
       );
     });
 
@@ -339,7 +345,9 @@ const make = Effect.gen(function* () {
       Option.match({
         // The boot seeds it, so this is a database somebody edited.
         onNone: () =>
-          Effect.fail(invalidState(`the ${DEFAULT_PROFILE} permission profile is missing`)),
+          Effect.fail(
+            createInvalidStateError(`the ${DEFAULT_PROFILE} permission profile is missing`),
+          ),
         onSome: (profile) => Effect.succeed(profile.id),
       }),
     );
@@ -350,7 +358,7 @@ const make = Effect.gen(function* () {
       const live = yield* resources.liveProjects([projectId]);
       if (live.length === 0) {
         return yield* Effect.fail(
-          validation([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
+          createValidationError([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
         );
       }
     });
@@ -373,7 +381,7 @@ const make = Effect.gen(function* () {
           // session it spawned runs, and that refusal must not be defeated by
           // a spawn that is still being placed.
           if (open.agentId !== undefined && Option.isNone(yield* agents.read(open.agentId))) {
-            return yield* Effect.fail(notFound(NO_SUCH_AGENT));
+            return yield* Effect.fail(createNotFoundError(NO_SUCH_AGENT));
           }
           // Where it works is the workspaces domain's to decide, in full: what
           // the wish means, how the checkouts are laid out, what the branch is
@@ -443,7 +451,7 @@ const make = Effect.gen(function* () {
     placeSession: (input: SessionSpawnInput): Effect.Effect<Session, PlaceError | NotFound> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("session.spawn");
-        const decoded = yield* Effect.mapError(decodeSpawn(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeSpawn(input), createDecodeValidationError);
         if (decoded.agentId !== undefined) yield* refuseAgentOwnedFields(decoded);
         const spawnedFrom =
           decoded.agentId === undefined
@@ -456,14 +464,14 @@ const make = Effect.gen(function* () {
         // bounded by at least as much as the Agent is.
         const user = actor._tag === "user" ? actor : undefined;
         if (spawnedFrom === undefined && user === undefined) {
-          return yield* Effect.fail(forbidden("session.spawn", THREAD_IS_THE_USERS));
+          return yield* Effect.fail(createForbiddenError("session.spawn", THREAD_IS_THE_USERS));
         }
         if (spawnedFrom !== undefined) {
           if (!mayRunAs(actor, spawnedFrom.profile)) {
-            return yield* Effect.fail(forbidden("session.spawn", NOT_ITS_GRANTS));
+            return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_GRANTS));
           }
           if (!mayRunOn(actor, decoded.accessMode, spawnedFrom.agent)) {
-            return yield* Effect.fail(forbidden("session.spawn", NOT_ITS_ACCESS_MODE));
+            return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_ACCESS_MODE));
           }
         }
         const outputSchema = yield* requireLintedSchema(decoded.outputSchema);
@@ -503,7 +511,7 @@ const make = Effect.gen(function* () {
         );
         if (accessMode === undefined) {
           return yield* Effect.fail(
-            invalidState(
+            createInvalidStateError(
               `${definition.displayName} supports no access mode at or below ${requestedAccessMode}`,
             ),
           );
@@ -522,7 +530,7 @@ const make = Effect.gen(function* () {
           (hosting.models.find((one) => one.isDefault) ?? hosting.models[0])?.slug;
         if (model === undefined) {
           return yield* Effect.fail(
-            invalidState("that machine reported no models for this provider instance"),
+            createInvalidStateError("that machine reported no models for this provider instance"),
           );
         }
         // The choices are held to the model they run on, whatever they came
@@ -593,10 +601,13 @@ const make = Effect.gen(function* () {
     continueSession: (input: ContinueInput): Effect.Effect<Session, ContinueError> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("session.continue");
-        const { id, mode, prompt } = yield* Effect.mapError(decodeContinue(input), validationOf);
+        const { id, mode, prompt } = yield* Effect.mapError(
+          decodeContinue(input),
+          createDecodeValidationError,
+        );
         const parent = yield* one(id);
         if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
-          return yield* Effect.fail(forbidden("session.spawn", NOT_ITS_PROFILE));
+          return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
         }
         // Read for what it refuses: an instance that is gone, or a provider this
         // build no longer carries, before the machine's snapshot is trusted.

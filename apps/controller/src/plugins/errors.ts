@@ -8,7 +8,7 @@
  */
 import type * as Schema from "effect/Schema";
 import { PluginError } from "@hercule/plugin-host";
-import { issuesOf, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
+import { listDecodeIssues, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
 
 /**
  * Cutting a plugin's unbounded text where the message is made, rather than at
@@ -22,7 +22,7 @@ export const truncateMessage = (message: string): string =>
 /** Every issue a decode found, as one line naming the field each one is about. */
 export const describeFieldIssues = (error: Schema.SchemaError): string =>
   truncateMessage(
-    issuesOf(error)
+    listDecodeIssues(error)
       .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
       .join("; "),
   );

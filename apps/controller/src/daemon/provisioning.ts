@@ -17,8 +17,8 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  createDecodeValidationError,
   Id,
-  validationOf,
   WorkspaceProvisionInput,
   type Conflict,
   type Forbidden,
@@ -94,7 +94,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Workspace, WorkspaceError | Conflict> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.provision");
-        const decoded = yield* Effect.mapError(decodeProvision(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeProvision(input), createDecodeValidationError);
         const { workspace, frame } = yield* withTransaction(
           sql,
           workspaces.openPrimaryFor({
@@ -112,7 +112,7 @@ const make = Effect.gen(function* () {
     disposeWorkspace: (input: Identified): Effect.Effect<Record<string, never>, WorkspaceError> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.dispose");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         // The refusal and the write are one transaction, so a session that
         // starts in the workspace while this runs is either refused or is not
         // there yet.

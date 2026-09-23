@@ -35,10 +35,10 @@ import {
   AgentUpdateInput,
   DEFAULT_PAGE_LIMIT,
   Id,
-  invalidState,
-  notFound,
-  validation,
-  validationOf,
+  createDecodeValidationError,
+  createInvalidStateError,
+  createNotFoundError,
+  createValidationError,
   type Agent,
   type Forbidden,
   type InvalidState,
@@ -113,7 +113,9 @@ const buildModelSelection = (
   options: ModelSelection["options"] | undefined,
 ): Effect.Effect<ModelSelection | null | undefined, Validation> => {
   if (typeof model !== "string" && options !== undefined) {
-    return Effect.fail(validation([{ path: ["options"], message: NO_MODEL_FOR_OPTIONS }]));
+    return Effect.fail(
+      createValidationError([{ path: ["options"], message: NO_MODEL_FOR_OPTIONS }]),
+    );
   }
   if (model === undefined) return Effect.succeed(undefined);
   return Effect.succeed(model === null ? null : { model, options: options ?? {} });
@@ -166,14 +168,14 @@ const make = Effect.gen(function* () {
       const instance = yield* instances.one(instanceId);
       if (Option.isNone(instance)) {
         return yield* Effect.fail(
-          validation([{ path: ["instanceId"], message: NO_SUCH_INSTANCE }]),
+          createValidationError([{ path: ["instanceId"], message: NO_SUCH_INSTANCE }]),
         );
       }
       const providerId = instance.value.providerId;
       const definitions = yield* host.providers();
       if (!definitions.some((definition) => definition.id === providerId)) {
         return yield* Effect.fail(
-          validation([
+          createValidationError([
             {
               path: ["instanceId"],
               message:
@@ -192,7 +194,7 @@ const make = Effect.gen(function* () {
       const profile = yield* profiles.getById(profileId);
       if (Option.isNone(profile)) {
         return yield* Effect.fail(
-          validation([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
+          createValidationError([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
         );
       }
     });
@@ -202,7 +204,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(
       agents.read(id),
       Option.match({
-        onNone: () => Effect.fail(notFound(NO_SUCH_AGENT)),
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_AGENT)),
         onSome: Effect.succeed,
       }),
     );
@@ -214,7 +216,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("agent.query");
         const { limit, cursor, sort, permissionProfileId } = yield* Effect.mapError(
           decodeQuery(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const listing = yield* refuseCursor(
           agents.list({
@@ -234,7 +236,7 @@ const make = Effect.gen(function* () {
     read: (input: Identified): Effect.Effect<Agent, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const composeRecord = yield* agentRecordComposer;
         return composeRecord(yield* requireAgent(id));
       }),
@@ -243,7 +245,7 @@ const make = Effect.gen(function* () {
     create: (input: AgentCreateInput): Effect.Effect<Agent, WriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.create");
-        const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         const selection = yield* buildModelSelection(decoded.model, decoded.options);
         const composeRecord = yield* agentRecordComposer;
         const stored = yield* withTransaction(
@@ -295,7 +297,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("agent.update");
         const { id, model, options, ...named } = yield* Effect.mapError(
           decodeUpdate(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const selection = yield* buildModelSelection(model, options);
         const edit: AgentEdit = {
@@ -303,7 +305,9 @@ const make = Effect.gen(function* () {
           ...(selection === undefined ? {} : { model: selection }),
         };
         if (Object.keys(edit).length === 0) {
-          return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: [], message: "name a field to change" }]),
+          );
         }
         const composeRecord = yield* agentRecordComposer;
         const stored = yield* withTransaction(
@@ -346,7 +350,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Record<string, never>, WriteError | NotFound | InvalidState> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -369,7 +373,7 @@ const make = Effect.gen(function* () {
             const running = live.items[0];
             if (running !== undefined) {
               return yield* Effect.fail(
-                invalidState(
+                createInvalidStateError(
                   `session ${running.id} was spawned from this agent and has not exited; ` +
                     "end it first, then delete the agent",
                 ),

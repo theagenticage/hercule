@@ -7,7 +7,7 @@
  */
 import * as Effect from "effect/Effect";
 import type { ModelDescriptor, ModelSelection, SessionSpec } from "@hercule/protocol";
-import { validation, type Validation } from "@hercule/contract";
+import { createValidationError, type Validation } from "@hercule/contract";
 import type { ScopeSettings } from "../settings";
 
 /** The picks themselves, in the shape the row and the wire hold them. */
@@ -45,7 +45,7 @@ export const validatedOptions = (
       ? []
       : [{ ...at, message: `${id} takes one of ${choices.join(", ")}` }];
   });
-  return issues.length === 0 ? Effect.void : Effect.fail(validation(issues));
+  return issues.length === 0 ? Effect.void : Effect.fail(createValidationError(issues));
 };
 
 /** Applied here, controller-side, when the settings key is unset; the runner holds no default of its own. */

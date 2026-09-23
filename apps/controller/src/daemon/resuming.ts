@@ -12,7 +12,7 @@ import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { invalidState, type InvalidState } from "@hercule/contract";
+import { createInvalidStateError, type InvalidState } from "@hercule/contract";
 import { loggedIn, NO_PLACEMENT, providerRepository } from "../providers";
 import { DRAINING, RETIRED, runnerRepository } from "../runners";
 import type { StoredSession } from "../sessions";
@@ -52,8 +52,10 @@ export const resumable: Effect.Effect<
 
   return (session: StoredSession) =>
     Effect.gen(function* () {
-      if (session.status !== "exited") return yield* Effect.fail(invalidState(STILL_LIVE));
-      if (session.nativeSessionId === null) return yield* Effect.fail(invalidState(NO_TRANSCRIPT));
+      if (session.status !== "exited")
+        return yield* Effect.fail(createInvalidStateError(STILL_LIVE));
+      if (session.nativeSessionId === null)
+        return yield* Effect.fail(createInvalidStateError(NO_TRANSCRIPT));
       if (!session.resumable) {
         // A thread's transcript is keyed to the working area it ran in, so a
         // workspace that is gone is a session that cannot be picked up - and
@@ -63,23 +65,23 @@ export const resumable: Effect.Effect<
             ? undefined
             : yield* workspaces.statusOf(session.workspaceId);
         if (status !== undefined && status !== "ready") {
-          return yield* Effect.fail(invalidState(workspaceGone(status)));
+          return yield* Effect.fail(createInvalidStateError(workspaceGone(status)));
         }
-        return yield* Effect.fail(invalidState(RETIRED));
+        return yield* Effect.fail(createInvalidStateError(RETIRED));
       }
       // `resumable` says the transcript is still there; this says the machine
       // will not open it. Whether it can be reached right now is dispatch's to
       // decide: unreachable queues the session rather than refusing it.
       const machine = yield* runners.read(session.runnerId);
       if (Option.isSome(machine) && machine.value.lifecycle !== "active") {
-        return yield* Effect.fail(invalidState(DRAINING));
+        return yield* Effect.fail(createInvalidStateError(DRAINING));
       }
       // The stored snapshot's word, asked of the one machine holding the native
       // state rather than of the fleet, because the transcript is only where it
       // already is.
       const snapshots = yield* instances.snapshotsOf(session.instanceId);
       if (!snapshots.some((one) => loggedIn(one) && one.runnerId === session.runnerId)) {
-        return yield* Effect.fail(invalidState(NO_PLACEMENT));
+        return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       }
       return session.nativeSessionId;
     });

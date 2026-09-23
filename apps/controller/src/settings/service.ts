@@ -16,7 +16,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  validation,
+  createValidationError,
   type Forbidden,
   type SettingsPatch,
   type SettingsState,
@@ -60,7 +60,7 @@ const make = Effect.gen(function* () {
       const found = yield* connections.one(connectionId);
       if (Option.isNone(found) || !isGithubConnection(found.value)) {
         return yield* Effect.fail(
-          validation([{ path: ["user", THREAD_GITHUB], message: NOT_GITHUB }]),
+          createValidationError([{ path: ["user", THREAD_GITHUB], message: NOT_GITHUB }]),
         );
       }
     });
@@ -131,7 +131,7 @@ const make = Effect.gen(function* () {
           Object.keys(patch.user ?? {}).length === 0
         ) {
           return yield* Effect.fail(
-            validation([{ path: [], message: "name at least one setting to write" }]),
+            createValidationError([{ path: [], message: "name at least one setting to write" }]),
           );
         }
         return yield* withTransaction(

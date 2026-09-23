@@ -18,7 +18,7 @@ import type {
   ProviderEvent,
 } from "@hercule/protocol";
 import {
-  notFound,
+  createNotFoundError,
   SESSION_STATUSES,
   type NotFound,
   type SessionStatus,
@@ -816,7 +816,7 @@ export const requireSession =
     Effect.flatMap(
       rows.one(id),
       Option.match({
-        onNone: () => Effect.fail(notFound(NO_SUCH_SESSION)),
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_SESSION)),
         onSome: Effect.succeed,
       }),
     );

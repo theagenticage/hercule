@@ -28,9 +28,9 @@ import type * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import {
   Authenticated,
+  createUnauthenticatedError,
   isOperationId,
   SetupToken,
-  unauthenticated,
   type OperationId,
 } from "@hercule/contract";
 import { CurrentActor, grantCheck, NO_CREDENTIAL, type Actor } from "../actor";
@@ -110,10 +110,11 @@ export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials |
         bearer: (httpEffect, options) =>
           Effect.gen(function* () {
             const token = Redacted.value(options.credential);
-            if (token === "") return yield* Effect.fail(unauthenticated(NO_CREDENTIAL));
+            if (token === "") return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
             const actor = yield* resolve(credentials, sessions, token);
-            if (Option.isNone(actor)) return yield* Effect.fail(unauthenticated(NO_CREDENTIAL));
+            if (Option.isNone(actor))
+              return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
             const operation = yield* operationFor(operationIdOf(options));
             const refused = grantCheck(operation, actor.value);
@@ -134,7 +135,8 @@ export const SetupTokenLayer: Layer.Layer<SetupToken, never, Setup> = Layer.effe
         Effect.gen(function* () {
           const token = Redacted.value(options.credential);
           const accepted = token !== "" && (yield* Effect.orDie(setup.matchesToken(token)));
-          if (!accepted) return yield* Effect.fail(unauthenticated("the setup token is not valid"));
+          if (!accepted)
+            return yield* Effect.fail(createUnauthenticatedError("the setup token is not valid"));
           return yield* httpEffect;
         }),
     };

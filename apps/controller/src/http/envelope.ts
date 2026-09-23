@@ -25,10 +25,10 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
 import {
   ERROR_STATUS,
-  internal,
-  issuesOf,
-  notFound,
-  validation,
+  createInternalError,
+  createNotFoundError,
+  createValidationError,
+  listDecodeIssues,
   type ApiError,
 } from "@hercule/contract";
 
@@ -64,18 +64,21 @@ export const errorFor = (cause: Cause.Cause<unknown>): ApiError | undefined => {
         internalDetail ??= `cannot encode the ${PART[error.kind]}`;
         continue;
       }
-      return validation(issuesOf(error.cause), `the ${PART[error.kind]} is not valid`);
+      return createValidationError(
+        listDecodeIssues(error.cause),
+        `the ${PART[error.kind]} is not valid`,
+      );
     }
     if (HttpServerError.isHttpServerError(error)) {
-      if (error.reason._tag === "RouteNotFound") return notFound("no such route");
+      if (error.reason._tag === "RouteNotFound") return createNotFoundError("no such route");
       if (error.reason._tag === "RequestParseError") {
-        return validation([{ path: [], message: "the request could not be read" }]);
+        return createValidationError([{ path: [], message: "the request could not be read" }]);
       }
     }
     internalDetail ??= String(error);
   }
   if (internalDetail === undefined) return undefined;
-  return internal("something went wrong");
+  return createInternalError("something went wrong");
 };
 
 /**

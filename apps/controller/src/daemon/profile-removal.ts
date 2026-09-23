@@ -15,7 +15,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  invalidState,
+  createInvalidStateError,
   type Forbidden,
   type InvalidState,
   type NotFound,
@@ -77,7 +77,7 @@ const make = Effect.gen(function* () {
             );
             if (live.items.length > 0) {
               return yield* Effect.fail(
-                invalidState(
+                createInvalidStateError(
                   `${profile.name} is carried by a session that has not exited; ` +
                     "it can be deleted once they have.",
                 ),
@@ -99,7 +99,7 @@ const make = Effect.gen(function* () {
             const agent = naming.items[0];
             if (agent !== undefined) {
               return yield* Effect.fail(
-                invalidState(
+                createInvalidStateError(
                   `the agent ${agent.name} spawns its sessions under ${profile.name}; ` +
                     "point that agent at another profile first, then delete this one",
                 ),
