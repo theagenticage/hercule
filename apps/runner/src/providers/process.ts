@@ -1,6 +1,7 @@
 /**
- * A seam so a test can state what an adapter runs - the vendor installer above
- * all - without running it.
+ * Spawns the processes adapters run. Adapters take these functions as a seam,
+ * so a test can check what an adapter would run (above all, the vendor
+ * installer) without running it.
  */
 import * as Effect from "effect/Effect";
 import type { AppServerSpawn } from "./codex";
@@ -19,21 +20,22 @@ export type Run = (
 ) => Effect.Effect<Ran>;
 
 /**
- * A command that could not start reads as one that exited badly and said why: a
- * missing binary is an ordinary state.
+ * Runs a command to completion and returns its exit code and output. Never
+ * fails: a command that cannot start returns exit code 1 with the error in
+ * `stderr`, because a missing binary is an ordinary state.
  */
 export const runProcess: Run = (command, env) =>
   Effect.tryPromise({
     try: async (signal) => {
-      // Copied because Bun's types take a mutable array, and an adapter's
-      // command is a constant it must keep.
+      // Copy the command, because Bun's types expect a mutable array and an
+      // adapter's command is a constant.
       const child = Bun.spawn([...command], {
         stdout: "pipe",
         stderr: "pipe",
         env,
       });
-      // Giving up on the answer is not giving up on the process: a deadline that
-      // left the installer running would leave one behind on every attempt.
+      // When the caller gives up, for example on a deadline, kill the process
+      // too. Otherwise every timed-out attempt would leave an installer running.
       signal.addEventListener("abort", () => {
         child.kill();
       });
@@ -54,7 +56,7 @@ const decodeStream = (stream: ReadableStream<Uint8Array>): AsyncIterable<string>
   })();
 };
 
-/** One item per line, with the trailing partial line held back until it ends. */
+/** Splits a stream into lines, holding back a trailing partial line until it is complete. */
 const splitLines = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =>
   (async function* () {
     let buffered = "";
@@ -67,15 +69,17 @@ const splitLines = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =
     if (buffered !== "") yield buffered;
   })();
 
-/** Unlike a run, a login is read and written while it lives. */
+/**
+ * Spawns a login process. Unlike `runProcess`, a login is read from and written to while it runs.
+ */
 export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
   const child = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
   return {
     stdout: decodeStream(child.stdout),
     stderr: decodeStream(child.stderr),
     write: (value) => {
-      // Written and flushed without waiting: the vendor is reading a line and
-      // the answer comes back on the pipes, not from the write.
+      // Write and flush without waiting: the vendor's response arrives on stdout
+      // or stderr, not as the result of the write.
       void child.stdin.write(value);
       void child.stdin.flush();
     },
@@ -87,28 +91,29 @@ export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
 };
 
 /**
- * A harness spoken to line by line: framed both ways, read while it lives, and
- * ended either by closing its stdin or by killing it. Each adapter takes the
- * half of this it uses.
+ * A harness process the runner talks to one line at a time, in both
+ * directions. It is read while it runs, and ended either by closing its stdin
+ * or by killing it. Each adapter uses only the parts it needs.
  */
 export interface FramedChild {
   readonly write: (text: string) => void;
   readonly stdout: AsyncIterable<string>;
   readonly stderr: AsyncIterable<string>;
-  /** The end of the conversation, for a harness that leaves on end-of-input. */
+  /** Closes stdin, which ends a harness that exits at end of input. */
   readonly end: () => void;
   readonly kill: () => void;
   readonly exited: Promise<number>;
 }
 
-/** One spawner for both: a conversation, not a run. */
+/** Spawns a line-framed harness. Shared by the Codex and pi adapters. */
 const spawnFramed = (
   command: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
   /**
-   * Where the harness runs, for one that takes it from its process rather than
-   * from a command. Left out, the child inherits the runner's own directory,
-   * which is a session writing its files wherever the daemon happens to live.
+   * The directory the harness runs in, for a harness that takes it from its
+   * process rather than from a command-line option. When it is left out, the
+   * child inherits the runner's own directory, and a session would write its
+   * files wherever the daemon was started.
    */
   cwd?: string | null,
 ): FramedChild => {
@@ -123,8 +128,8 @@ const spawnFramed = (
     stdout: splitLines(child.stdout),
     stderr: splitLines(child.stderr),
     write: (text) => {
-      // Written and flushed without waiting: the answer comes back on stdout
-      // under the frame's own id, not from the write.
+      // Write and flush without waiting: the response arrives on stdout,
+      // matched by the frame's id, not as the result of the write.
       void child.stdin.write(text);
       void child.stdin.flush();
     },
@@ -138,7 +143,7 @@ const spawnFramed = (
   };
 };
 
-/** Codex's app-server, which is ended by killing it rather than by its stdin. */
+/** Spawns Codex's app-server, which is ended by killing it rather than by closing its stdin. */
 export const spawnAppServer: AppServerSpawn = spawnFramed;
 
 export const spawnPi: PiSpawn = spawnFramed;

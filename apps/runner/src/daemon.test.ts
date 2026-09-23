@@ -1,12 +1,16 @@
 /**
- * `hercule runner`, from the home it reads to the controller it dials.
+ * Tests `hercule runner`, from the Hercule Home it reads to the controller it
+ * connects to.
  *
- * The daemon is three parts wired together - what this machine joined, what it
- * says about itself, and the loop that holds the connection - and the wiring is
- * the only thing here that no other test covers. What it asserts is that a
- * machine that never joined is told so by name, that one holding an address it
- * cannot dial is told which field to edit, and that one that did dials the
- * controller its `runner.json` points at, with the credential that file holds.
+ * The daemon wires together three parts: the stored join, the facts probe,
+ * and the reconnect loop. No other test covers that wiring. These tests check
+ * that:
+ *
+ * - a machine that never joined gets an error that names the missing file;
+ * - a machine with an invalid controller URL gets an error that names the field
+ *   to edit;
+ * - a machine that joined connects to the controller in its `runner.json`,
+ *   with the credential stored there.
  */
 import { lstatSync, mkdtempSync, mkdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,7 +32,7 @@ const createTemporaryHome = (): string => {
   return home;
 };
 
-/** A home holding a `runner.json` that points at this address. */
+/** Creates a Hercule Home whose `runner.json` points at `controllerUrl`. */
 const createEnrolledHome = (controllerUrl: string): string => {
   const home = createTemporaryHome();
   mkdirSync(locateRunnerDir(home), { recursive: true });
@@ -46,8 +50,8 @@ const createEnrolledHome = (controllerUrl: string): string => {
   return home;
 };
 
-describe("the runner daemon", () => {
-  it("says which file a machine that never joined is missing", async () => {
+describe("runDaemon", () => {
+  it("names the missing file on a machine that never joined", async () => {
     const home = createTemporaryHome();
 
     const outcome = await Effect.runPromise(Effect.result(runDaemon(home)));
@@ -60,8 +64,8 @@ describe("the runner daemon", () => {
 
   it.each([
     ["is not a URL at all", "not-a-url"],
-    ["is a scheme the socket cannot dial", "mailto:a@b.c"],
-  ])("refuses to start when the stored controllerUrl %s", async (_case, controllerUrl) => {
+    ["uses a scheme the socket cannot connect to", "mailto:a@b.c"],
+  ])("fails to start when the stored controllerUrl %s", async (_case, controllerUrl) => {
     const home = createEnrolledHome(controllerUrl);
 
     const outcome = await Effect.runPromise(Effect.result(runDaemon(home)));
@@ -73,7 +77,7 @@ describe("the runner daemon", () => {
     expect(message).toContain("hercule runner set-controller");
   });
 
-  it("dials the controller its runner.json names, with the credential it holds", async () => {
+  it("connects to the controller in runner.json, with the stored credential", async () => {
     const seen: Array<{ path: string; authorization: string | null }> = [];
     const server = Bun.serve({
       hostname: "127.0.0.1",
@@ -89,8 +93,8 @@ describe("the runner daemon", () => {
 
     try {
       const home = createEnrolledHome(`http://127.0.0.1:${String(server.port)}`);
-      // The loop retries for ever, so it runs only for as long as it takes the
-      // first attempt to reach the listener.
+      // The loop retries for ever, so the race stops it as soon as the first
+      // attempt reaches the listener.
       await Effect.runPromise(
         Effect.raceFirst(
           Effect.ignore(runDaemon(home)),
@@ -104,9 +108,9 @@ describe("the runner daemon", () => {
 
       expect(seen[0]?.path).toBe("/api/v1/runners/socket");
       expect(seen[0]?.authorization).toBe("Bearer the-credential-the-join-handed-back");
-      // Put there on the way up, before any session could be placed here: a
-      // session whose `PATH` names this directory and finds nothing in it has
-      // no way to call Hercule at all (spec 15 section 2).
+      // Installed at startup, before any session can be placed here. A session
+      // whose `PATH` holds this directory but finds nothing in it cannot call
+      // Hercule at all (spec 15 section 2).
       const link = join(locateRunnerDir(home), "bin", "hercule");
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
       expect(readlinkSync(link)).toBe(process.execPath);
@@ -115,10 +119,10 @@ describe("the runner daemon", () => {
     }
   });
 
-  it("answers who it is on the port its hello reports", async () => {
-    // The hello is the only place the runner says where to find it, so a
-    // listener that never started, or one on a port the facts do not name,
-    // reads here as a machine a browser cannot recognise.
+  it("serves its identity on the port its hello reports", async () => {
+    // The hello is the only place the runner reports where to find it. If the
+    // listener never started, or runs on a different port than the facts
+    // report, a browser cannot recognise the machine.
     let greeted: ((hello: unknown) => void) | undefined;
     const hello = new Promise<{ facts: { identityPort: number } }>((resolve) => {
       greeted = resolve as (hello: unknown) => void;
@@ -137,8 +141,8 @@ describe("the runner daemon", () => {
 
     try {
       const home = createEnrolledHome(`http://127.0.0.1:${String(server.port)}`);
-      // The listener lives as long as the daemon does, so it is asked from
-      // inside the race rather than after it.
+      // The listener lives only as long as the daemon, so the request is made
+      // inside the race, not after it.
       const answered = await Effect.runPromise(
         Effect.raceFirst(
           Effect.as(Effect.ignore(runDaemon(home)), undefined as unknown),

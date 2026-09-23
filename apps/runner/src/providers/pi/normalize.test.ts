@@ -1,20 +1,17 @@
 /**
- * The pi normalizer: one line off pi's stdout plus a per-session running state
- * in, normalized events out. Nothing here starts a process.
+ * Tests the pi normalizer, which turns one line of pi's stdout plus a
+ * per-session state into normalized events. Nothing here starts a process.
  *
- * The lines are pi 0.85.1's own RPC event shapes, from `docs/rpc.md` and the
- * types behind it - `AgentEvent` in `@earendil-works/pi-agent-core`,
- * `AgentSessionEvent` in `dist/core/agent-session.d.ts` and the stdout
- * projection in `dist/modes/json-event.d.ts`, which is what strips the
- * cumulative `partial` snapshot off every `assistantMessageEvent` and puts the
- * call id and the tool name on `toolcall_start`.
+ * The lines use pi 0.85.1's RPC event shapes, from `docs/rpc.md` and the
+ * types behind it: `AgentEvent` in `@earendil-works/pi-agent-core`,
+ * `AgentSessionEvent` in `dist/core/agent-session.d.ts`, and the stdout
+ * format in `dist/modes/json-event.d.ts`. That format removes the cumulative
+ * `partial` snapshot from every `assistantMessageEvent`, and adds the call id
+ * and tool name to `toolcall_start`.
  *
- * Assumed surface, because the module is the implementer's to name: the two
- * exports mirror `codex/normalize.ts`, `buildNormalizingState(sessionId, nativeSessionId)`
- * builds the running state and `normalize(state, line)` takes one raw line off
- * stdout - raw, not decoded, because a line that is not JSON is one of the
- * cases below. Event ids and the `at` instant are the module's own business and
- * nothing here reads them. Rename either export and these tests follow.
+ * `buildNormalizingState` builds the state and `normalize(state, line)` takes
+ * one raw line, not a parsed one, because a line that is not JSON is one of
+ * the cases below. The tests do not check event ids or `at` timestamps.
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderEvent } from "@hercule/protocol";
@@ -68,7 +65,7 @@ const normalizeEvents = (
   events: ReadonlyArray<Record<string, unknown>>,
 ): ReadonlyArray<ProviderEvent> => events.flatMap((event) => normalize(running, buildLine(event)));
 
-/** A whole sequence against a state of its own, which is the common case. */
+/** Normalizes a whole sequence of events against a fresh state, the common case. */
 const normalizeFromStart = (
   events: ReadonlyArray<Record<string, unknown>>,
 ): ReadonlyArray<ProviderEvent> => normalizeEvents(buildTestState(), events);
@@ -130,7 +127,7 @@ const buildToolEnd = (isError: boolean) => ({
   isError,
 });
 
-describe("what a whole pi turn normalizes to", () => {
+describe("normalizing a whole pi turn", () => {
   it("reports the turn, the assistant's item, its deltas, and both completions", () => {
     const events = normalizeFromStart(ANSWERING);
 
@@ -149,7 +146,7 @@ describe("what a whole pi turn normalizes to", () => {
     expect(filterByTag(events, "item.completed")[0]?.status).toBe("completed");
   });
 
-  it("files everything in the turn it opened, so a consumer can bracket it", () => {
+  it("puts every event under the id of the turn it opened", () => {
     const events = normalizeFromStart(ANSWERING);
 
     const turnId = filterByTag(events, "turn.started")[0]?.turnId;
@@ -183,8 +180,8 @@ describe("what a whole pi turn normalizes to", () => {
       (event) => event.streamKind === "reasoning_text",
     );
     expect(reasoning.map((event) => event.delta)).toEqual(["The user said hi."]);
-    // The two blocks are two items: a surface that folded them into one would
-    // show the model's thinking as its answer.
+    // The two blocks are two items. Merged into one, the model's thinking
+    // would show as part of its answer.
     expect(new Set(filterByTag(events, "item.started").map((event) => event.itemId)).size).toBe(2);
   });
 
@@ -216,7 +213,7 @@ describe("what a whole pi turn normalizes to", () => {
   });
 });
 
-describe("what a tool call on a pi turn normalizes to", () => {
+describe("normalizing a tool call on a pi turn", () => {
   it("reports a shell command as a command execution, streaming only what is new", () => {
     const events = normalizeFromStart([
       { type: "agent_start" },
@@ -234,8 +231,8 @@ describe("what a tool call on a pi turn normalizes to", () => {
       "item.completed",
     ]);
     expect(filterByTag(events, "item.started")[0]?.kind).toBe("command_execution");
-    // pi's `partialResult` is the whole output so far, so the delta is the
-    // suffix: appending the cumulative text would print the output twice.
+    // pi's `partialResult` is the whole output so far, so the delta is only
+    // the new part at the end. Sending the whole text would repeat output.
     expect(filterByTag(events, "content.delta").map((event) => event.delta)).toEqual([
       "hel",
       "lo\n",
@@ -277,7 +274,7 @@ describe("what a tool call on a pi turn normalizes to", () => {
   });
 });
 
-describe("how a turn that did not simply finish ends", () => {
+describe("how a turn ends when it does not simply finish", () => {
   const buildStoppedEvents = (stopReason: string, extra: Record<string, unknown> = {}) => [
     { type: "agent_start" },
     { type: "turn_end", message: { ...buildMessage(TEXT), stopReason, ...extra }, toolResults: [] },
@@ -295,7 +292,7 @@ describe("how a turn that did not simply finish ends", () => {
     expect(filterByTag(events, "turn.completed")[0]?.state).toBe("interrupted");
   });
 
-  it("reports a turn that errored as failed, in the words pi used", () => {
+  it("reports a turn that ended on an error as failed, with pi's error message", () => {
     const events = normalizeFromStart(
       buildStoppedEvents("error", { errorMessage: "1210 thinking is not supported" }),
     );
@@ -303,12 +300,12 @@ describe("how a turn that did not simply finish ends", () => {
     const completed = filterByTag(events, "turn.completed")[0];
     expect(completed?.state).toBe("failed");
     expect(completed?.error).toContain("1210");
-    // The failure is reported as it happens too: a turn state alone is a row
-    // that says something went wrong without saying what.
+    // The error is also reported when it happens: the turn state alone would
+    // say that something went wrong, but not what.
     expect(filterByTag(events, "runtime.error")[0]?.class).toBe("agent_error");
   });
 
-  it("carries one turn across pi's own retry, and prices both attempts", () => {
+  it("keeps one turn across pi's own retry, and counts the cost of both attempts", () => {
     const events = normalizeFromStart([
       { type: "agent_start" },
       { type: "turn_end", message: buildMessage(TEXT), toolResults: [] },
@@ -319,14 +316,14 @@ describe("how a turn that did not simply finish ends", () => {
       { type: "agent_settled" },
     ]);
 
-    // One episode: the attempt after a retry is the same turn carrying on.
+    // One turn: the attempt after a retry continues the same turn.
     expect(filterByTag(events, "turn.started")).toHaveLength(1);
     expect(filterByTag(events, "turn.completed")).toHaveLength(1);
-    // What the failed attempt cost is still spent.
+    // The failed attempt's cost was still spent.
     expect(filterByTag(events, "turn.completed")[0]?.costUsd).toBeCloseTo(usage.cost.total * 2, 12);
   });
 
-  it("carries one turn across a compaction and a queued message alike", () => {
+  it("keeps one turn across a compaction and across a queued message", () => {
     const answered = [
       { type: "turn_end", message: buildMessage(TEXT), toolResults: [] },
       { type: "agent_end", messages: [buildMessage(TEXT)], willRetry: false },
@@ -360,7 +357,7 @@ describe("how a turn that did not simply finish ends", () => {
     }
   });
 
-  it("reports a failure pi retried and gave up on once, not twice", () => {
+  it("reports an error pi retried and gave up on once, not twice", () => {
     const events = normalizeFromStart([
       { type: "agent_start" },
       {
@@ -368,7 +365,7 @@ describe("how a turn that did not simply finish ends", () => {
         messages: [{ ...buildMessage(TEXT), stopReason: "error", errorMessage: "529 overloaded" }],
         willRetry: false,
       },
-      // pi says the attempts are over after the run that ended them.
+      // pi reports the end of its retries after the `agent_end` of the last run.
       { type: "auto_retry_end", success: false, attempt: 3, finalError: "529 overloaded" },
     ]);
 
@@ -376,7 +373,7 @@ describe("how a turn that did not simply finish ends", () => {
     expect(filterByTag(events, "runtime.error")[0]?.class).toBe("agent_error");
   });
 
-  it("says an answer was cut at the output limit, and still ends the turn normally", () => {
+  it("warns that an answer was cut off at the output limit, and still completes the turn", () => {
     const events = normalizeFromStart([
       { type: "agent_start" },
       {
@@ -391,7 +388,7 @@ describe("how a turn that did not simply finish ends", () => {
     expect(filterByTag(events, "turn.completed")[0]?.state).toBe("completed");
   });
 
-  it("closes the items still running when the turn ends", () => {
+  it("completes the items still running when the turn ends, as failed", () => {
     const events = normalizeFromStart([
       { type: "agent_start" },
       { type: "message_start", message: buildMessage([], ZERO) },
@@ -400,8 +397,8 @@ describe("how a turn that did not simply finish ends", () => {
       { type: "agent_settled" },
     ]);
 
-    // A tool whose result never came and a block pi stopped mid-stream: a row
-    // nobody closes spins for the rest of the session.
+    // A tool whose result never came and a block pi stopped mid-stream. An
+    // item nobody completes would show a spinner for the rest of the session.
     expect(filterByTag(events, "item.completed").map((event) => event.status)).toEqual([
       "failed",
       "failed",
@@ -411,7 +408,7 @@ describe("how a turn that did not simply finish ends", () => {
     );
   });
 
-  it("reports what failed around the turn without ending it", () => {
+  it("reports extension and retry errors without ending the turn", () => {
     const extension = normalizeFromStart([
       { type: "agent_start" },
       {
@@ -432,14 +429,14 @@ describe("how a turn that did not simply finish ends", () => {
     );
     expect(filterByTag(retries, "runtime.error")[0]?.class).toBe("auto_retry_failed");
     expect(filterByTag(retries, "runtime.error")[0]?.message).toContain("529");
-    // Neither is the end of the turn: the settle that follows is.
+    // Neither ends the turn; the settle that follows does.
     expect(filterByTag(extension, "turn.completed")).toEqual([]);
     expect(filterByTag(retries, "turn.completed")).toEqual([]);
   });
 });
 
-describe("a line pi wrote that is not an event", () => {
-  it("warns about it and carries on with the next one", () => {
+describe("a line from pi that is not a valid event", () => {
+  it("warns about it and goes on with the next line", () => {
     const running = buildTestState();
 
     const stray = normalizeEvents(running, [{ type: "agent_start" }]).concat(
@@ -449,10 +446,11 @@ describe("a line pi wrote that is not an event", () => {
 
     expect(filterByTag(stray, "runtime.warning")).toHaveLength(1);
     expect(filterByTag(stray, "runtime.warning")[0]?.message ?? "").not.toBe("");
-    // Not the line itself: what pi could not frame is as likely to be a
-    // credential in a stack trace as a complaint.
+    // The warning does not include the line, because the line could just as
+    // well contain a credential in a stack trace.
     expect(filterByTag(stray, "runtime.warning")[0]?.message).not.toContain("something on stdout");
-    // Skipped, not decoded into something: the line said nothing about a turn.
+    // The line is skipped, not turned into some other event: it holds nothing
+    // about the turn.
     expect(listEventTags(stray)).toEqual(["turn.started", "runtime.warning"]);
     expect(listEventTags(after)).toContain("turn.completed");
   });

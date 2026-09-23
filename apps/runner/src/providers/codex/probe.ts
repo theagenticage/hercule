@@ -1,8 +1,8 @@
 /**
- * What the runner learns about a Codex installation without hosting anything on
- * it: the harness version, which account it is logged in as, and the models it
- * offers - plus the install that puts one there. A probe runs on an app-server
- * of its own and kills it, so nothing here touches a thread.
+ * Probes a Codex installation without running a session on it: the harness
+ * version, the account it is logged in as, and the models it offers. Also
+ * installs Codex. A probe starts its own app-server and kills it afterwards,
+ * so nothing here touches a thread.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -29,42 +29,53 @@ import type {
   ModelListResponse,
 } from "./types";
 
-/** What a probe needs of an app-server: what to ask it, what it said, and how to end it. */
+/** What a probe needs from an app-server: its connection, its output, and a way to kill it. */
 export interface AppServer {
   readonly rpc: Rpc;
   readonly kill: () => void;
-  /** What the child wrote that was not a frame, which is where a start failure is said. */
+  /**
+   * Returns the last lines the child wrote that were not frames. When the
+   * app-server fails to start, the reason is in these lines.
+   */
   readonly complaint: () => string;
 }
 
 /**
- * Attestation is declined here rather than left to a request nobody answers,
- * and the experimental surface is off because this build talks the methods the
- * pinned release declares.
+ * Attestation is turned off here, so Codex never sends an attestation request
+ * that nothing would reply to. The experimental API is off because this build
+ * uses only the methods the pinned release declares.
  */
 const INITIALIZE: InitializeParams = {
   clientInfo: { name: "hercule", title: "Hercule", version: VERSION },
   capabilities: { experimentalApi: false, requestAttestation: false },
 };
 
-/** Nothing else may be asked of an app-server until this has been answered. */
+/**
+ * Sends the `initialize` handshake and then the `initialized` notification.
+ * Returns the app-server's reply, or fails with its error. No other request
+ * may be sent to an app-server until this succeeds.
+ */
 export const initializeAppServer = (host: AppServer): Effect.Effect<InitializeResponse, RpcError> =>
   Effect.map(host.rpc.request("initialize", INITIALIZE), (answer) => {
     host.rpc.notify("initialized");
     return answer as InitializeResponse;
   });
 
-/** What the app-server said, in preference to what the codec made of it. */
+/**
+ * Returns a message for a failed request. The app-server's own recent output
+ * is preferred, because it usually explains the failure better than the
+ * codec's error message.
+ */
 export const describeRpcError = (host: AppServer, error: RpcError): string => {
   const said = host.complaint();
   return said === "" ? error.message : said;
 };
 
 /**
- * `initialize` carries no version field, so the version is the token after the
- * first `/` of the user agent, which reads `<client>/<version> (os; arch) ...`.
- * A user agent that does not read as one reports nothing rather than a guess,
- * which `computeVersionVerdict` already takes as "unknown".
+ * The `initialize` reply has no version field, so the version is parsed from
+ * the user agent, which has the form `<client>/<version> (os; arch) ...`. A
+ * user agent in any other form gives `null` rather than a guess, and
+ * `computeVersionVerdict` already treats `null` as "unknown".
  */
 const USER_AGENT = /^[^/\s]+\/(\S+)/;
 
@@ -96,17 +107,19 @@ const buildSelectOption = (
 });
 
 /**
- * Hercule's name for the tier Codex runs on when it is told none. Codex has no id
- * for it: `serviceTiers` lists only the tiers beyond the standard one, and a
- * `defaultServiceTier` of `null` means that one. Without a choice for it the
- * only selectable value would be a paid tier nobody asked for, so it is offered
- * by name and the request omits `serviceTier` when it is the one selected.
+ * Hercule's name for the tier Codex uses when no tier is given. Codex has no
+ * id for it: `serviceTiers` lists only the extra tiers, and a
+ * `defaultServiceTier` of `null` means the standard one. Without this choice
+ * the only selectable values would be paid tiers nobody asked for. So the
+ * standard tier is offered under this name, and a request with it selected
+ * sends no `serviceTier`.
  */
 export const STANDARD_TIER = "standard";
 
 /**
- * Only what the model itself lists: an empty select is a control the composer
- * shows and nothing can be chosen in.
+ * Builds the options a model supports. An option is added only when the model
+ * lists values for it, because an empty select would show in the composer with
+ * nothing to choose.
  */
 const buildModelOptions = (model: Model): ReadonlyArray<ModelOption> => {
   const options: Array<ModelOption> = [];
@@ -114,8 +127,8 @@ const buildModelOptions = (model: Model): ReadonlyArray<ModelOption> => {
   if (efforts.length > 0) {
     options.push(
       buildSelectOption(
-        // The well-known option id (spec 06 section 3.3): the composer labels and
-        // recognises reasoning effort under `effort`, whatever the harness calls it.
+        // The standard option id (spec 06 section 3.3): the composer recognises
+        // reasoning effort by the id `effort`, whatever the harness calls it.
         "effort",
         "Effort",
         efforts.map(({ reasoningEffort }) => ({
@@ -136,8 +149,8 @@ const buildModelOptions = (model: Model): ReadonlyArray<ModelOption> => {
         "Service tier",
         [
           { value: STANDARD_TIER, label: "Standard" },
-          // An unnamed tier is still a tier, and the protocol will not carry an
-          // empty label.
+          // A tier with no name is still offered, labelled with its id, because
+          // the protocol does not allow an empty label.
           ...tiers.map((tier) => ({
             value: truncateFact(tier.id),
             label: truncateFact(tier.name === "" || tier.name === undefined ? tier.id : tier.name),
@@ -152,7 +165,7 @@ const buildModelOptions = (model: Model): ReadonlyArray<ModelOption> => {
 
 const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor> =>
   models
-    // The protocol will not carry an empty slug or name.
+    // The protocol does not allow an empty slug or name.
     .filter((model) => model.id !== "" && model.displayName !== "")
     .slice(0, MAX_FACT_ITEMS)
     .map((model) => ({
@@ -163,17 +176,17 @@ const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescript
     }));
 
 /**
- * The probe, over the adapter's own way of opening an app-server. It is passed
- * in rather than made here because opening one is what the adapter does for a
- * session too, and a probe that opened its own differently would report on a
- * connection no session will ever run on.
+ * Builds the probe function from the adapter's way of opening an app-server.
+ * The probe never fails: every error becomes a failed `ProbeResult`. `openHost`
+ * is passed in because sessions use the same function. A probe that opened
+ * its app-server differently would test a connection no session runs on.
  */
 export const makeProbe =
   (openHost: (ctx: ProviderRunnerContext, binary: string) => Effect.Effect<AppServer, string>) =>
   (ctx: ProviderRunnerContext, binary: string): Effect.Effect<ProbeResult> => {
-    // A probe runs on a process of its own and kills it: sharing the connection
-    // a session runs on would keep an app-server alive for a Fleet page nobody
-    // is looking at any more.
+    // A probe starts its own process and kills it when done. Sharing a
+    // session's connection would keep an app-server alive for a Fleet page
+    // nobody is looking at any more.
     const gather = Effect.acquireUseRelease(
       openHost(ctx, binary),
       (host) =>
@@ -207,13 +220,16 @@ export const makeProbe =
       Option.getOrElse(() =>
         buildFailedProbe(
           null,
-          `the app-server did not answer within ${Duration.format(PROBE_DEADLINE)}`,
+          `the app-server did not reply within ${Duration.format(PROBE_DEADLINE)}`,
         ),
       ),
     );
   };
 
-/** The script URL is pinned to the tag, so it and the release it fetches move together. */
+/**
+ * Builds the Codex installer. The script URL is pinned to the release tag, so
+ * the script and the release it installs always match.
+ */
 export const makeCodexInstall = (
   run: Run,
 ): ((env: Readonly<Record<string, string | undefined>>) => Effect.Effect<InstallOutcome>) =>

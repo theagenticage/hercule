@@ -1,12 +1,12 @@
 /**
- * `workspaces.json`: where this machine's workspaces are on its disk.
+ * `workspaces.json`: the record of where this runner's workspaces are on disk.
  *
- * The controller stores no path, so this file is the only record of where a
- * workspace lives; a daemon that lost it would strand the user's work. It is
- * read afresh on every use rather than cached, so a restart needs no warm-up
- * and two readers never disagree, and it is decoded rather than cast: an entry
- * a hand-edit or an older build made unreadable is dropped, and the rest of the
- * machine's workspaces still stand.
+ * The controller stores no paths, so this file is the only record of where a
+ * workspace lives. A runner that lost it would strand the user's work. The
+ * file is read again on every use instead of being cached, so a restart needs
+ * no warm-up and two readers never disagree. Each entry is decoded with a
+ * schema, not cast: an entry that a hand edit or an older build made
+ * unreadable is dropped, and the runner's other workspaces are kept.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -22,13 +22,13 @@ const RegisteredCheckout = Schema.Struct({
   path: Schema.String,
 });
 
-/** One working copy, as the machine holds it. */
+/** One checkout, as the registry records it. */
 export type RegisteredCheckout = Schema.Schema.Type<typeof RegisteredCheckout>;
 
 const RegisteredWorkspace = Schema.Struct({
   workspaceId: StorageId,
   kind: WorkspaceKind,
-  /** The directory the workspace is; a primary's is the checkout's own folder. */
+  /** The workspace's directory. For a primary this is the checkout's own directory. */
   root: Schema.String,
   checkouts: Schema.Array(RegisteredCheckout),
 });
@@ -38,10 +38,10 @@ export type RegisteredWorkspace = Schema.Schema.Type<typeof RegisteredWorkspace>
 const decodeEntry = Schema.decodeUnknownResult(RegisteredWorkspace);
 
 /**
- * Whether the directories this entry names are still there. A workspace
- * somebody removed underneath the machine is one no session can be placed in
- * and one nothing can be re-reported about, so both readers ask it here rather
- * than each keeping its own idea of what standing means.
+ * Checks that the workspace root and every checkout directory in the entry
+ * still exist. A workspace whose directory was removed cannot have a session
+ * placed in it, and cannot be reported as ready. Every caller uses this one
+ * check, so they all agree on what counts as still there.
  */
 export const isStillOnDisk = (entry: RegisteredWorkspace): boolean =>
   existsSync(entry.root) && entry.checkouts.every((one) => existsSync(one.path));
@@ -49,9 +49,10 @@ export const isStillOnDisk = (entry: RegisteredWorkspace): boolean =>
 const buildRegistryPath = (storageDir: string): string => joinPath(storageDir, "workspaces.json");
 
 /**
- * A file that is not there yet, or that something outside Hercule has made
- * unreadable, is read as an empty registry: a machine that holds nothing is
- * exactly what the controller then re-provisions against.
+ * Reads the registry and returns its valid entries. A missing file, or one that
+ * something outside Hercule made unreadable, reads as an empty registry. A
+ * runner with no workspaces is a state the controller already handles: it
+ * provisions the workspaces again.
  */
 const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> => {
   let parsed: unknown;
@@ -68,8 +69,9 @@ const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> =>
 };
 
 /**
- * Written to a fresh file and renamed over the target, the way `runner.json` is:
- * a half-written registry would lose every workspace on the machine at once.
+ * Writes the registry to a new temporary file and renames it over the old one,
+ * the same way `runner.json` is written. A half-written registry would lose
+ * every workspace on the runner at once.
  */
 const writeRegistry = (storageDir: string, entries: ReadonlyArray<RegisteredWorkspace>): void => {
   const path = buildRegistryPath(storageDir);
@@ -87,7 +89,10 @@ const writeRegistry = (storageDir: string, entries: ReadonlyArray<RegisteredWork
 export interface Registry {
   readonly all: () => ReadonlyArray<RegisteredWorkspace>;
   readonly held: (workspaceId: string) => RegisteredWorkspace | undefined;
-  /** The primary of a resource this machine holds, which `.workspaceinclude` is read from. */
+  /**
+   * Returns this runner's primary for a resource, or undefined if it has none.
+   * `.workspaceinclude` and the files it lists are read from the primary.
+   */
   readonly primaryOf: (resourceId: string) => RegisteredWorkspace | undefined;
   readonly update: (
     change: (entries: ReadonlyArray<RegisteredWorkspace>) => ReadonlyArray<RegisteredWorkspace>,
@@ -96,8 +101,9 @@ export interface Registry {
 
 export const makeRegistry = (storageDir: string): Registry => {
   /**
-   * Read, change, write, one caller at a time: two workspaces being provisioned
-   * at once would otherwise each write the registry they read before the other.
+   * Runs updates one at a time, so each read, change and write finishes before
+   * the next starts. Otherwise two workspaces provisioned at once could each
+   * write back the registry they had read, and one change would be lost.
    */
   let pending: Promise<void> = Promise.resolve();
   return {

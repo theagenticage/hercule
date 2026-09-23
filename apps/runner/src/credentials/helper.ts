@@ -1,12 +1,12 @@
 /**
- * `hercule git-credential <action>`: the helper git runs, once per request it
- * needs a credential for.
+ * `hercule git-credential <action>`: the credential helper git runs each time
+ * it needs a credential.
  *
- * It knows nothing and stores nothing. It asks the daemon on this machine's
- * socket, proving who it is with what its environment carries - a session's own
- * token, or the workspace the runner is provisioning - and prints what comes
- * back. Anything else prints nothing, which is how git falls through to the
- * machine's own helpers instead of failing.
+ * The helper stores nothing. It asks the runner daemon over this machine's
+ * socket and prints the credential it gets back. To identify itself it sends
+ * what its environment holds: the session's own token, or the id of the
+ * workspace the runner is provisioning. In every other case it prints nothing,
+ * so git moves on to the machine's own helpers instead of failing.
  */
 import { createConnection } from "node:net";
 import { CREDENTIAL_DEADLINE_MS, isSpeakable } from "./socket";
@@ -14,12 +14,15 @@ import { CREDENTIAL_DEADLINE_MS, isSpeakable } from "./socket";
 /** The session's own token, injected by the runner into the session's environment. */
 const TOKEN = "HERCULE_TOKEN";
 
-/** The workspace the runner is making, for the runner's own git while it makes it. */
+/**
+ * The workspace the runner is provisioning, set for the runner's own git commands during
+ * provisioning.
+ */
 const PROVISIONING = "HERCULE_WORKSPACE_PROVISIONING";
 
 const SOCKET = "HERCULE_RUNNER_SOCKET";
 
-/** git writes `key=value` lines and ends with a blank one. */
+/** Parses git's credential request, which is `key=value` lines ending with a blank line. */
 const parseHelperQuestion = (input: string): Record<string, string> => {
   const fields: Record<string, string> = {};
   for (const line of input.split("\n")) {
@@ -45,7 +48,7 @@ const askDaemon = (path: string, question: unknown): Promise<string> =>
       if (received.includes("\n")) finishWithAnswer(received);
     });
     socket.on("end", () => finishWithAnswer(received));
-    // No daemon, no socket, no permission: all of them are "no credential".
+    // A missing daemon, a missing socket or a permission error all mean "no credential".
     socket.on("error", () => finishWithAnswer(""));
   });
 
@@ -63,8 +66,8 @@ export const answerCredentialQuestion = async (
       : provisioning !== undefined && provisioning.length > 0
         ? { workspaceId: provisioning }
         : undefined;
-  // Nothing to prove is nothing to ask: the daemon would refuse it anyway, and
-  // git is waiting on this.
+  // Without a token or a workspace id the daemon would reject the request
+  // anyway, so skip the round trip while git waits.
   if (claim === undefined) return "";
   const question = parseHelperQuestion(input);
   const answer = await askDaemon(path, {
@@ -79,8 +82,8 @@ export const answerCredentialQuestion = async (
       password?: string;
     };
     if (username === undefined || password === undefined) return "";
-    // A value with a line break in it would be two answers to git, the second
-    // one nobody checked.
+    // git would read a value with a line break in it as two lines, and the
+    // second line would be unchecked input.
     if (!isSpeakable(username) || !isSpeakable(password)) return "";
     return `username=${username}\npassword=${password}\n`;
   } catch {
@@ -89,11 +92,12 @@ export const answerCredentialQuestion = async (
 };
 
 /**
- * What the runner role does with `hercule git-credential <action>`. git calls it
- * with the request on stdin and names an action; only `get` has an answer, and
- * `store` and `erase` are git reporting what it did with a credential this
- * helper keeps none of. Anything else is a word nobody meant: it says nothing
- * and succeeds, because a helper that fails is one git reports at the user.
+ * Runs `hercule git-credential <action>`. git passes the request on stdin.
+ *
+ * - `get` prints the credential, or nothing when there is none.
+ * - `store` and `erase` do nothing, because this helper stores no credentials.
+ * - Any other action also does nothing and succeeds, because git shows the
+ *   user an error for a helper that fails.
  */
 export const runCredentialAction = async (action: string | undefined): Promise<void> => {
   if (action !== "get") return;

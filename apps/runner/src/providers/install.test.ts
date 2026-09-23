@@ -1,6 +1,6 @@
 /**
- * Installing the Claude Code harness, over a stubbed process seam: nothing is
- * downloaded or run.
+ * Tests installing the Claude Code harness with a stubbed process seam:
+ * nothing is downloaded or run.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -14,7 +14,7 @@ const CONTEXT: ProviderRunnerContext = {
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
   secrets: {},
-  // Never read by a probe, an install or a login; the context type carries it
+  // Not read by a probe, an install or a login. The context type requires it
   // for the sessions this adapter also hosts.
   herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
 };
@@ -49,7 +49,7 @@ const install = (seam: ClaudeSeam) =>
   Effect.runPromise(makeClaudeCodeAdapter(seam).install!(CONTEXT.env));
 
 describe("installing the Claude Code harness", () => {
-  it("runs the vendor's install script pinned to the version this build talks to", async () => {
+  it("runs the vendor's install script, pinned to the version this build supports", async () => {
     const { seam, commands } = buildStubSeam({ code: 0, stdout: "Installed claude" });
 
     const outcome = await install(seam);
@@ -62,7 +62,7 @@ describe("installing the Claude Code harness", () => {
     expect(written).toContain(`bash -s ${CLAUDE_CODE_VERSION}`);
   });
 
-  it("says what the installer said when it failed, rather than that it failed", async () => {
+  it("reports the installer's own error output when it fails", async () => {
     const stderr = [
       "  % Total    % Received",
       "curl: (22) The requested URL returned error: 404",

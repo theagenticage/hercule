@@ -1,7 +1,7 @@
 /**
- * The one door into `generated/`. The tree is the vendor's whole protocol for
- * the pinned release, so what this adapter actually speaks is only legible if
- * it is named in one place.
+ * The only module that imports from `generated/`. That folder holds the whole
+ * Codex protocol for the pinned release, so listing the types this adapter
+ * actually uses in one place shows which part of the protocol it depends on.
  */
 export type { InitializeParams } from "./generated/InitializeParams";
 export type { InitializeResponse } from "./generated/InitializeResponse";

@@ -1,8 +1,8 @@
 /**
- * The Codex adapter. Everything it knows about the harness it learns over one
- * app-server connection, and everything that connection touches lives under the
- * instance's own home: a runner that read the developer's own Codex directory
- * would mix Hercule's sessions with the user's login, skills and memory.
+ * The Codex adapter. It talks to Codex only through app-server connections,
+ * and every file an app-server uses lives under the instance's own home
+ * directory. Using the developer's own Codex directory would mix Hercule's
+ * sessions with the user's login, skills and memory.
  */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -75,7 +75,10 @@ export const CODEX = "codex";
 
 const CODEX_BINARY = "codex";
 
-/** What an app-server writes on its way out, kept for the report when it dies. */
+/**
+ * How many of the app-server's last non-frame lines are kept, so they can be
+ * reported if it fails.
+ */
 const MAX_COMPLAINT_LINES = 5;
 
 export interface CodexSeam {
@@ -83,17 +86,17 @@ export interface CodexSeam {
   readonly run: Run;
 }
 
-/** One app-server, what it said that was not a frame, and who is on it. */
+/** One running app-server and the session it serves. */
 interface Host extends AppServer {
-  /** The one session this host serves; a probe's own process serves none. */
+  /** The one session this host serves; a probe's own app-server serves none. */
   readonly sessionId: string | undefined;
 }
 
 /**
- * A request the session is parked on, as a surface reads it and as it is
- * answered. The frame id is Codex's own and is echoed back verbatim, because it
- * types one as a string or a number and an answer under a reshaped id answers
- * nothing.
+ * A request from Codex that the session is parked on: the request surfaces
+ * show, and what is needed to reply to it. `id` is Codex's own frame id and
+ * is sent back unchanged. Codex uses both string and number ids, and a reply
+ * under a converted id would not match the request.
  */
 interface Park {
   readonly id: string | number;
@@ -102,33 +105,34 @@ interface Park {
   readonly params: unknown;
 }
 
-/** One session this adapter hosts, and what it believes about its thread. */
+/** One session this adapter hosts, and what the adapter knows about its thread. */
 interface Held {
   readonly binding: SessionBinding;
   readonly host: Host;
   readonly state: Normalizing;
-  /** The turn believed to be running, which is what makes an input a steer. */
+  /** The turn the adapter believes is running. While it is set, an input steers that turn. */
   turnId: string | undefined;
   /**
-   * The request the session is parked on, and the ones that arrived while it
-   * was open. A session has exactly one open request, so a second announced
-   * before the first is answered would take its place and the first would
-   * disappear from every surface with nobody able to answer it. Codex waits for
-   * both, so the second waits here and is opened when the first is resolved.
+   * The request the session is parked on, and the requests that arrived while
+   * it was open. A session has at most one open request. If a second one were
+   * opened before the first was resolved, it would replace the first, and the
+   * first would vanish from every surface with no way to answer it. Codex
+   * waits for both, so the second waits here and is opened once the first is
+   * resolved.
    */
   open: Park | undefined;
   readonly waiting: Array<Park>;
   /**
-   * What each running file change item is about. A file change approval names
-   * no paths at this release, so the card reads them off the item instead.
+   * The paths of each running file change item, by item id. A file change
+   * request has no paths at this release, so the card takes them from the item.
    */
   readonly fileChanges: Map<string, ReadonlyArray<string>>;
 }
 
 /**
- * What each access mode is on a Codex thread (spec 06 section 8.1).
- * `accessMode` always names a mode Codex supports natively, so there is no
- * fallback here and nothing to substitute silently.
+ * The Codex thread settings for each access mode (spec 06 section 8.1). Codex
+ * supports every access mode natively, so there is no fallback here and
+ * nothing is silently substituted.
  */
 const ACCESS_MODES: Readonly<
   Record<
@@ -163,27 +167,30 @@ const ACCESS_MODES: Readonly<
 };
 
 /**
- * How long a control request is given. It is a write to the app-server and a
- * wait for its answer, and the runner handles session frames in the order they
- * arrived rather than concurrently, so one app-server that stops answering
- * would otherwise hold up every session on the machine - pings included.
+ * How long a control request, such as an interrupt, may take. The runner handles
+ * session frames one at a time, in order, so without this timeout one
+ * app-server that stops replying would hold up every session on the machine,
+ * pings included.
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
 
-/** The code spec 06 section 10.2 names for a server too busy to take a turn. */
+/** The error code for a server too busy to start a turn (spec 06 section 10.2). */
 const OVERLOADED = -32001;
 
-/** JSON-RPC's own: this build has no answer for that method. */
+/** The standard JSON-RPC code for a method this build does not handle. */
 const METHOD_NOT_FOUND = -32601;
 
-/** JSON-RPC's own, and the code Codex itself refuses a request it cannot read with. */
+/**
+ * The standard JSON-RPC code for an invalid request. Codex also uses it for
+ * requests it cannot parse.
+ */
 const INVALID_REQUEST = -32600;
 
 const RETRIES = 3;
 
 const BACKOFF: Duration.Duration = Duration.millis(500);
 
-/** Enough that an instance's sessions do not all come back in the same millisecond. */
+/** The maximum random delay added to each retry, so sessions do not all retry at once. */
 const JITTER_MS = 250;
 
 const backoff = Schedule.exponential(BACKOFF).pipe(
@@ -195,9 +202,10 @@ const backoff = Schedule.exponential(BACKOFF).pipe(
 );
 
 /**
- * 500, 1000 and 2000 ms, jittered. Only an overload is retried: a request the
- * server refused on its merits would be refused three more times, four seconds
- * later.
+ * Retries a request while the server reports it is overloaded, up to three
+ * times, after 500, 1000 and 2000 ms plus jitter. Other errors are not
+ * retried: a request the server rejected for its content would just be
+ * rejected three more times.
  */
 const retryWhileOverloaded = <A>(request: Effect.Effect<A, RpcError>): Effect.Effect<A, RpcError> =>
   Effect.retry(request, {
@@ -206,26 +214,25 @@ const retryWhileOverloaded = <A>(request: Effect.Effect<A, RpcError>): Effect.Ef
     while: (error: RpcError) => error.code === OVERLOADED,
   });
 
-/** Which thread a frame is about, where it names one at all. */
+/** Returns the `threadId` in a frame's params, or `undefined` if there is none. */
 const readThreadId = (params: unknown): string | undefined => {
   const threadId = (params as { readonly threadId?: unknown } | null | undefined)?.threadId;
   return typeof threadId === "string" ? threadId : undefined;
 };
 
 /**
- * Builds the developer instructions for one thread. A Codex thread takes
- * instructions on one channel only, so the session's own prompt and the skill
- * share it: the prompt first, the skill below it, one blank line between them.
- * If one of the two is absent, the other is the whole text, because an absent
- * prompt must not leave the skill below a blank line the model must read past.
+ * Builds the developer instructions for one thread. A Codex thread accepts only
+ * one set of instructions, so the session's system prompt and the skill are
+ * joined: the prompt first, then a blank line, then the skill. If either is
+ * missing, the other is used alone, so the text never starts with a blank line.
  */
 const buildDeveloperInstructions = (systemPrompt: string | undefined, skill: string): string =>
   [systemPrompt, skill].filter((part) => part !== undefined && part !== "").join("\n\n");
 
-/** Turn input is text only: attachments are the open item in spec 16 section B. */
+/** Builds a text-only turn input. Attachments are still an open item (spec 16 section B). */
 const buildTextInput = (text: string): UserInput => ({ type: "text", text, text_elements: [] });
 
-/** What the device login prints for the user to type: four characters, a dash, five. */
+/** Matches the code the device login prints for the user to type: four characters, a dash, five. */
 const USER_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/;
 
 export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
@@ -235,13 +242,13 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
   const sessions = new Map<string, Held>();
   /**
-   * One app-server per session, not per instance: the session's own token is in
-   * the environment its process was spawned with, and every shell command that
-   * process runs inherits it. A host shared with a second session would run that
-   * session's work under the first session's credential, grants and stamp, and
-   * would go dead for everyone the moment the first session's token was revoked
-   * (spec 06 section 9.3). The auth refresh and the model catalog are per
-   * process as a result.
+   * One app-server per session, not per instance. The session's own token is
+   * in the environment its process was started with, and every shell command
+   * that process runs inherits it. If a second session shared the host, its
+   * work would run under the first session's credential, grants and actor
+   * stamp, and the host would stop working for both as soon as the first
+   * session's token was revoked (spec 06 section 9.3). As a result, the auth
+   * refresh and the model catalog are per process too.
    */
   const hosts = new Map<string, Host>();
 
@@ -249,22 +256,27 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     PubSub.publishUnsafe(published, event);
   };
 
-  /** The session this host serves, once it has a thread open. */
+  /** Returns the session this host serves, or `undefined` until its thread is open. */
   const findHostSession = (host: Host): Held | undefined =>
     host.sessionId === undefined ? undefined : sessions.get(host.sessionId);
 
-  /** A thread belongs to one app-server, so only that host's session is asked. */
+  /**
+   * Returns the session on this host whose thread is `threadId`, or
+   * `undefined`. A thread belongs to one app-server, so only this host's
+   * session is checked.
+   */
   const findThreadSession = (host: Host, threadId: string): Held | undefined => {
     const held = findHostSession(host);
     return held?.binding.nativeSessionId === threadId ? held : undefined;
   };
 
   /**
-   * A complaint about the connection belongs to no one thread, so the session
-   * on that app-server hears it: the alternative is a session going quiet with
-   * the reason kept in a log nobody is reading. A probe's own host has no
-   * session to tell, and a session whose thread is still opening has not been
-   * reported as started - a warning naming it would arrive before it does.
+   * Emits a warning about the connection to the session on this host. A
+   * connection problem belongs to no thread, but reporting it to the session
+   * is better than the session going quiet with the reason only in a log.
+   * Nothing is emitted when the host has no session: a probe's own host has
+   * none, and a session whose thread is still opening has not been reported
+   * as started yet, so a warning for it would arrive before its start.
    */
   const warn = (host: Host, message: string): void => {
     const held = findHostSession(host);
@@ -279,8 +291,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /**
-   * Ends the app-server a session was given: the host is that session's alone,
-   * so nothing is left running with its token in it.
+   * Kills a session's app-server and forgets it. The host belongs to that
+   * session alone, so killing it leaves no process running with the
+   * session's token.
    */
   const releaseHost = (host: Host): void => {
     if (host.sessionId !== undefined && hosts.get(host.sessionId) === host) {
@@ -290,9 +303,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   const exitSession = (held: Held, reason: ExitReason): void => {
-    // By identity: a stop waits on the harness, and a thread the server closed
-    // or an app-server that died in that window has already ended this session.
-    // A second exit would be a second row for one end.
+    // Compared by identity: a stop waits on the harness, and in that time the
+    // server may close the thread or the app-server may die, which already
+    // ended this session. A second exit would record the same end twice.
     if (sessions.get(held.binding.sessionId) !== held) return;
     sessions.delete(held.binding.sessionId);
     emit({
@@ -305,18 +318,19 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     releaseHost(held.host);
   };
 
-  /** An app-server that stopped on its own takes the session it held with it. */
+  /** Ends the host's session when its app-server exits on its own. */
   const onHostGone = (host: Host): void => {
     const held = findHostSession(host);
     if (held !== undefined) exitSession(held, "process_exit");
   };
 
   /**
-   * `CODEX_HOME` alone does not isolate a session: Codex reads skills out of
-   * the user's `~/.agents/skills`, so `HOME` is relocated to an empty directory
-   * of the instance's own. Doing it here rather than in the session context is
-   * what keeps Claude's Keychain lookup working, which a relocated `HOME`
-   * breaks.
+   * Builds the environment for a Codex process, creating the instance's
+   * `codex` and `home` directories if needed. `CODEX_HOME` alone does not
+   * isolate a session: Codex also reads skills from the user's
+   * `~/.agents/skills`, so `HOME` is moved to an empty directory of the
+   * instance's own. This is done here, not in the shared session context,
+   * because a moved `HOME` breaks Claude's Keychain lookup.
    */
   const prepareEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined> => {
     const codexHome = join(ctx.home, "codex");
@@ -334,9 +348,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   ): Host => {
     const complaints: Array<string> = [];
     const child = seam.appServer(
-      // `--strict-config` turns a knob renamed in an upgrade from silent drift
-      // into a start failure, and the updater is off because a harness that
-      // updated itself would run a version nobody chose.
+      // `--strict-config` makes a setting renamed in an upgrade fail the start
+      // instead of being silently ignored. The updater is off because a
+      // harness that updated itself would run a version nobody chose.
       [binary, "app-server", "--strict-config", "-c", "check_for_update_on_startup=false"],
       prepareEnv(ctx),
     );
@@ -348,33 +362,33 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       try {
         for await (const line of child.stderr) if (line.trim() !== "") rememberComplaint(line);
       } catch {
-        // A child killed mid-read has nothing more to complain about, and what
-        // it already said is still worth reporting.
+        // A child killed while stderr is being read writes nothing more, and
+        // the lines already kept are still worth reporting.
       }
     })();
     const host: Host = {
       rpc: makeRpc(child, {
-        // Nothing a vendor writes may take the reader down, and a request that
-        // threw on its way through is still a request that must be answered:
-        // dropping it would hang the turn and the connection both.
+        // Nothing Codex sends may crash the reader. A request whose handling
+        // threw still needs a reply: without one, the turn and the connection
+        // would both hang.
         onServerRequest: (frame) => {
           try {
             onServerRequest(host, frame);
           } catch {
             refuseRequest(host, frame, {
               code: INVALID_REQUEST,
-              message: `Hercule could not read the ${frame.method} it was asked`,
+              message: `Hercule could not read this ${frame.method} request`,
             });
-            warn(host, `the app-server sent a ${frame.method} this build could not read`);
+            warn(host, `the app-server sent a ${frame.method} that this build could not read`);
           }
         },
-        // Nothing a vendor writes may take the reader down: a throw here would
-        // abandon every request in flight on this connection.
+        // Nothing Codex sends may crash the reader: a throw here would fail
+        // every request in flight on this connection.
         onNotification: (frame) => {
           try {
             onNotification(host, frame);
           } catch {
-            warn(host, `the app-server sent a ${frame.method} this build could not read`);
+            warn(host, `the app-server sent a ${frame.method} that this build could not read`);
           }
         },
         onWarning: (message) => {
@@ -394,7 +408,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     return host;
   };
 
-  /** A home this runner may not write is an ordinary state, not a defect. */
+  /**
+   * Starts an app-server, failing with the error message if it cannot be
+   * started. A home directory the runner cannot write to is an expected
+   * failure, not a defect.
+   */
   const openHost = (
     ctx: ProviderRunnerContext,
     binary: string,
@@ -413,9 +431,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     binary: string,
   ): Effect.Effect<Host, string> =>
     Effect.suspend(() => {
-      // A session resumed in place is started again under its own id, and an
-      // entry left here is the process of the run that ended - never one to
-      // talk to, and never one to leave running with a dead token in it.
+      // A session resumed in place starts again under the same id. An entry
+      // left here belongs to the run that ended: it must not be used, and must
+      // not keep running with a revoked token.
       const stale = hosts.get(sessionId);
       if (stale !== undefined) {
         hosts.delete(sessionId);
@@ -423,9 +441,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       }
       return Effect.flatMap(openHost(ctx, binary, sessionId), (host) =>
         Effect.matchEffect(initializeAppServer(host), {
-          // Registered only once it has answered: a host kept under a session
-          // id without a handshake is one nothing could talk to, and its child
-          // would outlive the runner.
+          // Registered only after the handshake succeeds. A host registered
+          // without one could never be used, and its child would outlive the
+          // runner.
           onFailure: (error) => {
             const said = describeRpcError(host, error);
             host.kill();
@@ -443,16 +461,16 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     const threadId = readThreadId(frame.params);
     const held = threadId === undefined ? undefined : findThreadSession(host, threadId);
     if (held === undefined) return;
-    // The thread is unloaded and its rollout is on disk, which is what makes
-    // this the one exit a later session can carry on from (spec 06 section 4.1).
+    // The thread is unloaded and its rollout is on disk, so this is the one
+    // exit a later session can continue from (spec 06 section 4.1).
     if (frame.method === "thread/closed") {
       exitSession(held, "idle_unload");
       return;
     }
     for (const event of normalize(held.state, frame)) emit(event);
-    // A file change approval names no paths at this release, so what a card
-    // shows are the item's own, held from the moment the patch is announced
-    // until it is applied: the window an approval for it arrives in.
+    // A file change request has no paths at this release, so the card shows
+    // the item's paths. They are kept from when the item starts until it
+    // completes, which is when a request for it can arrive.
     if (frame.method === "item/started" || frame.method === "item/completed") {
       const { item } = frame.params as ItemStartedNotification | ItemCompletedNotification;
       if (item.type !== "fileChange") return;
@@ -462,23 +480,24 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       }
       return;
     }
-    // What the adapter believes about the turn, which is what decides whether
-    // the next input steers. The turn a `turn/start` answered with is already
-    // held; this is the server's own account of the same thing.
+    // Track which turn is running, which decides whether the next input
+    // steers it.
     if (frame.method === "turn/started") {
-      // The turn a `turn/start` answered with is already held, and it is the
-      // one this session is steering; a turn opened elsewhere is not.
+      // The turn id from the `turn/start` reply is already set, and it is the
+      // turn this session steers. A turn started some other way does not
+      // replace it.
       held.turnId ??= (frame.params as TurnStartedNotification).turn.id;
     } else if (frame.method === "turn/completed") {
       const turn = (frame.params as TurnCompletedNotification).turn;
-      // Only the turn in flight ends the flight: a completion for another turn
-      // would otherwise make the next input open a turn beside a running one.
+      // Only the running turn's completion clears it. Otherwise a completion
+      // for another turn would make the next input start a second turn
+      // beside the running one.
       if (turn.status !== "inProgress" && turn.id === held.turnId) {
         held.turnId = undefined;
-        // The controller closed the open request when the turn ended, so no
-        // resolution is reported for it - but Codex is still waiting on every
-        // park it asked, and a request left unanswered is a connection nobody
-        // can reason about.
+        // The controller closes the open request when the turn ends, so no
+        // resolution is reported for it. But Codex is still waiting for a
+        // reply to every request it sent, and a request left without a reply
+        // leaves the connection in an unknown state.
         cancelWaiting(held);
         const open = held.open;
         held.open = undefined;
@@ -488,20 +507,20 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     }
   };
 
-  /** Tells Codex a park is over, in its own terms. Every request is answered. */
+  /** Replies to a request with a cancel, in the reply shape Codex expects for it. */
   const cancelPark = (held: Held, park: Park): void => {
     held.host.rpc.answer(park.id, park.asked.replies("cancel", park.params));
   };
 
   /**
-   * Ends every park nobody has been shown. No event: no surface was ever told
-   * these existed, so there is nothing to report over.
+   * Cancels every waiting request that was never shown to the user. No event
+   * is emitted, because no surface was ever told these requests existed.
    */
   const cancelWaiting = (held: Held): void => {
     for (const park of held.waiting.splice(0)) cancelPark(held, park);
   };
 
-  /** Puts the session on a park: exactly one is open at a time. */
+  /** Makes `park` the session's open request and emits `request.opened`. */
   const announce = (held: Held, park: Park): void => {
     held.open = park;
     emit({
@@ -514,9 +533,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /**
-   * Ends the open park: Codex is told the answer in its own terms, the stream
-   * says the park is over, and the next request Codex is waiting on takes the
-   * slot it left.
+   * Resolves the open request: replies to Codex with the decision, emits
+   * `request.resolved`, and opens the next waiting request, if any.
    */
   const resolvePark = (held: Held, park: Park, decision: ApprovalDecision): void => {
     held.open = undefined;
@@ -534,8 +552,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /**
-   * Answered, not dropped: a request left hanging is a turn that never ends,
-   * with nothing said anywhere.
+   * Replies to a server request with an error. The request gets a reply
+   * rather than being dropped, because a request with no reply leaves the
+   * turn hanging forever, with no error anywhere.
    */
   const refuseRequest = (host: Host, frame: ServerRequestFrame, error: RpcError): void => {
     host.rpc.answer(frame.id, { error });
@@ -543,8 +562,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   const onServerRequest = (host: Host, frame: ServerRequestFrame): void => {
     if (frame.method === "item/tool/call") {
-      // Hercule hosts no tools for Codex, so there is nothing a user could decide
-      // and nothing to wait for: the call is refused where it arrives.
+      // Hercule provides no dynamic tools to Codex, so there is nothing for a
+      // user to decide: the call is declined immediately.
       host.rpc.answer(frame.id, {
         result: {
           contentItems: [{ type: "inputText", text: "Hercule does not host dynamic tools" }],
@@ -557,15 +576,15 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     if (asked === undefined) {
       refuseRequest(host, frame, {
         code: METHOD_NOT_FOUND,
-        message: `Hercule does not answer ${frame.method}`,
+        message: `Hercule does not support ${frame.method}`,
       });
-      warn(host, `the app-server asked for ${frame.method}, which this runner build cannot answer`);
+      warn(host, `the app-server sent ${frame.method}, which this runner build does not support`);
       return;
     }
     const threadId = readThreadId(frame.params);
     const held = threadId === undefined ? undefined : findThreadSession(host, threadId);
-    // A thread nobody here holds has no one to ask and no one to tell: a
-    // warning for it would go to every other session on this app-server.
+    // No session here holds the thread, so there is nobody to ask. No warning
+    // is emitted either: it would go to a session the request is not about.
     if (threadId === undefined || held === undefined) {
       refuseRequest(host, frame, {
         code: INVALID_REQUEST,
@@ -580,15 +599,16 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       paths: (itemId) => held.fileChanges.get(itemId) ?? [],
     });
     const park: Park = { id: frame.id, request, asked, params: frame.params };
-    // Codex asks for a second approval without waiting for the first, and waits
-    // for both: this one is announced when the one in the slot is answered.
+    // Codex can send a second request before the first is resolved, and waits
+    // for both. The second is opened once the first is resolved.
     if (held.open === undefined) announce(held, park);
     else held.waiting.push(park);
   };
 
   /**
-   * Ends the running turn, if the adapter believes there is one. A refusal
-   * means the turn is already over, which is the same outcome.
+   * Interrupts the running turn, if the adapter believes there is one. Never
+   * fails: an error reply means the turn is already over, which is the same
+   * outcome, and a timeout is ignored too.
    */
   const interruptTurn = (held: Held): Effect.Effect<void> =>
     held.turnId === undefined
@@ -612,17 +632,17 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     });
 
   /**
-   * Opens a turn on the session's current selection. Codex takes the model,
-   * the reasoning effort and the service tier per turn, and `TurnInput` carries
-   * the session's selection on every frame, so it is sent every time rather
-   * than tracked here: a selection changed and changed back would otherwise be
-   * remembered as no change at all.
+   * Starts a turn with the session's current model selection. Returns the new
+   * turn id, or fails with the server's error message. Codex takes the model,
+   * reasoning effort and service tier per turn, and every `TurnInput` carries
+   * the session's selection, so the selection is sent on every turn rather
+   * than tracked here.
    */
   const startTurn = (held: Held, input: TurnInput): Effect.Effect<SendResult, string> =>
     Effect.gen(function* () {
-      // Codex takes the schema per turn and not per thread, so every turn of
-      // the session carries the schema. If it were sent once, the second turn
-      // of an Agent's session would answer in prose.
+      // Codex takes the schema per turn, not per thread, so every turn of the
+      // session sends it. If it were sent only once, the second turn of an
+      // Agent's session would answer in prose.
       const schema = held.state.outputSchema;
       const params: TurnStartParams = {
         threadId: held.binding.nativeSessionId,
@@ -633,16 +653,16 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         // Codex's own JSON type is the mutable type ts-rs writes.
         ...(schema === undefined ? {} : { outputSchema: schema as JsonValue }),
       };
-      // What the turn is running under, which is what the normalizer reports on
-      // `turn.started`: the notification itself carries no model. Set before
-      // the write, because `turn/started` can be read before this fiber resumes.
+      // The normalizer reports this model on `turn.started`, because the
+      // notification has no model. It is set before the request is sent,
+      // because `turn/started` can arrive before this fiber resumes.
       const before = held.state.model;
       if (input.modelSelection !== undefined) held.state.model = input.modelSelection.model;
       const answer = yield* Effect.mapError(
         retryWhileOverloaded(held.host.rpc.request("turn/start", params)),
         (error) => {
-          // No turn opened, so the selection it would have run under is not
-          // what the next one reports.
+          // No turn started, so restore the previous model for the next turn
+          // to report.
           held.state.model = before;
           return error.message;
         },
@@ -651,10 +671,10 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     });
 
   /**
-   * Steers the turn the adapter believes is running, and answers with nothing
-   * where it could not: the precondition failed, the turn is not steerable, or
-   * it ended between the belief and the call. The caller opens a turn instead,
-   * because input is never bounced.
+   * Steers the turn the adapter believes is running. Returns `undefined` if
+   * the steer failed: the expected turn id did not match, the turn cannot be
+   * steered, or the turn ended before the call. The caller then starts a new
+   * turn instead, because input is never rejected.
    */
   const steerTurn = (
     held: Held,
@@ -679,16 +699,17 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     );
 
   /**
-   * The tier a request names, if it names one at all. `STANDARD_TIER` is
-   * Hercule's own name for the tier Codex runs on by default and is not an id
-   * Codex knows, so selecting it sends no `serviceTier` field.
+   * Returns the service tier to send to Codex, or `undefined` for none.
+   * `STANDARD_TIER` is Hercule's name for Codex's default tier and is not an
+   * id Codex knows, so selecting it sends no `serviceTier` field.
    */
   const readServiceTier = (selected: unknown): string | undefined =>
     typeof selected === "string" && selected !== STANDARD_TIER ? selected : undefined;
 
   /**
-   * A selection as Codex takes it. The option ids are the ones the probe put on
-   * the model descriptor, so a composer that offers one sends it back by name.
+   * Converts a model selection into Codex's turn params. The option ids are
+   * the ones the probe put on the model descriptor, so the composer sends
+   * them back under the same names.
    */
   const buildModelParams = (
     selection: ModelSelection | undefined,
@@ -704,15 +725,15 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /**
-   * What a thread is opened, resumed or forked with: the session's own row, and
-   * its instructions as the developer instructions all three methods take - the
-   * channel #73 found, and the whole of what this adapter knows about the skill
-   * (spec 06 section 9.3). No `AGENTS.md` is written: the scratch directory a
-   * session runs in stays empty.
+   * Builds the params shared by starting, resuming and forking a thread: the
+   * session's directory, model and access mode, and its instructions. The
+   * system prompt and the skill are sent as developer instructions, which all
+   * three methods accept (spec 06 section 9.3). No `AGENTS.md` is written, so
+   * the scratch directory a session runs in stays empty.
    *
-   * Nothing in this adapter reads `disallowedTools`. Codex enforces no tool
-   * restriction, and the Agent record and the Session record both report the
-   * field as unenforced, so no behaviour is substituted in silence.
+   * Nothing in this adapter reads `disallowedTools`. Codex cannot restrict
+   * tools, and the Agent record and the Session record both report the field
+   * as not enforced, so no behaviour is silently substituted.
    */
   const buildThreadParams = (
     spec: SessionSpec,
@@ -768,13 +789,13 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
               } satisfies ThreadResumeParams & ThreadForkParams),
           {
             onFailure: (error: RpcError) => {
-              // A thread that never opens gives the host back rather than
-              // leaving a process nobody talks to.
+              // The thread did not open, so kill the host rather than leave a
+              // process running that nothing uses.
               releaseHost(host);
               return Effect.fail(error.message);
             },
-            // A fork is a thread of its own, so the id answered with is the
-            // session's; the one it was forked from is left alone.
+            // A fork is a new thread, so the session takes the id in the
+            // reply; the thread it was forked from is left alone.
             onSuccess: (answer) => Effect.succeed((answer as ThreadStartResponse).thread.id),
           },
         );
@@ -794,8 +815,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           waiting: [],
           fileChanges: new Map(),
         });
-        // The native id rides the event, because the controller has no other
-        // way to learn it: a session started after hello is never named again.
+        // The native id is sent on this event because the controller has no
+        // other way to learn it: a session started after the runner's hello
+        // is not listed again.
         emit({
           _tag: "session.started",
           eventId: crypto.randomUUID(),
@@ -813,8 +835,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         const steered =
           running === undefined ? undefined : yield* steerTurn(held, input.text, running);
         const sent = steered ?? (yield* startTurn(held, input));
-        // In flight from the answer, not from the notification that follows it:
-        // an input arriving in between would open a second turn.
+        // The turn counts as running from the reply, not from the
+        // `turn/started` notification after it: an input arriving in between
+        // would otherwise start a second turn.
         held.turnId = sent.turnId;
         for (const event of buildUserMessage({
           sessionId,
@@ -831,16 +854,17 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     interrupt: (sessionId: string): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
-        // The turn completing as `interrupted` is the whole report.
+        // No event is emitted here: the turn completing as `interrupted`
+        // reports the interrupt.
         if (held === undefined) return Effect.void;
-        // A park nobody answered is what the turn is waiting on, so every one
-        // is ended first: the harness is told the nearest refusal it can
-        // express. The waiting ones go before the open one, so that answering
-        // it announces none of them.
+        // The turn is waiting on its unresolved requests, so they are all
+        // cancelled first, with the closest reply each request's shape allows.
+        // The waiting requests are cancelled before the open one, so that
+        // resolving the open one does not open any of them.
         cancelWaiting(held);
         const open = held.open;
-        // The stream says the open park was cancelled, because that is what
-        // ended it.
+        // The open request is reported as resolved with `cancel`, because
+        // the interrupt is what ended it.
         if (open !== undefined) resolvePark(held, open, "cancel");
         return interruptTurn(held);
       }),
@@ -853,9 +877,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
         const park = held?.open;
-        // A request nobody here is parked on has nothing to answer, and the
-        // request itself is the authority on which answers it takes: one it did
-        // not offer is one the harness would have to substitute for.
+        // Ignore a decision for a request that is not the open one, and a
+        // decision the request did not offer: Codex would have to replace it
+        // with something else.
         if (
           held === undefined ||
           park === undefined ||
@@ -864,25 +888,26 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         ) {
           return Effect.void;
         }
-        // An answer that ends the turn ends every park with it, so nothing
-        // waiting is announced to a user who could only watch it die.
+        // A decision that ends the turn cancels every waiting request with it,
+        // so none of them is shown to the user only to be cancelled at once.
         const ending = park.asked.endsTurn.includes(decision);
         if (ending) cancelWaiting(held);
         resolvePark(held, park, decision);
-        // Only where the answer shape cannot carry the refusal itself: every
-        // other row says "stopped" to Codex in its own terms.
+        // Interrupt only when the reply cannot express the decision itself;
+        // every other row tells Codex to stop through its own reply.
         return ending ? interruptTurn(held) : Effect.void;
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
-        // A session whose thread the server unloaded, or whose app-server died,
-        // has already exited: a second exit would be a second row for one end.
+        // A session whose thread the server unloaded, or whose app-server
+        // died, has already exited: a second exit would record the same end
+        // twice.
         if (held === undefined) return Effect.void;
-        // The turn is ended before the session is: the app-server would
-        // otherwise go on working in the workspace between the exit and its own
-        // kill, with every notification about it going nowhere.
+        // The turn is interrupted before the session exits. Otherwise the
+        // app-server would keep working in the workspace until it is killed,
+        // and nobody would receive its notifications.
         return Effect.andThen(
           interruptTurn(held),
           Effect.sync(() => exitSession(held, reason)),
@@ -892,10 +917,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
 
     /**
-     * The device flow rather than the browser one: the machine the harness runs
-     * on usually has no browser, and this login prints a code the user types
-     * into one anywhere. The homes are the instance's own, as a session's are,
-     * so the credential lands where the app-server will look for it.
+     * Uses the device login rather than the browser login: the machine the
+     * harness runs on usually has no browser, and the device login prints a
+     * code the user can type into a browser anywhere. The login uses the
+     * instance's own home directories, like a session does, so the credential
+     * is saved where the app-server looks for it.
      */
     login: (ctx: ProviderRunnerContext, binary: string): LoginCommand => ({
       command: [binary, "login", "--device-auth"],

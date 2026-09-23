@@ -1,7 +1,8 @@
 /**
- * `runner.json`: the runner's whole durable identity. Written and read only
- * here, and read decoded rather than cast, so a hand-edited file reads as a bad
- * file rather than an undefined credential.
+ * Reads and writes `runner.json`, which holds the runner's durable identity.
+ * Only this module touches the file. It decodes the file with a schema instead
+ * of casting it, so a hand-edited file fails as an invalid file instead of
+ * producing an undefined credential.
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -13,11 +14,14 @@ import { locateRunnerDir } from "@hercule/home";
 export const CONTROLLER_URL_SCHEMES: ReadonlyArray<string> = ["http:", "https:"];
 
 /**
- * The controller URL is here rather than in `config.toml` because it is not a
- * bootstrap key: it is part of who this runner belongs to.
+ * The contents of `runner.json`.
  *
- * `set-controller` is the way out of a runner pointed at an address that will
- * not parse, so that field must not stop the rest of the file being read.
+ * The controller URL is stored here instead of in `config.toml` because it is
+ * not a bootstrap key: it records which controller this runner belongs to.
+ *
+ * The URL is a plain string, not a validated URL. `set-controller` is how the
+ * user fixes a runner whose URL does not parse, so an invalid URL must not
+ * stop the rest of the file from being read.
  */
 export const RunnerFile = Schema.Struct({
   runnerId: Schema.String,
@@ -25,7 +29,7 @@ export const RunnerFile = Schema.Struct({
   controllerUrl: Schema.String,
   controllerIdentityId: Schema.String,
   controllerPublicKey: Schema.String,
-  /** The directory's name, not its path: the home it sits in can move. */
+  /** The directory's name, not its path, because the Hercule Home can move. */
   storageDirectory: Schema.String,
 });
 
@@ -41,11 +45,15 @@ export class NotEnrolled extends Schema.TaggedError<NotEnrolled>()("NotEnrolled"
 }) {}
 
 /**
- * Written to a fresh file and renamed over the target. `mode` applies only on
- * creation, so writing into an existing `runner.json` would hold a new
- * credential at whatever mode the old one had, and a half-written one would
- * leave the machine with neither credential, of which the controller keeps only
- * hashes.
+ * Writes `runner.json` to a new temporary file and renames it over `path`.
+ * Throws when the write or the rename fails.
+ *
+ * Writing into the existing file instead would cause two problems:
+ *
+ * - `mode` applies only when a file is created, so the new credential would
+ *   keep whatever mode the old file had;
+ * - a half-written file would lose both the old and the new credential, and
+ *   the controller keeps only their hashes.
  */
 export const writeRunnerFile = (path: string, contents: RunnerFile): void => {
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -75,7 +83,7 @@ export const readRunnerFile = (home: string): Effect.Effect<RunnerFile, NotEnrol
       Schema.decodeUnknownEffect(RunnerFile, { errors: "all" })(raw),
       (error) =>
         new NotEnrolled({
-          message: `${path} is not a runner's configuration: ${error.message}`,
+          message: `${path} is not a valid runner configuration: ${error.message}`,
         }),
     );
   });

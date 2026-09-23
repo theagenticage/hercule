@@ -1,7 +1,7 @@
 /**
- * `hercule git-credential get`, driven against a real socket. What git
- * reads on stdout is the whole contract: the exact two lines, or nothing at
- * all, which is git's signal to try the next helper.
+ * Tests `hercule git-credential get` against a real socket. What the helper
+ * prints on stdout is all git sees: exactly two lines, or nothing at all, which
+ * tells git to try the next helper.
  */
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -11,7 +11,7 @@ import { cleanTemporaries, createTemporaryDir } from "../workspaces/testing";
 
 afterAll(cleanTemporaries);
 
-/** D-21 F5: an answer is a credential or a refusal, never a struct of maybes. */
+/** Builds a credential answer: either a credential or an error, never a mix of optional fields. */
 const buildCredentialAnswer = (
   fields:
     | { readonly token: string; readonly username: string }
@@ -43,11 +43,11 @@ const startCredentialSocket = async (
 };
 
 describe("what the helper prints", () => {
-  it("prints exactly the two lines git reads, from the answer the daemon gave", async () => {
+  it("prints exactly the two lines git reads, built from the daemon's answer", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(
-        // D-21 F5: an answer carries the credential; the git identity is the
-        // session's and rides on `sessionStart`.
+        // The answer holds only the credential. The session's git identity is
+        // sent separately, on `sessionStart`.
         buildCredentialAnswer({ token: "ghp_the-token", username: "octocat" }),
       ),
     );
@@ -57,14 +57,14 @@ describe("what the helper prints", () => {
       HERCULE_TOKEN: "the-session-token",
     });
 
-    // Byte for byte: git parses this, and a trailing anything is a parse error.
+    // Compare byte for byte: git parses this, and any extra trailing text is a parse error.
     expect(printed).toBe("username=octocat\npassword=ghp_the-token\n");
-    // The session proves itself with its own token; the remote is git's.
+    // The session identifies itself with its own token; the remote comes from git's request.
     expect(asked).toEqual([{ remote: "github.com/acme/web", sessionToken: "the-session-token" }]);
     await served.close();
   });
 
-  it("prints nothing when the daemon answers empty", async () => {
+  it("prints nothing when the daemon returns no credential", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ error: "unauthorized" })),
     );
@@ -78,7 +78,7 @@ describe("what the helper prints", () => {
     await served.close();
   });
 
-  it("prints nothing, and asks nothing, without a session token in its environment", async () => {
+  it("prints nothing and asks nothing when its environment has no session token", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ token: "ghp_the-token", username: "octocat" })),
     );
@@ -92,7 +92,7 @@ describe("what the helper prints", () => {
     await served.close();
   });
 
-  it("asks as the machine while the runner is provisioning a workspace", async () => {
+  it("asks with the workspace id while the runner is provisioning a workspace", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ token: "ghp_the-token", username: "octocat" })),
     );
@@ -102,7 +102,7 @@ describe("what the helper prints", () => {
       HERCULE_WORKSPACE_PROVISIONING: "0199e0e7-0000-7000-8000-00000000000b",
     });
 
-    // The machine has no session to be, so it names the workspace it is making.
+    // There is no session yet, so the helper sends the id of the workspace being provisioned.
     expect(asked).toEqual([
       { remote: "github.com/acme/web", workspaceId: "0199e0e7-0000-7000-8000-00000000000b" },
     ]);
@@ -110,7 +110,7 @@ describe("what the helper prints", () => {
     await served.close();
   });
 
-  it("prints nothing when a field of the answer carries a line break", async () => {
+  it("prints nothing when a field of the answer contains a line break", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(
         buildCredentialAnswer({ token: "ghp_the-token", username: "octocat\npassword=stolen" }),
@@ -122,8 +122,8 @@ describe("what the helper prints", () => {
       HERCULE_TOKEN: "the-session-token",
     });
 
-    // git reads the answer line by line: a break in a value is a line nobody
-    // checked, and the last one wins.
+    // git reads the answer line by line, so a line break in a value would add
+    // an unchecked line, and git uses the last value it reads for a key.
     expect(printed).toBe("");
     await served.close();
   });
@@ -137,11 +137,11 @@ describe("what the helper prints", () => {
       HERCULE_TOKEN: "the-session-token",
     });
 
-    // git then falls through to the machine's own helpers, rather than failing.
+    // git then moves on to the machine's own helpers instead of failing.
     expect(printed).toBe("");
   });
 
-  it("prints nothing when the environment names no socket at all", async () => {
+  it("prints nothing when the environment has no socket path", async () => {
     const printed = await answerCredentialQuestion(GIT_ASKS, {
       HERCULE_TOKEN: "the-session-token",
     });
@@ -150,16 +150,16 @@ describe("what the helper prints", () => {
   });
 });
 
-describe("the actions git names", () => {
-  it("says nothing, and reads no input, for anything but `get`", async () => {
+describe("the actions git passes", () => {
+  it("prints nothing for any action other than `get`", async () => {
     const written: Array<unknown> = [];
     const write = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
       written.push(chunk);
       return true;
     });
 
-    // `store` and `erase` are git reporting what it did with a credential this
-    // helper keeps none of; a bare invocation is nobody's command at all.
+    // git sends `store` and `erase` to report what it did with a credential,
+    // and this helper stores none. A missing action is not a git command at all.
     await runCredentialAction("store");
     await runCredentialAction("erase");
     await runCredentialAction("git-credential");

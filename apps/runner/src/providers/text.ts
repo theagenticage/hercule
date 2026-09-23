@@ -1,18 +1,18 @@
 /**
- * Cutting what a harness wrote down to what the protocol will carry. One
- * module, because two adapters cutting the same vendor string to two different
- * lengths - or one of them not cutting at all - is a frame the runner cannot
- * encode, and an event that will not encode is one the runner drops.
+ * Truncates text from a harness to the lengths the protocol accepts. It lives
+ * in one module because two adapters truncating the same vendor string to
+ * different lengths, or one not truncating at all, would produce a frame the
+ * runner cannot encode, and the runner drops an event it cannot encode.
  */
 import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "@hercule/protocol";
 
-/** An id, a name, a version: short by nature, and simply cut when it is not. */
+/** Truncates a short value, such as an id, a name or a version, to `MAX_FACT_LENGTH`. */
 export const truncateFact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
 
 /**
- * The same cut for the longer fields: free text a harness wrote, not an id. It
- * says where it cut, because a command read as whole is a command the user
- * approved something else than.
+ * Truncates free text a harness wrote to `MAX_MESSAGE_LENGTH`, ending it with
+ * `…` when it was cut. The marker matters: a user who reads a truncated command
+ * as complete would approve something other than what runs.
  */
 export const truncateMessage = (value: string): string =>
   value.length > MAX_MESSAGE_LENGTH ? `${value.slice(0, MAX_MESSAGE_LENGTH - 1)}…` : value;

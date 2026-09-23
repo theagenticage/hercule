@@ -1,7 +1,9 @@
 /**
- * Tearing a workspace down. The branch outlives the directory, a
- * primary is never torn down at all, and a dispose of something that is
- * already gone is still a dispose.
+ * Tests for disposing a workspace:
+ *
+ * - the branch is kept after the directory is removed,
+ * - a primary is never torn down,
+ * - disposing a workspace that is already gone still succeeds.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -53,7 +55,7 @@ describe("disposing an ephemeral workspace", () => {
     expect(runGitOrThrow(cache, "rev-parse", "--verify", "hercule/run-4d4d4d4d")).toMatch(
       /^[0-9a-f]{40}$/,
     );
-    // And git no longer believes a worktree lives there.
+    // And git no longer lists a worktree there.
     expect(runGitOrThrow(cache, "worktree", "list")).not.toContain(directory);
     // A restart must not resurrect it.
     expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
@@ -61,9 +63,9 @@ describe("disposing an ephemeral workspace", () => {
 });
 
 describe("disposing a primary", () => {
-  // D-20a: a primary is always Hercule's own clone, so what must survive a dispose
-  // is that clone rather than a folder of the user's that was adopted.
-  it("refuses, and leaves the main workspace where it is", async () => {
+  // A primary is always Hercule's own clone, so this checks that the clone
+  // survives the dispose.
+  it("fails, and leaves the main workspace untouched", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
@@ -82,10 +84,10 @@ describe("disposing a primary", () => {
     const report = await workspaces.dispose(buildDisposeFrame(workspaceId));
 
     expect(report.status).toBe("failed");
-    expect(report.message).toBe("a primary is never torn down");
+    expect(report.message).toBe("a main workspace is never torn down");
     expect(existsSync(directory)).toBe(true);
     expect(hashContents(directory)).toBe(before);
-    // Still the runner's, so a session can still be placed in it.
+    // Still registered, so a session can still be placed in it.
     expect(workspaces.resolve(workspaceId)?.cwd).toBe(directory);
   });
 });
@@ -106,9 +108,10 @@ describe("disposing something this runner never had", () => {
 
 describe("disposing a workspace that is still being provisioned", () => {
   /**
-   * D-21 R6: the two frames can arrive together, and a dispose that overtook
-   * the provisioning would remove a directory git was still writing into - and
-   * the provisioning would then register what the dispose had just removed.
+   * The two frames can arrive together. A dispose that ran before the
+   * provisioning finished would remove a directory git was still writing into,
+   * and the provisioning would then register the directory the dispose had
+   * just removed.
    */
   it("waits for the provisioning to finish, then leaves nothing behind", async () => {
     const remote = makeRemote();

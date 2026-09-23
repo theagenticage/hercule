@@ -1,13 +1,15 @@
 /**
- * The runner role. This module's import graph must never reach the controller,
- * the DB engine, the plugin host, or the web bundle.
+ * The runner role: parses `hercule runner` arguments and runs the matching
+ * command. This module's import graph must never reach the controller, the DB
+ * engine, the plugin host, or the web bundle.
  *
- * `join` belongs to this role rather than to the CLI because everything it
- * writes is the runner's own.
+ * `join` belongs to this role instead of the CLI, because every file it writes
+ * belongs to the runner.
  *
- * Both daemon forms stop on a signal rather than being killed by it: the
- * connection's scope closes on the way out, which is where the runner says it is
- * going. A runner that vanished reads as unreachable for a minute instead.
+ * Both daemon forms stop cleanly on SIGINT or SIGTERM instead of being killed.
+ * Closing the connection's scope is where the runner tells the controller it
+ * is going away. A runner that just disappeared would instead show as
+ * unreachable for a minute.
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
@@ -23,7 +25,7 @@ import { providerLogins } from "./providers";
 import { sessions } from "./sessions";
 import { setController } from "./set-controller";
 
-/** The same vocabulary the CLI uses. */
+/** The same exit codes the CLI uses. */
 const EXIT = { failed: 1, usage: 2 } as const;
 
 const USAGE = [
@@ -34,9 +36,10 @@ const USAGE = [
 ].join("\n");
 
 /**
- * The handlers stay installed until the scope that put them there closes, which
- * is after the connection is let go of: a second signal would otherwise reach
- * Bun's default disposition and kill the process mid-goodbye.
+ * Installs SIGINT and SIGTERM handlers, and returns an effect that completes
+ * when either signal arrives. The handlers stay installed until the scope
+ * closes, which is after the connection is closed. Otherwise a second signal
+ * would reach Bun's default handler and kill the process during shutdown.
  */
 const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Effect.acquireRelease(
   Effect.sync(() => {
@@ -56,9 +59,11 @@ const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Eff
 ).pipe(Effect.map(({ stopped }) => stopped.await));
 
 /**
- * A daemon that returns on its own has failed: holding the connection is all it
- * does. Everything it logs goes to stderr, because a runner's stdout is a
- * channel the spawning controller reads one line off.
+ * Runs a daemon until it fails or a stop signal arrives. On failure, prints
+ * the error and sets a failing exit code.
+ *
+ * All logs go to stderr, because the controller that spawns a local runner
+ * reads a line from its stdout.
  */
 const runUntilStopped = async (
   work: Effect.Effect<void, { readonly message: string }>,
@@ -67,14 +72,15 @@ const runUntilStopped = async (
     Effect.result(
       Effect.scoped(
         Effect.flatMap(untilStopped, (stopped) =>
-          // The shutdown runs as part of the stop branch itself, so `raceFirst`
-          // cannot call it won and interrupt `work` - closing the connection -
-          // until every session's exit has already gone out on it.
+          // The session shutdown runs inside the stop branch. So `raceFirst`
+          // only interrupts `work`, which closes the connection, after every
+          // session's exit has been sent on that connection.
           Effect.raceFirst(work, Effect.andThen(stopped, sessions.shutdown("runner_restart"))),
         ),
       ).pipe(
-        // A vendor login blocked on stdin would outlive this process, still
-        // holding a prompt for a credential.
+        // Stop any provider login in progress. A login process blocked on
+        // stdin would otherwise outlive this process, still waiting for a
+        // credential.
         Effect.ensuring(providerLogins.stopAll),
         Effect.provideService(Logger.LogToStderr, true),
       ),
@@ -104,7 +110,7 @@ export async function run(argv: readonly string[]): Promise<void> {
 
   if (verb === undefined || verb.startsWith("-")) {
     const home = resolveHomePath(options.success.home, process.env);
-    // Anything else is a typo, and starting a daemon is the wrong answer to one.
+    // Any other option is a typo, and starting a daemon would be the wrong response.
     const unknown = rest.find((token) => token !== "--local");
     if (unknown !== undefined) {
       reportMisuse(`unknown runner option \`${unknown}\``);
@@ -113,9 +119,10 @@ export async function run(argv: readonly string[]): Promise<void> {
     return await runUntilStopped(verb === "--local" ? runLocalRunner(home) : runDaemon(home));
   }
   if (verb !== "join" && verb !== "set-controller") {
-    // Everything else that reaches this role came from `hercule git-credential`:
-    // the dispatcher sends every other runner subcommand to the CLI. git names
-    // the action, and only `get` has an answer.
+    // Any other subcommand that reaches this role came from
+    // `hercule git-credential`, because the dispatcher sends every other
+    // runner subcommand to the CLI. git passes the action name, and only `get`
+    // returns anything.
     return await runCredentialAction(verb);
   }
 
@@ -143,8 +150,8 @@ export async function run(argv: readonly string[]): Promise<void> {
   const token = flag < 0 ? undefined : args[flag + 1];
   const named = flag < 0 ? args : args.filter((_, at) => at !== flag && at !== flag + 1);
   const reserved = named.includes("--reserved");
-  // What is left once the flags and the token are struck out is the URL, so a
-  // stray flag is refused rather than ignored.
+  // Whatever is left after removing the flags and the token is the URL, so a
+  // stray flag is rejected instead of ignored.
   const targets = named.filter((value) => value !== "--reserved");
   const controllerUrl = targets[0];
   if (controllerUrl === undefined) {

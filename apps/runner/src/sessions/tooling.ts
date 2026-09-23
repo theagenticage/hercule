@@ -1,20 +1,23 @@
 /**
- * What the runner puts on this machine once, at start, so that every session it
- * hosts can reach Hercule: the `hercule` binary on the directory sessions get at
- * the front of their `PATH` (spec 15 section 2), and the Claude plugin
- * directory the skill is materialized into (spec 06 section 9.3).
+ * Prepares what every session on this runner needs to reach Hercule. The runner
+ * does this at start:
  *
- * Refreshed rather than written once, exactly like the symlink: an upgraded
- * binary has to take over an older build's link and an older build's skill
- * text, and nothing else on the machine ever rewrites either.
+ * - it links the `hercule` binary into the directory that goes at the front of
+ *   every session's `PATH` (spec 15 section 2);
+ * - it writes the Claude plugin directory that holds the skill (spec 06
+ *   section 9.3).
  *
- * Synchronous, because runner start has nothing else to do while it waits and
- * a session may not be placed here before it is done.
+ * Both are rewritten at every start, not only the first. An upgraded binary has
+ * to replace the symlink and the skill text an older build left behind, and
+ * nothing else on the machine rewrites them.
  *
- * The link points at `process.execPath`, so it is the `hercule` CLI only when the
- * runner is the compiled binary: under `bun run` it points at bun, and a
- * session that calls `hercule` gets bun instead. The daemon warns about that at
- * start rather than leaving a session to discover it.
+ * The work is synchronous, because runner start has nothing else to do while it
+ * waits, and no session may be placed here before it is done.
+ *
+ * The symlink points at `process.execPath`, so it is the `hercule` CLI only when
+ * the runner is the compiled binary. Under `bun run` it points at bun, and a
+ * session that calls `hercule` gets bun instead. The daemon warns about this at
+ * start, so a session does not have to discover it.
  */
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,8 +28,8 @@ export interface Tooling {
   /** `<home>/runner/bin`: prepended to every session's `PATH`. */
   readonly binDir: string;
   /**
-   * hercule-as-a-tool as every adapter takes it, assembled here so the daemon
-   * carries one value rather than rebuilding it from the parts.
+   * The Hercule tool in the shape every adapter takes. It is built here so the
+   * daemon passes one value around instead of rebuilding it from its parts.
    */
   readonly herculeTool: {
     readonly skill: string;
@@ -36,14 +39,14 @@ export interface Tooling {
 
 export interface ToolingRequest {
   readonly home: string;
-  /** This runner's own storage directory, which its identity owns. */
+  /** This runner's storage directory, which belongs to its current identity. */
   readonly storageDir: string;
-  /** The running binary the session's `hercule` is pointed at. */
+  /** The path of the running binary. The `hercule` symlink points at it. */
   readonly execPath: string;
   readonly skill: string;
 }
 
-/** The minimum a Claude plugin directory is loadable with. */
+/** Builds the smallest `plugin.json` that lets Claude load the plugin directory. */
 const buildManifest = (): string =>
   `${JSON.stringify(
     {
@@ -55,7 +58,7 @@ const buildManifest = (): string =>
     2,
   )}\n`;
 
-/** The frontmatter that makes a `SKILL.md` a skill the harness can find by name. */
+/** Builds the `SKILL.md` text: the skill, after the frontmatter the harness needs to find it by name. */
 const buildSkillFile = (skill: string): string =>
   `---\nname: hercule\ndescription: How to reach the Hercule controller this session runs under - the hercule CLI on PATH, its help, and what a 403 means.\n---\n\n${skill}`;
 
@@ -63,8 +66,8 @@ export const prepareTooling = ({ home, storageDir, execPath, skill }: ToolingReq
   const binDir = join(locateRunnerDir(home), "bin");
   mkdirSync(binDir, { recursive: true });
   const link = join(binDir, "hercule");
-  // Removed rather than checked: what is there points at a build that may be
-  // gone, and `symlinkSync` will not overwrite.
+  // Remove the old link without inspecting it: it may point at a build that no
+  // longer exists, and `symlinkSync` does not overwrite an existing file.
   rmSync(link, { force: true });
   symlinkSync(execPath, link);
 

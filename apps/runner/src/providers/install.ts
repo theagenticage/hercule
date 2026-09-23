@@ -1,7 +1,7 @@
 /**
- * Putting a harness on a machine. Every vendor ships the same shape - a script
- * curled into a shell, pinned to the release this build talks to - so what
- * differs between adapters is the command and nothing else.
+ * Installs a harness on a machine. Every vendor ships an install script that
+ * is piped from curl into a shell and pinned to the release this build
+ * supports, so adapters differ only in the command.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -10,12 +10,16 @@ import { MAX_INSTALL_MESSAGE_LENGTH } from "@hercule/protocol";
 import type { InstallOutcome } from "./index";
 import type { Run } from "./process";
 
-/** Downloading and running somebody else's installer over a slow link. */
+/** Long enough to download and run a vendor's installer over a slow connection. */
 export const INSTALL_DEADLINE: Duration.Duration = Duration.minutes(5);
 
 const LAST_LINES = 5;
 
-/** What the installer said last, which is where it says what went wrong. */
+/**
+ * Returns the last few lines of the installer's output, where it reports what
+ * went wrong, cut to the length the protocol allows. Returns a fixed message
+ * when the output is empty.
+ */
 export const takeLastLines = (output: string): string => {
   const said = output.trimEnd().split("\n").slice(-LAST_LINES).join("\n");
   return said === ""

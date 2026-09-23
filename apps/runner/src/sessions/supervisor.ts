@@ -1,12 +1,14 @@
 /**
- * The runner's session supervisor: what this machine is hosting, and the one
- * place a normalized event gets its sequence number on the way out.
+ * The runner's session supervisor. It tracks the sessions this machine hosts,
+ * and it is the only place that gives an outgoing normalized event its
+ * sequence number.
  *
- * The table and the sequence are the supervisor's, not a connection's: a
- * session outlives the socket that started it, and the sequence is the
- * controller's idempotency key, so restarting it on a reconnect would make the
- * controller drop events it has never seen. There is no outbox yet either, so
- * an event produced while the socket is down is lost (spec 03 section 2.3).
+ * The session table and the sequence counter belong to the supervisor, not to
+ * a connection. A session outlives the socket that started it, and the
+ * controller uses the sequence number to recognise events it already has, so
+ * restarting the count on a reconnect would make the controller drop events it
+ * has never seen. There is no outbox yet either, so an event produced while the
+ * socket is down is lost (spec 03 section 2.3).
  */
 import { rmSync } from "node:fs";
 import * as Clock from "effect/Clock";
@@ -34,65 +36,64 @@ import { now, describeCause } from "../report";
 import { resolveSessionContext, type Machine } from "./context";
 
 /**
- * One session this runner holds. The binding is not here: the adapters are the
- * authority on what they are hosting (spec 03 section 2.2).
+ * A session this runner holds. The binding is not stored here, because the
+ * adapters are the source of truth for what they host (spec 03 section 2.2).
  */
 interface Live {
   readonly adapter: ProviderAdapter;
   readonly scratch: string | undefined;
-  /** The workspace this session works in, re-read and reported when it exits. */
+  /** The workspace this session works in. It is read again and reported when the session exits. */
   readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
   readonly inactivityMs: number;
   /** Clock time of the last event of this session while a turn was open. */
   lastEventAt: number;
   /**
-   * One fiber for as long as this session is being watched, watching
-   * `lastEventAt` against `inactivityMs`. Undefined whenever it is not, which
-   * is also when a stuck harness cannot be told from an idle one.
+   * The fiber that stops the session once `inactivityMs` has passed since
+   * `lastEventAt`. Undefined while the session is not watched.
    */
   inactivity: Fiber.Fiber<void> | undefined;
-  /** Whether a turn is open: between turns nothing can get stuck. */
+  /** Whether a turn is open. Between turns the harness is idle, so it cannot be stuck. */
   turnOpen: boolean;
   /**
-   * Whether the session is parked on a request. A session waiting for its user
-   * is not stuck, however long it waits, so it is not watched. A flag rather
-   * than a count: at most one request is open per session.
+   * Whether the session is parked on an open request. A session waiting for
+   * its user is not stuck, however long it waits, so it is not watched. This is
+   * a flag rather than a count because a session has at most one open request.
    */
   parked: boolean;
   /**
-   * Ends the session at its spec's absolute deadline; lives and dies with
-   * this entry. Undefined only in the moment between the entry being set and
-   * this fiber being forked.
+   * The fiber that stops the session at its spec's absolute deadline. It is
+   * interrupted when this entry is torn down. Undefined before the fiber is
+   * forked and after it has fired.
    */
   absolute: Fiber.Fiber<void> | undefined;
   /**
-   * Whether the adapter has confirmed this session as running yet. A stop
-   * asked for while still `starting` has nowhere to land - the adapter does
-   * not hold the session yet - so it waits as `pendingStop` instead.
+   * Whether the adapter has started this session yet. A stop requested while
+   * the session is still `starting` cannot go to the adapter, which does not
+   * hold the session yet, so it waits in `pendingStop` instead.
    */
   phase: "starting" | "running";
-  /** The first reason asked for while starting, applied once it is running. */
+  /** The reason of the first stop requested while starting. It is applied once the session is running. */
   pendingStop: ExitReason | undefined;
 }
 
-/** What one connection lends the supervisor for as long as it is up. */
+/** What a connection gives the supervisor while the connection is up. */
 export interface Connection {
   readonly machine: Machine;
   /**
-   * The error type is the transport's business: a write that failed means the
-   * connection is going, and there is nowhere left to report that to.
+   * The error type is left to the transport. A failed write means the
+   * connection is closing, and there is nowhere left to report the failure.
    */
   readonly send: (frame: RunnerToController) => Effect.Effect<void, unknown>;
 }
 
 export interface SessionSupervisor {
   /**
-   * Every adapter's events, sequenced and sent, until the connection ends.
-   * Forked, because it never returns.
+   * Numbers every adapter's events and sends them, until the connection ends.
+   * Run it in a forked fiber, because it never returns.
    */
   readonly relay: Effect.Effect<void>;
-  /** What the adapters are hosting. Reconciling it is the controller's. */
+  /** Sends a `sessionsReport` of what the adapters host. The controller reconciles its own state against it. */
   readonly report: Effect.Effect<void>;
   readonly start: (frame: SessionStart) => Effect.Effect<void>;
   readonly input: (frame: SessionInput) => Effect.Effect<void>;
@@ -102,55 +103,61 @@ export interface SessionSupervisor {
 }
 
 /**
- * The value `supervising` hands back: a `SessionSupervisor` for a connection,
- * and the process-wide shutdown beside it. A session outlives the socket that
- * started it, and so does the shutdown that ends every one of them - neither
+ * What `makeSupervising` returns: a way to build a `SessionSupervisor` for
+ * each connection, and the shutdown for the whole process. Sessions outlive the
+ * socket that started them, and the shutdown stops every session, so neither
  * belongs to one connection's `SessionSupervisor`.
  */
 export interface Supervising {
   readonly forConnection: (connection: Connection) => SessionSupervisor;
   /**
-   * Stops every session this runner holds and waits for each to have produced
-   * its `session.exited` through whichever connection's relay is up, bounded
-   * so a harness that will not die does not hold up the caller for ever.
-   * Fences new starts first, so nothing spawns behind the goodbye this call
-   * precedes.
+   * Stops every session this runner holds, and waits until the relay of
+   * whichever connection is up has sent each session's `session.exited`. The
+   * wait has a time limit, so a harness that will not exit cannot hold up the
+   * caller forever. New starts are blocked first, so no harness is spawned
+   * after the runner says goodbye to the controller.
    */
   readonly shutdown: (reason: ExitReason) => Effect.Effect<void>;
 }
 
 /**
- * The most a shutdown waits on a harness to confirm it stopped: long enough
- * for an ordinary exit, short enough that a stuck one does not delay the
- * goodbye a person would notice.
+ * How long a shutdown waits for harnesses to confirm they stopped. Long enough
+ * for a normal exit, and short enough that a stuck harness does not delay the
+ * goodbye noticeably.
  */
 const SHUTDOWN_STOP_BOUND: Duration.Duration = Duration.seconds(5);
 
-/** Taken once, so the state below is the process's rather than a connection's. */
+/**
+ * Creates the session supervisor. Call it once per process: the session table
+ * and the sequence counter it holds belong to the process, not to a connection.
+ */
 export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervising => {
   const live = new Map<string, Live>();
   let lastSeq = 0;
   /**
-   * One entry per session `shutdown` is waiting on, resolved once its
-   * `session.exited` has gone out on `sending` - not merely reached `release`,
-   * which runs first and would let the wait return before the frame crossed
-   * the socket.
+   * One deferred per session that `shutdown` is waiting on. It is resolved
+   * once `sendSequenced` has sent the session's `session.exited`, not when
+   * `releaseSession` runs: `releaseSession` runs before the send, so resolving
+   * there would let the wait end before the frame was on the socket.
    */
   const stopping = new Map<string, Deferred.Deferred<void>>();
-  // Assigning a number and writing it are one step, on whichever fiber gets
-  // here first: the relay and a frame being answered both emit, and a sequence
-  // that reached the wire out of order is one the controller may never insert.
+  // Assigning a sequence number and sending the frame happen under one lock.
+  // Both the relay and the handling of a controller frame send events, and the
+  // controller may never insert an event whose number reached it out of order.
   const sequencing = Semaphore.makeUnsafe(1);
-  // Set once, by `shutdown`: the process is going, so a start the controller
-  // sent before it heard about that is one nothing would ever stop.
+  // Set by `shutdown`. The process is shutting down, so a start the controller
+  // sent before it learned of that would spawn a harness nothing ever stops.
   let stopped = false;
 
   /**
-   * The one path every stop reaches the adapter through: a running session is
-   * told directly; a starting one has nowhere to send it yet - the adapter
-   * does not hold it - so the reason waits as `pendingStop` for `starting` to
-   * apply once the harness is up. First reason wins, the same as a second
-   * stop reaching the adapter directly would.
+   * Asks the adapter to stop a session. Every stop goes through here:
+   *
+   * - a running session is stopped directly;
+   * - a starting session is not held by the adapter yet, so the reason is
+   *   saved in `pendingStop`, and `startSession` applies it once the harness
+   *   is up.
+   *
+   * The first reason wins, as it would if two stops reached the adapter.
    */
   const requestStop = (sessionId: string, held: Live, reason: ExitReason): Effect.Effect<void> => {
     if (held.phase === "running") return held.adapter.stopSession(sessionId, reason);
@@ -164,14 +171,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     };
 
     /**
-     * On any cause, not only a failed write: a frame that will not encode is
-     * one event lost rather than the whole relay, which would drop every
-     * session's traffic for the life of the connection with nobody watching.
+     * Sends a frame and ignores any failure, not only a failed write. A frame
+     * that fails to encode then loses one event instead of ending the relay,
+     * which would silently drop every session's events for the rest of the
+     * connection.
      */
     const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
       Effect.ignoreCause(Effect.suspend(() => connection.send(frame)));
 
-    /** Interrupts both timer fibers of one entry and discards its scratch. */
+    /** Interrupts both timer fibers of a session entry and removes its scratch directory. */
     const tearDownSession = (held: Live): Effect.Effect<void> =>
       Effect.gen(function* () {
         if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
@@ -180,9 +188,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       });
 
     /**
-     * Forgets an exited session, on the adapter's authority rather than the
-     * event's: a session id started again while its old exit was still in
-     * flight is a different session, and the old run must not sweep it away.
+     * Removes an exited session's entry, but only when the adapter no longer
+     * holds the session. The exit event alone is not enough: if the same
+     * session id was started again while the old exit was on its way, the
+     * entry belongs to the new session and must stay.
      */
     const releaseSession = (sessionId: string): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -190,21 +199,21 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         if (held === undefined) return;
         const still = yield* held.adapter.listSessions;
         if (still.some((binding) => binding.sessionId === sessionId)) return;
-        // By identity, taken again after the wait above: a fresh start for
-        // this id may have already replaced the entry while this call was
-        // asking the adapter, and the adapter has not registered it yet
-        // either - `still` says nothing about that start, only about the one
-        // this exit belongs to.
+        // Compare by identity again after the wait above. A new start for this
+        // id may have replaced the entry while this call waited on the
+        // adapter, before the adapter registered the new session, so `still`
+        // only describes the session this exit belongs to.
         if (live.get(sessionId) !== held) return;
         live.delete(sessionId);
         yield* tearDownSession(held);
       });
 
     /**
-     * One fiber for the life of a turn. It sleeps to `lastEventAt +
-     * inactivityMs` and rechecks rather than trusting why it woke: an event
-     * arriving mid-sleep only moves `lastEventAt` (no interrupt, no fork), so
-     * the fiber already asleep has to notice the deadline moved on its own.
+     * Stops the session with `inactivity_timeout` once `inactivityMs` passes
+     * with no event. It runs in one fiber while the session is watched. It
+     * sleeps until `lastEventAt + inactivityMs` and then checks again, because
+     * an event during the sleep only moves `lastEventAt` and does not wake the
+     * fiber.
      */
     const watchInactivity = (held: Live, sessionId: string): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -215,8 +224,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             continue;
           }
           held.inactivity = undefined;
-          // By identity: this entry may be someone else's, or gone, by the
-          // time the deadline is reached.
+          // Compare by identity: by the time the deadline passes, the entry
+          // for this id may have been removed or replaced by a new start.
           if (live.get(sessionId) === held) {
             yield* requestStop(sessionId, held, "inactivity_timeout");
           }
@@ -225,8 +234,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       });
 
     /**
-     * What the user's own checkout is on now. A session in a primary is free to
-     * switch branches, and the controller's picture of it is this report.
+     * Reads a primary workspace's branches again and sends the result to the
+     * controller. A session in a primary workspace may switch branches, and
+     * this report is how the controller learns about it.
      */
     const reportWorkspace = (workspaceId: string): Effect.Effect<void> =>
       Effect.ignoreCause(
@@ -237,9 +247,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
 
     /**
-     * Every event leaves through here, in the order it was sequenced. Arming
-     * or moving the inactivity clock happens first, so a caller that has seen
-     * the frame this event produced has also seen what it did to the clock.
+     * Numbers an event and sends it. Every event goes out through here, in
+     * sequence order. The inactivity clock is updated before the send, so
+     * anyone who has seen the frame knows the clock already reflects the
+     * event.
      */
     const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
       sequencing.withPermits(1)(
@@ -252,9 +263,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                 break;
               case "turn.completed":
                 held.turnOpen = false;
-                // A request cannot outlive the turn it parked: the controller's
-                // own fold clears it on this event too, so a park left standing
-                // here would make the next turn unwatchable for ever.
+                // A request cannot outlive its turn. The controller also clears
+                // it on this event, and a `parked` flag left set here would
+                // stop every later turn from being watched.
                 held.parked = false;
                 break;
               case "request.opened":
@@ -266,11 +277,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               default:
                 break;
             }
-            // A session is watched exactly while a turn is open and nothing is
-            // waiting on its user. Reconciled after every event rather than
-            // armed and disarmed per case: the two flags are what the clock is
-            // a function of, and a fiber left over from a state that has
-            // passed would stop a session nobody is waiting on.
+            // A session is watched exactly while a turn is open and it is not
+            // waiting on its user. The watch is brought in line with the two
+            // flags after every event, instead of being started and stopped in
+            // each case above, so a fiber from an earlier state can never be
+            // left behind to stop a session that is not stuck.
             if (held.turnOpen && !held.parked) {
               held.lastEventAt = yield* Clock.currentTimeMillis;
               if (held.inactivity === undefined) {
@@ -286,8 +297,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
           if (event._tag === "session.exited") yield* releaseSession(event.sessionId);
           yield* sendFrame(frame);
-          // After the send, not before: a `shutdown` waiting on this deferred
-          // must see the frame already on the wire when it wakes.
+          // Resolve after the send, not before: when `shutdown` wakes up, the
+          // frame must already be on the wire.
           if (event._tag === "session.exited") {
             const waiting = stopping.get(event.sessionId);
             if (waiting !== undefined) {
@@ -299,9 +310,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
 
     /**
-     * Outside the sequence, because re-reading a checkout is a git call and
-     * every other session's events would wait behind it. The entry is read
-     * before the exit is sequenced, because that is what removes it.
+     * Sends an event. After a `session.exited` of a session with a workspace,
+     * it also reports the workspace. The report runs outside the sequence lock,
+     * because reading a checkout calls git and every other session's events
+     * would wait behind it. The workspace id is read before the exit is sent,
+     * because sending the exit removes the entry.
      */
     const forwardEvent = (event: ProviderEvent): Effect.Effect<void> => {
       const workspaceId =
@@ -313,7 +326,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
     };
 
-    /** What went wrong, in the session's own stream, where a reader of the thread sees it. */
+    /** Sends a `runtime.error` on the session's own stream, where the user reading the thread sees it. */
     const reportFailure = (sessionId: string, message: string): Effect.Effect<void> =>
       forwardEvent({
         _tag: "runtime.error",
@@ -321,14 +334,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         sessionId,
         at: now(),
         class: "unknown",
-        // Cut to what the protocol carries: an over-long message would be a
-        // frame that does not encode, and the event would be dropped.
+        // Truncate to the protocol's limit: a longer message would fail to
+        // encode, and the event would be dropped.
         message: message.slice(0, MAX_MESSAGE_LENGTH),
       });
 
     /**
-     * A session that never started still has to end: the controller holds it in
-     * `starting` until an exit says otherwise, and `crash` is the reason for an
+     * Reports a session that failed to start: sends the error, then a
+     * `session.exited` with reason `crash`. The controller keeps the session in
+     * `starting` until it receives an exit, and `crash` is the reason for an
      * end nobody asked for that leaves nothing to resume.
      */
     const reportDeath = (sessionId: string, message: string): Effect.Effect<void> =>
@@ -343,17 +357,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
 
     /**
-     * Starts one session, from the paths it resolves to the harness it asks
-     * for. The entry is held before the harness is asked for, and is removed
-     * on any cause, uninterruptibly. A session that exits while it still
-     * starts must find its own entry, and a session that never came up must
-     * leave no entry behind.
+     * Starts a session: resolves its context on this machine, then asks the
+     * adapter for the harness. Never fails; a failure is reported as the
+     * session's exit.
+     *
+     * The entry is added before the adapter is asked, and removed on any
+     * failure, in one uninterruptible block. A session that exits while it is
+     * still starting must find its entry, and a session that never came up
+     * must leave no entry behind.
      */
     const startSession = (frame: SessionStart, adapter: ProviderAdapter): Effect.Effect<void> => {
       // The controller linted this schema before it sent the frame, and the
-      // harness would be held to the schema for every turn of the session. A
-      // schema outside the subset means the two processes disagree about what
-      // a schema may say. Such a session must not start at all, because its
+      // harness would hold every turn of the session to it. A schema outside
+      // the subset means the controller and the runner disagree about which
+      // schemas are allowed. Such a session must not start at all, because its
       // results could not be trusted.
       const issues =
         frame.spec.outputSchema === undefined ? [] : lintOutputSchema(frame.spec.outputSchema);
@@ -373,8 +390,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                   scratch: resolved.scratch,
                   workspaceId: frame.spec.workspaceId,
                   inactivityMs: frame.spec.timeouts.inactivityMs,
-                  // Meaningless until the session is watched: `forward` sets
-                  // it alongside `inactivity`, on whatever event starts the watch.
+                  // Not used until the session is watched: `sendSequenced`
+                  // sets it together with `inactivity`, on the event that
+                  // starts the watch.
                   lastEventAt: 0,
                   inactivity: undefined,
                   turnOpen: false,
@@ -384,11 +402,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                   pendingStop: undefined,
                 };
                 live.set(frame.sessionId, held);
-                // A shutdown between `start`'s own fence and this line would
-                // never see this session - `listSessions` and `resolve` above
-                // both cross a suspension point - so it is asked here too:
-                // nobody asks the adapter for a harness about to be told to
-                // stop.
+                // Check `stopped` again. A shutdown that began after `start`
+                // checked it would not see this session, because
+                // `listSessions` and `resolveSessionContext` both yield to
+                // other fibers before this line. There is no point asking the
+                // adapter for a harness that is about to be stopped.
                 if (stopped) {
                   live.delete(frame.sessionId);
                   yield* tearDownSession(held);
@@ -400,9 +418,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                     reason: "runner_restart",
                   });
                 }
-                // Armed here, not on `session.started`: a spec's absolute
-                // deadline is this runner's own promise to end the session,
-                // not something the harness has to confirm first.
+                // Start the absolute timer here, not on `session.started`:
+                // the runner itself promises to end the session at the
+                // deadline, whether or not the harness confirms it started.
                 held.absolute = yield* Effect.forkDetach(
                   Effect.andThen(
                     Effect.sleep(Duration.millis(frame.spec.timeouts.absoluteMs)),
@@ -417,21 +435,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                   adapter.startSession(frame.sessionId, frame.spec, resolved.ctx),
                   () =>
                     Effect.gen(function* () {
-                      // By identity: a start after this one owns what is there
-                      // now, and this one has nothing left to take away.
+                      // Compare by identity: if a later start has replaced
+                      // the entry, it is not this start's to remove.
                       if (live.get(frame.sessionId) !== held) return;
                       live.delete(frame.sessionId);
                       yield* tearDownSession(held);
                     }),
                 );
-                // By identity, the same guard both timers use: a start after
-                // this one owns what is there now, and a pending stop of
-                // this one's is not that start's to apply.
+                // Compare by identity, as both timers do: if a later start
+                // has replaced the entry, this start must not mark it running
+                // or apply its own pending stop to it.
                 if (live.get(frame.sessionId) === held) {
                   held.phase = "running";
-                  // A stop asked for while the harness was still coming up -
-                  // by a shutdown, a timer, or the controller - has been
-                  // waiting on this since there was nowhere else to send it.
+                  // Apply a stop that was requested while the harness was
+                  // still starting, by a shutdown, a timer or the controller.
                   if (held.pendingStop !== undefined) {
                     yield* requestStop(frame.sessionId, held, held.pendingStop);
                   }
@@ -457,8 +474,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         forwardEvent,
       ),
 
-      // Asked of the adapters when the controller asks, not built when the
-      // connection was made.
+      // Ask the adapters each time the controller asks, instead of building
+      // the list when the connection was made.
       report: Effect.flatMap(
         Effect.forEach(adapters, (adapter) => adapter.listSessions),
         (held) => sendFrame({ _tag: "sessionsReport", sessions: held.flat() }),
@@ -466,21 +483,23 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
 
       start: (frame: SessionStart): Effect.Effect<void> =>
         Effect.gen(function* () {
-          // A start the controller had already put on the wire when a
-          // shutdown began: spawning a harness now is one nothing will ever
-          // stop, so it is dropped rather than run.
+          // The controller may have sent this start before it learned of the
+          // shutdown. A harness spawned now would never be stopped, so the
+          // start is dropped.
           if (stopped) return;
           const adapter = adapters.find((one) => one.providerId === frame.providerId);
           if (adapter === undefined) {
             return yield* reportDeath(frame.sessionId, describeMissingAdapter(frame.providerId));
           }
-          // The adapter is asked, never this table: a start for a session it
-          // still holds is one the controller re-issued after a reconnect,
-          // which spec 03 section 2.3 makes a no-op rather than an error.
+          // Ask the adapter, not the `live` table. A start for a session the
+          // adapter still holds was sent again by the controller after a
+          // reconnect, and is a no-op rather than an error (spec 03 section
+          // 2.3).
           const held = yield* adapter.listSessions;
           if (held.some((binding) => binding.sessionId === frame.sessionId)) return;
           // An exit published while the socket was down reached no relay, so
-          // an entry here can outlive its session. Stale, not worth keeping.
+          // the `live` entry can outlive its session. Remove such a stale
+          // entry before starting again.
           const stale = live.get(frame.sessionId);
           if (stale !== undefined) {
             live.delete(frame.sessionId);
@@ -490,16 +509,18 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         }),
 
       /**
-       * Delivered or reported lost, never queued: queued input is the
-       * controller's (spec 06 section 5). The answer carries what the adapter
-       * said the input did, because that is the only authority on it, and the
-       * controller is waiting on this frame under the row's own id.
+       * Delivers input to the session, or reports that it could not. The runner
+       * never queues input; queuing is the controller's job (spec 06 section
+       * 5). The `sessionInputResult` carries the adapter's report of what the
+       * input did, because only the adapter knows. The controller waits for it
+       * under the Queued Input row's id, `requestId`.
        */
       input: (frame: SessionInput): Effect.Effect<void> => {
         const sendInputResult = (result: Omit<SessionInputResult, "_tag" | "requestId">) =>
           sendFrame({ _tag: "sessionInputResult", requestId: frame.requestId, ...result });
-        // Both: the caller waiting on the answer needs the reason, and the
-        // session's own stream is where a reader of the thread sees it.
+        // Report the failure in both places: the controller waiting on the
+        // result needs the reason, and the user reading the thread sees the
+        // session's stream.
         const refuseInput = (message: string): Effect.Effect<void> =>
           Effect.flatMap(reportFailure(frame.sessionId, message), () =>
             sendInputResult({ ok: false, message: message.slice(0, MAX_MESSAGE_LENGTH) }),
@@ -520,9 +541,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         live.get(frame.sessionId)?.adapter.interrupt(frame.sessionId) ?? Effect.void,
 
       /**
-       * Idempotent, and the adapter's to judge: a request it is not holding -
-       * already answered, or never opened here - is a no-op, and the outcome
-       * arrives on the session's own stream rather than as an answer to this.
+       * Passes the user's decision on an open request to the adapter.
+       * Idempotent: the adapter ignores a request it does not hold, because it
+       * was already answered or never opened here. The outcome arrives as an
+       * event on the session's stream, not as a reply to this frame.
        */
       respond: (frame: SessionRespond): Effect.Effect<void> =>
         live
@@ -560,9 +582,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         Effect.forEach(waits, Deferred.await, { concurrency: "unbounded", discard: true }),
         Effect.sleep(SHUTDOWN_STOP_BOUND),
       );
-      // Whatever the race decided: a resolved one is already gone from here,
-      // and one that never came is not worth waiting on again, by this call
-      // or the next.
+      // Clear the entries however the race ended. A resolved entry is already
+      // gone, and an exit that never came is not worth waiting for again, by
+      // this call or a later one.
       for (const id of ids) stopping.delete(id);
     });
 

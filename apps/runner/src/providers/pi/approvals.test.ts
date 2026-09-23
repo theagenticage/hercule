@@ -1,19 +1,20 @@
 /**
- * The park: what the user is asked when the Hercule extension stops a tool call,
- * what is written back to pi for each answer, and what happens to a second
- * question asked while the first is still open. A request nobody can answer is
- * a session stuck with nothing said anywhere, so the absence of a response is
- * asserted as hard as its content.
+ * Tests parking on an approval: the request the user sees when the Hercule
+ * extension holds a tool call, the response written back to pi for each
+ * decision, and what happens to a second approval asked while the first is
+ * still open. A request nobody can answer leaves the session silently stuck,
+ * so the tests check that no response is sent too early as carefully as they
+ * check the response itself.
  *
- * Nothing vendor-supplied runs. The frames pushed in are pi 0.85.1's own:
- * `tool_execution_start` and the `extension_ui_request` that
- * `dist/modes/rpc/rpc-mode.js`'s `createDialogPromise` emits for
- * `ctx.ui.confirm`, answered by the `extension_ui_response` shapes
+ * No vendor code runs. The frames pushed in are pi 0.85.1's own:
+ * `tool_execution_start`, and the `extension_ui_request` that
+ * `createDialogPromise` in `dist/modes/rpc/rpc-mode.js` emits for
+ * `ctx.ui.confirm`. The responses use the `extension_ui_response` shapes
  * `dist/modes/rpc/rpc-types.d.ts` declares: `{ confirmed }` or `{ cancelled }`.
  *
- * pi's response frame has nowhere to put a reason, so a second question asked
- * while one is open is written back as the bare deny value and the reason is
- * said on the session's own stream, as a runtime warning.
+ * pi's response frame has no field for a reason. So a second approval asked
+ * while one is open gets a plain deny, and the reason goes on the session's
+ * stream as a runtime warning.
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -32,7 +33,7 @@ afterAll(cleanupHomes);
 
 const CALL = "call_0199e0e7";
 
-/** The id pi mints per dialog, which is the only handle the answer has. */
+/** The id pi gives the dialog. The response is matched to the dialog by this id alone. */
 const UI = "3f1a0c7e-0000-4000-8000-00000000abcd";
 
 const SECOND_UI = "3f1a0c7e-0000-4000-8000-00000000abce";
@@ -40,9 +41,9 @@ const SECOND_UI = "3f1a0c7e-0000-4000-8000-00000000abce";
 const SECOND_CALL = "call_0199e0e8";
 
 /**
- * What Hercule's own approval hook writes in the dialog: which call it is asking about.
- * pi's dialog carries no call of its own, and the card is rendered from the
- * call rather than from this, so the name and the id are all it says.
+ * Builds the dialog message Hercule's approval hook writes: the call it asks
+ * about. pi's dialog does not include the call, and the card is built from the
+ * call itself, so the message holds only the call's id and tool name.
  */
 const buildDialogMessage = (toolCallId: string, toolName: string): string =>
   JSON.stringify({ toolCallId, toolName });
@@ -51,7 +52,7 @@ const COMMAND = "rm -rf build && echo rebuilt";
 
 type DrivenAdapter = Awaited<ReturnType<typeof startBusySession>>;
 
-/** A turn stopped on a call the extension will not run unasked. */
+/** Starts a turn and pushes a tool call plus the approval dialog that holds it. */
 const parkOnTool = async (
   toolName: string,
   args: Readonly<Record<string, unknown>>,
@@ -68,7 +69,7 @@ const parkOnTool = async (
   return run;
 };
 
-/** A turn stopped on a shell command, which is what most of this file drives. */
+/** Parks a turn on a shell command, the case most tests in this file use. */
 const parkOnCommand = (): Promise<DrivenAdapter> => parkOnTool("bash", { command: COMMAND });
 
 const awaitOpenedRequest = async (
@@ -78,7 +79,7 @@ const awaitOpenedRequest = async (
   return filterByTag(run.seen, "request.opened")[0]!;
 };
 
-/** What the adapter wrote back to pi for one dialog, once it has written it. */
+/** Waits for the adapter's response to one dialog, and returns it. */
 const awaitAnswer = async (run: DrivenAdapter, id: string): Promise<Record<string, unknown>> => {
   await waitUntil(`answered dialog ${id}`, () =>
     listSentCommands(run.sent, "extension_ui_response").some((written) => written["id"] === id),
@@ -96,24 +97,26 @@ const awaitResolvedRequest = async (
 };
 
 /**
- * What a held call is asked as, by tool. The approval hook decides whether to hold a
- * call; what the card over it is called follows from what the call does, so a
- * shell is a command, a file written or edited is a change, and anything the
- * adapter does not recognise is the tool by its name.
+ * The request kind a held call opens, by tool. The approval hook decides
+ * whether to hold a call; the kind follows from what the call does:
+ *
+ * - a shell is a command approval;
+ * - writing or editing a file is a file change approval;
+ * - any other tool is a tool approval, by name.
  */
-describe("what a held call is asked as", () => {
+describe("the request kind of a held call", () => {
   const CARDS: ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>, string]> = [
     ["bash", { command: COMMAND }, "command_approval"],
-    // The same shell on another machine is the same question to the user.
+    // PowerShell is a shell like bash, so the user is asked the same way.
     ["powershell", { command: COMMAND }, "command_approval"],
     ["write", { path: "src/new.ts" }, "file_change_approval"],
     ["edit", { path: "src/new.ts" }, "file_change_approval"],
-    // An MCP tool, or one a later pi adds: named, never guessed at.
+    // An MCP tool, or one a later pi adds: shown by name, never guessed at.
     ["mcp__jira__create", { summary: "ship it" }, "tool_approval"],
   ];
 
   for (const [toolName, args, kind] of CARDS) {
-    it(`asks about ${toolName} as a ${kind}`, async () => {
+    it(`opens a ${kind} for ${toolName}`, async () => {
       const run = await parkOnTool(toolName, args);
 
       expect((await awaitOpenedRequest(run)).request.kind).toBe(kind);
@@ -121,8 +124,8 @@ describe("what a held call is asked as", () => {
   }
 });
 
-describe("what a parked shell command asks the user", () => {
-  it("docks a command approval on the item the command started", async () => {
+describe("the request for a parked shell command", () => {
+  it("docks a command approval on the command's item", async () => {
     const run = await parkOnCommand();
 
     const opened = await awaitOpenedRequest(run);
@@ -131,26 +134,26 @@ describe("what a parked shell command asks the user", () => {
     );
     expect(opened.request.kind).toBe("command_approval");
     expect(opened.request.requestId).not.toBe("");
-    // The card overlays the command it is about, so it carries that item's id.
+    // The card is shown on the command it is about, so it carries that item's id.
     expect(opened.request.itemId).toBe(item?.itemId);
     expect(opened.request.decisions).toEqual(["allow", "deny", "cancel"]);
     expect(opened.request.detail).toEqual({ command: COMMAND });
   });
 
-  it("says nothing to pi until the user answers", async () => {
+  it("sends pi nothing until the user answers", async () => {
     const run = await parkOnCommand();
     await awaitOpenedRequest(run);
 
     await settle();
 
-    // pi is holding the tool call open; an answer written early runs it.
+    // pi is holding the tool call; a response sent early would run it.
     expect(listSentCommands(run.sent, "extension_ui_response")).toEqual([]);
     expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
   });
 });
 
-describe("what each answer does to the parked session", () => {
-  it("lets the command run on an allow, and reports the park over", async () => {
+describe("what each decision does to the parked session", () => {
+  it("lets the command run on an allow, and reports the request resolved", async () => {
     const run = await parkOnCommand();
     const opened = await awaitOpenedRequest(run);
 
@@ -166,7 +169,7 @@ describe("what each answer does to the parked session", () => {
     expect(resolved.decision).toBe("allow");
   });
 
-  it("blocks the command on a deny, with the reason pi reports on the item", async () => {
+  it("blocks the command on a deny, and reports the item as declined with pi's reason", async () => {
     const reason = "Denied by the user in Hercule";
     const run = await parkOnCommand();
     const opened = await awaitOpenedRequest(run);
@@ -193,12 +196,12 @@ describe("what each answer does to the parked session", () => {
       (event) => event.itemId === opened.request.itemId,
     )!;
     expect(completed.status).toBe("declined");
-    // Why it did not run has to reach the transcript; a bare failure reads as
-    // a broken command rather than a decision the user made.
+    // The reason must reach the transcript. A plain failure would look like a
+    // broken command, not a decision the user made.
     expect(JSON.stringify(run.seen)).toContain(reason);
   });
 
-  it("refuses the command and ends the turn on a cancel", async () => {
+  it("blocks the command and ends the turn on a cancel", async () => {
     const run = await parkOnCommand();
     const opened = await awaitOpenedRequest(run);
 
@@ -209,17 +212,17 @@ describe("what each answer does to the parked session", () => {
     const written = await awaitAnswer(run, UI);
     expect(written["cancelled"]).toBe(true);
     expect((await awaitResolvedRequest(run)).decision).toBe("cancel");
-    // A cancel is not a no to one command: pi reads a refusal as one tool it
-    // may not run and carries on with the rest of what it planned, so the turn
-    // has to go with it.
+    // A cancel is more than a no to one command. pi treats a blocked call as
+    // one tool it may not run and carries on with the rest of its plan, so the
+    // turn must end too.
     await waitUntil("stopped the turn", () => listSentCommands(run.sent, "abort").length === 1);
     run.child.push({ type: "agent_end", messages: [{ role: "assistant", stopReason: "aborted" }] });
     run.child.push({ type: "agent_settled" });
 
     await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
     expect(filterByTag(run.seen, "turn.completed")[0]?.state).toBe("interrupted");
-    // The park ended once. A turn that ended a second time over the same
-    // question would leave a card reported as resolved twice.
+    // The request is resolved once. Ending the turn must not resolve the same
+    // request a second time.
     expect(filterByTag(run.seen, "request.resolved")).toHaveLength(1);
   });
 
@@ -230,7 +233,7 @@ describe("what each answer does to the parked session", () => {
     await Effect.runPromise(run.adapter.interrupt(SESSION));
 
     const written = await awaitAnswer(run, UI);
-    // A `cancelled` is the only answer pi reads as "no decision was made".
+    // `cancelled` is the only response pi reads as "no decision was made".
     expect(written["cancelled"]).toBe(true);
     const resolved = await awaitResolvedRequest(run);
     expect(resolved.requestId).toBe(opened.request.requestId);
@@ -240,13 +243,13 @@ describe("what each answer does to the parked session", () => {
     run.child.push({ type: "agent_settled" });
 
     await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
-    // The turn ending does not end the park a second time.
+    // Ending the turn does not resolve the request a second time.
     expect(filterByTag(run.seen, "request.resolved")).toHaveLength(1);
   });
 });
 
-describe("a second question asked while one is open", () => {
-  it("refuses it at once and docks nothing", async () => {
+describe("a second approval asked while one is open", () => {
+  it("denies it at once and docks no second card", async () => {
     const run = await parkOnCommand();
     await awaitOpenedRequest(run);
 
@@ -261,12 +264,12 @@ describe("a second question asked while one is open", () => {
     const written = await awaitAnswer(run, SECOND_UI);
     expect(written["confirmed"]).toBe(false);
     await settle();
-    // One card is docked on the composer; a second would have nowhere to go.
+    // The composer holds one docked card; a second would have nowhere to go.
     expect(filterByTag(run.seen, "request.opened")).toHaveLength(1);
     expect(listSentCommands(run.sent, "extension_ui_response")).toHaveLength(1);
   });
 
-  it("says why it refused", async () => {
+  it("warns about why it was denied", async () => {
     const run = await parkOnCommand();
     await awaitOpenedRequest(run);
 
@@ -282,6 +285,6 @@ describe("a second question asked while one is open", () => {
     const said = filterByTag(run.seen, "runtime.warning")
       .map((event) => event.message)
       .join(" ");
-    expect(said.toLowerCase()).toContain("one at a time");
+    expect(said.toLowerCase()).toContain("one approval at a time");
   });
 });

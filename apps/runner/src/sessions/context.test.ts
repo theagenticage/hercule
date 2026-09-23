@@ -1,9 +1,11 @@
 /**
- * What a session gets on this machine. Every assertion here is a leak the spec
- * names: a cwd the harness would read instruction files out of, a config
- * directory shared with another instance or with the user's own, and an
- * environment where instance config could take `HERCULE_SESSION` away from the
- * `hercule` CLI the session calls.
+ * Tests what a session gets on this machine. Each assertion guards against a
+ * leak the spec names:
+ *
+ * - a cwd the harness would read instruction files out of;
+ * - a config directory shared with another instance, or with the user's own;
+ * - an environment where instance config could take `HERCULE_SESSION` away
+ *   from the `hercule` CLI the session calls.
  */
 import {
   existsSync,
@@ -83,7 +85,7 @@ const buildSessionStart = (overrides: Partial<SessionStart> = {}): SessionStart 
 const resolveSync = (frame: SessionStart, machine: Machine) =>
   Effect.runSync(Effect.result(resolveSessionContext(frame, machine, "claude")));
 
-/** The same, for the cases where resolving a workspace reaches real git. */
+/** Like `resolveSync`, for cases where resolving a workspace calls real git, which is async. */
 const resolveAsync = (frame: SessionStart, machine: Machine) =>
   Effect.runPromise(Effect.result(resolveSessionContext(frame, machine, "claude")));
 
@@ -136,15 +138,15 @@ describe("what a workspace-less session runs in", () => {
 
     resolveSync(buildSessionStart(), machine);
 
-    // Empty is the whole property: a file left here is one the harness reads.
+    // The directory must be empty: the harness would read any file left here.
     expect(readdirSync(scratch)).toEqual([]);
   });
 
-  it("takes the harness this machine probed", () => {
+  it("uses the harness path the probe found, and none when it found none", () => {
     const outcome = resolveSync(buildSessionStart(), buildMachine({ binaryOf: () => undefined }));
 
-    // Not a guess at a path: a machine without the harness is the adapter's to
-    // refuse, by name.
+    // No guessed path: when the machine has no harness, it is up to the
+    // adapter to fail the start.
     expect(outcome._tag === "Success" ? outcome.success.ctx.binary : "").toBeUndefined();
   });
 });
@@ -174,14 +176,14 @@ describe("the environment a session runs with", () => {
     expect(env["HOME"]).toBe("/home/somebody");
   });
 
-  it("tells the session where the API is and that it is one", () => {
+  it("tells the session the API URL, its token, and that it runs as a session", () => {
     const env = resolveEnv(buildSessionStart(), buildMachine());
 
     expect(env["HERCULE_API_URL"]).toBe("https://controller.example:4938");
-    // The `hercule` CLI refuses the user's stored key under this (spec 15 section 2).
+    // With this set, the `hercule` CLI does not use the user's stored key (spec 15 section 2).
     expect(env["HERCULE_SESSION"]).toBe("1");
-    // The credential the session calls Hercule with: the very token the frame
-    // carried, never one the runner invented (spec 06 section 9.3).
+    // The session calls Hercule with exactly the token the frame carried,
+    // never one the runner made up (spec 06 section 9.3).
     expect(env["HERCULE_TOKEN"]).toBe("a-session-token");
   });
 
@@ -195,17 +197,17 @@ describe("the environment a session runs with", () => {
     expect(env["PATH"]).toBe(`${machine.binDir}:/usr/bin`);
   });
 
-  it("is the bin directory alone where the machine gave the runner no PATH", () => {
+  it("sets PATH to the bin directory alone when the machine gave the runner no PATH", () => {
     const machine = buildMachine({ baseEnv: { HOME: "/home/somebody" } });
 
     const env = resolveEnv(buildSessionStart(), machine);
 
-    // Never a stray colon: an empty entry on PATH is the current directory,
-    // which is a scratch directory the session writes into.
+    // No trailing colon: an empty entry in PATH means the current directory,
+    // which is the scratch directory the session writes into.
     expect(env["PATH"]).toBe(machine.binDir);
   });
 
-  it("does not let instance config take those away", () => {
+  it("does not let instance config override Hercule's variables or PATH", () => {
     const machine = buildMachine();
     const env = resolveEnv(
       buildSessionStart({
@@ -241,8 +243,8 @@ describe("the environment a session runs with", () => {
     expect(env["HOME"]).toBe("/home/somebody");
   });
 
-  it("ignores config that is not an environment rather than refusing to start", () => {
-    // No shipped provider declares one, so what arrives is `{}` today.
+  it("ignores instance config that is not a string-valued env, instead of failing the start", () => {
+    // No shipped provider declares an env field yet, so config arrives as `{}` today.
     const env = resolveEnv(buildSessionStart({ config: { env: { PORT: 8080 } } }), buildMachine());
 
     expect(env["PORT"]).toBeUndefined();
@@ -254,7 +256,7 @@ describe("the environment a session runs with", () => {
 });
 
 describe("a session the runner cannot place", () => {
-  it("refuses a workspace this machine does not hold, by id", async () => {
+  it("fails for a workspace this machine does not hold, and names the workspace id", async () => {
     const machine = buildMachine();
     const workspaceId = "0199e0e7-0000-7000-8000-00000000000b";
 
@@ -329,7 +331,7 @@ describe("a session that has a workspace", () => {
     expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
   });
 
-  it("refuses the session with git's own words when the branch cannot be switched to", async () => {
+  it("fails with git's error message when the branch cannot be switched to", async () => {
     const remote = makeRemote();
     const machine = buildMachine();
     const workspaceId = createId();
@@ -360,7 +362,7 @@ describe("a session that has a workspace", () => {
 });
 
 describe("the git credential environment a session runs with", () => {
-  /** The `GIT_CONFIG_*` triple, read back as the ordered pairs git would see. */
+  /** Reads the `GIT_CONFIG_*` variables back as the ordered key-value pairs git would see. */
   const readGitConfig = (
     env: Record<string, string | undefined>,
   ): ReadonlyArray<readonly [string | undefined, string | undefined]> =>
@@ -379,13 +381,15 @@ describe("the git credential environment a session runs with", () => {
     // The helper authenticates as this session, and nothing else.
     expect(env["HERCULE_TOKEN"]).toBe("the-session-token");
     const pairs = readGitConfig(env);
-    // The empty entry comes first: an inherited helper would otherwise answer
-    // with the machine owner's credentials, for any repository.
+    // The empty entry comes first and clears inherited helpers. Otherwise an
+    // inherited helper would supply the machine owner's credentials, for any
+    // repository.
     expect(pairs[0]).toEqual(["credential.helper", ""]);
     expect(pairs[1]?.[0]).toBe("credential.helper");
     expect(pairs[1]?.[1] ?? "").toContain("git-credential");
     expect((pairs[1]?.[1] ?? "").startsWith("/")).toBe(true);
-    // Without it the token of one repository would be sent to another host's.
+    // Without it the helper does not see the repository path, and one
+    // repository's token could be sent for another.
     expect(pairs).toContainEqual(["credential.useHttpPath", "true"]);
     expect(pairs.length).toBe(Number(env["GIT_CONFIG_COUNT"]));
   });
@@ -431,11 +435,11 @@ describe("the git credential environment a session runs with", () => {
     );
     const env = outcome._tag === "Success" ? { ...outcome.success.ctx.env } : {};
 
-    // Either of these would answer for the agent, with the machine owner's own
-    // credentials, for any repository.
+    // Either of these would answer credential prompts for the agent with the
+    // machine owner's credentials, for any repository.
     expect(env["GIT_ASKPASS"]).toBeUndefined();
     expect(env["SSH_ASKPASS"]).toBeUndefined();
-    // And this would take the helper away by pointing git at another file.
+    // And this would point git at another config file, which could replace the helper.
     expect(env["GIT_CONFIG_GLOBAL"]).toBeUndefined();
     // The agent still reaches its ssh keys and its home.
     expect(env["SSH_AUTH_SOCK"]).toBe("/private/tmp/ssh-agent.socket");
@@ -462,7 +466,7 @@ describe("the git credential environment a session runs with", () => {
 });
 
 describe("where the session's token is written", () => {
-  /** Every regular file under a directory, symlinks left unread. */
+  /** Lists every regular file under a directory, skipping symlinks. */
   const listFiles = (dir: string): ReadonlyArray<string> =>
     !existsSync(dir)
       ? []

@@ -1,17 +1,20 @@
 /**
- * The app-server's notifications turned into the one normalized taxonomy (spec
- * 06 section 6): one decoded frame plus a small mutable per-session state in,
- * events out. It reads no process, no clock but the wall one, and no socket.
+ * Converts the app-server's notifications into normalized provider events
+ * (spec 06 section 6). It takes one decoded frame and a small mutable
+ * per-session state, and returns events. It uses no process, no socket, and
+ * no clock other than the wall clock.
  *
- * The state is a running position rather than a value. `turn/started` carries
- * no model at this release, so the model the adapter opened the turn under is
- * held here; and one reasoning item arrives on two channels, of which only one
- * may be streamed (spec 06 section 6.4).
+ * The state is mutable because it tracks progress through the session:
  *
- * A notification this build has no mapping for produces nothing: the app-server
- * grows methods between releases and a live session must survive one it has not
- * heard of (spec 06 section 10.2). An item type it has no kind for is reported
- * as `unknown`, with the frame on `raw`, so nothing is lost.
+ * - `turn/started` has no model at this release, so the state holds the model
+ *   the adapter opened the turn with.
+ * - One reasoning item arrives on two channels, and only one of them may be
+ *   streamed (spec 06 section 6.4).
+ *
+ * A notification this build does not handle produces no events: the
+ * app-server adds methods between releases, and a live session must survive
+ * one it does not know (spec 06 section 10.2). An item type with no mapping is
+ * reported as `unknown`, with the frame in `raw`, so nothing is lost.
  */
 import type * as Schema from "effect/Schema";
 import {
@@ -41,28 +44,28 @@ import type {
   TurnStartedNotification,
 } from "./types";
 
-/** The one channel every raw payload from this adapter is filed under. */
+/** The channel name every raw payload from this adapter is filed under. */
 const CODEX_NOTIFICATION = "codex.app-server.notification";
 
-/** Which of an item's two reasoning streams this session settled on. */
+/** Which of an item's two reasoning streams is being streamed. */
 type Channel = "summary" | "raw";
 
 export interface Normalizing {
   readonly sessionId: string;
-  /** The native thread, named on every event so a surface can join the two. */
+  /** The native thread id, included on every event so a surface can link the two. */
   readonly threadId: string;
   /**
-   * The model the adapter last opened a turn under. `turn/started` carries
-   * none, and the adapter is the only party that knows which one it asked for.
+   * The model the adapter last opened a turn with. `turn/started` does not
+   * include it, and only the adapter knows which model it asked for.
    */
   model: string | undefined;
   readonly reasoning: Map<string, Channel>;
-  /** The schema every turn of this session answers under, if there is one. */
+  /** The schema every turn of this session must answer with, if there is one. */
   readonly outputSchema: OutputSchema | undefined;
   /**
-   * The last item the running turn completed. The answer is read from this
-   * item: Codex constrains the turn's final assistant message, so the answer
-   * is that message, and only if the turn ended on it.
+   * The last item the running turn completed. The structured answer is read
+   * from this item: Codex constrains the turn's final assistant message, so
+   * the answer is that message, and only if the turn ended on it.
    */
   lastCompletedItem: ThreadItem | undefined;
 }
@@ -83,16 +86,16 @@ export const buildNormalizingState = (
 const buildSessionEnvelope = (state: Normalizing): Envelope =>
   buildEnvelope(state.sessionId, { threadId: state.threadId });
 
-/** The notification the event was read off, under this adapter's channel. */
+/** Builds the `raw` field: the notification the event came from, under this adapter's channel. */
 const buildNotificationRaw = (payload: unknown): ReturnType<typeof buildRaw> =>
   buildRaw(CODEX_NOTIFICATION, payload);
 
 /**
- * Codex's item vocabulary in the taxonomy's; everything else is `unknown`.
- * `userMessage` is `null` rather than `user_message`: it is Codex echoing back
- * what Hercule sent, and the adapter already reported that input itself, with
- * what it did to the turn. Two items for one message would read as the user
- * having said it twice.
+ * Maps each Codex item type to a normalized item kind; unmapped types are
+ * `unknown`. `userMessage` maps to `null` (no event) rather than
+ * `user_message`: it is Codex echoing back what Hercule sent, and the adapter
+ * has already reported that input, along with whether it steered the turn.
+ * Two items for one message would look like the user sent it twice.
  */
 const ITEM_KINDS: Readonly<Record<ThreadItem["type"], ItemKind | null>> = {
   userMessage: null,
@@ -118,15 +121,14 @@ const ITEM_KINDS: Readonly<Record<ThreadItem["type"], ItemKind | null>> = {
 
 const classifyItem = (item: ThreadItem): ItemKind | null => {
   const known: ItemKind | null | undefined = ITEM_KINDS[item.type];
-  // An item type this release did not have is still an item.
+  // An item type added after this release is still reported, as `unknown`.
   return known === undefined ? "unknown" : known;
 };
 
 /**
- * What a file change is about, as the protocol carries it. A change the harness
- * named no file in has nothing for a reader to see, and an empty path is a
- * frame nobody can decode, so it is left out: the adapter's approval card and
- * the item row read the same list.
+ * Returns the paths a file change item touches, truncated for the protocol.
+ * An empty path is left out, because it shows the reader nothing and the
+ * protocol rejects it. The approval card and the item row both use this list.
  */
 export const readChangedPaths = (
   item: Extract<ThreadItem, { type: "fileChange" }>,
@@ -134,10 +136,10 @@ export const readChangedPaths = (
   item.changes.flatMap((change) => (change.path === "" ? [] : [truncateFact(change.path)]));
 
 /**
- * The one field of an item a reader wants in a row: what the command ran, what
- * the patch touched, what the tool was called. Kept to that - `raw` holds the
- * rest, and a vendor-shaped detail would make what the user reads a function of
- * which harness answered.
+ * Builds an item's `detail`: the one thing a reader wants to see in a row,
+ * such as the command that ran, the file a patch touched, or the tool that was
+ * called. Everything else stays in `raw`. A detail shaped like Codex's own
+ * data would make the row look different depending on the harness.
  */
 const buildDetail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
   switch (item.type) {
@@ -147,8 +149,8 @@ const buildDetail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
       const paths = readChangedPaths(item);
       const path = paths[0];
       if (path === undefined) return {};
-      // The first path is what a one-line row shows; the rest are there for a
-      // reader that opens the item.
+      // A one-line row shows the first path; the full list is for a reader
+      // who opens the item.
       return { detail: paths.length === 1 ? { path } : { path, paths } };
     }
     case "mcpToolCall":
@@ -163,15 +165,16 @@ const buildDetail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
       return { detail: { name: truncateFact(item.tool) } };
     default:
       // A plan, a reasoning block, an assistant message, a compaction and an
-      // unmapped item are all read off their own text or their raw payload.
+      // unmapped item are shown from their own text or their raw payload.
       return {};
   }
 };
 
 /**
- * Only a command and a patch carry a status, and only they can be refused. A
- * refusal reported as a failure would show the agent as broken rather than as
- * told no.
+ * Returns an item's final status. Only commands and patches have a status, and
+ * only they can be declined. A declined item is reported as `declined`, not
+ * `failed`: reporting it as a failure would make the agent look broken when
+ * the user just said no.
  */
 const readItemStatus = (item: ThreadItem): ItemStatus => {
   const status = "status" in item ? item.status : undefined;
@@ -179,7 +182,10 @@ const readItemStatus = (item: ThreadItem): ItemStatus => {
   return status === "failed" ? "failed" : "completed";
 };
 
-/** A turn that has not ended is not a boundary: reporting one would close it. */
+/**
+ * The end states a turn can complete in. A turn that is still in progress is
+ * not listed, because reporting it would mark the turn as ended.
+ */
 const TURN_STATES: Readonly<Record<string, TurnState>> = {
   completed: "completed",
   failed: "failed",
@@ -212,9 +218,11 @@ const buildContentDelta = (
 ];
 
 /**
- * Raw reasoning wins, and it wins once: the summary is the same thinking said
- * twice, so streaming both would double the item's text and there is no third
- * stream kind to put the other on (spec 06 section 6.4).
+ * Builds a reasoning delta, or nothing if the delta is on the channel not
+ * being streamed. Raw reasoning is preferred: once an item has sent raw
+ * reasoning, its summary deltas are dropped. The summary repeats the same
+ * reasoning, so streaming both would double the item's text, and there is no
+ * separate stream kind for summaries (spec 06 section 6.4).
  */
 const buildReasoningDelta = (
   state: Normalizing,
@@ -234,10 +242,9 @@ const toUsage = (usage: ThreadTokenUsageUpdatedNotification["tokenUsage"]): Usag
 });
 
 /**
- * The class Codex named, in the shape it named it in: a bare string for the
- * plain variants, and the variant's own key where it carries detail. An error
- * with no class is still an error, so it is reported as `unknown` rather than
- * dropped.
+ * Returns the error class from Codex's error info. The plain variants are a
+ * bare string; a variant with details is an object whose only key is the
+ * class. An error with no class is still reported, as `unknown`.
  */
 const classifyError = (info: CodexErrorInfo | null | undefined): string => {
   if (typeof info === "string") return truncateFact(info);
@@ -248,8 +255,8 @@ const classifyError = (info: CodexErrorInfo | null | undefined): string => {
 const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<ProviderEvent> => {
   const turn = params.turnId === "" ? {} : { turnId: truncateFact(params.turnId) };
   const failure = classifyError(params.error.codexErrorInfo);
-  // Codex is already retrying it, so a failure here would be a turn reported as
-  // over while it is still running.
+  // Codex is already retrying, so reporting an error here would mark the turn
+  // as failed while it is still running.
   if (params.willRetry) {
     return [
       {
@@ -257,9 +264,7 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
         ...buildSessionEnvelope(state),
         ...buildNotificationRaw(params),
         ...turn,
-        message: truncateMessage(
-          `${failure}: ${params.error.message}, which Codex is retrying itself`,
-        ),
+        message: truncateMessage(`${failure}: ${params.error.message} (Codex is retrying)`),
       },
     ];
   }
@@ -276,12 +281,12 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
 };
 
 /**
- * Reads what the turn answered under the schema. Codex constrains the final
- * assistant message and nothing else, so the answer is the text of the item
- * the turn ended on, parsed exactly as it was written. A message wrapped in
- * prose or in a code fence is not the constrained output the schema asked for.
- * If this adapter read an answer out of such a message, it would guess at an
- * answer nobody gave.
+ * Reads the turn's structured answer. Codex constrains only the final
+ * assistant message, so the answer is the text of the item the turn ended on,
+ * parsed as JSON exactly as written. Returns `missing` with a reason when the
+ * last item is not an agent message or its text is not JSON. A message wrapped
+ * in prose or a code fence is not the constrained output, and extracting JSON
+ * from it would be guessing at an answer the model never gave.
  */
 const readHarnessAnswer = (last: ThreadItem | undefined): HarnessAnswer => {
   if (last?.type !== "agentMessage") {
@@ -294,17 +299,22 @@ const readHarnessAnswer = (last: ThreadItem | undefined): HarnessAnswer => {
   }
 };
 
-/** The API's own code for a schema it will not constrain the answer on. */
+/** The API's error code for a schema it cannot use to constrain the answer. */
 const INVALID_SCHEMA = "invalid_json_schema";
 
 /**
- * The name Codex gives the response format that carries the schema. The
- * refusal's sentence names it. This name is read only where the code cannot be
- * read: a sentence is prose the API may reword, and a code is a contract.
+ * The name Codex gives the response format that carries the schema. The API's
+ * error message includes it. The message is checked for this name only when
+ * no error code can be parsed, because the API may reword a message at any
+ * time, while an error code is part of its contract.
  */
 const OUTPUT_SCHEMA_FORMAT_NAME = "codex_output_schema";
 
-/** Parses the error body Codex passes through whole, if the message is one. */
+/**
+ * Parses `message` as an API error body and returns its `error` object.
+ * Codex passes the API's error body through unchanged. Returns an empty object
+ * if the message is not such a body.
+ */
 const parseErrorBody = (
   message: string,
 ): { readonly code?: unknown; readonly message?: unknown } => {
@@ -318,15 +328,18 @@ const parseErrorBody = (
 };
 
 /**
- * Reads what the harness said, where the harness failed on the schema itself.
+ * Returns the error message if the turn failed because of the schema itself,
+ * or `undefined` if it failed for another reason.
  *
- * The API refuses a schema it cannot enforce before it samples the model.
- * Codex then fails the turn and puts the whole API error body in
- * `turn.error.message`. The body holds an error code and a sentence. The error
- * code `invalid_json_schema` tells this function that the failure is about the
- * schema. The sentence is what this function reports. If the body is not JSON
- * but names the response format `codex_output_schema`, the failure is still
- * about the schema, and the whole message is reported.
+ * The API rejects a schema it cannot enforce before it runs the model. Codex
+ * then fails the turn and puts the whole API error body in
+ * `turn.error.message`. The body holds an error code and a message:
+ *
+ * - If the code is `invalid_json_schema`, the failure is about the schema, and
+ *   the body's message is returned.
+ * - If the body is not JSON but mentions the response format
+ *   `codex_output_schema`, the failure is still about the schema, and the whole
+ *   message is returned.
  */
 const readSchemaRefusal = (turn: TurnCompletedNotification["turn"]): string | undefined => {
   const message = turn.error?.message;
@@ -339,11 +352,14 @@ const readSchemaRefusal = (turn: TurnCompletedNotification["turn"]): string | un
 };
 
 /**
- * Judges the turn: the verdict it carries about the schema, if it carries one.
- * A turn that ran to its end is judged on what it answered. A turn the harness
- * failed over the schema is a schema failure, in the harness's own words.
- * Every other failure and every interrupt is about the turn itself, and a
- * schema verdict there would claim that an answer was judged and rejected.
+ * Returns the turn's structured result, or `undefined` if the session has no
+ * schema or the turn has nothing to judge:
+ *
+ * - A completed turn is judged on its answer.
+ * - A turn that failed because of the schema is a schema failure, with
+ *   Codex's error message as the reason.
+ * - Any other failure, and any interrupt, gets no result. A result there would
+ *   claim that an answer was checked and rejected.
  */
 const judgeTurn = (
   state: Normalizing,
@@ -372,9 +388,9 @@ export const normalize = (
   switch (frame.method) {
     case "turn/started": {
       const params = frame.params as TurnStartedNotification;
-      // Every turn answers for itself. A completion this build could not read,
-      // or a completion that never arrived, must not leave the previous turn's
-      // item in place as the answer this turn is judged on.
+      // Each turn is judged on its own answer. If the previous turn's
+      // completion never arrived or could not be read, its last item must not
+      // be used as this turn's answer.
       state.lastCompletedItem = undefined;
       return [
         {
@@ -391,8 +407,8 @@ export const normalize = (
       const ended = TURN_STATES[params.turn.status];
       if (ended === undefined) return [];
       const structuredResult = judgeTurn(state, params.turn, ended);
-      // The items of a turn that is over cannot stream any more, and their
-      // channels are what the map holds.
+      // The items of an ended turn cannot stream any more, so their reasoning
+      // channels are no longer needed.
       state.reasoning.clear();
       state.lastCompletedItem = undefined;
       return [
@@ -424,9 +440,8 @@ export const normalize = (
     }
     case "item/completed": {
       const params = frame.params as ItemCompletedNotification;
-      // How far the turn has come, recorded before anything is decided about
-      // the item. The echo of the user's own message is also an item the turn
-      // completed, and a turn that ends on that echo ended with no answer.
+      // Recorded before the item is classified, because the echo of the user's
+      // message also counts: a turn that ends on that echo has no answer.
       state.lastCompletedItem = params.item;
       const kind = classifyItem(params.item);
       if (kind === null) return [];
@@ -450,8 +465,8 @@ export const normalize = (
           _tag: "session.usage.updated",
           ...buildSessionEnvelope(state),
           ...buildNotificationRaw(params),
-          // The cumulative breakdown, not the last turn's: a snapshot taken
-          // from `last` would make the session look like it never grew.
+          // The session's running total, not the last turn's usage: a snapshot
+          // taken from `last` would make the session look like it never grew.
           usage: toUsage(params.tokenUsage),
         },
       ];

@@ -1,17 +1,19 @@
 /**
- * That a real Codex session answers its output schema, and says so when no
- * value can satisfy it. Codex constrains the turn's final assistant message
- * itself; what is proven here is that the runner's verdict follows - an `ok`
- * whose value really fits, and a `schema-failure` that arrives as an ended turn
- * rather than as a hang.
+ * Checks that a real Codex session answers with its output schema, and
+ * reports a schema failure when no value can satisfy the schema. Codex itself
+ * constrains the turn's final assistant message; these tests check that the
+ * runner's result matches: `ok` with a value that really fits, and a
+ * `schema-failure` that arrives as an ended turn rather than a hang.
  *
- * Opt-in twice over, because the alternative is that `pnpm test` on any
- * developer's machine quietly spends their subscription:
- * `HERCULE_LIVE_SESSION_TEST` asks for the run, and `CODEX_HOME` names the
- * directory the login is borrowed from - the developer's own Codex home is
- * never looked for, let alone read. The login is copied into a throwaway
- * instance home rather than used where it lies, because that home is the one
- * the session runs under.
+ * The suite needs two opt-ins, so that `pnpm test` never quietly spends a
+ * developer's subscription:
+ *
+ * - `HERCULE_LIVE_SESSION_TEST` must be set.
+ * - `CODEX_HOME` must name the directory to copy the login from. The
+ *   developer's own Codex home is never searched for or read.
+ *
+ * The login is copied into a throwaway instance home, because the session
+ * runs under that home.
  */
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,7 +35,7 @@ const binary = Bun.which("codex") ?? undefined;
 
 const wanted = process.env["HERCULE_LIVE_SESSION_TEST"] !== undefined;
 
-/** The directory the login is borrowed from; unset means this suite skips. */
+/** The directory the login is copied from. If it is unset, this suite is skipped. */
 const borrowed = process.env["CODEX_HOME"];
 
 const scratch: Array<string> = [];
@@ -49,9 +51,9 @@ const createScratchDir = (label: string): string => {
 };
 
 /**
- * An instance home with the borrowed login in it. The adapter points
- * `CODEX_HOME` at the home's own `codex/` directory, so that is where the
- * credential has to be for the session to be logged in at all.
+ * Creates an instance home with the copied login in it. The adapter points
+ * `CODEX_HOME` at the home's own `codex/` directory, so the credential must be
+ * there for the session to be logged in.
  */
 const createHomeWithLogin = (): string => {
   const home = createScratchDir("home");
@@ -77,9 +79,9 @@ const ready =
   existsSync(join(borrowed, "auth.json"));
 
 /**
- * What the borrowed login can do, asked the way the runner asks it: whether it
- * is a login at all, and which model this account gets by default - a slug
- * written down here would be one more thing to keep up with OpenAI's catalogue.
+ * Probes the copied login the same way the runner does: whether it is logged
+ * in, and which model the account gets by default. A model slug hardcoded here
+ * would need updating whenever OpenAI's catalogue changes.
  */
 const probed = !ready
   ? undefined
@@ -98,7 +100,7 @@ const SESSION_SPEC: SessionSpec = {
   timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 };
 
-/** Long enough for a cold app-server to start, connect and answer one prompt. */
+/** Long enough for a cold app-server to start, connect and reply to one prompt. */
 const TURN_DEADLINE = Duration.seconds(120);
 
 const waitForEvent = async (
@@ -116,7 +118,11 @@ const waitForEvent = async (
   }
 };
 
-/** A fresh subscriber per session: the stream is unbounded and never replays. */
+/**
+ * Subscribes to the adapter's events and returns the list they are collected
+ * into. Each session needs a new subscriber, because the stream never replays
+ * past events.
+ */
 const collectEvents = (): Array<ProviderEvent> => {
   const seen: Array<ProviderEvent> = [];
   Effect.runFork(
@@ -129,7 +135,7 @@ const STRUCTURED = "0199e0e7-0000-7000-8000-00000000ff05";
 const IMPOSSIBLE = "0199e0e7-0000-7000-8000-00000000ff06";
 
 describe.skipIf(!authed)("a real Codex session under an output schema", () => {
-  /** One session under one schema: start, ask, wait the turn out, stop. */
+  /** Starts a session with a schema, sends one input, waits for the turn to end, and stops it. */
   const runTurnUnderSchema = async (
     sessionId: string,
     outputSchema: OutputSchema,

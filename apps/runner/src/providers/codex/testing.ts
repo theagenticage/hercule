@@ -1,12 +1,12 @@
 /**
- * The scripted app-server every Codex adapter test drives: a seam whose child
- * answers line by line, records what it was asked, and lets a test push a
- * notification or a request of its own. Nothing vendor-supplied runs, and the
- * frames the script answers with are the shapes captured from codex 0.154.0,
- * not shapes invented here.
+ * The scripted app-server that every Codex adapter test uses: a seam whose
+ * child replies line by line, records the requests it receives, and lets a
+ * test push a notification or a server request. No Codex code runs, and the
+ * scripted replies use the shapes captured from codex 0.154.0, not invented
+ * ones.
  *
- * It lives beside the tests rather than inside one of them because two test
- * files drive the same app-server: the adapter's own and the approvals'.
+ * It is in its own file because two test files use it: the adapter tests and
+ * the approvals tests.
  */
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
@@ -34,8 +34,8 @@ export const buildContext = (home: string, cwd: string | null = null): ProviderR
   binary: "/usr/local/bin/codex",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },
   secrets: {},
-  // The runner resolves this once, at start; a test that cares about it says
-  // what it is.
+  // The runner resolves this once, at start. A test that depends on it sets
+  // its own value.
   herculeTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 
@@ -58,7 +58,7 @@ export const INITIALIZE = {
   platformOs: "macos",
 };
 
-/** Arrives unsolicited right after `initialize`, and is nothing the probe asked for. */
+/** A notification Codex sends right after `initialize`, without being asked. */
 const UNSOLICITED = {
   method: "remoteControl/status/changed",
   params: {
@@ -70,7 +70,10 @@ const UNSOLICITED = {
   emittedAtMs: 1789373122124,
 };
 
-/** `samples/probe-account-read.json`: the observed row, then the two type-derived ones. */
+/**
+ * From `samples/probe-account-read.json`: the observed reply first, then two
+ * replies built from the generated types.
+ */
 export const LOGGED_OUT = { account: null, requiresOpenaiAuth: true };
 export const CHATGPT = {
   account: { type: "chatgpt", email: "rogier@example.com", planType: "pro" },
@@ -124,27 +127,27 @@ export const MODELS = {
   nextCursor: null,
 };
 
-/** One app-server the adapter asked for, and what it was asked with. */
+/** One app-server the adapter started, and the command and env it was started with. */
 export interface Spawn {
   readonly command: ReadonlyArray<string>;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly kills: () => number;
-  /** A frame the server sends unasked: a notification, or a request of its own. */
+  /** Sends a frame from the server without a request: a notification or a server request. */
   readonly push: (frame: unknown) => void;
-  /** The app-server stopping by itself, which is not the adapter ending it. */
+  /** Makes the app-server exit on its own, without the adapter killing it. */
   readonly crash: () => void;
 }
 
-/** One request the adapter wrote, in the order it wrote them. */
+/** One request the adapter sent. The list is in the order they were sent. */
 export interface Sent {
   readonly method: string;
   readonly params: unknown;
 }
 
 /**
- * One reply the adapter wrote back to a request the server made, by that
- * request's id. Exactly one of `result` and `error` is present, which is what
- * tells an answer from a refusal.
+ * One reply the adapter sent to a server request, with that request's id.
+ * Exactly one of `result` and `error` is present: `result` for a normal reply,
+ * `error` for a rejection.
  */
 export interface Answered {
   readonly id: string | number;
@@ -153,17 +156,17 @@ export interface Answered {
 }
 
 /**
- * An answer per method: a value to reply with, or `SILENT` for a method the
- * server never answers, which is what codex 0.154.0 does with one it does not
- * know.
+ * A reply per method: a function that builds the reply, or `SILENT` for a
+ * method the server never replies to. codex 0.154.0 never replies to a method
+ * it does not know.
  */
 export const SILENT = Symbol("no reply");
 
 export type Answers = Readonly<Record<string, ((params: unknown) => unknown) | typeof SILENT>>;
 
 /**
- * An answer that refuses the request, the way codex answers a bad one:
- * `-32600` is the code observed at 0.154.0 (`samples/errors.json`).
+ * Builds an error reply, the way codex replies to an invalid request. The
+ * default code `-32600` is the one observed at 0.154.0 (`samples/errors.json`).
  */
 export const buildRefusal = (
   message: string,
@@ -187,9 +190,10 @@ const DEFAULT_ANSWERS: Answers = {
 };
 
 /**
- * A seam whose app-server replies line by line, recording the argv and the env
- * it was spawned with and every request it was sent. `dies` is a server that
- * exits instead of answering.
+ * Builds a seam whose app-server replies line by line. It records the command
+ * and env each app-server was started with, every request sent to it, and
+ * every reply the adapter sent back. With `dies`, the app-server exits at once
+ * instead of replying.
  */
 export const buildScriptedSeam = (
   answers: Answers = {},
@@ -223,8 +227,8 @@ export const buildScriptedSeam = (
         const frame = JSON.parse(line) as Record<string, unknown>;
         const method = frame["method"];
         if (frame["id"] !== undefined && typeof method !== "string") {
-          // A frame with an id and no method is the adapter answering something
-          // the server asked, which is the whole subject of the approvals tests.
+          // A frame with an id and no method is the adapter's reply to a server
+          // request, which is what the approvals tests check.
           answered.push(frame as unknown as Answered);
           return;
         }
@@ -273,7 +277,7 @@ export const buildScriptedSeam = (
   return { seam, spawns, requests, answered };
 };
 
-/** An adapter with its events collected, and the app-server it will reach for. */
+/** Creates an adapter on a scripted seam, collecting every event it emits into `seen`. */
 export const createDriving = (
   answers: Answers = {},
   cwd: string | null = CWD,
@@ -300,7 +304,7 @@ export const listSentParams = (
 ): ReadonlyArray<unknown> =>
   requests.filter((request) => request.method === method).map((request) => request.params);
 
-/** A started session, and the app-server hosting it. */
+/** Starts a session and returns it with the app-server hosting it. */
 export const startTestSession = async (
   answers: Answers = {},
 ): Promise<ReturnType<typeof createDriving> & { readonly server: Spawn }> => {
@@ -309,7 +313,7 @@ export const startTestSession = async (
   return { ...run, server: run.spawns[0]! };
 };
 
-/** A session whose turn is running, which is what makes an input a steer. */
+/** Starts a session with a running turn, so that the next input steers it. */
 export const startBusySession = async (
   answers: Answers = {},
 ): Promise<ReturnType<typeof createDriving> & { readonly server: Spawn }> => {

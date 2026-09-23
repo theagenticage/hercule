@@ -1,20 +1,19 @@
 /**
- * The fake pi every adapter test in this folder drives: a seam whose child
- * answers one line at a time, records the argv, the environment and every
- * command it was written, and lets a test push an event of its own. Nothing
- * vendor-supplied runs, and the frames it answers with are the shapes
- * pi 0.85.1 declares - `dist/modes/rpc/rpc-types.d.ts` for the commands and
- * their responses, the bundled `models.json` for the two GLM models - not
- * shapes invented here.
+ * The fake pi that every adapter test in this folder uses. Its child process
+ * responds to one line at a time, records the arguments, the environment and
+ * every command written to it, and lets a test push events of its own. No
+ * vendor code runs. The frames it responds with follow the shapes pi 0.85.1
+ * declares - `dist/modes/rpc/rpc-types.d.ts` for the commands and responses,
+ * and the bundled `models.json` for the GLM models - and are not invented
+ * here.
  *
- * It lives beside the tests rather than inside one of them because the probe's
- * tests and the adapter's drive the same child. What is not pi's - scratch
- * homes, a pushable line stream, waiting on an adapter - is `../testing`.
+ * It lives in its own file because the probe tests and the adapter tests use
+ * the same fake child. Helpers that are not specific to pi - scratch homes, a
+ * line stream a test can push to, waiting on an adapter - are in `../testing`.
  *
- * The seam it stands in for is `PiSeam`: a `spawn` for the line-framed RPC
- * child and a `run` for a one-shot command. The child answers `write`,
- * `stdout`, `stderr`, `exited`, `kill` and `end` - `end` closes stdin, which
- * pi reads as its cue to leave.
+ * It fakes `PiSeam`: a `spawn` for the line-based RPC child and a `run` for a
+ * one-shot command. The child supports `write`, `stdout`, `stderr`, `exited`,
+ * `kill` and `end`. `end` closes stdin, which tells pi to exit.
  */
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
@@ -37,7 +36,7 @@ export {
 
 export const createPiHome = (): string => createScratchHome("pi");
 
-/** Not a key: a placeholder no upstream would accept, which is the point. */
+/** A placeholder, not a real key: no provider would accept it, on purpose. */
 export const TEST_ZAI_KEY = "zai-key-for-a-test-only";
 
 export const buildContext = (
@@ -64,10 +63,12 @@ export const SPEC: SessionSpec = {
 };
 
 /**
- * Z.ai's models as pi 0.85.1's own catalog answers with them, all seven,
- * plus one from another provider so a filter has something to leave out. The
- * thinking maps are theirs too: a level mapped to null is one the model cannot
- * be asked for, and the 5.2 line takes `off` where the 5.3 line cannot.
+ * Builds one Z.ai model as pi 0.85.1's catalog lists it. The catalog below has
+ * all seven, and the default `get_available_models` response adds one model
+ * from another provider, so the probe's filter has something to leave out.
+ * The thinking maps are pi's too: a level mapped to null is one the model
+ * does not support, and the 5.2 models support `off` while the 5.3 models do
+ * not.
  */
 const buildZaiModel = (
   id: string,
@@ -90,7 +91,7 @@ const buildZaiModel = (
   maxTokens: 131_072,
 });
 
-/** What the 5.2 line takes, which is not what the 5.3 line takes. */
+/** The thinking levels of the 5.2 models, which differ from the 5.3 models'. */
 const THINKING_52 = {
   off: "none",
   minimal: null,
@@ -162,32 +163,33 @@ const ANOTHER_PROVIDERS_MODEL = {
   cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75 },
 };
 
-/** One pi the adapter asked for, and what it was asked with. */
+/** A pi process the adapter spawned, with what it was spawned with and controls for the test. */
 export interface Spawn {
   readonly command: ReadonlyArray<string>;
   readonly env: Readonly<Record<string, string | undefined>>;
-  /** The directory pi was started in, which is where its session's files go. */
+  /** The directory pi was started in, where its session's files go. */
   readonly cwd: string | null;
-  /** An event pi sends unasked, which is everything on its stdout but a response. */
+  /** Pushes an event to pi's stdout, as pi does with everything but responses. */
   readonly push: (event: unknown) => void;
   readonly stdinClosed: () => boolean;
   readonly kills: () => number;
   /**
-   * pi stopping by itself, which is not the adapter ending it, saying on its
-   * stderr what it stopped over.
+   * Makes pi exit by itself, not because the adapter stopped it, after writing
+   * the given lines to stderr.
    */
   readonly crash: (...complaints: ReadonlyArray<string>) => void;
 }
 
-/** One command the adapter wrote, in the order it wrote them. */
+/** A command the adapter wrote to pi. The list keeps them in the order written. */
 export interface Sent {
   readonly type: string;
   readonly command: Record<string, unknown>;
 }
 
 /**
- * What pi answers one command with: the body of its `response` frame, minus the
- * envelope the fixture puts back on. `undefined` is a command pi never answers.
+ * The fake's response to each command type: the body of the `response` frame,
+ * without the `type`, `command` and `id` fields the fake adds. Returning
+ * `undefined` means pi never responds to the command.
  */
 export type Answers = Readonly<
   Record<string, (command: Record<string, unknown>) => Record<string, unknown> | undefined>
@@ -205,12 +207,12 @@ const DEFAULT_ANSWERS: Answers = {
   }),
 };
 
-/** What pi answers a command it will not do with, naming the field it refused. */
+/** Builds pi's response to a command it rejects, with the given error message. */
 export const buildRefusal = (error: string): Record<string, unknown> => ({ success: false, error });
 
 export const FAKE_PI_VERSION = "0.85.1";
 
-/** `pi auth check --provider zai --json` as pi 0.85.1 answers both branches. */
+/** Returns what `pi auth check --provider zai --json` prints in pi 0.85.1, with and without a key. */
 const answerAuthCheck = (env: Readonly<Record<string, string | undefined>>): Ran =>
   (env["ZAI_API_KEY"] ?? "") === ""
     ? {
@@ -228,29 +230,30 @@ const answerAuthCheck = (env: Readonly<Record<string, string | undefined>>): Ran
         stderr: "",
       };
 
-/** One command the adapter ran to completion, and what it was run with. */
+/** A one-shot command the adapter ran, and the environment it ran with. */
 interface RunCall {
   readonly command: ReadonlyArray<string>;
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
 export interface FakePiBehaviour {
-  /** What each RPC command is answered with, over the defaults above. */
+  /** Responses to RPC commands, replacing the defaults above. */
   readonly answers?: Answers;
-  /** What a one-shot command says, over `pi --version` and `pi auth check`. */
+  /** Results for one-shot commands, checked before the `pi --version` and `pi auth check` defaults. */
   readonly ran?: (
     command: ReadonlyArray<string>,
     env: Readonly<Record<string, string | undefined>>,
   ) => Ran | undefined;
-  /** A pi that exits instead of speaking, the way a broken install does. */
+  /** A pi that exits at once without responding, like a broken install. */
   readonly dies?: boolean;
-  /** A pi that reads the end of its stdin and stays anyway, as a parked one does. */
+  /** A pi that keeps running after its stdin closes, like one waiting on an approval. */
   readonly lingers?: boolean;
 }
 
 /**
- * A seam whose pi answers line by line, recording the argv and the environment
- * it was spawned with, every command it was sent, and every one-shot run.
+ * Builds a fake `PiSeam` whose pi responds line by line. Returns the seam and
+ * the lists it records into: every spawn with its arguments and environment,
+ * every command sent, and every one-shot run.
  */
 export const buildFakePiSeam = (
   behaviour: FakePiBehaviour = {},
@@ -288,7 +291,7 @@ export const buildFakePiSeam = (
       const type = frame["type"];
       if (typeof type !== "string") return;
       sent.push({ type, command: frame });
-      // An extension UI answer is not a command and is never responded to.
+      // An extension UI response is not a command, so pi never responds to it.
       if (type === "extension_ui_response") return;
       const reply = replies[type]?.(frame);
       if (reply === undefined) return;
@@ -312,7 +315,7 @@ export const buildFakePiSeam = (
       },
       stdout: out.iterable,
       stderr: err.iterable,
-      /** Closing stdin is what pi reads as the end of the conversation. */
+      /** Closes stdin, which tells pi the conversation is over. */
       end: () => {
         closed = true;
         if (behaviour.lingers !== true) exitCleanly();
@@ -357,7 +360,7 @@ export const buildFakePiSeam = (
   return { seam, spawns, sent, runs };
 };
 
-/** An adapter with its events collected, and the fake pi it will reach for. */
+/** Creates an adapter on a fake pi, and collects every event it emits. */
 export const createDriving = (
   behaviour: FakePiBehaviour = {},
   cwd: string | null = CWD,
@@ -384,7 +387,7 @@ export const listSentCommands = (
 ): ReadonlyArray<Record<string, unknown>> =>
   sent.filter((one) => one.type === type).map((one) => one.command);
 
-/** A started session, and the pi hosting it. */
+/** Starts a session on a fake pi. Returns the adapter setup and the pi hosting the session. */
 export const startTestSession = async (
   behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
@@ -395,7 +398,7 @@ export const startTestSession = async (
   return { ...run, child: run.spawns[0]! };
 };
 
-/** A session whose turn is running, which is what makes an input a steer. */
+/** Starts a session with a turn running, so the next input steers that turn. */
 export const startBusySession = async (
   behaviour: FakePiBehaviour = {},
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {

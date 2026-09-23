@@ -1,6 +1,7 @@
 /**
- * The runner daemon: `hercule runner`. Holding the connection is all it does yet;
- * hosting sessions is what the connection is for.
+ * Runs the runner daemon, `hercule runner`. It prepares the machine, then keeps
+ * the connection to the controller open. Sessions are hosted through that
+ * connection.
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { networkInterfaces } from "node:os";
@@ -30,7 +31,7 @@ import { connect, type RunnerRetired } from "./socket";
 import { readMachineHeadroom } from "./watermark";
 import { makeWorkspaces } from "./workspaces";
 
-/** Sorted, so two readings can be compared. */
+/** Lists this machine's network addresses, sorted so two readings can be compared. */
 const listNetworkAddresses = (): ReadonlyArray<string> =>
   Object.values(networkInterfaces())
     .flatMap((entries) => entries ?? [])
@@ -38,9 +39,12 @@ const listNetworkAddresses = (): ReadonlyArray<string> =>
     .sort();
 
 /**
- * The one place a stored controller URL is checked: every consumer downstream
- * builds a request URL off it, so a hand-edited value is refused here by name
- * rather than failing deep in a dial.
+ * Checks that the stored controller URL is an http or https URL. Fails with
+ * `NotEnrolled` when it is not.
+ *
+ * This is the only place the stored URL is checked. Every later step builds a
+ * request URL from it, so an invalid hand-edited value is reported here with
+ * the field name, instead of failing deep inside a connection attempt.
  */
 const validateControllerUrl = (
   home: string,
@@ -58,7 +62,7 @@ const validateControllerUrl = (
     new NotEnrolled({
       message:
         `controllerUrl in ${buildRunnerFilePath(home)} ${wrong}: ${controllerUrl}. ` +
-        "Run `hercule runner set-controller <controller-url>` to point this machine at one it can dial.",
+        "Run `hercule runner set-controller <controller-url>` to point this machine at a valid controller URL.",
     }),
   );
 };
@@ -67,8 +71,9 @@ const validateControllerUrl = (
 const EMBEDDED = "/$bunfs/";
 
 /**
- * Its own error because nothing about the connection will fix it: the machine
- * has to be made writable, or the thing in the way removed.
+ * The runner could not install the `hercule` link and the session skill. This
+ * is its own error because reconnecting will not fix it: the user has to make
+ * the directory writable, or remove whatever is in the way.
  */
 export class ToolingUnavailable extends Schema.TaggedError<ToolingUnavailable>()(
   "ToolingUnavailable",
@@ -76,9 +81,11 @@ export class ToolingUnavailable extends Schema.TaggedError<ToolingUnavailable>()
 ) {}
 
 /**
- * Putting `hercule` and the session skill on this machine is a precondition, not
- * a step: a runner that came up without them hosts sessions that cannot call
- * Hercule at all. Reported by name, like every other precondition here.
+ * Installs the `hercule` link and the session skill on this machine. Fails with
+ * `ToolingUnavailable` when they cannot be written.
+ *
+ * The daemon does not start without them, because sessions on a runner
+ * without them cannot call Hercule at all.
  */
 const prepareRunnerTooling = (
   home: string,
@@ -91,16 +98,16 @@ const prepareRunnerTooling = (
       catch: (error) =>
         new ToolingUnavailable({
           message:
-            `could not put hercule and the session skill under ${locateRunnerDir(home)}: ` +
+            `could not install hercule and the session skill under ${locateRunnerDir(home)}: ` +
             `${error instanceof Error ? error.message : String(error)}. ` +
-            "No session on this machine could reach Hercule.",
+            "Without them, no session on this machine can call Hercule.",
         }),
     }),
     () =>
-      // The link points at this process's executable, which is the `hercule` CLI
-      // only in a compiled build; from a checkout it is bun. Said once here
-      // rather than left for a session to discover when its first call runs
-      // bun instead of hercule.
+      // The link points at this process's executable. That is the `hercule`
+      // CLI only in a compiled build; from a source checkout it is bun. Warn
+      // once here, instead of leaving a session to find out when its first
+      // call runs bun instead of hercule.
       Bun.main.startsWith(EMBEDDED)
         ? Effect.void
         : Effect.logWarning(
@@ -110,8 +117,13 @@ const prepareRunnerTooling = (
   );
 
 /**
- * The facts are read afresh per attempt, so a machine that gained memory between
- * two connections says so in the second hello.
+ * Runs the runner daemon until the controller retires this runner. Fails with
+ * `NotEnrolled` when `runner.json` is missing or invalid, or the credential
+ * socket cannot be served, and with `ToolingUnavailable` when the tooling
+ * cannot be installed.
+ *
+ * The facts are probed again for each connection attempt, so a machine that
+ * gained memory between two connections reports it in the second hello.
  */
 export const runDaemon = (
   home: string,
@@ -120,8 +132,8 @@ export const runDaemon = (
     Effect.gen(function* () {
       const pin = yield* readRunnerFile(home);
       yield* validateControllerUrl(home, pin.controllerUrl);
-      // Before the first probe, so the port the facts report is the one a
-      // browser will find this runner on.
+      // Start the listener before the first probe, so the facts report the
+      // port a browser will actually find this runner on.
       const identityPort = yield* serveIdentity({
         runnerId: pin.runnerId,
         controllerUrl: pin.controllerUrl,
@@ -129,29 +141,29 @@ export const runDaemon = (
       });
       const probe = probeFacts(thisMachine, identityPort);
       const headroom = readMachineHeadroom(home);
-      // Everything this machine holds for its controller sits under here, so
-      // re-enlisting it leaves every provider login, workspace and cache behind
-      // with the identity it belonged to.
+      // Everything this machine stores for its controller lives in this
+      // directory. So when the machine joins again, every provider login,
+      // workspace and cache stays behind with the old runner identity.
       const storageDir = joinPath(locateRunnerDir(home), pin.storageDirectory);
-      // Nobody else on the machine reads a session's workspace or the socket
-      // its credentials are asked down.
+      // No other user on the machine may read a session's workspace or the
+      // credential socket.
       mkdirSync(storageDir, { recursive: true, mode: 0o700 });
       const providersDir = joinPath(storageDir, "providers");
-      // Beside them, and just as disposable: what a workspace-less session gets
-      // as a cwd, one directory per session.
+      // The working directories of sessions without a workspace, one per
+      // session. They can be deleted at any time.
       const scratchDir = joinPath(storageDir, "scratch");
       const socketPath = buildSocketPath(storageDir);
-      // The runner's own git asks for its credentials the same way a session's
-      // does: down this socket, with nothing on disk.
+      // The runner's own git gets its credentials the same way a session's git
+      // does: through this socket, with nothing written to disk.
       const workspaces = makeWorkspaces({
         storageDir,
         gitEnv: buildGitCredentialEnv({ socketPath }),
       });
       const credentials = makeCredentialRelay();
       yield* Effect.acquireRelease(
-        // A second daemon on one home would answer this machine's helpers with
-        // another controller's credentials, so it refuses to start rather than
-        // taking the socket over.
+        // A second daemon on the same Hercule Home could give this machine's
+        // credential helpers another controller's credentials. So the daemon
+        // fails to start instead of taking over the socket.
         Effect.tryPromise({
           try: () => serveCredentialSocket({ path: socketPath, ask: credentials.ask }),
           catch: (error) =>
@@ -161,12 +173,14 @@ export const runDaemon = (
         }),
         (server) => Effect.promise(() => server.close()),
       );
-      // No session survives this process, so everything under there is what the
-      // last one left behind: swept here rather than growing with every crash.
+      // No session outlives this process, so anything in the scratch directory
+      // was left behind by the last run. Delete it here, so it does not grow
+      // with every crash.
       rmSync(scratchDir, { recursive: true, force: true });
-      // Once, here: what every session on this machine reaches Hercule through,
-      // refreshed so an upgraded binary takes over the last build's symlink and
-      // skill text (spec 15 section 2, spec 06 section 9.3).
+      // Install, once per start, the link and skill every session on this
+      // machine uses to call Hercule. Doing it at every start means an upgraded
+      // binary replaces the previous build's symlink and skill text
+      // (spec 15 section 2, spec 06 section 9.3).
       const { binDir, herculeTool } = yield* prepareRunnerTooling(
         home,
         joinPath(locateRunnerDir(home), pin.storageDirectory),

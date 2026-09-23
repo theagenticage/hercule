@@ -1,32 +1,34 @@
 /**
- * The events an adapter reports about an input it has just delivered, rather
- * than about something the harness said - and the ids they are filed under.
+ * Events an adapter reports itself about input it has just delivered, rather
+ * than events it reads from the harness's output. Also the helper that makes an
+ * id valid for the protocol.
  */
 import type { ProviderEvent } from "@hercule/protocol";
 import { now } from "../report";
 import { truncateFact } from "./text";
 
 /**
- * The id something is filed under, cut to what the protocol carries. An id the
- * protocol will not carry is a frame nobody can decode, which loses the event
- * whole; a harness that named none gets one of ours instead, so what it was
- * about is still reported.
+ * Returns `given` truncated to the length the protocol allows, or a new random
+ * id when `given` is empty. A longer id would make the frame impossible to
+ * decode, and the whole event would be lost. When the harness gives no id, a
+ * random one is used so the event is still reported.
  */
 export const ensureId = (given: string): string =>
   given === "" ? crypto.randomUUID() : truncateFact(given);
 
 /**
- * The user's own message, as the pair of events one item is. Every adapter
- * reports it itself rather than off the harness's echo of it, because only the
- * adapter knows whether the input steered a running turn: an echo cannot say
- * which input it echoes.
+ * Returns the user's message as the pair of events for one item:
+ * `item.started` and `item.completed`. Every adapter builds these itself rather
+ * than from the harness's echo of the message, because only the adapter knows
+ * whether the input steered a running turn. The echo does not identify which
+ * input it belongs to.
  */
 export const buildUserMessage = (input: {
   readonly sessionId: string;
   readonly turnId: string;
   readonly text: string;
   readonly steered: boolean;
-  /** The native ids the item joins to, where the adapter has any. */
+  /** The harness's own ids for the item, if the adapter has any. */
   readonly providerRefs?: Readonly<Record<string, string>>;
 }): readonly [ProviderEvent, ProviderEvent] => {
   const item = {

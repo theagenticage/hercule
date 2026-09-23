@@ -1,17 +1,18 @@
 /**
- * The parts of normalizing a harness's events that are the same whichever
- * harness it is: what every event carries, what a vendor payload has to be cut
- * down to before the protocol will encode it, and what a count has to be.
+ * The parts of normalizing harness events that are the same for every harness:
  *
- * It lives here rather than in one adapter's folder because two adapters
- * holding their own copy is two of them drifting: a payload one of them does
- * not round-trip is a frame the runner cannot encode, and an event that will
- * not encode is one the runner drops.
+ * - the fields every event has;
+ * - converting a vendor payload to plain JSON the protocol can encode;
+ * - clamping counts.
+ *
+ * They live here rather than in one adapter's folder so that adapters cannot
+ * drift apart. A payload one adapter fails to convert is a frame the runner
+ * cannot encode, and the runner drops an event it cannot encode.
  */
 import type * as Schema from "effect/Schema";
 import { now } from "../report";
 
-/** What every event off a normalizer carries, whatever else it says. */
+/** The fields every normalized event has. */
 export interface Envelope {
   readonly eventId: string;
   readonly sessionId: string;
@@ -20,19 +21,24 @@ export interface Envelope {
 }
 
 /**
- * A real round-trip, not a cast: one `undefined` property anywhere in a vendor
- * payload would be a frame the protocol refuses to encode.
+ * Converts a value to plain JSON with a real round trip, not a type cast. A
+ * single `undefined` property anywhere in a vendor payload would make the frame
+ * fail to encode.
  */
 export const toJson = (value: unknown): Schema.Json =>
   JSON.parse(JSON.stringify(value ?? null)) as Schema.Json;
 
-/** A count the protocol will carry: a whole number, never negative. */
+/**
+ * Converts a value to a count the protocol accepts: a whole number, never negative. Anything else
+ * becomes 0.
+ */
 export const clampCount = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 
 /**
- * The envelope, with the native ids this harness names its own work by: a
- * thread for one, a session for another, so the key is the caller's.
+ * Returns a new envelope with the harness's own ids for its work. The caller
+ * chooses the keys, because harnesses use different ids: one uses a thread,
+ * another a session.
  */
 export const buildEnvelope = (
   sessionId: string,
@@ -45,9 +51,10 @@ export const buildEnvelope = (
 });
 
 /**
- * What the event was read off, for a reader that wants what the harness
- * actually said. Not on a delta: a turn is thousands of them, and a copy on
- * each would double the stream for a payload that is the delta itself.
+ * Returns the harness payload an event was built from, for a reader who wants
+ * the harness's original output. Not used for deltas: a turn has thousands of
+ * them, and a copy on each would double the stream for a payload that is the
+ * delta itself.
  */
 export const buildRaw = (
   source: string,

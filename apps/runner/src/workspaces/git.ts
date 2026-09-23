@@ -1,14 +1,13 @@
 /**
- * Real git, run as a process rather than through a shell: every argument is its
- * own element, so a remote or a branch can never be read as an option or as
- * another command.
+ * Runs real git as a child process, not through a shell. Each argument is
+ * passed separately, so a shell never interprets a remote or a branch name.
  */
 import { join as joinPath } from "node:path";
 
 export interface GitOutcome {
   readonly ok: boolean;
   readonly stdout: string;
-  /** Git's own words, which is what a failed workspace reports to the user. */
+  /** Git's error output. A failed workspace reports it to the user as it is. */
   readonly stderr: string;
 }
 
@@ -33,22 +32,25 @@ export const runGit = async (
 };
 
 /**
- * The branch a session was asked to start on, switched to before it runs.
+ * Switches a working copy to the branch a session was asked to start on,
+ * before the session runs. `ok` is false if git cannot switch, for example
+ * because the branch does not exist.
  *
- * The trailing `--` is what makes this a branch switch and nothing else: git
- * reads a word that names no branch but does name a file as "restore that file
- * from HEAD", which would throw away edits the user has not committed. With the
- * terminator the same word is an unknown reference, and the session is refused.
+ * The trailing `--` makes sure this only ever switches branches. Without it,
+ * git reads a name that is not a branch but is a file as "restore that file
+ * from HEAD", which throws away the user's uncommitted edits. With `--`, the
+ * same name is an unknown branch, the switch fails, and the session does not
+ * start.
  */
 export const switchBranch = (dir: string, branch: string, env: GitEnv): Promise<GitOutcome> =>
   runGit(["-C", dir, "checkout", branch, "--"], { env });
 
 /**
- * The branch a working copy is on now, or null where there is none to read: a
- * detached HEAD prints nothing, and a git that would not answer has nothing to
- * say either. Null rather than prose - `unknown`, `HEAD`, or git's own error -
- * because whatever comes back is written down as the branch the machine found,
- * and a sentence in that column is a branch name nobody can act on.
+ * Returns the branch a working copy is on, or null if there is none: on a
+ * detached HEAD, or when git fails. It returns null rather than text such as
+ * `unknown`, `HEAD` or git's error, because the result is stored as the
+ * checkout's branch, and text stored there would look like a branch name
+ * nobody can use.
  */
 export const readCurrentBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
   const shown = await runGit(["-C", dir, "branch", "--show-current"], { env });
@@ -56,7 +58,7 @@ export const readCurrentBranch = async (dir: string, env: GitEnv): Promise<strin
   return shown.stdout;
 };
 
-/** Every branch the user can switch to in that working copy. */
+/** Returns the local branches of a working copy: the branches the user can switch to. */
 export const listLocalBranches = async (
   dir: string,
   env: GitEnv,
@@ -68,7 +70,7 @@ export const listLocalBranches = async (
   return listed.stdout.split("\n").filter((line) => line.length > 0);
 };
 
-/** What `origin/HEAD` points at, or null where nothing set it. */
+/** Returns the branch `origin/HEAD` points at, or null if it is not set. */
 export const readDefaultBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
   const head = await runGit(["-C", dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], {
     env,
@@ -84,15 +86,17 @@ export const buildCacheDir = (storageDir: string, resourceId: string): string =>
 export const buildCacheRoot = (storageDir: string): string => joinPath(storageDir, "cache");
 
 /**
- * The bare repository every working copy of one resource is made from.
+ * Makes sure the cache for a resource exists and is up to date, and returns its
+ * path. The cache is a bare repository that every working copy of the resource
+ * is created from. Returns `failure`, with git's error output, if the clone or
+ * the fetch fails.
  *
- * Cloned bare from the remote once and refreshed from it afterwards, so a
- * worktree off it pushes to the remote rather than to this machine. Refreshed
- * into
- * `refs/remotes/origin/*` and never into `refs/heads/*`: the branches agents
- * work on live in `refs/heads`, checked out by worktrees, and git refuses to
- * fetch over a branch that is checked out - which is what would happen the
- * moment an agent pushed its own branch upstream.
+ * The cache is cloned bare from the remote once and fetched on every later
+ * call, so a worktree created from it pushes to the remote, not to this
+ * runner. Fetches write to `refs/remotes/origin/*`, never to `refs/heads/*`.
+ * The agents' branches live in `refs/heads`, checked out by worktrees, and git
+ * refuses to fetch over a branch that is checked out. That would happen as
+ * soon as an agent pushed its own branch upstream.
  */
 export const ensureCache = async (options: {
   readonly storageDir: string;
@@ -103,7 +107,7 @@ export const ensureCache = async (options: {
 }): Promise<{
   readonly path: string;
   readonly failure?: string;
-  /** The branch the cache now heads on, for callers that would otherwise re-ask. */
+  /** The repository's default branch, returned so callers do not ask git again. */
   readonly defaultBranch?: string;
 }> => {
   const path = buildCacheDir(options.storageDir, options.resourceId);
@@ -118,24 +122,25 @@ export const ensureCache = async (options: {
     { env },
   );
   if (!fetched.ok) return { path, failure: fetched.stderr };
-  // Taken from the cache's own HEAD rather than asked of the remote: the answer
-  // is the same and this costs no network.
-  // Without it nothing downstream - a worktree asked for no base, a report -
-  // can say what the repository's default branch is.
+  // Read the default branch from the cache's own HEAD instead of asking the
+  // remote: the answer is the same and needs no network. Setting `origin/HEAD`
+  // from it lets later code, such as a worktree with no base branch or a
+  // report, find the repository's default branch.
   const own = await runGit(["-C", path, "symbolic-ref", "--short", "HEAD"], { env });
   const head = own.stdout;
   if (head.length === 0) return { path };
   await runGit(["-C", path, "remote", "set-head", "origin", head], { env });
-  // Handed back rather than left to be read off the cache again: this is the
-  // one derivation of what the repository's default branch is, and a caller
-  // that asked git a second time could answer differently from this one.
+  // Return the default branch instead of letting callers read it from the cache
+  // again: this is the only place it is worked out, and a second git call could
+  // give a different answer.
   return { path, defaultBranch: head };
 };
 
 /**
- * What a new branch starts from: the remote's copy of the base branch, which is
- * what the cache refreshes, falling back to the base branch as the cache holds
- * it for a repository whose remote was never reachable.
+ * Returns the ref a new branch starts from, or undefined if the base branch
+ * does not exist. It prefers the remote's copy of the base branch, which the
+ * cache fetches. For a repository whose remote was never reachable, it falls
+ * back to the base branch in the cache's own `refs/heads`.
  */
 export const findStartPoint = async (
   cache: string,
@@ -150,15 +155,15 @@ export const findStartPoint = async (
   return undefined;
 };
 
-/** Takes a worktree's directory away. Idempotent: one already gone is one removed. */
+/** Removes a worktree and its directory. Idempotent: a worktree that is already gone counts as removed. */
 export const removeWorktree = async (cache: string, dir: string, env: GitEnv): Promise<void> => {
   await runGit(["-C", cache, "worktree", "remove", "--force", dir], { env });
 };
 
 /**
- * Forgets what the cache still believes about worktrees whose directories are
- * gone. Run after the directories are, never before: a prune that ran first
- * would leave registered whatever was removed after it.
+ * Makes the cache forget worktrees whose directories are gone. Call it after
+ * the directories are deleted, never before: a prune only forgets directories
+ * that are already gone.
  */
 export const pruneWorktrees = async (cache: string, env: GitEnv): Promise<void> => {
   await runGit(["-C", cache, "worktree", "prune"], { env });

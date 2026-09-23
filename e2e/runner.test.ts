@@ -225,7 +225,7 @@ describe("retiring a joined runner through the binary", () => {
       daemon = undefined;
       expect(ended.code, `the daemon stayed up:\n${ended.stdout}\n${ended.stderr}`).not.toBe(0);
       expect(`${ended.stdout}${ended.stderr}`).toContain(
-        "this runner was retired; run `hercule runner join` to re-enlist",
+        "this runner was retired; run `hercule runner join` to join the fleet again",
       );
 
       const afterRetire = (await listRunners()).find((one) => one.id === runner.id);

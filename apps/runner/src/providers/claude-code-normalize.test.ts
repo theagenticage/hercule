@@ -1,7 +1,8 @@
 /**
- * The SDK message shapes below were captured from the real CLI at 2.1.263
- * running one turn that thought, ran `echo hi` through `Bash`, and answered.
- * They are trimmed of long signatures and unread fields, never reshaped.
+ * The SDK messages below were captured from the real CLI, version 2.1.263,
+ * during one turn in which the model thought, ran `echo hi` with `Bash`, and
+ * replied. Long signatures and unused fields were removed; nothing else was
+ * changed.
  */
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
@@ -14,20 +15,23 @@ const NATIVE = "a2c71f4c-13ba-41ba-b372-49675028b0b1";
 const MESSAGE = "msg_011CeoxAoRk4jaxYB956uTmL";
 const TOOL = "toolu_016JZjZUP3FNEkwxFk3eJZao";
 
-/** Ids the test can read: the tenth minted id is `id-10`, in mint order. */
+/**
+ * Builds a state with readable ids, numbered in the order they are created: the
+ * tenth is `id-10`.
+ */
 const buildTestState = (outputSchema?: OutputSchema) => {
   let minted = 0;
   return buildNormalizingState(
     SESSION,
     () => `id-${(minted += 1)}`,
     () => "2026-09-07T10:51:47.000Z",
-    // Absent is a session answering prose, which is what most of this file's
-    // turns are; a schema is passed where the turn answers under one.
+    // No schema means the session replies in free text, as most turns in this
+    // file do. Tests that need structured output pass a schema.
     outputSchema,
   );
 };
 
-/** A session spawned from an Agent answers under one of these every turn. */
+/** An output schema, like the one a session started for an Agent gets on every turn. */
 const OUTPUT_SCHEMA: OutputSchema = {
   type: "object",
   additionalProperties: false,
@@ -35,7 +39,10 @@ const OUTPUT_SCHEMA: OutputSchema = {
   properties: { verdict: { type: "string", enum: ["accept", "dismiss"] } },
 };
 
-/** What each event says, short enough to read a whole turn as a list. */
+/**
+ * A provider event. `formatEvent` turns each one into a short line, so a whole
+ * turn reads as a list.
+ */
 type Event = Schema.Schema.Type<typeof ProviderEvent>;
 
 const formatEvent = (event: Event): string => {
@@ -81,7 +88,7 @@ const MESSAGE_START = {
 
 const MESSAGE_AFTER_TOOL = "msg_011CeoxAw86VZLxeZK3hZpRd";
 
-/** The leg after a tool result is a new model call, so a new message. */
+/** The model call after a tool result is a new call, so it starts a new message. */
 const MESSAGE_START_AFTER_TOOL = {
   type: "stream_event",
   session_id: NATIVE,
@@ -216,8 +223,8 @@ const RESULT = {
     cache_read_input_tokens: 14523,
     output_tokens: 151,
   },
-  // Two entries: the auxiliary call that titled the session, and the main loop.
-  // `usage` above counts only the main loop, and only this turn.
+  // Two entries: the extra call that generated the session title, and the main
+  // loop. `usage` above counts only the main loop, and only this turn.
   modelUsage: {
     "claude-haiku-4-5-20251001": {
       inputTokens: 911,
@@ -254,21 +261,21 @@ const RATE_LIMIT = {
 
 const STATUS = { type: "system", subtype: "status", status: "requesting", session_id: NATIVE };
 
-describe("one SDK message at a time", () => {
+describe("normalizing SDK messages one at a time", () => {
   const cases: ReadonlyArray<{
     readonly name: string;
     readonly messages: ReadonlyArray<unknown>;
     readonly events: ReadonlyArray<string>;
   }> = [
     {
-      // The adapter reads the native id off it and emits `session.started`
-      // itself, so the taxonomy has nothing to say here.
-      name: "the init message says nothing normalized",
+      // The adapter creates the native id and emits `session.started` itself,
+      // so `init` produces no events.
+      name: "produces no events for the init message",
       messages: [INIT],
       events: [],
     },
     {
-      name: "a text block streams as one assistant_message item",
+      name: "streams a text block as one assistant_message item",
       messages: [MESSAGE_START, TEXT_START, TEXT_DELTA, TEXT_STOP],
       events: [
         "turn.started",
@@ -278,7 +285,7 @@ describe("one SDK message at a time", () => {
       ],
     },
     {
-      name: "a thinking block streams as reasoning, and its signature is not text",
+      name: "streams a thinking block as reasoning, and does not emit its signature as text",
       messages: [MESSAGE_START, THINKING_START, THINKING_DELTA, SIGNATURE_DELTA, THINKING_STOP],
       events: [
         "turn.started",
@@ -288,19 +295,19 @@ describe("one SDK message at a time", () => {
       ],
     },
     {
-      // There is no argument-streaming kind: the call lands whole on the
+      // No event kind streams tool arguments. The whole call arrives on the
       // assistant message that follows (spec 06 section 6.3).
-      name: "a tool block's partial arguments are not a stream",
+      name: "does not stream a tool block's partial arguments",
       messages: [MESSAGE_START, TOOL_START, TOOL_ARGUMENT_DELTA],
       events: [],
     },
     {
-      name: "a Bash call is a command_execution item under its native tool id",
+      name: "turns a Bash call into a command_execution item with the native tool id",
       messages: [ASSISTANT_TOOL_USE],
       events: ["turn.started", `item.started command_execution ${TOOL}`],
     },
     {
-      name: "a tool result completes the item the call opened, with its kind",
+      name: "completes the tool call's item with the same kind when the tool result arrives",
       messages: [ASSISTANT_TOOL_USE, TOOL_RESULT],
       events: [
         "turn.started",
@@ -309,7 +316,7 @@ describe("one SDK message at a time", () => {
       ],
     },
     {
-      name: "a complete assistant message that never streamed still becomes an item",
+      name: "turns a complete assistant message that never streamed into an item",
       messages: [ASSISTANT_THINKING],
       events: [
         "turn.started",
@@ -320,9 +327,9 @@ describe("one SDK message at a time", () => {
     },
     {
       // The CLI sends one complete assistant message per finished block, so a
-      // block's index inside its message is not its index in the stream. The
-      // echo is recognised by its message id, never by position.
-      name: "a streamed block is not restated by the message that echoes it",
+      // block's index in its message is not its index in the stream. The
+      // repeated message is recognised by its message id, not by position.
+      name: "does not repeat a streamed block when the complete message arrives",
       messages: [MESSAGE_START, THINKING_START, THINKING_DELTA, THINKING_STOP, ASSISTANT_THINKING],
       events: [
         "turn.started",
@@ -332,9 +339,9 @@ describe("one SDK message at a time", () => {
       ],
     },
     {
-      // The block that streamed at index 1 is the only block of its own
-      // complete message, so an index-matched echo check would emit it twice.
-      name: "a text block that streamed second is not restated either",
+      // The block that streamed at index 1 is the only block in its complete
+      // message, so a check that matched by index would emit it twice.
+      name: "does not repeat a text block that streamed second either",
       messages: [
         MESSAGE_START,
         TOOL_START,
@@ -353,21 +360,21 @@ describe("one SDK message at a time", () => {
       ],
     },
     {
-      name: "the result closes the turn and reports cumulative usage",
+      name: "closes the turn on the result and reports the usage so far",
       messages: [RESULT],
       events: ["turn.started", "session.usage.updated", "turn.completed completed"],
     },
     {
-      // Rate limits are snapshot material and progress chatter is nothing;
-      // both are trimmed on purpose (spec 06 section 6.7).
-      name: "the informational tail is trimmed, not turned into items",
+      // Rate limits belong in the snapshot, and status updates hold nothing
+      // useful, so both are dropped on purpose (spec 06 section 6.7).
+      name: "drops informational messages instead of turning them into items",
       messages: [RATE_LIMIT, STATUS],
       events: [],
     },
     {
-      // The tail arrives after the `result` that closed the last turn, so a
-      // turn opened for it has to be closed by it too.
-      name: "a message shape this build has not heard of becomes an unknown item in its own turn",
+      // A system message can arrive after the `result` that closed the last
+      // turn, so the turn opened for it must be closed after it too.
+      name: "turns an unrecognised message into an unknown item in its own turn",
       messages: [{ type: "system", subtype: "image_generated", session_id: NATIVE }],
       events: [
         "turn.started",
@@ -377,7 +384,7 @@ describe("one SDK message at a time", () => {
       ],
     },
     {
-      name: "a retry is a runtime warning, not an item",
+      name: "reports a retry as a runtime warning, not an item",
       messages: [
         {
           type: "system",
@@ -393,7 +400,7 @@ describe("one SDK message at a time", () => {
       events: ["runtime.warning"],
     },
     {
-      name: "a compaction is an item of its own kind",
+      name: "reports a compaction as a context_compaction item",
       messages: [
         {
           type: "system",
@@ -402,8 +409,8 @@ describe("one SDK message at a time", () => {
           session_id: NATIVE,
         },
       ],
-      // Compaction can happen between turns, so the turn it opens is its own
-      // to close: no `result` is coming for it.
+      // Compaction can happen between turns, so it closes the turn it opened:
+      // no `result` will arrive for that turn.
       events: [
         "turn.started",
         "item.started context_compaction id-3",
@@ -441,8 +448,8 @@ const TURN = [
   RESULT,
 ];
 
-describe("a whole turn", () => {
-  it("reads as the episode it was", () => {
+describe("normalizing a whole turn", () => {
+  it("produces the events of the turn in order", () => {
     expect(normalizeMessages(TURN)).toEqual([
       "turn.started",
       `item.started reasoning ${MESSAGE}#0`,
@@ -458,7 +465,7 @@ describe("a whole turn", () => {
     ]);
   });
 
-  it("carries the vendor payload on the first event of each message, and never on a delta", () => {
+  it("attaches the vendor payload to the first event of each message, and never to a delta", () => {
     const running = buildTestState();
     const raw = TURN.flatMap((message) => normalize(running, message as SDKMessage)).filter(
       (event) => event.raw !== undefined,
@@ -470,11 +477,11 @@ describe("a whole turn", () => {
     }
   });
 
-  it("takes the usage snapshot the result reports", () => {
+  it("reports the usage from the result", () => {
     const running = buildTestState();
     const events = normalize(running, RESULT as unknown as SDKMessage);
     const snapshot = events.find((event) => event._tag === "session.usage.updated");
-    // Every model call the session made, summed, not the main loop's own turn.
+    // The sum over every model call the session made, not only this turn's main loop.
     expect(snapshot?._tag === "session.usage.updated" ? snapshot.usage : undefined).toEqual({
       inputTokens: 929,
       outputTokens: 165,
@@ -493,13 +500,13 @@ describe("a whole turn", () => {
   });
 });
 
-describe("a turn that did not simply finish", () => {
+describe("a turn that does not complete normally", () => {
   it("reports an abort as interrupted", () => {
     const events = normalizeMessages([{ ...RESULT, terminal_reason: "aborted_streaming" }]);
     expect(events).toContain("turn.completed interrupted");
   });
 
-  it("reports an error result as failed, with what the harness said", () => {
+  it("reports an error result as failed, with the harness's error message", () => {
     const running = buildTestState();
     const events = normalize(running, {
       ...RESULT,
@@ -513,7 +520,7 @@ describe("a turn that did not simply finish", () => {
   });
 });
 
-describe("what an item says about itself", () => {
+describe("item details", () => {
   const readItemDetail = (
     messages: ReadonlyArray<unknown>,
     itemId: string,
@@ -527,14 +534,14 @@ describe("what an item says about itself", () => {
     return undefined;
   };
 
-  it("names the tool and carries the arguments it was called with", () => {
+  it("includes the tool name and the arguments it was called with", () => {
     expect(readItemDetail([ASSISTANT_TOOL_USE], TOOL, "item.started")).toEqual({
       name: "Bash",
       input: { command: "echo hi", description: "Echo hi" },
     });
   });
 
-  it("tells an MCP tool apart from a native one by its name", () => {
+  it("marks a tool as MCP or native based on its name", () => {
     const buildToolUse = (name: string) => ({
       ...ASSISTANT_TOOL_USE,
       message: {
@@ -554,18 +561,19 @@ describe("what an item says about itself", () => {
     });
   });
 
-  it("carries the tool's output on the item the result completes", () => {
+  it("includes the tool's output on the item the tool result completes", () => {
     expect(readItemDetail([ASSISTANT_TOOL_USE, TOOL_RESULT], TOOL, "item.completed")).toEqual({
       content: "hi",
     });
   });
 
   /**
-   * Spec 06 section 6.3 pins `steered` as read from `SendResult` and never
-   * inferred, and the echo cannot say which input it echoes. So the adapter is
-   * the one that reports a user message, and the normalizer reports none.
+   * Spec 06 section 6.3 requires `steered` to come from `SendResult`, never to
+   * be guessed, and the harness's repeated message does not show which input
+   * it repeats. So the adapter reports user messages, and the normalizer
+   * reports none.
    */
-  it("makes no user_message item out of the harness's echo of what was sent", () => {
+  it("makes no user_message item when the harness repeats the input it was sent", () => {
     const buildUserEcho = (content: unknown) => ({
       type: "user",
       session_id: NATIVE,
@@ -576,13 +584,12 @@ describe("what an item says about itself", () => {
     for (const content of ["run the tests", [{ type: "text", text: "run the tests" }]]) {
       const running = buildTestState();
       const events = normalize(running, buildUserEcho(content) as unknown as SDKMessage);
-      // Nothing at all: not the item, and not the turn the message opened on
-      // its way in either.
+      // No events at all: no item, and not even the turn the message opened.
       expect(events).toEqual([]);
     }
   });
 
-  it("puts the vendor payload on the unknown item, not on the turn it had to open", () => {
+  it("attaches the vendor payload to the unknown item, not to the turn it opened", () => {
     const running = buildTestState();
     const events = normalize(running, {
       type: "system",
@@ -593,8 +600,8 @@ describe("what an item says about itself", () => {
   });
 });
 
-describe("what the ops events say", () => {
-  it("says which retry it is and what the harness was retrying after", () => {
+describe("runtime warnings and compaction details", () => {
+  it("reports the retry attempt and the error that caused it", () => {
     const running = buildTestState();
     const events = normalize(running, {
       type: "system",
@@ -612,7 +619,7 @@ describe("what the ops events say", () => {
     );
   });
 
-  it("says what a compaction did to the context", () => {
+  it("reports the context size before and after a compaction", () => {
     const running = buildTestState();
     const events = normalize(running, {
       type: "system",
@@ -629,8 +636,8 @@ describe("what the ops events say", () => {
   });
 });
 
-describe("what a turn reports when it was interrupted", () => {
-  it("says nothing about an error: the text it stopped on is the assistant's, not a reason", () => {
+describe("an interrupted turn", () => {
+  it("has no error, because the text it stopped on is the assistant's reply, not a reason", () => {
     const running = buildTestState();
     const events = normalize(running, {
       ...RESULT,
@@ -643,7 +650,7 @@ describe("what a turn reports when it was interrupted", () => {
   });
 });
 
-describe("what the protocol will carry", () => {
+describe("encoding the events with the protocol schema", () => {
   const encode = Schema.encodeUnknownSync(ProviderEvent);
 
   it("encodes every event a whole turn produces", () => {
@@ -655,7 +662,7 @@ describe("what the protocol will carry", () => {
     }
   });
 
-  it("encodes a turn that answered its schema, and one that could not", () => {
+  it("encodes a turn whose output matches its schema, and one whose output does not", () => {
     for (const structured_output of [{ verdict: "accept" }, { verdict: "maybe" }]) {
       const running = buildTestState(OUTPUT_SCHEMA);
       const events = normalize(running, { ...RESULT, structured_output } as unknown as SDKMessage);
@@ -682,7 +689,7 @@ describe("what the protocol will carry", () => {
   });
 });
 
-describe("what nothing can take the session down with", () => {
+describe("malformed messages", () => {
   const broken: ReadonlyArray<readonly [string, unknown]> = [
     ["a result with no model usage", { ...RESULT, modelUsage: undefined }],
     ["a compaction with no metadata", { type: "system", subtype: "compact_boundary" }],

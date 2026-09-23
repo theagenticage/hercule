@@ -1,19 +1,19 @@
 /**
- * The environment a machine's git runs with. Everything the person who started
- * the daemon exported for themselves is a way into a session's git, so the
- * environment is built rather than passed on.
+ * Tests the environment the runner's git runs with. Any variable the person who
+ * started the runner exported for themselves could reach a session's git, so
+ * the environment is built instead of passed on.
  */
 import { describe, expect, it } from "vitest";
 import { buildSubstrateEnv } from "./substrate";
 
 describe("the environment provisioning git runs with", () => {
-  it("keeps the machine's own and drops what would answer for the agent", () => {
+  it("keeps ordinary variables, drops git configuration and askpass programs, and adds the runner's own", () => {
     const env = buildSubstrateEnv(
       {
         PATH: "/usr/bin",
         HOME: "/home/somebody",
-        // The user's own git configuration, and the two ways a machine answers
-        // a credential prompt without asking Hercule.
+        // The user's own git configuration, and two askpass programs that would
+        // answer a credential prompt without going through Hercule.
         GIT_CONFIG_GLOBAL: "/home/somebody/.gitconfig",
         GIT_CONFIG_COUNT: "1",
         GIT_ASKPASS: "/usr/bin/say-the-password",
@@ -27,10 +27,10 @@ describe("the environment provisioning git runs with", () => {
     expect(env["GIT_CONFIG_GLOBAL"]).toBeUndefined();
     expect(env["GIT_ASKPASS"]).toBeUndefined();
     expect(env["SSH_ASKPASS"]).toBeUndefined();
-    // Hercule's own pairs survive the scrub, because they are added after it.
+    // The runner's own variables are added after the scrub, so they are kept.
     expect(env["HERCULE_RUNNER_SOCKET"]).toBe("/run/hercule/daemon.sock");
     expect(env["GIT_CONFIG_COUNT"]).toBe("3");
-    // Nothing on a machine waits for a person to type a password.
+    // Git on a runner never waits for a person to type a password.
     expect(env["GIT_TERMINAL_PROMPT"]).toBe("0");
   });
 });

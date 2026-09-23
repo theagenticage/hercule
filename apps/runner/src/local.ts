@@ -1,11 +1,11 @@
 /**
- * `hercule runner --local`: an ordinary runner in every way but its first two
- * seconds.
+ * Runs `hercule runner --local`: an ordinary runner, except for how it starts.
  *
- * `runner.json` has one owner, so a controller cannot read who its child is; the
- * child says so itself on the pipe they share. A machine that has never joined
- * says that instead, and is handed a token back on stdin, the one place a token
- * travels that `ps` does not show and no grandchild inherits.
+ * Only the runner reads `runner.json`, so the controller cannot read which
+ * runner its child process is. Instead the child writes its runner id to the
+ * pipe they share. A machine that has never joined writes that instead, and
+ * the controller sends a join token back on stdin. Stdin is the one channel
+ * that `ps` does not show and that no grandchild process inherits.
  */
 import { existsSync } from "node:fs";
 import * as Duration from "effect/Duration";
@@ -24,8 +24,9 @@ const encodeAnnouncement = Schema.encodeUnknownSync(LocalAnnouncement);
 const decodeEnrolment = Schema.decodeUnknownEffect(LocalEnrolment);
 
 /**
- * One line and nothing more: the controller reads exactly this much and leaves
- * the pipe to the runner's logs, so a second line reads as a second answer.
+ * Writes the announcement to stdout as a single line. The controller reads
+ * exactly one line and then leaves the pipe to the runner's logs, so a second
+ * line would be read as log output, not as part of the announcement.
  */
 const announce = (said: LocalAnnouncement): Effect.Effect<void> =>
   Effect.sync(() => {
@@ -33,8 +34,9 @@ const announce = (said: LocalAnnouncement): Effect.Effect<void> =>
   });
 
 /**
- * Reading stops at the newline rather than at end of file, so a controller that
- * holds the pipe open is not waited on.
+ * Reads the first line of stdin, or `undefined` when stdin closes first.
+ * Reading stops at the newline instead of end of file, because the controller
+ * keeps the pipe open.
  */
 const firstStdinLine = Effect.promise(async () => {
   const decoder = new TextDecoder();
@@ -53,7 +55,7 @@ const enrol = (home: string): Effect.Effect<void, JoinError> =>
     if (line === undefined) {
       return yield* Effect.fail(
         new JoinError({
-          message: "nothing wrote a join token to this runner's stdin",
+          message: "stdin closed before a join request arrived",
           retryable: false,
         }),
       );
@@ -63,15 +65,21 @@ const enrol = (home: string): Effect.Effect<void, JoinError> =>
         Effect.try({ try: () => JSON.parse(line) as unknown, catch: () => undefined }),
         decodeEnrolment,
       ),
-      () => new JoinError({ message: "that is not a join this runner can make", retryable: false }),
+      () =>
+        new JoinError({
+          message:
+            "the join request on stdin is invalid: expected JSON with a controller URL and a token",
+          retryable: false,
+        }),
     );
-    // The controller spawns its runner before it binds, so the first attempts
-    // meet a listener that is not up. A refusal is not one of those.
+    // The controller spawns its runner before it binds its port, so the first
+    // attempts may find nothing listening. Retry only those failures, not a
+    // rejected join.
     yield* join({
       controllerUrl: enrolment.controllerUrl,
       token: enrolment.token,
       home,
-      // The machine the controller is on takes whatever the fleet is given.
+      // The controller's own machine takes any work the fleet is given.
       reserved: false,
     }).pipe(
       Effect.retry({
@@ -85,8 +93,8 @@ export const runLocalRunner = (
   home: string,
 ): Effect.Effect<void, NotEnrolled | JoinError | RunnerRetired | ToolingUnavailable> =>
   Effect.gen(function* () {
-    // Whether the file is there, not whether it reads: a machine holding an
-    // unparseable `runner.json` should say so rather than enlist again.
+    // Check whether the file exists, not whether it parses: a machine with an
+    // invalid `runner.json` should report the error instead of joining again.
     if (existsSync(buildRunnerFilePath(home))) {
       const enrolled = yield* readRunnerFile(home);
       yield* announce({ runnerId: enrolled.runnerId });

@@ -1,9 +1,9 @@
 /**
- * What the runner still knows about its workspaces after it restarts.
+ * Tests that the runner still knows where its workspaces are after it restarts.
  *
- * The controller stores no path, so this registry is the only place a
- * workspace's directory exists. A daemon that forgets it has stranded the
- * user's work on its own disk.
+ * The controller stores no paths, so this registry is the only record of a
+ * workspace's directory. A runner that lost it would strand the user's work on
+ * its own disk.
  */
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,7 +24,7 @@ afterAll(cleanTemporaries);
 const createStorageDir = (): string => createTemporaryDir("hercule-storage-");
 
 describe("resolving a workspace", () => {
-  it("reads an ephemeral back after a restart, with its checkouts", async () => {
+  it("finds an ephemeral workspace and its checkouts after a restart", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
@@ -50,14 +50,14 @@ describe("resolving a workspace", () => {
 
     const directory = join(storageDir, "workspaces", workspaceId);
     expect(resolved?.root).toBe(directory);
-    // A single-repo ephemeral runs in the checkout itself, not above it.
+    // A single-repo ephemeral workspace runs in the checkout itself, not above it.
     expect(resolved?.cwd).toBe(directory);
     expect(resolved?.checkouts).toEqual([
       { checkoutId, resourceId, remote: remote.url, path: directory },
     ]);
   });
 
-  it("runs a multi-repo ephemeral above its repositories", async () => {
+  it("runs a multi-repo ephemeral workspace in the root above its repositories", async () => {
     const web = makeRemote();
     const api = makeRemote();
     const storageDir = createStorageDir();
@@ -93,7 +93,7 @@ describe("resolving a workspace", () => {
     ]);
   });
 
-  // D-20a: a primary is Hercule's own clone under the machine's storage.
+  // A primary is Hercule's own clone in the runner's storage directory.
   it("runs a primary in the clone it made for the repository", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
@@ -114,13 +114,13 @@ describe("resolving a workspace", () => {
     expect(resolved?.root).toBe(directory);
   });
 
-  it("knows nothing about a workspace it does not hold", () => {
+  it("returns undefined for a workspace the runner does not have", () => {
     expect(makeWorkspaces({ storageDir: createStorageDir() }).resolve(createId())).toBeUndefined();
   });
 });
 
-describe("provisioning a workspace this runner already holds", () => {
-  it("re-reports it rather than making it again", async () => {
+describe("provisioning a workspace this runner already has", () => {
+  it("reports it again instead of creating it again", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
@@ -146,13 +146,13 @@ describe("provisioning a workspace this runner already holds", () => {
   });
 
   /**
-   * D-21 F12: the registry is written when a provisioning finishes, so a frame
-   * that arrives while the first is still cloning would find nothing there and
-   * provision a second time - failing on the branch the first had just made and
-   * tearing down what it found. Whoever arrives second waits for the one in
-   * flight and reports what it reported.
+   * The registry is written when provisioning finishes, so a frame that
+   * arrives while the first provisioning is still cloning would find no entry
+   * and provision a second time. That would fail on the branch the first had
+   * just created, and tear down what it found. The second call must wait for
+   * the first and return the same report.
    */
-  it("reports the one in flight rather than provisioning twice", async () => {
+  it("returns the report of the provisioning in progress instead of provisioning twice", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
@@ -169,7 +169,7 @@ describe("provisioning a workspace this runner already holds", () => {
     });
     const workspaces = makeWorkspaces({ storageDir });
 
-    // Both sent before either has answered: one daemon, one frame resent.
+    // Both calls start before either returns, like a frame resent to the same runner.
     const [first, second] = await Promise.all([
       workspaces.provision(frame),
       workspaces.provision(frame),
@@ -185,7 +185,7 @@ describe("provisioning a workspace this runner already holds", () => {
 });
 
 describe("a workspace whose directory is gone", () => {
-  it("is nowhere to run, and is reported failed rather than re-reported ready", async () => {
+  it("cannot be resolved, and is reported failed instead of ready", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
@@ -211,12 +211,12 @@ describe("a workspace whose directory is gone", () => {
 
     expect(again.status).toBe("failed");
     expect(again.message ?? "").toContain("gone");
-    // Forgotten, so the next frame for it makes the workspace afresh.
+    // Its entry is removed, so the next frame for it creates the workspace from scratch.
     expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
   });
 });
 
-describe("what a primary is re-reported as after a session in it", () => {
+describe("reporting a primary after a session ran in it", () => {
   it("re-reads the branch the session left the checkout on", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
@@ -245,7 +245,7 @@ describe("what a primary is re-reported as after a session in it", () => {
     ]);
   });
 
-  it("has nothing to say about a workspace it does not hold", async () => {
+  it("returns undefined for a workspace the runner does not have", async () => {
     expect(
       await makeWorkspaces({ storageDir: createStorageDir() }).reportAfterSession(createId()),
     ).toBeUndefined();

@@ -1,12 +1,11 @@
 /**
- * What the runner learns about a pi installation without hosting a session on
- * it: the version the binary prints, whether Z.ai's credential is where pi
- * looks for it, and the models it would offer - plus the install that puts pi
- * on a machine.
+ * Probes a pi installation without starting a session: the version the binary
+ * prints, whether pi finds a Z.ai key, and the models pi offers. Also builds
+ * the install command that puts pi on a machine.
  *
- * The version and the credential are one-shot commands; the catalog needs a pi
- * that has loaded its providers, so it is asked of a session-less child that is
- * killed as soon as it has answered.
+ * The version and the key check are one-shot commands. The model catalog needs
+ * a pi that has loaded its providers, so it is read from a child process with
+ * no session, which is killed as soon as it has responded.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -25,31 +24,35 @@ import type { Ran, Run } from "../process";
 import { truncateFact } from "../text";
 import { makeRpc, type PiSpawn } from "./rpc";
 
-/** The upstream Hercule runs pi against; nothing else is offered or asked about. */
+/** The only pi provider Hercule uses; no other provider is offered or checked. */
 export const ZAI = "zai";
 
-/** The level a session runs on when the user picked none. */
+/** The thinking level a session uses when the user picked none. */
 export const DEFAULT_THINKING = "low";
 
-/** One model as pi's catalog declares it. */
+/** A model as pi's catalog lists it. */
 interface PiModel {
   readonly id?: unknown;
   readonly name?: unknown;
   readonly provider?: unknown;
-  /** The levels this model takes, mapping the ones it cannot to `null`. */
+  /** The model's thinking levels; a level the model does not support maps to `null`. */
   readonly thinkingLevelMap?: Readonly<Record<string, string | null>>;
 }
 
-/** What a command said, in preference to the fact that it failed. */
+/**
+ * Returns a failed command's error text: its stderr, else its stdout, else a
+ * message with the exit code.
+ */
 const readComplaint = (ran: Ran): string => {
   const said = (ran.stderr.trim() === "" ? ran.stdout : ran.stderr).trim();
-  return said === "" ? `pi exited ${ran.code} without saying why` : said;
+  return said === "" ? `pi exited with code ${ran.code} and printed no error` : said;
 };
 
 /**
- * pi answers `auth check` with a status object and exits 1 when no credential
- * is configured, so the exit code alone cannot tell a machine nobody has
- * entered a key on from a machine with no working pi: what it printed can.
+ * Converts the output of `pi auth check` to an auth state. pi prints a status
+ * object and exits with code 1 when no key is configured, so the exit code
+ * alone cannot tell a machine with no key from a machine with a broken pi.
+ * The printed status can.
  */
 const buildAuth = (ran: Ran): SnapshotAuth => {
   let status: unknown;
@@ -59,8 +62,8 @@ const buildAuth = (ran: Ran): SnapshotAuth => {
     return { status: "error", message: truncateFact(readComplaint(ran)) };
   }
   if (status === "ready") return { status: "ok" };
-  // The Z.ai upstream is an API key: there is no account to name, and a
-  // made-up identity would be a name the user never entered.
+  // Z.ai uses an API key, so there is no account name to report, and a
+  // made-up identity would show a name the user never entered.
   return status === "not_ready"
     ? { status: "unauthenticated" }
     : { status: "error", message: truncateFact(readComplaint(ran)) };
@@ -70,9 +73,10 @@ const formatLevelLabel = (level: string): string =>
   `${level.slice(0, 1).toUpperCase()}${level.slice(1)}`;
 
 /**
- * The thinking option the model offers, or none: the levels it maps to
- * something. A level it maps to `null` is one the upstream refuses the turn
- * for, so offering it would be a choice that fails.
+ * Builds the model's thinking option from the levels it supports, or returns
+ * no option when it supports none. A level mapped to `null` is left out: Z.ai
+ * rejects a turn at that level, so offering it would offer a choice that
+ * always fails.
  */
 const buildThinkingOption = (model: PiModel): ReadonlyArray<ModelOption> => {
   const levels = Object.entries(model.thinkingLevelMap ?? {}).flatMap(([level, mapped]) =>
@@ -81,7 +85,7 @@ const buildThinkingOption = (model: PiModel): ReadonlyArray<ModelOption> => {
   if (levels.length === 0) return [];
   return [
     {
-      // The option id the composer labels and sends back under.
+      // The option id the composer shows and sends back with the choice.
       id: "thinking",
       label: "Thinking",
       kind: "select",
@@ -112,10 +116,11 @@ const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescri
     }));
 
 /**
- * The catalog, off a pi of its own that persists nothing and reaches nowhere
- * but its own installed providers. It is killed as soon as it has answered: a
- * child left running for a Fleet page nobody is looking at any more is a
- * process with the user's key in its environment.
+ * Reads the model catalog from a separate pi process that saves nothing and
+ * makes no network calls. Fails with an error message when pi cannot be
+ * started or does not respond. The process is killed as soon as it has
+ * responded: left running, it would keep the user's key in its environment
+ * long after anyone looked at the Fleet page.
  */
 const fetchCatalog = (
   spawn: PiSpawn,
@@ -139,8 +144,7 @@ const fetchCatalog = (
             "--no-themes",
           ],
           env,
-          // A probe runs nothing and belongs to no session, so it has no
-          // directory of its own to run in.
+          // A probe belongs to no session, so it has no working directory.
           null,
         ),
       catch: (error) => (error instanceof Error ? error.message : String(error)),
@@ -170,8 +174,8 @@ export const makeProbe =
       const auth = buildAuth(
         yield* run([binary, "auth", "check", "--provider", ZAI, "--json"], env),
       );
-      // pi lists only the providers whose credentials it found, so a machine
-      // nobody has entered a key on has no catalog to read.
+      // pi lists only the providers it has a key for, so a machine with no key
+      // has no catalog to read.
       if (auth.status !== "ok") return { harnessVersion, auth, models: [] };
       return yield* Effect.match(fetchCatalog(spawn, binary, env), {
         onFailure: (message) => buildFailedProbe(harnessVersion, message),
@@ -186,7 +190,7 @@ export const makeProbe =
     );
   };
 
-/** The vendor ships one install script and pins no release, so this is all of it. */
+/** Builds the pi install: the vendor's install script, which cannot pin a release. */
 export const makePiInstall = (
   run: Run,
 ): ((env: Readonly<Record<string, string | undefined>>) => Effect.Effect<InstallOutcome>) =>

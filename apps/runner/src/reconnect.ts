@@ -1,13 +1,14 @@
 /**
- * Holding a connection open for ever, on a plain doubling backoff whose wait can
- * be abandoned. A lid opening or a network coming back means the reason the last
- * attempt failed is probably gone, and waiting out the rest of a thirty-second
- * sleep is the difference between a runner being there when its owner opens the
- * screen and not.
+ * Keeps a connection open for ever: it reconnects with an exponential backoff,
+ * and a signal can cut a wait short. When a laptop lid opens or the network
+ * comes back, the reason the last attempt failed is probably gone. Waiting out
+ * the rest of a thirty-second sleep then decides whether the runner is online
+ * when its owner opens the web app.
  *
- * No portable API says "the machine woke", so the loop takes a stream of signals
- * and nothing else; `streamReconnectSignals` below guesses at them, and a platform
- * source can replace it without the loop knowing.
+ * No portable API reports that the machine woke up, so the loop takes a stream
+ * of signals and nothing else. `streamReconnectSignals` below guesses when the
+ * machine woke up, and a platform-specific source could replace it without
+ * changing the loop.
  */
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -24,29 +25,33 @@ export const RECONNECT_CAP: Duration.Duration = Duration.seconds(30);
 
 export const HEURISTIC_INTERVAL: Duration.Duration = Duration.seconds(1);
 
-/** A second of timer drift is an overloaded box; ten is a lid that was shut. */
+/** One second of timer drift means an overloaded machine; ten means the lid was shut. */
 export const CLOCK_GAP_LIMIT: Duration.Duration = Duration.seconds(10);
 
 export interface ReconnectOptions<E> {
-  /** Returns when the attempt is over, however it ended. */
+  /** Completes when the attempt is over, however it ended. */
   readonly attempt: Effect.Effect<unknown, E>;
   /** Emits whenever it is worth trying again at once. */
   readonly signals: Stream.Stream<void>;
 }
 
 /**
- * Two things start the schedule over: a signal that the machine changed, and an
- * attempt that held longer than the cap, which was a working connection rather
- * than a failure and should not inherit an older outage's climb.
+ * Runs `attempt` again and again, waiting longer after each failure, up to
+ * `RECONNECT_CAP`. Fails only with `RunnerRetired`, when the controller has
+ * retired this runner. Two things reset the wait to `RECONNECT_BASE`:
+ *
+ * - a signal that the machine changed;
+ * - an attempt that lasted longer than the cap. That was a working connection,
+ *   not a failure, so it should not keep the long wait of an older outage.
  */
 export const reconnect = <E>(options: ReconnectOptions<E>): Effect.Effect<never, RunnerRetired> =>
   Effect.gen(function* () {
     const cap = Duration.toMillis(RECONNECT_CAP);
     const base = Duration.toMillis(RECONNECT_BASE);
 
-    // One subscription for the life of the loop. A fresh one per wait would
-    // restart a stateful source and hear nothing while an attempt is in flight,
-    // which is when a machine is most likely to change under it.
+    // Subscribe once for the life of the loop. A new subscription per wait
+    // would restart a stateful source and miss every signal while an attempt
+    // is in flight, which is when the machine is most likely to change.
     const arrivals = yield* Queue.unbounded<void>();
     yield* Effect.forkChild(
       Effect.ignore(Stream.runForEach(options.signals, () => Queue.offer(arrivals, undefined))),
@@ -55,17 +60,17 @@ export const reconnect = <E>(options: ReconnectOptions<E>): Effect.Effect<never,
     let wait = base;
     while (true) {
       const started = yield* Clock.currentTimeMillis;
-      // Every ending is logged and dialled again, bar one: a controller that
-      // has retired this runner will not have it back, whatever it waits.
+      // Every ending is logged and retried, except one: a controller that has
+      // retired this runner will never accept it again, however long it waits.
       const retired = yield* Effect.catchCause(
         Effect.as(options.attempt, undefined),
         (cause: Cause.Cause<E>) => {
           const ended = Option.getOrUndefined(
             Option.filter(Cause.findErrorOption(cause), (error) => error instanceof RunnerRetired),
           );
-          // A retirement is not an ending anyone should go looking into, so it
-          // is picked out before the warning: the caller's own message about
-          // re-enlisting is the only line it should produce.
+          // Check for retirement before logging the warning. A retirement needs
+          // no investigating, and the caller's own message about joining again
+          // should be the only line it produces.
           if (ended !== undefined) return Effect.succeed(ended);
           return Effect.as(
             Effect.logWarning("The connection to the controller ended", cause),
@@ -77,10 +82,10 @@ export const reconnect = <E>(options: ReconnectOptions<E>): Effect.Effect<never,
       const held = (yield* Clock.currentTimeMillis) - started;
       if (held >= cap) {
         wait = base;
-        // A connection held for hours banks every network change of the
-        // afternoon, and spending those as back-to-back retries when it drops is
-        // the opposite of what they mean. Signals during a short failing attempt
-        // are kept: that is the case the source exists for.
+        // A connection that lasted for hours has collected every network
+        // change of the afternoon. Using them as back-to-back retries when it
+        // drops would be wrong, so they are cleared. Signals that arrive during
+        // a short failing attempt are kept: that is the case they exist for.
         yield* Queue.clear(arrivals);
       }
       const signalled = yield* Effect.race(
@@ -92,19 +97,28 @@ export const reconnect = <E>(options: ReconnectOptions<E>): Effect.Effect<never,
   });
 
 export interface MachineReadings {
-  /** The wall clock, which a sleeping machine does not stop. */
+  /** Reads the wall clock, which keeps running while the machine sleeps. */
   readonly now: () => number;
-  /** Every address this machine holds, in a stable order. */
+  /** Lists every network address of this machine, in a stable order. */
   readonly addresses: () => ReadonlyArray<string>;
 }
 
-/** Compares each tick with the one before, so it holds nothing but the last reading. */
+/**
+ * Returns a stream that emits when the machine probably woke up or changed
+ * network. Each second it takes a reading and compares it with the previous
+ * one:
+ *
+ * - a clock jump much larger than the interval means the machine was asleep;
+ * - a change in the address list means the network changed.
+ *
+ * It keeps only the previous reading.
+ */
 export const streamReconnectSignals = (readings: MachineReadings): Stream.Stream<void> => {
   const interval = Duration.toMillis(HEURISTIC_INTERVAL);
   const gapLimit = Duration.toMillis(CLOCK_GAP_LIMIT);
   const takeReading = () => ({ at: readings.now(), addresses: readings.addresses().join(",") });
-  // Taken when the stream is run, not when it is built: a baseline from minutes
-  // ago makes the first tick look like a long sleep.
+  // Take the first reading when the stream runs, not when it is built. A
+  // reading from minutes ago would make the first tick look like a long sleep.
   return Stream.suspend(() =>
     Stream.unfold(takeReading(), (previous) =>
       Effect.gen(function* () {
@@ -112,7 +126,7 @@ export const streamReconnectSignals = (readings: MachineReadings): Stream.Stream
         while (true) {
           yield* Effect.sleep(HEURISTIC_INTERVAL);
           const next = takeReading();
-          // Anything much past one interval is time the machine was not running.
+          // Time well past one interval is time the machine was not running.
           const slept = next.at - last.at > interval + gapLimit;
           const moved = next.addresses !== last.addresses;
           last = next;

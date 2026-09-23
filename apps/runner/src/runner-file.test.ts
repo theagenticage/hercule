@@ -1,4 +1,4 @@
-/** Whether what the file holds can be dialed is the daemon's to say; `daemon.test.ts` says it. */
+/** Whether the daemon can dial the URL in the file is tested in `daemon.test.ts`. */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";

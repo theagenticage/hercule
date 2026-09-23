@@ -1,7 +1,8 @@
 /**
- * What one session needs on this machine, resolved from the frame that asked
- * for it: ids in, paths out (spec 06 section 4). Only this file knows where an
- * instance or a workspace lives on the runner.
+ * Resolves what one session needs on this machine from its start frame. The
+ * frame holds ids, and this file turns them into paths and an environment
+ * (spec 06 section 4). Only this file knows where an instance's home or a
+ * workspace lives on the runner.
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -11,7 +12,7 @@ import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
 
-/** The facts about this machine a session is resolved against. */
+/** The facts about this machine that a session's context is built from. */
 export interface Machine {
   /** `<runner storage>/providers`: one isolated provider home per instance. */
   readonly providersDir: string;
@@ -19,34 +20,36 @@ export interface Machine {
   readonly scratchDir: string;
   /** `<home>/runner/bin`, holding the `hercule` symlink, prepended to a session's `PATH`. */
   readonly binDir: string;
-  /** hercule-as-a-tool, as the runner resolved it once at start (spec 06 section 9.3). */
+  /** The Hercule tool, prepared once at runner start (spec 06 section 9.3). */
   readonly herculeTool: ProviderRunnerContext["herculeTool"];
   /** What a session reads as `HERCULE_API_URL`. */
   readonly controllerUrl: string;
-  /** The runner's own environment, the bottom layer of a session's. */
+  /** The runner's own environment. A session's environment is built on top of it. */
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
-  /** The harness path this machine last probed, by binary name. */
+  /** Returns the harness path the last probe found for a binary name, or undefined if it found none. */
   readonly binaryOf: (binaryName: string) => string | undefined;
-  /** The workspaces this machine holds: where a session with one runs. */
+  /** The workspaces on this machine. A session with a workspace runs in it. */
   readonly workspaces: Workspaces;
-  /** The credential socket this machine's git helper asks down. */
+  /** The socket the git credential helper connects to when it asks this runner for credentials. */
   readonly socketPath: string;
 }
 
 export interface Resolved {
   readonly ctx: ProviderRunnerContext;
-  /** Removed when the session exits; absent for a session that has a workspace. */
+  /** The scratch directory, removed when the session exits. Undefined for a session that has a workspace. */
   readonly scratch: string | undefined;
 }
 
 /**
- * Instance config carries "extra environment for the spawned process" (spec 06
- * section 2.1). No shipped provider declares a `configSchema` field for it yet,
- * so the shape is read leniently rather than refusing to start the session.
+ * Returns the string-valued variables in the `env` object of an instance's
+ * config: the "extra environment for the spawned process" (spec 06 section
+ * 2.1). No shipped provider declares a `configSchema` field for it yet, so the
+ * config is read leniently: anything else is ignored rather than failing the
+ * session start.
  *
- * `HOME` is dropped: relocating it makes the Claude CLI report another
- * account's login, or none, because the macOS Keychain item is keyed by the
- * real home (spec 06 section 9.1); isolation is `CLAUDE_CONFIG_DIR`'s job.
+ * `HOME` is dropped. Moving it makes the Claude CLI report another account's
+ * login, or none, because the macOS Keychain item is keyed by the real home
+ * (spec 06 section 9.1). `CLAUDE_CONFIG_DIR` isolates the instance instead.
  */
 const readInstanceEnv = (config: unknown): Record<string, string> => {
   const env = (config as { readonly env?: unknown } | null)?.env;
@@ -59,21 +62,29 @@ const readInstanceEnv = (config: unknown): Record<string, string> => {
 };
 
 /**
- * Base env, then the instance's, then Hercule's own: the layering of spec 06
- * section 4, in that order, so instance config can never take the session's
- * token, its controller or its `hercule` away from the CLI a session calls.
+ * Builds a session's environment in three layers, each overriding the one
+ * before it (spec 06 section 4):
  *
- * The token, `GH_TOKEN` and the git identity are the frame's alone, never
- * something the runner invented, and they are passed through the environment
- * and nowhere else: written down, any of them would outlive the session it dies
- * with (spec 06 section 9.3). An empty `GH_TOKEN` would read to `gh` as a
- * credential that failed rather than as one nobody issued, so it is left out
- * where the frame carries none.
+ * - the runner's own environment, with git's own variables removed;
+ * - the instance's extra environment;
+ * - Hercule's variables: the git credential helper, `GH_TOKEN`, the API URL,
+ *   the session token, and `PATH`.
  *
- * What the machine inherited is scrubbed of git's own variables first, the same
- * way the substrate's is: a `GIT_ASKPASS` or a `GIT_CONFIG_*` the person who
- * started the daemon exported for themselves would otherwise answer for the
- * agent, or take the helper below away from it.
+ * Hercule's layer comes last, so instance config can never replace the
+ * session's token, its controller, or the `hercule` the session calls.
+ *
+ * The token, `GH_TOKEN` and the git identity come only from the frame; the
+ * runner never makes them up. They are passed through the environment and
+ * nowhere else, because anything written to disk would outlive the session
+ * (spec 06 section 9.3). When the frame has no `GH_TOKEN`, the variable is left
+ * out: `gh` would read an empty one as a credential that failed, not as no
+ * credential at all.
+ *
+ * Git's variables are removed from the inherited environment the same way the
+ * substrate environment removes them. Otherwise a `GIT_ASKPASS` or a
+ * `GIT_CONFIG_*` that the person who started the daemon exported for
+ * themselves would answer credential prompts for the agent, or replace the
+ * credential helper set below.
  */
 const buildEnv = (machine: Machine, frame: SessionStart): Record<string, string | undefined> => ({
   ...buildSubstrateEnv(machine.baseEnv),
@@ -83,20 +94,23 @@ const buildEnv = (machine: Machine, frame: SessionStart): Record<string, string 
   HERCULE_API_URL: machine.controllerUrl,
   HERCULE_TOKEN: frame.token,
   HERCULE_SESSION: "1",
-  // Prepended, so `which hercule` finds this build and the machine's own tools
-  // keep working after it (spec 15 section 2). What it is prepended to is the
-  // machine's own `PATH`: a `PATH` in instance config is dropped, because a
-  // session whose config put another directory first could shadow `hercule`
-  // with a binary of its own choosing. An empty entry on `PATH` is the
-  // current directory, so a machine that gave the runner none gets the bin
-  // directory alone rather than a trailing colon.
+  // The bin directory goes first, so `which hercule` finds this build, and the
+  // machine's own tools still work after it (spec 15 section 2). The rest is
+  // the machine's own `PATH`. A `PATH` in instance config is ignored, because
+  // it could put another directory first and shadow `hercule` with a
+  // different binary. An empty entry in `PATH` means the current directory,
+  // so when the machine has no `PATH`, the result is the bin directory alone,
+  // with no trailing colon.
   PATH:
     machine.baseEnv["PATH"] === undefined || machine.baseEnv["PATH"] === ""
       ? machine.binDir
       : `${machine.binDir}:${machine.baseEnv["PATH"]}`,
 });
 
-/** Whatever the filesystem refused, said in the words a session's reader sees. */
+/**
+ * Runs a filesystem operation. Fails with the error's message, which is the
+ * text the user reads in the session's stream.
+ */
 const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
   Effect.try({
     try: work,
@@ -104,10 +118,14 @@ const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
   });
 
 /**
- * A workspace-less session gets an empty scratch directory rather than the
- * runner's own cwd, which every harness would read instruction files out of
- * (spec 06 section 9.1). The rest of spec 06 section 4.2 - empty setting
- * sources, auto memory off, strict MCP - is the adapter's to apply.
+ * Returns the directory a session runs in, and its scratch directory if it has
+ * one. Fails with a message when the workspace is not on this runner, when git
+ * cannot switch to the requested branch, or when the filesystem fails.
+ *
+ * A session without a workspace gets an empty scratch directory, not the
+ * runner's own cwd, because every harness reads instruction files out of its
+ * cwd (spec 06 section 9.1). The rest of spec 06 section 4.2 (empty setting
+ * sources, auto memory off, strict MCP) is up to the adapter.
  */
 const placeSession = (
   frame: SessionStart,
@@ -118,8 +136,9 @@ const placeSession = (
     if (workspaceId === null) {
       return yield* tryFilesystem(() => {
         const scratch = joinPath(machine.scratchDir, frame.sessionId);
-        // Emptied rather than merely made: "empty" is the whole property, and a
-        // directory left behind by a session of the same id is not that.
+        // Remove and recreate rather than only create: the directory must be
+        // empty, and one left behind by an earlier session with the same id
+        // may not be.
         rmSync(scratch, { recursive: true, force: true });
         mkdirSync(scratch, { recursive: true, mode: 0o700 });
         return { cwd: scratch, scratch };
@@ -133,8 +152,9 @@ const placeSession = (
     }
     const branch = frame.checkoutBranch;
     if (branch !== undefined) {
-      // Never forced: a switch git refuses is uncommitted work of the user's,
-      // and losing it is worse than not starting the session.
+      // Never force the switch: a forced switch can throw away the user's
+      // uncommitted work, and losing that is worse than not starting the
+      // session.
       const switched = yield* Effect.promise(() =>
         switchBranch(workspace.cwd, branch, buildSubstrateEnv(machine.baseEnv)),
       );
@@ -143,6 +163,12 @@ const placeSession = (
     return { cwd: workspace.cwd, scratch: undefined };
   });
 
+/**
+ * Resolves the context an adapter needs to start a session: its cwd, the
+ * instance's provider home, the harness binary, the environment and the
+ * secrets. Fails with a message the user can read when the session cannot be
+ * placed on this machine.
+ */
 export const resolveSessionContext = (
   frame: SessionStart,
   machine: Machine,
@@ -162,8 +188,9 @@ export const resolveSessionContext = (
         home,
         binary: machine.binaryOf(binaryName),
         env: buildEnv(machine, frame),
-        // Handed to the adapter and layered into nothing: a credential belongs
-        // in whichever variable the harness reads, which only the adapter knows.
+        // Passed to the adapter as they are, not added to the environment:
+        // only the adapter knows which variable its harness reads a credential
+        // from.
         secrets: frame.secrets,
         herculeTool: machine.herculeTool,
       },

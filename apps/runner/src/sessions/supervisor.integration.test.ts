@@ -1,8 +1,8 @@
 /**
- * The supervisor driven the way a connection drives it: the three frames a
- * controller sends in, the frames the runner sends back out. The adapter here
- * is a fake, because what is under test is the runner's own bookkeeping - the
- * sequence, the live table, the scratch directory - and not any harness.
+ * Tests the supervisor the way a connection uses it: the controller's frames go
+ * in, and the runner's frames come out. The adapter is a fake, because the
+ * tests are about the runner's own bookkeeping (the sequence numbers, the
+ * `live` table, the scratch directory), not about any harness.
  */
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,12 +38,12 @@ const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
 const TURN = "0199e0e7-0000-7000-8000-0000000000fd";
-/** The Queued Input row an input frame is sent under, and answered under. */
+/** The id of the Queued Input row an input frame and its result are sent under. */
 const REQUEST = "0199e0e7-0000-7000-8000-0000000000fc";
-/** The adapter's own id for the park an answer names; the controller mints none. */
+/** The adapter's own id for the open request an answer refers to. The controller does not create one. */
 const PARK = "0199e0e7-0000-7000-8000-0000000000fb";
 
-/** The shipped defaults (spec 03 section 6.2): only the test clock can cross them. */
+/** The shipped defaults (spec 03 section 6.2). Only the test clock can reach them. */
 const INACTIVITY_MS = 30 * 60 * 1000;
 const ABSOLUTE_MS = 8 * 60 * 60 * 1000;
 
@@ -68,8 +68,8 @@ const START: SessionStart = {
 const at = "2026-09-07T10:00:00.000Z";
 
 /**
- * No adapter sends this: it is published until a relay is heard from, and
- * filtered out before one sees it.
+ * An event no real adapter sends. The tests publish it until a relay receives
+ * it, and the fake adapter filters it out before the relay under test sees it.
  */
 const MARKER: ProviderEvent = {
   _tag: "runtime.warning",
@@ -79,18 +79,18 @@ const MARKER: ProviderEvent = {
   message: "is anybody listening",
 };
 
-/** An adapter that reports what it was handed and emits what the test asks for. */
+/** A fake adapter that records what it was given and emits the events the test asks for. */
 interface Fake {
   readonly adapter: ProviderAdapter;
   /** The context the supervisor resolved for the one session it started. */
   readonly contexts: Array<ProviderRunnerContext>;
-  /** How many markers have reached a relay, which is what says one is listening. */
+  /** How many markers have reached a relay. A count above zero proves a relay is listening. */
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
   readonly interrupted: Array<string>;
-  /** Every `respondToRequest`, as the positional arguments it was handed. */
+  /** The arguments of every `respondToRequest` call. */
   readonly answered: Array<readonly [string, string, ApprovalDecision]>;
-  /** Every `stopSession`, with the reason its caller gave it. */
+  /** Every `stopSession` call, with the reason its caller gave. */
   readonly stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }>;
   readonly emit: (event: ProviderEvent) => void;
   fails: string | undefined;
@@ -129,11 +129,11 @@ const createFake = (): Fake => {
       providerId: "fake",
       binaryName: "fake-harness",
       /**
-       * A PubSub drops what no subscriber is on, so an event published before
-       * the relay ran is one nobody heard - the missing outbox (spec 03 section
-       * 2.3), and a race for any test that starts a session. A marker that got
-       * this far is the proof a relay is listening; it is counted and dropped
-       * here rather than passed on, so the relay under test never sees it.
+       * A PubSub drops events that no subscriber receives, so an event
+       * published before the relay subscribed is lost. That is the missing
+       * outbox (spec 03 section 2.3), and a race in any test that starts a
+       * session. A marker that gets this far proves a relay is listening; it is
+       * counted and dropped here, so the relay under test never sees it.
        */
       events: Stream.filter(Stream.fromPubSub(events), (event) => {
         if (event !== MARKER) return true;
@@ -164,17 +164,17 @@ const createFake = (): Fake => {
         }),
       interrupt: (sessionId) => Effect.sync(() => void interrupted.push(sessionId)),
       /**
-       * Nothing parks in this fake: the request events are emitted directly,
-       * so there is never an answer for it to carry back to a harness. What
-       * the answer was handed is recorded, because the frame's three fields
-       * reaching the adapter in the right order is the runner's own job.
+       * No session in this fake is really parked: the tests emit request events
+       * directly, so there is no harness to pass an answer to. The arguments are
+       * recorded, because passing the frame's three fields to the adapter in
+       * the right order is the runner's own job.
        */
       respondToRequest: (sessionId, requestId, decision) =>
         Effect.sync(() => void answered.push([sessionId, requestId, decision])),
       /**
-       * The reason is the caller's, not this adapter's: the supervisor is the
-       * one that knows why it stopped a session, and the exit event is the only
-       * place that reason can enter the stream.
+       * The exit reason comes from the caller, not from this adapter: the
+       * supervisor knows why it stopped a session, and the exit event is the
+       * only place that reason can enter the stream.
        */
       stopSession: (sessionId, reason) =>
         Effect.sync(() => {
@@ -194,7 +194,7 @@ const createFake = (): Fake => {
   return fake;
 };
 
-/** One connection: what the supervisor writes, in order, and where things live. */
+/** Builds one connection that records every frame the supervisor sends, in order, on a fresh machine. */
 const buildConnection = (fake: Fake) => {
   const under = mkdtempSync(join(tmpdir(), "hercule-supervisor-"));
   roots.push(under);
@@ -210,10 +210,9 @@ const buildConnection = (fake: Fake) => {
     workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
     socketPath: join(under, "daemon.sock"),
   };
-  // The value `supervising` returns is the process's, and one connection's
-  // supervisor is built from it through `forConnection`: a session outlives
-  // the socket that started it, and so does the shutdown that ends every one
-  // of them.
+  // `makeSupervising` returns the process-wide value, and each connection's
+  // supervisor is built from it with `forConnection`. Sessions outlive the
+  // socket that started them, and so does the shutdown that stops them all.
   const runner = makeSupervising([fake.adapter]);
   const supervisor = runner.forConnection({
     machine,
@@ -223,22 +222,22 @@ const buildConnection = (fake: Fake) => {
 };
 
 /**
- * How long a wait on the relay is given. Wall clock rather than a count of
- * attempts: an attempt takes as long as the machine is busy, so counting them
- * makes the wait shortest exactly when the rest of the suite is running beside
- * it. Vitest's own budget is set from it, because a give-up wait longer than
- * the test timeout never gets to say what it was waiting for.
+ * How long a wait on the relay may take. This is wall-clock time, not a number
+ * of attempts: an attempt takes longer when the machine is busy, so a fixed
+ * count would give the shortest wait exactly when the rest of the suite runs
+ * alongside. Vitest's test timeout is derived from it, because a wait that
+ * outlasts the test timeout never gets to report what it was waiting for.
  */
 const WAIT_DEADLINE_MS = 10_000;
 
 /**
- * Three, because the longest case here waits for the relay to subscribe, then
- * for what the body did, then for the relay to have read past it: a test whose
- * waits can outlast the timeout never gets to say what it was waiting for.
+ * Three waits, because the longest test waits for the relay to subscribe, then
+ * for the result of its body, then for the relay to read past it. A test whose
+ * waits can outlast the timeout never gets to report what it was waiting for.
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 5_000 });
 
-/** Waits for something the relay has done, or gives up and says so. */
+/** Waits until `ready` returns true. Fails the test, naming `what`, if the deadline passes first. */
 const waitUntil = (what: string, ready: () => boolean): Effect.Effect<void> =>
   Effect.gen(function* () {
     const deadline = Date.now() + WAIT_DEADLINE_MS;
@@ -247,11 +246,11 @@ const waitUntil = (what: string, ready: () => boolean): Effect.Effect<void> =>
   });
 
 /**
- * Waits until a marker has reached the relay. That is the one thing that says a
- * relay is on the PubSub - `Stream.onStart` fires before the subscription
- * exists, so it would say so too early - and, because the relay reads the
+ * Waits until a marker has reached the relay. This is the only reliable sign
+ * that a relay has subscribed to the PubSub: `Stream.onStart` fires before the
+ * subscription exists, so it would be too early. Because the relay reads the
  * PubSub in order, nothing published before the marker can still be in flight
- * when it arrives.
+ * once the marker arrives.
  */
 const awaitMarker = (fake: Fake): Effect.Effect<void> =>
   Effect.suspend(() => {
@@ -262,7 +261,7 @@ const awaitMarker = (fake: Fake): Effect.Effect<void> =>
     });
   });
 
-/** The relay runs for as long as the body does, the way a connection forks it. */
+/** Runs `body` with the relay forked beside it, the way a connection runs it. */
 const runWithRelay = <A>(
   fake: Fake,
   supervisor: { readonly relay: Effect.Effect<void> },
@@ -271,9 +270,9 @@ const runWithRelay = <A>(
   Effect.runPromise(
     Effect.gen(function* () {
       const relaying = yield* Effect.forkChild(supervisor.relay);
-      // Proved, not slept through: `forkChild` hands the fiber back before it
-      // has run, so a session started here would publish its `session.started`
-      // to a PubSub nobody is on yet.
+      // Wait for proof, not for a fixed time: `forkChild` returns the fiber
+      // before it has run, so a session started now would publish its
+      // `session.started` to a PubSub with no subscriber yet.
       yield* awaitMarker(fake);
       const value = yield* body;
       yield* Fiber.interrupt(relaying);
@@ -330,8 +329,8 @@ describe("one session, start to exit", () => {
       "content.delta",
       "session.exited",
     ]);
-    // The controller inserts on this number exactly once, so it is the one
-    // thing about the stream that must never repeat or go backwards.
+    // The controller inserts each event once, keyed by this number, so the
+    // number must never repeat or go backwards.
     expect(events.map((frame) => frame.seq)).toEqual([1, 2, 3]);
     // The harness is handed the scratch cwd and the instance's home, not paths
     // the controller invented.
@@ -342,11 +341,11 @@ describe("one session, start to exit", () => {
     // The credential the session calls Hercule with, carried from the frame the
     // controller sent to the process the adapter spawns, and nowhere else.
     expect(fake.contexts[0]?.env["HERCULE_TOKEN"]).toBe(START.token);
-    // And the skill it learns Hercule exists from, as this machine resolved it.
+    // And the skill that tells it about Hercule, as this machine prepared it.
     expect(fake.contexts[0]?.herculeTool.claudePluginDir).toBe(machine.herculeTool.claudePluginDir);
   });
 
-  it("reports what it holds, and holds nothing once the session has exited", async () => {
+  it("reports the sessions it holds, and none once the session has exited", async () => {
     const fake = createFake();
     const { supervisor, sent, machine } = buildConnection(fake);
 
@@ -367,7 +366,7 @@ describe("one session, start to exit", () => {
     );
 
     const reports = sent.filter((frame) => frame._tag === "sessionsReport");
-    // A plain snapshot: the binding joins the Hercule session to the harness's own.
+    // A plain snapshot: each binding links the Hercule session to the harness's own session.
     expect(reports[0]?.sessions).toEqual([
       { sessionId: SESSION, nativeSessionId: NATIVE, instanceId: INSTANCE },
     ]);
@@ -393,9 +392,9 @@ describe("a start the controller sends twice", () => {
         // The controller re-issues a command it cannot account for after a
         // reconnect (spec 03 section 2.3), and this one must not be destructive.
         yield* supervisor.start(START);
-        // Read past it before counting: an event the duplicate had wrongly
-        // published would still be in the relay otherwise, and the count below
-        // would say "nothing happened" about a relay that had not looked yet.
+        // Wait for the relay to read past the duplicate before counting.
+        // Otherwise an event the duplicate wrongly published could still be
+        // in flight, and the count below would pass too early.
         yield* awaitMarker(fake);
       }),
     );
@@ -420,8 +419,8 @@ describe("an exit that arrives after the id was started again", () => {
         yield* supervisor.start(START);
         yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
         // The exit of an earlier run under the same id, still on its way
-        // through the relay when the new one started. Only the adapter can
-        // tell the two apart: the event carries the same session id.
+        // through the relay when the new one started. The event has the same
+        // session id, so only the adapter can tell the two apart.
         yield* Effect.sync(() =>
           fake.emit({
             _tag: "session.exited",
@@ -468,12 +467,12 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
       resumeFreshStart = resolve;
     });
 
-    // The second `listSessions` call is `release`'s, checking what a stale
-    // exit left behind; held open so a fresh start for the same id can run
-    // while it is still deciding. The second `startSession` call is that
-    // fresh start's; held open past `live` taking its entry but before the
-    // adapter itself has one - the exact window `release`'s gated read above
-    // has to land in for the race to matter.
+    // The second `listSessions` call comes from `releaseSession`, handling the
+    // stale exit. It is held open so a fresh start for the same id can run
+    // meanwhile. The second `startSession` call is that fresh start's. It is
+    // held open after the fresh start has added its `live` entry but before
+    // the adapter holds the session. That is the window in which the held
+    // `listSessions` call must return for the race to matter.
     Object.assign(fake.adapter, {
       listSessions: Effect.suspend(() => {
         listCalls += 1;
@@ -512,9 +511,9 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
         );
         resumeFreshStart();
         yield* waitUntil("the fresh start finished", () => fake.contexts.length === 2);
-        // If `release` tore down the fresh entry by mistake, this second stop
-        // finds nothing live and does nothing - the assertion below is what
-        // catches that.
+        // If `releaseSession` tore down the fresh entry by mistake, this second
+        // stop finds no entry and does nothing. The assertion below catches
+        // that.
         yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
         yield* waitUntil("the second stop reached the harness", () => fake.stops.length === 2);
       }),
@@ -525,7 +524,7 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
 });
 
 describe("a start for a session this machine tore down when it exited", () => {
-  it("starts it again under the same id, rather than refusing it as one already here", async () => {
+  it("starts it again under the same id, instead of treating it as already running", async () => {
     const fake = createFake();
     const { supervisor, sent, machine } = buildConnection(fake);
     const resumed: SessionStart = {
@@ -539,8 +538,8 @@ describe("a start for a session this machine tore down when it exited", () => {
       Effect.gen(function* () {
         yield* supervisor.start(START);
         yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
-        // The harness ends on its own, the way an idle one is unloaded: it
-        // stops holding the session and says so.
+        // The harness ends on its own, the way an idle one is unloaded: the
+        // adapter stops holding the session and emits its exit.
         yield* fake.adapter.stopSession(SESSION, "process_exit");
         yield* waitUntil("sent the exit", () => listSessionEvents(sent).length === 2);
         yield* supervisor.start(resumed);
@@ -570,9 +569,9 @@ describe("a session that ended while the socket was down", () => {
         waitUntil("sent the start", () => listSessionEvents(sent).length === 1),
       ),
     );
-    // The harness ends between connections: its exit is published to a relay
-    // nobody is running, so it reaches no controller and the supervisor's own
-    // entry outlives the session. Nothing replays it - there is no outbox.
+    // The harness ends between connections. No relay is running, so its exit
+    // reaches no controller, and the supervisor's entry outlives the session.
+    // Nothing sends the exit again, because there is no outbox.
     await Effect.runPromise(fake.adapter.stopSession(SESSION, "stopped"));
     await runWithRelay(
       fake,
@@ -591,7 +590,7 @@ describe("a session that ended while the socket was down", () => {
 });
 
 describe("a session that cannot run here", () => {
-  it("ends a start the adapter refused, rather than leaving it starting forever", async () => {
+  it("ends a session whose adapter failed to start it, instead of leaving it starting forever", async () => {
     const fake = createFake();
     fake.fails = "no fake-harness on this machine";
     const { supervisor, sent, machine } = buildConnection(fake);
@@ -619,10 +618,10 @@ describe("a session that cannot run here", () => {
       supervisor,
       supervisor.start({
         ...START,
-        // This schema is valid JSON and outside the subset the three
+        // This schema is valid JSON but outside the subset the three
         // harnesses agree on. The controller lints the schema too, so a frame
-        // like this one means the two processes disagree about what a schema
-        // may say.
+        // like this means the controller and the runner disagree about which
+        // schemas are allowed.
         spec: { ...SPEC, outputSchema: { type: "object", properties: {}, minProperties: 1 } },
       }),
     );
@@ -633,7 +632,7 @@ describe("a session that cannot run here", () => {
       message: expect.stringContaining("minProperties") as string,
     });
     expect(events[1]).toMatchObject({ reason: "crash" });
-    // The harness was never asked for, and nothing was written for it.
+    // The adapter was never asked for a harness, and nothing was written to disk.
     expect(fake.contexts).toEqual([]);
     expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
   });
@@ -649,15 +648,16 @@ describe("a session that cannot run here", () => {
     expect(events[1]).toMatchObject({ _tag: "session.exited", reason: "crash" });
   });
 
-  it("reports a defect on the session rather than letting it take the connection down", async () => {
+  it("reports a defect on the session instead of letting it end the connection", async () => {
     const fake = createFake();
     const { supervisor, sent, machine } = buildConnection(fake);
     fake.dies = true;
 
     await runWithRelay(fake, supervisor, supervisor.start(START));
 
-    // Every other answer on this connection catches its own defects; a session
-    // that did not would leave the controller waiting in `starting` forever.
+    // Every other frame handler on this connection catches its own defects. A
+    // start that did not would leave the controller waiting in `starting`
+    // forever.
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
     // And it left nothing behind: neither the directory nor an entry that
@@ -665,7 +665,7 @@ describe("a session that cannot run here", () => {
     expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
   });
 
-  it("says input for a session it does not hold was lost, and stays quiet about stopping one", async () => {
+  it("reports input for a session it does not hold as lost, and ignores a stop for one", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -680,7 +680,7 @@ describe("a session that cannot run here", () => {
           input: { text: "hi" },
         });
         // Commands are idempotent across a reconnect: a session this runner
-        // does not hold has already exited, and said so once.
+        // does not hold has already exited and already sent its exit.
         yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
       }),
     );
@@ -688,8 +688,8 @@ describe("a session that cannot run here", () => {
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ _tag: "runtime.error", sessionId: SESSION });
-    // The caller is waiting on the answer under the row's own id, and a reason
-    // it can report beats a bare flag.
+    // The controller waits for the result under the row's id, and a reason it
+    // can show is better than a bare flag.
     expect(listInputResults(sent)).toHaveLength(1);
     expect(listInputResults(sent)[0]).toMatchObject({ requestId: REQUEST, ok: false });
     expect(listInputResults(sent)[0]?.message ?? "").toContain(SESSION);
@@ -697,8 +697,8 @@ describe("a session that cannot run here", () => {
   });
 });
 
-describe("what the controller hears back about one input", () => {
-  it("answers a delivered input with what the adapter said it did", async () => {
+describe("what the runner sends back for input, interrupts and answers", () => {
+  it("reports a delivered input with the delivery the adapter returned", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -742,7 +742,7 @@ describe("what the controller hears back about one input", () => {
     expect(fake.interrupted).toEqual([SESSION]);
   });
 
-  it("answers the park for a session it holds, and nothing for one it does not", async () => {
+  it("passes an answer to the adapter for a session it holds, and ignores one it does not", async () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
@@ -771,10 +771,10 @@ describe("what the controller hears back about one input", () => {
 });
 
 /**
- * The same drive with the test clock in place of the wall clock. Only the two
- * supervision timers read that clock; every wait on the relay below stays on
- * the wall clock, because what those wait for is another fiber getting a turn,
- * which no amount of virtual time delivers.
+ * Like `runWithRelay`, but with the test clock in place of the wall clock. Only
+ * the two supervision timers read the test clock. Every wait on the relay stays
+ * on the wall clock, because it waits for another fiber to run, and moving
+ * virtual time does not make that happen.
  */
 const runWithRelayOnTestClock = <A>(
   fake: Fake,
@@ -794,14 +794,14 @@ const runWithRelayOnTestClock = <A>(
     ),
   );
 
-/** A wait on the relay, on the wall clock, while the test clock drives the timers. */
+/** Waits on the relay using the wall clock, while the test clock drives the timers. */
 const waitOnWallClock = (what: string, ready: () => boolean): Effect.Effect<void> =>
   TestClock.withLive(waitUntil(what, ready));
 
 /**
- * The event the relay has sent for a session, once it has sent one. Arming a
- * clock and sending the event that armed it are the same pass through the
- * relay now, so seeing the frame is enough to know the clock is set.
+ * Waits until the relay has sent at least `count` session events. The relay
+ * updates the inactivity clock and sends the event in one step, so once the
+ * frame is seen, the clock is already set.
  */
 const awaitForwarded = (
   sent: ReadonlyArray<RunnerToController>,
@@ -840,7 +840,7 @@ const emitDelta = (fake: Fake, id: string): void =>
     delta: "still here",
   });
 
-/** The reasons the exits sent to the controller carry, in order. */
+/** Lists the reasons of the exits sent to the controller, in order. */
 const listExitReasons = (sent: ReadonlyArray<RunnerToController>): ReadonlyArray<string> =>
   listSessionEvents(sent)
     .map((frame) => frame.event)
@@ -848,7 +848,7 @@ const listExitReasons = (sent: ReadonlyArray<RunnerToController>): ReadonlyArray
     .map((event) => (event as { readonly reason: string }).reason);
 
 describe("a harness that goes silent mid-turn", () => {
-  it("is stopped for inactivity, and the exit says that is why", async () => {
+  it("is stopped with inactivity_timeout as the exit reason", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -858,25 +858,24 @@ describe("a harness that goes silent mid-turn", () => {
       Effect.gen(function* () {
         yield* supervisor.start(START);
         yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
-        // `session.started` and `turn.started`: the clock is armed by the
-        // second of them, on its way through the relay.
+        // `session.started` and `turn.started`. The second one starts the
+        // inactivity clock as it passes through the relay.
         yield* awaitForwarded(sent, 2);
 
         yield* TestClock.adjust(INACTIVITY_MS);
-        // Waits for the exit frame itself, not merely for the adapter to have
-        // been asked: the two can be several ticks apart on the way through
-        // the relay.
+        // Wait for the exit frame itself, not only for the stop request to the
+        // adapter: the two can be several ticks apart in the relay.
         yield* awaitForwarded(sent, 3);
       }),
     );
 
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "inactivity_timeout" }]);
-    // The reason reaches the controller the one way it can: on the adapter's
-    // own exit event, forwarded like any other.
+    // The reason reaches the controller in the only way it can: on the
+    // adapter's exit event, forwarded like any other event.
     expect(listExitReasons(sent)).toEqual(["inactivity_timeout"]);
   });
 
-  it("starts the wait over on any event of that session", async () => {
+  it("restarts the wait on any event of that session", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -892,8 +891,8 @@ describe("a harness that goes silent mid-turn", () => {
         yield* Effect.sync(() => emitDelta(fake, "d-1"));
         yield* awaitForwarded(sent, 3);
 
-        // The moment the first wait would have expired at. Nothing, because the
-        // delta a millisecond earlier started the wait over.
+        // The first wait would have expired now. Nothing happens, because the
+        // delta a millisecond earlier restarted the wait.
         yield* TestClock.adjust(1);
         expect(fake.stops).toEqual([]);
 
@@ -922,8 +921,8 @@ describe("a harness that goes silent mid-turn", () => {
         yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
         yield* awaitForwarded(sent, 3);
 
-        // An idle session is not a stuck one: it is waiting for its user, and
-        // the absolute clock is the only one that may end it.
+        // An idle session is not stuck: it is waiting for its user, and only
+        // the absolute deadline may end it.
         yield* TestClock.adjust(ABSOLUTE_MS - 1);
       }),
     );
@@ -960,8 +959,9 @@ describe("a harness that goes silent mid-turn", () => {
 });
 
 /**
- * A session parked on an open request is waiting for its user, not stuck, so
- * the inactivity clock must not be running while one is open.
+ * Emits a `request.opened`. A session parked on an open request is waiting for
+ * its user, not stuck, so the inactivity clock must not run while the request
+ * is open.
  */
 const emitRequestOpened = (fake: Fake, requestId: string): void =>
   fake.emit({
@@ -988,7 +988,7 @@ const emitRequestResolved = (fake: Fake, requestId: string): void =>
     decision: "allow",
   });
 
-/** The four events the inactivity clock's arming is a function of. */
+/** The four events that decide whether the inactivity clock runs. */
 type Step = "turn.started" | "request.opened" | "request.resolved" | "turn.completed";
 
 const emitStep = (fake: Fake, which: Step, nth: number): void => {
@@ -1000,22 +1000,22 @@ const emitStep = (fake: Fake, which: Step, nth: number): void => {
 
 describe("a session parked on an open request", () => {
   /**
-   * Enumerated rather than generated: the repo carries no property-testing
-   * library, and the arming is a function of two flags, so the sequences that
-   * flip each of them are countable.
+   * Listed by hand rather than generated: the repo has no property-testing
+   * library, and whether the clock runs depends on only two flags, so the
+   * sequences that flip each flag are few enough to list.
    */
   const SEQUENCES: ReadonlyArray<readonly [ReadonlyArray<Step>, boolean]> = [
     [["turn.started"], true],
     [["turn.started", "request.opened"], false],
     [["turn.started", "request.opened", "request.resolved"], true],
     [["turn.started", "request.opened", "turn.completed"], false],
-    // The clock a still-open request disarmed is gone, not leaked: the next
-    // turn is watched the ordinary way and this session is stopped once.
+    // The clock that the open request stopped is gone, not leaked: the next
+    // turn is watched as usual and the session is stopped once.
     [["turn.started", "request.opened", "turn.completed", "turn.started"], true],
     [["turn.started", "request.opened", "request.resolved", "turn.completed"], false],
     [["turn.started", "turn.completed", "turn.started"], true],
-    // One request is open per session at a time, so a second open that replaced
-    // the first is answered by one resolution.
+    // A session has at most one open request, so a second open replaces the
+    // first, and one resolution closes it.
     [["turn.started", "request.opened", "request.opened", "request.resolved"], true],
     [["turn.started", "request.opened", "request.resolved", "request.opened"], false],
   ];
@@ -1030,9 +1030,9 @@ describe("a session parked on an open request", () => {
         supervisor,
         Effect.gen(function* () {
           yield* supervisor.start(START);
-          // One pass through the relay per event, in order: arming the clock
-          // and sending the event that armed it are the same pass, so a frame
-          // seen is a clock already set.
+          // Send one event at a time and wait for its frame. The relay updates
+          // the clock and sends the event in one step, so once the frame is
+          // seen, the clock is already set.
           let count = 1;
           for (const which of sequence) {
             count += 1;
@@ -1042,8 +1042,8 @@ describe("a session parked on an open request", () => {
           }
 
           yield* TestClock.adjust(INACTIVITY_MS);
-          // The exit frame itself, not merely the adapter having been asked:
-          // the two are several ticks apart on the way through the relay.
+          // Wait for the exit frame itself, not only for the stop request to
+          // the adapter: the two are several ticks apart in the relay.
           if (armed)
             yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
         }),
@@ -1070,8 +1070,8 @@ describe("a session that has run for as long as it may", () => {
         yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
         yield* awaitForwarded(sent, 2);
 
-        // A busy session, kept clear of the inactivity clock the whole way: an
-        // event every quarter of the shorter wait, until the longer one is up.
+        // A busy session that never hits the inactivity timeout: an event
+        // every half of the inactivity timeout, until the absolute deadline.
         const step = Math.floor(INACTIVITY_MS / 2);
         let elapsed = 0;
         let count = 2;
@@ -1106,8 +1106,8 @@ describe("a session that has run for as long as it may", () => {
         yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
         yield* awaitForwarded(sent, 2);
 
-        // Both clocks die with the session. A timer still running here would
-        // stop a session that is already gone, or the next one under its id.
+        // Both timers end with the session. A timer still running here would
+        // stop a session that is already gone, or the next one with its id.
         yield* TestClock.adjust(ABSOLUTE_MS * 2);
       }),
     );
@@ -1116,7 +1116,7 @@ describe("a session that has run for as long as it may", () => {
     expect(listExitReasons(sent)).toEqual(["stopped"]);
   });
 
-  it("gives a session started again under the same id a clock of its own", async () => {
+  it("gives a session started again under the same id its own deadline", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -1150,24 +1150,26 @@ describe("a session that has run for as long as it may", () => {
 });
 
 /**
- * What an announced shutdown does to what this runner is holding.
+ * Tests what an announced shutdown does to the sessions this runner holds.
  *
- * A runner that walks away without stopping its harnesses leaves orphan
- * processes behind and sessions the controller believes are busy, so what is
- * asserted here is that `shutdown` does not return until every session it
- * stopped has had its exit forwarded - the caller hangs up the moment it does -
- * and that it returns anyway when a harness will not die.
+ * A runner that goes away without stopping its harnesses leaves orphan
+ * processes behind, and sessions the controller believes are busy. So these
+ * tests check two things:
+ *
+ * - `shutdown` does not return until the exit of every session it stopped has
+ *   been sent, because the caller closes the socket as soon as it returns;
+ * - `shutdown` still returns when a harness will not exit.
  */
 
-/** A second session, so a shutdown has more than one thing to see out. */
+/** A second session, so a shutdown has more than one session to stop. */
 const OTHER_SESSION = "0199e0e7-0000-7000-8000-0000000000ef";
 
 const OTHER_START: SessionStart = { ...START, sessionId: OTHER_SESSION };
 
 /**
- * The most a shutdown may take with a harness that never exits. Generous next
- * to the few seconds the shutdown bounds the wait at: what is under test is a wait that
- * ends, not the constant the implementation chose.
+ * The longest a shutdown may take with a harness that never exits. This is
+ * generous compared to the few seconds the shutdown waits: the test checks that
+ * the wait ends, not the exact limit the implementation chose.
  */
 const SHUTDOWN_BUDGET_MS = 20_000;
 
@@ -1175,7 +1177,7 @@ const sortStopsBySession = (fake: Fake): ReadonlyArray<{ sessionId: string; reas
   [...fake.stops].sort((one, other) => one.sessionId.localeCompare(other.sessionId));
 
 describe("an announced shutdown", () => {
-  it("stops every live session as a restart, and their exits are out before it returns", async () => {
+  it("stops every live session with runner_restart, and sends their exits before it returns", async () => {
     const fake = createFake();
     const { supervisor, runner, sent } = buildConnection(fake);
 
@@ -1189,9 +1191,9 @@ describe("an announced shutdown", () => {
 
         yield* runner.shutdown("runner_restart");
 
-        // Read the moment it returns, not after a wait: what the caller does
-        // next is hang the socket up, and an exit still in flight then is one
-        // the controller never sees.
+        // Check as soon as it returns, without waiting: the caller closes the
+        // socket next, and the controller would never see an exit that is
+        // still in flight.
         expect(listExitReasons(sent)).toEqual(["runner_restart", "runner_restart"]);
       }),
     );
@@ -1202,7 +1204,7 @@ describe("an announced shutdown", () => {
     ]);
   });
 
-  it("goes anyway when a harness takes the stop and never exits", async () => {
+  it("still returns when a harness accepts the stop and never exits", async () => {
     const fake = createFake();
     const { supervisor, runner, sent } = buildConnection(fake);
 
@@ -1222,8 +1224,8 @@ describe("an announced shutdown", () => {
           Effect.as(Effect.sleep(Duration.millis(SHUTDOWN_BUDGET_MS)), false),
         );
 
-        expect(returned, "the shutdown waited on a harness that never died").toBe(true);
-        // Abandoned, not seen out: both were asked, neither said anything back.
+        expect(returned, "the shutdown kept waiting for a harness that never exited").toBe(true);
+        // Both harnesses were asked to stop, and neither sent an exit.
         expect(listExitReasons(sent)).toEqual([]);
       }),
     );
@@ -1234,7 +1236,7 @@ describe("an announced shutdown", () => {
     ]);
   });
 
-  it("starts nothing the controller asks for after it", async () => {
+  it("ignores a start the controller sends after it", async () => {
     const fake = createFake();
     const { supervisor, runner, sent } = buildConnection(fake);
 
@@ -1246,8 +1248,8 @@ describe("an announced shutdown", () => {
         yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
         yield* runner.shutdown("runner_restart");
 
-        // A start the controller had already put on the wire when this runner
-        // began going. Spawning a harness now is one nothing will ever stop.
+        // The controller sent this start before it learned of the shutdown. A
+        // harness spawned now would never be stopped.
         yield* supervisor.start(OTHER_START);
       }),
     );
@@ -1258,13 +1260,13 @@ describe("an announced shutdown", () => {
 });
 
 describe("a stop that arrives while a session is still starting", () => {
-  it("is applied once the harness is up, rather than lost", async () => {
+  it("is applied once the harness is up, instead of being lost", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    // Held open on the adapter's own `startSession`, so the session already
-    // has a `live` entry - `starting` - before the stop is asked for, with
-    // nowhere yet to send it but `pendingStop`.
+    // Hold the adapter's `startSession` open, so the session already has a
+    // `live` entry in the `starting` phase when the stop arrives. The stop can
+    // only go to `pendingStop`.
     let gateEntered = false;
     let resumeGate: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -1300,14 +1302,14 @@ describe("a stop that arrives while a session is still starting", () => {
   });
 });
 
-describe("a shutdown that lands before a start has an entry to find", () => {
+describe("a shutdown that happens before a start has added its entry", () => {
   it("never asks the adapter for the harness", async () => {
     const fake = createFake();
     const { supervisor, runner, sent } = buildConnection(fake);
 
-    // Held open on the very first `listSessions` - `start`'s own check,
-    // crossed before this session has a `live` entry a shutdown taken in the
-    // gap could see.
+    // Hold the first `listSessions` call open. It is `start`'s own check, made
+    // before the session has a `live` entry, so a shutdown during the wait
+    // cannot see the session.
     let gateEntered = false;
     let resumeGate: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -1330,12 +1332,12 @@ describe("a shutdown that lands before a start has an entry to find", () => {
       supervisor,
       Effect.gen(function* () {
         yield* Effect.forkChild(supervisor.start(START));
-        yield* waitUntil("the start reached its own fence", () => gateEntered);
-        // Nothing is live yet, so this returns at once - `stopped` is what
-        // the still-gated start has to see, once it resumes.
+        yield* waitUntil("the start reached its adapter check", () => gateEntered);
+        // No session is live yet, so this returns at once. The held start must
+        // see `stopped` once it resumes.
         yield* runner.shutdown("runner_restart");
         resumeGate();
-        yield* waitUntil("the entry saw the shutdown as it was made", () =>
+        yield* waitUntil("the start saw the shutdown when it added its entry", () =>
           listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
         );
       }),
@@ -1347,15 +1349,15 @@ describe("a shutdown that lands before a start has an entry to find", () => {
 });
 
 /**
- * The instance's secret-valued config. It rides the start frame and reaches the
- * adapter through the context and nowhere else: written to the runner's disk it
- * would outlive the session it belongs to, and the machine holds no Hercule state
- * to put it back in.
+ * Tests the instance's secret config values. They arrive in the start frame and
+ * reach the adapter through the context and nowhere else. Written to the
+ * runner's disk, they would outlive the session they belong to, and the machine
+ * holds no Hercule state to restore them from.
  */
 describe("the secrets a start frame carries", () => {
   const KEY = "a-paid-credential-nobody-else-holds";
 
-  it("hands the adapter what the frame carried, by name", async () => {
+  it("passes the frame's secrets to the adapter, by name", async () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
@@ -1369,12 +1371,12 @@ describe("the secrets a start frame carries", () => {
     );
 
     expect(fake.contexts[0]?.secrets).toEqual({ zaiApiKey: KEY });
-    // Never layered into the environment by the runner: which variable a key
-    // belongs in is the adapter's own business.
+    // The runner never adds them to the environment: only the adapter knows
+    // which variable a key belongs in.
     expect(JSON.stringify(fake.contexts[0]?.env)).not.toContain(KEY);
   });
 
-  it("hands the adapter an empty set where the frame carried none", async () => {
+  it("passes an empty set of secrets when the frame has none", async () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
