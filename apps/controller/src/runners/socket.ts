@@ -1,17 +1,19 @@
 /**
- * The runner socket. A runner is an HTTP client of its own, so unlike a browser
- * it can put a credential on the handshake; that credential is checked before
- * the upgrade and buys nothing else anywhere in Hercule.
+ * The runner socket. A runner is its own HTTP client, so unlike a browser it
+ * can send a credential with the handshake. The credential is checked before
+ * the upgrade, and is accepted nowhere else in Hercule.
  *
- * The proof runs the other way too: `greet` signs the runner's nonce beside its
- * id, and `encodeChallengeBytes` in `@hercule/protocol` says why both are in there.
+ * The controller proves its identity too: `greet` signs the runner's nonce
+ * together with the runner's id. `encodeChallengeBytes` in `@hercule/protocol`
+ * explains why both are signed.
  *
- * Liveness is a protocol frame, never a WebSocket control frame: Bun answers a
- * control ping in the runtime, which would prove the machine is up rather than
- * the runner process.
+ * Liveness uses a protocol frame, never a WebSocket control frame: Bun answers
+ * a control ping inside the runtime, which would only prove the machine is up,
+ * not the runner process.
  *
- * The loop is awaited inline in the handler. Forking it before returning the
- * response kills it with the request scope, and the server receives nothing.
+ * The receive loop is awaited inline in the handler. Forking it before
+ * returning the response would end it with the request scope, and the server
+ * would receive nothing.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -46,10 +48,10 @@ const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
 
 export const RUNNER_PING_INTERVAL: Duration.Duration = Duration.seconds(15);
 
-/** Four missed intervals: one lost answer is a hiccup, four in a row is a machine. */
+/** Four missed intervals: one lost pong is a hiccup, four in a row means the runner is gone. */
 export const RUNNER_SILENCE_LIMIT: Duration.Duration = Duration.seconds(60);
 
-/** Tests hand over values they can wait out. */
+/** The ping interval and silence limit. Tests pass shorter values they can wait for. */
 export interface RunnerPings {
   readonly interval: Duration.Duration;
   readonly silence: Duration.Duration;
@@ -68,23 +70,25 @@ export const RunnerPingSchedule = Context.Reference<RunnerPings>(
 const NO_CREDENTIAL = "the runner socket needs a runner's credential";
 
 /**
- * A runner that was retired is told so, because its operator can act on it:
- * re-enlist the machine. Every other refusal says the same nothing, since the
- * difference between a credential never minted and one from another controller
- * is a probe.
+ * A retired runner is told so, because its operator can act on it by joining
+ * the runner again. Every other rejected credential gets the same message,
+ * because telling apart a credential never created and one from another
+ * controller would help someone probing for valid credentials.
  */
 const UNKNOWN_CREDENTIAL = "unknown credential";
 
-const RETIRED = "this runner was retired";
+const RETIRED = "this runner was retired; run `hercule runner join` to re-enlist";
 
-/** Empty in v1: the seam exists, and nothing has been built to negotiate yet. */
+/** Empty in v1: capability negotiation exists, but there is nothing to negotiate yet. */
 const CAPABILITIES: ReadonlyArray<string> = [];
 
 const UNREADABLE = "that is not a message this controller can read";
-const WRONG_VERSION = `this controller speaks runner protocol version ${String(PROTOCOL_VERSION)}`;
+const WRONG_VERSION =
+  `this controller speaks runner protocol version ${String(PROTOCOL_VERSION)}; ` +
+  "update the runner to a build that matches the controller";
 const GREETED_ALREADY = "this connection has already said hello";
 
-/** RFC 6455's protocol error; the other codes this file writes live in the protocol. */
+/** The RFC 6455 protocol error close code. The other close codes used here are defined in the protocol package. */
 const PROTOCOL_ERROR = 1002;
 
 const SILENT = "this runner stopped answering";
@@ -98,14 +102,17 @@ const encodeFrameText = (message: typeof ControllerToRunner.Type): string =>
 
 const FACTS_REQUEST = encodeFrameText({ _tag: "factsRequest" } satisfies RunnerFactsRequest);
 
-/** What both ends offer, which is the only thing either may use. */
+/** Returns the capabilities both sides offer, which are the only ones either may use. */
 const negotiateCapabilities = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
   CAPABILITIES.filter((capability) => theirs.includes(capability));
 
 /**
- * `mine` names this connection, so what it writes on its way out is dropped if
- * the runner already dialled again, and `departure` stays `unreachable` until a
- * `Goodbye` makes it an announcement.
+ * Serves one runner connection until it closes: answers the hello, handles
+ * every frame, sends pings, and records the runner as gone at the end.
+ *
+ * `mine` identifies this connection, so what it writes as it closes is dropped
+ * if the runner has already connected again. `departure` stays `unreachable`
+ * unless a `goodbye` frame marks a planned shutdown.
  */
 const holdConnection = (runnerId: string, socket: Socket.Socket) =>
   Effect.gen(function* () {
@@ -119,7 +126,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
     let departure: Departure = "unreachable";
     let lastHeard = yield* Clock.currentTimeMillis;
 
-    /** Resolves with what the service asked this connection to go out with. */
+    /** Resolves with the close event the service asked this connection to close with. */
     const asked = Deferred.makeUnsafe<Socket.CloseEvent>();
 
     const closeWithProtocolError = (reason: string) =>
@@ -129,8 +136,8 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
       Effect.gen(function* () {
         const controller = yield* identity.read;
         if (Option.isNone(controller)) {
-          // The boot creates the identity before anything binds, so this is a
-          // bug rather than a state to answer.
+          // The boot creates the identity before the server starts, so a
+          // missing identity is a bug, not a state to handle.
           return yield* Effect.die("the controller has no identity row");
         }
         const signature = yield* identity.sign(encodeChallengeBytes(runnerId, hello.nonce));
@@ -143,8 +150,8 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           nonce: hello.nonce,
           signature: Buffer.from(signature).toString("base64"),
         };
-        // Before the answer goes out, so a runner told it is in is one the fleet
-        // already reads as online.
+        // Before the hello is answered, so a runner that receives the answer
+        // already reads as online in the fleet.
         yield* connections.greeted(
           runnerId,
           mine,
@@ -152,8 +159,8 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             close: (code, reason) => {
               Deferred.doneUnsafe(asked, Exit.succeed(new Socket.CloseEvent(code, reason)));
             },
-            // A write that fails is a connection that is going; the operation
-            // waiting on the answer meets that as its deadline.
+            // A failed write means the connection is closing. The operation
+            // waiting for the answer then fails when its deadline passes.
             askForFacts: Effect.ignore(write(FACTS_REQUEST)),
             ask: (request) => Effect.ignore(write(encodeFrameText(request))),
           },
@@ -166,9 +173,9 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
         );
         greeted = true;
         yield* write(encodeFrameText(answer));
-        // After the answer, because the runner drops every frame that reaches
-        // it before the controller's hello: a sweep announced any earlier can
-        // have its first probe thrown away.
+        // After the answer, because the runner drops every frame that arrives
+        // before the controller's hello. A probe sweep announced earlier could
+        // have its first probe dropped.
         yield* connections.arrived(runnerId);
       });
 
@@ -178,8 +185,9 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           Effect.try({ try: () => JSON.parse(raw) as unknown, catch: () => undefined }),
         );
         if (Option.isNone(parsed)) return yield* closeWithProtocolError(UNREADABLE);
-        // Read before the frame, because a later peer's hello will not decode
-        // here and would otherwise be called gibberish rather than a mismatch.
+        // The version is read before the frame is decoded, because a newer
+        // runner's hello does not decode here. It would otherwise be reported
+        // as unreadable rather than as a version mismatch.
         const version = yield* Effect.option(decodePeerVersion(parsed.value));
         if (Option.isSome(version) && version.value.protocolVersion !== PROTOCOL_VERSION) {
           return yield* closeWithProtocolError(WRONG_VERSION);
@@ -189,19 +197,19 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
         const message = frame.value;
         switch (message._tag) {
           case "runnerHello":
-            // Without this a runner could make the controller sign and write for
-            // every frame it cares to send.
+            // Without this check, a runner could make the controller sign and
+            // write a reply for every frame it sends.
             if (greeted) return yield* closeWithProtocolError(GREETED_ALREADY);
             return yield* greet(message);
           case "pong":
-            // The only frame that counts as an answer, and only from a
-            // connection that has said who it is: otherwise anything holding a
-            // credential could keep a row reading as last seen a moment ago.
+            // The only frame that counts as a sign of life, and only after the
+            // hello. Otherwise anything holding a credential could keep the
+            // runner's "last seen" time current.
             if (!greeted) return;
             lastHeard = yield* Clock.currentTimeMillis;
             return yield* connections.answered(runnerId);
           case "factsReport":
-            // Until the hello lands, all this connection has shown is that
+            // Until the hello arrives, this connection has only shown that
             // somebody holds a credential.
             if (!greeted) return;
             return yield* connections.reportedFacts(runnerId, mine, message.facts);
@@ -217,8 +225,8 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             if (!greeted) return;
             return yield* connections.reportedAnswer(runnerId, mine, message);
           case "workspaceReport":
-            // Published rather than handled, like a session event: what a
-            // machine made of a working area is not the wire's to interpret.
+            // Published rather than handled, like a session event: the
+            // workspaces domain interprets the report, not the socket.
             if (!greeted) return;
             return yield* connections.reportedWorkspace(runnerId, mine, message);
           case "credentialRequest":
@@ -226,25 +234,30 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             return yield* connections.requestedCredential(runnerId, mine, message);
           case "sessionEvent":
           case "sessionsReport":
-            // Handed on rather than handled: what a session event means belongs
-            // to the session domain, and this file's job is the wire.
+            // Passed on rather than handled: the sessions domain interprets
+            // session events, and this file only deals with the socket.
             if (!greeted) return;
             return yield* connections.reportedSession(runnerId, mine, message);
           case "goodbye":
             departure = "offline";
             return;
         }
-        // Every frame the protocol declares is answered above. A new one that
-        // reaches here would otherwise be dropped in silence.
+        // Every frame the protocol declares is handled above. The type check
+        // makes a new frame type fail to compile instead of being dropped
+        // silently.
         return message satisfies never;
       });
 
-    // The transport forks a fiber per frame, so two arriving together would
-    // otherwise run the exchange twice over the same four variables.
+    // The transport forks a fiber per frame, so without this lock two frames
+    // arriving together would update the same variables at once.
     const frames = yield* Semaphore.make(1);
     const receiveFrame = (raw: string) => frames.withPermits(1)(handleFrame(raw));
 
-    /** Raced against the receive loop, so neither outlives the other by a frame. */
+    /**
+     * Sends a ping every interval, and closes the connection when the runner
+     * has been silent past the limit. It is raced against the receive loop, so
+     * neither outlives the other.
+     */
     const ask = Effect.gen(function* () {
       while (true) {
         yield* Effect.sleep(pings.interval);
@@ -258,9 +271,10 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
     const closeWhenAsked = Effect.flatMap(Deferred.await(asked), write);
 
     /**
-     * A finaliser because a runner that hangs up aborts the request, and an
-     * aborted request interrupts the fiber serving it: without this the one
-     * write that matters most, the row leaving online, never happens.
+     * Records that the connection ended. It runs as a finalizer, because a
+     * runner that hangs up aborts the request, and an aborted request
+     * interrupts the fiber serving it. Without the finalizer, the most
+     * important write, moving the runner off `online`, would never happen.
      */
     const leave = Effect.suspend(() => connections.ended(runnerId, mine, departure));
 
@@ -277,15 +291,18 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
     );
   });
 
-/** Resolved before the upgrade, so a refusal is an ordinary `401` in the envelope. */
+/**
+ * The route for the runner socket. The credential is checked before the
+ * upgrade, so a rejected credential gets an ordinary `401` error response.
+ */
 export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, (request) =>
   Effect.gen(function* () {
     const connections = yield* RunnerConnections;
     const credential = readBearerToken(request);
     if (credential === undefined)
       return buildErrorResponse(createUnauthenticatedError(NO_CREDENTIAL));
-    // A database that will not answer is not a credential that was refused, and
-    // a runner told `unauthenticated` stops presenting a credential still good.
+    // A database error is not a rejected credential. A runner told
+    // `unauthenticated` would stop using a credential that is still valid.
     const admitted = yield* Effect.catch(connections.admits(credential), (error) =>
       Effect.as(Effect.logError("A runner's credential could not be resolved", error), undefined),
     );
@@ -293,13 +310,13 @@ export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, 
       return buildErrorResponse(createInternalError("something went wrong"));
     if (Option.isNone(admitted)) {
       const retired = yield* Effect.catch(connections.wasRetired(credential), (error) =>
-        Effect.as(Effect.logError("A refused credential could not be looked up", error), false),
+        Effect.as(Effect.logError("A rejected credential could not be looked up", error), false),
       );
       return buildErrorResponse(createUnauthenticatedError(retired ? RETIRED : UNKNOWN_CREDENTIAL));
     }
 
     const socket = yield* request.upgrade;
-    // Once the connection is up there is nobody left to answer with a status.
+    // After the upgrade there is no HTTP response left to send a status on.
     yield* holdConnection(admitted.value, socket);
     return HttpServerResponse.empty();
   }).pipe(Effect.withSpan("runner.socket")),

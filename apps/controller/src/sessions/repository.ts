@@ -1,10 +1,10 @@
 /**
- * Session rows and the append-only stream beside them. Nothing here decides
- * policy: placement, the access-mode fallback and the status axis are the
- * service's and the fold's.
+ * The repository for session rows and the append-only stream beside them.
+ * Nothing here decides policy: placement, the access-mode fallback and status
+ * changes are decided by the service and by the fold in `stream.ts`.
  *
- * `resumable` is computed in the SELECT rather than stored: a stored copy would
- * go stale the moment a runner is retired.
+ * `resumable` is computed in the SELECT rather than stored, because a stored
+ * copy would be out of date as soon as a runner is retired.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -41,18 +41,18 @@ import { buildReadyClause, buildResumableClause } from "../workspaces";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
 import type { StreamRow } from "./stream";
 
-/** A session as it is stored. `resumable` is derived at read; see above. */
+/** A session as it is stored. `resumable` is computed on read; see above. */
 export interface StoredSession {
   readonly id: string;
   readonly title: string;
   readonly permissionProfileId: string;
-  /** The Agent it was spawned from; `null` is a Thread. */
+  /** The Agent the session was spawned from; `null` for a Thread. */
   readonly agentId: string | null;
   readonly instanceId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
   readonly projectId: string | null;
-  /** The GitHub account this session pushes as, settled when it was spawned. */
+  /** The GitHub account this session pushes as, chosen when it was spawned. */
   readonly githubConnectionId: string | null;
   readonly requestedAccessMode: AccessMode;
   readonly accessMode: AccessMode;
@@ -67,11 +67,11 @@ export interface StoredSession {
   readonly exitedAt: string | null;
   readonly lastActivityAt: string;
   /**
-   * The provider behind its instance, and the tool families its spec asked
-   * that provider to take away. Both answer one question: does the provider
-   * act on the restriction. They are read and not stored, because the adapter
-   * in a later binary may enforce what this one ignores. `providerId` is
-   * `null` once the instance is gone.
+   * The provider behind the session's instance, and the tool families its
+   * spec disallowed. Both are used to work out whether the provider enforces
+   * the restriction. They are read on every read, not stored, because the
+   * adapter in a later binary may enforce what this one ignores. `providerId`
+   * is `null` once the instance is deleted.
    */
   readonly providerId: string | null;
   readonly disallowedTools: ReadonlyArray<DisallowedTool>;
@@ -79,14 +79,14 @@ export interface StoredSession {
 
 export interface NewSession {
   /**
-   * Minted by the caller, not here: a spawn opens the working area in the same
-   * transaction and a thread's own worktree is made on a branch named after the
-   * thread, so the id has to exist before either row does.
+   * Created by the caller, not here. A spawn opens the workspace in the same
+   * transaction, and a thread's own worktree is created on a branch named
+   * after the thread, so the id has to exist before either row does.
    */
   readonly id: string;
   readonly title: string;
   readonly permissionProfileId: string;
-  /** The Agent it was spawned from; absent is a Thread. */
+  /** The Agent the session was spawned from; `undefined` for a Thread. */
   readonly agentId: string | undefined;
   readonly instanceId: string;
   readonly runnerId: string;
@@ -94,7 +94,7 @@ export interface NewSession {
   readonly projectId: string | undefined;
   /** The branch the main workspace is switched to before the harness starts. */
   readonly checkoutBranch: string | undefined;
-  /** The GitHub account this session pushes as, settled when it was spawned. */
+  /** The GitHub account this session pushes as, chosen when it was spawned. */
   readonly githubConnectionId: string | undefined;
   readonly requestedAccessMode: AccessMode;
   readonly accessMode: AccessMode;
@@ -106,11 +106,10 @@ export interface NewSession {
 }
 
 /**
- * Every status of a session that is still live: one that has not exited. A live
- * session holds what it was spawned with - a machine, a working area and a
- * credential bounded by the grants it copied - so what it carries cannot be
- * deleted underneath it. Derived from the status vocabulary, so a status added
- * later is live until the session exits.
+ * Every session status except `exited`. A live session still uses what it was
+ * spawned with (a runner, a workspace, and a token limited to the grants it
+ * copied), so those cannot be deleted while it runs. The list is derived from
+ * `SESSION_STATUSES`, so a status added later counts as live.
  */
 export const LIVE_SESSION_STATUSES: ReadonlyArray<SessionStatus> = SESSION_STATUSES.filter(
   (status) => status !== "exited",
@@ -134,7 +133,7 @@ interface SessionRow {
   readonly permission_profile_id: Uint8Array;
   readonly agent_id: Uint8Array | null;
   readonly provider_id: string | null;
-  /** The spec's tool families as the JSON array it stores, or null for none. */
+  /** The spec's disallowed tool families as a JSON array, or null for none. */
   readonly disallowed_tools: string | null;
   readonly instance_id: Uint8Array;
   readonly runner_id: Uint8Array;
@@ -156,17 +155,17 @@ interface SessionRow {
 }
 
 /**
- * The column list, built when the repository is, never at module load. Two of
- * its pieces are functions the workspaces domain exports, and a constant that
- * called one of them while this module was being evaluated would read it before
- * its own module had finished - a `ReferenceError` that depends only on which
- * domain happened to be imported first.
+ * Builds the column list. It is called when the repository is built, never at
+ * module load. Part of the list comes from a function the workspaces domain
+ * exports. A constant that called it while this module loads could run before
+ * the workspaces module has finished loading, and throw a `ReferenceError`
+ * that depends only on which domain was imported first.
  */
 const buildColumnList = (): string =>
   "id, title, permission_profile_id, agent_id, instance_id, runner_id, workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
-  // Both read for `unenforced`: which provider is behind the instance, and
-  // what this session's spec asked that provider to take away.
+  // Both are read to compute `unenforced`: the provider behind the instance,
+  // and the tool families this session's spec disallowed.
   "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
@@ -210,9 +209,10 @@ const buildCursorScope = (direction: SortDirection): CursorScope => ({
 });
 
 /**
- * The transcript walk. Its key is the position, which is per session, so the
- * session is part of the walk the cursor belongs to: without it one session's
- * cursor would silently hide rows on another's transcript.
+ * Builds the cursor scope for one session's transcript. The cursor key is the
+ * position, which is per session, so the session id is part of the scope.
+ * Without it, a cursor from one session's transcript would silently skip rows
+ * on another session's transcript.
  */
 const buildTranscriptScope = (sessionId: string, direction: SortDirection): CursorScope => ({
   op: "transcript.read",
@@ -221,17 +221,19 @@ const buildTranscriptScope = (sessionId: string, direction: SortDirection): Curs
 });
 
 /**
- * Where a walk of this runner's queue stands: the position of the last row a
- * batch examined. Batches continue strictly past it, so a caller paging over
- * rows it skips never reads the same row twice.
+ * The position of the last queued row a batch read. The next batch starts
+ * after it, so a caller that skips rows never reads the same row twice.
  */
 export interface QueuePosition {
   readonly createdAt: string;
   readonly id: string;
 }
 
-/** One queued session, with everything the frame that starts it is built
- * from, bar the token minted and the account read at the claim. */
+/**
+ * One queued session, with everything needed to build its start frame except
+ * the token and the GitHub account, which are read when the session is
+ * claimed.
+ */
 export interface QueuedSession {
   readonly id: string;
   readonly createdAt: string;
@@ -242,14 +244,14 @@ export interface QueuedSession {
   readonly config: unknown;
 }
 
-/** Where a session's ingest stands: see `ingestState`. */
+/** A session's ingest state; see `ingestState`. */
 export interface IngestState {
   readonly lastSeq: number;
-  /** Added to every sequence this session's current process reports. */
+  /** Added to every sequence number the session's current process reports. */
   readonly base: number;
 }
 
-/** One row of a session's stream, as the transcript reads it back. */
+/** One row of a session's stream, as the transcript reads it. */
 export interface StoredStreamRow {
   readonly position: number;
   readonly at: string;
@@ -268,9 +270,9 @@ const make = Effect.gen(function* () {
   const COLUMNS = buildColumnList();
 
   /**
-   * One status is `=`; several - the runner page's capacity read - is `IN`.
-   * The contract requires at least one element in the array, so there is no
-   * empty case here to guard.
+   * Builds the status filter: `=` for one status, `IN` for several (the
+   * runner page reads capacity that way). The contract requires at least one
+   * element in the array, so an empty array cannot reach this.
    */
   const buildStatusClause = (status: SessionStatus | ReadonlyArray<SessionStatus>) =>
     Array.isArray(status) ? sql`status IN ${sql.in(status)}` : sql`status = ${status}`;
@@ -318,10 +320,10 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Which of these sessions have ended for good: the process is gone and
-     * nothing is left to pick the transcript up with. One read for the whole
-     * list, because the caller asking this is asking about a set of sessions
-     * at once and a read per id would grow with the set.
+     * Returns the ids among `ids` of sessions that have ended for good: the
+     * process has exited and the session cannot be resumed. Uses one query for
+     * the whole list, because the caller asks about many sessions at once and
+     * a query per id would grow with the list.
      */
     listEndedForGood: (
       ids: ReadonlyArray<string>,
@@ -379,10 +381,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The exact document this session's machine was told, as the row stores it.
-     * It is read on its own rather than on every session read, because only a
-     * session that picks up another session's transcript needs it, and the
-     * column is large enough for that to matter.
+     * Returns the exact spec sent to this session's runner, as the row stores
+     * it, or `none` when there is no such session. It is read separately
+     * rather than on every session read, because only a session that continues
+     * another session's transcript needs it, and the column is large.
      */
     readSpecDocument: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
@@ -393,9 +395,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * One page of a session's stream, in position order. The stored `event` is
-     * parsed back rather than re-decoded: the schema it was written from has no
-     * transform in it, so the document is the value.
+     * Returns one page of a session's stream, in position order. The stored
+     * `event` is parsed with `JSON.parse` rather than decoded with the schema:
+     * the schema has no transformations, so the JSON is already the value.
      */
     transcript: (
       request: TranscriptPageRequest,
@@ -435,13 +437,14 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Where ingest stands for this session: the highest sequence already
-     * written, and what the current process's own numbers are counted from.
+     * Returns the session's ingest state: the highest sequence number already
+     * written, and the offset added to the current process's sequence numbers.
      *
-     * A high-water mark, not a contiguous prefix: a coalesced delta row carries
-     * the sequence of the last delta folded into it, so a plain event can be
-     * written under a higher sequence while lower text is still only held.
-     * Nothing replays today; the outbox of spec 03 section 2.3 will need more.
+     * The highest sequence is a high-water mark, not proof that every lower
+     * number was written. A merged delta row stores the sequence of its last
+     * delta, so a plain event can be written with a higher sequence while
+     * lower delta text is still only held in memory. Nothing replays today;
+     * the outbox of spec 03 section 2.3 will need more than this.
      */
     ingestState: (sessionId: string): Effect.Effect<IngestState, SqlError> =>
       Effect.map(
@@ -456,8 +459,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Appends one row at the next position for this session. A sequence number
-     * already written hits the unique index and does nothing, which is what
-     * makes a replayed frame harmless.
+     * already written hits the unique index and writes nothing, so a replayed
+     * frame is harmless.
      */
     append: (sessionId: string, row: StreamRow): Effect.Effect<void, SqlError> => {
       const id = uuidFromString(sessionId);
@@ -471,18 +474,19 @@ const make = Effect.gen(function* () {
     },
 
     /**
-     * Moves the session and stamps the activity. `startedAt` is written once:
-     * it is when the conversation first came up, and a session resumed later
-     * does not get a new one. `exitedAt` is the last exit, so every move to
-     * `exited` stamps it afresh.
+     * Changes the session's status and updates its last activity time.
      *
-     * The WHERE clause is what keeps an exited session where it is: this row
-     * has two writers - ingest, and the spawn that could not reach its machine
-     * - so a status read before a transaction proves nothing inside it. The
-     * one move out of `exited` is `resume` below, and nothing else.
+     * - `startedAt` is written once, when the session first becomes `idle` or
+     *   `busy`. A session resumed later keeps its first start time.
+     * - `exitedAt` is the last exit, so every move to `exited` sets it again.
+     * - A status with no process behind it clears the token hash in the same
+     *   write. The table's constraint rejects the row otherwise (migration
+     *   0023).
      *
-     * A move to a status with no process behind it clears the token hash in
-     * the same write. The table refuses the row otherwise (migration 0023).
+     * The WHERE clause keeps an exited session exited. This row has two
+     * writers, ingest and a spawn that could not reach its runner, so a status
+     * read before the transaction proves nothing inside it. Only `resume`
+     * below moves a session out of `exited`.
      */
     moved: (sessionId: string, status: SessionStatus, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -498,11 +502,11 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * The move to `starting` dispatch makes, carrying the hash of the token it
-     * minted for that start. One statement rather than a move and a write: the
-     * row may hold a credential exactly because it is starting, and the two
-     * facts are never separately true. `moved`'s rule applies unchanged - an
-     * exited session is not restarted from here.
+     * Moves the session to `starting` for dispatch, and stores the hash of the
+     * token created for that start. It is one statement rather than a status
+     * change plus a write, because the row may hold a token only while it is
+     * starting or running, and the two must never be out of step. Like
+     * `moved`, it never changes an exited session.
      */
     started: (sessionId: string, tokenHash: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -514,26 +518,26 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * The one move out of `exited`, and so the one exception to `moved`'s rule
-     * above: the session goes back on the queue for dispatch to place, under
-     * the spec its resumed harness is to be started with. It answers whether
-     * it moved anything.
+     * Moves an exited session back to `queued`, with the spec its resumed
+     * harness starts with, for dispatch to place. This is the only way out of
+     * `exited`, and the one exception to the rule in `moved`. Returns whether
+     * the session was moved.
      *
-     * The write carries the same predicate the caller read `resumable` by, so
-     * two callers reaching this at once cannot both resume: the second finds
-     * the session no longer exited and changes nothing, rather than knocking a
-     * session that has already started back onto the queue and taking its
-     * credential away from the process holding it.
+     * The WHERE clause uses the same condition the caller used to read
+     * `resumable`, so two callers that arrive at once cannot both resume the
+     * session. The second finds it no longer exited and changes nothing. It
+     * does not put a session that has already started back on the queue, and
+     * so does not take the token away from the process holding it.
      *
      * An exited row holds no token hash (migration 0023), so a token that
-     * leaked before the exit cannot act again once the session is back on the
-     * queue. Dispatch mints the resumed process one of its own.
+     * leaked before the exit stays invalid once the session is back on the
+     * queue. Dispatch creates a new token for the resumed process.
      *
-     * The base every reported sequence is counted from moves up to what the
-     * stored stream reached, unconditionally: the controller cannot tell
-     * whether the machine's process restarted and so began numbering from zero
-     * again. Moving it anyway is harmless, because `runner_seq` is only a
-     * dedupe key and the transcript reads back in `position` order.
+     * The sequence offset always moves up to the highest sequence in the
+     * stored stream: the controller cannot tell whether the runner's process
+     * restarted and began numbering from zero again. Moving it anyway is
+     * harmless, because `runner_seq` is only used to drop duplicates and the
+     * transcript is read in `position` order.
      */
     resume: (sessionId: string, spec: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -553,9 +557,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The model and the per-model choices the session runs under from here on.
-     * `spec` is left alone: it is the document the runner was told at start,
-     * and only `resume` above rewrites it, for the start it is about to make.
+     * Sets the model and model options the session runs under from now on.
+     * `spec` is not changed: it is the spec the runner received at start, and
+     * only `resume` above rewrites it, for the next start.
      */
     setModelSelection: (
       sessionId: string,
@@ -566,7 +570,7 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(sessionId)}
       `),
 
-    /** The request the machine says it is parked on, or `null` for none. */
+    /** Stores the request the runner reported the session is waiting on, or `null` for none. */
     setOpenRequest: (
       sessionId: string,
       request: OpenRequest | null,
@@ -582,10 +586,10 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Records the provider-native id a runner reported for a session it holds.
-     * The runner and the instance are both in the WHERE clause: a machine may
-     * only speak for the sessions placed on it, and only about the instance
-     * those sessions were opened against.
+     * Stores the provider-native id a runner reported for one of its sessions.
+     * The runner and the instance are both in the WHERE clause, because a
+     * runner may report only on the sessions placed on it, and only for the
+     * instance those sessions were opened against.
      */
     bind: (
       sessionId: string,
@@ -600,12 +604,12 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * This runner's oldest queued sessions, up to `limit`, with what it takes
-     * to tell the machine to start each: the exact spec document it was
-     * queued with, and the provider it was opened against. Joined rather than
-     * looked up per row, so dispatch reads it in one statement. `after`
-     * continues an earlier walk from where it stood, in the queue's own
-     * order, so a caller skipping rows forward never re-reads them.
+     * Returns up to `limit` of this runner's oldest queued sessions, with what
+     * the start frame needs: the exact spec each was queued with, and its
+     * provider. The provider is joined rather than read per row, so dispatch
+     * needs one statement. `after` continues an earlier batch from where it
+     * stopped, in queue order, so a caller that skips rows never reads them
+     * again.
      */
     oldestQueued: (
       runnerId: string,
@@ -623,21 +627,22 @@ const make = Effect.gen(function* () {
           readonly config: string;
         }>`
           SELECT s.id, s.created_at, s.spec,
-                 -- The branch pick is one-shot: it is what the machine switches
-                 -- the main workspace to before this thread first runs. A resume
-                 -- picks the thread up where it left off, and replaying the pick
-                 -- would switch the branch out from under whatever the user has
-                 -- done in that checkout since.
+                 -- The branch is used only once: the runner switches the main
+                 -- workspace to it before this thread first runs. A resume
+                 -- continues where the thread left off, and switching again
+                 -- would change the branch under whatever the user has done in
+                 -- that checkout since.
                  CASE WHEN s.started_at IS NULL THEN s.checkout_branch END AS checkout_branch,
                  s.github_connection_id, pi.provider_id, pi.config
           FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
           WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
-            -- A session waits for the working area it asked for: telling the
-            -- machine to start it before the workspace stands would hand the
-            -- harness a directory that is not there yet.
+            -- A session waits until its workspace is ready. Starting it
+            -- earlier would give the harness a directory that does not exist
+            -- yet.
             AND ${sql.literal(buildReadyClause("s"))}
-            -- The walk's position, on the same pair the order below sorts by;
-            -- the sentinels a first batch passes sort before every real row.
+            -- Continue after the previous batch's last row, on the same pair
+            -- ORDER BY sorts by. The empty values a first batch passes sort
+            -- before every real row.
             AND (s.created_at, s.id) > (${after?.createdAt ?? ""}, ${after === undefined ? new Uint8Array(0) : uuidFromString(after.id)})
           ORDER BY s.created_at ASC, s.id ASC
           LIMIT ${limit}
@@ -655,7 +660,7 @@ const make = Effect.gen(function* () {
           })),
       ),
 
-    /** The sessions living in a workspace: what a workspace that failed ends. */
+    /** Returns the ids of the sessions in a workspace that have not exited. */
     liveInWorkspace: (workspaceId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
@@ -667,12 +672,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Ends every session this runner still holds open. `toStop` is what was
-     * `starting`, `idle` or `busy` before this call - read first, because the
-     * update below turns all of it into `exited` and there would be nothing
-     * left to tell apart - which is what a caller ending the runner itself
-     * still has to send a stop for; `ended` is every id this call moved,
-     * queued ones included, for the caller to cancel inputs on and announce.
+     * Ends every session still open on this runner. Returns two lists:
+     *
+     * - `toStop`: the sessions that were `starting`, `idle` or `busy`. A
+     *   caller retiring the runner still has to send each of them a stop. They
+     *   are read first, because the update then marks every session `exited`.
+     * - `ended`: every session this call moved, including queued ones, so the
+     *   caller can cancel their inputs and announce them.
      */
     endOnRunner: (
       runnerId: string,
@@ -704,9 +710,10 @@ const make = Effect.gen(function* () {
 
     /**
      * Ends every session on this runner that is `starting`, `idle` or `busy`
-     * and that `held` does not name: what a sessions report says this runner
-     * no longer has. Scoped to those three statuses so a session already
-     * `exited`, or `queued` and never told to this runner, is untouched.
+     * and is not in `held`, the list from the runner's sessions report.
+     * Returns the ids of the ended sessions. Only those three statuses are
+     * affected, so a session already `exited`, or `queued` and never sent to
+     * this runner, is left alone.
      */
     reportedGone: (
       runnerId: string,
@@ -730,7 +737,7 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Ends every running session on a lost runner: the runner is not one of
+     * Ends every running session on a lost runner: the runner is not in
      * `connected`, and nothing was heard about the session for longer than the
      * session's own absolute timeout.
      *
@@ -776,9 +783,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The sessions among `held` that this runner still runs and that the
-     * controller has already ended: what a runner's report lists and the rows
-     * say is `exited`. The runner is told to stop each one.
+     * Returns the sessions in `held` (the runner's report) that the controller
+     * has already marked `exited`. The caller tells the runner to stop each
+     * one.
      */
     listExitedAmong: (
       runnerId: string,
@@ -799,16 +806,16 @@ const make = Effect.gen(function* () {
 
 export const sessionRepository = make;
 
-/** The session rows, as whoever holds the repository sees them. */
+/** The session repository's methods. */
 export type SessionRows = Effect.Success<typeof make>;
 
-/** How every caller refuses a session id that names no row. */
+/** The error message every caller uses for a session id that matches no row. */
 const NO_SUCH_SESSION = "no such session";
 
 /**
- * One session by id, or the refusal every caller gives for one that is not
- * there, over the repository the caller already holds: the same id reads the
- * same refusal wherever it is looked up.
+ * Returns a function that reads one session by id from the given repository.
+ * It fails with `NotFound` when there is no such session, with the same
+ * message wherever it is used.
  */
 export const readSessionOrFail =
   (rows: SessionRows) =>

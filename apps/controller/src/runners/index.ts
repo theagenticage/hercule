@@ -1,9 +1,10 @@
 /**
  * Runners: the daemons that host sessions on the controller's behalf.
  *
- * The fleet keeps its own rows and the connections it is reachable through, and
- * calls nobody: what a machine reports that another domain acts on is published
- * on `RunnerConnections`, and what is done about it is decided above this domain.
+ * This domain owns the runner rows and the live connections to runners, and
+ * calls no other domain. When a runner reports something another domain acts
+ * on, the report is published on `RunnerConnections`, and the layer above this
+ * domain decides what to do about it.
  */
 export { requireAdapter, requireOnline } from "./adapters";
 export { RunnerJoinLayer } from "./join";

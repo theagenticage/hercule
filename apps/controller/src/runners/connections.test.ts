@@ -1,14 +1,13 @@
 /**
- * Two rules about which connection a runner's row follows.
+ * Tests for how runner rows follow their connections.
  *
- * What a controller does about the fleet it was holding when it stopped.
- *
- * A row saying `online` means a connection is open, and the only thing that
- * moves a runner off `online` is the connection that put it there. A controller
- * that was killed rather than drained therefore leaves rows claiming machines
- * are ready for work that nothing is connected to, and nothing later in the
- * process's life corrects them. This is the correction, and it is asserted here
- * rather than over the wire because what it is about is the run before this one.
+ * The first test covers what a controller does at boot about the runners that
+ * were connected when it last stopped. A row that reads `online` means a
+ * connection is open, and only that connection moves the runner off `online`.
+ * A controller that was killed rather than shut down therefore leaves rows
+ * that claim runners are ready when nothing is connected, and nothing later
+ * corrects them. `strandedByTheLastRun` is the correction. It is tested here
+ * rather than over the socket, because it is about the previous run.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
@@ -30,7 +29,7 @@ const layer = RunnerConnectionsLayer.pipe(
   Layer.provideMerge(TestDatabase),
 );
 
-/** One row as a stopped controller would have left it: where it stood, and how. */
+/** One runner row as a stopped controller left it: its connectivity and lifecycle. */
 interface Arranged {
   readonly connectivity: RunnerConnectivity;
   readonly lifecycle?: RunnerLifecycle;
@@ -54,7 +53,7 @@ const insertFleet = (rows: ReadonlyArray<Arranged>) =>
   });
 
 describe("the fleet a stopped controller left behind", () => {
-  it("reads every runner it was holding as unreachable, and leaves the rest alone", async () => {
+  it("marks every runner that was online as unreachable, and leaves the rest alone", async () => {
     const { rows, recorded } = await Effect.runPromise(
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
@@ -94,11 +93,11 @@ describe("the fleet a stopped controller left behind", () => {
       "offline/active",
       "unreachable/active",
       "offline/retired",
-      // The user asked for the drain and nothing has cancelled it; that a
-      // controller restarted says nothing about it either way.
+      // The user asked for the drain and nothing has cancelled it. A
+      // controller restart does not change that.
       "unreachable/draining",
     ]);
-    // Nobody holding a credential asked for this, and a runner is never an actor.
+    // No user or session asked for this, and a runner is never an actor.
     expect(recorded).toEqual([
       { actor: "system", state: "unreachable" },
       { actor: "system", state: "unreachable" },
@@ -107,7 +106,7 @@ describe("the fleet a stopped controller left behind", () => {
   });
 });
 
-/** What a machine says about itself; nothing here is about the probe. */
+/** The facts a runner reports about itself; these tests are not about the probe. */
 const FACTS: RunnerFacts = {
   os: "darwin",
   arch: "arm64",
@@ -124,7 +123,7 @@ const WATERMARK: RunnerWatermark = {
   availableMemoryBytes: 1,
 };
 
-/** A connection this file never writes to: its subject is the row, not the wire. */
+/** A connection these tests never write to: they test the row, not the socket. */
 const HELD = { close: () => undefined, askForFacts: Effect.void, ask: () => Effect.void };
 
 describe("a draining runner whose socket drops", () => {
@@ -142,7 +141,7 @@ describe("a draining runner whose socket drops", () => {
           negotiatedCapabilities: [],
           facts: FACTS,
         });
-        // The machine vanished: nothing announced it, the connection simply went.
+        // The runner vanished: it sent no goodbye, the connection just closed.
         yield* connections.ended(runner!.id, connection, "unreachable");
 
         return yield* runners.read(runner!.id);
@@ -156,7 +155,7 @@ describe("a draining runner whose socket drops", () => {
 });
 
 describe("a report from a connection the runner has replaced", () => {
-  it("is dropped, so the older socket cannot put its machine back over the newer one", async () => {
+  it("is dropped, so the older connection cannot overwrite what the newer one reported", async () => {
     const row = await Effect.runPromise(
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
@@ -171,7 +170,7 @@ describe("a report from a connection the runner has replaced", () => {
           negotiatedCapabilities: [],
           facts: FACTS,
         });
-        // The machine dialled again, and the row is the newer connection's now.
+        // The runner connected again, and the row now follows the newer connection.
         yield* connections.greeted(runner!.id, newer, HELD, {
           binaryVersion: "0.1.0",
           protocolVersion: 1,

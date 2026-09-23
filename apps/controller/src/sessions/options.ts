@@ -1,26 +1,29 @@
 /**
- * What a session starts under, as far as it is a matter of shaping values: what
- * makes a per-model pick wrong, the two clocks it runs under, and the document
- * a session picking up another's transcript is told. Pure throughout - the
- * catalog, the settings and the row are read by the caller and handed in, so
- * this is the one place that holds the rules.
+ * Pure helpers for the values a session starts with:
+ *
+ * - validating the model options a caller picked,
+ * - the two timeouts a session runs under,
+ * - the spec for a session that continues another session's transcript.
+ *
+ * The caller reads the model catalog, the settings and the row and passes
+ * them in, so these rules live in one place and have no dependencies.
  */
 import * as Effect from "effect/Effect";
 import type { ModelDescriptor, ModelSelection, SessionSpec } from "@hercule/protocol";
 import { createValidationError, type Validation } from "@hercule/contract";
 import type { ScopeSettings } from "../settings";
 
-/** The picks themselves, in the shape the row and the wire hold them. */
+/** The model options a caller picked, as the row and the wire store them. */
 export type ModelOptions = ModelSelection["options"];
 
 /**
- * Passes where every pick is one the model offers, and fails with a
- * `validation` naming each one that is not. Every wrong pick is reported, not
- * just the first, so a caller fixing a form sees all of it at once.
+ * Checks that the model offers every option in `given`, with a valid value.
+ * Fails with a `Validation` error that lists every invalid option, not just
+ * the first, so a caller fixing a form sees all the problems at once.
  *
- * A model the catalog has no descriptor for offers nothing, so every pick sent
- * with it is refused - which is how a slug nobody recognises is caught here,
- * even though the slug itself is left to the machine to refuse.
+ * A model with no descriptor in the catalog offers no options, so every option
+ * sent with it is rejected. That is how an unknown model slug is caught here,
+ * even though the runner is the one that rejects the slug itself.
  */
 export const validateOptions = (
   models: ReadonlyArray<ModelDescriptor>,
@@ -31,24 +34,22 @@ export const validateOptions = (
   const issues = Object.entries(given).flatMap(([id, value]) => {
     const at = { path: ["options", id] };
     if (described === undefined) {
-      return [{ ...at, message: `the machine reported no descriptor for ${model}` }];
+      return [{ ...at, message: `the runner reported no descriptor for ${model}` }];
     }
     const option = described.options.find((one) => one.id === id);
-    if (option === undefined) return [{ ...at, message: `${model} offers no ${id}` }];
+    if (option === undefined) return [{ ...at, message: `${model} has no option named ${id}` }];
     if (option.kind === "boolean") {
-      return typeof value === "boolean"
-        ? []
-        : [{ ...at, message: `${id} is a switch: true or false` }];
+      return typeof value === "boolean" ? [] : [{ ...at, message: `${id} must be true or false` }];
     }
     const choices = (option.choices ?? []).map((choice) => choice.value);
     return typeof value === "string" && choices.includes(value)
       ? []
-      : [{ ...at, message: `${id} takes one of ${choices.join(", ")}` }];
+      : [{ ...at, message: `${id} must be one of ${choices.join(", ")}` }];
   });
   return issues.length === 0 ? Effect.void : Effect.fail(createValidationError(issues));
 };
 
-/** Applied here, controller-side, when the settings key is unset; the runner holds no default of its own. */
+/** Used when the settings key is unset. The controller applies it; the runner has no default of its own. */
 const DEFAULT_INACTIVITY_TIMEOUT_MINUTES = 30;
 
 const DEFAULT_ABSOLUTE_TIMEOUT_MINUTES = 480;
@@ -56,12 +57,12 @@ const DEFAULT_ABSOLUTE_TIMEOUT_MINUTES = 480;
 const MINUTE_MS = 60_000;
 
 /**
- * The absolute timeout of a session whose stored spec carries none: one
- * stored before the timeouts were on the spec, under the same default.
+ * The absolute timeout for a session whose stored spec has none, because it
+ * was stored before the spec had timeouts. It is the same default as above.
  */
 export const DEFAULT_ABSOLUTE_TIMEOUT_MS = DEFAULT_ABSOLUTE_TIMEOUT_MINUTES * MINUTE_MS;
 
-/** The two clocks a session starts under, whole minutes turned into the milliseconds the wire carries. */
+/** Returns the two timeouts a session starts with, converted from minutes in the settings to milliseconds for the wire. */
 export const buildTimeouts = (
   controller: ScopeSettings<"controller">,
 ): SessionSpec["timeouts"] => ({
@@ -73,16 +74,17 @@ export const buildTimeouts = (
 });
 
 /**
- * Builds the document a machine is told for a session that picks up a
- * provider-native session, either resumed in place or forked off. It is the
- * document the parent was told, with the selection the parent ended on, the
- * native session it carries on from, and the timeouts as they stand now.
+ * Builds the spec sent to a runner for a session that continues a
+ * provider-native session, either resumed in place or forked. Returns the
+ * parent's spec with three changes: the model selection the parent ended on,
+ * the native session to continue from, and the timeouts from the current
+ * settings.
  *
- * It starts from the parent's own document and not from named fields, so
- * everything an Agent gave the parent reaches the continuation: the prompt,
- * the tools the session may not use, and the schema it answers under. Copying
- * is the rule here (ADR 0030). A fork that ran under a different prompt than
- * the session it came from would be a different piece of work.
+ * It copies the parent's whole spec rather than picking named fields, so
+ * everything an Agent gave the parent also reaches the continuation: the
+ * prompt, the disallowed tools, and the output schema (ADR 0030). A fork that
+ * ran under a different prompt than its parent would be a different piece of
+ * work.
  */
 export const buildContinuingSpec = (
   parent: SessionSpec,

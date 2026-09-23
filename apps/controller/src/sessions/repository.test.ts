@@ -1,11 +1,13 @@
 /**
- * The transcript walk: one session's stream rows, in position order, a page at
- * a time.
+ * Tests for the session repository, mainly paging through a transcript: one
+ * session's stream rows, in position order, a page at a time.
  *
- * What is asserted is the walk, not the rows: that the pages are contiguous and
- * in order, that the last one ends the walk, that a cursor is only good for the
- * order it was issued under, and that one session's stream never shows another
- * session's rows.
+ * The transcript tests check the paging, not the rows:
+ *
+ * - the pages are contiguous and in order;
+ * - the last page ends the paging;
+ * - a cursor works only for the sort direction it was created for;
+ * - one session's transcript never shows another session's rows.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
@@ -19,16 +21,16 @@ const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effe
 
 const at = "2026-09-07T10:00:00.000Z";
 
-/** A canonical v7 id, which is the only shape the store takes. */
+/** Returns a new canonical v7 id, the only id format the database accepts. */
 const mintId = () => uuidToString(mintUuid());
 
-/** A session row carrying one profile, with the shipped defaults filled in. */
+/** Inserts a session row on the given profile, with default values for the rest. */
 const insertSession = (permissionProfileId: string) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
-    // The caller mints the id, not the repository. A spawn opens the working
-    // area in the same transaction, and that area's branch is named after the
-    // session, so the id must exist before the row is written.
+    // The caller creates the id, not the repository. A spawn opens the
+    // workspace in the same transaction, and the workspace's branch is named
+    // after the session, so the id must exist before the row is written.
     const id = mintId();
     yield* sessions.insert({
       id,
@@ -51,10 +53,10 @@ const insertSession = (permissionProfileId: string) =>
     return id;
   });
 
-/** A session row to hang a stream on; nothing else carries its profile. */
+/** Inserts a session row for stream tests, on a profile no other session uses. */
 const aSession = Effect.suspend(() => insertSession(mintId()));
 
-/** `count` ordinary events on one session, numbered from one. */
+/** Appends `count` ordinary events to one session, numbered from one. */
 const fillStream = (sessionId: string, count: number) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
@@ -70,7 +72,7 @@ const fillStream = (sessionId: string, count: number) =>
     }
   });
 
-/** Every row of a session's transcript, read `limit` at a time. */
+/** Reads every row of a session's transcript, `limit` at a time, and counts the pages. */
 const walkTranscript = (sessionId: string, limit: number) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
@@ -86,7 +88,7 @@ const walkTranscript = (sessionId: string, limit: number) =>
     }
   });
 
-/** The token hash a session row holds, read straight off the row. */
+/** Reads a session's token hash directly from the row. */
 const readTokenHash = (sessionId: string) =>
   Effect.map(
     Effect.flatMap(
@@ -102,7 +104,7 @@ const readTokenHash = (sessionId: string) =>
 const readTurnId = (row: StoredStreamRow): string =>
   row.event._tag === "turn.started" ? row.event.turnId : row.event._tag;
 
-describe("the transcript walk", () => {
+describe("paging through a transcript", () => {
   it("pages through the whole stream in position order and stops at the end", async () => {
     const { items, pages } = await run(
       Effect.gen(function* () {
@@ -114,12 +116,12 @@ describe("the transcript walk", () => {
 
     expect(items.map((row) => row.position)).toEqual([1, 2, 3, 4, 5]);
     expect(items.map(readTurnId)).toEqual(["t1", "t2", "t3", "t4", "t5"]);
-    // Three pages of two: the third comes back short and ends the walk, which
-    // is the page that proves the cursor is not handed out one page too long.
+    // Three pages of two: the third is short and ends the paging, which proves
+    // no cursor is returned one page too many.
     expect(pages).toBe(3);
   });
 
-  it("ends the walk with no cursor when the page holds the rest", async () => {
+  it("returns no cursor when the page holds the remaining rows", async () => {
     const page = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -138,7 +140,7 @@ describe("the transcript walk", () => {
     expect(page.nextCursor).toBeUndefined();
   });
 
-  it("reads only the session it was asked for", async () => {
+  it("reads only the requested session", async () => {
     const items = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -159,7 +161,7 @@ describe("the transcript walk", () => {
     expect(items.map((row) => row.position)).toEqual([1, 2]);
   });
 
-  it("refuses a cursor from the other direction rather than resuming in the wrong place", async () => {
+  it("rejects a cursor from the other direction rather than continuing in the wrong place", async () => {
     const error = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -183,7 +185,7 @@ describe("the transcript walk", () => {
     expect(error).toBeInstanceOf(CursorError);
   });
 
-  it("refuses another session's cursor rather than skipping the rows below it", async () => {
+  it("rejects another session's cursor rather than skipping rows", async () => {
     const error = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -197,8 +199,8 @@ describe("the transcript walk", () => {
           cursor: undefined,
           direction: "asc",
         });
-        // Position is per session, so their position 4 is a boundary that means
-        // nothing here: taken at face value it would hide my first four rows.
+        // Positions are per session, so the other session's position 4 means
+        // nothing here. Used as is, it would skip this session's first four rows.
         return yield* sessions.transcript({
           sessionId: mine,
           limit: 4,
@@ -211,7 +213,7 @@ describe("the transcript walk", () => {
     expect(error).toBeInstanceOf(CursorError);
   });
 
-  it("hands back the normalized event as it was written, not a summary of it", async () => {
+  it("returns the normalized event exactly as it was written", async () => {
     const items = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -246,7 +248,7 @@ describe("the transcript walk", () => {
   });
 });
 
-/** A session moved to `starting` under a token hash, as dispatch moves one. */
+/** Inserts a session and moves it to `starting` with a token hash, as dispatch does. */
 const insertStartedSession = (tokenHash: string) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
@@ -257,7 +259,7 @@ const insertStartedSession = (tokenHash: string) =>
     return { sessionId, runnerId: row.value.runnerId };
   });
 
-describe("the session's own credential", () => {
+describe("the session token hash", () => {
   it("is cleared by every move to a status with no process behind it", async () => {
     const hashes = await run(
       Effect.gen(function* () {
@@ -292,9 +294,9 @@ describe("the session's own credential", () => {
     });
   });
 
-  it("is refused by the table on a row with no process behind it", async () => {
-    // What makes the rule hold for a writer that does not exist yet: a write
-    // that leaves a hash on such a row fails instead of keeping it.
+  it("is rejected by the table on a row with no process behind it", async () => {
+    // The constraint makes the rule hold for future writers too: a write that
+    // leaves a hash on such a row fails.
     const refused = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -310,8 +312,8 @@ describe("the session's own credential", () => {
   });
 });
 
-describe("listing the sessions that carry one profile", () => {
-  it("answers that profile's live sessions and leaves every other row out", async () => {
+describe("listing the sessions on one profile", () => {
+  it("returns that profile's live sessions and no other rows", async () => {
     const { listed, profileId, live } = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -319,7 +321,7 @@ describe("listing the sessions that carry one profile", () => {
         const live = yield* insertSession(profileId);
         const exited = yield* insertSession(profileId);
         yield* sessions.moved(exited, "exited", at);
-        // Another profile's session, which the filter must not answer.
+        // Another profile's session, which the filter must leave out.
         yield* insertSession(mintId());
         const page = yield* sessions.list({
           limit: 10,

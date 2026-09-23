@@ -1,11 +1,11 @@
 /**
- * Runners as the API sees them. A runner is almost entirely self-describing:
- * everything but the name, the labels, the session cap and whether the machine
- * is reserved arrives over the runner protocol, and the payload schema refuses
- * the rest.
+ * The runner service: runners as the API sees them. A runner describes itself
+ * almost entirely: everything except the name, the labels, the session cap,
+ * the disk watermark and whether it is reserved arrives over the runner
+ * protocol, and the update schema rejects every other field.
  *
- * Input is decoded here rather than trusted, because a built-in workflow action
- * calls these methods directly and the bounds are the same rule either way.
+ * Input is decoded here rather than trusted, because a built-in workflow
+ * action calls these methods directly, and the same limits apply either way.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -69,9 +69,9 @@ const RetireInput = Schema.Struct({ id: Id, ...RUNNER_RETIRE_FIELDS });
 export type RetireInput = Schema.Schema.Type<typeof RetireInput>;
 
 /**
- * The retired row, and the instant it was stamped with: everything else the
- * same retirement writes carries that instant rather than reading the clock
- * again a write later.
+ * The retired runner, and the timestamp of the retirement. Everything else the
+ * same retirement writes uses that timestamp, rather than reading the clock
+ * again.
  */
 export interface Retired extends RunnerDetail {
   readonly at: string;
@@ -92,45 +92,50 @@ interface Change {
   readonly new: unknown;
 }
 
-/** What a machine nobody has enlisted is called, wherever one is named. */
+/** The error message for a runner id that matches no runner, wherever it is used. */
 export const NO_SUCH_RUNNER = "no such runner";
 
-/** A spent, an expired and an unminted token all read the same: not outstanding. */
+/** The error message for a join token that was never created, already spent, or expired. */
 const NO_SUCH_JOIN_TOKEN = "no such join token";
 
 const NAME_TAKEN = "another runner already has that name";
 
 /**
- * §5.5: the fleet default is where work with nothing to say about placement
- * lands, which is the one thing a reserved runner never takes.
+ * The fleet's default runner gets work that names no runner, and a reserved
+ * runner must never get such work, so the default cannot be reserved (spec 03
+ * §5.5).
  */
 const RESERVED_IS_THE_DEFAULT =
   "this is the fleet's default runner; choose another default before reserving it";
 
 /**
- * Why a machine takes no session it does not already hold. Read wherever one is
- * named directly - a session being placed, or one being picked up again.
+ * The reasons a runner takes no new sessions. They are used wherever a runner
+ * is named directly: when a session is placed on it, or when a session on it
+ * is resumed.
  */
 export const DRAINING = "that runner is draining and takes no new sessions";
 export const RETIRED = "that runner is retired";
 
 const NOT_ACTIVE = "only an active runner can be drained";
 
-const NOT_DRAINING = "only a draining runner can be taken off the drain";
+const NOT_DRAINING = "only a draining runner can be undrained";
 
 const ALREADY_RETIRED = "that runner is already retired";
 
-const STILL_RUNNING = "sessions are still running on that runner";
+const STILL_RUNNING =
+  "sessions are still running on that runner; wait for them to finish, or retire it with force";
 
-/** Names the reachability first, because that is the word the fleet is showing. */
-const UNREACHABLE = "that runner is unreachable, so it cannot confirm its sessions have finished";
+/** Starts with "unreachable", because that is the status the fleet page shows. */
+const UNREACHABLE =
+  "that runner is unreachable, so it cannot confirm its sessions have finished; " +
+  "retire it with force to skip this check";
 
-/** Alphabetical: a fleet is short, and its name is how a reader picks one out. */
+/** Alphabetical: a fleet is short, and people find a runner by its name. */
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
 type Edit = { -readonly [K in keyof RunnerEdit]: RunnerEdit[K] };
 
-/** What every lifecycle move can answer with. */
+/** The errors every lifecycle change can fail with. */
 export type MoveError =
   | Unauthenticated
   | Forbidden
@@ -141,7 +146,7 @@ export type MoveError =
   | SqlError
   | Schema.SchemaError;
 
-/** Labels are replaced whole, so their order is part of the value. */
+/** Checks whether two label lists are equal. Labels are replaced as a whole, so order matters. */
 const haveSameLabels = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
   left.length === right.length && left.every((label, index) => label === right[index]);
 
@@ -164,9 +169,9 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * The two moves that differ only in which lifecycle they come from, go to,
-   * and write down. Each enforces its own grant, so changing what one of them
-   * requires changes what is checked.
+   * Changes a runner's lifecycle for `drain` and `undrain`, which differ only
+   * in the lifecycle they start from, the one they move to, and the audit
+   * entry. Each passes its own operation, so each checks its own grant.
    */
   const moveLifecycle = (
     input: Identified,
@@ -241,8 +246,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * A patch naming no field is refused, and one asking for the values already
-     * held writes nothing: either would stamp a row describing nothing.
+     * Updates a runner's editable fields and returns the updated runner. A
+     * patch with no fields is rejected, and a patch whose values match the
+     * current ones writes nothing, because either would record an audit entry
+     * describing no change.
      */
     update: (
       input: UpdateInput,
@@ -264,7 +271,7 @@ const make = Effect.gen(function* () {
         const result = yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // One clock read, so the row and the event carry the same instant.
+            // One clock read, so the row and the audit entry share one timestamp.
             const at = yield* nowIso;
             const before = yield* readRunnerOrFail(id);
 
@@ -295,8 +302,8 @@ const make = Effect.gen(function* () {
 
             if (Object.keys(changes).length === 0) return { detail: before, placements: false };
 
-            // Both reads sit inside the transaction the write is in, so the
-            // fleet cannot take the name, or the default, in between.
+            // Both reads are inside the write's transaction, so no other write
+            // can take the name, or change the default, in between.
             if (edit.name !== undefined && (yield* runners.names()).has(edit.name)) {
               return yield* Effect.fail(createConflictError(NAME_TAKEN));
             }
@@ -312,9 +319,9 @@ const make = Effect.gen(function* () {
               payload: { runnerId: id, changes },
               at,
             });
-            // The override moved the line under a disk this runner already
-            // reported: the same crossing `watermarkReport` would have found,
-            // recorded the same way.
+            // The new override may move the watermark past the free disk this
+            // runner already reported. That is the same change a
+            // `watermarkReport` would detect, and it is recorded the same way.
             if (before.watermark !== null && edit.diskWatermarkBytes !== undefined) {
               const wasAccepting = before.watermark.diskFreeBytes >= before.diskWatermarkBytes;
               const accepting = before.watermark.diskFreeBytes >= edit.diskWatermarkBytes;
@@ -335,15 +342,15 @@ const make = Effect.gen(function* () {
             };
           }),
         );
-        // After the commit, so whoever acts on the room this machine now has
-        // reads the cap and the watermark this patch wrote.
+        // After the commit, so whoever acts on this runner's new room reads
+        // the cap and the watermark this patch wrote.
         if (result.placements) yield* connections.placementsChanged(id);
         return result.detail;
       }),
 
     /**
-     * Takes a runner out of service without ending it: it finishes what it is
-     * running and is given nothing new. Cancelled by `undrain`.
+     * Takes a runner out of service without stopping it: it finishes the
+     * sessions it is running and gets no new ones. `undrain` reverses it.
      */
     drain: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
       moveLifecycle(input, {
@@ -363,22 +370,25 @@ const make = Effect.gen(function* () {
           refusal: NOT_DRAINING,
           kind: "runner.undrained",
         });
-        // A machine off the drain takes work again, which is not a fact the
-        // fleet acts on itself.
+        // An undrained runner can take work again. This domain does not act on
+        // that itself, so it publishes the change.
         yield* connections.placementsChanged(detail.id);
         return detail;
       }),
 
     /**
-     * The runner row's half of retiring a machine: the refusals, the lifecycle,
-     * the fleet default and the log entry. The operation a client reaches is the
-     * controller daemon's `retireRunner`, which runs this inside the transaction
-     * that also ends the machine's sessions and loses its workspaces, and closes
-     * the connection once that has committed.
+     * Does the runner row's part of retiring a runner: the checks, the
+     * lifecycle change, the fleet default and the audit entry. Fails with
+     * `InvalidState` when the runner is already retired, or, without `force`,
+     * when it still runs sessions or is unreachable.
      *
-     * The credential stops resolving the moment the row moves. Nothing is
-     * deleted: the row and everything that hangs off it stay, and re-enlisting
-     * writes a new runner beside this one.
+     * Clients reach the controller daemon's `retireRunner`, which runs this in
+     * the same transaction that ends the runner's sessions and marks its
+     * workspaces lost, and closes the connection after the commit.
+     *
+     * The credential stops working as soon as the lifecycle changes. Nothing
+     * is deleted: the row and everything linked to it stay, and joining again
+     * creates a new runner next to this one.
      */
     retire: (input: RetireInput): Effect.Effect<Retired, MoveError | SettingError> =>
       Effect.gen(function* () {
@@ -404,8 +414,9 @@ const make = Effect.gen(function* () {
               }
             }
             yield* runners.setLifecycle(id, "retired", at);
-            // A default nobody can place on is worse than no default: the
-            // fleet says so rather than promoting a runner nobody chose.
+            // A default that cannot take work is worse than no default. The
+            // default is cleared, and the audit entry records that, rather
+            // than promoting a runner nobody chose.
             const wasDefault = (yield* settings.defaultRunnerId()) === id;
             if (wasDefault) yield* settings.setDefaultRunnerId(null, at);
             yield* audit.append({
@@ -421,10 +432,11 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Asks the machine to probe itself now and hands back the row its answer
-     * left. The runner reports on its own hourly and only when something
-     * changed, so this is the only way to see a machine that was just given a
-     * provider CLI without waiting out the hour.
+     * Asks the runner to report its facts now, and returns the updated runner.
+     * Fails with `InvalidState` when the runner is not connected or does not
+     * report in time. The runner reports by itself only hourly, and only when
+     * something changed, so this is the only way to see a newly installed
+     * provider CLI without waiting up to an hour.
      */
     refreshFacts: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
       Effect.gen(function* () {
@@ -442,8 +454,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The token is in the answer and nowhere else. The fleet's "Add machine"
-     * mints a fresh one each time it opens, so an expired one costs a refresh.
+     * Creates a join token and returns it. The token appears only in this
+     * response. The fleet page's "Add machine" dialog creates a new one each
+     * time it opens, so an expired token only costs a refresh.
      */
     createJoinToken: (): Effect.Effect<MintedJoinToken, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
@@ -456,8 +469,8 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "runner.joinToken.minted",
               actor: yield* currentStamp,
-              // The token is a bearer secret; its id is what ties this entry to
-              // the machine that spends it.
+              // The token is a bearer secret, so only its id is recorded. The id
+              // links this entry to the runner that later spends the token.
               payload: { joinTokenId: minted.id, expiresAt: minted.expiresAt },
               at,
             });
@@ -467,9 +480,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The tokens the fleet is still expecting a machine to present. Never the
-     * token or its hash: this says an invitation is outstanding, and is not a
-     * second copy of one.
+     * Returns the join tokens that can still be spent. It never returns the
+     * token or its hash: the list shows which tokens are open, and must not be
+     * a second copy of them.
      */
     queryJoinTokens: (): Effect.Effect<
       ReadonlyArray<JoinTokenRef>,
@@ -480,7 +493,7 @@ const make = Effect.gen(function* () {
         return yield* joinTokens.outstanding(yield* nowIso);
       }),
 
-    /** Takes back an invitation that was minted and has not been spent. */
+    /** Revokes a join token that has not been spent. Fails with `NotFound` when there is no such open token. */
     revokeJoinToken: (
       input: Identified,
     ): Effect.Effect<

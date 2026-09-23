@@ -1,9 +1,10 @@
 /**
- * The fold: what a reported event writes, and where it leaves the session.
+ * Unit tests for the fold: which rows a reported event writes, and which
+ * status it leaves the session in.
  *
- * Everything here is about the rules rather than the rows, which is why it runs
- * without a database. The rows themselves are asserted end to end in
- * `sessions.integration.test.ts`, against a real socket.
+ * These tests cover the rules, not the stored rows, so they run without a
+ * database. The stored rows are tested end to end in
+ * `sessions.integration.test.ts`, over a real socket.
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderEvent } from "@hercule/protocol";
@@ -70,15 +71,15 @@ const resolved: ProviderEvent = {
   decision: "allow",
 };
 
-/** The tags a fold wrote, in the order it wrote them. */
+/** Returns the event tags of the rows a fold wrote, in order. */
 const listTags = (folded: Folded): ReadonlyArray<string> =>
   folded.rows.map((row) => row.event._tag);
 
-/** The coalesced text of the one delta row a fold wrote. */
+/** Returns the merged text of each delta row a fold wrote. */
 const listTexts = (folded: Folded): ReadonlyArray<string> =>
   folded.rows.flatMap((row) => (row.event._tag === "content.delta" ? [row.event.delta] : []));
 
-/** Applies a run of events, failing loudly on one the fold refused. */
+/** Folds a list of events in order, and fails the test if the fold skips one. */
 const applyEvents = (
   events: ReadonlyArray<readonly [number, ProviderEvent]>,
   from: Tracked = startTracking({ lastSeq: 0, base: 0 }),
@@ -87,15 +88,15 @@ const applyEvents = (
   const folds: Array<Folded> = [];
   for (const [seq, event] of events) {
     const folded = fold(state, seq, event);
-    expect(folded, `seq ${String(seq)} was refused`).toBeDefined();
+    expect(folded, `seq ${String(seq)} was skipped`).toBeDefined();
     folds.push(folded!);
     state = folded!.next;
   }
   return { state, folds };
 };
 
-describe("the status axis", () => {
-  it("moves on the four events that move it and on nothing else", () => {
+describe("the session status", () => {
+  it("changes on the four status events and on no other event", () => {
     const { folds } = applyEvents([
       [1, started],
       [2, turnStarted],
@@ -117,7 +118,7 @@ describe("the status axis", () => {
 });
 
 describe("a sequence number already applied", () => {
-  it("writes nothing and leaves the state where it was", () => {
+  it("writes nothing and leaves the state unchanged", () => {
     const { state } = applyEvents([
       [1, started],
       [2, turnStarted],
@@ -128,7 +129,7 @@ describe("a sequence number already applied", () => {
     expect(state.lastSeq).toBe(2);
   });
 
-  it("is refused whether or not it would have been a delta", () => {
+  it("is skipped for a delta too", () => {
     const { state } = applyEvents([[1, buildDelta("i1", "one")]]);
 
     expect(fold(state, 1, buildDelta("i1", "again"))).toBeUndefined();
@@ -138,7 +139,7 @@ describe("a sequence number already applied", () => {
   });
 });
 
-describe("coalescing", () => {
+describe("merging deltas", () => {
   it("holds deltas and writes one row at the item boundary", () => {
     const { folds } = applyEvents([
       [1, buildDelta("i1", "Hel")],
@@ -148,10 +149,10 @@ describe("coalescing", () => {
 
     expect(listTags(folds[0]!)).toEqual([]);
     expect(listTags(folds[1]!)).toEqual([]);
-    // The coalesced text first, then the boundary that flushed it.
+    // The merged text first, then the event that flushed it.
     expect(listTags(folds[2]!)).toEqual(["content.delta", "item.completed"]);
     expect(listTexts(folds[2]!)).toEqual(["Hello"]);
-    // The row is idempotent on the last delta folded into it.
+    // The row carries the sequence number of the last delta merged into it.
     expect(folds[2]!.rows[0]?.seq).toBe(2);
   });
 
@@ -177,7 +178,7 @@ describe("coalescing", () => {
     expect(listTexts(folds[3]!)).toEqual(["two"]);
   });
 
-  it("flushes what a session that exits was still holding", () => {
+  it("flushes the text still held when the session exits", () => {
     const { folds } = applyEvents([
       [1, buildDelta("i1", "tail")],
       [2, exited],
@@ -186,7 +187,7 @@ describe("coalescing", () => {
     expect(listTags(folds[1]!)).toEqual(["content.delta", "session.exited"]);
   });
 
-  it("writes a row of its own once the held text passes the threshold", () => {
+  it("writes a row once the held text reaches the flush size", () => {
     const long = "x".repeat(DELTA_FLUSH_BYTES - 1);
     const { folds, state } = applyEvents([
       [1, buildDelta("i1", long)],
@@ -195,7 +196,7 @@ describe("coalescing", () => {
 
     expect(listTags(folds[0]!)).toEqual([]);
     expect(listTexts(folds[1]!)).toEqual([`${long}yz`]);
-    // Flushed means nothing is held: the next boundary writes no empty row.
+    // Nothing is held after the flush, so the next boundary writes no empty row.
     expect(state.buffers.size).toBe(0);
     expect(listTags(fold(state, 3, buildCompletedItem("i1"))!)).toEqual(["item.completed"]);
   });
@@ -219,28 +220,28 @@ describe("the open request", () => {
     expect(computeOpenRequestAfter(opened, null)).toEqual(request);
   });
 
-  it("is cleared by the answer to it, by the turn ending and by the harness going", () => {
+  it("is cleared by its answer, by the turn completing and by the harness exiting", () => {
     expect(computeOpenRequestAfter(resolved, request)).toBeNull();
-    // The question dies with the turn it was asked in, answered or not.
+    // The question ends with the turn it was asked in, answered or not.
     expect(computeOpenRequestAfter(turnCompleted, request)).toBeNull();
     expect(computeOpenRequestAfter(exited, request)).toBeNull();
   });
 
-  it("is left standing by an answer to some other request", () => {
+  it("stays open when a different request is answered", () => {
     const other: ProviderEvent = { ...resolved, requestId: "r2" };
 
     expect(computeOpenRequestAfter(other, request)).toBeUndefined();
     expect(computeOpenRequestAfter(resolved, null)).toBeUndefined();
   });
 
-  it("says nothing where the clear changes nothing, so no write is made for it", () => {
-    // How most turns end: nothing was parked, and a write would cost every
-    // client watching the session a refetch for no change.
+  it("returns no change when there is no open request to clear, so nothing is written", () => {
+    // Most turns end like this: no request was open, and a write would make
+    // every client watching the session refetch for no change.
     expect(computeOpenRequestAfter(turnCompleted, null)).toBeUndefined();
     expect(computeOpenRequestAfter(exited, null)).toBeUndefined();
   });
 
-  it("is left alone by every other event", () => {
+  it("is not changed by any other event", () => {
     for (const event of [started, turnStarted, buildDelta("i1", "hi"), buildCompletedItem("i1")]) {
       expect(computeOpenRequestAfter(event, request), event._tag).toBeUndefined();
     }

@@ -1,11 +1,12 @@
 /**
- * `RunnerService` called in process, for the rules that need no transport.
+ * Tests for `RunnerService` called in process, for the rules that need no
+ * transport.
  *
- * The grant check is here because it cannot be reached over HTTP: v1
- * authenticates one population, the user, and the user has full parity, so no
- * credential a request can present is missing `infra.read` or `infra.write`.
- * The lifecycle and conflict refusals are here because they are decided in this
- * file and asserting them over the wire only re-asserts the status mapping.
+ * The grant check is tested here because it cannot be reached over HTTP: v1
+ * authenticates only the user, and the user has every grant, so no credential
+ * a request can send is missing `infra.read` or `infra.write`. The lifecycle
+ * and conflict errors are tested here because the service decides them, and
+ * testing them over HTTP would only test the status mapping again.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
@@ -31,10 +32,10 @@ const layer = RunnerServiceLayer.pipe(
   Layer.provideMerge(TestDatabase),
 );
 
-/** Everything a scenario in this file may reach. */
+/** The services a test in this file may use. */
 type Provided = RunnerService | Settings | AuditLog | SqlClient.SqlClient;
 
-/** A well-formed id nobody has: the grant check answers before the lookup. */
+/** A valid id that matches no runner: the grant check fails before the lookup. */
 const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
 
 const USER: Actor = {
@@ -46,7 +47,7 @@ const USER: Actor = {
 const runError = <A, E>(effect: Effect.Effect<A, E, Provided>) =>
   Effect.runPromise(Effect.flip(effect).pipe(Effect.provide(layer)) as Effect.Effect<E>);
 
-/** Runs one scenario against a fresh database, with the user behind it. */
+/** Runs one test against a fresh database, as the user. */
 const runAsUser = <A, E>(effect: Effect.Effect<A, E, Provided>): Promise<A> =>
   Effect.runPromise(
     effect.pipe(Effect.provideService(CurrentActor, USER), Effect.provide(layer), Effect.orDie),
@@ -71,7 +72,7 @@ const insertRunner = (
   }).pipe(Effect.orDie);
 
 describe("a caller with no actor", () => {
-  it("is refused infra.read by query and read, before anything is looked up", async () => {
+  it("is rejected for lack of infra.read by query and read, before anything is looked up", async () => {
     const errors = await Promise.all([
       runError(Effect.flatMap(RunnerService, (runners) => runners.query({}))),
       runError(Effect.flatMap(RunnerService, (runners) => runners.read({ id: UNKNOWN_ID }))),
@@ -83,7 +84,7 @@ describe("a caller with no actor", () => {
     }
   });
 
-  it("is refused infra.write by update, before anything is looked up", async () => {
+  it("is rejected for lack of infra.write by update, before anything is looked up", async () => {
     const error = await runError(
       Effect.flatMap(RunnerService, (runners) => runners.update({ id: UNKNOWN_ID, name: "iris" })),
     );
@@ -92,7 +93,7 @@ describe("a caller with no actor", () => {
     });
   });
 
-  it("is refused infra.write by createJoinToken, before a token is minted", async () => {
+  it("is rejected for lack of infra.write by createJoinToken, before a token is created", async () => {
     const error = await runError(
       Effect.flatMap(RunnerService, (runners) => runners.createJoinToken()),
     );
@@ -109,8 +110,8 @@ describe("a caller with no actor", () => {
   });
 });
 
-describe("the refusals the state machine makes on its own", () => {
-  it("refuses each lifecycle move the runner is not standing where it needs to be for", async () => {
+describe("the errors the service returns on its own", () => {
+  it("rejects each lifecycle change from a lifecycle it does not start from", async () => {
     const { errors, after, trail } = await runAsUser(
       Effect.gen(function* () {
         const runners = yield* RunnerService;
@@ -147,7 +148,7 @@ describe("the refusals the state machine makes on its own", () => {
     expect(trail.flat(), "nothing was written down").toEqual([]);
   });
 
-  it("refuses a name another runner holds, takes one nobody does, and reads case as its own", async () => {
+  it("rejects a name another runner has, accepts a free one, and treats a different case as a different name", async () => {
     const { taken, refused, cased, free } = await runAsUser(
       Effect.gen(function* () {
         const runners = yield* RunnerService;
@@ -157,7 +158,7 @@ describe("the refusals the state machine makes on its own", () => {
         return {
           taken,
           refused: yield* runners.read({ id: iris.id }),
-          // Nothing here folds case: the fleet reads what the user typed.
+          // Names are case-sensitive: the fleet stores what the user typed.
           cased: yield* runners.update({ id: iris.id, name: "Atlas" }),
           free: yield* runners.update({ id: iris.id, name: "vega" }),
         };
@@ -172,7 +173,7 @@ describe("the refusals the state machine makes on its own", () => {
     expect([cased.name, free.name]).toEqual(["Atlas", "vega"]);
   });
 
-  it("refuses to reserve the runner the fleet falls back on, and leaves it alone", async () => {
+  it("rejects reserving the fleet's default runner, and leaves it unchanged", async () => {
     const { error, after } = await runAsUser(
       Effect.gen(function* () {
         const runners = yield* RunnerService;

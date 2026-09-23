@@ -1,19 +1,22 @@
 /**
- * The local runner the controller spawns and supervises.
+ * Tests for the local runner the controller spawns and supervises.
  *
- * Everything here is driven through a real boot with a real child process, and
- * the only thing that differs from what ships is the command: the shipped one
- * is the Bun binary this test is already running inside, so a supervisor that
- * could not be handed a stub child could not be tested at all. The stub
- * writes what it was given into a file, so what the test asserts is what the
- * child really saw - its argv, its environment and the bytes on its stdin -
- * rather than what the controller believes it sent.
+ * Every test runs a real boot with a real child process. Only the command
+ * differs from the default: the default command is the Bun binary this test
+ * already runs in, so without a stub child the supervisor could not be tested
+ * at all. The stub writes what it received to a file, so the tests check what
+ * the child really saw (its argv, its environment and the bytes on its stdin),
+ * not what the controller believes it sent.
  *
- * What is asserted: the stdout handshake in both directions, the first boot's
- * token and the join it yields, the second boot's silence, a first line that
- * makes no sense stopping the boot, the respawn schedule and the crash-loop
- * record, and what the drain does to a child that goes quietly and to one that
- * does not.
+ * What the tests check:
+ *
+ * - the stdout and stdin handshake;
+ * - the first boot's join token and the join that follows;
+ * - that the second boot sends no token;
+ * - that an unreadable first line stops the boot;
+ * - the restart schedule and the crash-loop record;
+ * - what a stop does to a child that exits on SIGTERM, and to one that does
+ *   not.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,7 +55,7 @@ const createTemporaryHome = (): string => {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Whether a process is still on the machine. Signal 0 asks without asking for anything. */
+/** Checks whether a process is still running. Signal 0 checks without sending a signal. */
 const isAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
@@ -63,7 +66,7 @@ const isAlive = (pid: number): boolean => {
 };
 
 /**
- * A port nothing is on, taken by binding one and letting it go. The boot needs
+ * Returns a free port, found by binding one and releasing it. The boot needs
  * the address before it runs, because the child is told where to join.
  */
 const findFreePort = async (): Promise<number> => {
@@ -74,9 +77,9 @@ const findFreePort = async (): Promise<number> => {
 };
 
 /**
- * The child, as a script rather than the real binary: it starts in
- * milliseconds, it does exactly what a test needs of it, and it writes down
- * everything it was handed.
+ * The stub child, a script rather than the real binary: it starts in
+ * milliseconds, does exactly what a test needs, and records everything it
+ * receives.
  */
 const CHILD = `
 import { appendFileSync } from "node:fs";
@@ -89,9 +92,9 @@ const flag = (name) => {
 const state = flag("--state");
 const record = (entry) => appendFileSync(state, JSON.stringify(entry) + "\\n");
 
-// Installed before anything else this child does: the parent stops waiting on
-// its own deadline, so a handler put in place after the announcement races the
-// signal, and a child still without one dies of it silently.
+// Installed before anything else. The parent stops waiting at its own
+// deadline, so a handler installed after the announcement could race the
+// signal, and a child without a handler would die silently.
 if (flag("--deaf") === undefined) {
   process.on("SIGTERM", () => {
     record({ what: "sigterm", at: Date.now() });
@@ -111,8 +114,8 @@ let text = "";
 for await (const chunk of Bun.stdin.stream()) text += new TextDecoder().decode(chunk);
 record({ what: "stdin", at: Date.now(), text });
 
-// What a real local runner does with what it was handed: the ordinary join,
-// over loopback, retried until the controller is listening.
+// What a real local runner does with the enrolment: an ordinary join over
+// loopback, retried until the controller is listening.
 if (text.trim() !== "") {
   const line = JSON.parse(text.trim());
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -137,7 +140,7 @@ if (text.trim() !== "") {
 await new Promise(() => {});
 `;
 
-/** One thing a child wrote down. */
+/** One entry the stub child recorded. */
 interface Note {
   readonly what: string;
   readonly at: number;
@@ -149,9 +152,10 @@ interface Note {
 }
 
 /**
- * A stub child in this home, and the notes it leaves. Each of these keeps its
- * own notes, because a home outlives a boot: two boots of one home are two
- * children, and what the second was handed is not what the first was.
+ * Builds a stub child in this home, and returns its command and a reader for
+ * its notes. Each child has its own notes file, because a home outlives a
+ * boot: two boots of one home have two children, and each receives different
+ * input.
  */
 let children = 0;
 const buildStubChild = (
@@ -178,7 +182,7 @@ const buildStubChild = (
   };
 };
 
-/** Waits for something the child wrote, or gives up. */
+/** Polls the child's notes until `ready` returns true or `within` passes, and returns them. */
 const waitForNotes = async (
   notes: () => ReadonlyArray<Note>,
   ready: (all: ReadonlyArray<Note>) => boolean,
@@ -189,9 +193,9 @@ const waitForNotes = async (
 };
 
 /**
- * A boot that supervises the given child while `body` runs, with the listener
- * up: the child joins over loopback the way the real one does, so what the
- * fleet ends up holding is a real row from a real join.
+ * Boots a controller that supervises the given child, with the server
+ * listening, and runs `body`. The child joins over loopback like the real one,
+ * so the fleet ends up with a real row from a real join.
  */
 const bootAndHold = <A>(
   home: string,
@@ -221,7 +225,7 @@ const bootAndHold = <A>(
     ).pipe(Effect.orDie),
   );
 
-/** How many join tokens this home has ever minted. */
+/** Counts the join tokens this home has created. */
 const tokensMinted = Effect.map(
   Effect.flatMap(
     SqlClient.SqlClient,
@@ -230,7 +234,7 @@ const tokensMinted = Effect.map(
   (rows) => Number(rows[0]?.n ?? 0),
 );
 
-/** The runner rows this home holds, by name. */
+/** Returns the names of this home's runner rows, sorted. */
 const runnerNames = Effect.map(
   Effect.flatMap(
     SqlClient.SqlClient,
@@ -239,7 +243,7 @@ const runnerNames = Effect.map(
   (rows) => rows.map((row) => row.name),
 );
 
-/** A backoff a test can wait out, and the crash window the build ships. */
+/** Short deadlines a test can wait for. The crash window keeps its default. */
 const FAST = {
   backoff: { first: Duration.millis(20), cap: Duration.millis(60) },
   stopDeadline: Duration.millis(200),
@@ -247,9 +251,9 @@ const FAST = {
 };
 
 describe("the command the controller spawns", () => {
-  it("is the binary this process is, told to be a local runner", () => {
-    // Spec 15 section 4: spawn, never fork, and `process.execPath` is what a
-    // compiled Hercule spawns to get another one.
+  it("is this process's own binary, started as a local runner", () => {
+    // Spawn, never fork (spec 15 section 4). A compiled Hercule spawns
+    // `process.execPath` to start another Hercule.
     expect(LOCAL_RUNNER_COMMAND).toEqual([process.execPath, "runner", "--local"]);
   });
 
@@ -261,7 +265,7 @@ describe("the command the controller spawns", () => {
 });
 
 describe("the first boot of an empty home", () => {
-  it("hands the child a join token on stdin and ends with the runner it joined as", async () => {
+  it("sends the child a join token on stdin, and the child joins as a runner", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
     const child = buildStubChild(home, JSON.stringify({ join: true }));
@@ -284,12 +288,12 @@ describe("the first boot of an empty home", () => {
 
     const notes = child.notes();
     // One child, spawned once: a supervisor that spawned twice would have two
-    // runners joining as one machine.
+    // runners joining from one machine.
     expect(notes.filter((note) => note.what === "spawned")).toHaveLength(1);
 
-    // The handshake: the controller read the child's first line and answered on
-    // its stdin, then closed it - the child's read finished, which is the only
-    // way it got as far as joining.
+    // The handshake: the controller read the child's first line, answered on
+    // its stdin, and closed stdin. The child's read finished, which is the
+    // only way it could get as far as joining.
     const stdin = notes.find((note) => note.what === "stdin");
     expect(stdin, "the controller never wrote to the child's stdin").toBeDefined();
     const handed = JSON.parse(String(stdin?.text).trim()) as {
@@ -299,27 +303,27 @@ describe("the first boot of an empty home", () => {
     expect(handed.token).not.toBe("");
     expect(handed.controllerUrl).toContain(String(port));
 
-    // Never in argv, which `ps` shows, and never in the environment, which
-    // every grandchild inherits.
+    // The token is never in argv, which `ps` shows, and never in the
+    // environment, which every grandchild inherits.
     const spawned = notes.find((note) => note.what === "spawned")!;
     for (const argument of spawned.argv ?? []) expect(argument).not.toContain(handed.token);
     for (const value of Object.values(spawned.env ?? {})) {
       expect(value).not.toContain(handed.token);
     }
 
-    // The join was an ordinary one and left an ordinary row, and the controller
-    // took the fleet's first member as the runner work falls back to.
+    // The join was an ordinary one and created an ordinary row, and the
+    // controller made the fleet's first runner the default runner.
     const joined = notes.find((note) => note.what === "joined");
     expect(joined?.answer?.runnerId).toBeDefined();
     expect(seen.names).toHaveLength(1);
     expect(seen.minted).toBe(1);
     expect(seen.defaultRunnerId).toBe(joined?.answer?.runnerId);
-    // The machine the controller is on is the fleet's general-purpose one:
-    // reserved is a thing a person asks for about a machine of their own.
+    // The controller's own machine is the fleet's general-purpose runner:
+    // reserved is something a person asks for on a machine of their own.
     expect(seen.row.reserved).toBe(false);
   }, 30_000);
 
-  it("mints nothing and joins nothing for a child that already knows who it is", async () => {
+  it("creates no token and no join for a child that already has its runner id", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
 
@@ -339,8 +343,8 @@ describe("the first boot of an empty home", () => {
     );
     const runnerId = String(first.notes().find((note) => note.what === "joined")?.answer?.runnerId);
 
-    // And the boot after it: the child reads its own `runner.json` and says who
-    // it is, and the controller has nothing to hand it.
+    // Then the next boot: the child reads its own `runner.json` and announces
+    // its runner id, so the controller has nothing to send it.
     const again = buildStubChild(home, JSON.stringify({ runnerId }));
     const after = await bootAndHold(home, port, { ...FAST, command: again.command }, (outcome) =>
       Effect.gen(function* () {
@@ -361,11 +365,11 @@ describe("the first boot of an empty home", () => {
     expect(after.minted).toBe(before.minted);
     expect(after.names).toEqual(before.names);
     expect(after.defaultRunnerId).toBe(before.defaultRunnerId);
-    // The only place the local runner's identity lives is this process.
+    // The local runner's id is kept only in this process.
     expect(after.held).toBe(runnerId);
   }, 40_000);
 
-  it("stops the boot when the child's first line is not one of the two it can be", async () => {
+  it("stops the boot when the child's first line is not a valid announcement", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
     const child = buildStubChild(home, "hello, I am a runner");
@@ -387,18 +391,18 @@ describe("the first boot of an empty home", () => {
     expect(outcome._tag).toBe("Failure");
     const message = outcome._tag === "Failure" ? String(outcome.failure.message) : "";
     expect(message).not.toBe("");
-    // Nothing was enlisted on the strength of a line nobody could read.
+    // Nothing joined based on a line nobody could read.
     expect(child.notes().filter((note) => note.what === "spawned")).toHaveLength(1);
-    // And the child went with the boot that spawned it. One left behind would
-    // hold a socket with nothing on this end watching it, and the next attempt
-    // would put a second one beside it.
+    // The child was stopped with the boot that spawned it. A child left
+    // behind would hold a socket nobody watches, and the next attempt would
+    // start a second one next to it.
     const pid = child.notes().find((note) => note.what === "spawned")?.pid;
     expect(pid).toBeDefined();
     for (let waited = 0; waited < 5_000 && isAlive(pid!); waited += 20) await delay(20);
     expect(isAlive(pid!), `process ${String(pid)} outlived the boot that spawned it`).toBe(false);
   }, 30_000);
 
-  it("puts nothing in the place of a child it was asked to stop", async () => {
+  it("does not replace a child it was asked to stop", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
     const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
@@ -406,16 +410,16 @@ describe("the first boot of an empty home", () => {
       "3",
     ]);
 
-    // Stopped from inside the run, while the supervisor is still watching: the
-    // scope closing at the end of a boot would end the supervisor anyway, so it
-    // is the only way to see that a stop is not read as a crash.
+    // Stopped during the run, while the supervisor is still watching. The
+    // scope closing at the end of a boot would end the supervisor anyway, so
+    // this is the only way to check that a stop is not treated as a crash.
     const spawns = await bootAndHold(home, port, { ...FAST, command: child.command }, (outcome) =>
       Effect.gen(function* () {
         yield* Effect.promise(() =>
           waitForNotes(child.notes, (notes) => notes.some((note) => note.what === "spawned")),
         );
         yield* outcome.localRunner!.stop;
-        // Several backoffs' worth of chances to start another one.
+        // Long enough for several backoffs, so a restart would have happened.
         yield* Effect.promise(() => delay(300));
         return child.notes().filter((note) => note.what === "spawned").length;
       }),
@@ -424,14 +428,14 @@ describe("the first boot of an empty home", () => {
     expect(spawns).toBe(1);
   }, 30_000);
 
-  it("starts anyway when the child says nothing at all", async () => {
+  it("boots anyway when the child prints nothing at all", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
 
-    // A runner that cannot start - a `runner.json` nobody can parse, a machine
-    // out of file handles - is a crash for the supervisor to answer. A
-    // controller that refused to start over it would hold its whole API
-    // hostage to a file it is not even allowed to read.
+    // A runner that cannot start (a `runner.json` nobody can parse, a machine
+    // out of file handles) is a crash for the supervisor to handle. A
+    // controller that refused to start because of it would make its whole API
+    // depend on a file it is not even allowed to read.
     const outcome = await Effect.runPromise(
       Effect.result(
         bootWith(
@@ -449,7 +453,7 @@ describe("the first boot of an empty home", () => {
     expect(outcome._tag).toBe("Success");
   }, 30_000);
 
-  it("gives up on a child that is alive and saying nothing, rather than waiting on it", async () => {
+  it("stops waiting for a child that is running but prints nothing", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
 
@@ -463,9 +467,9 @@ describe("the first boot of an empty home", () => {
             masterKeyBackend: "file",
             localRunner: {
               ...FAST,
-              // A child that starts, says nothing and never exits. Nothing binds
-              // until the handshake is over, so waiting it out is the whole API
-              // held up by one silent process.
+              // A child that starts, prints nothing and never exits. The server
+              // does not listen until the handshake is over, so waiting for it
+              // would hold up the whole API.
               command: [process.execPath, "-e", "await new Promise(() => {})"],
               handshakeDeadline: Duration.millis(100),
             },
@@ -481,15 +485,15 @@ describe("the first boot of an empty home", () => {
 });
 
 describe("supervising the child", () => {
-  it("records the shipped crash-loop window and count", () => {
+  it("uses the default crash-loop window and count", () => {
     expect(CRASH_LOOP_LIMIT).toBe(3);
     expect(Duration.toMillis(CRASH_LOOP_WINDOW)).toBe(5 * 60 * 1000);
   });
 
-  it("respawns a child that exits, waiting longer each time up to the cap", async () => {
+  it("restarts a child that exits, waiting longer each time up to the cap", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
-    // It announces who it is and then dies, over and over.
+    // It announces its runner id and then exits, over and over.
     const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
       "--exit",
       "3",
@@ -505,12 +509,12 @@ describe("supervising the child", () => {
       .notes()
       .filter((note) => note.what === "spawned")
       .map((note) => note.at);
-    // Retried without a limit: six lives and counting.
+    // Restarted without a limit: six starts so far.
     expect(starts.length).toBeGreaterThanOrEqual(6);
 
     const gaps = starts.slice(1).map((at, index) => at - starts[index]!);
-    // 20, 40, then the cap of 60 for ever. Each wait is only ever a lower
-    // bound: a machine under load takes longer, never less.
+    // 20, 40, then the cap of 60 forever. Each wait is a lower bound: a
+    // machine under load takes longer, never less.
     expect(gaps[0]).toBeGreaterThanOrEqual(20);
     expect(gaps[1]).toBeGreaterThanOrEqual(40);
     expect(gaps[2]).toBeGreaterThanOrEqual(60);
@@ -518,7 +522,7 @@ describe("supervising the child", () => {
     expect(gaps[4]).toBeGreaterThanOrEqual(60);
   }, 30_000);
 
-  it("records a crash loop once for the window it happened in, and tells the alerts seam", async () => {
+  it("records a crash loop once per window, and calls the alert listener", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
     const runnerId = crypto.randomUUID();
@@ -535,8 +539,8 @@ describe("supervising the child", () => {
         },
         () =>
           Effect.gen(function* () {
-            // Five deaths: well past the three that make a loop, and all of
-            // them inside the same five minutes.
+            // Five exits: well past the three that make a loop, and all within
+            // the same five minutes.
             yield* Effect.promise(() =>
               waitForNotes(
                 child.notes,
@@ -559,7 +563,7 @@ describe("supervising the child", () => {
       ),
     );
 
-    // One row for the window, however many more times it dies inside it.
+    // One audit entry for the window, however many more times it exits within it.
     expect(audited).toHaveLength(1);
     expect(JSON.parse(String(audited[0]?.payload))).toMatchObject({
       runnerId,
@@ -570,7 +574,7 @@ describe("supervising the child", () => {
 });
 
 describe("stopping", () => {
-  it("asks the child to stop and lets it go, without putting another in its place", async () => {
+  it("asks the child to stop, and does not start another in its place", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
     const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }));
@@ -581,17 +585,17 @@ describe("stopping", () => {
       ),
     );
 
-    // The boot returned, which means the drain has run.
+    // The boot returned, so the drain has run.
     const notes = await waitForNotes(child.notes, (all) =>
       all.some((note) => note.what === "sigterm"),
     );
     expect(notes.some((note) => note.what === "sigterm")).toBe(true);
-    // A child the controller stopped is not a child that crashed.
+    // A child the controller stopped did not crash.
     await delay(200);
     expect(child.notes().filter((note) => note.what === "spawned")).toHaveLength(1);
   }, 30_000);
 
-  it("kills a child that is still there when the drain's deadline passes", async () => {
+  it("kills a child that is still running when the drain's deadline passes", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
     const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
@@ -607,38 +611,38 @@ describe("stopping", () => {
     );
     const took = Date.now() - started;
 
-    // It heard the signal and went on living; the drain stopped waiting.
+    // It received SIGTERM and kept running; the drain stopped waiting.
     expect(child.notes().some((note) => note.what === "sigterm-ignored")).toBe(true);
-    // The boot returned rather than hanging on a child that will not go.
+    // The boot returned rather than hanging on a child that will not exit.
     expect(took).toBeLessThan(20_000);
     expect(child.notes().filter((note) => note.what === "spawned")).toHaveLength(1);
   }, 30_000);
 });
 
-describe("counting deaths against a window", () => {
+describe("counting exits within a window", () => {
   const minute = 60_000;
 
-  it("says nothing until enough of them fall together", () => {
+  it("returns nothing until enough exits fall within the window", () => {
     const loop = createCrashCounter(3, 5 * minute);
     expect(loop.record(0)).toBeUndefined();
     expect(loop.record(1_000)).toBeUndefined();
     expect(loop.record(2_000)).toBe(3);
   });
 
-  it("does not count deaths the window has already let go of", () => {
+  it("does not count exits that are older than the window", () => {
     const loop = createCrashCounter(3, 5 * minute);
-    // One an hour, for ever: a machine that is not well, but not looping.
+    // One exit an hour, forever: an unhealthy runner, but not a crash loop.
     for (let hour = 0; hour < 10; hour++) expect(loop.record(hour * 60 * minute)).toBeUndefined();
   });
 
-  it("tells the story once, and again only once the window has passed", () => {
+  it("reports once, and again only after the window has passed", () => {
     const loop = createCrashCounter(3, 5 * minute);
     loop.record(0);
     loop.record(1);
     expect(loop.record(2)).toBe(3);
-    // It goes on dying, which is the same outbreak and not a second one.
+    // It keeps exiting, which is the same crash loop, not a new one.
     for (let at = 3; at < 5 * minute; at += 30_000) expect(loop.record(at)).toBeUndefined();
-    // A window has passed since it was last told, so this is a new one.
+    // A window has passed since the last report, so this is a new report.
     expect(loop.record(6 * minute)).toBeGreaterThanOrEqual(3);
   });
 });

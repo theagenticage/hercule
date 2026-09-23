@@ -1,12 +1,12 @@
 /**
- * Join tokens: minting one, and spending it.
+ * Join tokens: creating one, and spending it.
  *
- * Minting lives at the repository because the two callers are not alike: one
- * has a user behind it, and the first boot has nobody at all. Neither may be the
- * only place that knows how a token is made.
+ * Creation lives in the repository because its two callers differ: one has a
+ * user behind it, and the first boot has nobody at all. Neither caller should
+ * be the only place that knows how a token is made.
  *
  * Spending is one statement on purpose. Single use is the whole security
- * property, and a read followed by a write would let two machines presenting
+ * guarantee, and a read followed by a write would let two runners presenting
  * the same token both pass the read.
  */
 import * as Context from "effect/Context";
@@ -20,8 +20,9 @@ import { hashToken, mintToken } from "../credentials";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 
 /**
- * Long enough to walk to the other machine and type the command, short enough
- * that one left in a chat window is worthless by the time anyone reads it.
+ * How long a join token is valid. Long enough to walk to the other machine and
+ * type the command, short enough that a token left in a chat window is useless
+ * by the time anyone reads it.
  */
 export const JOIN_TOKEN_LIFETIME_MS = 60 * 60 * 1000;
 
@@ -36,8 +37,9 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Expired rows go with it: a token past its hour can never be spent again,
-     * and a table nothing sweeps grows for the life of the controller.
+     * Creates a join token and returns it with its id and expiry time. It also
+     * deletes expired tokens: an expired token can never be spent, and a table
+     * nothing cleans up would grow for the life of the controller.
      */
     create: (at: string): Effect.Effect<JoinToken, SqlError> =>
       Effect.gen(function* () {
@@ -53,9 +55,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * What the fleet is still expecting a machine to present. A spent or
-     * expired token is worthless to whoever holds it, so neither is something
-     * to show or to take back.
+     * Returns the join tokens that can still be spent, newest first. A spent or
+     * expired token is useless to whoever holds it, so neither is listed or can
+     * be revoked.
      */
     outstanding: (at: string): Effect.Effect<ReadonlyArray<JoinTokenRef>, SqlError> =>
       Effect.map(
@@ -77,9 +79,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Takes a minted token back. False for a token that was never minted, one
-     * already spent and one already expired: none of the three is outstanding,
-     * and the caller has nothing different to do about which it was.
+     * Revokes a join token. Returns `false` for a token that was never created,
+     * already spent, or already expired: none of the three can be spent, and
+     * the caller does the same thing whichever it was.
      */
     revoke: (id: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -92,8 +94,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Unminted, used and expired all answer `None`: the presenter learns nothing
-     * from the difference, and has nothing different to do.
+     * Marks a join token as used and returns its id. Returns `None` for a token
+     * that was never created, already used, or expired: the caller learns
+     * nothing from the difference, and does the same thing in all three cases.
      */
     spend: (token: string, at: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(

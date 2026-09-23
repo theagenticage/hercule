@@ -1,20 +1,22 @@
 /**
- * Composes a stored session into the record the API hands over.
+ * Converts a stored session into the `Session` record the API returns.
  *
- * Every field on the record is the row, except `unenforced`. Which parts of
- * the spec the session's provider ignores is read from that provider's
- * declaration at every read, so a binary whose adapter learned to enforce a
- * field stops reporting that field.
+ * Every field on the record comes from the row, except `unenforced`. The list
+ * of spec fields the session's provider ignores is read from the provider
+ * definition on every read. So when a new binary's adapter starts enforcing a
+ * field, the field drops off the list.
  *
- * It is an effect rather than a plain function because the declarations live
- * in the plugin host. Every caller outside this domain composes a session
- * record here, so two callers that read one row can never disagree about what
- * the row means.
+ * `sessionRecordComposer` is an effect rather than a plain function because
+ * the provider definitions live in the plugin host. Every caller outside this
+ * domain builds session records here, so two callers that read the same row
+ * always agree on what it means.
  *
- * There are two effects, one inside the other, and both levels matter. The
- * outer effect takes the plugin host, once, where the service is built. The
- * inner effect takes the provider catalog, once per call, so a page of
- * sessions is composed against one catalog instead of one catalog per row.
+ * There are two effects, one inside the other, and both levels matter:
+ *
+ * - The outer effect reads the plugin host once, when the service is built.
+ * - The inner effect reads the provider definitions once per call, so a page
+ *   of sessions is built against one list of definitions instead of one per
+ *   row.
  */
 import * as Effect from "effect/Effect";
 import type { Session } from "@hercule/contract";

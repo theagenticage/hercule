@@ -1,12 +1,14 @@
 /**
- * The frames the sessions domain builds itself: the `sessionStart` frames
- * `starting` hands back complete, and the one-expression builders for the
- * frames that follow a session's life.
+ * Tests for the frames the sessions domain builds: the complete `sessionStart`
+ * frames `starting` returns, and the one-line builders for the frames sent
+ * later in a session's life. Also tests `endOnLostRunners`.
  *
- * What is asserted is the wire shape and which row each field of it came from
- * - the token the row holds only a hash of, the spec decoded from the document
- * the row stores, the account a readable connection lends - never how the
- * domain goes about building them.
+ * The tests check the frame's shape on the wire and where each field comes
+ * from, not how the domain builds it:
+ *
+ * - the token, of which the row stores only a hash;
+ * - the spec, decoded from the JSON the row stores;
+ * - the GitHub account of a connection whose token can be read.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -33,13 +35,13 @@ import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 import { SessionService, SessionServiceLayer, type Starting } from "./service";
 
-/** Throwaway master-key homes, removed once this file's tests are done. */
+/** Temporary Hercule Homes for the master key, deleted after each test. */
 let homes: Array<string> = [];
 
 /**
- * A real plugin host with nothing registered in it, because the record a
- * session reads back says what its provider will not enforce, and that is read
- * from the catalog the host holds.
+ * Builds a real plugin host with no plugins. It is needed because a session
+ * record lists what its provider does not enforce, and that list is read from
+ * the provider definitions the host holds.
  */
 const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClient>) =>
   PluginHostLayer.pipe(
@@ -50,9 +52,9 @@ const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClie
   );
 
 /**
- * Made when the layer is built rather than when this module is read: the
- * sweep after each test removes what the last one made, so a home minted once
- * at import would be gone by the second case.
+ * Builds a layer that creates a temporary home when the layer is built, not
+ * when this module loads. The cleanup after each test deletes the homes, so a
+ * home created once at import would be gone by the second test.
  */
 const buildHomeLayer = (): Layer.Layer<HerculeHome> =>
   Layer.effect(HerculeHome)(
@@ -78,10 +80,10 @@ const run = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof layer>>) =>
 
 const at = "2026-09-07T10:00:00.000Z";
 
-/** A canonical v7 id, which is the only shape the store takes. */
+/** Returns a new canonical v7 id, the only id format the database accepts. */
 const mintId = () => uuidToString(mintUuid());
 
-/** The exact spec document a queued row stores, as `create` stores it. */
+/** Encodes a spec the way `create` stores it on a queued row. */
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
 const buildSpec = (instanceId: string, model: string): SessionSpec => ({
@@ -93,8 +95,8 @@ const buildSpec = (instanceId: string, model: string): SessionSpec => ({
 });
 
 /**
- * A provider instance row, which is where a start's `providerId` and `config`
- * come from: `oldestQueued` joins them in.
+ * Inserts a provider instance row. A start frame's `providerId` and `config`
+ * come from this row, which `oldestQueued` joins in.
  */
 const insertInstance = (
   providerId: string,
@@ -110,17 +112,17 @@ const insertInstance = (
     return uuidToString(id);
   });
 
-/** One queued session on a runner, stored the way `create` stores one. */
+/** Inserts one queued session on a runner, the way `create` stores one. */
 const insertQueuedSession = (
   runnerId: string,
   options: {
     readonly instanceId: string;
     readonly spec: SessionSpec;
-    /** Stores this document verbatim instead of encoding `spec`. */
+    /** Stores this string as the spec, as is, instead of encoding `spec`. */
     readonly storedSpec?: string;
     readonly checkoutBranch?: string;
     readonly githubConnectionId?: string;
-    /** A profile row that exists, for a case whose token has to resolve. */
+    /** An existing profile row, for a test whose session token has to resolve. */
     readonly permissionProfileId?: string;
   },
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
@@ -140,8 +142,8 @@ const insertQueuedSession = (
       githubConnectionId: options.githubConnectionId,
       requestedAccessMode: "approval-required",
       accessMode: "approval-required",
-      // The document is stored verbatim: a start frame's spec is decoded
-      // from exactly this.
+      // The spec is stored as is: a start frame's spec is decoded from exactly
+      // this string.
       spec: options.storedSpec ?? JSON.stringify(encodeSpec(options.spec)),
       modelSelection: options.spec.modelSelection,
       parentSessionId: undefined,
@@ -159,11 +161,10 @@ afterEach(() => {
 });
 
 /**
- * The reader's own dependency, gated: a `Secrets.get` that announces itself
- * and then holds, so an interruption arriving there must travel through the
- * credential reader's error handling rather than around it. The rest of the
- * stack is the real one, over the same database, with a master key of its own
- * in a home the test throws away.
+ * Builds the service layer with a gated `Secrets.get`: it signals `entered`
+ * and then waits on `hold`. So an interruption that arrives there has to pass
+ * through the credential reader's error handling. The rest of the stack is
+ * real, over the same database, with its own master key in a temporary home.
  */
 const buildGatedCredentialStack = (
   entered: Deferred.Deferred<void>,
@@ -188,8 +189,10 @@ const buildGatedCredentialStack = (
   );
 };
 
-/** A real GitHub connection with a really encrypted token: the reader only
- * reaches for a secret on one. */
+/**
+ * Inserts a real GitHub connection with an encrypted token. The credential
+ * reader reads a secret only for such a connection.
+ */
 const aGithubConnection = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const connections = yield* connectionRepository;
@@ -210,10 +213,10 @@ const aGithubConnection = Effect.gen(function* () {
   return connection.id;
 });
 
-/** An instance with no credential stored: what these sessions run on. */
+/** Returns no credentials, for the instance these sessions run on. */
 const NO_SECRETS = (): Effect.Effect<Record<string, string>> => Effect.succeed({});
 
-/** `starting` as the daemon calls it: inside the caller's transaction. */
+/** Calls `starting` the way the daemon does: inside the caller's transaction. */
 const claimStarting = (
   runnerId: string,
   room: number,
@@ -228,7 +231,7 @@ const claimStarting = (
     );
   });
 
-/** The token hash a session row holds, read straight off the row. */
+/** Reads a session's token hash directly from the row. */
 const readTokenHash = (sessionId: string) =>
   Effect.map(
     Effect.flatMap(
@@ -241,12 +244,12 @@ const readTokenHash = (sessionId: string) =>
     (rows) => rows[0]!.token_hash,
   );
 
-/** The frames a claim returned, keyed by the session each starts. */
+/** Returns the frames a claim returned, keyed by session id. */
 const mapFramesBySession = (claimed: ReadonlyArray<Claim>): Map<string, SessionStart> =>
   new Map(claimed.map((claim) => [claim.sessionId, claim.frame] as const));
 
 describe("SessionService.starting", () => {
-  it("returns one complete sessionStart per session it claimed to starting", async () => {
+  it("returns one complete sessionStart frame per session it moved to starting", async () => {
     const result = await run(
       Effect.gen(function* () {
         const rows = yield* sessionRepository;
@@ -284,7 +287,7 @@ describe("SessionService.starting", () => {
     expect(branch._tag).toBe("sessionStart");
     expect(branch.providerId).toBe("an-adapter");
     expect(branch.config).toEqual({ token: "t", baseUrl: "https://api" });
-    // Decoded from the document the row stores, not a re-encode of a summary.
+    // Decoded from the spec the row stores, not built again from other fields.
     expect(branch.spec).toStrictEqual(result.specOnBranch);
     expect(branch.checkoutBranch).toBe("feature-x");
     expect(typeof branch.token).toBe("string");
@@ -292,15 +295,15 @@ describe("SessionService.starting", () => {
 
     const plain = frames.get(result.plain)!;
     expect(plain.spec).toStrictEqual(result.specPlain);
-    // Where the row holds no branch, the key is not on the frame at all.
+    // When the row has no branch, the frame has no `checkoutBranch` key at all.
     expect("checkoutBranch" in plain).toBe(false);
 
-    // One pair per session it claimed: both rows moved to `starting`.
+    // Both claimed rows moved to `starting`.
     expect(result.onBranchAfter?.status).toBe("starting");
     expect(result.plainAfter?.status).toBe("starting");
   });
 
-  it("mints the token fresh and leaves the row holding nothing but its hash", async () => {
+  it("creates a new token and stores only its hash on the row", async () => {
     const result = await run(
       Effect.gen(function* () {
         const instanceId = yield* insertInstance("an-adapter", {});
@@ -332,11 +335,11 @@ describe("SessionService.starting", () => {
     expect(hashToken(firstFrame.token)).toBe(result.firstHash);
     expect(firstFrame.token).not.toBe(result.firstHash);
     expect(hashToken(secondFrame.token)).toBe(result.secondHash);
-    // Minted per start: two sessions in one claim never share a credential.
+    // Created per start: two sessions in one claim never share a token.
     expect(firstFrame.token).not.toBe(secondFrame.token);
   });
 
-  it("carries a readable connection's account, and asks only the connected rows", async () => {
+  it("includes the connection's GitHub account, and reads it only for rows with a connection", async () => {
     const connectionId = mintId();
     const result = await run(
       Effect.gen(function* () {
@@ -362,13 +365,13 @@ describe("SessionService.starting", () => {
       }),
     );
 
-    // Only the row with a non-null connection was asked about.
+    // `accountOf` was called only for the row with a connection.
     expect(result.asked).toEqual([connectionId]);
 
     const frames = mapFramesBySession(result.claimed);
     const account = frames.get(result.connected)!;
     expect(account.ghToken).toBe("ghpat-alice");
-    // Who the account commits as: its login, and GitHub's noreply address.
+    // The git identity for commits: the login, and GitHub's noreply address.
     expect(account.gitIdentity).toStrictEqual({
       name: "alice",
       email: "alice@users.noreply.github.com",
@@ -401,7 +404,7 @@ describe("SessionService.starting", () => {
       }),
     );
 
-    // It asked, and the answer was that there is no account.
+    // `accountOf` was called, and returned no account.
     expect(result.asked).toEqual([connectionId]);
     expect(result.claimed).toHaveLength(1);
     expect(result.claimed[0]!.frame).toMatchObject({ sessionId: result.sessionId });
@@ -415,9 +418,9 @@ describe("SessionService.starting", () => {
         const rows = yield* sessionRepository;
         const instanceId = yield* insertInstance("an-adapter", {});
         const runnerId = mintId();
-        // A document this build's codec refuses - valid JSON the row was
-        // allowed to store, and no `SessionSpec` of today will read: what a
-        // codec changing underneath a queued row leaves behind.
+        // Valid JSON that the current `SessionSpec` schema fails to decode.
+        // This is what a queued row looks like after the schema changed
+        // under it.
         const poisoned = yield* insertQueuedSession(runnerId, {
           instanceId,
           spec: buildSpec(instanceId, "clever"),
@@ -438,14 +441,14 @@ describe("SessionService.starting", () => {
       }),
     );
 
-    // The bad row is not claimed: it stays queued, visible and stoppable.
+    // The bad row is not claimed: it stays queued, where a user can see and stop it.
     expect(result.claimed.map((claim) => claim.sessionId)).toEqual([result.good]);
     expect(result.poisonedAfter?.status).toBe("queued");
-    // And it blocks nothing behind it.
+    // And it does not block the rows behind it.
     expect(result.goodAfter?.status).toBe("starting");
   });
 
-  it("still starts the row behind a poison head when there is room for only one", async () => {
+  it("starts the row behind an undecodable first row when there is room for only one", async () => {
     const result = await run(
       Effect.gen(function* () {
         const rows = yield* sessionRepository;
@@ -470,12 +473,12 @@ describe("SessionService.starting", () => {
       }),
     );
 
-    // Room for one, and the oldest row cannot fill it: the look past it does.
+    // Room for one, and the oldest row cannot use it, so the next row does.
     expect(result.claimed.map((claim) => claim.sessionId)).toEqual([result.good]);
     expect(result.poisonedAfter?.status).toBe("queued");
   });
 
-  it("walks past any number of poison rows to fill the room", async () => {
+  it("skips any number of undecodable rows to fill the room", async () => {
     const result = await run(
       Effect.gen(function* () {
         const instanceId = yield* insertInstance("an-adapter", {});
@@ -496,12 +499,12 @@ describe("SessionService.starting", () => {
       }),
     );
 
-    // Six unreadable rows ahead, room for two, one healthy row behind them
-    // all: the walk reaches it and the room is filled with what it found.
+    // Six undecodable rows first, room for two, and one valid row after
+    // them: the loop reaches the valid row and claims it.
     expect(result.claimed.map((claim) => claim.sessionId)).toEqual([result.good]);
   });
 
-  it("passes an interruption on rather than logging it away as an unreadable connection", async () => {
+  it("passes an interruption on instead of logging it as an unreadable connection", async () => {
     const entered = Effect.runSync(Deferred.make<void>());
     const hold = Effect.runSync(Deferred.make<void>());
     const logged: Array<string> = [];
@@ -526,9 +529,9 @@ describe("SessionService.starting", () => {
           const connectionId = yield* aGithubConnection;
           const reader = yield* Effect.forkChild(credentials.githubAccountOf(connectionId));
           yield* Deferred.await(entered);
-          // An interrupt cause arrives through the dependency itself: the
-          // catchable shape, and the one the reader's error handling must not
-          // read as an unreadable connection.
+          // The interruption arrives through the dependency itself, as a
+          // catchable cause. The reader's error handling must not treat it as
+          // an unreadable connection.
           yield* Deferred.interrupt(hold);
           const exit = yield* Fiber.await(reader);
           return Exit.isFailure(exit);
@@ -537,9 +540,9 @@ describe("SessionService.starting", () => {
       ),
     );
 
-    // The interruption came back out of the reader, and was never logged
-    // away: a handler that read it as an unreadable connection would have
-    // completed the read with no account and written exactly that to the log.
+    // The interruption came back out of the reader and was not logged. A
+    // handler that treated it as an unreadable connection would have
+    // returned no account and logged that.
     expect(result).toBe(true);
     expect(logged.filter((line) => line.includes("could not be read"))).toEqual([]);
   });
@@ -571,9 +574,9 @@ describe("SessionService.starting", () => {
           );
           const fiber = yield* Effect.forkChild(claim);
           yield* Deferred.await(entered);
-          // The shutdown shape: the dispatch child, suspended inside the
-          // credential reader's dependency, is told to stop and waits for
-          // nothing.
+          // Like a shutdown: the dispatch fiber, waiting inside the credential
+          // reader's dependency, is interrupted without waiting for it to
+          // finish.
           yield* Fiber.interrupt(fiber);
           return {
             after: yield* Effect.map(rows.one(sessionId), Option.getOrUndefined),
@@ -584,10 +587,10 @@ describe("SessionService.starting", () => {
       ),
     );
 
-    // The claim rolled back with the interruption: the row never left the
-    // queue, and the token's hash never landed. Whatever the reader's error
-    // handling does with an interruption, the transaction never commits a
-    // claim the interruption reached into.
+    // The claim rolled back with the interruption: the row is still queued,
+    // and no token hash was stored. Whatever the reader's error handling does
+    // with an interruption, the transaction never commits an interrupted
+    // claim.
     expect(result.after?.status).toBe("queued");
     expect(result.hash).toBeNull();
   });
@@ -605,7 +608,7 @@ describe("the frame builders on SessionService", () => {
     expect(frame).toStrictEqual({ _tag: "sessionStop", sessionId });
   });
 
-  it("inputFrame returns exactly the sessionInput frame off the stored row", async () => {
+  it("inputFrame returns exactly the sessionInput frame for the stored row", async () => {
     const row: StoredInput = {
       id: mintId(),
       sessionId: mintId(),
@@ -667,8 +670,8 @@ describe("the frame builders on SessionService", () => {
 const HOUR_MS = 3_600_000;
 
 /**
- * A session dispatched to this runner under a fresh token, and last heard
- * about `heardAgoMs` before now. Its absolute timeout is one hour (`buildSpec`).
+ * Inserts a session started on this runner with a new token, last heard from
+ * `heardAgoMs` ago. Its absolute timeout is one hour (`buildSpec`).
  */
 const insertRunningSession = (
   runnerId: string,
@@ -693,7 +696,7 @@ const insertRunningSession = (
     return { sessionId, tokenHash: hashToken(claim!.frame.token) };
   });
 
-/** A profile row, which a session's token resolves through. */
+/** Inserts a profile row, which a session's token resolves through. */
 const aProfile = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const id = mintId();
@@ -704,13 +707,13 @@ const aProfile = Effect.gen(function* () {
   return id;
 });
 
-/** The status a session row reads now. */
+/** Reads a session's current status. */
 const readStatus = (sessionId: string) =>
   Effect.flatMap(sessionRepository, (rows) =>
     Effect.map(rows.one(sessionId), (row) => Option.getOrThrow(row).status),
   );
 
-/** `endOnLostRunners` as the daemon calls it: inside the caller's transaction. */
+/** Calls `endOnLostRunners` the way the daemon does: inside the caller's transaction. */
 const runEndOnLostRunners = (connected: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -719,7 +722,7 @@ const runEndOnLostRunners = (connected: ReadonlyArray<string>) =>
   });
 
 describe("SessionService.endOnLostRunners", () => {
-  it("ends a session its lost runner has not reported past its absolute timeout", async () => {
+  it("ends a session on a lost runner once it has not been heard from for its absolute timeout", async () => {
     const result = await run(
       Effect.gen(function* () {
         const tokens = yield* SessionTokens;
@@ -727,8 +730,8 @@ describe("SessionService.endOnLostRunners", () => {
         const log = yield* AuditLog;
         const runnerId = mintId();
         const busy = yield* insertRunningSession(runnerId, "busy", 2 * HOUR_MS);
-        // Resolved while the session runs, so the resolver holds the answer:
-        // the sweep has to drop that too, not only move the row.
+        // Resolved while the session runs, so the resolver has it cached. The
+        // sweep has to drop that cache too, not only change the row.
         const before = yield* tokens.resolve(busy.tokenHash);
         const waiting = yield* inputs.insert({
           sessionId: busy.sessionId,
@@ -765,8 +768,8 @@ describe("SessionService.endOnLostRunners", () => {
   });
 
   it("ends a starting session and an idle one alike", async () => {
-    // `starting` is what a controller restart leaves behind when the runner
-    // never answered the start and never connects again.
+    // A controller restart leaves a session `starting` when the runner never
+    // answered the start and never connects again.
     const result = await run(
       Effect.gen(function* () {
         const runnerId = mintId();
@@ -790,9 +793,9 @@ describe("SessionService.endOnLostRunners", () => {
     });
   });
 
-  it("leaves a session within its bound, and one on a connected runner, running", async () => {
-    // Within the bound the session can still run on a runner that is only out
-    // of reach. A connected runner reports its own exits.
+  it("leaves running a session within its timeout, and one on a connected runner", async () => {
+    // Within the timeout, the session may still run on a runner that is only
+    // unreachable. A connected runner reports its own exits.
     const result = await run(
       Effect.gen(function* () {
         const tokens = yield* SessionTokens;
@@ -817,8 +820,8 @@ describe("SessionService.endOnLostRunners", () => {
     });
   });
 
-  it("bounds a session whose stored spec has no timeouts by the default of eight hours", async () => {
-    // A spec stored before the timeouts were on it.
+  it("uses the eight-hour default for a session whose stored spec has no timeouts", async () => {
+    // A spec stored before the spec had timeouts.
     const result = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
