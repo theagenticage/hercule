@@ -79,7 +79,12 @@ export const CONTENT_SECURITY_POLICY = [
   `connect-src 'self' ${IDENTITY_PORTS}`,
   "img-src 'self' data:",
   "font-src 'self'",
-  "style-src 'self'",
+  // CodeMirror, the editor of a workflow's text, puts its base styles in a
+  // `<style>` element when it starts. `style-src 'self'` blocks that element,
+  // and the editor then shows with no style. An inline style cannot load
+  // anything from another origin, because `img-src` and `font-src` name no
+  // other origin, and `script-src` stays without inline code.
+  "style-src 'self' 'unsafe-inline'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

@@ -123,9 +123,6 @@ export function SecretRow({
               />
             </Field>
           </div>
-          <Button type="submit" variant="form" disabled={rotate.isPending}>
-            Save
-          </Button>
           <Button
             type="button"
             variant="form"
@@ -136,6 +133,9 @@ export function SecretRow({
           >
             Cancel
           </Button>
+          <Button type="submit" variant="form" disabled={rotate.isPending}>
+            Save
+          </Button>
         </form>
       ) : null}
 
@@ -145,6 +145,13 @@ export function SecretRow({
         <div className="flex flex-wrap items-center gap-1.5 text-row text-muted">
           <span>Delete this secret? Its value cannot be recovered.</span>
           <Button
+            onClick={() => {
+              setConfirmingDelete(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
             variant="primary"
             onClick={() => {
               setConfirmingDelete(false);
@@ -152,13 +159,6 @@ export function SecretRow({
             }}
           >
             Confirm
-          </Button>
-          <Button
-            onClick={() => {
-              setConfirmingDelete(false);
-            }}
-          >
-            Cancel
           </Button>
         </div>
       ) : null}

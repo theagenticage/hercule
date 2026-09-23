@@ -332,3 +332,50 @@ export const localRunnerQuery = (
     queryFn: () => detect(runners),
     retry: false,
   });
+
+/**
+ * Every workflow, as one page. A workflow is standing work the user wrote by
+ * hand, so there are few of them; the screen shows all of them, and the point
+ * at which they outgrow one page is the point at which this grows a listing.
+ */
+export const workflowsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.workflows(),
+    queryFn: () => client.workflow.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * One workflow with its text, which is what its page reads. A refusal is
+ * answered at once rather than retried: a workflow that is not there answers
+ * 404 for good.
+ */
+export const workflowQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.workflow(id),
+    queryFn: () => client.workflow.read({ params: { id } }),
+    retry: false,
+  });
+
+/** Every action a step can name, which the editor completes after `action:`. */
+export const workflowActionsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.workflowActions(),
+    queryFn: () => client.workflowAction.query(),
+  });
+
+/** Every event kind a trigger can name, which the editor completes after `kind:`. */
+export const eventKindsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.eventKinds(),
+    queryFn: () => client.eventKind.query(),
+  });
+
+/**
+ * Every Agent, as one page, which the editor completes after `agent:`. An
+ * Agent is written by hand, so there are few of them.
+ */
+export const agentsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.agents(),
+    queryFn: () => client.agent.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });

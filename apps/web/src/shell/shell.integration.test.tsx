@@ -4,7 +4,14 @@ import userEvent from "@testing-library/user-event";
 import type { Session, Workspace } from "@hercule/contract";
 import { ageOf } from "@hercule/client-core";
 import { threadsWorld } from "@hercule/client-core/threads/testing";
-import { renderApp, stubApi, type Handler } from "../app/testing";
+import {
+  envelope,
+  expectInDocumentOrder,
+  readCurrentNavItems,
+  renderApp,
+  stubApi,
+  type Handler,
+} from "../app/testing";
 
 const ZONE = "Europe/Amsterdam";
 
@@ -115,6 +122,21 @@ describe("the two-face sidebar", () => {
     ]);
   });
 
+  it("marks the item of the screen that a page inside it belongs to", async () => {
+    await renderApp({
+      path: "/workflows/new",
+      api: stubApi({
+        ...inShell(),
+        "GET /api/v1/workflow-actions": { body: [] },
+        "GET /api/v1/event-kinds": { body: [] },
+        "GET /api/v1/agents": { body: { items: [] } },
+      }).fetch,
+      token: "held",
+    });
+
+    expect(readCurrentNavItems()).toEqual(["Workflows"]);
+  });
+
   it("carries a glyph on the entity items and on no other", async () => {
     await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
 
@@ -204,7 +226,7 @@ describe("the theme selector", () => {
     expect(document.documentElement.dataset.theme).toBeUndefined();
     const marks = screen.getByRole("button", { name: /Marks/ });
     const theme = screen.getByRole("button", { name: "Theme System" });
-    expect(marks.compareDocumentPosition(theme) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expectInDocumentOrder([marks, theme]);
 
     await user.click(theme);
     await user.click(screen.getByRole("radio", { name: "Dark" }));
@@ -233,8 +255,7 @@ describe("the Threads face's session rows", () => {
     }
     // Create new thread still comes before the rows.
     const create = threadsNav().getByRole("button", { name: /create new thread/i });
-    const first = rowLinks()[0]!;
-    expect(create.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expectInDocumentOrder([create, rowLinks()[0]!]);
   });
 
   it("carries the age read with ageOf, and the model slug in meta mode", async () => {
@@ -375,6 +396,30 @@ describe("the top bar", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("names a screen that renders its own chrome when the screen fails to load", async () => {
+    // A workflow's page renders its own header. When its workflow cannot be
+    // read, the failure is drawn instead, and nothing else would name the
+    // screen.
+    const workflowId = "0199c0ff-1111-7000-8000-00000000dead";
+    await renderApp({
+      path: `/workflows/${workflowId}`,
+      api: stubApi({
+        ...inShell(),
+        [`GET /api/v1/workflows/${workflowId}`]: {
+          status: 500,
+          body: envelope("internal", "The database is locked."),
+        },
+        "GET /api/v1/workflow-actions": { body: [] },
+        "GET /api/v1/event-kinds": { body: [] },
+        "GET /api/v1/agents": { body: { items: [] } },
+      }).fetch,
+      token: "held",
+    });
+
+    expect(screen.getByText("This screen did not load")).toBeDefined();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Workflow");
   });
 
   it("reads a zone this browser does not know in UTC, and says so", async () => {

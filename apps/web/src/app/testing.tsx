@@ -135,6 +135,11 @@ export interface LiveStub {
    * `subscribe` call. Asking about a topic nothing is watching throws.
    */
   cursorOf(topic: string): string | undefined;
+  /**
+   * Closes the app's socket from the controller's side, as a network that
+   * goes away does. The supervisor connects again on its own schedule.
+   */
+  drop(): void;
 }
 
 /**
@@ -153,6 +158,26 @@ afterEach(async () => {
 /** The page's text with its whitespace collapsed, the way a reader sees it. */
 export const reading = (element: HTMLElement | null = document.body): string =>
   (element?.textContent ?? "").replace(/\s+/g, " ").trim();
+
+/**
+ * Fails unless each element comes after the element before it on the page. A
+ * pair of answers puts the one that declines first and the one that accepts
+ * last, and a test pins that order with this.
+ */
+export const expectInDocumentOrder = (elements: readonly HTMLElement[]): void => {
+  elements.forEach((element, index) => {
+    const before = elements[index - 1];
+    if (before === undefined) return;
+    expect(before.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+};
+
+/** The names of the sidebar's items that mark the screen the reader is on. */
+export const readCurrentNavItems = (): readonly (string | null)[] =>
+  within(screen.getByRole("navigation", { name: "Hercule" }))
+    .getAllByRole("link")
+    .filter((link) => link.getAttribute("aria-current") === "page")
+    .map((link) => link.textContent);
 
 /**
  * Clicks a row inside the open menu - the Radix popover, read as
@@ -225,6 +250,11 @@ export const renderApp = async ({
       if (held === undefined) throw new Error(`nothing is subscribed to ${topic}`);
       const call = socket.calls("subscribe").find((frame) => frame.id === held.requestId);
       return (call?.payload as { cursor?: string } | undefined)?.cursor;
+    },
+    drop: () => {
+      const socket = sockets.at(-1);
+      if (socket === undefined) throw new Error("the app has not opened a socket");
+      socket.drop();
     },
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

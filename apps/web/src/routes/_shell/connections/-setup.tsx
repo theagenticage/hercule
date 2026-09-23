@@ -173,11 +173,11 @@ export function ConnectionSetup({
       ) : null}
 
       <div className="flex items-center gap-1.5">
-        <Button type="submit" variant="form" disabled={submit.isPending}>
-          Connect
-        </Button>
         <Button type="button" variant="form" onClick={onDone}>
           Cancel
+        </Button>
+        <Button type="submit" variant="form" disabled={submit.isPending}>
+          Connect
         </Button>
       </div>
 

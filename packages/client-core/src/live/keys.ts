@@ -51,6 +51,16 @@ export const queryKeys = {
   secrets: (): LiveQueryKey => ["secrets"],
   providers: (): LiveQueryKey => ["providers"],
   controller: (): LiveQueryKey => ["controller"],
+  workflows: (): LiveQueryKey => ["workflows"],
+  workflow: (id?: string): LiveQueryKey => (id === undefined ? ["workflow"] : ["workflow", id]),
+  /**
+   * Not a live topic: the two catalogs change only when a plugin is turned on
+   * or off, and the editor reads them again each time it opens.
+   */
+  workflowActions: (): LiveQueryKey => ["workflow-actions"],
+  eventKinds: (): LiveQueryKey => ["event-kinds"],
+  /** Not a live topic yet: an Agent written elsewhere lands on the next read. */
+  agents: (): LiveQueryKey => ["agents"],
   /** Keyed on the loopback endpoints it asks, because that is what it depends on. */
   localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
 } as const;
@@ -98,6 +108,13 @@ export const queryKeysFor = (
     return ids.length === 0
       ? [queryKeys.connections(), queryKeys.connection()]
       : [queryKeys.connections(), ...ids.map((id) => queryKeys.connection(id))];
+  }
+  // The listing is reread whichever workflow moved; a workflow's own page is
+  // reread only when the push names it, or when it names none.
+  if (topic === "workflow") {
+    return ids.length === 0
+      ? [queryKeys.workflows(), queryKeys.workflow()]
+      : [queryKeys.workflows(), ...ids.map((id) => queryKeys.workflow(id))];
   }
   // The plugin set is fixed at build time and read as one listing, so which
   // plugin changed narrows nothing.

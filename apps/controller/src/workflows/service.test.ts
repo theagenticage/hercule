@@ -70,16 +70,19 @@ describe("the workflow listing", () => {
         const workflows = yield* WorkflowService;
         const first = yield* workflows.create({ source: buildSource("First") });
         yield* TestClock.adjust("1 second");
-        yield* workflows.create({ source: buildSource("Second") });
+        const second = yield* workflows.create({ source: buildSource("Second") });
         yield* TestClock.adjust("1 second");
-        // An edit makes the first workflow the one changed last.
-        yield* workflows.update({ id: first.workflow.id, enabled: true });
+        // A new text makes the first workflow the one changed last.
+        yield* workflows.update({ id: first.workflow.id, source: buildSource("First, edited") });
+        yield* TestClock.adjust("1 second");
+        // Turning a workflow on changes no text, so it moves nothing.
+        yield* workflows.update({ id: second.workflow.id, enabled: true });
         const page = yield* workflows.query({});
         return page.items.map((item) => item.name);
       }),
     );
 
-    expect(names).toEqual(["First", "Second"]);
+    expect(names).toEqual(["First, edited", "Second"]);
   });
 });
 
@@ -108,5 +111,25 @@ describe("what the event log is told about a workflow", () => {
     for (const entry of entries) {
       expect(JSON.stringify(entry.payload)).not.toContain(SECRET_TEXT);
     }
+  });
+
+  it("names in changed only the fields that an update changed, one entry per update", async () => {
+    const changes = await run(
+      Effect.gen(function* () {
+        const workflows = yield* WorkflowService;
+        const audit = yield* AuditLog;
+        const source = buildSource("Unchanged");
+        const { workflow } = yield* workflows.create({ source });
+        // The same text, and the state that the workflow already has.
+        yield* workflows.update({ id: workflow.id, source, enabled: false });
+        // The same text, and a new state.
+        yield* workflows.update({ id: workflow.id, source, enabled: true });
+        // A new text, and the state that the workflow already has.
+        yield* workflows.update({ id: workflow.id, source: buildSource("Changed"), enabled: true });
+        return (yield* audit.listByKind("workflow.updated")).map((entry) => entry.payload.changed);
+      }),
+    );
+
+    expect(changes).toEqual([[], ["enabled"], ["source"]]);
   });
 });

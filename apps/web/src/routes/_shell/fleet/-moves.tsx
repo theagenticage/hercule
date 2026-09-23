@@ -94,6 +94,13 @@ export function Moves({
           <div className="flex flex-wrap items-center gap-1.5">
             <span>Retire {runner.name}?</span>
             <Button
+              onClick={() => {
+                setConfirming(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
               variant="primary"
               onClick={() => {
                 setConfirming(false);
@@ -101,13 +108,6 @@ export function Moves({
               }}
             >
               Confirm
-            </Button>
-            <Button
-              onClick={() => {
-                setConfirming(false);
-              }}
-            >
-              Cancel
             </Button>
           </div>
         </div>

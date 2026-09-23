@@ -34,7 +34,7 @@ const reactPackages = ["apps/web", "packages/ui"];
  * take.
  */
 const bothEngineTests = [
-  "packages/contract/src/groups/workflow.test.ts",
+  "packages/contract/src/groups/workflow-source.test.ts",
   "packages/client-core/src/workflow-completion.test.ts",
   "packages/client-core/src/workflow-graph.test.ts",
   "packages/client-core/src/workflow-source.test.ts",

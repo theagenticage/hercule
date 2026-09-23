@@ -211,6 +211,7 @@ const renderEditor = (options: {
   readonly validate: Validate;
   readonly onIssuesChange: ReportIssues;
   readonly onCheckStateChange?: ReportCheckState;
+  readonly onNameChange?: EditorProps["onNameChange"];
   readonly view: EditorProps["view"];
 }) => {
   const buildEditorElement = (source: string) => (
@@ -222,6 +223,7 @@ const renderEditor = (options: {
       validate={options.validate}
       onIssuesChange={options.onIssuesChange}
       onCheckStateChange={options.onCheckStateChange ?? (() => {})}
+      onNameChange={options.onNameChange ?? (() => {})}
     />
   );
   const { rerender } = render(buildEditorElement(options.source));
@@ -278,6 +280,7 @@ function EditorHost(props: {
         validate={props.validate ?? answerNoIssues}
         onIssuesChange={props.onIssuesChange ?? (() => {})}
         onCheckStateChange={() => {}}
+        onNameChange={() => {}}
       />
       <button type="button">Save</button>
     </>
@@ -542,6 +545,8 @@ function HostWithHandle({
   onSourceChange,
   validate,
   onIssuesChange,
+  onCheckStateChange,
+  onNameChange,
   ref,
 }: {
   /** The text that the parent wrote last, in place of the author's. */
@@ -550,6 +555,8 @@ function HostWithHandle({
   readonly onSourceChange: (source: string) => void;
   readonly validate: Validate;
   readonly onIssuesChange: ReportIssues;
+  readonly onCheckStateChange: ReportCheckState;
+  readonly onNameChange: EditorProps["onNameChange"];
   readonly ref: Ref<WorkflowEditorHandle>;
 }) {
   const [source, setSource] = useState(parentSource);
@@ -570,7 +577,8 @@ function HostWithHandle({
       catalog={CATALOG}
       validate={validate}
       onIssuesChange={onIssuesChange}
-      onCheckStateChange={() => {}}
+      onCheckStateChange={onCheckStateChange}
+      onNameChange={onNameChange}
     />
   );
 }
@@ -585,6 +593,8 @@ const renderEditorWithHandle = (options: {
   readonly view: EditorProps["view"];
   readonly validate?: Validate;
   readonly onIssuesChange?: ReportIssues;
+  readonly onCheckStateChange?: ReportCheckState;
+  readonly onNameChange?: EditorProps["onNameChange"];
 }) => {
   const handle = createRef<WorkflowEditorHandle>();
   const text = { current: options.source };
@@ -599,6 +609,8 @@ const renderEditorWithHandle = (options: {
       }}
       validate={options.validate ?? answerNoIssues}
       onIssuesChange={options.onIssuesChange ?? (() => {})}
+      onCheckStateChange={options.onCheckStateChange ?? (() => {})}
+      onNameChange={options.onNameChange ?? (() => {})}
     />
   );
   const { rerender } = render(buildHost());
@@ -607,6 +619,12 @@ const renderEditorWithHandle = (options: {
     readSource: () => text.current,
     moveCursorToLine: (line: number) => {
       act(() => handle.current?.moveCursorToLine(line));
+    },
+    markSaveRefusal: (source: string, errors: ReadonlyArray<Issue>) => {
+      act(() => handle.current?.markSaveRefusal(source, errors));
+    },
+    checkAgain: () => {
+      act(() => handle.current?.checkAgain());
     },
     changeView: (view: EditorProps["view"]) => {
       shown.view = view;
@@ -887,6 +905,37 @@ describe("diagnostics", () => {
     expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checked" });
   });
 
+  it("checks the text again when asked after a check could not run, and not while an answer stands", async () => {
+    let isReachable = false;
+    const validate = vi.fn<Validate>(() =>
+      isReachable
+        ? Promise.resolve({ errors: [], warnings: [] })
+        : Promise.reject(new Error("The controller cannot be reached.")),
+    );
+    const onCheckStateChange = vi.fn<ReportCheckState>();
+    const { checkAgain } = renderEditorWithHandle({
+      source: buildReviewWorkflowText("task.create"),
+      view: "yaml",
+      validate,
+      onCheckStateChange,
+    });
+    await advanceClock(1000);
+    expect(onCheckStateChange.mock.lastCall?.[0]).toMatchObject({ status: "failed" });
+
+    isReachable = true;
+    checkAgain();
+    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checking" });
+    await advanceClock(1000);
+    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checked" });
+    expect(validate).toHaveBeenCalledTimes(2);
+
+    // An answer about the text stands, so a second request checks nothing.
+    checkAgain();
+    await advanceClock(1000);
+    expect(validate).toHaveBeenCalledTimes(2);
+    expect(onCheckStateChange.mock.lastCall?.[0]).toEqual({ status: "checked" });
+  });
+
   it("reports why the controller cannot check the text apart from the issues, until the text changes", async () => {
     const onIssuesChange = vi.fn<ReportIssues>();
     const onCheckStateChange = vi.fn<ReportCheckState>();
@@ -943,6 +992,66 @@ describe("diagnostics", () => {
     await advanceClock(1000);
 
     expect(onIssuesChange.mock.lastCall?.[0]).toEqual([]);
+  });
+});
+
+describe("the screen's view of the text", () => {
+  it("tells the parent the workflow's name, and keeps the last name while the text does not parse", async () => {
+    const onNameChange = vi.fn<EditorProps["onNameChange"]>();
+    const { user, readSource, moveCursorToLine } = renderEditorWithHandle({
+      source: buildReviewWorkflowText("task.create"),
+      view: "yaml",
+      onNameChange,
+    });
+    expect(onNameChange.mock.lastCall?.[0]).toBe("Review");
+
+    moveCursorToLine(2);
+    await user.keyboard("{End}ed");
+    expect(readSource().split("\n")[1]).toBe("name: Reviewed");
+    expect(onNameChange.mock.lastCall?.[0]).toBe("Reviewed");
+
+    // The graph keeps showing the last text that read as a workflow, and so
+    // does the name.
+    await user.keyboard(": x");
+    expect(readSource().split("\n")[1]).toBe("name: Reviewed: x");
+    expect(onNameChange.mock.lastCall?.[0]).toBe("Reviewed");
+  });
+
+  it("marks the errors of a refused save in place of the last check's errors, and keeps its warnings", async () => {
+    const text = buildReviewWorkflowText("task.creat");
+    const warning: Issue = {
+      path: ["triggers", "0", "source", "filter"],
+      message: "This filter admits every labelled pull request.",
+    };
+    const refused: Issue = {
+      path: ["steps", "1", "action"],
+      message: "task.creat is not an action.",
+    };
+    const onIssuesChange = vi.fn<ReportIssues>();
+    const { markSaveRefusal } = renderEditorWithHandle({
+      source: text,
+      view: "yaml",
+      validate: () => Promise.resolve({ errors: [], warnings: [warning] }),
+      onIssuesChange,
+    });
+    await waitFor(() => {
+      expect(readUnderlinedText("warning")).toBe("filter: event.payload.number > 3");
+    });
+
+    // A refusal of another text is about a text the editor does not hold.
+    markSaveRefusal(buildReviewWorkflowText("task.create"), [refused]);
+    expect(readUnderlinedText("error")).toBe("");
+
+    markSaveRefusal(text, [refused]);
+
+    await waitFor(() => {
+      expect(readUnderlinedText("error")).toBe("action: task.creat");
+    });
+    expect(readUnderlinedText("warning")).toBe("filter: event.payload.number > 3");
+    expect(onIssuesChange.mock.lastCall?.[0]).toMatchObject([
+      { severity: "error", ...refused, line: 16 },
+      { severity: "warning", ...warning, line: 9 },
+    ]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./popover";
 import { Select } from "./select";
 import { SegmentedControl, SegmentedControlItem } from "./segmented-control";
 import { StringList } from "./string-list";
+import { Switch } from "./switch";
 
 describe("Button", () => {
   it("never submits a form unless asked to", () => {
@@ -33,6 +34,29 @@ describe("Button", () => {
     );
     await userEvent.click(screen.getByRole("button"));
     expect(onClick).not.toHaveBeenCalled();
+  });
+
+  // A Save whose write is in flight keeps the focus, so that the keyboard
+  // user stays where they were.
+  it("ignores presses, submits nothing and keeps the focus while aria-disabled", async () => {
+    const onClick = vi.fn();
+    const onSubmit = vi.fn((event: FormEvent) => {
+      event.preventDefault();
+    });
+    render(
+      <form onSubmit={onSubmit}>
+        <Button type="submit" aria-disabled onClick={onClick}>
+          Save
+        </Button>
+      </form>,
+    );
+    await userEvent.tab();
+    await userEvent.keyboard("{Enter}");
+    await userEvent.click(screen.getByRole("button"));
+
+    expect(onClick).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("button"));
   });
 
   it("is quiet unless the primary answer asks otherwise", () => {
@@ -221,5 +245,64 @@ describe("Checkbox", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Verbose").checked).toBe(false);
     await userEvent.click(screen.getByText("Verbose"));
     expect(screen.getByLabelText<HTMLInputElement>("Verbose").checked).toBe(true);
+  });
+});
+
+describe("Switch", () => {
+  function Example({ disabled = false }: { readonly disabled?: boolean }) {
+    const [on, setOn] = useState(false);
+    return <Switch aria-label="Enabled" checked={on} onCheckedChange={setOn} disabled={disabled} />;
+  }
+
+  it("is a switch, named by its label, that says whether it is on", () => {
+    render(<Example />);
+    expect(screen.getByRole("switch", { name: "Enabled" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+  });
+
+  it("turns on and off with each press, and never submits a form", async () => {
+    render(<Example />);
+    const control = screen.getByRole("switch", { name: "Enabled" });
+    expect(control).toHaveProperty("type", "button");
+    await userEvent.click(control);
+    expect(control.getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(control);
+    expect(control.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("turns with Space and Enter from the keyboard", async () => {
+    render(<Example />);
+    await userEvent.tab();
+    await userEvent.keyboard(" ");
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("is inert while disabled", async () => {
+    render(<Example disabled />);
+    await userEvent.click(screen.getByRole("switch"));
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
+  });
+
+  // A switch whose write is in flight ignores presses, and keeps the focus
+  // so that the keyboard user stays where they were.
+  it("ignores presses and keeps the focus while aria-disabled", async () => {
+    const onCheckedChange = vi.fn();
+    render(
+      <Switch
+        aria-label="Enabled"
+        checked={false}
+        onCheckedChange={onCheckedChange}
+        aria-disabled
+      />,
+    );
+    await userEvent.tab();
+    await userEvent.keyboard(" ");
+    await userEvent.click(screen.getByRole("switch"));
+
+    expect(onCheckedChange).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("switch"));
   });
 });

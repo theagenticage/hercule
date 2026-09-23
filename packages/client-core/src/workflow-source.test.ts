@@ -13,7 +13,12 @@
 import { describe, expect, it } from "vitest";
 import { Result } from "effect";
 import { parseWorkflowSource, type Issue, type WorkflowDefinition } from "@hercule/contract";
-import { decideIssueState, locateIssues, readWorkflowSource } from "@hercule/client-core";
+import {
+  decideIssueState,
+  formatProblemCount,
+  locateIssues,
+  readWorkflowSource,
+} from "@hercule/client-core";
 
 /**
  * A valid workflow, one line for each item, so line N is item N - 1. The
@@ -403,5 +408,13 @@ describe("decideIssueState", () => {
         reason: "The controller cannot be reached.",
       }),
     ).toEqual({ status: "failed", reason: "The controller cannot be reached." });
+  });
+});
+
+describe("formatProblemCount", () => {
+  it("says one problem in the singular, and any other count in the plural", () => {
+    expect(formatProblemCount(1)).toBe("1 problem");
+    expect(formatProblemCount(2)).toBe("2 problems");
+    expect(formatProblemCount(12)).toBe("12 problems");
   });
 });

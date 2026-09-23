@@ -8,20 +8,23 @@
  * stops typing, the controller checks the rest: actions, agents, expressions
  * and the graph's rules. Its answer is about the text that it checked and no
  * other. While the author types on, the marks of the last answer move with
- * the text, until the answer about the new text replaces them. The parent
- * hears of each problem that the text shows marked, at the place of its mark.
+ * the text, until the answer about the new text replaces them. A refused save
+ * is an answer about its text too, and its errors are marked in place of the
+ * last check's. The parent hears of each problem that the text shows marked,
+ * at the place of its mark.
  */
 import {
   useEffect,
   useEffectEvent,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type JSX,
   type Ref,
 } from "react";
-import type { WorkflowIssues } from "@hercule/contract";
+import type { Issue, WorkflowIssues } from "@hercule/contract";
 import {
   buildWorkflowGraph,
   decideIssueState,
@@ -60,6 +63,22 @@ export interface WorkflowEditorHandle {
    * again.
    */
   moveCursorToLine: (line: number) => void;
+  /**
+   * Marks the errors that the controller refused a save of `source` with, in
+   * place of the errors of the last answer about that text. A refusal is an
+   * answer about its text as a check is, and the last answer to arrive wins:
+   * a check of the same text that answers after the refusal replaces its
+   * errors. The warnings of a check of the same text stay, because a refusal
+   * names errors only. A refusal of a text that the editor no longer holds
+   * changes nothing.
+   */
+  markSaveRefusal: (source: string, errors: ReadonlyArray<Issue>) => void;
+  /**
+   * Checks the text again when the last check of it could not run, as when
+   * the controller could not be reached. An answer about the text stands, so
+   * a call when there is one changes nothing.
+   */
+  checkAgain: () => void;
 }
 
 interface WorkflowEditorProps {
@@ -81,6 +100,12 @@ interface WorkflowEditorProps {
   readonly onIssuesChange: (issues: ReadonlyArray<LocatedIssue>) => void;
   /** Receives how far the check of the text has come, each time that changes. */
   readonly onCheckStateChange: (state: WorkflowCheckState) => void;
+  /**
+   * Receives the name that the text gives the workflow, each time it changes.
+   * While the text does not read as a workflow, it is the name of the last
+   * text that did, as the graph shows that text too.
+   */
+  readonly onNameChange: (name: string | undefined) => void;
   readonly ref?: Ref<WorkflowEditorHandle>;
 }
 
@@ -108,6 +133,7 @@ export function WorkflowEditor({
   validate,
   onIssuesChange,
   onCheckStateChange,
+  onNameChange,
   ref,
 }: WorkflowEditorProps): JSX.Element {
   const [readSource] = useState(createSourceReader);
@@ -131,6 +157,8 @@ export function WorkflowEditor({
   const [validation, setValidation] = useState<WorkflowValidation>();
   if (!hasDefinition && validation !== undefined) setValidation(undefined);
 
+  // Each call of `checkAgain` that asks for a check starts one more round.
+  const [checkRound, setCheckRound] = useState(0);
   const requestValidation = useEffectEvent((text: string) => validate(text));
   useEffect(() => {
     // A text that does not parse gets the parse's problems from the
@@ -152,7 +180,7 @@ export function WorkflowEditor({
       isCurrent = false;
       clearTimeout(timer);
     };
-  }, [source, hasDefinition]);
+  }, [source, hasDefinition, checkRound]);
 
   const issueState = useMemo(() => decideIssueState(reading, validation), [reading, validation]);
   // While the answer about this text is still to come, the marks of the last
@@ -186,6 +214,16 @@ export function WorkflowEditor({
     [drawnDefinition],
   );
 
+  // A layout effect, so that a parent that shows the name shows it before
+  // the page is painted, and never a stand-in for one frame.
+  const drawnName = drawnDefinition?.name;
+  const reportName = useEffectEvent(() => {
+    onNameChange(drawnName);
+  });
+  useLayoutEffect(() => {
+    reportName();
+  }, [drawnName]);
+
   // A line to move the cursor to once the text shows, because a hidden text
   // cannot take focus.
   const textEditor = useRef<TextEditorHandle>(null);
@@ -204,8 +242,23 @@ export function WorkflowEditor({
         if (isTextShown) textEditor.current?.moveCursorToLine(line);
         else pendingLine.current = line;
       },
+      markSaveRefusal: (refused, errors) => {
+        if (refused !== source) return;
+        setValidation((last) => ({
+          text: refused,
+          issues: {
+            errors,
+            warnings: last?.text === refused && "issues" in last ? last.issues.warnings : [],
+          },
+        }));
+      },
+      checkAgain: () => {
+        if (issueState.status !== "failed") return;
+        setValidation(undefined);
+        setCheckRound((round) => round + 1);
+      },
     }),
-    [isTextShown],
+    [isTextShown, source, issueState.status],
   );
 
   const graphNote =

@@ -494,6 +494,54 @@ describe("workflow.update", () => {
     });
   });
 
+  // The listing sorts by updatedAt. If a toggle moved it, the Workflows
+  // screen would move a row to the top when its switch is pressed, and a
+  // second press at the same place would reach another workflow.
+  it("moves updatedAt only when the text changes, so a toggle keeps the workflow's place in the list", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      const older = await createWorkflowOrFail(base, token, {
+        source: buildFileTaskSource("Older"),
+      });
+      await waitForNextMillisecond();
+      const newer = await createWorkflowOrFail(base, token, {
+        source: buildFileTaskSource("Newer"),
+      });
+      const listIds = async () => (await queryWorkflows(base, token)).items.map((item) => item.id);
+      expect(await listIds()).toEqual([newer.id, older.id]);
+      const entriesBefore = (await readLog(base, token)).length;
+
+      await waitForNextMillisecond();
+      expect((await updateWorkflowOrFail(base, token, older.id, { enabled: true })).updatedAt).toBe(
+        older.updatedAt,
+      );
+      await waitForNextMillisecond();
+      expect(
+        (
+          await updateWorkflowOrFail(base, token, older.id, {
+            source: buildFileTaskSource("Older"),
+          })
+        ).updatedAt,
+      ).toBe(older.updatedAt);
+      expect((await readWorkflow(base, token, older.id)).updatedAt).toBe(older.updatedAt);
+      expect(await listIds()).toEqual([newer.id, older.id]);
+      // The audit log records the toggle, although the workflow's own time does not move.
+      const toggleEntry = (await readLog(base, token))[entriesBefore];
+      expect(toggleEntry?.kind).toBe("workflow.updated");
+      expect(toggleEntry?.payload).toEqual({ workflowId: older.id, changed: ["enabled"] });
+      // A save of the same text is one entry too, and it names no change.
+      const sameTextEntry = (await readLog(base, token))[entriesBefore + 1];
+      expect(sameTextEntry?.kind).toBe("workflow.updated");
+      expect(sameTextEntry?.payload).toEqual({ workflowId: older.id, changed: [] });
+
+      await waitForNextMillisecond();
+      const rewritten = await updateWorkflowOrFail(base, token, older.id, {
+        source: buildFileTaskSource("Rewritten"),
+      });
+      expect(rewritten.updatedAt > older.updatedAt).toBe(true);
+      expect(await listIds()).toEqual([older.id, newer.id]);
+    });
+  });
+
   it("leaves the stored workflow unchanged when an update is refused", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
@@ -827,6 +875,7 @@ interface LogEntry {
   readonly id: number;
   readonly kind: string;
   readonly actor: string | null;
+  readonly payload: unknown;
 }
 
 /** The whole log, oldest first, read by the user. */

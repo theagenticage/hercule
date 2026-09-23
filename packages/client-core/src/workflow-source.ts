@@ -1,7 +1,8 @@
 /**
  * How the browser reads a workflow's text: the one parse of the text, the
  * place in the text of each problem that the parse or the controller names,
- * and which of those problems are true of the text that the author sees.
+ * which of those problems are true of the text that the author sees, and
+ * their count in words.
  *
  * The controller names a problem by its path into the definition and never by
  * a position, so that the contract stays free of positions. The place is
@@ -258,3 +259,7 @@ export const decideIssueState = (
     ],
   };
 };
+
+/** How many problems a text has, in words: "1 problem", "3 problems". */
+export const formatProblemCount = (count: number): string =>
+  `${String(count)} ${count === 1 ? "problem" : "problems"}`;

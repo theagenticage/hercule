@@ -27,7 +27,13 @@ export {
   type CredentialField,
   type SetupStep,
 } from "./connections";
-export { ApiError, ConnectionError, RequestError } from "./errors";
+export {
+  ApiError,
+  ConnectionError,
+  isNotFound,
+  readValidationIssues,
+  RequestError,
+} from "./errors";
 export { idTail } from "./id-tail";
 export { joinCommand } from "./join-command";
 export {
@@ -136,6 +142,7 @@ export {
 } from "./workflow-graph";
 export {
   decideIssueState,
+  formatProblemCount,
   locateIssues,
   readWorkflowSource,
   type LocatedIssue,
@@ -143,3 +150,9 @@ export {
   type WorkflowSourceReading,
   type WorkflowValidation,
 } from "./workflow-source";
+export {
+  editDraft,
+  followStoredSource,
+  markDraftSaved,
+  type WorkflowDraft,
+} from "./workflow-draft";

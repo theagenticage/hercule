@@ -18,7 +18,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
-import type { Issue } from "@hercule/contract";
+import { STARTER_WORKFLOW_SOURCE, type Issue } from "@hercule/contract";
 import { HOST_API, registerConnectionType, type Plugin } from "@hercule/plugin-host";
 import { lintOutputSchema } from "@hercule/protocol";
 import { get, post, readRefusal } from "../http/testing";
@@ -1951,6 +1951,18 @@ const UNKNOWN_ACTION_DEFINITION = {
 };
 
 describe("workflow.validate", () => {
+  // The Workflows screen opens a new workflow on this text, so that the
+  // author sees a graph and no problem before the first keystroke.
+  it("finds no error and no warning in the text that a new workflow starts from", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      expect(
+        await readValidationAnswer(
+          await validateWorkflow(base, token, { source: STARTER_WORKFLOW_SOURCE }),
+        ),
+      ).toEqual({ errors: [], warnings: [] });
+    });
+  });
+
   it("stores nothing, whatever it is sent", async () => {
     await withArrangedController(async (controller) => {
       const { base, token } = controller;

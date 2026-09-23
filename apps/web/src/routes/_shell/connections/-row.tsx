@@ -126,6 +126,7 @@ export function ConnectionRow({
       {panel === "delete" ? (
         <div className="flex flex-wrap items-center gap-1.5 text-row text-muted">
           <span>Remove this connection? Its stored credentials go with it.</span>
+          <Button onClick={close}>Cancel</Button>
           <Button
             variant="primary"
             onClick={() => {
@@ -135,7 +136,6 @@ export function ConnectionRow({
           >
             Confirm
           </Button>
-          <Button onClick={close}>Cancel</Button>
         </div>
       ) : null}
 

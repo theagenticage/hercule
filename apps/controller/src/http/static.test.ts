@@ -75,7 +75,14 @@ describe("the page", () => {
       expect(page.headers.get("content-security-policy")).toBe(CONTENT_SECURITY_POLICY);
       expect(chunk.headers.get("content-security-policy")).toBe(CONTENT_SECURITY_POLICY);
       expect(CONTENT_SECURITY_POLICY).toContain("script-src 'self'");
-      expect(CONTENT_SECURITY_POLICY).not.toContain("unsafe-inline");
+      // Inline code is admitted for styles and for nothing else: the workflow
+      // editor puts its base styles in a `<style>` element, and a script is
+      // never inline.
+      expect(
+        CONTENT_SECURITY_POLICY.split("; ").filter((directive) =>
+          directive.includes("unsafe-inline"),
+        ),
+      ).toEqual(["style-src 'self' 'unsafe-inline'"]);
       // The one relaxation, and the shape of it: the ports a runner's identity
       // listener will settle for, named one by one. A wildcard port here would
       // hand anything that runs in the page every service on the reader's

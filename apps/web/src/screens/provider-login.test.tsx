@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient } from "@hercule/client-core";
 import { ProviderLogin } from "./provider-login";
-import { reading, stubApi, type Handler } from "../app/testing";
+import { expectInDocumentOrder, reading, stubApi, type Handler } from "../app/testing";
 
 const BASE = "http://controller.test";
 
@@ -107,7 +107,11 @@ describe("a login the vendor wants a code pasted into", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Code", { exact: true })).toBeDefined();
     });
-    expect(screen.getByRole("button", { name: /submit/i })).toBeDefined();
+    // The answer that declines comes first, and the answer that accepts comes last.
+    expectInDocumentOrder([
+      screen.getByRole("button", { name: "Cancel" }),
+      screen.getByRole("button", { name: /submit/i }),
+    ]);
     expect(sentCodes(api)).toEqual([]);
   });
 });

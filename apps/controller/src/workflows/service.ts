@@ -342,7 +342,7 @@ const make = Effect.gen(function* () {
                 : yield* readReferencesAndCheck(parsedSource.definition);
             if (problems !== undefined) yield* requireNoErrors(problems);
             const savedAt = yield* nowIso;
-            const stored = yield* requireFound(
+            const { workflow: stored, changed } = yield* requireFound(
               workflows.update(
                 decoded.id,
                 {
@@ -362,15 +362,15 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "workflow.updated",
               actor: yield* currentStamp,
+              // The entry names the workflow also when nothing changed, so
+              // the live topic says that the workflow was updated, and a
+              // client reads it again. That read finds the same workflow. A
+              // save that changes nothing is rare, and one rule for every
+              // update is simpler than a second path that stays silent.
               record: { topic: "workflow", id: stored.id },
-              // Which of the two changed, never the new text.
-              payload: {
-                workflowId: stored.id,
-                changed: [
-                  ...(parsedSource === undefined ? [] : ["source"]),
-                  ...(decoded.enabled === undefined ? [] : ["enabled"]),
-                ],
-              },
+              // Which of the two changed, never the new text. A save of the
+              // same text is recorded with nothing in `changed`.
+              payload: { workflowId: stored.id, changed },
               at: savedAt,
             });
             // Turning a workflow on or off does not read its text, so it

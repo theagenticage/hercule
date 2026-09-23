@@ -12,7 +12,13 @@
  * talks to the API through `client-core`'s promises.
  */
 import { readFileSync } from "node:fs";
-import { ApiError, ConnectionError, RequestError, createClient } from "@hercule/client-core";
+import {
+  ApiError,
+  ConnectionError,
+  RequestError,
+  createClient,
+  readValidationIssues,
+} from "@hercule/client-core";
 import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hercule/home";
 import { Result } from "effect";
 import { parseArguments, said } from "./commands/args";
@@ -272,14 +278,8 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
  * because the detail is in the issues, and a human rendering that printed only
  * the message told the caller nothing it could act on.
  */
-const refusals = (error: ApiError): ReadonlyArray<string> => {
-  const issues = (error.details as { issues?: unknown } | undefined)?.issues;
-  if (!Array.isArray(issues)) return [];
-  return issues.map((issue) => {
-    const { path, message } = issue as { path?: ReadonlyArray<string>; message?: string };
-    return describeIssue({ path: path ?? [], message: String(message) });
-  });
-};
+const refusals = (error: ApiError): ReadonlyArray<string> =>
+  (readValidationIssues(error) ?? []).map(describeIssue);
 
 /** Turn whatever went wrong into a message and an exit code. */
 const report = (error: unknown, json: boolean, io: Io): number => {

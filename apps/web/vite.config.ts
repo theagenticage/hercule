@@ -34,17 +34,30 @@ export default defineConfig(({ command }) => {
       babel({ presets: [reactCompilerPreset()] }),
       tailwindcss(),
     ],
+    // A route's chunk holds what only that route uses. A module of a workspace
+    // package reaches the first paint through the package's index all the
+    // same, unless the package declares which of its modules have side
+    // effects, as `@hercule/contract`, `@hercule/client-core` and
+    // `@hercule/ui` do. The budget check measures the first paint on each
+    // build: scripts/check-bundle-budget.ts.
     build: {
       rolldownOptions: {
-        treeshake: {
-          // `yaml` declares no `sideEffects` in its package, so a bundler keeps
-          // each of its module-level statements, and what they reference, in
-          // every chunk that imports it. `@hercule/contract` imports it for the
-          // one parse of a workflow's source, and the first paint imports the
-          // contract. The package defines symbols, classes and constants and
-          // changes nothing outside itself, so it is declared free of side
-          // effects here, and the parse reaches only the chunks that call it.
-          moduleSideEffects: [{ test: /[\\/]node_modules[\\/]yaml[\\/]/, sideEffects: false }],
+        output: {
+          // The workflow editor loads its libraries with the two pages that
+          // edit a workflow. Together they pass the size at which a build
+          // warns about a chunk. So the text editor's library, the largest,
+          // gets a chunk of its own, and the warning keeps its limit for
+          // every chunk. The graph's library stays with the page, because it
+          // shares React with the first paint: a group of its own would take
+          // React with it, and the first paint would load the graph.
+          codeSplitting: {
+            groups: [
+              {
+                name: "workflow-text-editor",
+                test: /[\\/]node_modules[\\/](@codemirror|@lezer)[\\/]/,
+              },
+            ],
+          },
         },
       },
     },

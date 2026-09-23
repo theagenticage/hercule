@@ -49,6 +49,17 @@ export interface WorkflowEdit {
   readonly enabled?: boolean;
 }
 
+/** A workflow as an edit left it, and which of its fields the edit changed. */
+export interface WorkflowUpdate {
+  readonly workflow: Workflow;
+  /**
+   * The fields whose stored value the edit changed. A field that the edit
+   * sets to the value it had is not in it, so a save of the same text
+   * changes nothing.
+   */
+  readonly changed: ReadonlyArray<"source" | "enabled">;
+}
+
 /** A trigger as a source declares it: every field of its row that the source gives. */
 export interface DeclaredTrigger {
   readonly triggerId: string;
@@ -161,14 +172,16 @@ const make = Effect.gen(function* () {
   const bindOptionalText = (text: string | undefined): Fragment =>
     text === undefined ? sql`NULL` : bindExactText(text);
 
+  const read = (id: string): Effect.Effect<Option.Option<Workflow>, SqlError> =>
+    Effect.map(
+      sql<WorkflowRow>`
+        SELECT ${sql.literal(WORKFLOW_COLUMNS)} FROM workflows WHERE id = ${uuidFromString(id)}
+      `,
+      (rows) => Option.map(Option.fromNullishOr(rows[0]), toWorkflow),
+    );
+
   return {
-    read: (id: string): Effect.Effect<Option.Option<Workflow>, SqlError> =>
-      Effect.map(
-        sql<WorkflowRow>`
-          SELECT ${sql.literal(WORKFLOW_COLUMNS)} FROM workflows WHERE id = ${uuidFromString(id)}
-        `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toWorkflow),
-      ),
+    read,
 
     /** Stores a new workflow. A new workflow is off. */
     insert: (parsedSource: ParsedSource, savedAt: string): Effect.Effect<Workflow, SqlError> =>
@@ -189,31 +202,52 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Applies an edit, and answers the workflow as the edit left it, or nothing
-     * where no workflow has the id. Only the columns the edit names are
-     * written, and the text and its definition are only written together.
+     * Applies an edit, and answers the workflow as the edit left it with the
+     * fields that the edit changed, or nothing where no workflow has the id.
+     * Only the columns the edit names are written, and the text and its
+     * definition are only written together. The caller holds the
+     * transaction, so the row cannot change between the read and the write.
+     *
+     * `updated_at` is when the text last changed. `enabled` is row state
+     * outside the text, so turning a workflow on or off does not move it, and
+     * neither does a save of the same text. A listing sorts by `updated_at`,
+     * so a workflow keeps its place in the list when its switch is pressed.
+     * The audit log records each update.
      */
     update: (
       id: string,
       edit: WorkflowEdit,
       savedAt: string,
-    ): Effect.Effect<Option.Option<Workflow>, SqlError> => {
-      const assignments = [sql`updated_at = ${savedAt}`];
-      if (edit.parsedSource !== undefined) {
-        assignments.push(
-          sql`source = ${bindExactText(edit.parsedSource.source)}`,
-          sql`definition = ${JSON.stringify(edit.parsedSource.definition)}`,
-        );
-      }
-      if (edit.enabled !== undefined) assignments.push(sql`enabled = ${edit.enabled ? 1 : 0}`);
-      return Effect.map(
-        sql<WorkflowRow>`
+    ): Effect.Effect<Option.Option<WorkflowUpdate>, SqlError> =>
+      Effect.gen(function* () {
+        const before = yield* read(id);
+        if (Option.isNone(before)) return Option.none();
+        const changed = [
+          ...(edit.parsedSource !== undefined && edit.parsedSource.source !== before.value.source
+            ? (["source"] as const)
+            : []),
+          ...(edit.enabled !== undefined && edit.enabled !== before.value.enabled
+            ? (["enabled"] as const)
+            : []),
+        ];
+        const assignments: Array<Fragment> = [];
+        if (edit.parsedSource !== undefined) {
+          assignments.push(
+            sql`source = ${bindExactText(edit.parsedSource.source)}`,
+            sql`definition = ${JSON.stringify(edit.parsedSource.definition)}`,
+          );
+        }
+        if (changed.includes("source")) assignments.push(sql`updated_at = ${savedAt}`);
+        if (edit.enabled !== undefined) assignments.push(sql`enabled = ${edit.enabled ? 1 : 0}`);
+        const rows = yield* sql<WorkflowRow>`
           UPDATE workflows SET ${sql.csv(assignments)} WHERE id = ${uuidFromString(id)}
           RETURNING ${sql.literal(WORKFLOW_COLUMNS)}
-        `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toWorkflow),
-      );
-    },
+        `;
+        return Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+          workflow: toWorkflow(row),
+          changed,
+        }));
+      }),
 
     /**
      * Removes the workflow, and answers the name it had, or nothing where no

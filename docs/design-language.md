@@ -256,6 +256,12 @@ non-entity nav items. The choice is per browser (localStorage, no stored key = t
 preference), never a setting; a stored light/dark reaches the document before the first paint via
 an external script, because the CSP allows no inline one. Owner: spec 14 §App shell.
 
+Amended 2026-09-23 by ticket #78 (Workflow definitions, validation, and the editor): a pair
+of buttons puts the answer that declines first. The answer that accepts comes last. The rule
+is the same for a question asked in place (**Cancel**, **Confirm**; **Stay**, **Leave**) and
+for a form (**Cancel**, **Save**; **Cancel**, **Connect**). The accepting answer then stands
+where the eye ends, as a form's submit does. Owner: spec 14 §Workflow editing.
+
 ## Provenance
 
 Three reaction rounds on the identical #20 check-in slice (enriched with #29 Task nouns).

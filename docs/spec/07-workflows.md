@@ -13,23 +13,37 @@ Names pinned by the tickets are used verbatim (`maxTraversals`, `freshSession`, 
 ```ts
 interface Workflow {
   id: string
-  name: string
+  name: string                         // one line of plain text, at most 128 characters
   description?: string
   enabled: boolean                     // row state, not in the source; false = no trigger of this workflow matches (pausing a workflow covers quiet hours)
-  inputs: InputDeclaration[]
-  triggers: Trigger[]                  // >= 0 start triggers, >= 0 signal triggers
+  inputs?: InputDeclaration[]
+  triggers?: Trigger[]                 // >= 0 start triggers, >= 0 signal triggers
   steps: Step[]
-  edges: Edge[]
-  workspace: WorkspacePolicy           // the one workspace every agent step of a run works in (section 4.4)
-  runner?: { requires?: string[]; runnerId?: string }   // placement inputs for the run: required runner capabilities, explicit runner
+  edges?: Edge[]
+  workspace?: WorkspacePolicy          // the one workspace every agent step of a run works in (section 4.4); absent = no checkout
   createdAt: string
   updatedAt: string
 }
 
-type InputDeclaration =
-  | { name: string; schema: JsonSchema; required: boolean; default?: unknown }   // draft-07; scalar, object or array; referenced as inputs.<name>
-  | { name: string; connection: { type: string }; required: boolean; default?: string }   // a Connection id of the named plugin type (section 3)
+interface InputDeclaration {           // exactly one of `schema` and `connection`
+  name: string                         // a CEL identifier (below); referenced as inputs.<name>
+  schema?: JsonSchema                  // draft-07; scalar, object or array
+  connection?: { type: string }        // the qualified Connection type, "github/github"; the value is a Connection id of that type (section 3)
+  required: boolean
+  default?: unknown
+}
 ```
+
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The block above is now the shape as shipped. It changed in four places, each to the spelling the contract already had for the concept or to what exists today:
+
+- `inputs`, `triggers` and `edges` may be left out, and so may `workspace`: a workflow with no `workspace` runs each agent step with no checkout, which is what `{ kind: "none" }` was (section 4.4).
+- `runner?` is gone for now. No placement by runner capability and no explicit runner exist yet; the field joins additively with the run engine ([#79](https://github.com/theagenticage/hercule/issues/79), [#80](https://github.com/theagenticage/hercule/issues/80)).
+- An input is one object with exactly one of `schema` and `connection`, so a mistake in either is named at its own field and not at the whole input.
+- `connection.type` is the qualified Connection type, `github/github`, as everywhere else ([./05-plugins.md](./05-plugins.md) section 1).
+
+In the contract the parsed shape is `WorkflowDefinition`: the block above less `id`, `enabled` and the timestamps, which are row state. `workflow.read` answers those beside `source`, and `workflow.submit` (section 9) takes a `WorkflowDefinition`. Every object in it refuses a key it does not declare, because a misspelt key would otherwise be dropped and the stored workflow would do something other than what its text says. A workflow is created with `enabled: false`; only `workflow.update { enabled: true }` turns it on. `updatedAt` is when the text last changed: turning a workflow on or off, or saving the same text again, does not move it, so a list sorted by it keeps its order when a workflow is switched; the audit log records each toggle. The canonical render has one exception to the rule above: a string that a block scalar cannot hold exactly (whitespace and line breaks only, or a control character) is double-quoted. No line is folded, and the keys an author chooses (`params`, schemas, a trigger's mappings) keep the order they were sent in.
+
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* **Ids and names are what an expression can read.** An expression reads a step or a signal trigger as `steps.<id>`, an input as `inputs.<name>` and a signal output as `steps.<id>.output.<name>`. CEL reads `steps.open-pr.output` as `steps.open - pr.output`, which passes the check at save and fails when a run evaluates it. So every step id and trigger id matches `^[a-z][a-z0-9_]*$`, and the refusal suggests the snake_case spelling (`open_pr`). Every input name and signal output name matches `^[A-Za-z_][A-Za-z0-9_]*$`; case is free there, because such a name is a field name (`prUrl`). A word that CEL cannot read as a field name is refused too: `in`, `true`, `false` and `null`, and `constructor` and `__proto__`, which the evaluator cannot read back as fields. Steps and triggers share one set of ids, because both are read as `steps.<id>`; a repeated id is refused at the later one. The examples in this document were written with hyphens and are corrected to snake_case.
 
 A workflow can be as small as one trigger plus one step. Steps reference inputs and earlier step outputs by expression (section 5) inside conditions, action parameters and agent prompts.
 
@@ -47,6 +61,19 @@ The controller validates a definition when it is saved and again when a run is s
 - Inputs: a `connection` input's `default`, when present, names an existing Connection of that type.
 
 One **warning**, not an error: a graph with signal nodes and no `terminal` step (section 4.3) can only end by cancellation. The editor shows it; the save succeeds, because "keep fixing checks until I cancel" is a legitimate workflow.
+
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The checks as built add these to the list above. Each problem is an issue `{ path, message }` whose path points into the definition (`["steps", "1", "action"]`); a YAML syntax problem has an empty path and names its line and column. A refusal names every problem it finds, up to 100, and one more issue that counts the rest. The checks that read CEL or the controller's data (expressions, actions, agents, Connections, the graph) run only once the text parses into the shape, so a text with a syntax or shape problem is refused for that first. `workflow.validate` runs the same checks and answers `{ errors, warnings }` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2).
+
+- Text: YAML anchors, aliases, tags and directives are refused at their place. Each one makes a value other than what the text visibly says, and an alias makes one place in the text stand for several places in the definition, so a path could not lead the editor back to one place. `<<` is an ordinary key, so there are no merge keys. A key that repeats an earlier key of its mapping (`1` and `"1"` are one key) is refused, and so is a key that is a mapping or a list. Refusing these now and allowing them later breaks no stored file; the other order would.
+- Ids and names: the rule above.
+- Expressions: a filter, a step condition and an edge condition must give a bool. One whose type is known and is not `bool` is refused; one whose type is known only at run time is accepted.
+- Templates: the `prompt` and every string inside `params` that holds `{{`, at any depth, are templates (section 5). Each of their expressions is checked in the scope of a run, and an unclosed `{{` is refused.
+- Actions: an action step names a built-in action, or an action of a plugin that is enabled and started; the refusal lists the actions that can be named. The params rule: every param the action requires is present, and a key its input does not declare is refused, at any depth. A literal value is decoded against its field's schema, together with any rule the input carries as a whole (a `task.update` names a field to change). A template is accepted for a field of any type, because its value is known only when the run renders it, except where the field takes no value at all.
+- Triggers: an event kind is a core kind or a kind of a plugin that is enabled and started (section 2.1). A plugin's kind names a Connection or `any`, and a named Connection exists and has the kind's Connection type; a core kind names none. A `cron.tick` start trigger has a five-field `schedule`, with no field for seconds; `timezone` is an IANA zone; neither is allowed on another kind. A signal trigger cannot listen for `cron.tick`.
+- Inputs: a Connection input's `connection.type` is a Connection type of a plugin that is enabled and started.
+- Graph: an edge from or into a start trigger is refused, because a start trigger starts runs and does not continue one. The entry-step rules of section 4.3 apply.
+
+The warning has the path `["steps"]`. A save answers it beside the stored workflow, and `workflow.validate` answers it in `warnings`.
 
 ### Invalid after the fact
 
@@ -66,11 +93,11 @@ interface EventSelector {               // the static condition of a trigger
 }
 
 interface StartTrigger {
-  id: string
+  id: string                           // unique inside its workflow; section 1 for the form
   kind: "start"
   source: EventSelector
-  inputs: Record<string, CelExpression> // input name -> expression over `event`
-  spawnBound: { maxRuns: number; windowSeconds: number }   // default ~30 per hour
+  inputs?: Record<string, CelExpression> // input name -> expression over `event`
+  spawnBound?: { maxRuns: number; windowSeconds: number }   // default ~30 per hour
   status: "active" | "paused"          // row state keyed by (workflowId, triggerId), not in the source; paused by the user or by a tripped breaker; enable/disable lives on the Workflow
   schedule?: string                    // cron triggers only (source.kind == "cron.tick"): cron expression
   timezone?: string                    // cron triggers only; the user's timezone setting when omitted
@@ -90,6 +117,14 @@ interface SignalTrigger {
 
 `EventSelector` is defined here because workflows own triggers; the matcher in [./08-events-and-connections.md](./08-events-and-connections.md) evaluates it (kind matches, Connection selection admits `event.connectionId`, filter true). The persisted kind catalogue that `kind` is validated against is registered by plugins and core emitters ([./08-events-and-connections.md](./08-events-and-connections.md)).
 
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* **A trigger is identified by `(workflowId, triggerId)`**, where `triggerId` is the `id` written in the source. No other id is minted, and a trigger id is unique only inside its workflow, as a job id is inside a GitHub Actions file. A later operation that names one trigger takes both. Each save reconciles the trigger rows in the transaction that stores the workflow:
+
+- a trigger whose id stays keeps its row, its `status` and its `createdAt`; its other fields (event kind, Connection selection, filter, schedule, timezone) are computed again from the source;
+- a removed id loses its row;
+- a new id gets a row, `active` for a start trigger. A signal trigger's row has no status.
+
+A trigger whose id stays but whose `kind` changes, start to signal or back, is a new trigger: new `createdAt`, and `active` again if it is a start trigger. A start and a signal trigger are different things, and a signal trigger has no status to keep. A start trigger may leave out `inputs` (it maps nothing) and `spawnBound` (the default bound applies, section 2.5).
+
 ### 2.1 Start triggers
 
 A start trigger has a static condition, its `EventSelector`: the event kind, the Connection selection and the optional CEL `filter`. When a persisted event matches an enabled workflow's active start trigger, the matcher inserts a pending-run effect row for it in the same transaction that advances its cursor ([ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md); mechanics in [./08-events-and-connections.md](./08-events-and-connections.md)). One event may start any number of runs across workflows and signal any number of live subscriptions; delivery is non-exclusive.
@@ -99,6 +134,8 @@ Connection selection is explicit: a named Connection or a deliberate `"any"`. Si
 A filter or mapping expression that throws evaluates as no-match and records a visible health warning on the trigger; it never stops the pipeline.
 
 Event kinds a start trigger can name in v1: GitHub and Gmail events from their plugins, `cron.tick`, manual synthetic events, and the platform events `run.completed`, `run.failed`, `task.created`, `task.updated` ([./08-events-and-connections.md](./08-events-and-connections.md) owns the envelope and catalogue).
+
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The kinds a trigger can name are one catalogue, which `eventKind.query` answers and validation reads: the **core kinds** `cron.tick`, `run.completed`, `run.failed`, `run.cancelled`, `task.created` and `task.updated`, and the kinds of every plugin that is enabled and started. A manual synthetic event has no kind of its own; it carries whatever kind its caller gives it. A signal trigger cannot name `cron.tick`: the Scheduler starts runs with its ticks and never signals a live run with one, so such a trigger could never fire. The catalogue's rules are in [./08-events-and-connections.md](./08-events-and-connections.md) section 2.
 
 ### 2.2 Cron
 
@@ -112,15 +149,17 @@ Manual is two things. Direct run creation (API or web app) starts a run of a wor
 
 A signal trigger resumes a live run mid-graph. Its static part is the same `EventSelector` as a start trigger; its dynamic part is the correlation pair: the event-side expression and the run-side expression must produce equal values. When a run starts, the controller instantiates one Subscription per signal trigger in the plan. Correlation evaluates lazily at match time against the run's current state (`inputs` and the outputs of steps completed so far); a run-side reference that does not resolve yet is a no-match, and no resolvability analysis is done. The subscription lives until the run reaches a terminal state and has no timeout: a run waiting forever is visible and cancelable, so workflows are designed to end at the right moment (correlate on PR merged, not PR opened).
 
-**A signal trigger is a source node in the graph.** It has outgoing edges and never incoming ones (validation rejects an edge into it). It is live from run start; each time its subscription matches, it fires: a step record is written for it (status `completed`, section 7.2, holding its output) and every outgoing edge whose condition holds fires, exactly as when a step completes. It may fire any number of times per run; `maxTraversals` on its outgoing edges bounds what that can do, the same cap that bounds cycles. Ordering comes from correlation, not from edges: a signal that correlates on `steps.open-pr.output.prNumber` cannot match before `open-pr` has completed, which is why the node needs no incoming edge to "wait after" a step. The pattern:
+**A signal trigger is a source node in the graph.** It has outgoing edges and never incoming ones (validation rejects an edge into it). It is live from run start; each time its subscription matches, it fires: a step record is written for it (status `completed`, section 7.2, holding its output) and every outgoing edge whose condition holds fires, exactly as when a step completes. It may fire any number of times per run; `maxTraversals` on its outgoing edges bounds what that can do, the same cap that bounds cycles. Ordering comes from correlation, not from edges: a signal that correlates on `steps.open_pr.output.prNumber` cannot match before `open_pr` has completed, which is why the node needs no incoming edge to "wait after" a step. The pattern:
 
 ```
-implement -> open-pr
-[checks-failed]  correlation.run: steps.open-pr.output.prNumber  -> implement    maxTraversals: 3
-[pr-merged]      correlation.run: steps.open-pr.output.prNumber  -> task-done    (terminal step)
+implement (entry: true) -> open_pr
+[checks_failed]  correlation.run: steps.open_pr.output.prNumber  -> implement    maxTraversals: 3
+[pr_merged]      correlation.run: steps.open_pr.output.prNumber  -> task_done    (terminal step)
 ```
 
-`checks-failed` firing into `implement` is an ordinary re-entry of `implement` (section 4.3): the next turn of its session, with the prompt re-rendered from `steps.checks-failed.output`. That is how a run "revives" a finished step on new information, visibly and bounded. Steps never hold subscriptions of their own; only sessions do, and a session's subscriptions are the agent's own doing through the `hercule` CLI, not the plan's ([./08-events-and-connections.md](./08-events-and-connections.md) section 7.2).
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* `implement` carries `entry: true`. Every step of the pattern has an incoming edge, so without the flag a run of it would start no step (section 4.3).
+
+`checks_failed` firing into `implement` is an ordinary re-entry of `implement` (section 4.3): the next turn of its session, with the prompt re-rendered from `steps.checks_failed.output`. That is how a run "revives" a finished step on new information, visibly and bounded. Steps never hold subscriptions of their own; only sessions do, and a session's subscriptions are the agent's own doing through the `hercule` CLI, not the plan's ([./08-events-and-connections.md](./08-events-and-connections.md) section 7.2).
 
 **Output.** `outputs` maps event fields onto `steps.<signalId>.output` with expressions over `event`, the same mechanism as a start trigger's input mapping. When `outputs` is absent, the output is the whole event envelope as expressions see it (`kind`, `source`, `connectionId`, `system`, `refs`, `url`, `occurredAt`, `payload.*`; never `raw`). The default is the loose shape because an agent step is the usual consumer and copes with it; a human pre-mapping every field is the exception. Section 3's "the raw event never enters the plan" therefore reads: not unless the author asks, and `raw` (the provider's untouched body) never.
 
@@ -136,7 +175,7 @@ A workflow declares typed inputs. A start trigger maps event fields onto them wi
 
 Connections flow through inputs: an outbound action names the Connection it acts as, and that id may be mapped from the triggering event's `event.connectionId` into an input, then referenced by the action's parameters (`inputs.connection`).
 
-A Connection input is **first-class**: the declaration says `connection: { type: "github" }` instead of a JSON schema, the value is a Connection id, and stamping validates that the Connection exists, is of that type and is not disabled, so a dead Connection fails at start rather than at step four. The manual-run form renders a Connection picker for it. A trigger with no event Connection (cron, manual) fills it from the declaration's `default` or a literal in its mapping (`'conn_abc'`). An action step may also name a Connection id literally in its `params` when the workflow only ever acts through one.
+A Connection input is **first-class**: the declaration says ~~`connection: { type: "github" }`~~ `connection: { type: "github/github" }` *(amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the qualified Connection type, as everywhere else)* instead of a JSON schema, the value is a Connection id, and stamping validates that the Connection exists, is of that type and is not disabled, so a dead Connection fails at start rather than at step four. The manual-run form renders a Connection picker for it. A trigger with no event Connection (cron, manual) fills it from the declaration's `default` or a literal in its mapping (`'conn_abc'`). An action step may also name a Connection id literally in its `params` when the workflow only ever acts through one.
 
 ## 4. Steps and the graph
 
@@ -148,29 +187,30 @@ interface StepBase {
   name?: string
   condition?: CelExpression            // skip condition over `inputs`, `steps`; bool
   join?: "any" | "all"                 // default "any"; section 4.3
+  entry?: boolean                      // default false; the run starts here, as at a step with no incoming edge; section 4.3
   terminal?: boolean                   // default false; completing this step completes the run; section 4.3
 }
 
 interface ActionStep extends StepBase {
   kind: "action"
   action: string                       // contribution id, e.g. "task.create", "github/pr.create"
-  params: Record<string, Literal | CelExpression>  // validated against the contribution's input schema
+  params?: Record<string, Literal | Template>  // validated against the contribution's input schema; a string holding {{ }}, at any depth, is a template (section 5)
 }
 
 interface AgentStep extends StepBase {
   kind: "agent"
   agent: string                        // Agent id; supplies the provider instance and the permission profile
-  model?: { model: string; options?: Record<string, string | boolean> }  // overrides the Agent's model; well-known option ids per ./06
   prompt: Template                     // first turn input; interpolates `inputs`, `steps`
+  model?: string                       // a model slug; overrides the Agent's model
+  options?: Record<string, string | boolean>  // that model's options; well-known option ids per ./06
   accessMode?: AccessMode              // overrides the Agent's accessMode (default full-access); resolved before session start
   freshSession?: boolean               // default false: iterations resume the same session
   outputSchema?: JsonSchema            // draft-07; declares steps.<id>.output
 }
 
-type WorkspacePolicy =                 // declared once per workflow (section 1); section 4.4
-  | { kind: "none" }                                                    // workspace-less sessions
-  | { kind: "primary"; resource: string }                               // the resource's shared main checkout on the target runner
-  | { kind: "ephemeral"; resources: string[]; branch?: Template }       // fresh worktrees; [] = scratch, several = multi-repo
+type WorkspacePolicy =                 // declared once per workflow (section 1), absent = workspace-less sessions; section 4.4
+  | { kind: "primary"; resourceId: string; branch?: string }                           // the resource's shared main checkout on the target runner
+  | { kind: "ephemeral"; checkouts: { resourceId: string; baseBranch?: string }[] }    // one fresh worktree per checkout; [] = scratch, several = multi-repo
 
 interface Edge {
   from: string                         // step id or signal trigger id
@@ -179,6 +219,8 @@ interface Edge {
   maxTraversals?: number               // >= 1; times this edge may fire per run
 }
 ```
+
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The block above is now the shape as shipped, spelled as the contract already spelled each concept. Steps gain `entry` (section 4.3). An action step may leave out `params`, and its values are literals or templates, not bare expressions. An agent step's model override is flat, `model` plus `options`, as `agent.create` and `session.spawn` take it; it was `model: { model, options }`. `WorkspacePolicy` is `session.spawn`'s workspace less `existing` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, workspace): `resource` became `resourceId`, `resources` became `checkouts` (at most 32), and `{ kind: "none" }` became leaving `workspace` out. The ephemeral `branch` template is not in the shape yet (section 4.4).
 
 ### 4.1 Action steps
 
@@ -200,11 +242,13 @@ Iterations: when an edge brings the graph back to an agent step (a cycle, or a s
 
 ### 4.3 Routing and cycles
 
-Control flow lives entirely in the graph. Steps with no incoming edges start when the run starts. When a step completes (or a signal node fires), every outgoing edge whose condition is absent or evaluates true fires; several firing edges run their targets in parallel. A branch the agent "chooses" is two outgoing edges with mutually exclusive conditions over an enum field of the step's output; the prompt tells the agent the choice exists, the schema carries it, the edges route it. Conditions route on `inputs.*` and `steps.<id>.output.*` only; there is no other run state visible to the graph.
+Control flow lives entirely in the graph. ~~Steps with no incoming edges start when the run starts.~~ *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The run starts every **entry step**: a step with `entry: true`, or a step with no incoming edge. In a loop the old rule started nothing: in section 2.4's pattern every step has an incoming edge. A step that only a signal trigger leads into is not an entry step, because it waits for its signal. Validation refuses two things, and each message suggests `entry: true`. A workflow with steps and no entry step is refused at the first step, in definition order, that another step leads into, or at the first step when no step leads into another. A step that no path reaches from an entry step or a signal trigger is refused at that step. The graph preview draws an edge from each start trigger to each entry step ([./14-web-app.md](./14-web-app.md) §Workflow editing).
+
+When a step completes (or a signal node fires), every outgoing edge whose condition is absent or evaluates true fires; several firing edges run their targets in parallel. A branch the agent "chooses" is two outgoing edges with mutually exclusive conditions over an enum field of the step's output; the prompt tells the agent the choice exists, the schema carries it, the edges route it. Conditions route on `inputs.*` and `steps.<id>.output.*` only; there is no other run state visible to the graph.
 
 **Joins.** A step with several incoming edges runs according to its `join`:
 
-- `any` (default): every firing incoming edge runs the step once more, as a new iteration. For an agent step that is the next turn of its session, so a `summarize` step fed by `review-a` and `review-b` sees both reviews arrive in context, like a main thread receiving messages from subagents. Its outgoing edges fire per iteration, so anything after it runs once per firing.
+- `any` (default): every firing incoming edge runs the step once more, as a new iteration. For an agent step that is the next turn of its session, so a `summarize` step fed by `review_a` and `review_b` sees both reviews arrive in context, like a main thread receiving messages from subagents. Its outgoing edges fire per iteration, so anything after it runs once per firing.
 - `all`: the step runs once, when every incoming edge has *resolved*: fired, or dead. An edge is dead when its source is dead or skipped, or its source completed and the edge's condition was false. A step with incoming edges is dead when all of them are dead; a dead step gets no record. `all` is the fan-in barrier ("run two reviewers, then combine once"). Validation forbids `all` on a step inside a cycle, because the loop-back edge cannot resolve on the first visit.
 
 **Skips.** A step whose `condition` evaluates false is skipped: a record with status `skipped`, no output, and its outgoing edges are evaluated as if it had completed (pass-through). Skipping is never a runtime act; it is a condition the author wrote, so the steps after it are written to expect it: `steps.<id>` is absent for a skipped step (section 5), and a downstream condition that reads it guards with `has()`:
@@ -218,9 +262,9 @@ A forgotten guard is an expression error (below), never a silent false. Pruning 
 
 **Cycles** use ordinary edges. Any edge may carry `maxTraversals >= 1`, the number of times it may fire in one run; validation requires every cycle to contain at least one capped edge, so every graph is bounded by construction. When a capped edge's condition holds but its cap is exhausted, the run fails with reason `iteration-limit`. When the condition is false the edge simply does not fire and the cap is irrelevant. The per-step `iteration` counter increments each time the step runs in the run.
 
-**Busy step.** An edge firing into a step that is currently running (a second review arriving while the summarizer is mid-turn, a second `checks-failed` signal while the fixer is still fixing) queues one iteration, recorded as `pending`; queued iterations run in order after the current one completes. Nothing is coalesced and nothing steers the running turn in v1: batching belongs at the source (subscribe to GitHub's per-suite and per-review kinds, not per-check and per-comment ones; [./08-events-and-connections.md](./08-events-and-connections.md)). Coalescing queued firings into one iteration, and steering a running session, are Post-v1.
+**Busy step.** An edge firing into a step that is currently running (a second review arriving while the summarizer is mid-turn, a second `checks_failed` signal while the fixer is still fixing) queues one iteration, recorded as `pending`; queued iterations run in order after the current one completes. Nothing is coalesced and nothing steers the running turn in v1: batching belongs at the source (subscribe to GitHub's per-suite and per-review kinds, not per-check and per-comment ones; [./08-events-and-connections.md](./08-events-and-connections.md)). Coalescing queued firings into one iteration, and steering a running session, are Post-v1.
 
-**Terminal steps.** A step with `terminal: true` completes the run when it completes: running branches are cancelled (their records `cancelled`), pending iterations dropped, live subscriptions ended, undelivered signal deliveries dropped. Otherwise a run completes when nothing is running or pending and no subscription is live. A graph with signal nodes therefore needs a terminal step to end on its own (a live `checks-failed` node would otherwise keep the run alive after `task-done`); without one it ends only by cancellation, which the editor warns about (section 1).
+**Terminal steps.** A step with `terminal: true` completes the run when it completes: running branches are cancelled (their records `cancelled`), pending iterations dropped, live subscriptions ended, undelivered signal deliveries dropped. Otherwise a run completes when nothing is running or pending and no subscription is live. A graph with signal nodes therefore needs a terminal step to end on its own (a live `checks_failed` node would otherwise keep the run alive after `task_done`); without one it ends only by cancellation, which the editor warns about (section 1).
 
 **Failure.** A step failing fails the run; parallel branches still running are cancelled. There are no automatic retries. A CEL expression that throws at any in-run site (a step condition, an edge condition, a template in a prompt or a parameter) fails the run with reason `expression-error` and the site named in `failedStepId`. In-run errors are loud where trigger sites are quiet ([./08-events-and-connections.md](./08-events-and-connections.md): no-match plus health warning) because the pipeline must never stall on one workflow's bad expression, whereas a run is an isolated unit and a silently-false edge would route work wrongly.
 
@@ -231,6 +275,8 @@ A run takes place in one workspace on one runner. The workflow declares the `Wor
 Policy: `none` runs sessions workspace-less (assistant-style, API-only work); `primary` uses the resource's long-lived main checkout on the runner, sharing it with whatever else runs there (a dirty primary is the next run's starting reality); `ephemeral` provisions fresh worktrees for the listed resources off the runner's per-resource cache, with each resource's setup command run first. Provisioning happens when the first agent step starts. Ephemeral workspaces are deleted on clean completion of the run and kept on failure until the user dismisses the failed run; a re-run provisions fresh ones. Parallel agent steps share the one workspace, allowed and the author's risk, as with a primary. Substrate details in [./03-controller-and-runners.md](./03-controller-and-runners.md).
 
 Branch: `branch` is a template over `inputs` (and `steps`, though nothing has run yet); the default is `hercule/run-<runId>`, always unique. It is the *initial* name only: the runner tracks the worktree by path, so an agent is free to rename the branch to something meaningful and PR creation uses whatever branch is current. Shipped task-driven workflows template `task/{{ inputs.taskId }}`; "task branch" is a convention of those workflows, not a core rule.
+
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The policy is spelled as `session.spawn` spells a workspace, so one concept has one spelling: `{ kind: "primary", resourceId, branch? }`, with `branch` meaning what it means on `session.spawn`, or `{ kind: "ephemeral", checkouts: [{ resourceId, baseBranch? }] }`. `none` is leaving `workspace` out. Two things above are not in the shape yet, because nothing exists to act on them: the ephemeral `branch` template (no run-branch naming exists) and the run's `runner` placement inputs (no placement by runner capability exists). Both join additively with the run engine ([#79](https://github.com/theagenticage/hercule/issues/79), [#80](https://github.com/theagenticage/hercule/issues/80)).
 
 ## 5. Expressions: CEL
 
@@ -252,12 +298,14 @@ One language, CEL, is used at every condition site. Termination is a property of
 Evaluator: `@marcbachmann/cel-js` (pure JS, zero dependencies) behind a small Hercule-owned wrapper exposing parse, check and evaluate and nothing else; `@bufbuild/cel` is the named fallback implementation, swappable without touching stored workflows because definitions store CEL source only. Wrapper rules:
 
 - Context variables (`inputs`, `steps`, `event`) are declared `dyn` in v1 so plain JSON numbers work without BigInt friction; typed schemas can come later.
-- Every stored expression is checked with the environment's `check()` at save time; parse or type errors reject the save.
+- Every stored expression is checked with the environment's `check()` at save time; parse or type errors reject the save. *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* Each site is checked in an environment that declares only that site's variables (the table above), so `steps.x` in a trigger filter is refused at save and not at each evaluation. A site whose result is bool refuses an expression whose type is known and is not `bool`.
 - Parse-time structural limits (`maxAstNodes`, `maxDepth`, list and map size, call arity) are set to modest values; conditions are small.
 - No async or side-effecting custom functions; the function whitelist is pure.
 - Evaluation of one expression is wall-clock guarded as a belt-and-braces measure, since neither implementation meters runtime cost.
 
-Interpolation: action parameter values and agent prompts are templates whose embedded expressions are ordinary CEL over `inputs` and `steps`, delimited `{{ expr }}`: `Fix the failing checks on {{ inputs.prUrl }}. CI said: {{ steps.checks-failed.output.payload.summary }}`. A non-string value renders as JSON. A literal `{{` is written `{{ '{{' }}`. `{{ }}` was chosen over `${ }` because prompts routinely quote code, where `${...}` is common. Only the step `prompt` and string `params` are templates; an Agent's system prompt is a standalone entity with no run to reference and is not interpolated. A template that throws is an `expression-error` (section 4.3).
+Interpolation: action parameter values and agent prompts are templates whose embedded expressions are ordinary CEL over `inputs` and `steps`, delimited `{{ expr }}`: `Fix the failing checks on {{ inputs.prUrl }}. CI said: {{ steps.checks_failed.output.payload.summary }}`. A non-string value renders as JSON. A literal `{{` is written `{{ '{{' }}`. `{{ }}` was chosen over `${ }` because prompts routinely quote code, where `${...}` is common. Only the step `prompt` and ~~string `params`~~ the strings in `params` are templates; an Agent's system prompt is a standalone entity with no run to reference and is not interpolated. A template that throws is an `expression-error` (section 4.3).
+
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* A string inside `params` that holds `{{` is a template at any depth: the value of a param, an item of a list, or a field of a mapping. Section 8 puts `inputs.eventId` into `provenance`, which is a list of mappings, so a template only at the top would not be enough. The run renders nested strings the same way ([#79](https://github.com/theagenticage/hercule/issues/79)). An expression ends at the first `}}` after its `{{`, as a Mustache tag does, so the reader of a template needs to know nothing of CEL; an expression that must hold `}}` writes it another way, such as `'}' + '}'`.
 
 **Verify at build time:** the exact values of the parse-time limits, and a Hercule-side corpus of representative expressions run in CI against the wrapper (optionally including selected official conformance cases from `@bufbuild/cel-spec`) to pin the subset Hercule relies on.
 
@@ -294,7 +342,7 @@ A run is created by: a start-trigger match (the matcher's pending-run effect row
 3. Resolves inputs from the trigger's mappings, the manual form, or the caller's explicit values, applying defaults; a `connection` input is checked against the Connection table here.
 4. Copies the triggering event, if any, onto the run so event-log pruning never breaks audit.
 5. Instantiates a Subscription for every signal trigger in the plan.
-6. Starts every step with no incoming edge. The workspace is provisioned, and the runner pinned, when the first agent step starts (section 4.4).
+6. Starts every ~~step with no incoming edge~~ entry step (section 4.3; *amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78)*, because in a loop every step has an incoming edge). The workspace is provisioned, and the runner pinned, when the first agent step starts (section 4.4).
 
 Concurrent runs of one workflow are unlimited in v1; the per-runner session cap queues sessions at placement and the spawn bound limits trigger-driven creation.
 
@@ -345,7 +393,7 @@ interface StepRecord {
 }
 ```
 
-Run status: `pending` (created, not yet started, e.g. queued behind validation or placement), `running`, and the terminal states `completed`, `failed`, `cancelled`. There is no waiting status: a run blocked on a signal is `running` with nothing running or pending and a live subscription, and the UI derives "waiting on `pr-merged`" from that. A run with one branch waiting and another working is `running` either way, which is why a run-level `waiting` would lie. `failed` is terminal: recovery is fixing the workflow, prompt or filter and re-running (section 7.4); resuming a failed run from a step is partial re-run, Post-v1. The user may cancel a run at any time; cancellation ends its subscriptions, cancels its running step records and stops their sessions.
+Run status: `pending` (created, not yet started, e.g. queued behind validation or placement), `running`, and the terminal states `completed`, `failed`, `cancelled`. There is no waiting status: a run blocked on a signal is `running` with nothing running or pending and a live subscription, and the UI derives "waiting on `pr_merged`" from that. A run with one branch waiting and another working is `running` either way, which is why a run-level `waiting` would lie. `failed` is terminal: recovery is fixing the workflow, prompt or filter and re-running (section 7.4); resuming a failed run from a step is partial re-run, Post-v1. The user may cancel a run at any time; cancellation ends its subscriptions, cancels its running step records and stops their sessions.
 
 Step records are one per (node, iteration) and their status is monotonic: `pending` (a queued iteration behind a busy step, section 4.3) `-> running -> completed | failed | cancelled`; `skipped` is set at creation and final. A re-entered step never goes back from `completed`; its next iteration is a new record. A signal node gets a `completed` record per firing, holding its output, and none while merely live; a dead step gets none.
 
@@ -370,7 +418,7 @@ There is no cleanup machinery beyond the substrate's: the run's ephemeral worksp
 
 ## 8. Built-in actions
 
-Five built-in actions ship in the core, registered into the workflow-action extension point like any plugin contribution but owned by the core. Each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)) and carries the **same id as the operation** it calls ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3); its input and output are that operation's contract schemas, so nothing is reachable through an action that is not reachable over HTTP. The tickets called the notification action `notify`; its id is `notification.create`. This table is the single owner of the catalogue; Task semantics are in [./09-tasks.md](./09-tasks.md), the Notification record and triage-specific usage in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
+Five built-in actions ship in the core (three of them now; see the amendment below the table), registered into the workflow-action extension point like any plugin contribution but owned by the core. Each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)) and carries the **same id as the operation** it calls ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3); its input and output are that operation's contract schemas, so nothing is reachable through an action that is not reachable over HTTP. The tickets called the notification action `notify`; its id is `notification.create`. This table is the single owner of the catalogue; Task semantics are in [./09-tasks.md](./09-tasks.md), the Notification record and triage-specific usage in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
 
 | Action | Input (contract op) | Output | Notes |
 |---|---|---|---|
@@ -379,6 +427,8 @@ Five built-in actions ship in the core, registered into the workflow-action exte
 | `task.create` | Task create input: `{ title, description, priority?, labels?, projectId?, provenance? }` | the created Task | Provenance may carry the triggering event id (`inputs.eventId`), the run id and external refs. |
 | `task.update` | `{ taskId, ...changes }` | the updated Task | One call, one `task.updated` event with per-field diffs. Appending provenance is an update. |
 | `task.query` | `TaskFilter`: `{ refs?, labels?, status?, projectId?, text? }` (any-of within a field, and across fields; [./11](./11-public-api-and-agent-surface.md) section 2) | `{ items: Task[] }` | The same operation agents use. Structured fields match by exact identity: a provenance ref is matched by canonical external ref (`github:issue:owner/repo#42`), never by content; `text` is SQLite FTS over title and description and is normally absent in graphs. The guard-before-agent pattern: `task.query` on the event's refs, an edge on `size(steps.guard.output.items) > 0` to `task.update`, otherwise the agent step. |
+
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* Three are registered now: `task.create`, `task.update` and `task.query`. `workflow.run` joins with [#79](https://github.com/theagenticage/hercule/issues/79) and `notification.create` with [#84](https://github.com/theagenticage/hercule/issues/84), each in the ticket that adds its operation, because an action is its operation and cannot exist before it. Two inputs differ from the operation's, by necessity. `task.update` takes `taskId` in its params, because a request carries it in the path, and it is refused when it names no field to change, by the operation's own rule. `task.query` takes `TaskFilter` without the paging fields and answers the first page, `{ items, nextCursor? }`: a step reads the answer to decide where the run goes next, and the first page answers that. Nothing executes an action until runs exist ([#79](https://github.com/theagenticage/hercule/issues/79)).
 
 GitHub and Gmail actions (for example creating a PR, commenting, fetching a mail body on demand, merging) are plugin contributions of the `github` and `gmail` plugins, invoked as ordinary action steps naming the Connection they act as (`connection.use` grant, [./13-security.md](./13-security.md)). Their exact roster is Open in [./05-plugins.md](./05-plugins.md). Mid-session mailbox access from an agent step is covered in v1 by gmail action steps around it and the session spec's MCP passthrough.
 

@@ -167,6 +167,13 @@ export function PluginCard({
         <div className="flex flex-wrap items-center gap-1.5 text-row text-muted">
           <span>Wipe everything this plugin has stored?</span>
           <Button
+            onClick={() => {
+              setConfirmingReset(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
             variant="primary"
             onClick={() => {
               setConfirmingReset(false);
@@ -174,13 +181,6 @@ export function PluginCard({
             }}
           >
             Confirm
-          </Button>
-          <Button
-            onClick={() => {
-              setConfirmingReset(false);
-            }}
-          >
-            Cancel
           </Button>
         </div>
       ) : null}

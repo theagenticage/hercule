@@ -75,11 +75,11 @@ it("carries a table column's alignment as a class", () => {
   expect(cells[2]).toContain("text-right");
 });
 
-// The fence for the Content-Security-Policy the controller serves the bundle
-// under: `style-src 'self'` with no `'unsafe-inline'` means the browser drops
-// every style attribute. Any markdown construct that starts emitting one fails
-// here, rather than silently losing its effect in the shipped binary while
-// still working behind a dev server that sends no policy.
+// The fence for style attributes. Markdown that an agent wrote must never set
+// a style on the page, and the app's own markup keeps to classes: the policy
+// that the controller serves admits inline styles only because the workflow
+// editor needs them. Any markdown construct that starts emitting a style
+// attribute fails here.
 it("puts no inline style on anything it renders", () => {
   const { container } = render(<Markdown text={ALIGNED_TABLE} />);
 

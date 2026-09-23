@@ -144,6 +144,7 @@ export function ProviderLogin({
               </Field>
 
               <div className="-ml-2 flex flex-wrap items-center gap-1.5">
+                <Button onClick={close}>Cancel</Button>
                 <Button
                   variant="primary"
                   disabled={code.trim() === "" || submit.isPending}
@@ -153,7 +154,6 @@ export function ProviderLogin({
                 >
                   Submit
                 </Button>
-                <Button onClick={close}>Cancel</Button>
               </div>
             </>
           ) : (
@@ -286,6 +286,7 @@ export function ProviderKeyEntry({
             />
           </Field>
           <div className="-ml-2 flex flex-wrap items-center gap-1.5">
+            <Button onClick={close}>Cancel</Button>
             <Button
               variant="primary"
               // Nothing to save is refused here rather than a round trip away.
@@ -296,7 +297,6 @@ export function ProviderKeyEntry({
             >
               Save
             </Button>
-            <Button onClick={close}>Cancel</Button>
           </div>
           {save.error === null ? null : (
             <p className="text-fine text-fail" role="alert">

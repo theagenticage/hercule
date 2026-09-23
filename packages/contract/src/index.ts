@@ -308,14 +308,17 @@ export {
   decodeWorkflowDefinition,
   limitIssues,
   listEntrySteps,
-  parseWorkflowDocument,
-  parseWorkflowSource,
   readFieldNotation,
-  renderWorkflowSource,
-  spellPathKey,
   WorkflowDefinition,
   type FieldNotation,
 } from "./groups/workflow";
+export {
+  parseWorkflowDocument,
+  parseWorkflowSource,
+  renderWorkflowSource,
+  spellPathKey,
+} from "./groups/workflow-source";
+export { STARTER_WORKFLOW_SOURCE } from "./groups/workflow-starter";
 export { excerptMessage, quoteWritten } from "./excerpts";
 export { WorkflowAction } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";
