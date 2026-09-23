@@ -208,13 +208,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  // The copied credential is in here, so removing the home matters for security, not just tidiness.
+  // The copied credential is in here, so removing the home matters for
+  // security, not just tidiness.
   state.remove();
 });
 
 describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () => {
   it(
-    "creates and updates a task as itself, and is not allowed the delete its profile does not grant",
+    "creates and updates a task as itself, and fails to delete it because its profile lacks the grant",
     async (ctx) => {
       if (!isLoginAvailable()) {
         ctx.skip(

@@ -6,7 +6,8 @@
  * This is the only test that proves the bundle is embedded rather than read
  * from disk, so it runs what a release ships. It runs an existing binary
  * rather than building one: a build rewrites `apps/web/dist` and the generated
- * file list, which should not happen while the rest of the suite runs. `pnpm build:binary` first, then `pnpm test:binary`.
+ * file list, which should not happen while the rest of the suite runs. Run
+ * `pnpm build:binary` first, then `pnpm test:binary`.
  *
  * It stops before setup completes, which is when a first-run browser arrives.
  */

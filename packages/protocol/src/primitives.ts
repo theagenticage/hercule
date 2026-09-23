@@ -3,8 +3,7 @@
  *
  * They are in a module of their own rather than in `index.ts`, because the
  * session schemas need them and `index.ts` needs the session frames to build
- * its unions. A shared module with no imports of its own avoids an import
- * cycle.
+ * its unions. Keeping them in a separate module avoids an import cycle.
  */
 import { Schema } from "effect";
 

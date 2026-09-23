@@ -3,8 +3,8 @@
  * pushes to a private repository with a token that is never written to its
  * disk.
  *
- * Opt-in, like `e2e/session.test.ts`: it uses a real account and creates a
- * branch there until it deletes it again, so it runs only with
+ * Opt-in, like `e2e/session.test.ts`: it uses a real account and leaves a
+ * branch there until it deletes it, so it runs only with
  * `HERCULE_E2E_GITHUB_TOKEN` and `HERCULE_E2E_GITHUB_REPO` (`owner/name`) set.
  *
  * The controller runs under a `HOME` that holds no `.gitconfig` of the

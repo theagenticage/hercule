@@ -6,8 +6,8 @@
  * an in-process RPC client. This suite runs `./hercule` as the controller and
  * as the CLI, and puts a real `client-core` live client - real ticket fetch,
  * real WebSocket, real greeting - between them, so a `hercule task create` in
- * one process has to reach a subscriber in another. `pnpm build:binary` first, then
- * `pnpm test:binary`.
+ * one process has to reach a subscriber in another. `pnpm build:binary` first,
+ * then `pnpm test:binary`.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -39,13 +39,19 @@ let token: string;
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, binary, stdin });
 
-/** Parses a command's JSON output. Fails with the command's own output, rather than later on an undefined field. */
+/**
+ * Parses a command's JSON output. Fails with the command's own output, rather
+ * than later on an undefined field.
+ */
 const expectJsonOutput = (ran: { code: number; stdout: string; stderr: string }): unknown => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
   return parseJsonOutput(ran);
 };
 
-/** Waits for something a socket delivers. On timeout, the error includes what it was waiting for. */
+/**
+ * Waits for something a socket delivers. On timeout, the error includes what
+ * it was waiting for.
+ */
 const waitUntil = async (what: string, done: () => boolean): Promise<void> => {
   const deadline = Date.now() + 10_000;
   while (!done()) {

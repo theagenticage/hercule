@@ -425,9 +425,9 @@ describe("the first run and everything after it", () => {
     // Exit 0 alone would also follow from `process.exit()`: the kernel releases
     // SQLite's locks either way. Closing the database is what checkpoints the
     // write-ahead log back into `hercule.db`, so an empty `-wal` is what
-    // separates a clean close from a killed process. SQLite
-    // then removes the file where the platform lets it and truncates it to
-    // zero where it does not, so both outcomes mean checkpointed.
+    // separates a clean close from a killed process. SQLite then removes the
+    // file where the platform lets it and truncates it to zero where it does
+    // not, so both outcomes mean checkpointed.
     expect(existsSync(wal) ? statSync(wal).size : 0).toBe(0);
 
     controller = await startController({ home: state.home, port });

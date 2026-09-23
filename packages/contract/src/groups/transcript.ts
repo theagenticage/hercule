@@ -3,9 +3,10 @@
  *
  * The transcript is a separate entity from the session record ([11-public-api
  * section 2]): the record holds a session's current state, and the transcript
- * holds what it did. It is append-only and keyed by a per-session position, so reading it
- * is a keyset walk over that position and nothing else: there is no filter and
- * no search, and the only choice a caller has is which end to start from.
+ * holds what it did. The transcript is append-only and keyed by a per-session
+ * position, so reading it is a keyset walk over that position and nothing
+ * else: there is no filter and no search, and the only choice a caller has is
+ * which end to start from.
  * `transcript.query`, the full-text search over every session, is a different
  * operation and is not built yet.
  *

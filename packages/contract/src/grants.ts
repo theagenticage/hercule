@@ -41,7 +41,10 @@ export const GRANT_FAMILIES = {
 /** A grant family: the broad area of operations a grant covers. */
 export type GrantFamily = keyof typeof GRANT_FAMILIES;
 
-/** A grant, written `<family>.<verb>`. A 403 response reports the missing grant, and an escalation asks for one. */
+/**
+ * A grant, written `<family>.<verb>`. A 403 response reports the missing
+ * grant, and an escalation asks for one.
+ */
 export type Grant = {
   [F in GrantFamily]: `${F}.${(typeof GRANT_FAMILIES)[F][number]}`;
 }[GrantFamily];

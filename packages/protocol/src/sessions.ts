@@ -325,8 +325,9 @@ const Money = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
  * A cumulative token snapshot for the session, not a per-turn delta: harnesses
- * report at different intervals, and a snapshot works for all of them. The optional fields
- * are the ones only some harnesses report (spec 06 section 6.6).
+ * report at different intervals, and a snapshot works for all of them. The
+ * optional fields are the ones only some harnesses report (spec 06 section
+ * 6.6).
  */
 export const Usage = Schema.Struct({
   inputTokens: Tokens,

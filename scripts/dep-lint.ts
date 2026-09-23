@@ -10,8 +10,8 @@
  * `--metafile`.
  *
  * The rule reads specifiers, so it cannot see a specifier built at runtime
- * (`await import("bun" + ":sqlite")`). Nothing in the
- * codebase does that, and no scan short of running the code could catch it.
+ * (`await import("bun" + ":sqlite")`). Nothing in the codebase does that, and
+ * no scan short of running the code could catch it.
  *
  * A second graph rule is about the controller rather than the runner: its
  * domains form a DAG, with no allowlist of edges. `src/<domain>/index.ts` is
@@ -28,8 +28,9 @@
  *
  * One rule is about the workspace, not an import graph: the Agent SDK's eight
  * per-platform CLI packages (one is 196 MB) are excluded at install, and the
- * shipped binary would include them if they were installed again. The pnpm store is read
- * directly, because pnpm links only direct dependencies into `node_modules`.
+ * shipped binary would include them if they were installed again. The pnpm
+ * store is read directly, because pnpm links only direct dependencies into
+ * `node_modules`.
  *
  * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. `scripts/dep-lint.test.ts`
  * uses the optional entrypoint to point the script at its fixtures.
@@ -143,8 +144,8 @@ console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the gr
  * file in a domain is that domain, and an import of `../<other>` is an edge
  * from this domain to that one. `db/` and `config/` are infrastructure every
  * domain may import, and the check does not treat them as sources of edges.
- * `daemon/` is a node like any other here; this rule does not separately check
- * that no domain imports it.
+ * `daemon/` is a node like any other here. No separate rule stops a domain
+ * from importing it; such an import is caught only when it closes a cycle.
  */
 const controllerSrc = `${root}apps/controller/src`;
 
@@ -207,7 +208,10 @@ for (const domain of domains) {
   edges.set(domain, out);
 }
 
-/** Returns the first cycle a depth-first search finds, as the path around it, or `undefined` when there is none. */
+/**
+ * Returns the first cycle a depth-first search finds, as the path around it,
+ * or `undefined` when there is none.
+ */
 const findCycle = (): ReadonlyArray<string> | undefined => {
   const open = new Set<string>();
   const done = new Set<string>();

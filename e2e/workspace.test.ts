@@ -76,7 +76,10 @@ const PROVISION_DEADLINE_MS = 60_000;
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
   runCli(args, { home: state.home, binary, stdin });
 
-/** Parses a command's JSON output. Fails with the command's own output, rather than later on an undefined field. */
+/**
+ * Parses a command's JSON output. Fails with the command's own output, rather
+ * than later on an undefined field.
+ */
 const expectJsonOutput = <A>(ran: Ran): A => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
   return parseJsonOutput(ran) as A;
@@ -127,7 +130,10 @@ interface Snapshot {
   readonly auth: { readonly status: string };
 }
 
-/** Reads a workspace until it is no longer provisioning, and returns it. Throws when it is still provisioning at the deadline. */
+/**
+ * Reads a workspace until it is no longer provisioning, and returns it. Throws
+ * when it is still provisioning at the deadline.
+ */
 const waitForSettledWorkspace = async (id: string): Promise<Workspace> => {
   const deadline = Date.now() + PROVISION_DEADLINE_MS;
   for (;;) {

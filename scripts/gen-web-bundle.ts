@@ -10,9 +10,9 @@
  * hashes, so the list is generated after each `vite build` rather than
  * written by hand.
  *
- * Without `dist/`, the generated module exports no bundle, and the controller
- * serves the API alone. That is the state of a fresh checkout, which must typecheck
- * and test without anyone having run a web build.
+ * Without `dist/`, the generated module sets `webBundle` to `undefined`, and
+ * the controller serves the API alone. That is the state of a fresh checkout,
+ * which must typecheck and test without anyone having run a web build.
  */
 import { existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";

@@ -85,7 +85,10 @@ export const listSecretFields = (
   });
 };
 
-/** Checks whether a branch has only a `type` key with the given type, as both branches of an empty struct do. */
+/**
+ * Checks whether a branch has only a `type` key with the given type, as both
+ * branches of an empty struct do.
+ */
 const isBareType = (branch: unknown, type: string) => {
   const keys = Object.keys(branch as object);
   return keys.length === 1 && (branch as JsonSchema.JsonSchema).type === type;

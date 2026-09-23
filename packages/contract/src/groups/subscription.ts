@@ -183,8 +183,9 @@ export const SubscriptionHolderFromShorthand = markShorthandOnItself(
  *
  * An evaluation that fails counts as no match and never ends the
  * subscription: the condition is evaluated again on the next event, and the
- * failure is reported here so the holder can see why nothing arrives. It is set on the first failure,
- * refreshed while failures continue, and cleared by the next clean evaluation.
+ * failure is reported here so the holder can see why nothing arrives. The
+ * health is set on the first failure, refreshed while failures continue, and
+ * cleared by the next clean evaluation.
  */
 export const SubscriptionHealth = Schema.Union([
   Schema.Struct({ state: Schema.Literal("ok") }),

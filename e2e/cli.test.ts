@@ -5,9 +5,9 @@
  * Tasks, projects and the event log add no CLI code of their own: the commands
  * are derived from the contract's CLI table, so the only way to know they are
  * really there is to run what a release ships. The plugin registry is compiled
- * in too, so what a release starts with is only visible from a release. This suite runs
- * `./hercule` as the controller and as the CLI, which is why it is out of
- * `pnpm test`: `pnpm build:binary` first, then `pnpm test:binary`.
+ * in too, so what a release starts with is only visible from a release. This
+ * suite runs `./hercule` as the controller and as the CLI, which is why it is
+ * out of `pnpm test`: `pnpm build:binary` first, then `pnpm test:binary`.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -35,7 +35,10 @@ let url: string;
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, binary, stdin });
 
-/** Parses a command's JSON output. Fails with the command's own output, rather than later on an undefined field. */
+/**
+ * Parses a command's JSON output. Fails with the command's own output, rather
+ * than later on an undefined field.
+ */
 const expectJsonOutput = (ran: { code: number; stdout: string; stderr: string }): unknown => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
   return parseJsonOutput(ran);

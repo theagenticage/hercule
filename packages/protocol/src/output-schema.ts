@@ -6,9 +6,10 @@
  * agree on a small common core only. Outside that core, OpenAI's strict mode,
  * draft-07 and pi's strict transform each reject or silently change different
  * things. So the subset is a closed set of keywords, not a best effort, and
- * `lintOutputSchema` below is the only place that defines what is in the set. The controller runs the lint when a session is spawned, and the
- * runner runs it again at session start, because the two are different
- * processes and only the schema crosses between them.
+ * `lintOutputSchema` below is the only place that defines what is in the set.
+ * The controller runs the lint when a session is spawned, and the runner runs
+ * it again at session start, because the two are different processes and only
+ * the schema crosses between them.
  */
 import { Schema } from "effect";
 

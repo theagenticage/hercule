@@ -1831,7 +1831,7 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a session, from an Agent or as a Thread the user drives by hand. With `--agent` every value comes from that Agent; without one it is a Thread and the values come from the user's thread settings. Either way, a flag given here takes precedence. Returns the session's id; watch what it does with `hercule transcript read` and send the next turn with `hercule session input`.",
+    help: "Starts a session, from an Agent or as a Thread the user drives by hand. With `--agent` every value comes from that Agent; without one it is a Thread and the values come from the user's thread settings. Either way, a flag given here takes precedence. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
       {
@@ -2058,7 +2058,7 @@ export const CLI = {
   },
   "input.update": {
     command: "input update",
-    help: "Rewrites a Queued Input before the controller delivers it. It fails for an input already sent or delivered, so check `hercule input list` if it fails.",
+    help: "Rewrites a Queued Input before the controller delivers it. An input already sent or delivered cannot be rewritten; if the command fails, check its status with `hercule input list`.",
     examples: [
       {
         args: ["1f3a9c2e", "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0"],
@@ -2197,7 +2197,7 @@ export const NOUNS = {
     flow: "hercule workspace provision makes a repo's main workspace, hercule workspace list shows what exists, hercule workspace dispose tears an ephemeral one down.",
   },
   event: {
-    summary: "The event log: external events and audit entries, under one envelope.",
+    summary: "The event log: external events and audit entries, in one format.",
     flow: "hercule event list to see what came in, hercule event read for one entry in full, hercule event emit to post one by hand, hercule event enrich to record what an entry is really about.",
   },
   subscription: {
@@ -2234,7 +2234,7 @@ export const NOUNS = {
   },
   connection: {
     summary: "Connections: the named links to external accounts Hercule acts through.",
-    flow: "hercule connection create for a pasted credential or hercule connection start-oauth for a browser flow, then hercule connection list to watch its status and hercule connection set-credentials to rotate.",
+    flow: "hercule connection create for a pasted credential or hercule connection start-oauth for a browser flow, then hercule connection list to check its status and hercule connection set-credentials to rotate.",
   },
   agent: {
     summary: "Agents: the named configurations sessions are spawned from, to work unattended.",
@@ -2242,7 +2242,7 @@ export const NOUNS = {
   },
   session: {
     summary: "Sessions: conversations with provider-backed agents, resumable and forkable.",
-    flow: "hercule session spawn starts one, hercule transcript read watches it, hercule session input sends the next turn, hercule session respond answers what it is parked on, hercule session stop ends it.",
+    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond answers what it is parked on, hercule session stop ends it.",
   },
   input: {
     summary: "The inputs a session was given, and the queued ones that can still be changed.",

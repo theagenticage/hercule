@@ -53,8 +53,9 @@ const BUN = process.execPath.endsWith("/bun") ? process.execPath : "bun";
 
 /**
  * Builds the environment a spawned Hercule sees: this process's environment,
- * without any `HERCULE_` variable. A developer with `HERCULE_HOME` or `HERCULE_TOKEN` set in their shell
- * must not change what these tests exercise.
+ * without any `HERCULE_` variable. A developer with `HERCULE_HOME` or
+ * `HERCULE_TOKEN` set in their shell must not change what these tests
+ * exercise.
  */
 function buildCleanEnv(): Record<string, string> {
   return Object.fromEntries(

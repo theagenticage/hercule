@@ -130,7 +130,10 @@ const readStructuredResult = (rows: ReadonlyArray<Row>): Readonly<Record<string,
   return result as Readonly<Record<string, unknown>>;
 };
 
-/** Spawns one session from the Agent under a schema, and returns its transcript once the turn is over. */
+/**
+ * Spawns one session from the Agent under a schema, and returns its transcript
+ * once the turn is over.
+ */
 const runSessionUnderSchema = async (
   schema: unknown,
   prompt: string,

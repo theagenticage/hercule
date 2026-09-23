@@ -267,11 +267,14 @@ describe("lintOutputSchema", () => {
     expect(lintOutputSchema(IMPOSSIBLE_SCHEMA)).toEqual([]);
   });
 
-  it.each(REJECTED)("rejects $what, and gives where and which rule", ({ schema, names }) => {
-    const issues = lintOutputSchema(schema);
-    expect(issues).toHaveLength(1);
-    for (const name of names) expect(issues[0]).toContain(name);
-  });
+  it.each(REJECTED)(
+    "rejects $what, with the location and the broken rule in the issue",
+    ({ schema, names }) => {
+      const issues = lintOutputSchema(schema);
+      expect(issues).toHaveLength(1);
+      for (const name of names) expect(issues[0]).toContain(name);
+    },
+  );
 });
 
 /**

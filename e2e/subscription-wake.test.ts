@@ -167,7 +167,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  // The copied credential is in here, so removing the home matters for security, not just tidiness.
+  // The copied credential is in here, so removing the home matters for
+  // security, not just tidiness.
   state.remove();
 });
 

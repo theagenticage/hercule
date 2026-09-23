@@ -9,8 +9,9 @@
  * `ping` is an app-level keepalive, because a browser cannot send a WebSocket
  * ping frame.
  *
- * Everything sent here can also be read over HTTP, except for one thing that
- * is never stored:
+ * Everything sent here can also be read over HTTP, except the token deltas of
+ * `session:<id>:tap`, which are never stored. Each kind of topic pushes
+ * something different:
  *
  * - a mutable topic pushes an invalidation with the ids of the changed records,
  *   and the client refetches them over HTTP;
