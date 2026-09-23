@@ -267,11 +267,13 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
     // spawned a session wants to watch it. The hint does not suggest a
     // subscription on the session: no platform event about a session is
     // emitted yet, so the controller would reject it. It points at the
-    // transcript, which the caller can already read.
+    // transcript, which the caller can already read. `transcript read` returns
+    // the rows so far and does not follow the session, so the hint says "read",
+    // not "watch".
     if (command.id === "session.spawn") {
       lines.push(
         "",
-        `watch what it does with \`hercule transcript read ${formatCell(record["id"])}\``,
+        `read what it has done so far with \`hercule transcript read ${formatCell(record["id"])}\``,
       );
     }
     return lines;

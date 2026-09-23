@@ -31,7 +31,7 @@ describe("hercule session spawn", () => {
 
     expect(lines[0]).toBe(`id      ${SESSION.slice(-8)}`);
     expect(lines).toContain(
-      `watch what it does with \`hercule transcript read ${SESSION.slice(-8)}\``,
+      `read what it has done so far with \`hercule transcript read ${SESSION.slice(-8)}\``,
     );
   });
 

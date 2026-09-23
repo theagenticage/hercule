@@ -79,7 +79,10 @@ const formatLabelledText = (label: string, width: number, text: string): Readonl
   return [`  ${label.padEnd(width)}  ${first.trimStart()}`, ...rest];
 };
 
-/** Returns the text up to and including its first full stop. */
+/**
+ * Returns the text up to and including the first `.`, `!` or `?` that ends a
+ * sentence, or the whole text when there is none.
+ */
 const extractFirstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
 
 /** Quotes a shell argument, but only when a shell would need quotes. */

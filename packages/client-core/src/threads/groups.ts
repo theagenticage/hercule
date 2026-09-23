@@ -2,8 +2,9 @@
  * Groups the sidebar's threads by project, and inside a project by workspace
  * (spec 14 §App shell, amended by #160 and #72).
  *
- * - Projects are sorted by their most recent activity, newest first. The
- *   draft's project comes first, and the threads with no project come last.
+ * - Projects are sorted newest first by the latest thread in their first
+ *   workspace group. The draft's project comes first, and the threads with
+ *   no project come last.
  * - Inside a project, worktrees come first in catalog order, then the main
  *   workspace, then the threads with no workspace (see `rankLane`).
  *
@@ -37,7 +38,7 @@ export interface WorkspaceGroup {
    * workspace`, split into the two parts a narrow sidebar truncates
    * separately. `null` for the no-workspace group when it is the project's
    * only group (the label tells groups apart, and there is nothing to tell
-   * apart), and for a group that holds only the draft.
+   * apart), or when it holds only the draft.
    */
   readonly label: WorkspaceLabel | null;
   /** Whether the draft being written joins this group. */

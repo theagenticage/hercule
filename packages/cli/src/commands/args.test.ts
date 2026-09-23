@@ -97,7 +97,7 @@ describe("user set-password", () => {
     expect(args.payload).toEqual({ current: "old", next: "new" });
   });
 
-  it("reads the two lines in the same order, whatever order the markers are in", async () => {
+  it("assigns the two lines in schema order, whatever order the markers are in", async () => {
     const args = await parseArguments(
       setPassword,
       ["--next-stdin", "--current-stdin"],

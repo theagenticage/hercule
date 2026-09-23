@@ -92,8 +92,8 @@ const writeCredentials = (home: string, url: string, apiKey: string): string => 
 
 /**
  * Runs `hercule login` with the tokens after `login`. Returns what was stored.
- * Throws a `UsageError` for a bad command line, and an `ApiError` when a call
- * to the controller fails.
+ * Throws a `UsageError` for a bad command line, and the client's `ApiError` or
+ * `ConnectionError` when a call to the controller fails.
  */
 export const login = async (
   tokens: ReadonlyArray<string>,

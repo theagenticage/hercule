@@ -101,7 +101,7 @@ export const resolveCredential = (home: string, env: Env): Credential => {
   // the user has to see.
   if (envUrl !== undefined && envUrl !== "") {
     throw new CredentialError(
-      "HERCULE_API_URL is set but HERCULE_TOKEN is not. Unset it, or set both. The credential file's key is only ever sent to the controller that created it.",
+      "HERCULE_API_URL is set but HERCULE_TOKEN is not. Unset HERCULE_API_URL, or set both. The credential file's key is only ever sent to the controller that created it.",
     );
   }
 

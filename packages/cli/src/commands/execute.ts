@@ -156,8 +156,10 @@ const validateWrittenId = (command: Command, field: Field, text: string): string
 
 /**
  * Resolves every tail in a command's fields to the full id, for positionals
- * and flags alike. Any field that holds an id may be given a tail, and a tail
- * that matches no id fails, however the field was written.
+ * and flags alike. A field whose row names a list operation may be given a
+ * tail, and a tail that matches no id fails. A field whose row names none is
+ * sent unchanged, unless it holds a Hercule id and the text looks like a tail
+ * (see `validateWrittenId`).
  */
 const resolveTails = async (
   client: HerculeClient,
@@ -168,7 +170,7 @@ const resolveTails = async (
   const resolved = { ...values };
   for (const field of fields) {
     const given = resolved[field.name];
-    // Three fields are skipped: a field the caller never wrote, a numeric
+    // Three kinds of field are skipped: a field the caller never wrote, a numeric
     // field and a repeated field. No tail stands for any of them.
     if (typeof given !== "string") continue;
     resolved[field.name] =
