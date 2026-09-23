@@ -53,7 +53,7 @@ function TimezoneStep(): JSX.Element {
   return (
     <CenteredScreen
       title="Confirm your timezone"
-      lead="Hercule uses this zone for every time: schedules, ages, and what happened since you last looked."
+      lead="Hercule uses this zone for all times: schedules, ages, and what happened since you last looked."
     >
       <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
         <Field id="timezone" label="Timezone">

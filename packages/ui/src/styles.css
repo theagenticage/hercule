@@ -263,8 +263,9 @@
   animation-delay: 0.7s;
 }
 
-/* The drawer slides in from the right edge once, over 160ms, so the panel
-   looks like it sits over the page, not like it replaced the page. */
+/* The drawer slides in from the right edge once, over 160ms. It is the only
+   transition in the system, and it is there so the panel looks like it sits
+   over the page, not like it replaced the page. */
 @keyframes hercule-drawer-in {
   from {
     transform: translateX(12px);
@@ -280,8 +281,8 @@
   animation: hercule-drawer-in 160ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* Liveness: something live has a slowly pulsing dot beside its state word.
-   Nothing static moves, so the motion itself shows that it is live. */
+/* Currency (live vs stale): something live has a slowly pulsing dot beside its
+   state word. Nothing static moves, so the motion itself shows that it is live. */
 @keyframes hercule-live-pulse {
   0%,
   100% {

@@ -42,7 +42,7 @@ export function MenuRow({
   /**
    * Whether the right-hand note is truncated, instead of the name, when the
    * row is too narrow. A branch name is what the user picks, so it must stay
-   * whole; the note about what holds the branch is less important (R6).
+   * whole; the note about what holds the branch is less important.
    */
   readonly clipNote?: boolean;
   /**

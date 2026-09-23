@@ -259,7 +259,7 @@ export function ProviderKeyEntry({
       }),
     onSuccess: () => {
       close();
-      // Refresh the providers before calling the caller: the value is stored,
+      // Refresh the providers before notifying the caller: the value is stored,
       // so the row should show it even if the machine cannot be reached.
       void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
       onSaved();

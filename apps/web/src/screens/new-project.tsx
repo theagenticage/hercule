@@ -21,7 +21,7 @@ import { readErrorMessage } from "./save-status";
  * was already created is remembered and skipped on the next submission, so
  * only the failed writes are sent again.
  *
- * Leaving follows the same idea (R4). Once the project exists, Cancel and Esc
+ * Leaving follows the same idea. Once the project exists, Cancel and Esc
  * open a draft thread in it, rather than returning the user to where they
  * started with a project they never saw. A source that failed already shows
  * its error on its own row, and is simply not created.

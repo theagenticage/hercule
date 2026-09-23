@@ -56,8 +56,8 @@ export function BranchSelector({
           name={<span className="font-mono">{row.branch}</span>}
           note={row.badge}
           dimmed={row.dimmed}
-          // A branch name is never truncated; the note beside it is truncated
-          // instead (R6).
+          // The branch name is what the user picks, so it is never truncated;
+          // the note beside it is truncated instead.
           clipNote
           current={row.branch === field.value}
           onPick={() => {

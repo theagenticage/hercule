@@ -7,8 +7,8 @@ import { Connectivity } from "../../../screens/connectivity";
 /**
  * Returns the runner's probed facts for its row, in the order a person scans
  * them, leaving out the ones not reported yet. The row joins them into one
- * line, so the two sizes say what they measure; on the runner page each fact
- * has its own label instead.
+ * line, so each size is followed by what it measures ("memory", "disk free");
+ * on the runner page each fact has its own label instead.
  */
 const listProbedFacts = (runner: Runner): ReadonlyArray<string> => {
   const reading = describeRunnerFacts(runner);

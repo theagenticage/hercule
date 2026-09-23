@@ -58,7 +58,7 @@ export function EditForm({
 
   const blamed = findRunnerConflictField(save.error, sent);
   const message = save.error === null ? null : readErrorMessage(save.error);
-  /** Returns the error message if the controller blamed `field`, otherwise undefined. */
+  /** Returns the controller's error message if it is about `field`, otherwise undefined. */
   const readFieldRefusal = (field: "name" | "reserved"): string | undefined =>
     blamed === field ? (message ?? undefined) : undefined;
 

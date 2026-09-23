@@ -1749,7 +1749,7 @@ describe("Thread: the header is the screen's first row", () => {
  * assumptions as `new.integration.test.tsx`:
  * - A lone icon button shows why it is disabled in its `title`.
  * - The accessible names of the send, Steer, Cancel and Stop controls contain
- *   the exact words from the ACs ("send", "Steer", "Cancel", "Stop").
+ *   the exact words from the spec ("send", "Steer", "Cancel", "Stop").
  */
 describe("Thread: composer read-only fields and model switch", () => {
   it("renders workspace, machine and access mode as read-only values with no menu", async () => {

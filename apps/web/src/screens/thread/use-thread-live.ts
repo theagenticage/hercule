@@ -11,7 +11,7 @@
  * once per animation frame however many deltas arrived, because a `setState`
  * per token would re-render the whole column for every token.
  *
- * When the session no longer exists, the delta says so (`gone`) and the
+ * When the session no longer exists, the delta arrives with `gone` set and the
  * handler unsubscribes, rather than retrying a subscription that will keep
  * failing.
  */
