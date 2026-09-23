@@ -252,6 +252,22 @@ const readRunner = async (base: string, token: string, id: string): Promise<Runn
   return (await response.json()) as RunnerDetail;
 };
 
+/** How long a test waits between two reads of a row that it waits on. */
+const ROW_POLL_INTERVAL_MS = 10;
+
+/** How many times a test reads a row that it waits on before it gives up. */
+const ROW_POLL_ATTEMPTS = 300;
+
+/**
+ * The time budget of a test that waits on its row four times. A wait that
+ * gives up later than the test's time budget never gets to give up: vitest
+ * stops the test first, and the failure names the test and not the row that
+ * never changed. Under the load of the whole suite, four waits can take longer
+ * than the default five seconds. So the budget holds four whole waits, and the
+ * setup before them.
+ */
+const FOUR_ROW_WAITS_TIMEOUT_MS = ROW_POLL_INTERVAL_MS * ROW_POLL_ATTEMPTS * 4 + 10_000;
+
 /** The row once it says what the test is waiting for, or as it stubbornly is. */
 const rowWhen = async (
   base: string,
@@ -260,8 +276,8 @@ const rowWhen = async (
   ready: (row: RunnerDetail) => boolean,
 ): Promise<RunnerDetail> => {
   let row = await readRunner(base, token, id);
-  for (let attempt = 0; attempt < 300 && !ready(row); attempt++) {
-    await delay(10);
+  for (let attempt = 0; attempt < ROW_POLL_ATTEMPTS && !ready(row); attempt++) {
+    await delay(ROW_POLL_INTERVAL_MS);
     row = await readRunner(base, token, id);
   }
   return row;
@@ -793,97 +809,101 @@ describe("what a runner reports about its machine", () => {
     availableMemoryBytes: 16 * 1024 * 1024 * 1024,
   });
 
-  it("stores the watermark a runner reports and hands it back on the row", async () => {
-    await withServer(
-      async (harness) => {
-        const token = await completeSetup(harness.base);
-        const joined = await enlist(harness);
-        const { wire } = await greet(harness.base, joined.credential);
+  it(
+    "stores the watermark a runner reports and hands it back on the row",
+    async () => {
+      await withServer(
+        async (harness) => {
+          const token = await completeSetup(harness.base);
+          const joined = await enlist(harness);
+          const { wire } = await greet(harness.base, joined.credential);
 
-        const online = await rowWhen(
-          harness.base,
-          token,
-          joined.runnerId,
-          (one) => one.connectivity === "online",
-        );
-        // A runner that has only just said hello has said nothing about its
-        // disk yet.
-        expect(online.watermark).toBeNull();
+          const online = await rowWhen(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.connectivity === "online",
+          );
+          // A runner that has only just said hello has said nothing about its
+          // disk yet.
+          expect(online.watermark).toBeNull();
 
-        // Above the shipped ten-gibibyte watermark, so this reading is a
-        // machine still accepting work.
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB) });
-        const stored = await rowWhen(
-          harness.base,
-          token,
-          joined.runnerId,
-          (one) => one.watermark !== null,
-        );
-        expect(stored.watermark).toEqual(watermarkOf(200 * GIB));
+          // Above the shipped ten-gibibyte watermark, so this reading is a
+          // machine still accepting work.
+          wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB) });
+          const stored = await rowWhen(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.watermark !== null,
+          );
+          expect(stored.watermark).toEqual(watermarkOf(200 * GIB));
 
-        const before = await harness.audit("runner.placementsChanged");
-        // A machine nobody had heard from is taken to be accepting work, so a
-        // first reading of a healthy disk is not news about it.
-        expect(before).toHaveLength(0);
+          const before = await harness.audit("runner.placementsChanged");
+          // A machine nobody had heard from is taken to be accepting work, so a
+          // first reading of a healthy disk is not news about it.
+          expect(before).toHaveLength(0);
 
-        // The same reading again, then a different disk that means the same
-        // thing for placement. Waiting for the second one to land is what
-        // proves the first was seen and deliberately left no row.
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB) });
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(150 * GIB) });
-        const again = await rowWhen(
-          harness.base,
-          token,
-          joined.runnerId,
-          (one) => one.watermark?.diskFreeBytes === 150 * GIB,
-        );
-        expect(again.watermark).toEqual(watermarkOf(150 * GIB));
-        expect(
-          await harness.audit("runner.placementsChanged"),
-          "nothing about placement changed",
-        ).toHaveLength(before.length);
+          // The same reading again, then a different disk that means the same
+          // thing for placement. Waiting for the second one to land is what
+          // proves the first was seen and deliberately left no row.
+          wire.send({ _tag: "watermarkReport", watermark: watermarkOf(200 * GIB) });
+          wire.send({ _tag: "watermarkReport", watermark: watermarkOf(150 * GIB) });
+          const again = await rowWhen(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.watermark?.diskFreeBytes === 150 * GIB,
+          );
+          expect(again.watermark).toEqual(watermarkOf(150 * GIB));
+          expect(
+            await harness.audit("runner.placementsChanged"),
+            "nothing about placement changed",
+          ).toHaveLength(before.length);
 
-        // The disk filled up, below the shipped watermark: this one is a
-        // change of what the fleet may do with the machine, and that is what
-        // gets recorded.
-        wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB) });
-        const short = await rowWhen(
-          harness.base,
-          token,
-          joined.runnerId,
-          (one) => one.watermark?.diskFreeBytes === 4 * GIB,
-        );
-        expect(short.watermark).toEqual(watermarkOf(4 * GIB));
+          // The disk filled up, below the shipped watermark: this one is a
+          // change of what the fleet may do with the machine, and that is what
+          // gets recorded.
+          wire.send({ _tag: "watermarkReport", watermark: watermarkOf(4 * GIB) });
+          const short = await rowWhen(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.watermark?.diskFreeBytes === 4 * GIB,
+          );
+          expect(short.watermark).toEqual(watermarkOf(4 * GIB));
 
-        const after = await harness.audit("runner.placementsChanged");
-        expect(after).toHaveLength(before.length + 1);
-        const flip = after[after.length - 1];
-        // Nobody holding a credential asked for this: a runner is never an actor.
-        expect(flip?.actor).toBe("system");
-        expect(flip?.payload).toMatchObject({
-          runnerId: joined.runnerId,
-          acceptingPlacements: false,
-        });
+          const after = await harness.audit("runner.placementsChanged");
+          expect(after).toHaveLength(before.length + 1);
+          const flip = after[after.length - 1];
+          // Nobody holding a credential asked for this: a runner is never an actor.
+          expect(flip?.actor).toBe("system");
+          expect(flip?.payload).toMatchObject({
+            runnerId: joined.runnerId,
+            acceptingPlacements: false,
+          });
 
-        // And a `system` stamp the event schema cannot encode would fail the
-        // whole page rather than the row, so it is read back over the wire too.
-        const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
-          items: ReadonlyArray<{
-            kind: string;
-            actor: string | null;
-            payload: Record<string, unknown>;
-          }>;
-        };
-        const recorded = log.items.find((entry) => entry.kind === "runner.placementsChanged");
-        expect(recorded).toBeDefined();
-        expect(recorded!.actor).toBe("system");
-        expect(recorded!.payload).toMatchObject({ runnerId: joined.runnerId });
+          // And a `system` stamp the event schema cannot encode would fail the
+          // whole page rather than the row, so it is read back over the wire too.
+          const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
+            items: ReadonlyArray<{
+              kind: string;
+              actor: string | null;
+              payload: Record<string, unknown>;
+            }>;
+          };
+          const recorded = log.items.find((entry) => entry.kind === "runner.placementsChanged");
+          expect(recorded).toBeDefined();
+          expect(recorded!.actor).toBe("system");
+          expect(recorded!.payload).toMatchObject({ runnerId: joined.runnerId });
 
-        wire.close();
-      },
-      { pings: FAST },
-    );
-  });
+          wire.close();
+        },
+        { pings: FAST },
+      );
+    },
+    FOUR_ROW_WAITS_TIMEOUT_MS,
+  );
 
   it("records a machine that comes back with no room left", async () => {
     await withServer(

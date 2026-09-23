@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@hercule/ui";
 import { queryKeys, retireQuestion, type HerculeClient } from "@hercule/client-core";
 import type { RunnerDetail } from "@hercule/contract";
-import { messageOf } from "../../../screens/save-status";
+import { readErrorMessage } from "../../../screens/save-status";
 
 type Move = "drain" | "undrain" | "refreshFacts" | "retire";
 
@@ -115,7 +115,7 @@ export function Moves({
 
       {move.error === null ? null : (
         <p className="text-fine text-fail" role="alert">
-          {messageOf(move.error)}
+          {readErrorMessage(move.error)}
         </p>
       )}
     </div>

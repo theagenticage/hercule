@@ -16,3 +16,13 @@ globalThis.ResizeObserver = class {
 };
 
 window.scrollTo = () => {};
+
+/**
+ * jsdom does no layout, so a text range has no `getClientRects`. The text
+ * editor of the workflow editor asks a range for its rectangles to place the
+ * cursor and its popups, so a range answers as a browser does for text that
+ * is not drawn: with no rectangles.
+ */
+Range.prototype.getClientRects = function () {
+  return Object.assign([], { item: () => null });
+};

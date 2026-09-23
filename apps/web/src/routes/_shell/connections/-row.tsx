@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, cn } from "@hercule/ui";
 import { queryKeys, type ConnectionType, type HerculeClient } from "@hercule/client-core";
 import type { Connection, ConnectionStatus } from "@hercule/contract";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 import { ConfigureConnection } from "./-configure";
 import { ConnectionSetup } from "./-setup";
 
@@ -141,7 +141,10 @@ export function ConnectionRow({
 
       {/* A delete that worked takes the row with it, so only a refusal has
           anywhere to land. */}
-      <SaveStatus saved={false} failure={remove.error === null ? null : messageOf(remove.error)} />
+      <SaveStatus
+        saved={false}
+        failure={remove.error === null ? null : readErrorMessage(remove.error)}
+      />
     </li>
   );
 }

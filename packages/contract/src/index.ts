@@ -307,9 +307,14 @@ export {
   ANY_CONNECTION,
   decodeWorkflowDefinition,
   limitIssues,
+  listEntrySteps,
+  parseWorkflowDocument,
   parseWorkflowSource,
+  readFieldNotation,
   renderWorkflowSource,
-  type WorkflowDefinition,
+  spellPathKey,
+  WorkflowDefinition,
+  type FieldNotation,
 } from "./groups/workflow";
 export { excerptMessage, quoteWritten } from "./excerpts";
 export { WorkflowAction } from "./groups/workflow-action";

@@ -9,7 +9,7 @@ import {
 } from "@hercule/client-core";
 import type { RunnerDetail } from "@hercule/contract";
 import { ProviderKeyEntry, ProviderLogin } from "../../../screens/provider-login";
-import { messageOf } from "../../../screens/save-status";
+import { readErrorMessage } from "../../../screens/save-status";
 import { providersQuery } from "../../../app/queries";
 
 /** A move the machine cannot make is dimmed with its reason rather than hidden. */
@@ -45,7 +45,7 @@ export function Providers({
     return (
       <FormCard label="Providers">
         <p className="text-fine text-fail" role="alert">
-          {messageOf(instances.error)}
+          {readErrorMessage(instances.error)}
         </p>
       </FormCard>
     );
@@ -82,7 +82,7 @@ export function Providers({
       </div>
       {probe.error === null && install.error === null ? null : (
         <p className="text-fine text-fail" role="alert">
-          {messageOf(probe.error ?? install.error)}
+          {readErrorMessage(probe.error ?? install.error)}
         </p>
       )}
     </FormCard>

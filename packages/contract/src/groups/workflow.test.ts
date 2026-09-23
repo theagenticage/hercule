@@ -489,6 +489,15 @@ steps:
     expect(issues[0]!.message).toMatch(/\b20\b/);
   });
 
+  it("counts the column of a YAML syntax error in characters, so that an emoji is one column", () => {
+    // The stray x after the closing quote is the twelfth character of line 1,
+    // and the fourteenth UTF-16 code unit.
+    const issues = collectIssues('name: "😀😀" x: y\nsteps: []\n');
+    expect(issues.map((issue) => issue.message)).toContainEqual(
+      expect.stringContaining("line 1, column 12."),
+    );
+  });
+
   it("points a field of the wrong shape at that field", () => {
     const issues = collectIssues(`name: wrong kind
 steps:

@@ -4,7 +4,7 @@ import { queryKeys, type HerculeClient } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { Button } from "@hercule/ui";
 import { inputsQuery } from "../../app/queries";
-import { messageOf } from "../save-status";
+import { readErrorMessage } from "../save-status";
 
 /**
  * The queued list above the composer: every `queued` row from a session's
@@ -72,7 +72,7 @@ function QueuedRow({
       {row.reason === null ? null : <p className="text-fine text-faint">{row.reason}</p>}
       {failure === null ? null : (
         <p className="text-fine text-fail" role="alert">
-          {messageOf(failure)}
+          {readErrorMessage(failure)}
         </p>
       )}
     </div>

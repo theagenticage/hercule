@@ -254,7 +254,10 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
       await awaiting(live, "the allowed command never ran", () =>
         finishedTheCommand(live, second.itemId),
       );
-      expect(existsSync(file), "the allowed file change never landed").toBe(true);
+      // pi asks about each call of a batch in turn, and then runs the calls of
+      // the batch at the same time. The file change can land after the command
+      // ends, so the test waits for the file and does not look once.
+      await awaiting(live, "the allowed file change never landed", () => existsSync(file));
       await live.stop();
     },
     BUDGET_MS,

@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { approvalCard, type HerculeClient } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
 import { cn, DecisionMark } from "@hercule/ui";
-import { messageOf } from "../save-status";
+import { readErrorMessage } from "../save-status";
 
 /**
  * The question the harness parked on, docked onto the composer: the same place
@@ -138,7 +138,7 @@ export function PermissionCard({
         </div>
         {respond.error === null ? null : (
           <p className="mt-1 text-fail" role="alert">
-            {messageOf(respond.error)}
+            {readErrorMessage(respond.error)}
           </p>
         )}
       </div>

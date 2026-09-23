@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Input } from "@hercule/ui";
 import { formatStamp, queryKeys, type HerculeClient } from "@hercule/client-core";
 import type { SecretRef } from "@hercule/contract";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
  * One stored secret, as everything about it that can be read: who owns it, what
@@ -163,7 +163,10 @@ export function SecretRow({
         </div>
       ) : null}
 
-      <SaveStatus saved={rotate.isSuccess} failure={failure === null ? null : messageOf(failure)} />
+      <SaveStatus
+        saved={rotate.isSuccess}
+        failure={failure === null ? null : readErrorMessage(failure)}
+      />
     </li>
   );
 }

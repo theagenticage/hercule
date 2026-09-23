@@ -99,6 +99,23 @@
   /* What an overlay dims the page behind it with. */
   --scrim: rgba(23, 26, 33, 0.22);
 
+  /* The syntax palette: the colours of the parts of a text of code, such as a
+     workflow's YAML. Colour is at word scale only. Keys are blue, quoted text
+     is olive, and comments and punctuation are grey in the hue of the
+     neutrals, so the structure of a text shows at a glance. Plain values are
+     ink. Each colour has a contrast of at least 4.5:1 on the raised layer.
+     Each hue sits between two hues of the colour doctrine, and at least 29
+     degrees of oklch hue from each of them, in the light and in the dark
+     theme: keys at 255 between live (222 to 224) and the hercule dot (286 to
+     287), quoted text at 117 between attention (77 to 81) and done (155 to
+     157), and meta at 317 between the two project dots (286 to 287, and 347
+     to 348). */
+  --syn-key: oklch(46% 0.1 255);
+  --syn-string: oklch(50% 0.075 117);
+  --syn-comment: oklch(55% 0.0156 265);
+  --syn-punctuation: oklch(56% 0.0156 265);
+  --syn-meta: oklch(48% 0.11 317);
+
   --sans: "Onest", -apple-system, system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --w-emph: 500;
@@ -129,6 +146,12 @@
     --project-hercule: #9490c9;
     --project-ops: #bd93a8;
     --scrim: rgba(0, 0, 0, 0.45);
+
+    --syn-key: oklch(80% 0.075 255);
+    --syn-string: oklch(80% 0.07 117);
+    --syn-comment: oklch(64% 0.0288 265);
+    --syn-punctuation: oklch(64% 0.0288 265);
+    --syn-meta: oklch(78% 0.09 317);
   }
 }
 
@@ -155,6 +178,12 @@
   --project-hercule: #9490c9;
   --project-ops: #bd93a8;
   --scrim: rgba(0, 0, 0, 0.45);
+
+  --syn-key: oklch(80% 0.075 255);
+  --syn-string: oklch(80% 0.07 117);
+  --syn-comment: oklch(64% 0.0288 265);
+  --syn-punctuation: oklch(64% 0.0288 265);
+  --syn-meta: oklch(78% 0.09 317);
 }
 
 /* The type scale and radii are Tailwind theme values outright: nothing else

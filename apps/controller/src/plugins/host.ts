@@ -130,7 +130,7 @@ const decodeConnectionType = Schema.decodeUnknownEffect(ConnectionType, {
  * One line either way, because this is shown to the user in Settings, where a
  * stack trace would say less than the sentence at the top of it.
  */
-const messageOf = (cause: Cause.Cause<PluginError>): string =>
+const readCauseMessage = (cause: Cause.Cause<PluginError>): string =>
   truncateMessage(
     Option.match(Cause.findErrorOption(cause), {
       onSome: (error) => error.message,
@@ -494,7 +494,7 @@ const make = Effect.gen(function* () {
     ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
-        Effect.succeed<PluginStatus>({ _tag: "errored", message: messageOf(cause) }),
+        Effect.succeed<PluginStatus>({ _tag: "errored", message: readCauseMessage(cause) }),
       ),
     );
 
@@ -525,7 +525,7 @@ const make = Effect.gen(function* () {
       ).pipe(
         Effect.matchCauseEffect({
           onSuccess: (deactivate) => patch(id, { status: { _tag: "active" }, deactivate }),
-          onFailure: (cause) => markErrored(id, "activate", messageOf(cause)),
+          onFailure: (cause) => markErrored(id, "activate", readCauseMessage(cause)),
         }),
       );
     }).pipe(
@@ -552,7 +552,8 @@ const make = Effect.gen(function* () {
         Effect.matchCauseEffect({
           onSuccess: () =>
             Effect.as(patch(id, { status: { _tag: "inactive" }, deactivate: undefined }), true),
-          onFailure: (cause) => Effect.as(markErrored(id, "deactivate", messageOf(cause)), false),
+          onFailure: (cause) =>
+            Effect.as(markErrored(id, "deactivate", readCauseMessage(cause)), false),
         }),
       );
     });

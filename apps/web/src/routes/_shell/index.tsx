@@ -7,7 +7,7 @@ import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { CreateThreadLink } from "../../screens/create-thread-link";
 import { ProviderKeyEntry, ProviderLogin } from "../../screens/provider-login";
-import { messageOf } from "../../screens/save-status";
+import { readErrorMessage } from "../../screens/save-status";
 
 export const Route = createFileRoute("/_shell/")({
   staticData: { title: "Sessions" },
@@ -96,7 +96,7 @@ function Sessions(): JSX.Element {
         headline={found(state.offers.map((row) => row.name))}
         lead={state.lead}
         fine="A thread needs a harness that is logged in, so starting one waits on this."
-        failure={probe.error === null ? null : messageOf(probe.error)}
+        failure={probe.error === null ? null : readErrorMessage(probe.error)}
       >
         {state.offers.flatMap((row) => {
           const entered = () => {

@@ -32,6 +32,7 @@ import {
   parseDocument,
   Scalar,
   stringify,
+  type Document,
   type YAMLError,
 } from "yaml";
 import {
@@ -141,8 +142,36 @@ const NodeId = Schema.String.check(
   }),
 );
 
+/**
+ * The annotation that names the notation of a string field of the definition,
+ * where the field is not plain words. An editor reads it to write the value in
+ * a form that YAML keeps as written. An expression or a schedule often holds
+ * characters that YAML reads as its own, such as `: ` or ` #` in the middle
+ * and a quote, `*`, `!` or `{` at the start, so the editor writes it in double
+ * quotes. A template is text for an agent, usually on several lines, so the
+ * editor writes it as a `|` block.
+ */
+const NOTATION_ANNOTATION = "notation";
+
+/** The notations of the string fields of the definition. `NOTATION_ANNOTATION` says what each is for. */
+export type FieldNotation = "expression" | "schedule" | "template";
+
+/**
+ * The notation of a field of the definition, from its schema, or `undefined`
+ * for plain words. Only the schemas of this file set the annotation, and each
+ * sets a `FieldNotation`.
+ */
+export const readFieldNotation = (ast: SchemaAST.AST): FieldNotation | undefined =>
+  ast.annotations?.[NOTATION_ANNOTATION] as FieldNotation | undefined;
+
 /** A CEL expression. What it may read depends on the place it is written. */
-const Expression = Schema.String;
+const Expression = Schema.String.annotate({ [NOTATION_ANNOTATION]: "expression" });
+
+/** A cron expression, which says when a `cron.tick` trigger fires. */
+const CronSchedule = Schema.String.annotate({ [NOTATION_ANNOTATION]: "schedule" });
+
+/** Text whose `{{ expr }}` templates a run renders with the values of `inputs` and `steps`. */
+const TemplateText = Schema.String.annotate({ [NOTATION_ANNOTATION]: "template" });
 
 /**
  * What an input name or a signal trigger's output name may look like: a CEL
@@ -293,8 +322,8 @@ const StartTrigger = closedStruct({
   spawnBound: Schema.optionalKey(
     closedStruct({ maxRuns: PositiveInt, windowSeconds: PositiveInt }),
   ),
-  /** A cron expression, on a `cron.tick` trigger only. */
-  schedule: Schema.optionalKey(Schema.String),
+  /** On a `cron.tick` trigger only. */
+  schedule: Schema.optionalKey(CronSchedule),
   /** The zone the schedule is read in. Absent reads it in the user's timezone setting. */
   timezone: Schema.optionalKey(Timezone),
 });
@@ -368,8 +397,8 @@ const AgentStep = closedStruct({
   kind: Schema.Literal("agent"),
   name: Schema.optionalKey(Schema.String),
   agent: Id,
-  /** The first turn's input. Its `{{ }}` templates read `inputs` and `steps`. */
-  prompt: Schema.String,
+  /** The first turn's input. */
+  prompt: TemplateText,
   /** A model slug, in place of the Agent's model. */
   model: Schema.optionalKey(Schema.NonEmptyString),
   /** The choices of that model. */
@@ -414,7 +443,7 @@ const WorkspacePolicy = Schema.Union([
  * The shape alone does not refuse an id that two triggers or steps share:
  * `decodeWorkflowDefinition` does, and it is the one way to check a value.
  */
-const WorkflowDefinition = closedStruct({
+export const WorkflowDefinition = closedStruct({
   name: WorkflowName,
   description: Schema.optionalKey(WorkflowDescription),
   inputs: Schema.optionalKey(Schema.Array(InputDeclaration)),
@@ -426,6 +455,33 @@ const WorkflowDefinition = closedStruct({
 });
 
 export type WorkflowDefinition = Schema.Schema.Type<typeof WorkflowDefinition>;
+
+/**
+ * The entry steps of a definition, in definition order: the steps that a run
+ * starts at. A step is an entry step when it says `entry: true`, or when no
+ * edge leads into it. Only an edge that may join its two ends leads into a
+ * step: an edge from a step or a signal trigger, to a step. A step that only
+ * a signal trigger leads into is not an entry step, because it waits for its
+ * signal. The controller's check and the editor's graph both read the entry
+ * steps here, so the two cannot disagree about where a run begins.
+ */
+export const listEntrySteps = (
+  definition: WorkflowDefinition,
+): ReadonlyArray<WorkflowDefinition["steps"][number]> => {
+  const stepIds = new Set(definition.steps.map((step) => step.id));
+  const sourceIds = new Set([
+    ...stepIds,
+    ...(definition.triggers ?? []).flatMap((trigger) =>
+      trigger.kind === "signal" ? [trigger.id] : [],
+    ),
+  ]);
+  const ledInto = new Set(
+    (definition.edges ?? [])
+      .filter((edge) => sourceIds.has(edge.from) && stepIds.has(edge.to))
+      .map((edge) => edge.to),
+  );
+  return definition.steps.filter((step) => step.entry === true || !ledInto.has(step.id));
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -453,6 +509,24 @@ const listKinds = (union: SchemaAST.Union): ReadonlyArray<string> =>
   );
 
 const formatStandardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
+
+/**
+ * A problem of a workflow's text, with what an editor needs to mark its place.
+ * The public API sends only the path and the message, because the API names
+ * a problem by its path and never by a position in a text.
+ */
+interface WorkflowSourceIssue extends Issue {
+  /**
+   * The place of a problem of the YAML itself, as offsets into the text: the
+   * first character of the problem, and the character after its last. Such a
+   * problem has an empty path, because the text did not become a definition,
+   * and its message gives the line and the column.
+   */
+  readonly range?: readonly [from: number, to: number];
+}
+
+/** A problem as the public API names it: by its path and its message only. */
+const buildPublicIssue = ({ path, message }: Issue): Issue => ({ path, message });
 
 /**
  * Every problem a decode of the definition found, each at its path. `value` is
@@ -564,7 +638,7 @@ const MAX_ISSUES = 100;
  * controller's checks of meaning all refuse through this, so no refusal of a
  * workflow names more.
  */
-export const limitIssues = (issues: ReadonlyArray<Issue>): ReadonlyArray<Issue> =>
+export const limitIssues = <I extends Issue>(issues: ReadonlyArray<I>): ReadonlyArray<I | Issue> =>
   issues.length <= MAX_ISSUES
     ? issues
     : [
@@ -616,16 +690,35 @@ const LONE_SURROGATE_MESSAGE =
   "contains half of a UTF-16 surrogate pair, which is not a character. Remove it, or write the whole character.";
 
 /**
+ * The line and the column of an offset into a text, both counted from 1. The
+ * column counts characters, as the messages about templates do. A character
+ * such as an emoji is two UTF-16 code units of the text, and one column.
+ */
+const findLineAndColumn = (
+  text: string,
+  lines: LineCounter,
+  offset: number,
+): { readonly line: number; readonly column: number } => {
+  const { line, col } = lines.linePos(offset);
+  return { line, column: [...text.slice(offset - col + 1, offset)].length + 1 };
+};
+
+/**
  * A YAML syntax error as an issue. The path is empty because the text did not
  * become a definition, so the place is given in the text, by line and column.
  */
-const describeSyntaxError = (error: YAMLError, lines: LineCounter): Issue => {
-  const { line, col } = lines.linePos(error.pos[0]);
+const describeSyntaxError = (
+  text: string,
+  error: YAMLError,
+  lines: LineCounter,
+): WorkflowSourceIssue => {
+  const { line, column } = findLineAndColumn(text, lines, error.pos[0]);
   return {
     path: [],
     message:
-      `The YAML is not valid at line ${String(line)}, column ${String(col)}. ` +
+      `The YAML is not valid at line ${String(line)}, column ${String(column)}. ` +
       `The parser says: ${excerptMessage(error.message)} Correct the text at this position.`,
+    range: error.pos,
   };
 };
 
@@ -647,14 +740,16 @@ const listDirectiveIssues = (
   text: string,
   documentStart: number,
   lines: LineCounter,
-): ReadonlyArray<Issue> =>
+): ReadonlyArray<WorkflowSourceIssue> =>
   [...text.slice(0, documentStart).matchAll(DIRECTIVE_START)].map((directive) => {
-    const { line, col } = lines.linePos(directive.index);
+    const { line, column } = findLineAndColumn(text, lines, directive.index);
+    const lineEnd = text.indexOf("\n", directive.index);
     return {
       path: [],
       message:
-        `The text at line ${String(line)}, column ${String(col)} is a YAML directive. ` +
+        `The text at line ${String(line)}, column ${String(column)} is a YAML directive. ` +
         "A workflow does not use directives, because a directive changes how the rest of the text is read. Remove the line.",
+      range: [directive.index, lineEnd === -1 ? text.length : lineEnd],
     };
   });
 
@@ -677,13 +772,14 @@ const REPEATED_KEY =
   "Remove one of the two, or give each its own name.";
 
 /**
- * A key as the parsed value spells it: the value of a scalar as text, so `1`
- * and `"1"` are one key, and an empty key as "". The core schema, with no
- * tag resolved, reads a scalar as a string, a number, a boolean or null. An
- * alias as a key is spelled "" too, and the walk refuses the alias where it
- * meets it.
+ * A key of a YAML mapping as the parsed value spells it, and so as a path
+ * into the definition spells it: the value of a scalar as text, so `1` and
+ * `"1"` are one key, and an empty key as "". The core schema, with no tag
+ * resolved, reads a scalar as a string, a number, a boolean or null. An alias
+ * as a key is spelled "" too, and the walk refuses the alias where it meets
+ * it. An editor spells keys the same way to find the node that a path names.
  */
-const spellKey = (key: unknown): string => {
+export const spellPathKey = (key: unknown): string => {
   const value: unknown = isScalar(key) ? key.value : null;
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
     ? String(value)
@@ -708,7 +804,7 @@ const spellKey = (key: unknown): string => {
 const collectNodeIssues = (
   node: unknown,
   path: ReadonlyArray<string>,
-  issues: Array<Issue>,
+  issues: Array<WorkflowSourceIssue>,
 ): void => {
   if (isAlias(node) || (isNode(node) && node.anchor !== undefined)) {
     issues.push({ path, message: NO_ANCHORS });
@@ -729,7 +825,7 @@ const collectNodeIssues = (
         issues.push({ path, message: NO_COLLECTION_KEYS });
         continue;
       }
-      const key = spellKey(pair.key);
+      const key = spellPathKey(pair.key);
       const keyPath = [...path, key];
       if (keys.has(key)) issues.push({ path: keyPath, message: REPEATED_KEY });
       keys.add(key);
@@ -745,19 +841,46 @@ const collectNodeIssues = (
 };
 
 /**
- * The definition a text says, or every problem that stops the text from being
- * one, however many there are.
+ * What one parse of a workflow's text found: the YAML document, and the
+ * definition that the text says or the problems that stop the text from being
+ * one.
  */
-const parseSourceText = (text: string): Result.Result<WorkflowDefinition, ReadonlyArray<Issue>> => {
+interface ParsedWorkflowDocument {
+  /**
+   * The YAML document, with the range in the text of each node. An editor
+   * reads it to find the place in the text of a problem that is named by its
+   * path, and to find what the author writes at the cursor. It is absent for a
+   * text too long to parse.
+   */
+  readonly document: Document.Parsed | undefined;
+  /** Where each line of the text starts, which gives the line of an offset. Absent with `document`. */
+  readonly lines: LineCounter | undefined;
+  /**
+   * The definition, or the problems that stop the text from being one: at
+   * most `MAX_ISSUES` problems, and one more problem that counts the others.
+   */
+  readonly result: Result.Result<WorkflowDefinition, ReadonlyArray<WorkflowSourceIssue>>;
+}
+
+/** Why a text is refused before it is parsed. */
+const TOO_LONG_ISSUE: WorkflowSourceIssue = {
+  path: [],
+  // Said of the workflow and not of a text, because a definition object is
+  // measured by the text it is written as.
+  message: `A workflow is at most ${String(MAX_WORKFLOW_SOURCE_LENGTH)} characters of YAML. This one is longer. Make it shorter.`,
+};
+
+/**
+ * The definition a workflow's text says, or the problems that stop the text
+ * from being one: a text that is too long or not valid Unicode, YAML syntax,
+ * directives, tags, anchors and aliases, repeated keys, and everything
+ * `decodeWorkflowDefinition` refuses. The YAML document of the text comes
+ * with the answer, so a program that must also find places in the text parses
+ * the text once. The text itself is never changed.
+ */
+export const parseWorkflowDocument = (text: string): ParsedWorkflowDocument => {
   if (text.length > MAX_WORKFLOW_SOURCE_LENGTH) {
-    // Said of the workflow and not of a text, because a definition object is
-    // measured by the text it is written as.
-    return Result.fail([
-      {
-        path: [],
-        message: `A workflow is at most ${String(MAX_WORKFLOW_SOURCE_LENGTH)} characters of YAML. This one is longer. Make it shorter.`,
-      },
-    ]);
+    return { document: undefined, lines: undefined, result: Result.fail([TOO_LONG_ISSUE]) };
   }
   const lines = new LineCounter();
   const document = parseDocument(text, {
@@ -773,35 +896,43 @@ const parseSourceText = (text: string): Result.Result<WorkflowDefinition, Readon
     // A tag such as `!!binary` is not decoded. The walk refuses each tag.
     resolveKnownTags: false,
   });
+  const refuse = (issues: ReadonlyArray<WorkflowSourceIssue>): ParsedWorkflowDocument => ({
+    document,
+    lines,
+    result: Result.fail(limitIssues(issues)),
+  });
   const surrogate = text.search(LONE_SURROGATE);
   if (surrogate !== -1) {
-    const { line, col } = lines.linePos(surrogate);
-    return Result.fail([
+    const { line, column } = findLineAndColumn(text, lines, surrogate);
+    return refuse([
       {
         path: [],
-        message: `The text at line ${String(line)}, column ${String(col)} ${LONE_SURROGATE_MESSAGE}`,
+        message: `The text at line ${String(line)}, column ${String(column)} ${LONE_SURROGATE_MESSAGE}`,
+        range: [surrogate, surrogate + 1],
       },
     ]);
   }
   if (document.errors.length > 0) {
-    return Result.fail(document.errors.map((error) => describeSyntaxError(error, lines)));
+    return refuse(document.errors.map((error) => describeSyntaxError(text, error, lines)));
   }
-  const issues = [...listDirectiveIssues(text, document.range[0], lines)];
+  const issues: Array<WorkflowSourceIssue> = [
+    ...listDirectiveIssues(text, document.range[0], lines),
+  ];
   collectNodeIssues(document.contents, [], issues);
-  if (issues.length > 0) return Result.fail(issues);
-  return decodeDefinitionValue(document.toJS());
+  if (issues.length > 0) return refuse(issues);
+  const decoded = decodeDefinitionValue(document.toJS());
+  return Result.isSuccess(decoded) ? { document, lines, result: decoded } : refuse(decoded.failure);
 };
 
 /**
  * The definition a workflow's text says, or the problems that stop the text
- * from being one: a text that is too long or not valid Unicode, YAML syntax,
- * directives, tags, anchors and aliases, repeated keys, and everything
- * `decodeWorkflowDefinition` refuses. The text itself is never changed.
+ * from being one, as `parseWorkflowDocument` finds them. Each problem is named
+ * by its path and its message, as the public API names it.
  */
 export const parseWorkflowSource = (
   text: string,
 ): Result.Result<WorkflowDefinition, ReadonlyArray<Issue>> =>
-  Result.mapError(parseSourceText(text), limitIssues);
+  Result.mapError(parseWorkflowDocument(text).result, (issues) => issues.map(buildPublicIssue));
 
 /** Puts the keys of every object in the order the definition declares them. */
 const orderDefinitionKeys = Schema.encodeSync(WorkflowDefinition);

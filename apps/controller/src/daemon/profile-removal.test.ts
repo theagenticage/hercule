@@ -50,7 +50,7 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
 const READER: ReadonlyArray<Grant> = ["task.read", "run.read"];
 
 /** The message a refusal carried, as the test reads it. */
-const messageOf = (error: unknown): string =>
+const readRefusalMessage = (error: unknown): string =>
   (error as { readonly error: { readonly message: string } }).error.message;
 
 /** A session carrying this profile, in the status given. */
@@ -114,7 +114,7 @@ describe("profile.delete", () => {
       }),
     );
     expect(error).toMatchObject({ error: { code: "invalid_state" } });
-    expect(messageOf(error)).toContain("Hercule ships");
+    expect(readRefusalMessage(error)).toContain("Hercule ships");
   });
 
   it("answers not_found for an id nobody has", async () => {
@@ -140,7 +140,7 @@ describe("profile.delete", () => {
     // The session copied these grants at spawn and is held to them while it
     // runs; deleting the row would end its credential without a word.
     expect(error).toMatchObject({ error: { code: "invalid_state" } });
-    expect(messageOf(error)).toContain("session");
+    expect(readRefusalMessage(error)).toContain("session");
   });
 
   it("deletes one whose only session has exited", async () => {
@@ -171,7 +171,7 @@ describe("profile.delete", () => {
     );
 
     expect(error).toMatchObject({ error: { code: "invalid_state" } });
-    expect(messageOf(error)).toContain("the-elder");
+    expect(readRefusalMessage(error)).toContain("the-elder");
   });
 
   /**
@@ -190,7 +190,7 @@ describe("profile.delete", () => {
       }),
     );
 
-    expect(messageOf(error)).toContain("session");
-    expect(messageOf(error)).not.toContain("the-elder");
+    expect(readRefusalMessage(error)).toContain("session");
+    expect(readRefusalMessage(error)).not.toContain("the-elder");
   });
 });

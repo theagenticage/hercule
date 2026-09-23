@@ -11,7 +11,7 @@ import {
 } from "@hercule/client-core";
 import type { PluginDetail, PluginStatus } from "@hercule/contract";
 import { ConfigForm } from "../../../screens/plugins/config-form";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
  * Only `errored` is something gone wrong; `refused` is the attention hue
@@ -126,7 +126,7 @@ export function PluginCard({
       )}
       <SaveStatus
         saved={configure.isSuccess}
-        failure={failed === null ? null : messageOf(failed)}
+        failure={failed === null ? null : readErrorMessage(failed)}
       />
 
       <div className="flex flex-wrap items-center gap-1.5">

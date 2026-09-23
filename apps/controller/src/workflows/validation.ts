@@ -32,6 +32,7 @@ import {
   excerptMessage,
   isId,
   limitIssues,
+  listEntrySteps,
   quoteWritten,
   type Issue,
   type WorkflowDefinition,
@@ -806,10 +807,11 @@ const findLoops = (
  * where a run begins.
  */
 const listGraphIssues = (
-  steps: ReadonlyArray<Step>,
+  definition: WorkflowDefinition,
   edges: ReadonlyArray<GraphEdge>,
   nodes: GraphNodes,
 ): ReadonlyArray<Issue> => {
+  const { steps } = definition;
   const issues: Array<Issue> = [];
   const stepIds = steps.map((step) => step.id);
   const nodeIds = [...nodes.signalIds, ...stepIds];
@@ -847,13 +849,8 @@ const listGraphIssues = (
     }
   }
 
-  // A run begins at every entry step: a step with entry: true, or a step no
-  // edge leads into. A step that only a signal trigger leads into is not one,
-  // because it waits for its signal.
-  const ledInto = new Set(edges.map((edge) => edge.to));
-  const entryIds = steps
-    .filter((step) => step.entry === true || !ledInto.has(step.id))
-    .map((step) => step.id);
+  // A run begins at every entry step.
+  const entryIds = listEntrySteps(definition).map((step) => step.id);
   if (steps.length > 0 && entryIds.length === 0) {
     // The run most likely begins in the loop that leaves every step with an
     // edge into it, so the refusal is placed at a step another step leads into.
@@ -960,7 +957,7 @@ export const checkDefinitionAgainst = (
           ...conditionIssues,
         ]),
       )).flat(),
-      ...listGraphIssues(definition.steps, edges, nodes),
+      ...listGraphIssues(definition, edges, nodes),
     ];
     return { errors: limitIssues(errors), warnings: listWarnings(definition) };
   });

@@ -121,3 +121,25 @@ export {
   supportedTimezones,
 } from "./timezone";
 export { createTokenStore } from "./token-store";
+export {
+  listWorkflowCompletions,
+  type CompletionList,
+  type CompletionOffer,
+  type WorkflowCatalog,
+} from "./workflow-completion";
+export {
+  abbreviateEdgeCondition,
+  buildWorkflowGraph,
+  type WorkflowGraph,
+  type WorkflowGraphEdge,
+  type WorkflowGraphNode,
+} from "./workflow-graph";
+export {
+  decideIssueState,
+  locateIssues,
+  readWorkflowSource,
+  type LocatedIssue,
+  type WorkflowCheckState,
+  type WorkflowSourceReading,
+  type WorkflowValidation,
+} from "./workflow-source";

@@ -13,7 +13,7 @@ import {
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { ConfigFieldRow } from "../../../screens/plugins/config-form";
-import { SaveStatus, messageOf } from "../../../screens/save-status";
+import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 import { Naming } from "./-naming";
 
 /**
@@ -115,7 +115,7 @@ export function ConfigureConnection({
       </div>
 
       {/* The form closes on a save that worked, so only a refusal is shown. */}
-      <SaveStatus saved={false} failure={failure === null ? null : messageOf(failure)} />
+      <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
     </form>
   );
 }
