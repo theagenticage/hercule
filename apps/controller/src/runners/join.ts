@@ -12,7 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { unauthenticated, type Unauthenticated } from "@hercule/contract";
+import { createUnauthenticatedError, type Unauthenticated } from "@hercule/contract";
 import type { JoinAnswer } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { hashToken, mintToken } from "../credentials";
@@ -58,7 +58,7 @@ const make = Effect.gen(function* () {
           const at = yield* nowIso;
           const invitation = yield* joinTokens.spend(token, at);
           if (Option.isNone(invitation)) {
-            return yield* Effect.fail(unauthenticated(NO_JOIN));
+            return yield* Effect.fail(createUnauthenticatedError(NO_JOIN));
           }
           const controller = yield* identity.read;
           if (Option.isNone(controller)) {

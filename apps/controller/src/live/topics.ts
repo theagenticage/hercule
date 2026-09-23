@@ -33,12 +33,12 @@ import type * as Scope from "effect/Scope";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  capExceeded,
-  internal,
-  notFound,
+  createCapExceededError,
+  createInternalError,
+  createNotFoundError,
+  createValidationError,
   sessionStreamTopic,
   sessionTapTopic,
-  validation,
   type CapExceeded,
   type Delta,
   type Event,
@@ -136,7 +136,7 @@ const make = Effect.gen(function* () {
         drop(watcher);
         yield* Queue.fail(
           watcher.queue,
-          capExceeded({ count: waiting, cap: SUBSCRIPTION_CAP }, TOO_SLOW),
+          createCapExceededError({ count: waiting, cap: SUBSCRIPTION_CAP }, TOO_SLOW),
         );
         return false;
       }
@@ -243,7 +243,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* Effect.logError("a live subscription could not read its log", cause);
           drop(watcher);
-          yield* Queue.fail(watcher.queue, internal(source.unreadable));
+          yield* Queue.fail(watcher.queue, createInternalError(source.unreadable));
         }),
       ),
     );
@@ -279,10 +279,12 @@ const make = Effect.gen(function* () {
     after: number | undefined,
   ): Effect.Effect<LiveQueue, Validation | Internal, Scope.Scope> =>
     Effect.gen(function* () {
-      const head = yield* Effect.mapError(source.head, () => internal(source.unreadable));
+      const head = yield* Effect.mapError(source.head, () =>
+        createInternalError(source.unreadable),
+      );
       if (after !== undefined && after > head) {
         return yield* Effect.fail(
-          validation([
+          createValidationError([
             {
               path: ["cursor"],
               message: `this ${source.noun} has reached ${String(head)}, no further`,
@@ -346,10 +348,10 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         if (
           !(yield* Effect.mapError(sessionExists(sql, sessionId), () =>
-            internal(SESSION_UNREADABLE),
+            createInternalError(SESSION_UNREADABLE),
           ))
         ) {
-          return yield* Effect.fail(notFound(NO_SUCH_SESSION));
+          return yield* Effect.fail(createNotFoundError(NO_SUCH_SESSION));
         }
         return yield* followLog(sessionStreamTopic(sessionId), transcriptSource(sessionId), after);
       }),
@@ -363,10 +365,10 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         if (
           !(yield* Effect.mapError(sessionExists(sql, sessionId), () =>
-            internal(SESSION_UNREADABLE),
+            createInternalError(SESSION_UNREADABLE),
           ))
         ) {
-          return yield* Effect.fail(notFound(NO_SUCH_SESSION));
+          return yield* Effect.fail(createNotFoundError(NO_SUCH_SESSION));
         }
         return yield* Effect.map(
           hold(sessionTapTopic(sessionId), 0, undefined),

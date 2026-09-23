@@ -11,7 +11,7 @@ import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ProviderDefinition } from "@hercule/plugin-host";
-import { validation, type Validation } from "@hercule/contract";
+import { createValidationError, type Validation } from "@hercule/contract";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "./repository";
 
@@ -49,14 +49,14 @@ export const resolvedInstance: Effect.Effect<
       const found = yield* instances.one(instanceId);
       if (Option.isNone(found)) {
         return yield* Effect.fail(
-          validation([{ path: ["instanceId"], message: "no such provider instance" }]),
+          createValidationError([{ path: ["instanceId"], message: "no such provider instance" }]),
         );
       }
       const registered = yield* host.providers();
       const definition = registered.find((one) => one.id === found.value.providerId);
       if (definition === undefined) {
         return yield* Effect.fail(
-          validation([
+          createValidationError([
             {
               path: ["instanceId"],
               message: `this build carries no ${found.value.providerId} provider`,

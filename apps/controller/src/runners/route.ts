@@ -12,12 +12,12 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import {
-  internal,
+  createDecodeValidationError,
+  createInternalError,
+  createUnauthenticatedError,
+  createValidationError,
   Unauthenticated,
-  unauthenticated,
   Validation,
-  validation,
-  validationOf,
 } from "@hercule/contract";
 import { JoinRequest } from "@hercule/protocol";
 import { bearerOf } from "../http/bearer";
@@ -46,7 +46,9 @@ const CLOSED = { onExcessProperty: "error" } as const;
  * the caller holds a join token and no credential.
  */
 const requestIn = Effect.mapError(HttpServerRequest.schemaBodyJson(JoinRequest, CLOSED), (error) =>
-  error._tag === "SchemaError" ? validationOf(error) : validation([{ path: [], message: NO_BODY }]),
+  error._tag === "SchemaError"
+    ? createDecodeValidationError(error)
+    : createValidationError([{ path: [], message: NO_BODY }]),
 );
 
 /** `201`: the answer is a runner that did not exist before the request. */
@@ -54,7 +56,7 @@ export const RunnerJoinRouteLayer = HttpRouter.add("POST", JOIN_PATH, (request) 
   Effect.gen(function* () {
     const enlist = yield* RunnerJoin;
     const token = bearerOf(request);
-    if (token === undefined) return responseFor(unauthenticated(NO_TOKEN));
+    if (token === undefined) return responseFor(createUnauthenticatedError(NO_TOKEN));
     return yield* Effect.flatMap(requestIn, (body) =>
       enlist.join(token, body.reserved ?? false),
     ).pipe(
@@ -64,7 +66,7 @@ export const RunnerJoinRouteLayer = HttpRouter.add("POST", JOIN_PATH, (request) 
           ? Effect.succeed(responseFor(error))
           : Effect.as(
               Effect.logError("A machine presenting a join token could not be enlisted", error),
-              responseFor(internal("something went wrong")),
+              responseFor(createInternalError("something went wrong")),
             ),
       ),
     );

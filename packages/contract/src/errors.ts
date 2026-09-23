@@ -159,48 +159,57 @@ export type ApiError =
   | CapExceeded
   | Internal;
 
-export const unauthenticated = (message: string): Unauthenticated =>
+/** Creates the error for a missing credential, or for a credential that does not resolve. */
+export const createUnauthenticatedError = (message: string): Unauthenticated =>
   new Unauthenticated({ error: { code: "unauthenticated", message } });
 
-export const forbidden = (grant: Grant, message = `missing grant ${grant}`): Forbidden =>
+/** Creates the error for a caller who lacks the grant that the operation requires. */
+export const createForbiddenError = (grant: Grant, message = `missing grant ${grant}`): Forbidden =>
   new Forbidden({ error: { code: "forbidden", message, details: { grant } } });
 
-export const validation = (
+/** Creates the error for a request that fails validation, with one issue per problem. */
+export const createValidationError = (
   issues: ReadonlyArray<Issue>,
   message = "the request is not valid",
 ): Validation => new Validation({ error: { code: "validation", message, details: { issues } } });
 
-export const notFound = (message: string): NotFound =>
+/** Creates the error for an entity that does not exist. */
+export const createNotFoundError = (message: string): NotFound =>
   new NotFound({ error: { code: "not_found", message } });
 
-export const conflict = (message: string): Conflict =>
+/** Creates the error for a write that collides with something that already exists. */
+export const createConflictError = (message: string): Conflict =>
   new Conflict({ error: { code: "conflict", message } });
 
-export const invalidState = (message: string): InvalidState =>
+/** Creates the error for an entity whose state does not allow the operation. */
+export const createInvalidStateError = (message: string): InvalidState =>
   new InvalidState({ error: { code: "invalid_state", message } });
 
-export const capExceeded = (details: CapDetails, message: string): CapExceeded =>
+/** Creates the error for a size or a count that is more than its cap. */
+export const createCapExceededError = (details: CapDetails, message: string): CapExceeded =>
   new CapExceeded({ error: { code: "cap_exceeded", message, details } });
 
-export const internal = (message: string): Internal =>
+/** Creates the error for a failure that the caller cannot fix. */
+export const createInternalError = (message: string): Internal =>
   new Internal({ error: { code: "internal", message } });
 
 const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
 /**
- * A decode failure as the contract's `issues` list: one entry per thing wrong,
- * so a caller fixes every field in one retry. Path segments are stringified
+ * Lists the issues of a Schema decode failure, one entry per problem, so a
+ * caller can fix every field in one retry. Path segments are stringified
  * because a JSON document has no other kind of key.
  *
  * The wire vocabulary names no schema library, and this is the one place the
  * two meet: the transport decodes a request with it and a service decodes an
  * in-process call with it, so the same bad input reads the same either way.
  */
-export const issuesOf = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
+export const listDecodeIssues = (error: Schema.SchemaError): ReadonlyArray<Issue> =>
   standardIssues(error.issue).issues.map((issue) => ({
     path: (issue.path ?? []).map(String),
     message: issue.message,
   }));
 
-/** A decode failure as the error the operation answers with. */
-export const validationOf = (error: Schema.SchemaError): Validation => validation(issuesOf(error));
+/** Creates the validation error for a Schema decode failure, with one issue per problem. */
+export const createDecodeValidationError = (error: Schema.SchemaError): Validation =>
+  createValidationError(listDecodeIssues(error));

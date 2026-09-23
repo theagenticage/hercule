@@ -33,11 +33,11 @@ import {
   ConnectionUpdateInput,
   DEFAULT_PAGE_LIMIT,
   Id,
-  invalidState,
-  issuesOf,
-  notFound,
-  validation,
-  validationOf,
+  createDecodeValidationError,
+  createInvalidStateError,
+  createNotFoundError,
+  createValidationError,
+  listDecodeIssues,
   type Connection,
   type ConnectionOAuthStart,
   type Forbidden,
@@ -152,7 +152,9 @@ const make = Effect.gen(function* () {
       Option.match({
         onNone: () =>
           Effect.fail(
-            validation([{ path: ["type"], message: `no plugin defines the type ${type}` }]),
+            createValidationError([
+              { path: ["type"], message: `no plugin defines the type ${type}` },
+            ]),
           ),
         onSome: Effect.succeed,
       }),
@@ -169,7 +171,9 @@ const make = Effect.gen(function* () {
       Option.match({
         onNone: () =>
           Effect.fail(
-            invalidState(`the plugin that defines the type ${row.type} is not in this build`),
+            createInvalidStateError(
+              `the plugin that defines the type ${row.type} is not in this build`,
+            ),
           ),
         onSome: Effect.succeed,
       }),
@@ -189,7 +193,7 @@ const make = Effect.gen(function* () {
       return Object.keys(config).length === 0
         ? Effect.void
         : Effect.fail(
-            validation([
+            createValidationError([
               {
                 path: ["config"],
                 message: `the type ${contribution.type} takes no configuration`,
@@ -199,7 +203,9 @@ const make = Effect.gen(function* () {
     }
     return Effect.asVoid(
       Effect.mapError(decodeAgainst(schema, config), (error) =>
-        validation(issuesOf(error).map((issue) => ({ ...issue, path: ["config", ...issue.path] }))),
+        createValidationError(
+          listDecodeIssues(error).map((issue) => ({ ...issue, path: ["config", ...issue.path] })),
+        ),
       ),
     );
   };
@@ -226,7 +232,7 @@ const make = Effect.gen(function* () {
     ];
     return issues.length === 0
       ? Effect.succeed(Object.fromEntries(declared.map((name) => [name, credentials[name]!])))
-      : Effect.fail(validation(issues));
+      : Effect.fail(createValidationError(issues));
   };
 
   /**
@@ -243,7 +249,7 @@ const make = Effect.gen(function* () {
       Effect.provide(contribution.validate(credentials), FetchHttpClient.layer),
       (failure: ConnectionValidationFailed) => {
         const field = fieldsOf(contribution)[0];
-        return validation(
+        return createValidationError(
           [
             {
               path: field === undefined ? ["credentials"] : ["credentials", field],
@@ -277,7 +283,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(
       connections.one(id),
       Option.match({
-        onNone: () => Effect.fail(notFound(NO_SUCH_CONNECTION)),
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_CONNECTION)),
         onSome: Effect.succeed,
       }),
     );
@@ -426,7 +432,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("connection.query");
         const { limit, cursor, sort, type, status } = yield* Effect.mapError(
           decodeQuery(input),
-          validationOf,
+          createDecodeValidationError,
         );
         const order =
           sort === undefined
@@ -457,7 +463,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Connection, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("connection.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* one(id);
       }),
 
@@ -471,11 +477,11 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Connection, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("connection.create");
-        const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         const { pluginId, contribution } = yield* typeNamed(decoded.type);
         if (isOAuthFlow(contribution)) {
           const message = `the type ${decoded.type} is set up through its OAuth flow: start it with connection.startOAuth`;
-          return yield* Effect.fail(validation([{ path: ["type"], message }], message));
+          return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
         const config = decoded.config ?? {};
         yield* readConfig(contribution, config);
@@ -524,7 +530,10 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("connection.update");
-        const { id, ...patch } = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const { id, ...patch } = yield* Effect.mapError(
+          decodeUpdate(input),
+          createDecodeValidationError,
+        );
         const row = yield* stored(id);
         if (patch.config !== undefined) {
           const { contribution } = yield* typeOf(row);
@@ -560,12 +569,17 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("connection.setCredentials");
-        const decoded = yield* Effect.mapError(decodeCredentials(input), validationOf);
+        const decoded = yield* Effect.mapError(
+          decodeCredentials(input),
+          createDecodeValidationError,
+        );
         const row = yield* stored(decoded.id);
         const { contribution } = yield* typeOf(row);
         if (isOAuthFlow(contribution)) {
           const message = `the type ${row.type} is reconnected through its OAuth flow: start it with connection.startOAuth`;
-          return yield* Effect.fail(validation([{ path: ["credentials"], message }], message));
+          return yield* Effect.fail(
+            createValidationError([{ path: ["credentials"], message }], message),
+          );
         }
         const credentials = yield* readCredentials(contribution, decoded.credentials);
         const account = yield* validated(contribution, credentials);
@@ -605,12 +619,12 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("connection.startOAuth");
-        const decoded = yield* Effect.mapError(decodeStart(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeStart(input), createDecodeValidationError);
         const { pluginId, contribution } = yield* typeNamed(decoded.type);
         const oauth = contribution.oauth;
         if (oauth === undefined) {
           const message = `the type ${decoded.type} is not set up through a redirect flow`;
-          return yield* Effect.fail(validation([{ path: ["type"], message }], message));
+          return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
         // A reconnect keeps what the user already chose, so the start needs
         // neither a label nor a topic to go with it.
@@ -620,7 +634,7 @@ const make = Effect.gen(function* () {
             : Option.getOrUndefined(yield* connections.one(decoded.connectionId));
         if (decoded.connectionId !== undefined && existing === undefined) {
           return yield* Effect.fail(
-            validation([{ path: ["connectionId"], message: NO_SUCH_CONNECTION }]),
+            createValidationError([{ path: ["connectionId"], message: NO_SUCH_CONNECTION }]),
           );
         }
         // Reconnecting replaces one connection's tokens, so the flow has to be
@@ -628,7 +642,7 @@ const make = Effect.gen(function* () {
         // under an account they say nothing about.
         if (existing !== undefined && existing.type !== decoded.type) {
           return yield* Effect.fail(
-            validation([
+            createValidationError([
               {
                 path: ["connectionId"],
                 message: `that connection is of the type ${existing.type}`,
@@ -640,7 +654,7 @@ const make = Effect.gen(function* () {
         const labels = decoded.labels ?? existing?.labels;
         if (label === undefined || labels === undefined) {
           return yield* Effect.fail(
-            validation([
+            createValidationError([
               { path: ["label"], message: "a new connection needs a label and a topic" },
             ]),
           );
@@ -650,7 +664,7 @@ const make = Effect.gen(function* () {
         const client = yield* clientOf(pluginId);
         if (Option.isNone(client)) {
           return yield* Effect.fail(
-            invalidState(
+            createInvalidStateError(
               `the plugin ${pluginId} holds no OAuth client credentials: set its clientId ` +
                 `config field and its clientSecret secret before connecting`,
             ),
@@ -716,7 +730,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("connection.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const row = yield* stored(id);
         yield* withTransaction(
           sql,
@@ -725,7 +739,7 @@ const make = Effect.gen(function* () {
             // connection between the check and the delete would be left naming
             // a connection that is gone.
             if (yield* connections.namedByResource(id)) {
-              return yield* Effect.fail(invalidState(NAMED_BY_RESOURCE));
+              return yield* Effect.fail(createInvalidStateError(NAMED_BY_RESOURCE));
             }
             const at = yield* nowIso;
             const owner = ownerOf(id);

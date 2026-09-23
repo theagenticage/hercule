@@ -15,9 +15,9 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import {
-  forbidden,
+  createForbiddenError,
+  createUnauthenticatedError,
   OPERATIONS,
-  unauthenticated,
   type Forbidden,
   type Grant,
   type OperationId,
@@ -167,9 +167,9 @@ export const grantCheck = (id: OperationId, actor: Actor): Forbidden | undefined
     case "user":
       return undefined;
     case "session":
-      return actor.grants.includes(grant) ? undefined : forbidden(grant);
+      return actor.grants.includes(grant) ? undefined : createForbiddenError(grant);
     case "none":
-      return forbidden(grant);
+      return createForbiddenError(grant);
   }
 };
 
@@ -210,7 +210,7 @@ export const currentUser = (
     const grant = grantOf(OPERATIONS[id].requires);
     return Effect.fail(
       actor._tag === "session" && grant !== undefined
-        ? forbidden(grant, USER_ONLY)
-        : unauthenticated(NO_CREDENTIAL),
+        ? createForbiddenError(grant, USER_ONLY)
+        : createUnauthenticatedError(NO_CREDENTIAL),
     );
   });

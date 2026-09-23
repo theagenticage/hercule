@@ -17,7 +17,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { unauthenticated, type Unauthenticated } from "@hercule/contract";
+import { createUnauthenticatedError, type Unauthenticated } from "@hercule/contract";
 import { CurrentActor, NO_CREDENTIAL, type UserActor } from "../actor";
 import { mintToken } from "../credentials";
 
@@ -58,14 +58,14 @@ const make = Effect.sync(() => {
         // caller who reaches no transport.
         const actor = yield* CurrentActor;
         if (actor._tag === "none") {
-          return yield* Effect.fail(unauthenticated(NO_CREDENTIAL));
+          return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
         }
         // The socket is the user's screens. A session reads what it needs
         // through the API and holds no live topic in this build, and the
         // connection sweep can re-check only a user credential, so a socket
         // opened as a session would be one nothing could ever take away.
         if (actor._tag === "session") {
-          return yield* Effect.fail(unauthenticated(SESSION_HAS_NO_SOCKET));
+          return yield* Effect.fail(createUnauthenticatedError(SESSION_HAS_NO_SOCKET));
         }
         const now = yield* Clock.currentTimeMillis;
         for (const [value, entry] of held) {

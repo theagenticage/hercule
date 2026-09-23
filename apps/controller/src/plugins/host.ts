@@ -37,7 +37,7 @@ import {
   type RegistrationHost,
 } from "@hercule/plugin-host";
 import {
-  validationOf,
+  createDecodeValidationError,
   type PluginRefusalReason,
   type PluginStatus,
   type Validation,
@@ -643,7 +643,10 @@ const make = Effect.gen(function* () {
         return entry === undefined
           ? Effect.die(new Error(`No plugin named ${id} was loaded.`))
           : Effect.asVoid(
-              Effect.mapError(decodeAgainst(entry.manifest.configSchema, config), validationOf),
+              Effect.mapError(
+                decodeAgainst(entry.manifest.configSchema, config),
+                createDecodeValidationError,
+              ),
             );
       }),
   };

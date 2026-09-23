@@ -17,8 +17,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   DEFAULT_PAGE_LIMIT,
-  notFound,
-  validation,
+  createNotFoundError,
+  createValidationError,
   type ApiKey,
   type Forbidden,
   type NotFound,
@@ -124,7 +124,7 @@ const make = Effect.gen(function* () {
           })
           .pipe(
             Effect.catchTag("CursorError", (error) =>
-              Effect.fail(validation([{ path: ["cursor"], message: error.message }])),
+              Effect.fail(createValidationError([{ path: ["cursor"], message: error.message }])),
             ),
           );
         return {
@@ -148,7 +148,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const revoked = yield* credentials.revokeApiKey(actor.userId, input.id);
-            if (!revoked) return yield* Effect.fail(notFound("no such API key"));
+            if (!revoked) return yield* Effect.fail(createNotFoundError("no such API key"));
             yield* audit.append({
               kind: "auth.apiKey.revoked",
               actor: USER_ACTOR,

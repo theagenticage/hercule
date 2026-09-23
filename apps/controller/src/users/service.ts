@@ -19,7 +19,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  validation,
+  createValidationError,
   type Forbidden,
   type Unauthenticated,
   type Validation,
@@ -64,7 +64,9 @@ const make = Effect.gen(function* () {
         const matches = yield* verifyPassword(input.current, user.value.passwordHash);
         if (!matches) {
           return yield* Effect.fail(
-            validation([{ path: ["current"], message: "the current password is incorrect" }]),
+            createValidationError([
+              { path: ["current"], message: "the current password is incorrect" },
+            ]),
           );
         }
 

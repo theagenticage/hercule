@@ -33,19 +33,19 @@ import {
   type SessionStop,
 } from "@hercule/protocol";
 import {
+  createDecodeValidationError,
+  createInvalidStateError,
+  createNotFoundError,
+  createValidationError,
   DEFAULT_PAGE_LIMIT,
   Id,
   INPUT_SORT_FIELDS,
   INPUT_UPDATE_FIELDS,
   InvalidState,
-  invalidState,
   NotFound,
-  notFound,
   SESSION_SORT_FIELDS,
   SessionFilter,
   TRANSCRIPT_SORT_FIELDS,
-  validation,
-  validationOf,
   type Forbidden,
   type Input,
   type Session,
@@ -353,11 +353,14 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<StoredInput, NotFound | InvalidState | SqlError> =>
     Effect.gen(function* () {
       const found = yield* inputs.one(sessionId, inputId);
-      if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_INPUT));
+      if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError(NO_SUCH_INPUT));
       if (found.value.status !== "queued") {
-        return yield* Effect.fail(invalidState(`that input was already ${found.value.status}`));
+        return yield* Effect.fail(
+          createInvalidStateError(`that input was already ${found.value.status}`),
+        );
       }
-      if (found.value.sentAt !== null) return yield* Effect.fail(invalidState(ALREADY_SENT));
+      if (found.value.sentAt !== null)
+        return yield* Effect.fail(createInvalidStateError(ALREADY_SENT));
       return found.value;
     });
 
@@ -435,7 +438,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("session.query");
         const { limit, cursor, sort, status, runnerId, agentId, permissionProfileId, thread } =
-          yield* Effect.mapError(decodeQuery(input), validationOf);
+          yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         // A Thread is a session with no Agent behind it. `agentId` asks for
         // the sessions of one Agent, and `thread` asks for the sessions that
         // have no Agent, so the two can never both be true of one session. A
@@ -443,7 +446,7 @@ const make = Effect.gen(function* () {
         // "there are none" instead of "the question is wrong".
         if (agentId !== undefined && thread !== undefined) {
           return yield* Effect.fail(
-            validation([
+            createValidationError([
               {
                 path: ["thread"],
                 message:
@@ -486,14 +489,15 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<SessionSpec, NotFound | SqlError | Schema.SchemaError> =>
       Effect.gen(function* () {
         const document = yield* sessions.readSpecDocument(sessionId);
-        if (Option.isNone(document)) return yield* Effect.fail(notFound("no such session"));
+        if (Option.isNone(document))
+          return yield* Effect.fail(createNotFoundError("no such session"));
         return yield* decodeSpecDocument(document.value);
       }),
 
     read: (input: Identified): Effect.Effect<Session, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("session.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return (yield* recordComposer)(yield* one(id));
       }),
 
@@ -507,7 +511,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("transcript.read");
         const { id, limit, cursor, sort } = yield* Effect.mapError(
           decodeTranscript(input),
-          validationOf,
+          createDecodeValidationError,
         );
         yield* one(id);
         const listing = yield* refuseCursor(
@@ -1141,7 +1145,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("input.query");
         const { id, limit, cursor, sort } = yield* Effect.mapError(
           decodeInputQuery(input),
-          validationOf,
+          createDecodeValidationError,
         );
         yield* one(id);
         const listing = yield* refuseCursor(
@@ -1160,7 +1164,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("input.update");
         const { id, inputId, text } = yield* Effect.mapError(
           decodeInputUpdate(input),
-          validationOf,
+          createDecodeValidationError,
         );
         yield* one(id);
         return yield* withTransaction(
@@ -1177,7 +1181,10 @@ const make = Effect.gen(function* () {
     cancelInput: (input: InputIdentified): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.cancel");
-        const { id, inputId } = yield* Effect.mapError(decodeInputIdentified(input), validationOf);
+        const { id, inputId } = yield* Effect.mapError(
+          decodeInputIdentified(input),
+          createDecodeValidationError,
+        );
         yield* one(id);
         return yield* withTransaction(
           sql,

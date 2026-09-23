@@ -27,8 +27,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   DEFAULT_PAGE_LIMIT,
-  notFound,
-  validation,
+  createNotFoundError,
+  createValidationError,
   type Forbidden,
   type NotFound,
   type OwnerKind,
@@ -82,7 +82,7 @@ const CORE_REFUSED =
   "the `core` owner holds the controller's own key material and is not writable through the API";
 
 const coreRefused = (): Validation =>
-  validation([{ path: ["ownerKind"], message: CORE_REFUSED }], CORE_REFUSED);
+  createValidationError([{ path: ["ownerKind"], message: CORE_REFUSED }], CORE_REFUSED);
 
 /** What the wire sees: everything but the value, and no internal row id. */
 const toRef = (stored: StoredSecret): SecretRef => ({
@@ -95,12 +95,17 @@ const toRef = (stored: StoredSecret): SecretRef => ({
 
 /** A separator the repository refused, in the envelope's vocabulary. */
 const nameIssue = (error: SecretNameError): Effect.Effect<never, Validation> =>
-  Effect.fail(validation([{ path: [], message: error.message }], "the request is not valid"));
+  Effect.fail(
+    createValidationError([{ path: [], message: error.message }], "the request is not valid"),
+  );
 
 /** A cursor this listing did not issue, in the envelope's vocabulary. */
 const cursorIssue = (error: CursorError): Effect.Effect<never, Validation> =>
   Effect.fail(
-    validation([{ path: ["cursor"], message: error.message }], "the cursor is not valid"),
+    createValidationError(
+      [{ path: ["cursor"], message: error.message }],
+      "the cursor is not valid",
+    ),
   );
 
 const make = Effect.gen(function* () {
@@ -184,7 +189,7 @@ const make = Effect.gen(function* () {
             const removed = yield* secrets.delete(owner, input.name);
             if (!removed) {
               return yield* Effect.fail(
-                notFound(`no secret named ${input.name} for ${owner.kind}/${owner.id}`),
+                createNotFoundError(`no secret named ${input.name} for ${owner.kind}/${owner.id}`),
               );
             }
             yield* audit.append({

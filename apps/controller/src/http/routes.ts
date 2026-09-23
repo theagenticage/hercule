@@ -19,7 +19,7 @@ import {
   CapExceeded,
   Conflict,
   Forbidden,
-  internal,
+  createInternalError,
   Internal,
   InvalidState,
   NotFound,
@@ -93,7 +93,7 @@ export const operation = <A, E, R>(
       ? Effect.fail(error as Extract<E, ApiError>)
       : Effect.andThen(
           Effect.logError("An operation failed with something the caller cannot act on", error),
-          Effect.fail(internal("something went wrong")),
+          Effect.fail(createInternalError("something went wrong")),
         ),
   );
 

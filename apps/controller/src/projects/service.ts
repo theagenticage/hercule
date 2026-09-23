@@ -28,14 +28,14 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  createDecodeValidationError,
+  createNotFoundError,
+  createValidationError,
   DEFAULT_PAGE_LIMIT,
   Id,
-  notFound,
   PROJECT_SORT_FIELDS,
   ProjectCreateInput,
   ProjectUpdateInput,
-  validation,
-  validationOf,
   type Forbidden,
   type NotFound,
   type Project,
@@ -102,7 +102,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(
       projects.live(id),
       Option.match({
-        onNone: () => Effect.fail(notFound(NO_SUCH_PROJECT)),
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_PROJECT)),
         onSome: Effect.succeed,
       }),
     );
@@ -114,7 +114,10 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<ProjectPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("project.query");
-        const { limit, cursor, sort } = yield* Effect.mapError(decodeQuery(input), validationOf);
+        const { limit, cursor, sort } = yield* Effect.mapError(
+          decodeQuery(input),
+          createDecodeValidationError,
+        );
         const order =
           sort === undefined
             ? DEFAULT_SORT
@@ -134,7 +137,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Project, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("project.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* live(id);
       }),
 
@@ -144,7 +147,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Project, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("project.create");
-        const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -179,9 +182,14 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Project, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("project.update");
-        const { id, ...patch } = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const { id, ...patch } = yield* Effect.mapError(
+          decodeUpdate(input),
+          createDecodeValidationError,
+        );
         if (Object.keys(patch).length === 0) {
-          return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: [], message: "name a field to change" }]),
+          );
         }
         return yield* withTransaction(
           sql,
@@ -234,7 +242,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireGrant("project.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

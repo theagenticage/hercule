@@ -22,11 +22,11 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  conflict,
+  createConflictError,
+  createInvalidStateError,
+  createNotFoundError,
+  createValidationError,
   DEFAULT_PAGE_LIMIT,
-  invalidState,
-  notFound,
-  validation,
   type Conflict,
   type Forbidden,
   type Grant,
@@ -60,7 +60,8 @@ export interface ProfilePage {
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
 /** The one message a name collision gets, whichever operation hit it. */
-const NAME_TAKEN = (name: string): Conflict => conflict(`a profile named ${name} already exists`);
+const NAME_TAKEN = (name: string): Conflict =>
+  createConflictError(`a profile named ${name} already exists`);
 
 const NO_SUCH_PROFILE = "no such permission profile";
 
@@ -84,10 +85,12 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<Profile, NotFound | InvalidState | GrantsError | SqlError> =>
     Effect.gen(function* () {
       const found = yield* profiles.getById(id);
-      if (Option.isNone(found)) return yield* Effect.fail(notFound(NO_SUCH_PROFILE));
+      if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError(NO_SUCH_PROFILE));
       if (found.value.shipped) {
         return yield* Effect.fail(
-          invalidState(`${found.value.name} is a profile Hercule ships; it cannot be deleted.`),
+          createInvalidStateError(
+            `${found.value.name} is a profile Hercule ships; it cannot be deleted.`,
+          ),
         );
       }
       return found.value;
@@ -111,7 +114,7 @@ const make = Effect.gen(function* () {
           })
           .pipe(
             Effect.catchTag("CursorError", (error) =>
-              Effect.fail(validation([{ path: ["cursor"], message: error.message }])),
+              Effect.fail(createValidationError([{ path: ["cursor"], message: error.message }])),
             ),
           );
         return {
@@ -128,7 +131,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("profile.read");
         const found = yield* profiles.getById(input.id);
         return yield* Option.match(found, {
-          onNone: () => Effect.fail(notFound(NO_SUCH_PROFILE)),
+          onNone: () => Effect.fail(createNotFoundError(NO_SUCH_PROFILE)),
           onSome: Effect.succeed,
         });
       }),
@@ -174,7 +177,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("profile.update");
         if (input.name === undefined && input.grants === undefined) {
-          return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: [], message: "name a field to change" }]),
+          );
         }
         return yield* withTransaction(
           sql,
@@ -185,7 +190,7 @@ const make = Effect.gen(function* () {
             });
             switch (outcome._tag) {
               case "absent":
-                return yield* Effect.fail(notFound(NO_SUCH_PROFILE));
+                return yield* Effect.fail(createNotFoundError(NO_SUCH_PROFILE));
               case "nameTaken":
                 // Only the unique `name` column can make the update an ignore,
                 // so a patch that got here carried one.

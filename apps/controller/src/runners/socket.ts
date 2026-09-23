@@ -25,7 +25,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/unstable/socket/Socket";
-import { internal, unauthenticated } from "@hercule/contract";
+import { createInternalError, createUnauthenticatedError } from "@hercule/contract";
 import {
   ControllerToRunner,
   GOING_AWAY_CLOSE_CODE,
@@ -281,18 +281,18 @@ export const RunnerSocketRouteLayer = HttpRouter.add("GET", RUNNER_SOCKET_PATH, 
   Effect.gen(function* () {
     const connections = yield* RunnerConnections;
     const credential = bearerOf(request);
-    if (credential === undefined) return responseFor(unauthenticated(NO_CREDENTIAL));
+    if (credential === undefined) return responseFor(createUnauthenticatedError(NO_CREDENTIAL));
     // A database that will not answer is not a credential that was refused, and
     // a runner told `unauthenticated` stops presenting a credential still good.
     const admitted = yield* Effect.catch(connections.admits(credential), (error) =>
       Effect.as(Effect.logError("A runner's credential could not be resolved", error), undefined),
     );
-    if (admitted === undefined) return responseFor(internal("something went wrong"));
+    if (admitted === undefined) return responseFor(createInternalError("something went wrong"));
     if (Option.isNone(admitted)) {
       const retired = yield* Effect.catch(connections.wasRetired(credential), (error) =>
         Effect.as(Effect.logError("A refused credential could not be looked up", error), false),
       );
-      return responseFor(unauthenticated(retired ? RETIRED : UNKNOWN_CREDENTIAL));
+      return responseFor(createUnauthenticatedError(retired ? RETIRED : UNKNOWN_CREDENTIAL));
     }
 
     const socket = yield* request.upgrade;

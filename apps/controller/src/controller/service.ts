@@ -27,10 +27,10 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  conflict,
   ControllerUpdateInput,
-  validation,
-  validationOf,
+  createConflictError,
+  createDecodeValidationError,
+  createValidationError,
   type Conflict,
   type ControllerInfo,
   type Forbidden,
@@ -96,7 +96,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* currentUser("controller.update");
-        const patch = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const patch = yield* Effect.mapError(decodeUpdate(input), createDecodeValidationError);
         if (patch.defaultRunnerId === undefined) return yield* info();
         const chosen = patch.defaultRunnerId;
         return yield* withTransaction(
@@ -112,12 +112,12 @@ const make = Effect.gen(function* () {
               const runner = yield* runners.read(chosen);
               if (Option.isNone(runner)) {
                 return yield* Effect.fail(
-                  validation([{ path: ["defaultRunnerId"], message: NO_SUCH_RUNNER }]),
+                  createValidationError([{ path: ["defaultRunnerId"], message: NO_SUCH_RUNNER }]),
                 );
               }
-              if (runner.value.reserved) return yield* Effect.fail(conflict(RESERVED));
+              if (runner.value.reserved) return yield* Effect.fail(createConflictError(RESERVED));
               if (runner.value.lifecycle === "retired") {
-                return yield* Effect.fail(conflict(RETIRED));
+                return yield* Effect.fail(createConflictError(RETIRED));
               }
             }
             yield* settings.setDefaultRunnerId(chosen, at);

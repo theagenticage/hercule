@@ -4,13 +4,18 @@
  * said which providers its build carries an adapter for.
  */
 import * as Effect from "effect/Effect";
-import { invalidState, validation, type InvalidState, type Validation } from "@hercule/contract";
+import {
+  createInvalidStateError,
+  createValidationError,
+  type InvalidState,
+  type Validation,
+} from "@hercule/contract";
 import type { RunnerDetail } from "@hercule/contract";
 
 const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything";
 
 export const requireOnline = (runner: RunnerDetail): Effect.Effect<void, InvalidState> =>
-  runner.connectivity === "online" ? Effect.void : Effect.fail(invalidState(NOT_ONLINE));
+  runner.connectivity === "online" ? Effect.void : Effect.fail(createInvalidStateError(NOT_ONLINE));
 
 export const noAdapterFor = (providerId: string): string =>
   `no adapter for ${providerId} in this runner build`;
@@ -25,5 +30,5 @@ export const requireAdapter = (
   Effect.flatMap(requireOnline(runner), () =>
     (runner.facts?.adapters ?? []).includes(providerId)
       ? Effect.void
-      : Effect.fail(validation([{ path: [field], message: noAdapterFor(providerId) }])),
+      : Effect.fail(createValidationError([{ path: [field], message: noAdapterFor(providerId) }])),
   );

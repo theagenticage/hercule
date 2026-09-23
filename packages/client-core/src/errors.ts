@@ -6,7 +6,13 @@
  * derived client can produce is folded into one of these three plain errors
  * before it reaches the web app or the CLI.
  */
-import { ERROR_CODES, ERROR_STATUS, issuesOf, type ErrorCode, type Issue } from "@hercule/contract";
+import {
+  ERROR_CODES,
+  ERROR_STATUS,
+  listDecodeIssues,
+  type ErrorCode,
+  type Issue,
+} from "@hercule/contract";
 import { Schema } from "effect";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 
@@ -114,7 +120,7 @@ export const toClientError = (
   sent: boolean,
 ): RequestError | ApiError | ConnectionError => {
   if (!sent && Schema.isSchemaError(failure)) {
-    return new RequestError(issuesOf(failure), failure);
+    return new RequestError(listDecodeIssues(failure), failure);
   }
 
   const envelope = asEnvelope(failure);

@@ -23,15 +23,15 @@ import {
 } from "@hercule/plugin-host";
 import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hercule/protocol";
 import {
-  invalidState,
+  createInvalidStateError,
   Id,
-  notFound,
+  createNotFoundError,
   ProviderInstanceCreateInput,
   ProviderInstanceUpdateInput,
   ProviderLoginCodeInput,
   ProviderLoginInput,
-  validation,
-  validationOf,
+  createValidationError,
+  createDecodeValidationError,
   type CapabilitySnapshot,
   type Forbidden,
   type InvalidState,
@@ -143,7 +143,7 @@ type AskError = WriteError | InvalidState;
  * settles by entering the credential again.
  */
 const undecryptable = (error: SecretDecryptError): InvalidState =>
-  invalidState(
+  createInvalidStateError(
     `the credential stored as ${error.name} for that provider instance could not be ` +
       "decrypted; enter it again to replace it",
   );
@@ -169,7 +169,7 @@ const readConfig = (
   Effect.asVoid(
     Effect.mapError(
       decodeAgainst(excludeSecretFields(definition.configSchema), config),
-      validationOf,
+      createDecodeValidationError,
     ),
   );
 
@@ -260,7 +260,7 @@ const make = Effect.gen(function* () {
         ),
       );
       return yield* Option.match(found, {
-        onNone: () => Effect.fail(notFound(NO_SUCH_INSTANCE)),
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_INSTANCE)),
         onSome: Effect.succeed,
       });
     });
@@ -269,14 +269,18 @@ const make = Effect.gen(function* () {
     Effect.flatMap(definitions, (known) => {
       const definition = known.get(id);
       return definition === undefined
-        ? Effect.fail(validation([{ path: ["providerId"], message: `no plugin registered ${id}` }]))
+        ? Effect.fail(
+            createValidationError([
+              { path: ["providerId"], message: `no plugin registered ${id}` },
+            ]),
+          )
         : Effect.succeed(definition);
     });
 
   const machine = (runnerId: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
     Effect.gen(function* () {
       const runner = yield* runners.read(runnerId);
-      if (Option.isNone(runner)) return yield* Effect.fail(notFound(NO_SUCH_RUNNER));
+      if (Option.isNone(runner)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RUNNER));
       return runner.value;
     });
 
@@ -300,7 +304,7 @@ const make = Effect.gen(function* () {
         // answer.
         onNone: () =>
           Effect.fail(
-            invalidState(
+            createInvalidStateError(
               `that runner did not answer the login within ${Duration.format(deadline)}`,
             ),
           ),
@@ -318,7 +322,7 @@ const make = Effect.gen(function* () {
     read: (input: Identified): Effect.Effect<ProviderInstance, WriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* one(id);
       }),
 
@@ -331,7 +335,10 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<{ readonly url: string; readonly userCode?: string }, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.login");
-        const { id, runnerId } = yield* Effect.mapError(decodeLogin(input), validationOf);
+        const { id, runnerId } = yield* Effect.mapError(
+          decodeLogin(input),
+          createDecodeValidationError,
+        );
         const instance = yield* one(id);
         yield* drivable(runnerId, instance.providerId, "runnerId");
         const answer = yield* asked(
@@ -344,7 +351,8 @@ const make = Effect.gen(function* () {
           },
           yield* ProviderLoginDeadline,
         );
-        if (answer._tag !== "loginUrl") return yield* Effect.fail(invalidState(refusalIn(answer)));
+        if (answer._tag !== "loginUrl")
+          return yield* Effect.fail(createInvalidStateError(refusalIn(answer)));
         // Absent rather than empty: a code is what tells the user's browser,
         // not this exchange, to finish the login.
         return {
@@ -361,7 +369,10 @@ const make = Effect.gen(function* () {
     submitLoginCode: (input: LoginCodeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.submitLoginCode");
-        const { id, runnerId, code } = yield* Effect.mapError(decodeLoginCode(input), validationOf);
+        const { id, runnerId, code } = yield* Effect.mapError(
+          decodeLoginCode(input),
+          createDecodeValidationError,
+        );
         const instance = yield* one(id);
         yield* drivable(runnerId, instance.providerId, "runnerId");
         const answer = yield* asked(
@@ -370,11 +381,13 @@ const make = Effect.gen(function* () {
           LOGIN_CODE_DEADLINE,
         );
         if (answer._tag !== "loginResult") {
-          return yield* Effect.fail(invalidState(refusalIn(answer)));
+          return yield* Effect.fail(createInvalidStateError(refusalIn(answer)));
         }
         if (!answer.ok) {
           const said = answer.message ?? "that code was refused";
-          return yield* Effect.fail(validation([{ path: ["code"], message: said }], said));
+          return yield* Effect.fail(
+            createValidationError([{ path: ["code"], message: said }], said),
+          );
         }
         // Who put a credential on which machine. Never the URL or the code -
         // they are good for this exchange only.
@@ -400,7 +413,7 @@ const make = Effect.gen(function* () {
           onNone: () =>
             Effect.flatMap(ProviderProbeDeadline, (waited) =>
               Effect.fail(
-                invalidState(
+                createInvalidStateError(
                   `the login finished, but that runner did not answer the probe within ${Duration.format(waited)}`,
                 ),
               ),
@@ -416,7 +429,10 @@ const make = Effect.gen(function* () {
     probe: (input: ProbeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.probe");
-        const { runnerId, instanceId } = yield* Effect.mapError(decodeProbe(input), validationOf);
+        const { runnerId, instanceId } = yield* Effect.mapError(
+          decodeProbe(input),
+          createDecodeValidationError,
+        );
         yield* requireOnline(yield* machine(runnerId));
         const snapshot = yield* probes
           .probe(runnerId, instanceId)
@@ -427,7 +443,7 @@ const make = Effect.gen(function* () {
           onNone: () =>
             Effect.flatMap(ProviderProbeDeadline, (waited) =>
               Effect.fail(
-                invalidState(
+                createInvalidStateError(
                   `that runner did not answer the probe within ${Duration.format(waited)}`,
                 ),
               ),
@@ -444,7 +460,10 @@ const make = Effect.gen(function* () {
     installHarness: (input: InstallInput): Effect.Effect<RunnerDetail, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.installHarness");
-        const { runnerId, providerId } = yield* Effect.mapError(decodeInstall(input), validationOf);
+        const { runnerId, providerId } = yield* Effect.mapError(
+          decodeInstall(input),
+          createDecodeValidationError,
+        );
         yield* drivable(runnerId, providerId, "providerId");
         const answer = yield* connections.asked(
           runnerId,
@@ -454,11 +473,13 @@ const make = Effect.gen(function* () {
         if (Option.isNone(answer) || answer.value._tag !== "installResult") {
           const waited = Duration.format(HARNESS_INSTALL_DEADLINE);
           return yield* Effect.fail(
-            invalidState(`that runner did not finish the install within ${waited}`),
+            createInvalidStateError(`that runner did not finish the install within ${waited}`),
           );
         }
         if (!answer.value.ok) {
-          return yield* Effect.fail(invalidState(answer.value.message ?? "the install failed"));
+          return yield* Effect.fail(
+            createInvalidStateError(answer.value.message ?? "the install failed"),
+          );
         }
         yield* Effect.forkDetach(probes.sweepRunner(runnerId));
         return yield* machine(runnerId);
@@ -468,7 +489,7 @@ const make = Effect.gen(function* () {
     create: (input: ProviderInstanceCreateInput): Effect.Effect<ProviderInstance, CreateError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.create");
-        const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
+        const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         const definition = yield* provider(decoded.providerId);
         yield* readConfig(definition, decoded.config);
         return yield* withTransaction(
@@ -480,7 +501,7 @@ const make = Effect.gen(function* () {
               const existing = yield* instances.list();
               if (existing.some((row) => row.providerId === definition.id)) {
                 return yield* Effect.fail(
-                  validation([
+                  createValidationError([
                     {
                       path: ["providerId"],
                       message: `${definition.displayName} holds one account, and it already has one`,
@@ -513,9 +534,14 @@ const make = Effect.gen(function* () {
     update: (input: UpdateInput): Effect.Effect<ProviderInstance, WriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.update");
-        const { id, ...patch } = yield* Effect.mapError(decodeUpdate(input), validationOf);
+        const { id, ...patch } = yield* Effect.mapError(
+          decodeUpdate(input),
+          createDecodeValidationError,
+        );
         if (Object.keys(patch).length === 0) {
-          return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
+          return yield* Effect.fail(
+            createValidationError([{ path: [], message: "name a field to change" }]),
+          );
         }
         return yield* withTransaction(
           sql,
@@ -554,7 +580,7 @@ const make = Effect.gen(function* () {
     delete: (input: Identified): Effect.Effect<Record<string, never>, WriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), validationOf);
+        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -562,7 +588,7 @@ const make = Effect.gen(function* () {
             const stored = yield* Effect.flatMap(
               instances.one(id),
               Option.match({
-                onNone: () => Effect.fail(notFound(NO_SUCH_INSTANCE)),
+                onNone: () => Effect.fail(createNotFoundError(NO_SUCH_INSTANCE)),
                 onSome: Effect.succeed,
               }),
             );
