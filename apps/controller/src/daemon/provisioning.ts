@@ -150,7 +150,7 @@ const make = Effect.gen(function* () {
           const interval = yield* WorkspaceSweepInterval;
           while (true) {
             yield* Effect.sleep(interval);
-            yield* absorbFailures("The workspace expiry sweep failed", sweep);
+            yield* absorbFailures("Sweeping expired workspaces failed", sweep);
           }
         }),
       ],

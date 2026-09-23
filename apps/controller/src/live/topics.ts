@@ -22,7 +22,8 @@
  *   gets one delta per entry.
  *
  * A subscriber that stops reading is ended instead of queued for without
- * limit. It can come back from the last cursor it received.
+ * limit. It can subscribe again, and a log subscriber can pass the last
+ * cursor it received to continue where it stopped.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -72,8 +73,8 @@ const COALESCE_WINDOW = Duration.millis(COALESCE_WINDOW_MS);
  * How many messages may wait for one subscriber before the controller ends
  * the subscription. A client that stops reading is either gone or too slow to
  * catch up, and either way buffering for it costs memory the controller cannot
- * reclaim. The subscription ends, and the client can subscribe again from its
- * cursor.
+ * reclaim. The subscription ends, and the client can subscribe again. For a
+ * log topic it passes the last cursor it received, so it misses nothing.
  */
 const SUBSCRIPTION_CAP = 1000;
 
@@ -99,7 +100,7 @@ interface Watcher {
 const LOG_TOPIC: LiveTopic = "event";
 
 const TOO_SLOW =
-  "this subscription fell too far behind because it was not being read; subscribe again from your last cursor";
+  "this subscription fell too far behind because it was not being read; subscribe again, and for a log topic pass the last cursor you received";
 
 const LOG_UNREADABLE = "the event log could not be read";
 

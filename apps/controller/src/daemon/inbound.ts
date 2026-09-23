@@ -144,11 +144,11 @@ const make = Effect.gen(function* () {
 
   return {
     driving: Stream.runForEach(connections.fleetTraffic, (traffic) =>
-      absorbFailures("A runner's report could not be applied", applyFleetTraffic(traffic)),
+      absorbFailures("Applying a runner's report failed", applyFleetTraffic(traffic)),
     ),
 
     ingesting: Stream.runForEach(connections.sessionTraffic, (traffic) =>
-      absorbFailures("A session report could not be recorded", ingestSessionTraffic(traffic)),
+      absorbFailures("Recording a session report failed", ingestSessionTraffic(traffic)),
     ),
   };
 });

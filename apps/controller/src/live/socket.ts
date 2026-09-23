@@ -89,7 +89,10 @@ const parsePosition = (raw: string | undefined): Effect.Effect<number | undefine
   if (!CURSOR.test(raw) || !Number.isSafeInteger(cursor)) {
     return Effect.fail(
       createValidationError([
-        { path: ["cursor"], message: "cursor must be a whole number: a position in the log" },
+        {
+          path: ["cursor"],
+          message: "the cursor must be a whole number: the position of an entry in the log",
+        },
       ]),
     );
   }

@@ -43,7 +43,7 @@ const make = Effect.gen(function* () {
     // A delivery that fails must not hold back the next one: they own
     // different rows and do not depend on each other.
     for (const delivery of deliveries) {
-      yield* absorbFailures(`The delivery of ${delivery.name} failed`, delivery.deliverWaiting());
+      yield* absorbFailures(`Delivering ${delivery.name} failed`, delivery.deliverWaiting());
     }
   });
 
@@ -57,7 +57,7 @@ const make = Effect.gen(function* () {
       const interval = yield* EventRoutingInterval;
       while (true) {
         yield* Effect.sleep(interval);
-        yield* absorbFailures("One tick of the event pipeline failed", tick);
+        yield* absorbFailures("Running a tick of the event pipeline failed", tick);
       }
     }),
   };

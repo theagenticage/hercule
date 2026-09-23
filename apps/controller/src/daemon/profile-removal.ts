@@ -82,7 +82,7 @@ const make = Effect.gen(function* () {
               return yield* Effect.fail(
                 createInvalidStateError(
                   `${profile.name} is used by a session that has not exited; ` +
-                    "delete it once every session on it has exited",
+                    "delete it once every session using it has exited",
                 ),
               );
             }

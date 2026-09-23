@@ -60,7 +60,7 @@ export const sweepSessionsOnLostRunners: Effect.Effect<
     Effect.flatMap(runners.connected(), (connected) => sessions.endOnLostRunners(connected)),
   );
   while (true) {
-    yield* absorbFailures("The sweep for sessions on lost runners failed", pass);
+    yield* absorbFailures("Ending sessions on lost runners failed", pass);
     yield* Effect.sleep(interval);
   }
 });
