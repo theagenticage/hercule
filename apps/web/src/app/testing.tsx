@@ -136,8 +136,8 @@ export interface LiveStub {
    */
   cursorOf(topic: string): string | undefined;
   /**
-   * Closes the app's socket from the controller's side, as a network that
-   * goes away does. The supervisor connects again on its own schedule.
+   * Closes the app's socket from the server side, as a network failure would.
+   * The app then reconnects on its own schedule.
    */
   drop(): void;
 }
@@ -160,9 +160,9 @@ export const reading = (element: HTMLElement | null = document.body): string =>
   (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /**
- * Fails unless each element comes after the element before it on the page. A
- * pair of answers puts the one that declines first and the one that accepts
- * last, and a test pins that order with this.
+ * Checks that the elements appear on the page in the given order, and fails
+ * the test otherwise. Tests use it, for example, to check that Cancel comes
+ * before Confirm.
  */
 export const expectInDocumentOrder = (elements: readonly HTMLElement[]): void => {
   elements.forEach((element, index) => {
@@ -172,7 +172,7 @@ export const expectInDocumentOrder = (elements: readonly HTMLElement[]): void =>
   });
 };
 
-/** The names of the sidebar's items that mark the screen the reader is on. */
+/** Returns the names of the sidebar links marked as the current page. */
 export const readCurrentNavItems = (): readonly (string | null)[] =>
   within(screen.getByRole("navigation", { name: "Hercule" }))
     .getAllByRole("link")

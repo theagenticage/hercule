@@ -5,15 +5,16 @@ import { WorkflowEditorPage } from "./-page";
 import { validateWorkflowViewSearch } from "./-view";
 
 export const Route = createFileRoute("/_shell/workflows/new")({
-  // The page's own header names the workflow, so the shell's bar stands down.
+  // The page draws its own header with the workflow's name, so the shell
+  // hides its top bar.
   staticData: { title: "New workflow", ownsTopBar: true },
   validateSearch: validateWorkflowViewSearch,
-  // The catalogs that the editor completes from are read before it shows.
+  // Loads the editor's autocomplete data before the page renders.
   loader: ({ context: { client, queryClient } }) => prefetchWorkflowCatalog(client, queryClient),
   component: NewWorkflow,
 });
 
-/** A workflow that is not stored yet, written from the starter source. */
+/** Renders the editor page for a new workflow, starting from the starter source. */
 function NewWorkflow(): JSX.Element {
   const { client, live } = Route.useRouteContext();
   const navigate = Route.useNavigate();

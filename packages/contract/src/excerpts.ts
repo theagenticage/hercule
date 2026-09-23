@@ -1,43 +1,44 @@
 /**
- * Short excerpts of long text, for the messages of a refusal: a quote of what
- * an author wrote, a list of the author's names, and one sentence of what a
- * library said. A refusal names each problem with its own message, so a
- * message that repeated a long value in full would make the refusal as large
- * as the request, once for each problem. The checks of a workflow and the
- * check of a subscription's condition write their messages through these.
+ * Helpers that keep error messages short when they include long text: a quote
+ * of what the author wrote, a list of names, or a message from a library. An
+ * error response has one message per problem, so messages that repeated a long
+ * value in full could make the response as large as the request, once per
+ * problem. The workflow validators and the check of a subscription's condition
+ * build their messages with these helpers.
  */
 
 /**
- * The first `max` characters of a text, and "..." after them where the text
- * is longer. The cut never falls between the two halves of a surrogate pair,
- * because half of a pair is not a character.
+ * Returns the first `max` characters of `text`, followed by "..." if the text
+ * is longer. Never cuts between the two halves of a surrogate pair, because
+ * half a pair is not a valid character.
  */
-export const cutShort = (text: string, max: number): string => {
+export const truncateText = (text: string, max: number): string => {
   if (text.length <= max) return text;
   const end = /[\uD800-\uDBFF]/.test(text.charAt(max - 1)) ? max - 1 : max;
   return `${text.slice(0, end)}...`;
 };
 
-/** The most characters of what the author wrote that a message quotes. */
+/** The maximum number of characters of the author's text that a message quotes. */
 export const MAX_QUOTED_LENGTH = 40;
 
 /**
- * Text the author wrote, in quotes, cut short where it is long. Every message
- * about a workflow or an expression quotes the author's text through this,
- * lists the author's names through `joinNames`, and repeats a library's words
- * through `excerptMessage`, so no message grows with what the author wrote.
+ * Returns the author's text as a JSON string in double quotes, truncated to
+ * `MAX_QUOTED_LENGTH` characters. Every message about a workflow or an
+ * expression quotes the author's text with this function, lists names with
+ * `joinNames`, and includes a library's message with `shortenLibraryMessage`. So no
+ * message grows with the size of what the author wrote.
  */
-export const quoteWritten = (text: string): string =>
-  JSON.stringify(cutShort(text, MAX_QUOTED_LENGTH));
+export const quoteAuthorText = (text: string): string =>
+  JSON.stringify(truncateText(text, MAX_QUOTED_LENGTH));
 
-/** The most names that a message lists. */
+/** The maximum number of names that a message lists. */
 const MAX_LISTED_NAMES = 5;
 
 /**
- * Names in an English list: `a`, `a and b`, `a, b and c`. A list of more than
- * `MAX_LISTED_NAMES` names gives the first ones and the number of the others,
- * such as `a, b, c, d, e and 3 more`, so a message does not grow with the
- * number of names that the author wrote.
+ * Joins names into an English list: `a`, `a and b`, `a, b and c`. With more
+ * than `MAX_LISTED_NAMES` names, returns the first ones and a count of the
+ * rest, such as `a, b, c, d, e and 3 more`, so a message does not grow with
+ * the number of names.
  */
 export const joinNames = (names: ReadonlyArray<string>): string => {
   const listed =
@@ -49,17 +50,17 @@ export const joinNames = (names: ReadonlyArray<string>): string => {
     : `${listed.slice(0, -1).join(", ")} and ${listed.at(-1)!}`;
 };
 
-/** The most characters of a message from a library that a refusal repeats. */
+/** The maximum number of characters of a library's message that an error message repeats. */
 const MAX_LIBRARY_MESSAGE_LENGTH = 120;
 
 /**
- * A message that a library wrote, such as the YAML parser, the schema library
- * or the expression evaluator, as one sentence of a refusal. The library's
- * words can repeat what the author wrote, so they are cut short, as a quote of
- * the author's text is. The sentence ends with one full stop: a message that
- * ends in punctuation, or in the dots of a cut, gets no second one.
+ * Returns a library's message (from the YAML parser, the schema library or the
+ * expression evaluator) as one sentence to include in an error message. The
+ * library's message can repeat what the author wrote, so it is truncated like
+ * a quote. The result ends with exactly one full stop: none is added after a
+ * message that already ends in punctuation or in the "..." of a cut.
  */
-export const excerptMessage = (message: string): string => {
-  const excerpt = cutShort(message, MAX_LIBRARY_MESSAGE_LENGTH);
+export const shortenLibraryMessage = (message: string): string => {
+  const excerpt = truncateText(message, MAX_LIBRARY_MESSAGE_LENGTH);
   return /[.!?]$/.test(excerpt) ? excerpt : `${excerpt}.`;
 };

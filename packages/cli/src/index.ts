@@ -22,7 +22,7 @@ import {
 import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hercule/home";
 import { Result } from "effect";
 import { parseArguments, said } from "./commands/args";
-import { describeIssue, type WorkflowIssues } from "@hercule/contract";
+import { formatIssue, type WorkflowIssues } from "@hercule/contract";
 import { execute, type Outcome } from "./commands/execute";
 import { commandHelp, nounHelp, rootHelp, shellExample } from "./commands/help";
 import { renderHuman } from "./commands/render";
@@ -149,11 +149,11 @@ const runOperation = async (
 };
 
 /**
- * The exit code of an operation the controller answered. A check of a
- * workflow that found an error answers like any other check, but a script
- * that checks a workflow before it saves one must be able to stop on the
- * error. So it ends as a refused save of the same workflow does. Warnings
- * alone do not stop a save, and do not change the code.
+ * Returns the exit code for an operation the controller completed. When
+ * `workflow validate` finds errors, the controller still returns success, but
+ * the CLI exits with the same code as a rejected save. This lets a script
+ * validate a workflow and stop before saving it. Warnings alone do not block
+ * a save, so they do not change the exit code.
  */
 const decideExitCode = (command: Command, outcome: Outcome): number =>
   command.id === "workflow.validate" &&
@@ -279,7 +279,7 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
  * the message told the caller nothing it could act on.
  */
 const refusals = (error: ApiError): ReadonlyArray<string> =>
-  (readValidationIssues(error) ?? []).map(describeIssue);
+  (readValidationIssues(error) ?? []).map(formatIssue);
 
 /** Turn whatever went wrong into a message and an exit code. */
 const report = (error: unknown, json: boolean, io: Io): number => {

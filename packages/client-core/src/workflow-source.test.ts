@@ -1,15 +1,8 @@
 /**
- * How the browser reads a workflow's source: the one parse of the source, and
- * the place in the source of each problem that the parse or the controller
- * names.
- *
- * The controller names a problem by its path into the definition and never by
- * a position, so that the contract stays free of positions. The editor must
- * find the place in the source itself. Each test of `locateIssues` writes a
- * source, names one kind of path, and checks the characters that the path
- * lands on. `from` and `to` are character offsets into the source. A path
- * that ends at a key lands on the key through its value. A range covers the
- * first line of its place only, and not the line break after it.
+ * The controller reports each problem with a path into the definition and no
+ * text offset, so the editor must convert paths to text ranges itself. Each
+ * `locateIssues` test takes one kind of path and checks the range it converts
+ * to. `from` and `to` are character offsets into the source.
  */
 import { describe, expect, it } from "vitest";
 import { Result } from "effect";
@@ -18,17 +11,18 @@ import {
   decideIssueState,
   formatProblemCount,
   locateIssues,
-  readWorkflowSource,
+  parseWorkflowSourceWithRanges,
 } from "@hercule/client-core";
 import { findUniqueOffset } from "./workflow-source.testing";
 
 /**
- * A valid workflow, one line for each item, so line N is item N - 1. The
- * comment on the first line puts the definition after the start of the source,
- * so a place that counts from the wrong start shows.
- * Step `review` names an action that does not exist, as a typing author
- * leaves it, and `task.create` in the step before it has the same first
- * characters.
+ * A valid workflow. Line N is array item N - 1.
+ *
+ * - The comment on the first line makes the definition start after offset 0,
+ *   so an offset computed from the wrong start fails the test.
+ * - Step `review` has an unknown action, `task.creat`, as if the author were
+ *   still typing it. The step before it uses `task.create`, which starts with
+ *   the same characters.
  */
 const SOURCE = [
   "# Review labelled pull requests.",
@@ -55,7 +49,7 @@ const SOURCE = [
   "",
 ].join("\n");
 
-/** A step whose kind is a word that is not a kind. The YAML is valid. */
+/** Valid YAML, but a step has an unknown kind, `acton`. */
 const SHAPE_ERROR_SOURCE = [
   "name: Review",
   "steps:",
@@ -65,7 +59,7 @@ const SHAPE_ERROR_SOURCE = [
   "",
 ].join("\n");
 
-/** Line 4 holds a mapping inside a compact mapping, which YAML does not allow. */
+/** Invalid YAML: line 4 has a mapping inside a compact mapping. */
 const SYNTAX_ERROR_SOURCE = [
   "name: Review",
   "steps:",
@@ -74,35 +68,35 @@ const SYNTAX_ERROR_SOURCE = [
   "",
 ].join("\n");
 
-/** The offset just after a fragment that the source holds exactly once. */
+/** Returns the offset just after `fragment`, which must occur exactly once in `source`. */
 const findUniqueEnd = (source: string, fragment: string): number =>
   findUniqueOffset(source, fragment) + fragment.length;
 
-/** The issues that the shared parse refuses a source with. A source that parses fails the test. */
+/** Returns the errors from the contract's parse of `source`. Throws if the source parses. */
 const listParseIssues = (source: string): ReadonlyArray<Issue> => {
   const parsed = parseWorkflowSource(source);
-  if (Result.isSuccess(parsed)) throw new Error("The source parsed, and the test needs a refusal.");
+  if (Result.isSuccess(parsed)) throw new Error("The source parsed, but the test needs errors.");
   return parsed.failure;
 };
 
-describe("readWorkflowSource", () => {
-  it("answers the definition that the shared parse answers, and no issues, for a source that parses", () => {
-    const reading = readWorkflowSource(SOURCE);
+describe("parseWorkflowSourceWithRanges", () => {
+  it("returns the same definition as the contract's parse, and no issues, for a valid source", () => {
+    const parsed = parseWorkflowSourceWithRanges(SOURCE);
 
-    expect(reading.definition).toEqual(Result.getOrThrow(parseWorkflowSource(SOURCE)));
-    expect(reading.issues).toEqual([]);
+    expect(parsed.definition).toEqual(Result.getOrThrow(parseWorkflowSource(SOURCE)));
+    expect(parsed.issues).toEqual([]);
   });
 
-  it("answers no definition for a shape error, and places the issue from the key through the value it names", () => {
-    const reading = readWorkflowSource(SHAPE_ERROR_SOURCE);
+  it("returns no definition for a schema error, and a range from the key through its value", () => {
+    const parsed = parseWorkflowSourceWithRanges(SHAPE_ERROR_SOURCE);
     const from = findUniqueOffset(SHAPE_ERROR_SOURCE, "kind: acton");
 
-    expect(reading.definition).toBeUndefined();
-    // The same issue that the controller refuses the source with, because both
-    // read the source with the one parse.
+    expect(parsed.definition).toBeUndefined();
+    // The controller would fail the source with this same issue, because it
+    // runs the same parse.
     const [refused] = listParseIssues(SHAPE_ERROR_SOURCE);
     expect(refused?.path).toEqual(["steps", "0", "kind"]);
-    expect(reading.issues).toEqual([
+    expect(parsed.issues).toEqual([
       {
         severity: "error",
         path: ["steps", "0", "kind"],
@@ -113,17 +107,17 @@ describe("readWorkflowSource", () => {
     ]);
   });
 
-  it("answers no definition for a syntax error, and places the issue on the line the parser names", () => {
-    const reading = readWorkflowSource(SYNTAX_ERROR_SOURCE);
+  it("returns no definition for a YAML syntax error, and a range on the line the parser reports", () => {
+    const parsed = parseWorkflowSourceWithRanges(SYNTAX_ERROR_SOURCE);
 
-    expect(reading.definition).toBeUndefined();
-    expect(reading.issues.map(({ path, message }) => ({ path, message }))).toEqual(
+    expect(parsed.definition).toBeUndefined();
+    expect(parsed.issues.map(({ path, message }) => ({ path, message }))).toEqual(
       listParseIssues(SYNTAX_ERROR_SOURCE),
     );
-    const [located] = reading.issues;
+    const [located] = parsed.issues;
     expect(located?.severity).toBe("error");
-    // The parser names a position on line 4. The range starts on that line and
-    // stays inside the source.
+    // The parser reports a position on line 4. The range must start on that
+    // line and end inside the source.
     const lineStart = findUniqueOffset(SYNTAX_ERROR_SOURCE, "    kind: action: agent");
     const lineEnd = findUniqueEnd(SYNTAX_ERROR_SOURCE, "    kind: action: agent");
     expect(located?.from).toBeGreaterThanOrEqual(lineStart);
@@ -134,7 +128,7 @@ describe("readWorkflowSource", () => {
 
   it.each([
     {
-      about: "a field that is not known",
+      about: "an unknown field",
       lines: [
         "name: Review",
         "steps:",
@@ -148,13 +142,13 @@ describe("readWorkflowSource", () => {
       path: ["steps", "0", "actoin"],
     },
     {
-      about: "a key that its mapping has twice",
+      about: "a duplicate key",
       lines: ["name: Review", "steps: []", "name: Another review", ""],
       key: "name: Another",
       path: ["name"],
     },
     {
-      about: "an output name that an expression cannot read",
+      about: "an output name that expressions cannot reference",
       lines: [
         "name: Review",
         "triggers:",
@@ -174,51 +168,52 @@ describe("readWorkflowSource", () => {
       key: "pr-url",
       path: ["triggers", "0", "outputs", "pr-url"],
     },
-  ])(
-    "places a problem about $about from the key through its value, on the key's line",
-    (example) => {
-      const source = example.lines.join("\n");
-      const from = findUniqueOffset(source, example.key);
+  ])("locates $about from the key through its value, on the key's line", (example) => {
+    const source = example.lines.join("\n");
+    const from = findUniqueOffset(source, example.key);
 
-      expect(readWorkflowSource(source).issues).toEqual([
-        {
-          severity: "error",
-          path: example.path,
-          message: listParseIssues(source)[0]?.message,
-          from,
-          to: source.indexOf("\n", from),
-        },
-      ]);
-    },
-  );
+    expect(parseWorkflowSourceWithRanges(source).issues).toEqual([
+      {
+        severity: "error",
+        path: example.path,
+        message: listParseIssues(source)[0]?.message,
+        from,
+        to: source.indexOf("\n", from),
+      },
+    ]);
+  });
 });
 
 describe("locateIssues", () => {
-  const message = "The controller's words for the problem.";
+  const message = "The controller's error message.";
 
-  it("places an issue at a scalar value from its key through that value", () => {
+  it("locates a scalar value from its key through the value", () => {
     const path = ["steps", "1", "action"];
     const from = findUniqueOffset(SOURCE, "action: task.creat\n");
 
-    expect(locateIssues(readWorkflowSource(SOURCE), [{ path, message }], "error")).toEqual([
-      { severity: "error", path, message, from, to: from + "action: task.creat".length },
-    ]);
+    expect(
+      locateIssues(parseWorkflowSourceWithRanges(SOURCE), [{ path, message }], "error"),
+    ).toEqual([{ severity: "error", path, message, from, to: from + "action: task.creat".length }]);
   });
 
-  it("places an issue at a step, a sequence item, on the first line of that step", () => {
+  it("locates a step (a sequence item) on the step's first line", () => {
     const path = ["steps", "1"];
     const from = findUniqueOffset(SOURCE, "id: review");
 
-    expect(locateIssues(readWorkflowSource(SOURCE), [{ path, message }], "error")).toEqual([
+    expect(
+      locateIssues(parseWorkflowSourceWithRanges(SOURCE), [{ path, message }], "error"),
+    ).toEqual([
       { severity: "error", path, message, from, to: findUniqueEnd(SOURCE, "id: review") },
     ]);
   });
 
-  it("places an issue at an edge, a sequence item, on the first line of that edge", () => {
+  it("locates an edge (a sequence item) on the edge's first line", () => {
     const path = ["edges", "0"];
     const from = findUniqueOffset(SOURCE, "from: open_task");
 
-    expect(locateIssues(readWorkflowSource(SOURCE), [{ path, message }], "error")).toEqual([
+    expect(
+      locateIssues(parseWorkflowSourceWithRanges(SOURCE), [{ path, message }], "error"),
+    ).toEqual([
       {
         severity: "error",
         path,
@@ -237,11 +232,15 @@ describe("locateIssues", () => {
       path: ["steps", "0", "params"],
       fragment: "params:",
     },
-  ])("places an issue at $about, a key with a list or a mapping, on the key's line", (example) => {
+  ])("locates $about, a key whose value is a list or mapping, on the key's line", (example) => {
     const from = findUniqueOffset(SOURCE, example.fragment);
 
     expect(
-      locateIssues(readWorkflowSource(SOURCE), [{ path: example.path, message }], "error"),
+      locateIssues(
+        parseWorkflowSourceWithRanges(SOURCE),
+        [{ path: example.path, message }],
+        "error",
+      ),
     ).toEqual([
       {
         severity: "error",
@@ -253,11 +252,13 @@ describe("locateIssues", () => {
     ]);
   });
 
-  it("places an issue at a nested key from the key through its value, with the severity it is given", () => {
+  it("locates a nested key from the key through its value, with the given severity", () => {
     const path = ["triggers", "0", "source", "filter"];
     const from = findUniqueOffset(SOURCE, "filter: event.payload.number > 3");
 
-    expect(locateIssues(readWorkflowSource(SOURCE), [{ path, message }], "warning")).toEqual([
+    expect(
+      locateIssues(parseWorkflowSourceWithRanges(SOURCE), [{ path, message }], "warning"),
+    ).toEqual([
       {
         severity: "warning",
         path,
@@ -268,11 +269,13 @@ describe("locateIssues", () => {
     ]);
   });
 
-  it("places an issue at a key the author chose, inside params, from the key through its value", () => {
+  it("locates a user-defined key inside params from the key through its value", () => {
     const path = ["steps", "0", "params", "title"];
     const from = findUniqueOffset(SOURCE, "title: Review the pull request");
 
-    expect(locateIssues(readWorkflowSource(SOURCE), [{ path, message }], "error")).toEqual([
+    expect(
+      locateIssues(parseWorkflowSourceWithRanges(SOURCE), [{ path, message }], "error"),
+    ).toEqual([
       {
         severity: "error",
         path,
@@ -283,46 +286,46 @@ describe("locateIssues", () => {
     ]);
   });
 
-  it("places an issue at a key that the mapping does not have on the first line of the mapping", () => {
-    // The step review writes no params, and the controller names the missing
-    // params of its action there.
+  it("locates a missing key on the first line of its parent mapping", () => {
+    // Step `review` has no params. The controller reports the missing params
+    // at this path.
     const path = ["steps", "1", "params"];
     const from = findUniqueOffset(SOURCE, "id: review");
 
-    expect(locateIssues(readWorkflowSource(SOURCE), [{ path, message }], "error")).toEqual([
-      { severity: "error", path, message, from, to: from + "id: review".length },
-    ]);
+    expect(
+      locateIssues(parseWorkflowSourceWithRanges(SOURCE), [{ path, message }], "error"),
+    ).toEqual([{ severity: "error", path, message, from, to: from + "id: review".length }]);
   });
 
-  it("places an issue at a value written as nothing on its key", () => {
+  it("locates an empty value on its key", () => {
     const source = SOURCE.replace("action: task.creat\n", "action:\n");
     const path = ["steps", "1", "action"];
     const from = findUniqueOffset(source, "action:\nedges");
 
-    expect(locateIssues(readWorkflowSource(source), [{ path, message }], "error")).toEqual([
-      { severity: "error", path, message, from, to: from + "action:".length },
-    ]);
+    expect(
+      locateIssues(parseWorkflowSourceWithRanges(source), [{ path, message }], "error"),
+    ).toEqual([{ severity: "error", path, message, from, to: from + "action:".length }]);
   });
 
-  it("places an issue at the empty path at the document start", () => {
-    // While the source parses, the one issue that the controller sends with an
-    // empty path says how many more problems a long refusal left out. An
-    // underline under the whole source would hide each real underline.
+  it("locates the empty path at the start of the document", () => {
+    // The only issue the controller sends with an empty path is the summary
+    // that counts the problems left out of a long list. Underlining the whole
+    // source would hide every other underline.
     const path: ReadonlyArray<string> = [];
 
-    expect(locateIssues(readWorkflowSource(SOURCE), [{ path, message }], "error")).toEqual([
-      { severity: "error", path, message, from: 0, to: expect.any(Number) as unknown },
-    ]);
+    expect(
+      locateIssues(parseWorkflowSourceWithRanges(SOURCE), [{ path, message }], "error"),
+    ).toEqual([{ severity: "error", path, message, from: 0, to: expect.any(Number) as unknown }]);
   });
 
-  it("places an issue whose path no longer maps at the document start", () => {
-    // The source has two steps. A validation that answered before the author
-    // removed a step can name a third or a fourth one.
+  it("locates a path that is no longer in the source at the start of the document", () => {
+    // The source has two steps. A validation result from before the author
+    // removed some steps can still refer to a third or fourth step.
     const path = ["steps", "3", "action"];
 
-    expect(locateIssues(readWorkflowSource(SOURCE), [{ path, message }], "error")).toEqual([
-      { severity: "error", path, message, from: 0, to: expect.any(Number) as unknown },
-    ]);
+    expect(
+      locateIssues(parseWorkflowSourceWithRanges(SOURCE), [{ path, message }], "error"),
+    ).toEqual([{ severity: "error", path, message, from: 0, to: expect.any(Number) as unknown }]);
   });
 });
 
@@ -333,53 +336,53 @@ describe("decideIssueState", () => {
     message: "This filter admits every event.",
   };
 
-  it("answers the parse's problems for a source that does not parse, whatever the controller answered", () => {
-    const reading = readWorkflowSource(SHAPE_ERROR_SOURCE);
+  it("returns the local parse errors when there are any, ignoring the controller's result", () => {
+    const parsed = parseWorkflowSourceWithRanges(SHAPE_ERROR_SOURCE);
 
     expect(
-      decideIssueState(reading, {
+      decideIssueState(parsed, {
         source: SHAPE_ERROR_SOURCE,
         issues: { errors: [error], warnings: [warning] },
       }),
-    ).toEqual({ status: "validated", issues: reading.issues });
+    ).toEqual({ status: "validated", issues: parsed.issues });
   });
 
-  it("answers the controller's problems about this source at their places, errors first", () => {
-    const reading = readWorkflowSource(SOURCE);
+  it("returns the controller's issues for this source with their ranges, errors first", () => {
+    const parsed = parseWorkflowSourceWithRanges(SOURCE);
 
     expect(
-      decideIssueState(reading, {
+      decideIssueState(parsed, {
         source: SOURCE,
         issues: { errors: [error], warnings: [warning] },
       }),
     ).toEqual({
       status: "validated",
       issues: [
-        ...locateIssues(reading, [error], "error"),
-        ...locateIssues(reading, [warning], "warning"),
+        ...locateIssues(parsed, [error], "error"),
+        ...locateIssues(parsed, [warning], "warning"),
       ],
     });
   });
 
-  it("does not place the controller's answer about another source on this one", () => {
-    const reading = readWorkflowSource(SOURCE);
+  it("ignores a controller result for a different source", () => {
+    const parsed = parseWorkflowSourceWithRanges(SOURCE);
     const earlierSource = SOURCE.replace("task.creat\n", "task.cre\n");
 
-    expect(decideIssueState(reading, undefined)).toEqual({ status: "validating" });
+    expect(decideIssueState(parsed, undefined)).toEqual({ status: "validating" });
     expect(
-      decideIssueState(reading, {
+      decideIssueState(parsed, {
         source: earlierSource,
         issues: { errors: [error], warnings: [] },
       }),
     ).toEqual({ status: "validating" });
-    expect(decideIssueState(reading, { source: earlierSource, reason: "Offline." })).toEqual({
+    expect(decideIssueState(parsed, { source: earlierSource, reason: "Offline." })).toEqual({
       status: "validating",
     });
   });
 
-  it("answers why the controller could not validate this source, and no problem for it", () => {
+  it("returns the reason when the controller could not validate this source", () => {
     expect(
-      decideIssueState(readWorkflowSource(SOURCE), {
+      decideIssueState(parseWorkflowSourceWithRanges(SOURCE), {
         source: SOURCE,
         reason: "The controller cannot be reached.",
       }),
@@ -388,7 +391,7 @@ describe("decideIssueState", () => {
 });
 
 describe("formatProblemCount", () => {
-  it("says one problem in the singular, and any other count in the plural", () => {
+  it("uses the singular for one problem and the plural for any other count", () => {
     expect(formatProblemCount(1)).toBe("1 problem");
     expect(formatProblemCount(2)).toBe("2 problems");
     expect(formatProblemCount(12)).toBe("12 problems");

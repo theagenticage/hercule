@@ -7,11 +7,10 @@ import { Switch, cn } from "@hercule/ui";
 import { readErrorMessage, SaveStatus } from "../../../screens/save-status";
 
 /**
- * One workflow: what it is called and what it does, whether its triggers
- * are on, and how long ago its text changed. The name opens the workflow's
- * page, and the whole row answers to it. The row owns the switch's write,
- * because the write is about this workflow and nothing above it needs to
- * know.
+ * Renders one workflow in the list: its name, its description, a switch that
+ * turns its triggers on or off, and how long ago its source changed. The
+ * whole row links to the workflow's page. The row owns the switch's
+ * mutation, because nothing above the row needs it.
  */
 export function WorkflowRow({
   client,
@@ -20,7 +19,7 @@ export function WorkflowRow({
 }: {
   readonly client: HerculeClient;
   readonly workflow: WorkflowSummary;
-  /** How long ago the workflow's text changed, as the app reads an age. */
+  /** How long ago the workflow's source changed, already formatted. */
   readonly age: string;
 }): JSX.Element {
   const queryClient = useQueryClient();
@@ -28,8 +27,9 @@ export function WorkflowRow({
   const setEnabled = useMutation({
     mutationFn: (enabled: boolean) =>
       client.workflow.update({ params: { id: workflow.id }, payload: { enabled } }),
-    // The write stays pending until the listing is read again, so the switch
-    // never shows the old state between the answer and the new listing.
+    // Returning the promise keeps the mutation pending until the list is
+    // refetched. Otherwise the switch would briefly show the old state
+    // between the response and the refetch.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.workflows() }),
   });
 
@@ -49,9 +49,10 @@ export function WorkflowRow({
           {workflow.name}
         </Link>
         <span className="min-w-0 flex-1 truncate text-muted">{workflow.description}</span>
-        {/* After the link that covers the row, so it is above the link: a
-            press turns the switch and opens nothing. While the write is in
-            flight, the switch ignores presses and keeps the focus. */}
+        {/* Placed after the link that covers the row, so the switch sits on
+            top of it: a click toggles the switch and does not open the
+            workflow. `aria-disabled` makes the switch ignore clicks while the
+            request is in flight, and it keeps the focus. */}
         <Switch
           aria-label="Enabled"
           checked={setEnabled.isPending ? setEnabled.variables : workflow.enabled}

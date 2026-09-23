@@ -1,19 +1,18 @@
 /**
- * A text editor that speaks the module's own types: the text, a callback for
- * each change, marks for problems, offers to complete what the author types,
- * and a handle that moves the cursor. This folder is the one place that
- * imports the editor library, so the library can be replaced here alone.
+ * A CodeMirror text editor behind this module's own types: the text, a change
+ * callback, diagnostics, completions, and a handle that moves the cursor.
+ * This folder is the only place that imports CodeMirror, so the library can
+ * be replaced here alone.
  *
  * The parent owns the text. The editor sends each change up, and the parent
- * sends the text back down. A text that the parent sends and that the editor
- * sent before is a text the editor has already, so it changes nothing, even
- * when the author has typed more since. Any other text replaces the text in
- * the editor, and starts a new history: undo never goes back past it.
+ * passes the text back down. When the parent passes back a text that the
+ * editor sent earlier, the editor ignores it, even if the author has typed
+ * more since. Any other text replaces the editor's content and starts a new
+ * undo history, so undo never goes back past it.
  *
- * The editor keeps every character of the text, line breaks included. The
- * editor's text is read with `sliceDoc`, which writes each line break with
- * the line separator of the editor: the document's own `toString` writes
- * `\n`.
+ * The editor keeps every character of the text, including the exact line
+ * breaks. Read the editor's text with `sliceDoc`, which joins lines with the
+ * editor's line separator. The document's own `toString` always uses `\n`.
  */
 import {
   useEffect,
@@ -45,10 +44,10 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
-import type { CompletionList, CompletionOffer } from "@hercule/client-core";
+import type { CompletionList, CompletionOption } from "@hercule/client-core";
 import { editorTheme, syntaxHighlightStyle } from "./theme";
 
-/** A problem to mark in the text, from the offset `from` to the offset `to` of the text. */
+/** An issue to underline, from offset `from` to offset `to` in the text. */
 interface TextDiagnostic {
   readonly from: number;
   readonly to: number;
@@ -57,20 +56,19 @@ interface TextDiagnostic {
 }
 
 /**
- * A problem as the editor marks it now: at its offsets in the text that the
- * editor holds, which move with the text that the author types, and on the
- * line of `from`, counted from 1.
+ * A diagnostic at its current underline position, which moves as the author
+ * types. `line` is the 1-based line of `from`.
  */
 type ShownDiagnostic<D extends TextDiagnostic> = D & { readonly line: number };
 
-/** What to offer at an offset of a text, or `undefined` for nothing. */
+/** Returns the completions at an offset in a text, or `undefined` for none. */
 type TextCompletionSource = (text: string, offset: number) => CompletionList | undefined;
 
 export interface TextEditorHandle {
   /**
-   * Puts the cursor at the start of a line, counted from 1, shows the line,
-   * and focuses the editor. The editor must be visible, because a hidden
-   * editor cannot take focus.
+   * Puts the cursor at the start of a 1-based line, scrolls the line into
+   * view, and focuses the editor. The editor must be visible, because a
+   * hidden editor cannot take focus.
    */
   moveCursorToLine: (line: number) => void;
 }
@@ -79,36 +77,37 @@ export interface TextEditorHandle {
 const ACCESSIBLE_NAME = "Workflow source";
 
 /**
- * How long Tab moves focus out of the editor after Escape. It is the time the
- * editor library gives Tab after an Escape that nothing else handles.
+ * How long Tab moves focus out of the editor after Escape. CodeMirror uses
+ * the same time after an Escape that nothing else handles.
  */
 const TAB_FOCUS_AFTER_ESCAPE_MS = 2000;
 
 /**
- * The line separator of the editor for a text. The parser of a workflow's
- * text starts a new line at each `\n` only, and a `\r` just before a `\n` is a
- * part of that line break. So the editor splits the text at `\r\n` when each
- * `\n` of the text follows a `\r`, and at `\n` in every other text. Then the
- * editor counts the lines as the parser does, and gives back every character
- * of the text. A `\r` that is not a part of a line break stays in its line,
- * where it shows as a special character.
+ * Returns the line separator the editor should use for a text.
+ *
+ * The workflow parser starts a new line only at `\n`, and treats a `\r` right
+ * before it as part of the line break. So the editor uses `\r\n` when every
+ * `\n` in the text follows a `\r`, and `\n` otherwise. The editor then counts
+ * lines the same way the parser does, and returns every character of the
+ * text unchanged. A lone `\r` stays inside its line, where it shows as a
+ * special character.
  */
 const chooseLineSeparator = (text: string): "\r\n" | "\n" =>
   text.includes("\n") && !/(?<!\r)\n/.test(text) ? "\r\n" : "\n";
 
 /*
- * The editor library counts each line break as one position, whatever its
- * characters. An offset into the text counts each character of it. The two
- * functions below convert between them, so the rest of the module speaks of
- * offsets into the text only. Every line break of the editor is its line
- * separator, so each line break has the same length.
+ * CodeMirror counts each line break as one position, even a two-character
+ * `\r\n`. A text offset counts every character. The two functions below
+ * convert between the two, so the rest of this module uses only text
+ * offsets. Every line break in the editor is its line separator, so all line
+ * breaks have the same length.
  */
 
-/** The position in the editor of an offset into the text. */
+/** Converts a text offset to an editor position. */
 const convertOffsetToPosition = (state: EditorState, offset: number): number => {
   const extra = state.lineBreak.length - 1;
   if (extra === 0) return Math.min(offset, state.doc.length);
-  // The last line whose first character is at or before the offset.
+  // Binary search for the last line that starts at or before the offset.
   let [low, high] = [1, state.doc.lines];
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
@@ -119,38 +118,39 @@ const convertOffsetToPosition = (state: EditorState, offset: number): number => 
   return Math.min(offset - (low - 1) * extra, line.to);
 };
 
-/** The offset into the text of a position in the editor. */
+/** Converts an editor position to a text offset. */
 const convertPositionToOffset = (state: EditorState, position: number): number =>
   position + (state.doc.lineAt(position).number - 1) * (state.lineBreak.length - 1);
 
 /**
- * An offer in the form the editor library takes, which writes the offer's
- * text and places the cursor. The library gives the range from the start of
- * the replaced text to the cursor. The offer replaces `rest` more characters
- * after the cursor, which are in the cursor's line.
+ * Converts a completion option to CodeMirror's form, which inserts the text
+ * and places the cursor. CodeMirror passes the range from the start of the
+ * replaced text to the cursor. The option also replaces `rest` more
+ * characters after the cursor, all on the cursor's line.
  */
-const buildLibraryCompletion = (offer: CompletionOffer, rest: number): Completion => ({
-  label: offer.label,
-  ...(offer.detail === undefined ? {} : { detail: offer.detail }),
+const buildLibraryCompletion = (option: CompletionOption, rest: number): Completion => ({
+  label: option.label,
+  ...(option.detail === undefined ? {} : { detail: option.detail }),
   apply: (view, completion, from, to) => {
     view.dispatch({
-      // A text of lines, which the editor writes with the line break of its text.
-      changes: { from, to: to + rest, insert: Text.of(offer.text.split("\n")) },
-      // Each line break of the offer's text is one position in the editor.
-      selection: { anchor: from + (offer.cursor ?? offer.text.length) },
+      // `Text.of` takes lines, so the editor joins them with its own line separator.
+      changes: { from, to: to + rest, insert: Text.of(option.text.split("\n")) },
+      // Each `\n` in the option's text is one editor position, so the cursor
+      // offset needs no conversion.
+      selection: { anchor: from + (option.cursor ?? option.text.length) },
       userEvent: "input.complete",
       annotations: pickedCompletion.of(completion),
     });
   },
 });
 
-/** A problem that the editor was given, and the place of its mark when the editor reported it. */
+/** A diagnostic as passed in, and its underline position when the editor last reported it. */
 interface ReportedDiagnostic<D extends TextDiagnostic> {
   readonly given: D;
   readonly shown: ShownDiagnostic<D>;
 }
 
-/** Whether two reports name the same given problems, at the same places. */
+/** Returns true when two reports hold the same diagnostics at the same positions. */
 const isSameReport = <D extends TextDiagnostic>(
   a: ReadonlyArray<ReportedDiagnostic<D>>,
   b: ReadonlyArray<ReportedDiagnostic<D>>,
@@ -176,24 +176,24 @@ export function TextEditor<D extends TextDiagnostic>({
   ref,
 }: {
   readonly text: string;
-  /** Receives each text that the author makes. */
+  /** Called with the new text after each change the author makes. */
   readonly onTextChange: (text: string) => void;
   /**
-   * Is called when the editor takes a text from the parent that it did not
-   * send: another text, and not the author's next change.
+   * Called when the parent passes in a text that the editor did not send, so
+   * the text was replaced rather than edited by the author.
    */
   readonly onTextReplace: () => void;
   /**
-   * The problems of `text`, or `undefined` while they are not known. The
-   * problems are marked only while the editor holds `text`. While the problems
-   * are not known, the marks that the editor shows stay, and move with the
-   * text that the author types.
+   * The issues in `text`, or `undefined` while they are not known. They are
+   * underlined only while the editor holds exactly `text`. While they are not
+   * known, the current underlines stay and move with the text as the author
+   * types.
    */
   readonly diagnostics: ReadonlyArray<D> | undefined;
   /**
-   * Receives the problems that the editor marks, each time they or their
-   * places change, in the order that `diagnostics` gave them. Each is the
-   * problem that `diagnostics` gave, at the place of its mark now.
+   * Called with the underlined diagnostics whenever they or their positions
+   * change, in the order of `diagnostics`. Each one is the diagnostic that was
+   * passed in, at its current underline position.
    */
   readonly onDiagnosticsChange: (shown: ReadonlyArray<ShownDiagnostic<D>>) => void;
   readonly completionSource: TextCompletionSource;
@@ -201,11 +201,11 @@ export function TextEditor<D extends TextDiagnostic>({
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  /** The texts the editor sent up that the parent has not sent back yet, oldest first. */
+  /** Texts the editor sent up that the parent has not passed back yet, oldest first. */
   const sentTexts = useRef<Array<string>>([]);
-  /** Each problem that the editor was given last, by the library's form of it. */
+  /** The last diagnostics passed in, keyed by their CodeMirror objects. */
   const givenDiagnostics = useRef(new Map<Diagnostic, D>());
-  /** The problems that the editor reported last, which a report of the same problems does not repeat. */
+  /** The last report sent to the parent, so an identical report is not sent again. */
   const reportedDiagnostics = useRef<ReadonlyArray<ReportedDiagnostic<D>> | undefined>(undefined);
   const [initialText] = useState(text);
   const hintId = useId();
@@ -238,13 +238,13 @@ export function TextEditor<D extends TextDiagnostic>({
     onDiagnosticsChange(report.map(({ shown }) => shown));
   });
 
-  /** A new state of the editor for a text: no history, no marks, and the cursor at the start. */
+  /** Creates an editor state for a text: no undo history, no diagnostics, and the cursor at the start. */
   const createState = useEffectEvent((initial: string) =>
     EditorState.create({
       doc: initial,
       extensions: [
         EditorState.lineSeparator.of(chooseLineSeparator(initial)),
-        // A pasted or dropped text is written with the line break of the text.
+        // Pasted or dropped text gets the editor's line separator.
         EditorView.clipboardInputFilter.of((pasted, state) =>
           pasted.replace(/\r\n?|\n/g, state.lineBreak),
         ),
@@ -257,10 +257,10 @@ export function TextEditor<D extends TextDiagnostic>({
         yaml(),
         syntaxHighlightStyle,
         editorTheme,
-        // The completion list takes Escape to close itself, and then the
-        // editor library does not give the next Tab to the page. Escape then
-        // Tab moves focus out of the editor in every state, as the editor's
-        // description says, so Escape turns that on before the list closes.
+        // When the completion list is open, Escape closes the list, and
+        // CodeMirror then does not let the next Tab leave the editor. The
+        // editor's hint text describes Escape then Tab as a way to always move
+        // focus out, so this handler turns that mode on before the list closes.
         Prec.highest(
           keymap.of([
             {
@@ -281,19 +281,18 @@ export function TextEditor<D extends TextDiagnostic>({
               if (found === undefined) return null;
               const from = convertOffsetToPosition(context.state, found.from);
               // While the author types, the list opens once a word is
-              // started. An empty line or a new value opens it only when
-              // the author asks, so the list does not follow each space.
+              // started. On an empty line or an empty value, it opens only
+              // when the author asks, so it does not pop up after every space.
               if (!context.explicit && from === context.pos) return null;
-              // The library matches the offers against the text from `from`
+              // CodeMirror filters the options against the text from `from`
               // to the end of the result. So the result ends at the cursor,
-              // and each offer replaces the rest of the text by itself. The
-              // rest is in the cursor's line, which holds no line break, so
-              // its offsets and its positions in the editor are equal in
-              // number.
+              // and each option replaces the rest of the value itself. The
+              // rest is on the cursor's line and contains no line break, so
+              // its length is the same in text offsets and editor positions.
               const rest = found.to - offset;
               return {
                 from,
-                options: found.offers.map((offer) => buildLibraryCompletion(offer, rest)),
+                options: found.options.map((option) => buildLibraryCompletion(option, rest)),
               };
             },
           ],
@@ -328,8 +327,8 @@ export function TextEditor<D extends TextDiagnostic>({
   const replaceText = useEffectEvent(() => {
     onTextReplace();
   });
-  // A layout effect, so that a parent that changes what it draws when the
-  // text is replaced does so before the page is painted.
+  // A layout effect, so a parent that redraws when the text is replaced does
+  // so before paint.
   useLayoutEffect(() => {
     const view = viewRef.current;
     if (view === null) return;
@@ -337,7 +336,7 @@ export function TextEditor<D extends TextDiagnostic>({
     const index = sent.indexOf(text);
     if (index !== -1) {
       // The parent caught up with a text the editor sent. The author may have
-      // typed more since, so the editor keeps what it holds.
+      // typed more since, so the editor keeps its current content.
       sent.splice(0, index + 1);
       return;
     }
@@ -351,15 +350,15 @@ export function TextEditor<D extends TextDiagnostic>({
 
   useEffect(() => {
     const view = viewRef.current;
-    // The problems were found in `text`. While the editor holds a newer text
-    // their offsets may be wrong, so the marks stay until the problems of the
-    // newer text arrive.
+    // The diagnostics were computed for `text`. If the editor now holds a
+    // newer text, their offsets may be wrong, so the current underlines stay
+    // until diagnostics for the newer text arrive.
     if (view === null || diagnostics === undefined || view.state.sliceDoc() !== text) return;
     const { state } = view;
     const given = new Map<Diagnostic, D>();
     for (const diagnostic of diagnostics) {
-      // A new object for each problem, so that the report can tell two equal
-      // problems apart.
+      // A new object for each diagnostic, so the report can tell two equal
+      // diagnostics apart.
       const libraryDiagnostic: Diagnostic = {
         from: convertOffsetToPosition(state, diagnostic.from),
         to: convertOffsetToPosition(state, diagnostic.to),

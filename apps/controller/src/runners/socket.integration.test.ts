@@ -252,19 +252,19 @@ const readRunner = async (base: string, token: string, id: string): Promise<Runn
   return (await response.json()) as RunnerDetail;
 };
 
-/** How long a test waits between two reads of a row that it waits on. */
+/** The delay between two reads of a runner row while `rowWhen` polls. */
 const ROW_POLL_INTERVAL_MS = 10;
 
-/** How many times a test reads a row that it waits on before it gives up. */
+/** How many times `rowWhen` reads the row before it gives up. */
 const ROW_POLL_ATTEMPTS = 300;
 
 /**
- * The time budget of a test that waits on its row four times. A wait that
- * gives up later than the test's time budget never gets to give up: vitest
- * stops the test first, and the failure names the test and not the row that
- * never changed. Under the load of the whole suite, four waits can take longer
- * than the default five seconds. So the budget holds four whole waits, and the
- * setup before them.
+ * The timeout for a test that calls `rowWhen` four times. If the test timed
+ * out before `rowWhen` gave up, vitest would stop the test first, and the
+ * failure would report the test instead of the row that never changed. Under
+ * the load of the full suite, four waits can take longer than vitest's default
+ * five seconds. So the timeout covers four full waits plus the setup before
+ * them.
  */
 const FOUR_ROW_WAITS_TIMEOUT_MS = ROW_POLL_INTERVAL_MS * ROW_POLL_ATTEMPTS * 4 + 10_000;
 
@@ -824,8 +824,8 @@ describe("what a runner reports about its machine", () => {
             joined.runnerId,
             (one) => one.connectivity === "online",
           );
-          // A runner that has only just said hello has said nothing about its
-          // disk yet.
+          // A runner that has only just sent its hello has not reported its
+          // disk space yet.
           expect(online.watermark).toBeNull();
 
           // Above the shipped ten-gibibyte watermark, so this reading is a

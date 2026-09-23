@@ -2,18 +2,18 @@
  * Expressions: the CEL sources Hercule stores on a subscription or in a
  * workflow, and evaluates against one event or inside one run.
  *
- * A source is checked once, when it is saved, so a broken condition is refused
- * while a user is there to read why. It is checked in the scope of the place
- * where it is written, so that an expression that reads a value its place does
- * not have is refused at save and does not fail at each evaluation. It is
- * evaluated against one context when a match is decided, and it is parsed when
- * a caller wants the compiled program in its hand.
+ * A source is validated once, when it is saved, so a broken condition is
+ * rejected while a user is there to read why. Validation uses the scope of the
+ * place where the source is written (see `ExpressionScope`). So an expression
+ * that reads a variable its place does not have fails when it is saved, and
+ * not at every evaluation. A source is evaluated against one context when a
+ * match is decided, and it is parsed when a caller wants the compiled program.
  *
- * A template is text with expressions in it, each one written `{{ expr }}`,
- * such as the prompt of an agent step. Each of its expressions is checked in
- * the scope of a run.
+ * A template is a string with expressions in it, each written `{{ expr }}`,
+ * such as the prompt of an agent step. Each of its expressions is validated in
+ * the run scope.
  *
- * The environments are built here once and shared by every call, because
+ * The environments are built once here and shared by every call, because
  * building one is expensive.
  */
 import * as Context from "effect/Context";
@@ -21,7 +21,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { excerptMessage, quoteWritten } from "@hercule/contract";
+import { shortenLibraryMessage, quoteAuthorText } from "@hercule/contract";
 // This is the only module that reaches the evaluator, which is what keeps the
 // implementation swappable: `@bufbuild/cel` is the named fallback, and a
 // stored condition holds CEL source and nothing derived from it, so a swap
@@ -76,16 +76,17 @@ const SOURCE_LIMITS = {
 };
 
 /**
- * The environment that parses and evaluates. No function is registered on it,
- * or on the environments that check, which is what makes the function
+ * The environment used to parse and evaluate. No function is registered on it,
+ * or on the scoped environments used for validation. That keeps the function
  * whitelist pure: a registered function is the only way a custom, and possibly
  * asynchronous, handler enters, and an asynchronous handler is the only thing
  * that turns `evaluate` into a `Promise`. So evaluation is synchronous by
  * construction, and a condition can call nothing that reaches outside the
  * context it is given.
  *
- * It declares no variable and reads each one from the context it is handed.
- * Which variables a source may read was decided when the source was checked.
+ * It declares no variables and reads each one from the evaluation context.
+ * Which variables a source may read was already enforced when the source was
+ * validated.
  */
 const environment = new Environment({
   // Context variables are dynamic. A payload is loosely shaped, and a plain
@@ -96,22 +97,26 @@ const environment = new Environment({
 });
 
 /**
- * What an expression can read, which the place where it is written decides.
- * An expression over one event, such as the filter of a trigger, reads
- * `event`. An expression inside a run, such as the condition of an edge or an
- * expression in a prompt, reads the run's `inputs` and `steps`.
+ * Which variables an expression can read. This depends on where the
+ * expression is written:
+ *
+ * - `event`: an expression over one event, such as a trigger's filter, reads
+ *   `event`.
+ * - `run`: an expression inside a run, such as an edge condition or an
+ *   expression in a prompt, reads the run's `inputs` and `steps`.
  */
 export type ExpressionScope = "event" | "run";
 
-/** The variables of each scope, which are all dynamic, as the evaluation's are. */
+/** The variables each scope declares. All are `dyn`, as in the evaluation environment. */
 const SCOPE_VARIABLES: Record<ExpressionScope, ReadonlyArray<string>> = {
   event: ["event"],
   run: ["inputs", "steps"],
 };
 
 /**
- * An environment that declares only the variables of one scope, so a check
- * refuses a source that reads any other. The limits are the evaluation's own.
+ * Builds an environment that declares only the variables of one scope, so
+ * validation rejects a source that reads any other variable. It uses the same
+ * limits as evaluation.
  */
 const buildScopedEnvironment = (scope: ExpressionScope): Environment =>
   SCOPE_VARIABLES[scope].reduce(
@@ -125,26 +130,28 @@ const SCOPED_ENVIRONMENTS: Record<ExpressionScope, Environment> = {
 };
 
 /**
- * The one line of an evaluator error that names what is wrong, as one
- * sentence. Its `message` repeats that line and adds an excerpt of the source
- * under a caret, which belongs in a terminal and not in a stored health
- * message. The line can repeat what the author wrote, so it is cut short.
+ * Returns the one-line summary of an evaluator error, as a sentence. The
+ * error's `message` repeats that line and adds an excerpt of the source under
+ * a caret, which belongs in a terminal and not in a stored health message. The
+ * summary can quote what the author wrote, so it is truncated.
  */
 const readSummary = (failure: unknown): string => {
   const summary = (failure as { readonly summary?: unknown } | null)?.summary;
-  return excerptMessage(typeof summary === "string" ? summary : String(failure));
+  return shortenLibraryMessage(typeof summary === "string" ? summary : String(failure));
 };
 
 /** The summary the evaluator writes when a source is over a structural limit. */
 const OVER_LIMIT = /^Exceeded (\w+) \((\d+)\)/;
 
 /**
- * Why a source was refused, and what its author does about it, kept apart.
- * `reason` completes a sentence that begins with the expression, and ends it:
- * a stored health message says only why an evaluation failed, and only a
- * check that a user is waiting on adds the repair. A source over a limit is
- * valid CEL that is too big, and telling its author it is not CEL sends them
- * looking for a syntax error that is not there.
+ * Returns why a source was rejected (`reason`) and how its author can fix it
+ * (`repair`), as two strings. `reason` finishes a sentence that starts with
+ * the expression, such as "is not valid CEL: ...". The two are kept apart
+ * because a stored health message contains only the reason an evaluation
+ * failed. Only a validation that a user is waiting on adds the fix.
+ *
+ * A source over a limit is valid CEL that is too big. Telling its author it is
+ * not CEL sends them looking for a syntax error that is not there.
  */
 const describeRefusal = (
   failure: unknown,
@@ -159,31 +166,33 @@ const describeRefusal = (
       };
 };
 
-/** What a check of a source finds wrong, as the evaluator reports it. */
+/** The error the evaluator's `check` returns for an invalid source. */
 type CheckFailure = NonNullable<ReturnType<Environment["check"]>["error"]>;
 
 /**
- * Why a check refused a source, and what its author does about it. A source
- * that reads a variable its scope does not declare is valid CEL in the wrong
- * place, so its author is told which values the place has, and why.
+ * Returns the message for a source that failed validation, including how to
+ * fix it. A source that reads a variable its scope does not declare is valid
+ * CEL in the wrong place, so the message lists the variables that are
+ * available there, and explains why.
  */
-const describeCheckRefusal = (failure: CheckFailure, scope: ExpressionScope): string => {
+const describeCheckFailure = (failure: CheckFailure, scope: ExpressionScope): string => {
   const variable: unknown = failure.node?.args;
   if (failure.code !== "unknown_variable" || typeof variable !== "string") {
     const { reason, repair } = describeRefusal(failure);
     return `This expression ${reason} ${repair}`;
   }
-  const unavailable = `This expression reads ${quoteWritten(variable)}, which is not available here.`;
+  const unavailable = `This expression reads ${quoteAuthorText(variable)}, which is not available here.`;
   if (scope === "event") {
-    return `${unavailable} An expression here is evaluated against one event, before the event reaches a run. Read only event.`;
+    return `${unavailable} An expression here is evaluated against one event, before any run starts, so it can read only event.`;
   }
-  // The one mistake with a known repair: the event did not enter the run, but
-  // a start trigger can copy what the run needs of it into an input.
+  // Reading `event` inside a run is a common mistake with a known fix. The run
+  // does not keep the event, but a start trigger can map the values the run
+  // needs into inputs.
   const repair =
     variable === "event"
-      ? " A run does not keep the event: map the value from the event into an input at the start trigger, and read it as inputs.<name>."
+      ? " A run does not keep the event. Map the value you need from the event into an input at the start trigger, and read it as inputs.<name>."
       : "";
-  return `${unavailable} An expression here is evaluated inside a run. Read only inputs and steps.${repair}`;
+  return `${unavailable} An expression here is evaluated inside a run, so it can read only inputs and steps.${repair}`;
 };
 
 /** A source compiled once, called with one context per event. */
@@ -208,9 +217,11 @@ export const parseExpression = (
   });
 
 /**
- * The type a source gives, when it may be stored at a place of this scope. A
- * variable is `dyn`, so a source that reads one gives a type that is known
- * only when it is evaluated.
+ * Type-checks a source in a scope and returns its type, such as `bool`, `int`
+ * or `dyn`. Fails with `ExpressionError` if the source is not valid in that
+ * scope. Every variable is `dyn`, so a source whose value comes straight from
+ * a variable, such as `event.payload.merged`, has type `dyn`: its real type is
+ * known only when it is evaluated.
  */
 const typeCheckSource = (
   source: string,
@@ -220,14 +231,15 @@ const typeCheckSource = (
     const result = SCOPED_ENVIRONMENTS[scope].check(source);
     return result.valid
       ? Effect.succeed(result.type!)
-      : Effect.fail(new ExpressionError({ message: describeCheckRefusal(result.error!, scope) }));
+      : Effect.fail(new ExpressionError({ message: describeCheckFailure(result.error!, scope) }));
   });
 
 /**
- * Whether a source may be stored at a place of this scope. It answers nothing:
- * what a caller does with a source it has accepted is parse it or evaluate it,
- * and both read the source again. This is the one path a user is waiting on,
- * so its message carries the repair too.
+ * Validates a source for the given scope. Fails with `ExpressionError` if the
+ * source is not valid there. Returns nothing on success, because a caller
+ * parses or evaluates the source later, and both read the source again. A
+ * user is waiting on this validation, so the error message also explains how
+ * to fix the source.
  */
 export const checkExpression = (
   source: string,
@@ -235,11 +247,12 @@ export const checkExpression = (
 ): Effect.Effect<void, ExpressionError> => Effect.asVoid(typeCheckSource(source, scope));
 
 /**
- * Whether a source may be stored at a place of this scope where its value
- * decides yes or no, such as a filter or a condition. Only `true` says yes
- * when it is evaluated, so a source whose type is known and is not `bool`
- * could never say yes, and is refused. A `dyn` source is accepted, because
- * its type is known only when it is evaluated.
+ * Validates a source whose value decides yes or no, such as a filter or a
+ * condition. Fails with `ExpressionError` if the source is not valid in the
+ * scope, or if its type is known and is not `bool`. Only `true` counts as yes
+ * when the source is evaluated, so a source of another type could never pass.
+ * A `dyn` source is accepted, because its type is known only when it is
+ * evaluated.
  */
 export const checkCondition = (
   source: string,
@@ -251,39 +264,38 @@ export const checkCondition = (
       : Effect.fail(
           new ExpressionError({
             message:
-              `This expression gives a value of type ${type}, but here it must give true or false. ` +
-              "Write an expression that gives true or false, such as a comparison with ==.",
+              `This expression evaluates to a value of type ${type}, but here it must evaluate to true or false. ` +
+              "Write an expression that evaluates to true or false, such as a comparison with ==.",
           }),
         ),
   );
 
-/** The mark that opens an expression in a template. */
 const TEMPLATE_OPEN = "{{";
-
-/** The mark that closes an expression in a template. */
 const TEMPLATE_CLOSE = "}}";
 
 /**
- * Whether a text is a template, which is whether it holds a `{{`. Each `{{`
- * opens an expression, and a literal `{{` is written `{{ '{{' }}`, so what
- * such a text says is known only when a run renders it.
+ * Returns true if the string contains `{{`, which makes it a template. Every
+ * `{{` starts an expression (a literal `{{` is written `{{ '{{' }}`), so the
+ * final string is known only when a run renders the template.
  */
 export const isTemplate = (text: string): boolean => text.includes(TEMPLATE_OPEN);
 
-/** One expression of a template: its source, and where its `{{` stands in the text. */
+/** An expression found in a template. `offset` is the UTF-16 index of its `{{`. */
 interface TemplateExpression {
   readonly source: string;
   readonly offset: number;
 }
 
 /**
- * The expressions of a template, in order, or the offset of a `{{` that no
- * `}}` closes. An expression ends at the first `}}` after its `{{`, as a tag
- * does in Mustache, so the reader needs to know nothing of CEL. An expression
- * that must hold `}}` itself writes it another way: `'}' + '}'`, or a space
- * between two closing braces of a map.
+ * Finds the expressions in a template, in order. Returns a failed `Result`
+ * with the offset of the first `{{` that has no closing `}}`.
+ *
+ * An expression ends at the first `}}` after its `{{`, as a Mustache tag does,
+ * so a reader does not need to know CEL to see where it ends. An expression
+ * that must contain `}}` writes it another way: `'}' + '}'`, or with a space
+ * between the two closing braces of a nested map.
  */
-const readTemplateExpressions = (
+const parseTemplateExpressions = (
   template: string,
 ): Result.Result<ReadonlyArray<TemplateExpression>, number> => {
   const expressions: Array<TemplateExpression> = [];
@@ -299,27 +311,27 @@ const readTemplateExpressions = (
 };
 
 /**
- * How many characters a text holds before an offset. An offset counts UTF-16
- * code units, and a character such as an emoji is two of them, so a position
- * that an author counts in the text is not the offset.
+ * Returns the number of characters in `text` before `offset`. An offset counts
+ * UTF-16 code units, and a character such as an emoji takes two, so the offset
+ * is not the position an author would count.
  */
 const countCharactersBefore = (text: string, offset: number): number =>
   [...text.slice(0, offset)].length;
 
 /**
- * Whether a template may be stored: every `{{` is closed, and each expression
- * passes the check in the scope of a run, because a run renders the template.
- * The refusal names the first problem by its character in the text, counted
- * from 1, because the text may hold many expressions.
+ * Validates a template. Fails with `ExpressionError` if a `{{` has no closing
+ * `}}`, or if an expression is not valid in the run scope (a run renders the
+ * template). The message gives the position of the first error as a character
+ * number, counted from 1, because a template can contain many expressions.
  */
 export const checkTemplate = (template: string): Effect.Effect<void, ExpressionError> =>
   Effect.suspend(() => {
-    const read = readTemplateExpressions(template);
+    const read = parseTemplateExpressions(template);
     if (Result.isFailure(read)) {
       return Effect.fail(
         new ExpressionError({
           message:
-            `The {{ at character ${String(countCharactersBefore(template, read.failure) + 1)} opens an expression that no }} closes. ` +
+            `The {{ at character ${String(countCharactersBefore(template, read.failure) + 1)} has no closing }}. ` +
             "Close the expression with }}, or write {{ '{{' }} for a literal {{.",
         }),
       );
@@ -329,9 +341,9 @@ export const checkTemplate = (template: string): Effect.Effect<void, ExpressionE
       (expression) =>
         Effect.mapError(
           checkExpression(expression.source, "run"),
-          (refusal) =>
+          (error) =>
             new ExpressionError({
-              message: `The expression that the {{ at character ${String(countCharactersBefore(template, expression.offset) + 1)} opens, and the first }} after it closes, is not valid. ${refusal.message}`,
+              message: `The expression that starts with the {{ at character ${String(countCharactersBefore(template, expression.offset) + 1)} and ends at the next }} is not valid. ${error.message}`,
             }),
         ),
       { discard: true },

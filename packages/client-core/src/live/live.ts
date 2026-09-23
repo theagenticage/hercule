@@ -135,8 +135,8 @@ export interface Live {
    */
   subscribe(topic: AppendOnlyLiveTopic, handler: LiveDeltaHandler, cursor?: string): () => void;
   /**
-   * Reports where the supervisor is now, and again on every change, until
-   * the function it answers is called.
+   * Calls the listener with the current status, and again on every change.
+   * Returns a function that removes the listener.
    */
   onStatus(listener: (status: LiveStatus) => void): () => void;
   /** What the controller answered at the greeting, or `null` before the first one. */

@@ -1,11 +1,7 @@
 /**
- * The graph that the editor's preview draws from a workflow's definition: one
- * node for each step and each trigger, one edge for each entry of `edges`, and
- * an edge from each start trigger to each entry step. An entry step is a step
- * with `entry: true`, or a step with no incoming edges. The run starts at the
- * entry steps, so the preview shows where each start trigger leads.
- *
- * The graph promises no order, so each test sorts it before it compares.
+ * An entry step is a step with `entry: true`, or a step with no incoming
+ * edges. The graph's nodes and edges have no guaranteed order, so each test
+ * sorts them before comparing.
  */
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@hercule/contract";
@@ -13,17 +9,17 @@ import { abbreviateEdgeCondition, buildWorkflowGraph } from "@hercule/client-cor
 
 type WorkflowGraph = ReturnType<typeof buildWorkflowGraph>;
 
-/** An Agent's id. The graph does not read it. */
+/** An Agent id. The graph ignores it. */
 const AGENT_ID = "0199e0e7-1111-7000-8000-0000000000ab";
 
-/** The nodes and edges of a graph in one fixed order. */
+/** Returns the graph with its nodes and edges sorted. */
 const sortGraph = (graph: WorkflowGraph): WorkflowGraph => ({
   nodes: [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id)),
   edges: [...graph.edges].sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to)),
 });
 
 describe("buildWorkflowGraph", () => {
-  it("draws a linear workflow, and the start trigger into its first step", () => {
+  it("builds a linear workflow, with an edge from the start trigger to the first step", () => {
     const definition: WorkflowDefinition = {
       name: "Review labelled pull requests",
       triggers: [{ id: "labelled", kind: "start", source: { kind: "github.pr.labeled" } }],
@@ -54,8 +50,8 @@ describe("buildWorkflowGraph", () => {
     });
   });
 
-  it("starts a loop at the step marked entry, and not at a step that only a signal leads into", () => {
-    // Every step of the loop has an incoming edge, so only `entry: true` says
+  it("starts a loop at the step marked entry, not at a step reached only by a signal", () => {
+    // Every step in the loop has an incoming edge, so only `entry: true` marks
     // where the run starts. task_done waits for its signal.
     const definition: WorkflowDefinition = {
       name: "Implement a task",
@@ -130,7 +126,7 @@ describe("buildWorkflowGraph", () => {
     });
   });
 
-  it("draws each start trigger into each entry step, and no signal trigger into any", () => {
+  it("adds an edge from each start trigger to each entry step, and none from a signal trigger", () => {
     const definition: WorkflowDefinition = {
       name: "Triage and audit",
       triggers: [
@@ -169,11 +165,11 @@ describe("buildWorkflowGraph", () => {
     ]);
   });
 
-  it("finds the entry steps over the edges that the check accepts, as the controller does", () => {
-    // The check refuses an edge from a start trigger and an edge from an id
-    // that names nothing, so neither leads into a step: both steps are entry
-    // steps. The written edge from the start trigger is drawn, and the edge
-    // from nothing cannot be.
+  it("finds entry steps using only valid edges, as the controller does", () => {
+    // Validation rejects an edge from a start trigger and an edge from an
+    // unknown id. Neither counts as an incoming edge, so both steps are entry
+    // steps. The edge written from the start trigger is still drawn. The edge
+    // from the unknown id cannot be drawn.
     const definition: WorkflowDefinition = {
       name: "Triage",
       triggers: [{ id: "labelled", kind: "start", source: { kind: "github.pr.labeled" } }],
@@ -196,7 +192,7 @@ describe("buildWorkflowGraph", () => {
 });
 
 describe("abbreviateEdgeCondition", () => {
-  it("leaves out the output prefix of the step that the edge leaves, wherever the condition reads it", () => {
+  it("removes every output prefix of the edge's source step", () => {
     expect(
       abbreviateEdgeCondition({
         from: "review",
@@ -207,7 +203,7 @@ describe("abbreviateEdgeCondition", () => {
     ).toBe('has(steps.review) && verdict == "reject" && score < 3');
   });
 
-  it("keeps the output of another step, and a name that only ends like the prefix", () => {
+  it("keeps another step's output prefix, and a name that only ends like the prefix", () => {
     expect(
       abbreviateEdgeCondition({
         from: "review",
@@ -217,7 +213,7 @@ describe("abbreviateEdgeCondition", () => {
     ).toBe("steps.checks.output.passed && inputs.steps.review.output.x");
   });
 
-  it("answers nothing for an edge with no condition", () => {
+  it("returns undefined for an edge with no condition", () => {
     expect(abbreviateEdgeCondition({ from: "review", to: "merge" })).toBeUndefined();
   });
 });

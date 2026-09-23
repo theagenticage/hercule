@@ -18,10 +18,9 @@ import { deriveCatalogJsonSchema } from "./json-schema";
 import type { NewContribution } from "./repository";
 
 /**
- * One event kind a boot registered: the kind as a trigger names it, the plugin
- * that declared it, and the live schema an emitted payload is read against. A
- * plugin's events always arrive through a Connection, so the Connection type
- * is always present.
+ * An event kind a plugin registered at boot, with the id of that plugin and
+ * the schema that emitted payloads are decoded against. `connectionType` is
+ * always set, because a plugin's events always arrive through a Connection.
  */
 export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType {
   readonly pluginId: string;
@@ -52,9 +51,11 @@ const EventKindHeader = Schema.Struct({
 const decodeEventKindHeader = Schema.decodeUnknownEffect(EventKindHeader, { errors: "all" });
 
 /**
- * Registers one event source: the row the catalog holds for it, and every kind
- * it declares, in the map that an emit is read against and that a trigger's
- * kind is looked up in.
+ * Registers one event source. Adds its catalog row to `declared`, and adds
+ * each of its kinds to `kinds`, which is the map used to decode emitted
+ * payloads and to look up the kind of a trigger. Fails with a `PluginError` if
+ * a name is invalid, a kind is declared twice, or a kind has the name of a
+ * core kind.
  *
  * Both collections are the registration pass's own, handed in and appended to,
  * because a pass registers every plugin before any of it is stored: a duplicate
@@ -97,12 +98,12 @@ export const registerEventSourceContribution = (
           }),
         );
       }
-      // A trigger names a kind by its name alone, so a plugin kind with the
-      // name of a core kind would make one name mean two kinds.
+      // A trigger refers to a kind by its name only. A plugin kind with the
+      // name of a core kind would make that name ambiguous.
       if (isCoreEventKind(kind)) {
         return yield* Effect.fail(
           new PluginError({
-            message: `the event kind ${kind} is a kind the core declares, and a trigger could not tell the two apart: declare the kind under another name`,
+            message: `the event kind ${kind} is already declared by the core. A trigger refers to a kind by its name only, so it could not tell the two kinds apart. Give the kind another name.`,
           }),
         );
       }

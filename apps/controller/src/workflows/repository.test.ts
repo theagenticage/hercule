@@ -1,11 +1,12 @@
 /**
- * Trigger rows: what a save does to the rows of the triggers a source keeps,
- * drops, adds or changes, and the listing across pages.
+ * Tests how a save updates the trigger rows of a workflow, and how the trigger
+ * list is paged.
  *
- * A save writes all of a workflow's triggers at one instant, so `created_at`
- * alone does not order them: the walk also orders by the workflow and the
- * trigger id, and a cursor has to carry all three for the next page to start
- * where the last one ended.
+ * One save writes all of a workflow's triggers with the same `created_at`, so
+ * `created_at` alone does not give a stable order. The list query also sorts by
+ * workflow id and trigger id, and the cursor holds all three values. Without
+ * them, a page that ends among rows with the same `created_at` would skip or
+ * repeat rows on the next page.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -17,7 +18,7 @@ import { workflowRepository, type DeclaredTrigger } from "./repository";
 const FIRST_SAVE = "2026-09-22T10:00:00.000Z";
 const SECOND_SAVE = "2026-09-22T11:00:00.000Z";
 
-/** A start trigger on task creation, with the fields a case changes given. */
+/** Returns a start trigger on `task.created`, with `fields` replacing the defaults. */
 const declareTrigger = (
   triggerId: string,
   fields: Partial<DeclaredTrigger> = {},
@@ -32,7 +33,7 @@ const declareTrigger = (
   ...fields,
 });
 
-/** One workflow and its triggers, all written at the instant given. */
+/** Inserts a workflow and its triggers, all saved at `savedAt`. Returns the workflow id. */
 const storeWorkflow = (name: string, triggers: ReadonlyArray<DeclaredTrigger>, savedAt: string) =>
   Effect.gen(function* () {
     const workflows = yield* workflowRepository;
@@ -44,7 +45,7 @@ const storeWorkflow = (name: string, triggers: ReadonlyArray<DeclaredTrigger>, s
     return stored.id;
   });
 
-/** Every trigger row, by its id, in one page. */
+/** Lists every trigger row in one page. Returns a map from trigger id to row. */
 const readTriggers = Effect.gen(function* () {
   const workflows = yield* workflowRepository;
   const page = yield* workflows.listTriggers({
@@ -60,9 +61,10 @@ const readTriggers = Effect.gen(function* () {
 });
 
 /**
- * The trigger rows after a first save of `before` and a second save of
- * `after` an hour later. Every trigger in `before` whose id `pausedIds` holds
- * is paused between the two saves.
+ * Saves a workflow with the triggers in `before`, then saves it again an hour
+ * later with the triggers in `after`. The triggers listed in `pausedIds` are
+ * paused between the two saves. Returns the trigger rows after the second
+ * save, keyed by trigger id.
  */
 const saveTwice = (
   before: ReadonlyArray<DeclaredTrigger>,
@@ -82,13 +84,13 @@ const saveTwice = (
     }).pipe(Effect.provide(TestDatabase), Effect.orDie),
   );
 
-describe("saving a source again", () => {
-  it("leaves the row of a trigger whose fields did not change as it was", async () => {
+describe("saving a workflow's triggers a second time", () => {
+  it("leaves the row of an unchanged trigger untouched", async () => {
     const triggers = await saveTwice([declareTrigger("a")], [declareTrigger("a")]);
     expect(triggers.get("a")).toMatchObject({ createdAt: FIRST_SAVE, updatedAt: FIRST_SAVE });
   });
 
-  it("moves updated_at, and only updated_at, of a trigger whose fields changed", async () => {
+  it("updates the fields and updated_at of a changed trigger, and keeps its created_at and status", async () => {
     const triggers = await saveTwice(
       [declareTrigger("a")],
       [declareTrigger("a", { filter: "event.payload.id > 3" })],
@@ -102,7 +104,7 @@ describe("saving a source again", () => {
     });
   });
 
-  it("gives a start trigger a status and a signal trigger none", async () => {
+  it("gives a start trigger a status and a signal trigger no status", async () => {
     const triggers = await saveTwice(
       [],
       [declareTrigger("a"), declareTrigger("s", { kind: "signal", eventKind: "task.updated" })],
@@ -111,7 +113,7 @@ describe("saving a source again", () => {
     expect(Object.keys(triggers.get("s") ?? {})).not.toContain("status");
   });
 
-  it("makes a trigger whose kind changed a new trigger, whatever its id", async () => {
+  it("replaces a trigger whose kind changed with a new row, even when its id is the same", async () => {
     const triggers = await saveTwice(
       [declareTrigger("a"), declareTrigger("s", { kind: "signal" })],
       [declareTrigger("a", { kind: "signal" }), declareTrigger("s")],
@@ -129,8 +131,8 @@ describe("saving a source again", () => {
   });
 });
 
-describe("listing the triggers page by page", () => {
-  it("answers each trigger once, in order, when a page ends among triggers written at one instant", async () => {
+describe("listing triggers page by page", () => {
+  it("returns each trigger once, in order, when a page ends among triggers with the same created_at", async () => {
     const { listed, workflowIds } = await Effect.runPromise(
       Effect.gen(function* () {
         const triggers = ["a", "b", "c"].map((triggerId) => declareTrigger(triggerId));
@@ -158,8 +160,9 @@ describe("listing the triggers page by page", () => {
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    // A canonical id sorts as text the way its bytes sort in the column, and
-    // every id has the same length, so the joined pair sorts as the walk does.
+    // Workflow ids are canonical UUIDs of the same length, so comparing them as
+    // strings gives the same order as the database. Joining each workflow id
+    // and trigger id into one string then sorts the pairs like the list query.
     const expected = workflowIds
       .flatMap((workflowId) => ["a", "b", "c"].map((triggerId) => [workflowId, triggerId] as const))
       .sort((left, right) => (left.join(" ") < right.join(" ") ? 1 : -1));

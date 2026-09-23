@@ -1,38 +1,39 @@
 /**
- * What a workflow's page shows: the text, the graph, or both side by side. The
- * choice is a search parameter, so a reload or a shared link keeps it.
+ * The view on a workflow's page: the YAML, the graph, or both side by side.
+ * The view is a search parameter, so a reload or a shared link keeps it.
  *
- * This file imports only a type of the editor, which the build removes. The
- * route files read it before their page is loaded, and the editor loads with
- * the page.
+ * This file imports only a type from the editor, and the build removes type
+ * imports. The route files load this file before the page, so the editor
+ * code stays out of that first load and loads with the page.
  */
 import type { SearchSchemaInput } from "@tanstack/react-router";
 import type { WorkflowView } from "../../../screens/workflow-editor";
 
-/** Each view, in the order the page's control offers them. */
+/** Every view, in the order the view control shows them. */
 export const WORKFLOW_VIEWS = [
   "yaml",
   "graph",
   "split",
 ] as const satisfies ReadonlyArray<WorkflowView>;
 
-/** The view when the address names none. */
+/** The view used when the URL has no valid `view` parameter. */
 const DEFAULT_WORKFLOW_VIEW: WorkflowView = "split";
 
 /**
- * The view that a word names. A word that is not a view names the default
- * view, so the page opens on a view and not on an error.
+ * Parses a `view` value. Returns the default view for any value that is not
+ * a view, so the page opens instead of showing an error.
  */
-export const readWorkflowView = (word: unknown): WorkflowView =>
-  WORKFLOW_VIEWS.find((view) => view === word) ?? DEFAULT_WORKFLOW_VIEW;
+export const parseWorkflowView = (value: unknown): WorkflowView =>
+  WORKFLOW_VIEWS.find((view) => view === value) ?? DEFAULT_WORKFLOW_VIEW;
 
 /**
- * The search of a workflow's page. It always holds a view, because the
- * router keeps each search key that the validator does not answer: a word
- * that is not a view would otherwise reach the page as it was typed. A link
- * to the page may name no view. A view that the author chooses is always in
- * the address, the default view too.
+ * Validates the search params of a workflow's page. The result always has a
+ * `view`. If the validator left `view` out, the router would keep the raw
+ * value from the URL, and an invalid view would reach the page.
+ *
+ * A link to the page may leave out the view. A view that the user chooses is
+ * always written to the URL, even the default one.
  */
 export const validateWorkflowViewSearch = (
   search: { readonly view?: unknown } & SearchSchemaInput,
-): { readonly view: WorkflowView } => ({ view: readWorkflowView(search.view) });
+): { readonly view: WorkflowView } => ({ view: parseWorkflowView(search.view) });

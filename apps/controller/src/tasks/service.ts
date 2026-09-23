@@ -53,9 +53,9 @@ const QueryInput = Schema.Struct({ ...TaskFilter.fields, ...pageInput(TASK_SORT_
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
 /**
- * What identifies one task: the id, and what an edit does to it. The edit is
- * refused when it names no field to change, by the rule the request's own
- * schema carries.
+ * What identifies one task: the id, and what an edit does to it. Decoding
+ * fails when the edit sets no field. The check is the same one the request
+ * schema uses, so both reject the same edits.
  */
 const UpdateInput = Schema.Struct({ id: Id, ...TaskUpdateInput.fields }).check(
   refuseEmptyTaskUpdate,
@@ -220,8 +220,9 @@ const make = Effect.gen(function* () {
     /**
      * Changes a task and says what changed.
      *
-     * A patch that names no field is refused by the decode, and a patch that
-     * asks for the values the task already holds writes nothing at all:
+     * A patch that sets no field fails to decode with a `Validation` error,
+     * and a patch that asks for the values the task already holds writes
+     * nothing at all:
      * either would move `updatedAt` and stamp a `task.updated` row describing
      * nothing, and a workflow triggering on that event would wake for no
      * change.

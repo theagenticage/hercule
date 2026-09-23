@@ -1,8 +1,8 @@
 /**
  * Event kinds: what a trigger can listen for. The core declares the kinds it
- * emits, and every plugin that runs declares the kinds of its event sources.
- * The listing is the whole catalog a trigger can name now, so it has no filter
- * and no paging.
+ * emits, and every running plugin declares the kinds its event sources emit.
+ * The list is the complete catalog of kinds a trigger can use right now, and
+ * it is short, so it has no filter and no paging.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -11,16 +11,13 @@ import { Forbidden, Internal, Unauthenticated } from "../errors";
 import { Authenticated } from "../security";
 import { EventKind } from "./event";
 
-/**
- * An event kind that the core or a running plugin declares, which a trigger
- * can name.
- */
+/** An event kind that the core or a running plugin declares, and that a trigger can listen for. */
 export const DeclaredEventKind = Schema.Struct({
   kind: EventKind,
   description: Schema.String,
   /**
-   * Whether a trigger on this kind names a Connection, or `any`. A plugin's
-   * events arrive through a Connection; the core's arrive through none.
+   * Whether a trigger on this kind must set a Connection: a Connection id or
+   * `any`. A plugin's events arrive through a Connection; the core's do not.
    */
   connectionRequired: Schema.Boolean,
 });

@@ -162,8 +162,8 @@ export function PluginCard({
         )}
       </div>
 
-      {/* Wiping is not undoable and nothing else on this screen is, so the
-          press asks first. */}
+      {/* Wiping cannot be undone, unlike everything else on this screen, so
+          the button asks for confirmation first. */}
       {confirmingReset ? (
         <InPlaceQuestion
           question="Wipe everything this plugin has stored?"

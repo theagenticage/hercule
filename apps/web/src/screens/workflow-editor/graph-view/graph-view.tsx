@@ -1,9 +1,9 @@
 /**
- * The workflow's graph, drawn read-only: a card for each trigger and step, and
- * a curve for each edge with its condition and its cap. The layout engine
- * places the cards, and the graph library draws them and gives pan, zoom and
- * fit to view. This folder is the one place that imports the graph library,
- * so the library can be replaced here alone.
+ * A read-only drawing of the workflow graph: a card for each trigger and
+ * step, and a curve for each edge with its condition and traversal limit.
+ * The layout engine (dagre) positions the cards. React Flow draws them and
+ * provides pan, zoom and "Fit to view". This folder is the only place that
+ * imports React Flow, so the library can be replaced here alone.
  */
 import "@xyflow/react/dist/base.css";
 import { useEffect, useEffectEvent, useId, useMemo, type JSX } from "react";
@@ -30,39 +30,39 @@ import {
 } from "@hercule/client-core";
 import { Button, cn } from "@hercule/ui";
 import {
+  computeDrawingViewport,
   computeGraphLayout,
   LARGEST_PLACED_ZOOM,
-  placeDrawing,
   type EdgeRoute,
   type Point,
   type Size,
 } from "./layout";
 
 /**
- * Each glyph of IBM Plex Mono, the face of the ids and the edge labels, is
- * 0.6em wide. So the width of a text in that face follows from its
- * characters, and the layout knows the size of each card and each label
- * before anything is drawn. Each is drawn with the same sizes, padding and
- * borders as it is measured with, so nothing overlaps a card.
+ * Every glyph of IBM Plex Mono, the font of the ids and edge labels, is 0.6em
+ * wide. So a text's width can be computed from its length, and the layout
+ * knows the size of every card and label before anything is rendered. Cards
+ * and labels are rendered with the same sizes, padding and borders they are
+ * measured with, so nothing overlaps a card.
  */
 const MONO_GLYPH_WIDTH = 0.6;
 
-/** The width of a text set in IBM Plex Mono at a font size. */
+/** Returns the width of a text in IBM Plex Mono at a font size. */
 const measureMonoText = (text: string, fontSize: number): number =>
   Math.ceil([...text].length * fontSize * MONO_GLYPH_WIDTH);
 
 const CARD_HEIGHT = 52;
-/** The width of a card with a short id. It holds the kind of each card, and an id of 14 characters. */
+/** The width of a card with a short id. It fits every kind label, and an id of 14 characters. */
 const MIN_CARD_WIDTH = 136;
-/** The id of a card is set at the meta size of the type scale, `text-meta`. */
+/** The font size of a card's id, `text-meta`. */
 const ID_FONT_SIZE = 12.5;
 /** The space between a card's border and its text. */
 const CARD_PADDING = 12;
 /** A card's border, `border`. */
 const CARD_BORDER = 1;
 /**
- * The most characters of an id that a card grows to show. A longer id is cut
- * short, and the whole id is the title of the card's id.
+ * The longest id a card grows to fit. A longer id is truncated, and its
+ * tooltip shows the full id.
  */
 const MAX_ID_CHARACTERS = 32;
 /** The radius of a card's corners, `rounded-card`. */
@@ -70,13 +70,13 @@ const CARD_CORNER_RADIUS = 10;
 /** The width and the height of an arrowhead. */
 const ARROWHEAD_SIZE = 9;
 /**
- * The part at each end of a card's side where no edge attaches: the rounded
- * corner, and half an arrowhead, so that an arrowhead lands only on the
+ * The length at each end of a card's side where no edge attaches: the
+ * rounded corner plus half an arrowhead. So an arrowhead always lands on the
  * straight part of the side.
  */
 const SIDE_MARGIN = CARD_CORNER_RADIUS + ARROWHEAD_SIZE / 2;
 
-/** The size of a node's card: wide enough for its id, up to an id of `MAX_ID_CHARACTERS`. */
+/** Returns the size of a node's card: wide enough for its id, up to `MAX_ID_CHARACTERS`. */
 const measureCard = (node: WorkflowGraphNode): Size => ({
   width: Math.max(
     MIN_CARD_WIDTH,
@@ -86,7 +86,7 @@ const measureCard = (node: WorkflowGraphNode): Size => ({
   height: CARD_HEIGHT,
 });
 
-/** An edge label is set at the fine size of the type scale, `text-fine`. */
+/** The font size of an edge label, `text-fine`. */
 const LABEL_FONT_SIZE = 12;
 const LABEL_HEIGHT = 20;
 const LABEL_PADDING = 6;
@@ -94,25 +94,26 @@ const LABEL_GAP = 6;
 const BADGE_PADDING = 4;
 const BADGE_BORDER = 1;
 /**
- * How many characters of a condition a label shows. A longer condition shows
- * its end, after an ellipsis, because two branches of one step usually differ
- * at the end of their conditions. The whole condition is the label's title.
+ * The most characters of a condition a label shows. A longer condition shows
+ * only its end, after an ellipsis, because two branches from the same step
+ * usually differ at the end of their conditions. The tooltip shows the full
+ * condition.
  */
 const MAX_CONDITION_CHARACTERS = 24;
 
 /**
- * The colour of the edges and their arrowheads: the faint ink, one fifth of
- * the way to the muted ink, so that a line has a contrast of 3:1 on the
- * surface in both themes, as a graphic that carries meaning must.
+ * The colour of edges and arrowheads: the faint colour mixed 20% towards the
+ * muted colour. This gives lines a 3:1 contrast on the surface in both
+ * themes, the minimum for a graphic that carries meaning.
  */
 const EDGE_COLOUR = "color-mix(in oklch, var(--faint), var(--muted) 20%)";
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 1.5;
-/** The space around the drawing, as a part of the pane, when the author asks to see all of it. */
+/** The padding around the drawing for "Fit to view", as a fraction of the pane. */
 const FIT_PADDING = 0.08;
 
-/** What a card calls the kind of its node. */
+/** The label a card shows for each node kind. */
 const KIND_LABELS: Record<WorkflowGraphNode["kind"], string> = {
   start: "Start trigger",
   signal: "Signal trigger",
@@ -120,11 +121,11 @@ const KIND_LABELS: Record<WorkflowGraphNode["kind"], string> = {
   agent: "Agent step",
 };
 
-/** The badge of an edge that may fire a limited number of times in one run. */
+/** Returns the badge text for an edge with a traversal limit, or `undefined` for none. */
 const formatTraversalBadge = (edge: WorkflowGraphEdge): string | undefined =>
   edge.maxTraversals === undefined ? undefined : `max ${String(edge.maxTraversals)}`;
 
-/** The condition that an edge's label shows, cut to its end where it is too long. */
+/** Returns the condition an edge's label shows, truncated at the start when too long. */
 const formatConditionLabel = (edge: WorkflowGraphEdge): string | undefined => {
   const condition = abbreviateEdgeCondition(edge);
   if (condition === undefined) return undefined;
@@ -134,7 +135,7 @@ const formatConditionLabel = (edge: WorkflowGraphEdge): string | undefined => {
     : `…${characters.slice(1 - MAX_CONDITION_CHARACTERS).join("")}`;
 };
 
-/** The size an edge's label is drawn at, or `undefined` for an edge with nothing to say. */
+/** Returns the size of an edge's label, or `undefined` for an edge with no condition and no limit. */
 const measureLabel = (edge: WorkflowGraphEdge): Size | undefined => {
   const condition = formatConditionLabel(edge);
   const badge = formatTraversalBadge(edge);
@@ -148,16 +149,17 @@ const measureLabel = (edge: WorkflowGraphEdge): Size | undefined => {
   return { width: conditionWidth + gap + badgeWidth + 2 * LABEL_PADDING, height: LABEL_HEIGHT };
 };
 
-/** A coordinate as text, to a tenth of a pixel, which is finer than a screen shows. */
+/** Formats a coordinate rounded to a tenth of a pixel, which is finer than a screen can show. */
 const formatCoordinate = (value: number): string => String(Math.round(value * 10) / 10);
 
-/** A point as the path of an SVG writes it. */
+/** Formats a point for an SVG path. */
 const formatPoint = ({ x, y }: Point): string => `${formatCoordinate(x)},${formatCoordinate(y)}`;
 
 /**
- * A smooth curve through an edge's points: the uniform B-spline that the
- * layout engine's own renderer draws its points with. A route has at least
- * four points: each end, and a point straight out of each card.
+ * Builds an SVG path for a smooth curve through an edge's points. The curve
+ * is the same uniform B-spline that dagre's own renderer draws. A route always
+ * has at least four points: the two ends, and one point straight out from
+ * each card.
  */
 const buildCurve = (points: ReadonlyArray<Point>): string => {
   const [first, second] = [points[0]!, points[1]!];
@@ -173,20 +175,20 @@ const buildCurve = (points: ReadonlyArray<Point>): string => {
   return `${path} L${formatPoint(b)}`;
 };
 
-/** A trigger or a step as the graph library draws it: a card. */
+/** A trigger or step as a React Flow node, drawn as a card. */
 type DrawnWorkflowNode = Node<{ readonly node: WorkflowGraphNode }, "card">;
 
-/** An edge as the graph library draws it: a curve along its route. */
+/** An edge as a React Flow edge, drawn as a curve along its route. */
 type DrawnWorkflowEdge = Edge<
   { readonly edge: WorkflowGraphEdge; readonly route: EdgeRoute; readonly markerId: string },
   "route"
 >;
 
 /**
- * The handles of a card: one on each side for the edges that leave it and
- * one for the edges that enter it. The layout routes an edge back from right
- * to left where it closes a loop, so an edge can leave or enter either side.
- * The curves come from the layout, so the handles are not shown.
+ * A card's connection points: on each side, one for outgoing edges and one
+ * for incoming edges. An edge that closes a loop is routed back from right to
+ * left, so an edge can leave or enter either side. The curves come from the
+ * layout, so the handles are invisible.
  */
 const HANDLES = [
   { id: "left-in", type: "target", position: Position.Left },
@@ -196,9 +198,9 @@ const HANDLES = [
 ] as const;
 
 /**
- * A trigger is a flat card with a hairline, because it is passive. A step is
- * lit, on the raised layer, because the steps are the work. The graph library
- * attaches each edge to a handle.
+ * A trigger is a flat card with a thin border, because it is passive. A step
+ * is raised, with a shadow, because steps do the work. React Flow attaches
+ * each edge to a handle.
  */
 function WorkflowNodeCard({ data }: NodeProps<DrawnWorkflowNode>): JSX.Element {
   const { node } = data;
@@ -256,13 +258,14 @@ function WorkflowEdgeCurve({ id, data }: EdgeProps<DrawnWorkflowEdge>): JSX.Elem
               gap: LABEL_GAP,
               paddingInline: LABEL_PADDING,
             }}
-            // The ground hides the curve behind the text only. The padding is
-            // outside it, so the curve stays whole where it meets the label.
+            // The background covers the curve only behind the text. The
+            // padding is outside the background, so the curve stays visible
+            // right up to the text.
             className="pointer-events-auto absolute flex items-center bg-surface bg-clip-content font-mono text-fine leading-none whitespace-nowrap text-muted tabular-nums"
           >
             {edge.condition === undefined ? null : (
               <>
-                {/* The label shows a short form of the condition. A screen reader reads the whole condition. */}
+                {/* The label shows a shortened condition. A screen reader reads the full condition. */}
                 <span className="sr-only">{edge.condition}</span>
                 <span aria-hidden="true" title={edge.condition}>
                   {condition}
@@ -291,7 +294,7 @@ function WorkflowEdgeCurve({ id, data }: EdgeProps<DrawnWorkflowEdge>): JSX.Elem
 const NODE_TYPES = { card: WorkflowNodeCard };
 const EDGE_TYPES = { route: WorkflowEdgeCurve };
 
-/** The arrowhead: an open chevron with round ends, drawn as the marks are. */
+/** The arrowhead: an open chevron with round ends, in the same style as the app's marks. */
 function ArrowMarker({ id }: { readonly id: string }): JSX.Element {
   return (
     <svg width={0} height={0} className="absolute" aria-hidden="true">
@@ -321,22 +324,23 @@ function ArrowMarker({ id }: { readonly id: string }): JSX.Element {
 }
 
 /**
- * Places the drawing in the pane. On its own, it draws the drawing at the
- * legible zoom and never smaller, and a small drawing larger, as
- * `placeDrawing` says. It places the drawing again when the pane changes
- * size and when the structure changes: a node or an edge comes or goes, or
- * an edge joins other nodes. A new structure can have a new shape, and the old place
- * can cut the new shape at the pane's edge. It does not place the drawing
- * again at each keystroke that changes a label or an id, so that a place the
- * author panned to stays. "Fit to view" is the author asking to see all of
- * the drawing, so it makes the drawing as small as it must be to fit.
+ * Sets the viewport that `computeDrawingViewport` returns: never below a
+ * readable zoom, and a small drawing scaled up.
+ *
+ * The drawing is placed again when the pane resizes, and when the structure
+ * changes (a node or edge is added or removed, or an edge connects different
+ * nodes). A new structure can have a new shape, and the old viewport could
+ * cut it off at the pane's edge. A keystroke that only changes a label or an
+ * id does not reset the viewport, so the author's panning is kept.
+ *
+ * "Fit to view" zooms out as far as needed to show the whole drawing.
  */
 function DrawingPlacement({
   size,
   structure,
 }: {
   readonly size: Size;
-  /** Which nodes the edges join. Ids and labels are not part of it. */
+  /** A key that encodes which nodes the edges connect. Ids and labels are not part of it. */
   readonly structure: string;
 }): JSX.Element {
   const { setViewport } = useReactFlow();
@@ -344,7 +348,7 @@ function DrawingPlacement({
   const paneHeight = useStore((state) => state.height);
   const placeInPane = useEffectEvent(() => {
     if (paneWidth === 0 || paneHeight === 0) return;
-    void setViewport(placeDrawing({ width: paneWidth, height: paneHeight }, size));
+    void setViewport(computeDrawingViewport({ width: paneWidth, height: paneHeight }, size));
   });
   useEffect(() => {
     placeInPane();
@@ -376,11 +380,11 @@ export function GraphView({
   isStale,
 }: {
   readonly graph: WorkflowGraph;
-  /** Whether the graph is of an earlier text than the one the author sees, which dims it. */
+  /** Whether the graph shows an older version of the text than the editor. A stale graph is dimmed. */
   readonly isStale: boolean;
 }): JSX.Element {
-  // An id that `url(#...)` can name: React's ids hold characters that a URL
-  // fragment does not take as they are.
+  // React's ids contain characters that are not valid in a `url(#...)`
+  // fragment, so they are removed.
   const markerId = `workflow-arrow-${useId().replace(/[^\w-]/g, "")}`;
   const drawing = useMemo(() => {
     const edges = graph.edges.map((edge, index) => ({ id: `edge-${String(index)}`, edge }));
@@ -393,9 +397,9 @@ export function GraphView({
           from: edge.from,
           to: edge.to,
           ...(label === undefined ? {} : { label }),
-          // Every loop of a valid workflow has an edge with maxTraversals,
-          // which bounds how often a run goes round. That edge is the one
-          // that goes back to the start of the loop.
+          // Every loop in a valid workflow has an edge with maxTraversals,
+          // which limits how often a run goes round the loop. That edge is
+          // the one that goes back to the start of the loop.
           closesLoop: edge.maxTraversals !== undefined,
         };
       }),
@@ -409,10 +413,10 @@ export function GraphView({
         position: layout.nodes.get(node.id)!,
         data: { node },
         ...size,
-        // The handles that the edges name, given before the cards are
-        // measured, so that the edges are drawn in the first frame. The
-        // curves come from the layout, so the place of a handle on its side
-        // does not move a curve.
+        // Handles are passed in up front, before React Flow measures the
+        // cards, so the edges render in the first frame. The curves come from
+        // the layout, so a handle's position on its side does not affect a
+        // curve.
         handles: HANDLES.map((handle) => ({
           ...handle,
           x: handle.position === Position.Left ? 0 : size.width,
@@ -422,8 +426,8 @@ export function GraphView({
     });
     const routes: Array<DrawnWorkflowEdge> = edges.map(({ id, edge }) => {
       const route = layout.edges.get(id)!;
-      // The side of each card that the route leaves and enters: the route
-      // runs straight out of the side of the card at each end.
+      // Find the side of each card that the route leaves and enters. The
+      // route runs straight out from the card's side at each end.
       const sourceSide = route.points[1]!.x > route.points[0]!.x ? "right" : "left";
       const targetSide = route.points.at(-2)!.x < route.points.at(-1)!.x ? "left" : "right";
       return {
@@ -436,24 +440,25 @@ export function GraphView({
         data: { edge, route, markerId },
       };
     });
-    // The structure names each node by its place in the list, not by its id,
-    // so a rename keeps it. A count of the nodes and the edges is not enough:
-    // an edge into an entry step removes the edge from the trigger into it.
-    const nodePlaces = new Map(graph.nodes.map((node, place) => [node.id, place]));
+    // The structure key refers to each node by its index, not by its id, so
+    // renaming a node does not change the key. Counting nodes and edges is not
+    // enough: adding an edge into an entry step removes the edge from the
+    // trigger into it, so the count can stay the same.
+    const nodeIndexes = new Map(graph.nodes.map((node, index) => [node.id, index]));
     const structure = [
       graph.nodes.length,
       ...graph.edges.map(
-        (edge) => `${String(nodePlaces.get(edge.from))}>${String(nodePlaces.get(edge.to))}`,
+        (edge) => `${String(nodeIndexes.get(edge.from))}>${String(nodeIndexes.get(edge.to))}`,
       ),
     ].join(" ");
     return { nodes, edges: routes, size: layout.size, structure };
   }, [graph, markerId]);
 
   return (
-    // A stale graph dims its nodes, its edges and their labels, which are all
-    // inside the graph library's viewport, and not its controls. The class is
-    // a literal because the class scanner reads `_` as a space unless it is
-    // escaped, and the viewport's class holds `__`.
+    // A stale graph dims its nodes, edges and labels, which are all inside
+    // React Flow's viewport element, but not its controls. The class name is
+    // written out in full because Tailwind reads `_` as a space unless it is
+    // escaped, and the viewport's class contains `__`.
     <div
       data-stale={isStale ? "" : undefined}
       className="relative h-full w-full data-stale:[&_.react-flow\_\_viewport]:opacity-50"

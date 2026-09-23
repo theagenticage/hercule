@@ -1,7 +1,6 @@
 /**
- * The JSON Schema the catalog holds for a declared schema: the root's own
- * keywords at the top, and only the definitions that a reference still
- * points at.
+ * Tests that the catalog JSON Schema has the root's keywords at the top, and
+ * keeps only the definitions that some `$ref` still points to.
  */
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
@@ -20,7 +19,7 @@ const Category = Schema.Struct({
 }).annotate({ identifier: "Category" });
 
 describe("deriveCatalogJsonSchema", () => {
-  it("puts the keywords of a root that has an identifier at the top, and keeps no copy of it", () => {
+  it("moves the keywords of a root with an identifier to the top, and drops its definition", () => {
     const derived = deriveCatalogJsonSchema(
       Schema.Struct({ title: Schema.String }).annotate({ identifier: "Thing" }),
     );
@@ -33,7 +32,7 @@ describe("deriveCatalogJsonSchema", () => {
     });
   });
 
-  it("keeps the definitions that the root points at, and drops the copy of the root", () => {
+  it("keeps the definitions the root refers to, and drops the root's own definition", () => {
     const derived = deriveCatalogJsonSchema(
       Schema.Struct({ first: Inner, second: Inner }).annotate({ identifier: "Outer" }),
     );
@@ -46,7 +45,7 @@ describe("deriveCatalogJsonSchema", () => {
     expect(Object.keys(derived["$defs"] as object)).toEqual(["Inner"]);
   });
 
-  it("keeps the definition of a root that contains itself, because a reference still points at it", () => {
+  it("keeps the root's definition for a recursive schema, because a $ref still points to it", () => {
     const derived = deriveCatalogJsonSchema(Category);
 
     expect(derived["type"]).toBe("object");
@@ -54,7 +53,7 @@ describe("deriveCatalogJsonSchema", () => {
     expect(JSON.stringify(derived["properties"])).toContain('"#/$defs/Category"');
   });
 
-  it("drops the copy of the root where a value in the schema only looks like its pointer", () => {
+  it("drops the root's definition when a string value only looks like a $ref to it", () => {
     const derived = deriveCatalogJsonSchema(
       Schema.Struct({ pointer: Schema.Literal("#/$defs/Thing") }).annotate({ identifier: "Thing" }),
     );
@@ -63,7 +62,7 @@ describe("deriveCatalogJsonSchema", () => {
     expect(derived["$defs"]).toBeUndefined();
   });
 
-  it("answers the root as it is where the root has no identifier", () => {
+  it("returns the root unchanged when the root has no identifier", () => {
     expect(deriveCatalogJsonSchema(Schema.Struct({ count: Schema.Int }))).toEqual(
       Schema.toJsonSchemaDocument(Schema.Struct({ count: Schema.Int })).schema,
     );

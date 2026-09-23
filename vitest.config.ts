@@ -2,8 +2,8 @@ import { defineConfig } from "vitest/config";
 
 /**
  * Three projects: the two React packages, everything else, and the one suite
- * that runs the release binary. A few tests are in both of the first two, as
- * `bothEngineTests` below says.
+ * that runs the release binary. A few tests run in both of the first two; see
+ * `bothEngineTests` below.
  *
  * The first two run on different runtimes, which is why `pnpm test` invokes
  * vitest twice. The `node` project needs Bun: it reaches `bun:sqlite`,
@@ -16,7 +16,7 @@ import { defineConfig } from "vitest/config";
  * runs it, after `pnpm build:binary`. It is kept apart because a build rewrites
  * `apps/web/dist` and the generated file list underneath any controller a
  * parallel suite is running from source. Most of its suites test the packaging
- * itself and refuse to start without `./hercule`, saying so; the three that test the
+ * itself and fail with a clear error when `./hercule` is missing; the three that test the
  * controller's own surface rather than the packaging - `e2e/workspace.test.ts`,
  * `e2e/github-push.test.ts` and `e2e/workflows.test.ts` - are the same program
  * either way, so with no build they run the dispatcher's source instead
@@ -25,15 +25,14 @@ import { defineConfig } from "vitest/config";
 const reactPackages = ["apps/web", "packages/ui"];
 
 /**
- * Tests of code whose result can depend on the JavaScript engine. The
- * contract's parse of a workflow runs in the controller under Bun and in the
- * browser, and client-core's reading of a workflow runs that parse in the
- * browser, which is V8 in Chrome and JavaScriptCore in Safari. The engines
- * have different limits, such as how many arguments one call can take, and a
- * long source reaches them. These tests run in both projects, so both engines
- * run them: JavaScriptCore under Bun, and V8 under Node. Completion and the
- * graph only read what the parse answers and reach no such limit, so their
- * tests run on one engine.
+ * Tests that run in both the `react` and the `node` project, so that both
+ * JavaScript engines run them: V8 under Node and JavaScriptCore under Bun.
+ *
+ * The workflow parser in the contract runs in the controller (Bun) and in the
+ * browser (V8 in Chrome, JavaScriptCore in Safari). The engines have different
+ * limits, such as the maximum number of arguments to one function call, and a
+ * long workflow source can hit them. Completion and the graph code only read
+ * the parse result and hit no such limit, so their tests run on one engine.
  */
 const bothEngineTests = [
   "packages/contract/src/groups/workflow-source.test.ts",

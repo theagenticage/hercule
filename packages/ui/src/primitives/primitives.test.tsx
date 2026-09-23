@@ -36,9 +36,9 @@ describe("Button", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  // A Save whose write is in flight keeps the focus, so that the keyboard
-  // user stays where they were.
-  it("ignores presses, submits nothing and keeps the focus while aria-disabled", async () => {
+  // A Save button keeps focus while its save is in flight, so a keyboard user
+  // does not lose their place.
+  it("ignores clicks, does not submit and keeps focus while aria-disabled", async () => {
     const onClick = vi.fn();
     const onSubmit = vi.fn((event: FormEvent) => {
       event.preventDefault();
@@ -254,14 +254,14 @@ describe("Switch", () => {
     return <Switch aria-label="Enabled" checked={on} onCheckedChange={setOn} disabled={disabled} />;
   }
 
-  it("is a switch, named by its label, that says whether it is on", () => {
+  it("has the switch role, its label as its name, and its state in aria-checked", () => {
     render(<Example />);
     expect(screen.getByRole("switch", { name: "Enabled" }).getAttribute("aria-checked")).toBe(
       "false",
     );
   });
 
-  it("turns on and off with each press, and never submits a form", async () => {
+  it("toggles on each click, and is not a submit button", async () => {
     render(<Example />);
     const control = screen.getByRole("switch", { name: "Enabled" });
     expect(control).toHaveProperty("type", "button");
@@ -271,7 +271,7 @@ describe("Switch", () => {
     expect(control.getAttribute("aria-checked")).toBe("false");
   });
 
-  it("turns with Space and Enter from the keyboard", async () => {
+  it("toggles with Space and Enter", async () => {
     render(<Example />);
     await userEvent.tab();
     await userEvent.keyboard(" ");
@@ -280,15 +280,15 @@ describe("Switch", () => {
     expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
   });
 
-  it("is inert while disabled", async () => {
+  it("ignores clicks while disabled", async () => {
     render(<Example disabled />);
     await userEvent.click(screen.getByRole("switch"));
     expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
   });
 
-  // A switch whose write is in flight ignores presses, and keeps the focus
-  // so that the keyboard user stays where they were.
-  it("ignores presses and keeps the focus while aria-disabled", async () => {
+  // A switch keeps focus while its save is in flight, so a keyboard user does
+  // not lose their place.
+  it("ignores clicks and keys and keeps focus while aria-disabled", async () => {
     const onCheckedChange = vi.fn();
     render(
       <Switch

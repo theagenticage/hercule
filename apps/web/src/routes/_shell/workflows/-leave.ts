@@ -1,15 +1,15 @@
-/**
- * The question that a workflow's page asks before the author leaves it with
- * changes that are not saved.
- */
 import { useEffect } from "react";
 import { useBlocker } from "@tanstack/react-router";
 
 /**
- * Holds a navigation to another page while `shouldAsk` is true, so the page
- * can ask first. A change of view stays on the page, so it is never held.
- * When `shouldAsk` turns false while a navigation is held, as when a save
- * lands, nothing is left to ask about, and the navigation goes on.
+ * Blocks navigation to another page while `shouldAsk` is true, so the page
+ * can ask the user first. Returns the router's blocker: its `status` is
+ * "blocked" while a navigation waits, and `proceed` and `reset` let it go or
+ * cancel it.
+ *
+ * A change of view keeps the same path, so it is never blocked. If
+ * `shouldAsk` becomes false while a navigation is blocked, for example
+ * because a save finished, the navigation continues.
  */
 export const useLeaveBlocker = (shouldAsk: boolean) => {
   const blocker = useBlocker({

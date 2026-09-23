@@ -254,9 +254,10 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
       await awaiting(live, "the allowed command never ran", () =>
         finishedTheCommand(live, second.itemId),
       );
-      // pi asks about each call of a batch in turn, and then runs the calls of
-      // the batch at the same time. The file change can land after the command
-      // ends, so the test waits for the file and does not look once.
+      // pi asks for approval of each tool call in a batch one by one, then runs
+      // all calls of the batch in parallel. So the file change can land after
+      // the command finishes, and the test waits for the file instead of
+      // checking once.
       await awaiting(live, "the allowed file change never landed", () => existsSync(file));
       await live.stop();
     },

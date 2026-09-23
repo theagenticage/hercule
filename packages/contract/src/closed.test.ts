@@ -21,7 +21,7 @@ describe("a closed struct", () => {
     expect(decode(Example)({ a: "x", b: 1 })._tag).toBe("Failure");
   });
 
-  it("names the key it does not declare, and says what to do about it", () => {
+  it("reports an unknown key at its own path, with a message that says how to fix it", () => {
     const failed = Schema.decodeUnknownExit(Example)({ a: "x", b: 1 });
     expect(failed._tag).toBe("Failure");
     if (failed._tag !== "Failure") return;

@@ -1,15 +1,15 @@
 /**
- * The one parse and the one canonical render of a workflow's YAML source.
+ * Tests `parseWorkflowSource` and `renderWorkflowSource`.
  *
- * The controller and the web app both call these two functions, so what a
- * source means and how a definition object is written back as text are
- * decided here and nowhere else. The render is checked as a property over
- * generated definitions, because a rule such as "a string with a newline is a
- * block scalar" is about every string at every place, and a handful of
- * examples would only check the places the examples happen to use.
+ * The controller and the web app both call these two functions, so these
+ * tests fix how YAML source is parsed and how a definition object is
+ * converted to YAML. The render is tested as a property over generated
+ * definitions, because a rule such as "a string with a newline is a block
+ * scalar" applies to every string in every field. A handful of examples would
+ * only test the fields those examples happen to use.
  *
- * `parseWorkflowSource` answers the definition or the issues. The two helpers
- * below are the only code that reads the shape of that answer.
+ * `parseWorkflowSource` returns the definition or the issues. The two helpers
+ * below are the only code that reads that result.
  */
 import { describe, expect, it } from "vitest";
 import { Result } from "effect";
@@ -23,16 +23,16 @@ import {
   type WorkflowDefinition,
 } from "../index";
 
-/** The definition a source parses to. A refusal fails the test and shows its issues. */
+/** Parses a source and returns the definition. Throws with the issues if the parse fails. */
 const parseDefinition = (source: string): WorkflowDefinition => {
   const parsed = parseWorkflowSource(source);
   if (Result.isFailure(parsed)) {
-    throw new Error(`the source was refused: ${JSON.stringify(parsed.failure)}\n${source}`);
+    throw new Error(`the source failed to parse: ${JSON.stringify(parsed.failure)}\n${source}`);
   }
   return parsed.success;
 };
 
-/** The issues the parse refuses a source with. Empty when the source parses. */
+/** Parses a source and returns its issues, or an empty list if it parses. */
 const collectIssues = (source: string): ReadonlyArray<Issue> => {
   const parsed = parseWorkflowSource(source);
   return Result.isFailure(parsed) ? parsed.failure : [];
@@ -41,7 +41,7 @@ const collectIssues = (source: string): ReadonlyArray<Issue> => {
 const listIssuePaths = (issues: ReadonlyArray<Issue>): ReadonlyArray<ReadonlyArray<string>> =>
   issues.map((issue) => issue.path);
 
-/** The top-level keys, in the order the definition shape declares them. */
+/** The top-level keys, in the order the definition schema declares them. */
 const TOP_LEVEL_KEY_ORDER = [
   "name",
   "description",
@@ -52,10 +52,10 @@ const TOP_LEVEL_KEY_ORDER = [
   "workspace",
 ];
 
-/** A Connection, Agent or Resource id. The parse only reads its shape. */
+/** A Connection, Agent or Resource id. The parse only checks its format. */
 const ENTITY_ID = "0199e0e7-1111-7000-8000-0000000000ab";
 
-/** Words that YAML reads as plain text, so a line made of them needs no quotes. */
+/** Words that YAML parses as plain text, so a line made of them needs no quotes. */
 const PLAIN_WORDS = [
   "review",
   "the",
@@ -74,11 +74,11 @@ const PLAIN_WORDS = [
 ];
 
 /**
- * Text that YAML reads as something else, or cannot read at all, without
- * quotes: a boolean, a null, a number, an indicator character at the start, a
- * comment marker, a mapping separator, or space at an end. Two of them contain
- * one kind of quote, because a YAML writer that is free to choose picks the
- * other kind of quote for those.
+ * Text that YAML parses as something else, or fails to parse, unless it is
+ * quoted: a boolean, a null, a number, an indicator character at the start, a
+ * comment marker, a mapping separator, or a space at either end. Two of them
+ * contain one kind of quote, because a YAML writer that can choose would use
+ * the other kind of quote for those.
  */
 const TEXTS_NEEDING_QUOTES = [
   "true",
@@ -113,12 +113,13 @@ const CEL_EXPRESSIONS = [
   'inputs.pr_url != ""',
 ];
 
-/** The ids and names the contract refuses, repeated here because the contract does not export them. */
+/** The ids and names the contract rejects, copied here because the contract does not export them. */
 const UNREADABLE_FIELD_NAMES = new Set(["in", "true", "false", "null", "constructor", "__proto__"]);
 
 /**
- * A step, trigger or input name: a CEL identifier, because an expression reads
- * it, and not a word that an expression cannot read as a field name.
+ * A step id, trigger id or input name: a CEL identifier, because expressions
+ * refer to it, and not one of the words an expression cannot use as a field
+ * name.
  */
 const identifierArbitrary = FastCheck.stringMatching(/^[a-z][a-z0-9_]{0,11}$/).filter(
   (word) => !UNREADABLE_FIELD_NAMES.has(word),
@@ -140,13 +141,13 @@ const wordsLineArbitrary = FastCheck.tuple(plainTextArbitrary, lineEndArbitrary)
 );
 
 /**
- * Two to five lines. The first and the last hold words; a line between them
- * holds words, nothing, or only whitespace. The text sometimes ends with one
- * or two newlines.
+ * Two to five lines. The first and last lines have words; a line in between
+ * has words, nothing, or only whitespace. The text sometimes ends with one or
+ * two newlines.
  *
- * No line starts with whitespace here: the property below reads the leading
- * whitespace of every line as indentation. The cases below the property check
- * such lines.
+ * No line starts with whitespace here, because the property below treats the
+ * leading whitespace of every line as indentation. Separate tests after the
+ * property cover such lines.
  */
 const multilineTextArbitrary = FastCheck.tuple(
   wordsLineArbitrary,
@@ -162,24 +163,24 @@ const anyTextArbitrary = FastCheck.oneof(
 );
 
 /**
- * Only whitespace and line breaks. A block cannot hold such a text, so it is
- * written in double quotes, and it is generated only where the property does
- * not check how a string is written.
+ * Only whitespace and line breaks. A block scalar cannot hold such text, so it
+ * is written in double quotes. It is generated only for fields where the
+ * property does not check the YAML style of a string.
  */
 const blankLinesArbitrary = FastCheck.array(lineEndArbitrary, { minLength: 2, maxLength: 4 }).map(
   (lines) => lines.join("\n"),
 );
 
-/** Any text, or one of only whitespace and line breaks. */
+/** Any text, including text of only whitespace and line breaks. */
 const anyTextOrBlankLinesArbitrary = FastCheck.oneof(anyTextArbitrary, blankLinesArbitrary);
 
 const expressionArbitrary = FastCheck.constantFrom(...CEL_EXPRESSIONS);
 
 /*
- * The contract fixes the order of its own keys. The keys of a map whose keys
+ * The contract sets the order of its own keys. The keys of a map whose keys
  * the author chooses (params, options, schemas, input mappings, outputs) keep
  * the order in which they were sent. `params` has two keys here, in either
- * order, so the property checks that the render keeps that order; the other
+ * order, so the property checks that the render keeps that order. The other
  * maps have one key.
  */
 
@@ -327,10 +328,10 @@ const workspaceArbitrary = FastCheck.oneof(
 );
 
 /**
- * A definition the parse accepts: every id a CEL identifier, and no id used by
- * two nodes, triggers and steps together. Whether its agents, actions and
- * event kinds exist is the server's question and not the parse's, so they are
- * fixed values here.
+ * A definition the parse accepts: every id is a CEL identifier, and no id is
+ * used twice across triggers and steps. Whether its agents, actions and event
+ * kinds exist is checked by the controller, not the parse, so they are fixed
+ * values here.
  */
 const definitionArbitrary = FastCheck.record({
   nodeIds: FastCheck.uniqueArray(identifierArbitrary, { minLength: 1, maxLength: 6 }),
@@ -366,8 +367,9 @@ const definitionArbitrary = FastCheck.record({
 });
 
 /**
- * The fields whose value is a map with keys the author chooses. The author's
- * order of those keys is kept, so `reverseKeys` leaves such a map as it is.
+ * The fields whose value is a map with keys the author chooses. The render
+ * keeps the author's order of those keys, so `reverseKeys` leaves such a map
+ * unchanged.
  */
 const AUTHOR_KEYED_FIELDS = new Set([
   "params",
@@ -380,9 +382,10 @@ const AUTHOR_KEYED_FIELDS = new Set([
 ]);
 
 /**
- * The same value with the contract's keys of every object written in reverse
- * order. A map with keys the author chooses stays as it is. The top-level
- * `inputs` is a list, so the declarations in it are reversed too.
+ * Returns a copy of the value with the contract's keys of every object in
+ * reverse order. A map with keys the author chooses is left unchanged. The
+ * top-level `inputs` is a list, so the keys of each declaration in it are
+ * reversed too.
  */
 const reverseKeys = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(reverseKeys);
@@ -397,13 +400,13 @@ const reverseKeys = (value: unknown): unknown => {
   );
 };
 
-/** The keys of each step's `params`, in the order the value holds them. */
+/** Returns the keys of each step's `params`, in their order in the value. */
 const listParamsKeys = (definition: unknown): ReadonlyArray<ReadonlyArray<string>> =>
   (definition as { steps: ReadonlyArray<{ params?: object }> }).steps.flatMap((step) =>
     step.params === undefined ? [] : [Object.keys(step.params)],
   );
 
-/** The keys written at the left margin, in the order the text writes them. */
+/** Returns the keys written at the left margin, in the order they appear in the text. */
 const readTopLevelKeys = (text: string): ReadonlyArray<string> =>
   text.split("\n").flatMap((line) => {
     const key = /^([A-Za-z]+):/.exec(line)?.[1];
@@ -415,25 +418,25 @@ const countMatches = (text: string, pattern: RegExp): number => (text.match(patt
 /** A block scalar header: `|`, with an optional chomping and indentation indicator. */
 const BLOCK_SCALAR_HEADER = /\|[-+0-9]*$/;
 
-/** The prompts of a definition's agent steps, in step order. */
+/** Returns the prompts of a definition's agent steps, in step order. */
 const collectPrompts = (definition: Record<string, unknown>): ReadonlyArray<string> =>
   (definition["steps"] as ReadonlyArray<Record<string, unknown>>).flatMap((step) =>
     step["kind"] === "agent" ? [step["prompt"] as string] : [],
   );
 
 describe("rendering a definition as canonical YAML", () => {
-  it("gives the same bytes for the same object, in contract order, with block and double-quoted scalars, two-space indent, and a parse back to the same definition", () => {
+  it("is deterministic, uses contract key order, block and double-quoted scalars and two-space indent, and parses back to the same definition", () => {
     FastCheck.assert(
       FastCheck.property(definitionArbitrary, (generated) => {
         const definition = generated as unknown as WorkflowDefinition;
         const definitionFields = generated as Record<string, unknown>;
         const source = renderWorkflowSource(definition);
 
-        // The same object gives the same bytes, and so does a copy of it.
+        // The same object, or a copy of it, renders to the same bytes.
         expect(renderWorkflowSource(definition)).toBe(source);
         expect(renderWorkflowSource(structuredClone(definition))).toBe(source);
 
-        // The order the caller wrote the contract's keys in changes nothing.
+        // The order of the contract's keys in the input does not matter.
         expect(renderWorkflowSource(reverseKeys(generated) as WorkflowDefinition)).toBe(source);
         expect(readTopLevelKeys(source)).toEqual(
           TOP_LEVEL_KEY_ORDER.filter((key) => key in definitionFields),
@@ -441,8 +444,8 @@ describe("rendering a definition as canonical YAML", () => {
         // The keys the author chooses keep the order in which they were sent.
         expect(listParamsKeys(parseDefinition(source))).toEqual(listParamsKeys(generated));
 
-        // A string with a newline is a block scalar; a string that needs
-        // quotes has double quotes; a plain string is written as it is.
+        // A string with a newline is a block scalar, a string that needs
+        // quotes gets double quotes, and a plain string is written unquoted.
         const description = definitionFields["description"];
         if (typeof description === "string") {
           const descriptionLine =
@@ -464,7 +467,7 @@ describe("rendering a definition as canonical YAML", () => {
         );
         expect(source).not.toMatch(/^[\s-]*[A-Za-z]+: '/m);
 
-        // Each level of nesting is two spaces deeper than the one around it.
+        // Each level of nesting is indented two spaces more than its parent.
         let previousIndent = 0;
         for (const line of source.split("\n").filter((written) => written.trim() !== "")) {
           const indent = line.length - line.trimStart().length;
@@ -479,9 +482,9 @@ describe("rendering a definition as canonical YAML", () => {
   });
 });
 
-describe("parsing a source that is not valid", () => {
-  it("names a YAML syntax error once, with no path, by its line and column", () => {
-    // The stray word after the closing quote on line 9 starts at column 20.
+describe("parsing an invalid source", () => {
+  it("reports a YAML syntax error once, with an empty path, giving its line and column", () => {
+    // The extra word after the closing quote on line 9 starts at column 20.
     const issues = collectIssues(`# A workflow with one broken line.
 name: broken
 
@@ -498,16 +501,16 @@ steps:
     expect(issues[0]!.message).toMatch(/\b20\b/);
   });
 
-  it("counts the column of a YAML syntax error in characters, so that an emoji is one column", () => {
-    // The stray x after the closing quote is the twelfth character of line 1,
-    // and the fourteenth UTF-16 code unit.
+  it("counts the column of a YAML syntax error in characters, so an emoji is one column", () => {
+    // The extra x after the closing quote is the 12th character of line 1,
+    // and the 14th UTF-16 code unit.
     const issues = collectIssues('name: "😀😀" x: y\nsteps: []\n');
     expect(issues.map((issue) => issue.message)).toContainEqual(
       expect.stringContaining("line 1, column 12."),
     );
   });
 
-  it("points a field of the wrong shape at that field", () => {
+  it("reports a field with the wrong type at that field's path", () => {
     const issues = collectIssues(`name: wrong kind
 steps:
   - id: file_task
@@ -517,7 +520,7 @@ steps:
     expect(listIssuePaths(issues)).toEqual([["steps", "0", "kind"]]);
   });
 
-  it("says what kind of value to write after a key with no value, where one plain value belongs", () => {
+  it("gives the kind of value that a key with no value takes", () => {
     const issues = collectIssues(`name:
 steps:
   - id: file_task
@@ -531,21 +534,21 @@ edges:
     maxTraversals:
 `);
     expect(issues).toEqual([
-      { path: ["name"], message: "Write a value here. name takes text." },
-      { path: ["steps", "0", "action"], message: "Write a value here. action takes text." },
-      { path: ["steps", "0", "join"], message: "Write a value here. join takes any or all." },
+      { path: ["name"], message: "name has no value. It takes text." },
+      { path: ["steps", "0", "action"], message: "action has no value. It takes text." },
+      { path: ["steps", "0", "join"], message: "join has no value. It takes any or all." },
       {
         path: ["steps", "0", "entry"],
-        message: "Write a value here. entry takes true or false.",
+        message: "entry has no value. It takes true or false.",
       },
       {
         path: ["edges", "0", "maxTraversals"],
-        message: "Write a value here. maxTraversals takes a number.",
+        message: "maxTraversals has no value. It takes a number.",
       },
     ]);
   });
 
-  it("points an agent that is not an id at it, and says where the id of an Agent is shown", () => {
+  it("reports an agent that is not an id at its path, and says how to find Agent ids", () => {
     const issues = collectIssues(`name: agent by name
 steps:
   - id: file_task
@@ -560,13 +563,13 @@ steps:
       {
         path: ["steps", "1", "agent"],
         message:
-          '"nobody" is not the id of an Agent. Write the id of an Agent. ' +
-          "The command hercule agent list shows the id of each Agent.",
+          '"nobody" is not an Agent id. Write the id of an Agent. ' +
+          "Run hercule agent list to see the id of each Agent.",
       },
     ]);
   });
 
-  it("points two steps that share an id at the second one", () => {
+  it("reports two steps that share an id at the second one", () => {
     const issues = collectIssues(`name: two steps, one id
 steps:
   - id: file_task
@@ -579,7 +582,7 @@ steps:
     expect(listIssuePaths(issues)).toEqual([["steps", "1", "id"]]);
   });
 
-  it("points a signal trigger that repeats a start trigger's id at the signal trigger", () => {
+  it("reports a signal trigger that repeats a start trigger's id at the signal trigger", () => {
     const issues = collectIssues(`name: three triggers, two ids
 triggers:
   - id: nightly
@@ -606,9 +609,9 @@ steps:
     expect(listIssuePaths(issues)).toEqual([["triggers", "2", "id"]]);
   });
 
-  it("points a step that repeats a trigger's id at the step, even where the text writes the steps first", () => {
-    // Triggers come before steps in the definition, whatever order the text
-    // writes them in, so the step is the second node with the id.
+  it("reports a step that repeats a trigger's id at the step, even when the source lists steps first", () => {
+    // Triggers count as earlier than steps, whatever order the source lists
+    // them in, so the step is the second one with the id.
     const issues = collectIssues(`name: a step that reuses a trigger id
 steps:
   - id: file_task
@@ -627,7 +630,7 @@ triggers:
     expect(listIssuePaths(issues)).toEqual([["steps", "1", "id"]]);
   });
 
-  it("points a step id that is not snake_case at it and suggests the snake_case spelling", () => {
+  it("reports a step id that is not snake_case at its path and suggests the snake_case spelling", () => {
     const issues = collectIssues(`name: kebab step
 steps:
   - id: open-pr
@@ -638,7 +641,7 @@ steps:
     expect(issues[0]!.message).toContain("open_pr");
   });
 
-  it("points a trigger id that is not snake_case at it and suggests the snake_case spelling", () => {
+  it("reports a trigger id that is not snake_case at its path and suggests the snake_case spelling", () => {
     const issues = collectIssues(`name: kebab trigger
 triggers:
   - id: checks-failed
@@ -655,21 +658,21 @@ steps:
   });
 });
 
-/** One action step, the smallest body a case can put a mistake beside. */
+/** One action step: the smallest valid `steps` list, for tests that add a mistake elsewhere. */
 const ONE_STEP = `steps:
   - id: file_task
     kind: action
     action: task.create
 `;
 
-describe("parsing a source that copies one part of itself into another", () => {
-  it("refuses an alias to an anchor that does not exist, at the alias, and does not throw", () => {
+describe("parsing a source with YAML anchors and aliases", () => {
+  it("rejects an alias to an anchor that does not exist at the alias, without throwing", () => {
     const issues = collectIssues(`name: dangling alias\nsteps: *nowhere\n`);
     expect(listIssuePaths(issues)).toEqual([["steps"]]);
     expect(issues[0]!.message).toMatch(/anchors or aliases/);
   });
 
-  it("refuses an alias bomb at each anchor, without expanding it", () => {
+  it("rejects an alias bomb at each anchor, without expanding it", () => {
     const levels = ["a", "b", "c", "d", "e", "f", "g", "h", "i"];
     const bomb = levels
       .map((level, index) =>
@@ -684,7 +687,7 @@ describe("parsing a source that copies one part of itself into another", () => {
     expect(listIssuePaths(issues)).toContainEqual(["a"]);
   });
 
-  it("refuses a plain anchor at its place", () => {
+  it("rejects a plain anchor at its path", () => {
     expect(
       listIssuePaths(
         collectIssues(`name: anchored
@@ -698,7 +701,7 @@ steps:
     ).toEqual([["steps", "0"]]);
   });
 
-  it("reads << as an ordinary key, as YAML 1.2 does, and merges nothing", () => {
+  it("parses << as an ordinary key, as YAML 1.2 does, and merges nothing", () => {
     for (const key of ["<<", '"<<"']) {
       const definition = parseDefinition(`name: merged
 steps:
@@ -714,18 +717,18 @@ steps:
 });
 
 describe("parsing text that is not valid Unicode", () => {
-  it("refuses half of a surrogate pair in the text, by its line and column", () => {
+  it("rejects a lone surrogate in the text, giving its line and column", () => {
     const issues = collectIssues(`name: broken\ndescription: a\uD800b\n${ONE_STEP}`);
     expect(listIssuePaths(issues)).toEqual([[]]);
     expect(issues[0]!.message).toContain("line 2, column 15");
   });
 
-  it("refuses half of a surrogate pair written as an escape, at its field", () => {
+  it("rejects a lone surrogate written as an escape, at its field", () => {
     const issues = collectIssues(`name: escaped\ndescription: "a\\uD800b"\n${ONE_STEP}`);
     expect(listIssuePaths(issues)).toEqual([["description"]]);
   });
 
-  it("refuses a definition object whose canonical text would hold one", () => {
+  it("rejects a definition object whose rendered YAML would contain one", () => {
     const definition = parseDefinition(`name: good\n${ONE_STEP}`);
     const issues = collectIssues(renderWorkflowSource({ ...definition, description: "a\uDC00b" }));
     expect(listIssuePaths(issues)).toEqual([["description"]]);
@@ -733,7 +736,7 @@ describe("parsing text that is not valid Unicode", () => {
 });
 
 describe("parsing a source with a JSON value nested too deep", () => {
-  it("takes 32 levels of mappings and lists in a field, and refuses 33 at that field", () => {
+  it("accepts 32 levels of mappings and lists in a field, and rejects 33 at that field", () => {
     const withParams = (levels: number) =>
       decodeWorkflowDefinition({
         name: "deep",
@@ -754,7 +757,7 @@ describe("parsing a source with a JSON value nested too deep", () => {
     ]);
   });
 
-  it("refuses a value thousands of levels deep without running out of stack", () => {
+  it("rejects a value thousands of levels deep without a stack overflow", () => {
     const refused = decodeWorkflowDefinition({
       name: "deeper",
       inputs: [{ name: "pr", schema: { a: nestInLists(20_000) }, required: true }],
@@ -766,10 +769,10 @@ describe("parsing a source with a JSON value nested too deep", () => {
   });
 });
 
-describe("what a refusal repeats of the source", () => {
+describe("how much of the source an error message repeats", () => {
   const longWord = "Open-PR-".repeat(2_000);
 
-  it("quotes at most a short part of a long value in the definition", () => {
+  it("quotes only a short part of a long value", () => {
     const issues = collectIssues(`name: long
 triggers:
   - id: ${longWord}
@@ -795,17 +798,17 @@ steps:
     for (const issue of issues) expect(issue.message.length, issue.message).toBeLessThan(400);
   });
 
-  it("cuts short what the YAML parser repeats of the text", () => {
+  it("truncates the source text that a YAML parser error repeats", () => {
     const issues = collectIssues(`name: long\ndescription: |${longWord}\n${ONE_STEP}`);
     expect(listIssuePaths(issues)).toEqual([[]]);
     expect(issues[0]!.message.length).toBeLessThan(400);
-    // The dots of the cut are not followed by a full stop.
+    // No full stop is added after the "..." of the cut.
     expect(issues[0]!.message).toContain("...");
     expect(issues[0]!.message).not.toContain("....");
   });
 
-  it("never cuts a quoted value between the two halves of a surrogate pair", () => {
-    // The 40th character, the last one a quote keeps, is the first half of a pair.
+  it("never truncates a quoted value between the two halves of a surrogate pair", () => {
+    // The 40th character, the last one a quote keeps, is the first half of a surrogate pair.
     const written = `${"a".repeat(39)}${String.fromCodePoint(0x1f600)}${"b".repeat(10)}`;
     const issues = collectIssues(`name: cut
 steps:
@@ -818,8 +821,8 @@ steps:
   });
 });
 
-describe("parsing a source that says more than its text shows", () => {
-  it("refuses a %YAML directive by its line, so no key merges under YAML 1.1", () => {
+describe("parsing a source with directives and tags", () => {
+  it("rejects a %YAML directive, giving its line, so no key is merged as in YAML 1.1", () => {
     const issues = collectIssues(`%YAML 1.1
 ---
 name: merged
@@ -835,7 +838,7 @@ steps:
     expect(issues[0]!.message).toContain("directive");
   });
 
-  it("refuses a %TAG directive and the tag it names, each at its place", () => {
+  it("rejects a %TAG directive and the tag it defines, each at its own path", () => {
     const issues = collectIssues(`# A comment before the directive.
 %TAG !e! tag:example.com,2026:
 ---
@@ -845,7 +848,7 @@ ${ONE_STEP}`);
     expect(issues[0]!.message).toContain("line 2, column 1");
   });
 
-  it("refuses !!str, !!binary, !!omap and a custom tag, each at its place, and says to quote the value", () => {
+  it("rejects !!str, !!binary, !!omap and a custom tag, each at its own path, and says to quote the value", () => {
     const issues = collectIssues(`name: tagged
 description: !!str 2026-09-23
 steps:
@@ -867,7 +870,7 @@ steps:
   });
 });
 
-/** A source whose step params are one mapping with this many keys. */
+/** Builds a source whose step params are one mapping with `keyCount` keys. */
 const buildWideSource = (keyCount: number): string => {
   const keys = Array.from({ length: keyCount }, (_, index) => `k${String(index)}: 0`).join(", ");
   return `name: wide
@@ -880,9 +883,9 @@ steps:
 };
 
 /**
- * The shortest time of five parses of a wide source, for each count of keys.
- * The parses of the counts take turns, so a period of other work on the
- * machine slows each count, and the shortest parse is the one that such work
+ * Returns, for each key count, the fastest of five parses of a wide source.
+ * The parses for the different counts take turns, so other load on the
+ * machine slows every count alike, and the fastest parse is the one that load
  * slowed least.
  */
 const measureWideParses = (keyCounts: ReadonlyArray<number>): ReadonlyArray<number> => {
@@ -899,16 +902,16 @@ const measureWideParses = (keyCounts: ReadonlyArray<number>): ReadonlyArray<numb
 };
 
 /**
- * How many times longer a parse of four times the keys may take. A check that
- * reads each key once takes about four times as long, and a check that
- * compares each key with every earlier key, as the parser's own check of
- * repeated keys does, takes about sixteen times as long. Eight leaves room for
- * the noise of a machine under load and still refuses the second check.
+ * How many times longer a parse of four times as many keys may take. A linear
+ * check takes about four times as long. A check that compares each key with
+ * every earlier key, as the YAML parser's own duplicate-key check does, takes
+ * about sixteen times as long. Eight leaves room for noise on a busy machine
+ * and still catches the quadratic check.
  */
 const MAX_GROWTH_FOR_FOUR_TIMES_THE_KEYS = 8;
 
-describe("parsing a source that writes one key twice in a mapping", () => {
-  it('refuses the second of two keys the value spells alike, such as 1 and "1"', () => {
+describe("parsing a source with a duplicate key in a mapping", () => {
+  it('rejects the second of two keys that are equal as strings, such as 1 and "1"', () => {
     const issues = collectIssues(`name: twice
 steps:
   - id: file_task
@@ -919,13 +922,13 @@ steps:
     expect(listIssuePaths(issues)).toEqual([["steps", "0", "params", "1"]]);
   });
 
-  it("refuses a field of the definition written twice at the second one", () => {
+  it("rejects a definition field written twice at the second one", () => {
     expect(listIssuePaths(collectIssues(`name: first\nname: second\n${ONE_STEP}`))).toEqual([
       ["name"],
     ]);
   });
 
-  it("spells an empty key as the value spells it, so the path leads to a place in the text", () => {
+  it("writes an empty key in the path as the parsed value has it, so the path points into the text", () => {
     const issues = collectIssues(`name: empty keys
 steps:
   - id: file_task
@@ -936,7 +939,7 @@ steps:
     expect(listIssuePaths(issues)).toEqual([["steps", "0", "params", ""]]);
   });
 
-  it("refuses a key that is a list, at its mapping", () => {
+  it("rejects a key that is a list, at its mapping", () => {
     const issues = collectIssues(`name: list key
 steps:
   - id: file_task
@@ -949,7 +952,7 @@ steps:
     expect(listIssuePaths(issues)).toEqual([["steps", "0", "params"]]);
   });
 
-  it("checks a mapping in a time that grows as its keys do, and not as their square", () => {
+  it("checks a mapping in time linear in its key count, not quadratic", () => {
     const [fiveThousand, twentyThousand] = measureWideParses([5_000, 20_000]);
     expect(twentyThousand! / fiveThousand!).toBeLessThan(MAX_GROWTH_FOR_FOUR_TIMES_THE_KEYS);
 
@@ -958,10 +961,10 @@ steps:
   });
 });
 
-describe("parsing a list with a great many items", () => {
-  it("takes a flow list of 130,000 items, about as many as the longest text holds", () => {
-    // V8 cannot pass this many values as the arguments of one call, so a walk
-    // of the parsed text that did so would throw in a browser.
+describe("parsing a very long list", () => {
+  it("accepts a flow list of 130,000 items, about as many as the longest allowed source holds", () => {
+    // V8 cannot pass this many arguments to one function call, so code that
+    // spread the parsed list into a call would throw in a browser.
     const items = Array.from({ length: 130_000 }, () => "0").join(",");
     const definition = parseDefinition(`name: long list
 steps:
@@ -975,8 +978,8 @@ steps:
   });
 });
 
-describe("a refusal with a great many problems", () => {
-  it("names the first hundred, and then how many more there are, for a text and an object alike", () => {
+describe("an error response with many problems", () => {
+  it("lists the first hundred, then how many more there are, for YAML source and a definition object alike", () => {
     const unknownKeys = Array.from({ length: 150 }, (_, index) => `unknown_${String(index)}`);
     const fromText = collectIssues(
       `name: noisy\n${unknownKeys.map((key) => `${key}: 1`).join("\n")}\n${ONE_STEP}`,
@@ -997,11 +1000,11 @@ describe("a refusal with a great many problems", () => {
   });
 });
 
-describe("the name and the description of a workflow", () => {
+describe("a workflow's name and description", () => {
   const decodeWithFields = (fields: Record<string, string>) =>
     decodeWorkflowDefinition({ name: "plain", steps: [], ...fields });
 
-  it("refuses a name with a line or paragraph separator, or a text direction mark", () => {
+  it("rejects a name with a line or paragraph separator, or a text direction mark", () => {
     for (const code of [0x2028, 0x2029, 0x061c, 0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2069]) {
       const refused = decodeWithFields({ name: `a${String.fromCodePoint(code)}b` });
       expect(
@@ -1011,7 +1014,7 @@ describe("the name and the description of a workflow", () => {
     }
   });
 
-  it("refuses a description with a NUL or another control character, and keeps tabs and line breaks", () => {
+  it("rejects a description with a NUL or another control character, and accepts tabs and line breaks", () => {
     for (const code of [0x00, 0x07, 0x0b, 0x1b, 0x7f, 0x85]) {
       const refused = decodeWithFields({ description: `a${String.fromCodePoint(code)}b` });
       expect(
@@ -1023,8 +1026,8 @@ describe("the name and the description of a workflow", () => {
   });
 });
 
-describe("parsing a source with several kinds of mistake", () => {
-  it("names a repeated id beside a field of the wrong shape", () => {
+describe("parsing a source with several kinds of error", () => {
+  it("reports a repeated id and a field with the wrong type together", () => {
     const issues = collectIssues(`name: two mistakes
 steps:
   - id: file_task
@@ -1041,26 +1044,26 @@ steps:
     ]);
   });
 
-  it("says what to write where a step is not a mapping", () => {
+  it("says what to write when a step is not a mapping", () => {
     const issues = collectIssues(`name: bare word\nsteps: [review]\n`);
     expect(listIssuePaths(issues)).toEqual([["steps", "0"]]);
     expect(issues[0]!.message).toContain("Write a mapping of fields here");
     expect(issues[0]!.message).toContain("action or agent");
   });
 
-  it("refuses a name with a control character in it", () => {
+  it("rejects a name with a control character in it", () => {
     for (const name of ['"a\\tb"', '"a\\u0000b"', '"a\\nb"']) {
       expect(listIssuePaths(collectIssues(`name: ${name}\n${ONE_STEP}`)), name).toEqual([["name"]]);
     }
   });
 
-  it("refuses a text longer than the longest the API stores, before reading it", () => {
+  it("rejects a source longer than the API stores, before parsing it", () => {
     const issues = collectIssues(`name: long\n${ONE_STEP}# ${"x".repeat(256 * 1024)}\n`);
     expect(listIssuePaths(issues)).toEqual([[]]);
   });
 });
 
-describe("a definition object and the same definition as text", () => {
+describe("a definition object and the same definition as YAML", () => {
   it("give the same issues, at the same paths, with the same messages", () => {
     const definition = {
       name: "one of each",
@@ -1087,11 +1090,11 @@ steps:
   });
 });
 
-describe("rendering strings that a block cannot hold as they are", () => {
+describe("rendering strings that a block scalar cannot hold exactly", () => {
   const noBreakSpace = String.fromCodePoint(0xa0);
   const lineSeparator = String.fromCodePoint(0x2028);
 
-  it("gives back each one exactly, after the parse", () => {
+  it("parses each one back exactly", () => {
     for (const text of [
       "  indented\nline",
       "\tstart\nnext",
@@ -1112,7 +1115,7 @@ describe("rendering strings that a block cannot hold as they are", () => {
     }
   });
 
-  it("writes a string of no-break spaces and line breaks as a block, because YAML reads a no-break space as text", () => {
+  it("writes a string of no-break spaces and line breaks as a block, because YAML treats a no-break space as text", () => {
     const definition = parseDefinition(`name: strings\n${ONE_STEP}`);
     const withText = { ...definition, description: `${noBreakSpace}\n${noBreakSpace}\n` };
     const source = renderWorkflowSource(withText);
@@ -1122,9 +1125,9 @@ describe("rendering strings that a block cannot hold as they are", () => {
 });
 
 /**
- * A source with two inputs and a signal trigger with two outputs. The first
- * input and the first output are always readable, so each place the parse
- * refuses is the second one.
+ * Builds a source with two inputs and a signal trigger with two outputs. The
+ * first input and the first output always have valid names, so any error is
+ * at the second one.
  */
 const buildNamedValuesSource = (
   inputName: string,
@@ -1160,14 +1163,14 @@ steps:
     action: task.create
 `;
 
-describe("parsing the names an expression reads", () => {
-  it("points an input name that is not a CEL identifier at the name, saying what an expression can read", () => {
+describe("parsing input and output names", () => {
+  it("reports an input name that is not a CEL identifier at the name, and explains why", () => {
     const issues = collectIssues(buildNamedValuesSource("pr-url", "pr_url"));
     expect(listIssuePaths(issues)).toEqual([["inputs", "1", "name"]]);
     expect(issues[0]!.message).toMatch(/expression/i);
   });
 
-  it("points a signal output name that is not a CEL identifier at its key, saying what an expression can read", () => {
+  it("reports a signal output name that is not a CEL identifier at its key, and explains why", () => {
     const issues = collectIssues(buildNamedValuesSource("pr_url", "pr-url"));
     expect(listIssuePaths(issues)).toEqual([["triggers", "1", "outputs", "pr-url"]]);
     expect(issues[0]!.message).toMatch(/expression/i);
@@ -1180,8 +1183,8 @@ describe("parsing the names an expression reads", () => {
 });
 
 /**
- * A source whose step id, input name and signal output name are the words of
- * a case. The trigger's correlation reads the step, so the step is read as
+ * Builds a source with the given step id, input name and signal output name.
+ * The trigger's correlation refers to the step, so the step id is used as
  * `steps.<id>`.
  */
 const buildWordsSource = (stepId: string, inputName: string, outputName: string): string =>
@@ -1207,13 +1210,13 @@ steps:
     action: task.create
 `;
 
-describe("parsing a word that an expression cannot read as a field name", () => {
+describe("parsing a word that an expression cannot use as a field name", () => {
   it.each([
-    ["CEL reads as an operator", "in", "in", "in"],
-    ["CEL reads as a value", "true", "false", "null"],
-    ["a run could not read in its values", "constructor", "constructor", "__proto__"],
+    ["CEL parses as an operator", "in", "in", "in"],
+    ["CEL parses as a literal value", "true", "false", "null"],
+    ["a run could not read", "constructor", "constructor", "__proto__"],
   ])(
-    "refuses an id, an input name and an output name that %s, at each place, naming the word",
+    "rejects an id, an input name and an output name that %s, at each path, quoting the word",
     (_why, stepId, inputName, outputName) => {
       const issues = collectIssues(buildWordsSource(stepId, inputName, outputName));
       expect(listIssuePaths(issues)).toEqual([
@@ -1224,11 +1227,11 @@ describe("parsing a word that an expression cannot read as a field name", () => 
       expect(issues[0]!.message).toContain(`"${inputName}"`);
       expect(issues[1]!.message).toContain(`"${outputName}"`);
       expect(issues[2]!.message).toContain(`"${stepId}"`);
-      for (const issue of issues) expect(issue.message).toMatch(/Write another (id|name)\.$/);
+      for (const issue of issues) expect(issue.message).toMatch(/Choose another (id|name)\.$/);
     },
   );
 
-  it("accepts a word that CEL reserves but reads as a field name, such as if and as", () => {
+  it("accepts a word that CEL reserves but allows as a field name, such as if and as", () => {
     const definition = parseDefinition(buildWordsSource("if", "as", "while"));
     expect(definition.steps[0]!.id).toBe("if");
     expect(definition.inputs?.[0]!.name).toBe("as");

@@ -1,20 +1,19 @@
 /**
- * What the editor offers to write at the cursor in a workflow's source. The
- * keys and the fixed values come from the definition's schema in the
- * contract, so the offers follow the shape that a save validates. The ids
- * that a step and a trigger name come from what the controller knows: its
- * action catalog, its agents and its event kinds.
+ * Autocompletion for a workflow's YAML source.
  *
- * The mapping that the cursor writes into is found in the YAML document of the
- * one parse of the source, and the lines are the lines that the parse counted.
- * The line up to the cursor is read as text, because a key that the author has
- * half written is not a key in the document yet.
+ * - Keys and fixed values (literals, booleans) come from the workflow schema
+ *   in the contract, so the suggestions match what a save validates.
+ * - Action ids, agent ids and event kinds come from the controller's catalog.
+ *
+ * The mapping at the cursor is found in the parsed YAML document. The current
+ * line up to the cursor is matched as plain text instead, because a key the
+ * author is still typing is not yet a key in the document.
  */
 import { SchemaAST } from "effect";
 import { isMap, isNode, isScalar, isSeq, type LineCounter, type YAMLMap } from "yaml";
 import {
   readFieldNotation,
-  spellPathKey,
+  convertKeyToPathSegment,
   WorkflowDefinition,
   type Agent,
   type DeclaredEventKind,
@@ -22,80 +21,80 @@ import {
   type WorkflowAction,
 } from "@hercule/contract";
 import { idTail } from "./id-tail";
-import { findLineEnd, findLineStart, type WorkflowSourceReading } from "./workflow-source";
+import { findLineEnd, findLineStart, type ParsedWorkflowSource } from "./workflow-source";
 
-/** What a workflow's source can name that the controller knows. */
+/** The ids from the controller that a workflow can reference. */
 export interface WorkflowCatalog {
   readonly actions: ReadonlyArray<Pick<WorkflowAction, "id" | "displayName" | "description">>;
   readonly agents: ReadonlyArray<Pick<Agent, "id" | "name">>;
   readonly eventKinds: ReadonlyArray<DeclaredEventKind>;
 }
 
-/** An offer to write text at the cursor. */
-export interface CompletionOffer {
-  /** What the list shows, and what the text that the author typed is matched against. */
+/** One completion suggestion. */
+export interface CompletionOption {
+  /** The text shown in the list. The author's typed text is matched against it. */
   readonly label: string;
-  /** A short note beside the label, such as the name of an action. */
+  /** A short note shown beside the label, such as an action's display name. */
   readonly detail?: string;
-  /** What accepting the offer writes, in place of what the author typed of it. A line break in it is `\n`. */
+  /** The text inserted when the option is picked. Line breaks are `\n`. */
   readonly text: string;
-  /** Where the cursor goes after the offer is accepted, as an offset into `text`. Absent is the end. */
+  /** The cursor position after insertion, as an offset into `text`. Defaults to the end. */
   readonly cursor?: number;
 }
 
 /**
- * The offers at the cursor, and the offsets where the text that they replace
- * starts and ends. An offer of a key replaces the part of the key before the
- * cursor. An offer of a value replaces the whole value, also the part after
- * the cursor, so that no part of the old value stays beside the new one.
+ * The completion options at the cursor, and the range of text they replace.
+ * A key option replaces only the part of the key before the cursor. A value
+ * option replaces the whole value, including the part after the cursor, so no
+ * part of the old value is left behind.
  */
 export interface CompletionList {
   readonly from: number;
   readonly to: number;
-  readonly offers: ReadonlyArray<CompletionOffer>;
+  readonly options: ReadonlyArray<CompletionOption>;
 }
 
-/** How many spaces one level of a block is indented by, as in the canonical text. */
+/** The number of spaces per indent level, as in the canonical YAML. */
 const INDENT = 2;
 
-/** The line up to the cursor, where it writes a value after a key: `key: val`, maybe after `- `. */
+/** Matches a line, up to the cursor, that is typing a value: `key: val`, maybe after `- `. */
 const VALUE_BEFORE_CURSOR = /^( *)((?:- +)?)(\w+): +([^\s#]*)$/;
 
-/** The line up to the cursor, where it writes a key or nothing yet: `ke`, maybe after `- `. */
+/** Matches a line, up to the cursor, that is typing a key or is empty: `ke`, maybe after `- `. */
 const KEY_BEFORE_CURSOR = /^( *)((?:- +)?)(\w*)$/;
 
 /**
- * The text that follows a value in its line: a comment and the white space
- * before the comment, or white space alone. A `#` at the start of the value
- * starts a comment too, because a space comes before each value.
+ * Matches the text after a value on its line: whitespace, optionally followed
+ * by a comment. A `#` at the start of the value also starts a comment,
+ * because a value always follows a space.
  */
 const AFTER_VALUE = /(?:(?:^|\s+)#[^]*|\s*)$/;
 
-/** What the line of the cursor writes, as far as the cursor. */
+/** The cursor's line, parsed up to the cursor. */
 interface CursorLine {
-  /** The offset of the first character of the line. */
+  /** The offset of the line's first character. */
   readonly start: number;
-  /** The offset of the line break that ends the line, or of the end of the source. */
+  /** The offset of the `\n` that ends the line, or the source length on the last line. */
   readonly end: number;
-  /** The column of the `- ` that starts a list item on the line, if the line has one. */
+  /** The column of the `- ` list item marker, if the line has one. */
   readonly itemColumn: number | undefined;
-  /** The column of the key that the line writes. */
+  /** The column of the line's key. */
   readonly keyColumn: number;
-  /** The key before the cursor's value, or absent where the cursor writes a key. */
+  /** The key when the cursor is in its value, or `undefined` when the cursor is in a key. */
   readonly key: string | undefined;
-  /** What the author typed of the key or of the value, before the cursor. */
+  /** The part of the key or value that the author typed before the cursor. */
   readonly typed: string;
 }
 
-/** A parsed source and the lines that the parse counted in it. */
+/** A source and its line counter from the YAML parse. */
 interface CursorSource {
   readonly source: string;
   readonly lines: LineCounter;
 }
 
 /**
- * What the cursor's line writes up to the cursor, or `undefined` for a line
- * that writes neither a key nor a value after a key there.
+ * Parses the cursor's line up to the cursor. Returns `undefined` when the
+ * cursor is neither in a key nor in a value after a key.
  */
 const readCursorLine = (
   source: string,
@@ -118,23 +117,26 @@ const readCursorLine = (
   };
 };
 
-/** The offset where a node of the document starts, if it is a node. */
+/** Returns the start offset of a YAML node, or `undefined` if the value is not a node. */
 const readNodeStart = (node: unknown): number | undefined =>
   isNode(node) ? node.range?.[0] : undefined;
 
-/** The column of an offset in its line, counted from 0. */
+/** Returns the 0-based column of an offset. */
 const findColumn = (lines: LineCounter, offset: number): number => lines.linePos(offset).col - 1;
 
 /**
- * The path of the mapping that the cursor's line writes a key of, and the
- * node of the document at each step of the path, the last one that mapping.
- * The last node is not a mapping where the line starts the mapping: a key
- * written with nothing after it, or a list item with nothing in it yet.
+ * Finds the mapping that the cursor's line adds a key to. Returns the path to
+ * the mapping and the YAML node at each segment of that path. The last node
+ * is the mapping itself. Returns `undefined` when no mapping fits.
  *
- * The walk goes down by indentation, because the line may be half written:
- * at each mapping it takes the last key before the line, and at each list the
- * last item before the line, until it meets the mapping whose keys stand in
- * the column of the line's key.
+ * The last node is not a mapping when the cursor's line is the first key of a
+ * new mapping, for example under a key with no value yet, or in an empty list
+ * item.
+ *
+ * The search walks down by indentation, because the current line may be only
+ * half typed. At each mapping it follows the last key above the line. At
+ * each list it follows the last item above the line. It stops at the mapping
+ * whose keys are in the same column as the line's key.
  */
 const findCursorMapping = (
   lines: LineCounter,
@@ -154,7 +156,7 @@ const findCursorMapping = (
         (item) => (readNodeStart(item.key) ?? Infinity) < line.start,
       );
       if (pair === undefined) return undefined;
-      path.push(spellPathKey(pair.key));
+      path.push(convertKeyToPathSegment(pair.key));
       node = pair.value;
     } else if (isSeq(node)) {
       const column = findColumn(lines, readNodeStart(node) ?? 0);
@@ -173,8 +175,9 @@ const findCursorMapping = (
       path.push(String(index));
       node = node.items[index];
     } else {
-      // A value written as nothing, or a word that the line starts: the line
-      // starts the mapping. A value written before the line holds no keys.
+      // An empty value, or a scalar that starts on the cursor's line: the line
+      // is the first key of a new mapping. A scalar that starts on an earlier
+      // line cannot hold keys.
       const start = readNodeStart(node);
       const isStarting =
         node === null ||
@@ -185,20 +188,20 @@ const findCursorMapping = (
   }
 };
 
-/** Each member of a union, and each member of the unions inside it. */
+/** Returns the members of a union, flattening nested unions. A non-union returns itself. */
 const flattenUnion = (ast: SchemaAST.AST): ReadonlyArray<SchemaAST.AST> =>
   SchemaAST.isUnion(ast) ? ast.types.flatMap(flattenUnion) : [ast];
 
-/** The `kind` that an object shape declares as a literal, if it declares one. */
+/** Returns the literal value of an object schema's `kind` field, if it has one. */
 const readShapeKind = (shape: SchemaAST.Objects): string | undefined => {
   const kind = shape.propertySignatures.find((property) => property.name === "kind")?.type;
   return kind !== undefined && SchemaAST.isLiteral(kind) ? String(kind.literal) : undefined;
 };
 
 /**
- * The object shapes among some types, narrowed to the members of a union
- * whose kind the mapping writes. A mapping that writes no kind, or a kind that
- * no member has, may have the shape of any member.
+ * Returns the object schemas among `types`, keeping only those whose `kind`
+ * matches. When `kind` is `undefined` or matches no schema, returns all of
+ * them, because the mapping could still become any of them.
  */
 const narrowShapes = (
   types: ReadonlyArray<SchemaAST.AST>,
@@ -209,7 +212,7 @@ const narrowShapes = (
   return kind !== undefined && written.length > 0 ? written : shapes;
 };
 
-/** The types that a key's value may have in some object shapes. */
+/** Returns the possible types of a key's value across some object schemas. */
 const readValueTypes = (
   shapes: ReadonlyArray<SchemaAST.Objects>,
   key: string,
@@ -221,7 +224,7 @@ const readValueTypes = (
       : [property.type];
   });
 
-/** The fixed values that a type allows: its literals, and `true` and `false` for a boolean. */
+/** Returns the fixed values a type allows: its literals, and `true` and `false` for a boolean. */
 const listFixedValues = (ast: SchemaAST.AST): ReadonlyArray<string> =>
   flattenUnion(ast).flatMap((member) =>
     SchemaAST.isLiteral(member)
@@ -232,17 +235,18 @@ const listFixedValues = (ast: SchemaAST.AST): ReadonlyArray<string> =>
   );
 
 /**
- * The offer to write a key, and the start of its value in the form that YAML
- * keeps as written. A template is text for an agent, usually on several
- * lines, which a `|` block holds as written. An expression or a schedule often
- * holds characters that YAML reads as its own, and a value in double quotes
- * is read as text.
+ * Builds the completion option for a key. The inserted text also starts the
+ * value in a form that YAML reads literally:
+ * - A template is usually multi-line text for an agent, so it gets a `|`
+ *   block.
+ * - An expression or a schedule often contains characters that are special
+ *   in YAML, so it gets double quotes with the cursor between them.
  */
-const buildKeyOffer = (
+const buildKeyOption = (
   key: string,
   notation: FieldNotation | undefined,
   keyColumn: number,
-): CompletionOffer => {
+): CompletionOption => {
   if (notation === "template") {
     return { label: key, text: `${key}: |\n${" ".repeat(keyColumn + INDENT)}` };
   }
@@ -253,12 +257,15 @@ const buildKeyOffer = (
   return { label: key, text: `${key}: ` };
 };
 
-/** The values from what the controller knows that a key names, where it names one. */
+/**
+ * Returns the catalog ids that a key takes as its value, or `undefined` for a
+ * key whose value is not a catalog id.
+ */
 const listCatalogValues = (
   path: ReadonlyArray<string>,
   key: string,
   catalog: WorkflowCatalog,
-): ReadonlyArray<CompletionOffer> | undefined => {
+): ReadonlyArray<CompletionOption> | undefined => {
   const [list, , field] = path;
   if (path.length === 2 && list === "steps" && key === "action") {
     return catalog.actions.map((action) => ({
@@ -268,8 +275,8 @@ const listCatalogValues = (
     }));
   }
   if (path.length === 2 && list === "steps" && key === "agent") {
-    // Two agents may have one name. The offer of each then shows the tail of
-    // its id beside the name, so that the author can tell the two apart.
+    // Two agents can have the same name. Those agents show the end of their
+    // id beside the name, so the author can tell them apart.
     const names = catalog.agents.map((agent) => agent.name);
     return catalog.agents.map((agent) => ({
       label: agent.name,
@@ -290,11 +297,12 @@ const listCatalogValues = (
 };
 
 /**
- * The key of a pair as it stands in the source, or `undefined` for the key
- * that the cursor's line writes, which is still being typed. The parser reads
- * a word that the author has started on the line above a key as the first
- * word of that key, as in `pr kind: agent`. The key on the later line is
- * written, so it is the last line of such a key's text.
+ * Returns a pair's key as written in the source, or `undefined` for the key
+ * on the cursor's line, which is still being typed.
+ *
+ * When the author starts a word on the line above an existing key, the parser
+ * joins the two lines into one key, such as `pr kind`. The real key is on the
+ * last of those lines.
  */
 const readWrittenKey = (
   { source, lines }: CursorSource,
@@ -303,13 +311,13 @@ const readWrittenKey = (
 ): string | undefined => {
   const range = isNode(key) ? key.range : undefined;
   if (range === undefined || range === null || range[0] < line.start || range[0] > line.end) {
-    return spellPathKey(key);
+    return convertKeyToPathSegment(key);
   }
   if (range[1] <= line.end) return undefined;
   return source.slice(findLineStart(lines, range[1] - 1), range[1]).trim();
 };
 
-/** The pairs of a mapping that the source has written, each with its key as written. */
+/** Returns a mapping's pairs with their keys as written, leaving out the key being typed. */
 const listWrittenPairs = (
   cursorSource: CursorSource,
   mapping: YAMLMap,
@@ -321,18 +329,22 @@ const listWrittenPairs = (
   });
 
 /**
- * What to offer at an offset of a workflow's source: after `key: `, the
- * values that the key takes, and where the line writes a key, each key of the
- * mapping that the mapping does not have yet, above or below the line. A key
- * or a value that the cursor's line writes is being typed, so it does not
- * count as written.
+ * Returns the completion options at an offset in a workflow's source, or
+ * `undefined` when there are none.
+ *
+ * - After `key: `, the values the key accepts.
+ * - Where a key is being typed, each key the mapping does not have yet, on
+ *   any line.
+ *
+ * The key or value on the cursor's line is still being typed, so it does not
+ * count as already present.
  */
 export const listWorkflowCompletions = (
-  reading: WorkflowSourceReading,
+  parsed: ParsedWorkflowSource,
   position: number,
   catalog: WorkflowCatalog,
 ): CompletionList | undefined => {
-  const { source, document, lines } = reading;
+  const { source, document, lines } = parsed;
   if (document === undefined || lines === undefined) return undefined;
   const line = readCursorLine(source, lines, position);
   if (line === undefined) return undefined;
@@ -359,9 +371,9 @@ export const listWorkflowCompletions = (
   const shapes = narrowShapes(types, readKind(mapping));
   const from = position - line.typed.length;
   const buildCompletionList = (
-    offers: ReadonlyArray<CompletionOffer>,
+    options: ReadonlyArray<CompletionOption>,
     to: number,
-  ): CompletionList | undefined => (offers.length === 0 ? undefined : { from, to, offers });
+  ): CompletionList | undefined => (options.length === 0 ? undefined : { from, to, options });
 
   if (line.key !== undefined) {
     return buildCompletionList(
@@ -376,7 +388,7 @@ export const listWorkflowCompletions = (
   const written = new Set(
     isMap(mapping) ? listWrittenPairs(cursorSource, mapping, line).map((pair) => pair.key) : [],
   );
-  // Each key once, in the order of the schema, with the notation of its value.
+  // Each key once, in schema order, with the notation of its value.
   const keys = new Map<string, FieldNotation | undefined>();
   for (const { name, type } of shapes.flatMap((shape) => shape.propertySignatures)) {
     if (!keys.has(String(name))) keys.set(String(name), readFieldNotation(type));
@@ -384,7 +396,7 @@ export const listWorkflowCompletions = (
   return buildCompletionList(
     [...keys]
       .filter(([key]) => !written.has(key))
-      .map(([key, notation]) => buildKeyOffer(key, notation, line.keyColumn)),
+      .map(([key, notation]) => buildKeyOption(key, notation, line.keyColumn)),
     position,
   );
 };

@@ -127,8 +127,9 @@ const decodeConnectionType = Schema.decodeUnknownEffect(ConnectionType, {
 });
 
 /**
- * One line either way, because this is shown to the user in Settings, where a
- * stack trace would say less than the sentence at the top of it.
+ * Returns a one-line message for a failed plugin call: the `PluginError`'s
+ * message, or the defect's message. Settings shows this line to the user, and
+ * a whole stack trace would tell them less than its first sentence.
  */
 const readCauseMessage = (cause: Cause.Cause<PluginError>): string =>
   truncateMessage(
@@ -364,8 +365,8 @@ const make = Effect.gen(function* () {
   /** Every event kind this boot registered, by name. Settled with the providers. */
   const eventKinds = yield* Ref.make<ReadonlyMap<string, RegisteredEventKind>>(new Map());
   /**
-   * Every workflow action this boot registered, the built-in ones included, by
-   * the id a step names it by. Settled with the providers.
+   * Every workflow action this boot registered, built-in ones included, keyed
+   * by the qualified id a step uses. Settled with the providers.
    */
   const workflowActions = yield* Ref.make<ReadonlyMap<string, RegisteredWorkflowAction>>(new Map());
   /**
@@ -386,8 +387,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The plugins that run now. A plugin is active only while it is enabled and
-   * its activation succeeded: a disable stops it before the flag is written.
+   * Returns the ids of the plugins that are running now. A plugin is active
+   * only while it is enabled and its activation succeeded. Disabling a plugin
+   * stops it before the enabled flag is written.
    */
   const listActivePluginIds: Effect.Effect<ReadonlySet<string>> = Effect.map(
     Ref.get(entries),
@@ -573,8 +575,8 @@ const make = Effect.gen(function* () {
         const registeredTypes: Array<RegisteredConnectionType> = [];
         const registeredKinds = new Map<string, RegisteredEventKind>();
         const registeredActions = new Map<string, RegisteredWorkflowAction>();
-        // The core's own actions go first and into the same catalog, so every
-        // reader finds the built-in actions and the plugins' actions in one list.
+        // The built-in actions go into the same catalog as the plugins'
+        // actions, so every reader finds all actions in one list.
         registerBuiltInWorkflowActions(catalog, registeredActions);
 
         for (const [index, plugin] of registry.entries()) {
@@ -587,12 +589,12 @@ const make = Effect.gen(function* () {
             );
           }
           if (manifest.id === CORE_CONTRIBUTION_OWNER) {
-            // The core owns the built-in contributions under this id, and a
-            // plugin row with it would decide whether they are enabled.
+            // The built-in contributions are stored under this owner id. A
+            // plugin with the same id would control whether they are enabled.
             return yield* Effect.die(
               new Error(
                 `The plugin registry lists a plugin with the id ${CORE_CONTRIBUTION_OWNER}. ` +
-                  "The core owns its built-in contributions under that id, so no plugin can have it. Give the plugin another id.",
+                  "That id is reserved for the built-in contributions. Give the plugin another id.",
               ),
             );
           }
@@ -687,9 +689,9 @@ const make = Effect.gen(function* () {
     eventKinds: (): Effect.Effect<ReadonlyMap<string, RegisteredEventKind>> => Ref.get(eventKinds),
 
     /**
-     * The event kinds of every active plugin. A trigger can name only these:
-     * the event sources of a plugin that is disabled, or that did not start,
-     * ingest nothing, so a trigger on one of their kinds could never match.
+     * Returns the event kinds of every active plugin. A trigger can use only
+     * these kinds. A plugin that is disabled, or that failed to start, ingests
+     * no events, so a trigger on one of its kinds could never match.
      */
     listActiveEventKinds: (): Effect.Effect<ReadonlyArray<RegisteredEventKind>> =>
       Effect.map(Effect.zip(Ref.get(eventKinds), listActivePluginIds), ([kinds, active]) =>
@@ -697,9 +699,10 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The workflow actions a step can name, ordered by id: the built-in ones,
-     * and those of every active plugin. The action of a plugin that is disabled,
-     * or that did not start, has nothing running behind it to call.
+     * Returns the workflow actions a step can call, sorted by id: the built-in
+     * actions and the actions of every active plugin. The actions of a plugin
+     * that is disabled, or that failed to start, are left out, because the
+     * plugin is not running to execute them.
      */
     listActiveWorkflowActions: (): Effect.Effect<ReadonlyArray<RegisteredWorkflowAction>> =>
       Effect.map(Effect.zip(Ref.get(workflowActions), listActivePluginIds), ([actions, active]) =>
@@ -709,10 +712,10 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The qualified name of each Connection type of every active plugin. A
-     * workflow input can take a Connection of only these types: a plugin that
-     * is disabled, or that did not start, acts through none of its
-     * Connections.
+     * Returns the qualified names of the Connection types of every active
+     * plugin. A workflow input can take a Connection of only these types,
+     * because a plugin that is disabled, or that failed to start, cannot act
+     * through its Connections.
      */
     listActiveConnectionTypes: (): Effect.Effect<ReadonlyArray<string>> =>
       Effect.map(Effect.zip(connectionTypes.list(), listActivePluginIds), ([types, active]) =>

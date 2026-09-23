@@ -392,7 +392,7 @@ describe("Connections > setting one up", () => {
     );
     await fill(user);
     hold([created]);
-    // The answer that declines comes first, and the answer that accepts comes last.
+    // Cancel comes before Connect.
     const connect = within(formWith("Label")).getByRole("button", { name: "Connect" });
     expectInDocumentOrder([
       within(formWith("Label")).getByRole("button", { name: "Cancel" }),
@@ -572,7 +572,7 @@ describe("Connections > reconnecting and removing", () => {
     await user.click(within(row).getByRole("button", { name: "Delete" }));
 
     expect(writes(api)).toEqual([]);
-    // The answer that declines comes first, and the answer that accepts comes last.
+    // Cancel comes before Confirm.
     const confirm = within(row).getByRole("button", { name: "Confirm" });
     expectInDocumentOrder([within(row).getByRole("button", { name: "Cancel" }), confirm]);
 

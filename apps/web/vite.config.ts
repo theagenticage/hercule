@@ -34,22 +34,22 @@ export default defineConfig(({ command }) => {
       babel({ presets: [reactCompilerPreset()] }),
       tailwindcss(),
     ],
-    // A route's chunk holds what only that route uses. A module of a workspace
-    // package reaches the first paint through the package's index all the
-    // same, unless the package declares which of its modules have side
-    // effects, as `@hercule/contract`, `@hercule/client-core` and
-    // `@hercule/ui` do. The budget check measures the first paint on each
-    // build: scripts/check-bundle-budget.ts.
+    // Each route gets a chunk with the code that only that route uses. A
+    // workspace package can still pull all its modules into the initial bundle
+    // through its index, unless its package.json declares `sideEffects`, as
+    // `@hercule/contract`, `@hercule/client-core` and `@hercule/ui` do.
+    // scripts/check-bundle-budget.ts checks the initial bundle size on every
+    // build.
     build: {
       rolldownOptions: {
         output: {
-          // The workflow editor loads its libraries with the two pages that
-          // edit a workflow. Together they pass the size at which a build
-          // warns about a chunk. So the text editor's library, the largest,
-          // gets a chunk of its own, and the warning keeps its limit for
-          // every chunk. The graph's library stays with the page, because it
-          // shares React with the first paint: a group of its own would take
-          // React with it, and the first paint would load the graph.
+          // The two pages that edit a workflow load the text editor library
+          // (CodeMirror) and the graph library. Together they are bigger than
+          // the chunk size at which the build warns. So CodeMirror, the larger
+          // one, gets its own chunk, and the warning limit stays the same for
+          // every chunk. The graph library stays in the page chunk: a separate
+          // chunk for it would also take in React, which the initial bundle
+          // needs, so every page would then load the graph library.
           codeSplitting: {
             groups: [
               {

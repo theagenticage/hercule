@@ -334,9 +334,9 @@ export const localRunnerQuery = (
   });
 
 /**
- * Every workflow, as one page. A workflow is standing work the user wrote by
- * hand, so there are few of them; the screen shows all of them, and the point
- * at which they outgrow one page is the point at which this grows a listing.
+ * Reads every workflow in a single page. Users write workflows by hand, so
+ * there are few of them. If they ever outgrow one page, this query needs
+ * paging.
  */
 export const workflowsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -345,9 +345,8 @@ export const workflowsQuery = (client: HerculeClient) =>
   });
 
 /**
- * One workflow with its text, which is what its page reads. A refusal is
- * answered at once rather than retried: a workflow that is not there answers
- * 404 for good.
+ * Reads one workflow, including its YAML source. An error is not retried,
+ * because a workflow that returns 404 once will keep returning 404.
  */
 export const workflowQuery = (client: HerculeClient, id: string) =>
   queryOptions({
@@ -357,15 +356,15 @@ export const workflowQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * What the controller finds in a workflow's source when it validates the
- * source as a save would. The answer names the source it is about, so a
- * reader that shows the answer about an earlier source while the next one is
- * validated can tell the two apart.
+ * Asks the controller to validate a workflow's source, with the same checks a
+ * save runs. Returns the errors and warnings together with the source they
+ * belong to. The page keeps showing the previous result while the next source
+ * is validated, and compares the sources to know which result it is showing.
  *
- * A failure is said at once rather than retried, because the page says why
- * the validation could not run and validates again when the live connection
- * comes back. The page validates a source when the author stops typing, and
- * again only after a failure, so a return to the window asks nothing again.
+ * A failed request is not retried: the page shows why it failed, and
+ * validates again when the live connection comes back. Window focus does not
+ * trigger a refetch either, because the page only validates after the user
+ * stops typing or after a failure.
  */
 export const workflowValidationQuery = (client: HerculeClient, source: string) =>
   queryOptions({
@@ -378,14 +377,14 @@ export const workflowValidationQuery = (client: HerculeClient, source: string) =
     refetchOnWindowFocus: false,
   });
 
-/** Every action a step can name, which the editor completes after `action:`. */
+/** Reads every action a step can use. The editor suggests them after `action:`. */
 export const workflowActionsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.workflowActions(),
     queryFn: () => client.workflowAction.query(),
   });
 
-/** Every event kind a trigger can name, which the editor completes after `kind:`. */
+/** Reads every event kind a trigger can use. The editor suggests them after `kind:`. */
 export const eventKindsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.eventKinds(),
@@ -393,8 +392,8 @@ export const eventKindsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Every Agent, as one page, which the editor completes after `agent:`. An
- * Agent is written by hand, so there are few of them.
+ * Reads every Agent in a single page. The editor suggests them after
+ * `agent:`. Users write Agents by hand, so there are few of them.
  */
 export const agentsQuery = (client: HerculeClient) =>
   queryOptions({

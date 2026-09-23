@@ -217,7 +217,7 @@ describe("Settings > Secrets", () => {
 
     expect(reading(row)).toContain("Delete this secret? Its value cannot be recovered.");
     expect(writes(api)).toEqual([]);
-    // The answer that declines comes first, and the answer that accepts comes last.
+    // Cancel comes before Confirm.
     const cancel = within(row).getByRole("button", { name: "Cancel" });
     expectInDocumentOrder([cancel, within(row).getByRole("button", { name: "Confirm" })]);
 

@@ -56,12 +56,12 @@ const CELL = "border border-line-soft px-2 py-1 align-top";
 /**
  * A table cell, with its column's alignment as a class.
  *
- * `remark-gfm` puts the alignment of `|:---|---:|` in an inline `style`. It
- * is read here as a class and the style is dropped, so no markdown that an
- * agent wrote ever reaches a style attribute. The Content-Security-Policy that
- * the controller serves admits inline styles only because the workflow
- * editor needs them, and the app's own markup keeps to classes, so a stricter
- * policy would take nothing from it.
+ * `remark-gfm` puts the alignment of `|:---|---:|` in an inline `style`. This
+ * function converts the alignment to a class and drops the style, so markdown
+ * written by an agent never reaches a style attribute. The controller's
+ * Content-Security-Policy allows inline styles only because the workflow
+ * editor needs them. The app's own markup uses classes only, so a stricter
+ * policy would break nothing.
  */
 const cell = (
   tag: "th" | "td",

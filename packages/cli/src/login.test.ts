@@ -66,7 +66,7 @@ describe("hercule login", () => {
     });
   });
 
-  it("takes a final CRLF on stdin as the line break, and not as part of the password", async () => {
+  it("strips a trailing CRLF from the password read from stdin", async () => {
     const fetch = controller();
     const io = stubIo({ fetch, stdin: "hunter2\r\n" });
 

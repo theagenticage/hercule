@@ -1,13 +1,15 @@
 /**
- * The workflow actions a step can call: the row the catalog holds for each
- * one, and the live input schema that a step's params are read against.
+ * Registers workflow actions: the actions a workflow step can call. Each
+ * action gets a catalog row, and its input schema is kept so that a step's
+ * params can be validated against it.
  *
- * A plugin registers its actions through the host, and the core registers its
- * built-in actions into the same catalog at every boot, so validation and every
- * picker read one list. It sits beside the host rather than inside it because
- * the host's registration surface is a list of extension points, and the whole
- * of what one of them takes belongs in one place. A leaf: the host calls this,
- * and this calls nothing of the host's.
+ * Plugins register their actions through the host. The core registers its
+ * built-in actions into the same catalog at every boot, so validation and
+ * every action picker read one list.
+ *
+ * This module sits beside the host rather than inside it, so that all the code
+ * for one extension point is in one place. The host calls this module, and
+ * this module calls nothing in the host.
  */
 import * as Effect from "effect/Effect";
 import type * as JsonSchema from "effect/JsonSchema";
@@ -37,35 +39,37 @@ import type { NewContribution } from "./repository";
 const WORKFLOW_ACTION = "workflow-action";
 
 /**
- * The owner of every contribution the core declares, in the catalog. The core
- * is not a plugin, so it has no row in `plugins` and it is never disabled. No
- * plugin can have this id.
+ * The owner id of the built-in contributions in the catalog. The core is not
+ * a plugin, so it has no row in `plugins` and cannot be disabled. No plugin
+ * can use this id.
  */
 export const CORE_CONTRIBUTION_OWNER = "core";
 
 /**
- * One workflow action a boot registered. `id` is the id a step names it by:
- * `<pluginId>/<word>` for a plugin's action, and the operation's id for a
- * built-in action.
+ * A workflow action registered at boot. `id` is the id a step uses to call
+ * the action: `<pluginId>/<word>` for a plugin's action, and the operation id
+ * for a built-in action.
  */
 export interface RegisteredWorkflowAction {
   readonly id: string;
   /**
    * The id of the plugin that declared the action, or `core` for a built-in
-   * action, which a step can always name.
+   * action. A step can always call a built-in action.
    */
   readonly owner: string;
   readonly displayName: string;
   readonly description: string;
-  /** The params a step writes, as the JSON Schema the catalog holds. */
+  /** The schema of the params a step writes, as JSON Schema. */
   readonly inputSchema: JsonSchema.JsonSchema;
-  /** The same params as a live schema, which a literal param is decoded against. */
+  /** The same schema as an Effect schema, used to decode literal params. */
   readonly input: Schema.Top;
 }
 
 /**
- * What a workflow action says about itself besides its two names. Both fields
- * reach a column and the wire, so they are bounded where the plugin is told.
+ * The fields of a workflow action, other than its id and display name, that
+ * are validated at registration. Both are stored in a column and sent over
+ * the API, so their length is checked here, where the plugin author gets the
+ * error.
  */
 const WorkflowActionHeader = Schema.Struct({
   description: Schema.String.check(
@@ -85,10 +89,7 @@ const decodeWorkflowActionHeader = Schema.decodeUnknownEffect(WorkflowActionHead
   errors: "all",
 });
 
-/**
- * One workflow action as the core or a plugin declares it, with the id a step
- * names it by.
- */
+/** A workflow action as the core or a plugin declares it, with its qualified id. */
 interface DeclaredWorkflowAction {
   readonly id: string;
   readonly displayName: string;
@@ -99,10 +100,11 @@ interface DeclaredWorkflowAction {
 }
 
 /**
- * Adds one action to both collections of the registration pass. They are the
- * pass's own, handed in and appended to, because a pass registers every
- * plugin before any of it is stored: a plugin whose registration fails leaves
- * nothing behind in the collections the boot keeps.
+ * Adds one action to the catalog rows in `declared` and to the `actions` map.
+ *
+ * Both collections belong to the current registration pass. The pass
+ * registers every plugin before it stores anything, so a plugin whose
+ * registration fails leaves nothing in the collections the boot keeps.
  */
 const addWorkflowAction = (
   owner: string,
@@ -134,9 +136,13 @@ const addWorkflowAction = (
 };
 
 /**
- * Registers one action a plugin declares. The host makes the id a step names
- * it by from the plugin's id and the word the plugin declared. `execute` stays
- * with the plugin: nothing calls it until runs execute action steps.
+ * Validates and registers one workflow action that a plugin declares. The
+ * qualified id is `<pluginId>/<word>`. Fails with a `PluginError` if a field
+ * is invalid, the id is already registered, or the input schema is not a
+ * struct.
+ *
+ * `execute` is not stored here: nothing calls it until runs execute action
+ * steps.
  */
 export const registerWorkflowActionContribution = (
   pluginId: string,
@@ -157,7 +163,7 @@ export const registerWorkflowActionContribution = (
       }),
       (error) =>
         new PluginError({
-          message: `the workflow action ${id} is refused: ${describeFieldIssues(error)}`,
+          message: `the workflow action ${id} is invalid: ${describeFieldIssues(error)}`,
         }),
     );
     if (actions.has(id)) {
@@ -167,12 +173,13 @@ export const registerWorkflowActionContribution = (
         }),
       );
     }
-    // A step writes its params as named fields, so the checks at save read
-    // the input as a struct: which fields exist, and which are required.
+    // A step writes its params as named fields. Validation at save reads the
+    // input schema as a struct to find which fields exist and which are
+    // required.
     if (!SchemaAST.isObjects(contribution.input.ast)) {
       return yield* Effect.fail(
         new PluginError({
-          message: `the workflow action ${id} is refused: its input must be a struct, because a step writes its params as named fields`,
+          message: `the workflow action ${id} is invalid: its input schema must be a struct, because a step writes its params as named fields`,
         }),
       );
     }
@@ -192,10 +199,10 @@ export const registerWorkflowActionContribution = (
   });
 
 /**
- * The actions the core declares. Each one is an operation of the public API,
- * with the operation's id, so a step reaches nothing through an action that a
- * request cannot reach. The other built-in actions join this list with the
- * operations they call.
+ * The built-in workflow actions. Each one calls an operation of the public API
+ * and has the operation's id, so a step can do nothing that an API request
+ * cannot do. More built-in actions are added here as their operations are
+ * built.
  */
 const BUILT_IN_WORKFLOW_ACTIONS: ReadonlyArray<
   DeclaredWorkflowAction & { readonly id: OperationId }
@@ -212,10 +219,10 @@ const BUILT_IN_WORKFLOW_ACTIONS: ReadonlyArray<
     id: "task.update",
     displayName: "Update a task",
     description:
-      "Changes the fields of the Task that taskId names. A field that the params leave out stays as it is.",
-    // The operation's input, with the task named in the params, because a
-    // request names it in the path. The edit is refused when it names no
-    // field to change, by the rule the operation's input carries.
+      "Changes fields of the Task with the id taskId. Fields left out of the params are not changed.",
+    // The operation's input plus `taskId`, because an API request sends the
+    // task id in the path and a step has no path. The check is the one the
+    // operation uses, so both reject an update that changes no field.
     input: Schema.Struct({ taskId: Id, ...TaskUpdateInput.fields }).check(refuseEmptyTaskUpdate),
     output: Task,
   },
@@ -223,15 +230,15 @@ const BUILT_IN_WORKFLOW_ACTIONS: ReadonlyArray<
     id: "task.query",
     displayName: "Find tasks",
     description: "Lists the Tasks that match refs, labels, status, project or text.",
-    // The filter of the operation, without the operation's paging fields. A
-    // step reads the answer to decide where the run goes next, such as whether
-    // a Task for the event exists already, and the first page answers that.
+    // The operation's filter, without the paging fields. A step uses the
+    // result to decide what the run does next, for example whether a Task for
+    // the event already exists. The first page is enough for that.
     input: TaskFilter,
     output: page(Task),
   },
 ];
 
-/** Registers the built-in actions, owned by the core, into the collections of a pass. */
+/** Adds the built-in actions, owned by `core`, to the collections of a registration pass. */
 export const registerBuiltInWorkflowActions = (
   declared: Array<NewContribution>,
   actions: Map<string, RegisteredWorkflowAction>,

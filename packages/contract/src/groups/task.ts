@@ -94,8 +94,8 @@ export const ProvenanceEntry = Schema.Struct({
 export type ProvenanceEntry = Schema.Schema.Type<typeof ProvenanceEntry>;
 
 /**
- * A field of a provenance entry that the core sets when it stores the entry.
- * No value a caller writes is accepted, and the refusal says why.
+ * A provenance field that the core sets when it stores the entry. Decoding
+ * fails for any value a caller sends, with a message that explains why.
  */
 const CoreStampedField = Schema.Never.annotate({
   description: "stamped by the core",
@@ -177,7 +177,7 @@ export const TaskCreateInput = Schema.Struct({
 
 export type TaskCreateInput = Schema.Schema.Type<typeof TaskCreateInput>;
 
-/** The fields an edit of a task may change. */
+/** The fields a task update can change. */
 const TASK_UPDATE_FIELDS = {
   title: Schema.optionalKey(TaskTitle),
   description: Schema.optionalKey(TaskDescription),
@@ -197,11 +197,11 @@ const TASK_UPDATE_FIELDS = {
 };
 
 /**
- * Refuses an edit of a task that names no field to change. Such an edit would
- * move `updatedAt` and record a `task.updated` event that describes nothing,
- * and a workflow that such an event starts would start for no change. The
- * `task.update` operation and the built-in action that calls the operation
- * both check their input with this, so the two refuse the same edits.
+ * Rejects a task update that sets no field. Such an update would still change
+ * `updatedAt` and record a `task.updated` event with no changes, and that
+ * event could start a workflow for nothing. The `task.update` operation and
+ * the built-in action that calls it both use this check, so both reject the
+ * same updates.
  */
 export const refuseEmptyTaskUpdate = Schema.makeFilter(
   (update: { readonly [Field in keyof typeof TASK_UPDATE_FIELDS]?: unknown }) =>
@@ -209,12 +209,12 @@ export const refuseEmptyTaskUpdate = Schema.makeFilter(
       (field) => update[field as keyof typeof TASK_UPDATE_FIELDS] !== undefined,
     )
       ? undefined
-      : "An edit of a task names at least one field to change. Add each field to change, such as title or status.",
+      : "A task update must name at least one field to change. Add each field to change, such as title or status.",
 );
 
 /**
- * What editing a task takes. Every field is optional, and an absent one is
- * untouched, but at least one field is present.
+ * The input of a task update. Every field is optional and an absent field is
+ * left unchanged, but at least one field must be set.
  */
 export const TaskUpdateInput = Schema.Struct(TASK_UPDATE_FIELDS).check(refuseEmptyTaskUpdate);
 

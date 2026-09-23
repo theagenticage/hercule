@@ -1,20 +1,15 @@
-/**
- * The graph that the editor's preview draws from a workflow's definition: one
- * node for each trigger and each step, one edge for each entry of `edges`, and
- * an edge from each start trigger to each entry step.
- */
 import { listEntrySteps, type WorkflowDefinition } from "@hercule/contract";
 
-/** What a node of the graph stands for: a trigger or a step, of one kind. */
+/** A trigger kind (`start`, `signal`) or a step kind (`action`, `agent`). */
 type WorkflowGraphNodeKind = "start" | "signal" | "action" | "agent";
 
 export interface WorkflowGraphNode {
-  /** The id the text gives the trigger or the step. */
+  /** The trigger's or step's id. */
   readonly id: string;
   readonly kind: WorkflowGraphNodeKind;
 }
 
-/** A way through the graph, with the condition and the cap that the text gives it. */
+/** An edge of the graph, with the condition and traversal limit from the definition. */
 export interface WorkflowGraphEdge {
   readonly from: string;
   readonly to: string;
@@ -28,13 +23,14 @@ export interface WorkflowGraph {
 }
 
 /**
- * The graph of a definition. A run starts at every entry step, so each start
- * trigger leads into each entry step, and the preview shows where a run
- * begins.
+ * Builds the graph that the editor's preview draws for a workflow definition:
+ * - one node for each trigger and each step,
+ * - one edge for each entry in `edges`,
+ * - an edge from each start trigger to each entry step, because a run starts
+ *   at every entry step. These edges show where a run begins.
  *
- * An edge whose end names no trigger and no step cannot be drawn, so the
- * graph leaves it out. The check of the definition refuses such an edge at
- * its path, so the author learns of it there.
+ * An edge whose `from` or `to` is not a trigger or step id cannot be drawn,
+ * so it is left out. Validation reports that edge as an error at its path.
  */
 export const buildWorkflowGraph = (definition: WorkflowDefinition): WorkflowGraph => {
   const triggers = definition.triggers ?? [];
@@ -53,13 +49,14 @@ export const buildWorkflowGraph = (definition: WorkflowDefinition): WorkflowGrap
 };
 
 /**
- * The condition of an edge as the graph shows it, or `undefined` for an edge
- * with no condition. A condition often reads the output of the step or the
- * signal trigger that the edge leaves, as in
- * `steps.review.output.verdict == "approve"`. The edge starts there already,
- * so the graph leaves out `steps.<from>.output.` and shows
- * `verdict == "approve"`. The part that is left is the part in which two
- * branches of one step differ.
+ * Returns an edge's condition shortened for display, or `undefined` for an
+ * edge with no condition.
+ *
+ * A condition often reads the output of the edge's source step, as in
+ * `steps.review.output.verdict == "approve"`. The graph already shows that
+ * the edge leaves `review`, so the prefix `steps.review.output.` is removed,
+ * leaving `verdict == "approve"`. What remains is the part that differs
+ * between two branches from the same step.
  */
 export const abbreviateEdgeCondition = (edge: WorkflowGraphEdge): string | undefined =>
   edge.condition?.replace(new RegExp(`(?<![\\w.])steps\\.${edge.from}\\.output\\.`, "g"), "");

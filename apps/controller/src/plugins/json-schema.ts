@@ -1,32 +1,35 @@
 /**
- * The JSON Schema the catalog holds for a schema that a contribution declares:
- * an event kind's payload, or a workflow action's input and output.
+ * Converts the Effect schemas that contributions declare (an event kind's
+ * payload, a workflow action's input and output) to the JSON Schema stored in
+ * the catalog.
  */
 import type * as JsonSchema from "effect/JsonSchema";
 import * as Schema from "effect/Schema";
 
-/** Where the definitions of a derived document are pointed at from. */
+/** The prefix of a `$ref` that points into a document's `$defs`. */
 const DEFINITIONS_POINTER = "#/$defs/";
 
-/** Whether a JSON value holds a `$ref` to this pointer, at any depth. */
-const holdsReferenceTo = (value: unknown, pointer: string): boolean => {
-  if (Array.isArray(value)) return value.some((item) => holdsReferenceTo(item, pointer));
+/** Checks whether a JSON value contains a `$ref` to `pointer`, at any depth. */
+const containsReferenceTo = (value: unknown, pointer: string): boolean => {
+  if (Array.isArray(value)) return value.some((item) => containsReferenceTo(item, pointer));
   if (typeof value !== "object" || value === null) return false;
   return Object.entries(value).some(
-    ([key, item]) => (key === "$ref" && item === pointer) || holdsReferenceTo(item, pointer),
+    ([key, item]) => (key === "$ref" && item === pointer) || containsReferenceTo(item, pointer),
   );
 };
 
 /**
- * The derived document as one JSON Schema. It is a whole document rather than
- * the root node alone: a schema carrying an identifier is emitted once as a
- * definition and pointed at with a `$ref`, and a reader handed the root by
- * itself could not follow that reference.
+ * Converts a schema to a single JSON Schema object, with its definitions
+ * under `$defs`.
  *
- * A root that is such a reference is replaced by the definition it points at,
- * so a reader finds the root's own keywords, such as `type` and `properties`,
- * at the top. That definition then stays among the definitions only where a
- * reference still points at it, as in a schema that contains itself.
+ * The definitions must be kept: Effect emits a schema that has an identifier
+ * once, as a definition, and refers to it with a `$ref`. The root alone would
+ * contain references that a reader cannot resolve.
+ *
+ * If the root itself is such a `$ref`, it is replaced by the definition it
+ * points to, so a reader finds keywords like `type` and `properties` at the
+ * top. That definition is then dropped from `$defs`, unless something still
+ * refers to it (a recursive schema).
  */
 export const deriveCatalogJsonSchema = (schema: Schema.Top): JsonSchema.JsonSchema => {
   const document = Schema.toJsonSchemaDocument(schema);
@@ -47,7 +50,7 @@ export const deriveCatalogJsonSchema = (schema: Schema.Top): JsonSchema.JsonSche
   const others = Object.fromEntries(
     Object.entries(document.definitions).filter(([name]) => name !== rootDefinitionName),
   );
-  const definitions = holdsReferenceTo(
+  const definitions = containsReferenceTo(
     [root, others],
     `${DEFINITIONS_POINTER}${rootDefinitionName}`,
   )

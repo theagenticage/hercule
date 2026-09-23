@@ -101,8 +101,8 @@ function HerculeFace({
             active={
               item.section === true
                 ? pathname.startsWith("/settings")
-                : // A page inside a screen, such as one workflow's page,
-                  // belongs to that screen's item.
+                : // A page under a screen's path, such as one workflow's page,
+                  // highlights that screen's item.
                   pathname === item.to || pathname.startsWith(`${item.to}/`)
             }
           />

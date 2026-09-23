@@ -54,17 +54,18 @@ export const queryKeys = {
   workflows: (): LiveQueryKey => ["workflows"],
   workflow: (id?: string): LiveQueryKey => (id === undefined ? ["workflow"] : ["workflow", id]),
   /**
-   * Not a live topic: the answer about a source is keyed by the source itself,
-   * so a source that was validated before answers from the cache.
+   * Not a live topic. The key includes the source text, so validating the same
+   * source again reads the cached result.
    */
   workflowValidation: (source: string): LiveQueryKey => ["workflow-validation", source],
   /**
-   * Not a live topic: the two catalogs change only when a plugin is turned on
-   * or off, and the editor reads them again each time it opens.
+   * Not live topics. The action and event kind catalogs change only when a
+   * plugin is turned on or off, and the editor fetches them again each time it
+   * opens.
    */
   workflowActions: (): LiveQueryKey => ["workflow-actions"],
   eventKinds: (): LiveQueryKey => ["event-kinds"],
-  /** Not a live topic yet: an Agent written elsewhere lands on the next read. */
+  /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
   agents: (): LiveQueryKey => ["agents"],
   /** Keyed on the loopback endpoints it asks, because that is what it depends on. */
   localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
@@ -114,8 +115,8 @@ export const queryKeysFor = (
       ? [queryKeys.connections(), queryKeys.connection()]
       : [queryKeys.connections(), ...ids.map((id) => queryKeys.connection(id))];
   }
-  // The listing is reread whichever workflow moved; a workflow's own page is
-  // reread only when the push names it, or when it names none.
+  // Any workflow change refetches the listing. A workflow's own page is
+  // refetched only when the push lists its id, or when the push lists no ids.
   if (topic === "workflow") {
     return ids.length === 0
       ? [queryKeys.workflows(), queryKeys.workflow()]

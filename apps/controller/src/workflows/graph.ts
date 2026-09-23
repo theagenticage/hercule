@@ -1,45 +1,47 @@
 /**
- * The graph of a workflow's definition: the nodes that an edge may join, and
- * the rules about the graph as a whole. A loop has an edge with
- * `maxTraversals`, a step inside a loop does not join with `all`, a run has a
- * step to begin at, and each step is reached from where a run begins.
+ * Validates the graph of a workflow definition: which nodes each edge may
+ * connect, and these rules about the graph as a whole:
  *
- * The rules about the whole graph read every edge together, and the other
- * checks of a workflow read one place at a time. So the graph has a module of
- * its own, and the checks in `./validation` call it.
+ * - every loop has an edge with `maxTraversals`;
+ * - a step inside a loop does not use `join: all`;
+ * - at least one step is an entry step;
+ * - every step can be reached from an entry step or a signal trigger.
+ *
+ * The whole-graph rules look at all edges together, while the other checks in
+ * `./validation` look at one part of the definition at a time. That is why the
+ * graph checks have their own module.
  */
 import {
   joinNames,
   listEntrySteps,
-  quoteWritten,
+  quoteAuthorText,
   type Issue,
   type WorkflowDefinition,
 } from "@hercule/contract";
 
 type Edge = NonNullable<WorkflowDefinition["edges"]>[number];
 
-/** An edge whose two ends name nodes it may join: a step or a signal trigger, to a step. */
+/** An edge with valid ends: from a step or a signal trigger, to a step. */
 export interface GraphEdge {
   readonly index: number;
   readonly from: string;
   readonly to: string;
-  /** Whether the edge carries `maxTraversals`, which bounds how often a loop through it runs. */
+  /** Whether the edge has `maxTraversals`, which limits how often a run can go round a loop through it. */
   readonly capped: boolean;
 }
 
-/** The ids of the steps and of the triggers: what an edge may name. */
+/** The ids of the steps and triggers, which are the nodes an edge may refer to. */
 export interface GraphNodes {
   readonly stepIds: ReadonlySet<string>;
   readonly signalIds: ReadonlySet<string>;
   readonly startIds: ReadonlySet<string>;
 }
 
-/** Why a start trigger cannot be an end of an edge. */
 const START_TRIGGER_HAS_NO_EDGES =
   "A start trigger starts runs, and does not continue one, so it cannot have edges. " +
   "Remove the edge: a run starts at its entry steps.";
 
-/** Each end of an edge that names no node it may join. */
+/** Returns an issue for each end of an edge that is not a valid node for that end. */
 export const listEdgeEndIssues = (
   edge: Edge,
   index: number,
@@ -50,36 +52,36 @@ export const listEdgeEndIssues = (
   if (nodes.startIds.has(edge.from)) {
     issues.push({
       path: [...path, "from"],
-      message: `${quoteWritten(edge.from)} is a start trigger. ${START_TRIGGER_HAS_NO_EDGES}`,
+      message: `${quoteAuthorText(edge.from)} is a start trigger. ${START_TRIGGER_HAS_NO_EDGES}`,
     });
   } else if (!nodes.stepIds.has(edge.from) && !nodes.signalIds.has(edge.from)) {
     issues.push({
       path: [...path, "from"],
-      message: `No step or signal trigger has the id ${quoteWritten(edge.from)}. An edge starts at a step or at a signal trigger. Write the id of one.`,
+      message: `No step or signal trigger has the id ${quoteAuthorText(edge.from)}. An edge starts at a step or at a signal trigger. Write the id of one.`,
     });
   }
   if (nodes.startIds.has(edge.to)) {
     issues.push({
       path: [...path, "to"],
-      message: `${quoteWritten(edge.to)} is a start trigger. ${START_TRIGGER_HAS_NO_EDGES}`,
+      message: `${quoteAuthorText(edge.to)} is a start trigger. ${START_TRIGGER_HAS_NO_EDGES}`,
     });
   } else if (nodes.signalIds.has(edge.to)) {
     issues.push({
       path: [...path, "to"],
       message:
-        `${quoteWritten(edge.to)} is a signal trigger. A signal trigger fires when its event reaches the run, ` +
+        `${quoteAuthorText(edge.to)} is a signal trigger. A signal trigger fires when its event reaches the run, ` +
         "so no edge can lead into it. Lead the edge into a step.",
     });
   } else if (!nodes.stepIds.has(edge.to)) {
     issues.push({
       path: [...path, "to"],
-      message: `No step has the id ${quoteWritten(edge.to)}. An edge leads into a step. Write the id of one.`,
+      message: `No step has the id ${quoteAuthorText(edge.to)}. An edge leads into a step. Write the id of one.`,
     });
   }
   return issues;
 };
 
-/** The nodes each node's edges lead to, by node. A node with no edge out is not in it. */
+/** Returns the successors of each node, by node id. A node with no outgoing edge has no entry. */
 const buildSuccessorMap = (
   edges: ReadonlyArray<GraphEdge>,
 ): ReadonlyMap<string, ReadonlyArray<string>> => {
@@ -93,10 +95,12 @@ const buildSuccessorMap = (
 };
 
 /**
- * The sets of nodes that loops go through: each strongly connected component
- * that holds a loop, which is one of more than one node, or one node with an
- * edge to itself. Tarjan's algorithm, with a stack of its own in place of
- * recursion, so a large graph cannot exhaust the call stack.
+ * Returns the node sets of the loops in a graph: each strongly connected
+ * component that contains a loop, which means it has more than one node, or
+ * one node with an edge to itself.
+ *
+ * Uses Tarjan's algorithm with an explicit stack instead of recursion, so a
+ * large graph cannot overflow the call stack.
  */
 const findLoops = (
   nodeIds: ReadonlyArray<string>,
@@ -152,10 +156,8 @@ const findLoops = (
 };
 
 /**
- * The rules about the graph as a whole, over the edges whose ends are valid:
- * a loop has an edge with `maxTraversals`, a step inside a loop does not join
- * with `all`, a run has a step to begin at, and each step is reached from
- * where a run begins.
+ * Checks the rules about the graph as a whole (see the top of this file).
+ * `edges` holds only the edges with valid ends. Returns every issue found.
  */
 export const listGraphIssues = (
   definition: WorkflowDefinition,
@@ -169,14 +171,14 @@ export const listGraphIssues = (
   const sortInStepOrder = (loop: ReadonlySet<string>): ReadonlyArray<string> =>
     stepIds.filter((id) => loop.has(id));
 
-  // A loop of edges that carry no maxTraversals, when every edge that carries
-  // one is taken away. It is named at its first edge in definition order.
+  // Find the loops that remain after removing every edge with maxTraversals.
+  // Report each one at its first edge in definition order.
   for (const loop of findLoops(
     nodeIds,
     edges.filter((edge) => !edge.capped),
   )) {
     const first = edges.find((edge) => !edge.capped && loop.has(edge.from) && loop.has(edge.to))!;
-    const names = joinNames(sortInStepOrder(loop).map(quoteWritten));
+    const names = joinNames(sortInStepOrder(loop).map(quoteAuthorText));
     issues.push({
       path: ["edges", String(first.index)],
       message:
@@ -186,8 +188,8 @@ export const listGraphIssues = (
     });
   }
 
-  // `all` waits for every incoming edge, and the edge that comes back round a
-  // loop cannot fire before the step runs the first time.
+  // `join: all` waits for every incoming edge, but the edge that comes back
+  // round a loop cannot fire before the step has run once.
   const inLoop = new Set(findLoops(nodeIds, edges).flatMap((loop) => [...loop]));
   for (const [index, step] of steps.entries()) {
     if (step.join === "all" && inLoop.has(step.id)) {
@@ -200,11 +202,11 @@ export const listGraphIssues = (
     }
   }
 
-  // A run begins at every entry step.
   const entryIds = listEntrySteps(definition).map((step) => step.id);
   if (steps.length > 0 && entryIds.length === 0) {
-    // The run most likely begins in the loop that leaves every step with an
-    // edge into it, so the refusal is placed at a step another step leads into.
+    // Every step has an incoming edge, which usually means the run was meant
+    // to begin inside a loop. So report the error at the first step that
+    // another step leads into.
     const ledIntoByStep = new Set(
       edges.filter((edge) => nodes.stepIds.has(edge.from)).map((edge) => edge.to),
     );
@@ -218,15 +220,15 @@ export const listGraphIssues = (
         "No step begins a run of this workflow: an edge leads into every step, so no step starts when a run starts. " +
         "Write entry: true on this step, or on the step where a run begins.",
     });
-    // Without an entry step every step is unreached, and that is this one
-    // problem, which is named once.
+    // Without an entry step, no step can be reached. That is the same
+    // problem, so do not also report every step as unreachable.
     return issues;
   }
 
   const successors = buildSuccessorMap(edges);
   const reached = new Set<string>([...entryIds, ...nodes.signalIds]);
-  // The set grows while it is walked, and a walk of a set visits what is added
-  // behind the walk too, so this is a breadth-first search.
+  // A Set iterator also visits values added during the iteration, so this
+  // loop is a breadth-first search.
   for (const id of reached) {
     for (const next of successors.get(id) ?? []) reached.add(next);
   }

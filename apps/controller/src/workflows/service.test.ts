@@ -1,7 +1,7 @@
 /**
- * Two rules of the workflow service that the wire does not show well: the
- * order a listing answers in when the caller names none, and what the event
- * log is told about a save.
+ * Tests two rules of the workflow service that the HTTP tests cannot check
+ * well: the default sort order of the workflow list, and what the event log
+ * records about each write.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
@@ -17,8 +17,8 @@ import { buildFileTaskSource } from "./testing";
 type Deps = WorkflowService | AuditLog | PluginHost | SqlClient.SqlClient;
 
 /**
- * The service over the real plugin host, which holds the built-in actions a
- * saved workflow's steps are checked against.
+ * Uses the real plugin host, because a save validates each step's action
+ * against the built-in actions that the host registers.
  */
 const layer = WorkflowServiceLayer.pipe(
   Layer.provideMerge(EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer))),
@@ -32,9 +32,11 @@ const USER: Actor = {
 };
 
 /**
- * Every test runs on a `TestClock`, so a later write is later by a clock step
- * and not by a race. The host boots with no plugin first, which registers the
- * built-in actions.
+ * Runs `effect` as the user, after booting the plugin host with no plugins so
+ * that the built-in actions are registered.
+ *
+ * The clock is a `TestClock`, so a test makes a later write get a later
+ * timestamp by moving the clock, instead of depending on real time passing.
  */
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
@@ -48,14 +50,14 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     ),
   );
 
-/** The description of each workflow here: text of the source that no audit entry may repeat. */
+/** The description of every workflow in these tests. No event log entry may contain it. */
 const SECRET_TEXT = "Read the private notes and say nothing of them";
 
-/** A workflow that files one task, with the text no audit entry may repeat. */
+/** Returns the YAML source of a workflow that files one task, described by `SECRET_TEXT`. */
 const buildSource = (name: string): string => buildFileTaskSource(name, SECRET_TEXT);
 
-describe("the workflow listing", () => {
-  it("answers the workflow changed last first when the caller names no order", async () => {
+describe("listing workflows", () => {
+  it("sorts the most recently changed workflow first when no sort is given", async () => {
     const names = await run(
       Effect.gen(function* () {
         const workflows = yield* WorkflowService;
@@ -63,10 +65,10 @@ describe("the workflow listing", () => {
         yield* TestClock.adjust("1 second");
         const second = yield* workflows.create({ source: buildSource("Second") });
         yield* TestClock.adjust("1 second");
-        // A new text makes the first workflow the one changed last.
+        // A new source makes the first workflow the most recently changed.
         yield* workflows.update({ id: first.workflow.id, source: buildSource("First, edited") });
         yield* TestClock.adjust("1 second");
-        // Turning a workflow on changes no text, so it moves nothing.
+        // Enabling a workflow does not change its source, so the order stays the same.
         yield* workflows.update({ id: second.workflow.id, enabled: true });
         const page = yield* workflows.query({});
         return page.items.map((item) => item.name);
@@ -77,8 +79,8 @@ describe("the workflow listing", () => {
   });
 });
 
-describe("what the event log is told about a workflow", () => {
-  it("names the workflow and what changed, and never repeats the source", async () => {
+describe("event log entries for workflow writes", () => {
+  it("record the workflow id and its name or changed fields, and never the source", async () => {
     const entries = await run(
       Effect.gen(function* () {
         const workflows = yield* WorkflowService;
@@ -104,18 +106,18 @@ describe("what the event log is told about a workflow", () => {
     }
   });
 
-  it("names in changed only the fields that an update changed, one entry per update", async () => {
+  it("are written once per update, and list in changed only the fields that changed", async () => {
     const changes = await run(
       Effect.gen(function* () {
         const workflows = yield* WorkflowService;
         const audit = yield* AuditLog;
         const source = buildSource("Unchanged");
         const { workflow } = yield* workflows.create({ source });
-        // The same text, and the state that the workflow already has.
+        // Same source, same enabled state.
         yield* workflows.update({ id: workflow.id, source, enabled: false });
-        // The same text, and a new state.
+        // Same source, new enabled state.
         yield* workflows.update({ id: workflow.id, source, enabled: true });
-        // A new text, and the state that the workflow already has.
+        // New source, same enabled state.
         yield* workflows.update({ id: workflow.id, source: buildSource("Changed"), enabled: true });
         return (yield* audit.listByKind("workflow.updated")).map((entry) => entry.payload.changed);
       }),

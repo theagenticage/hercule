@@ -9,13 +9,13 @@ import { WorkflowRow } from "./-row";
 
 export const Route = createFileRoute("/_shell/workflows/")({
   staticData: { title: "Workflows" },
-  // Answered before it is shown, so the screen never renders as a frame
-  // around nothing and never grows rows under the reader a moment later.
+  // Loads the list before rendering, so the screen never shows an empty
+  // frame and then shifts when the rows arrive.
   loader: ({ context }) => context.queryClient.ensureQueryData(workflowsQuery(context.client)),
   component: Workflows,
 });
 
-/** The way to write a workflow. It is a link, because it opens a page of its own. */
+/** Renders the New workflow button. It is a link, because it opens a page of its own. */
 function NewWorkflowLink(): JSX.Element {
   return (
     <Link to="/workflows/new" className={buttonClassName("form", "self-start")}>
@@ -25,8 +25,8 @@ function NewWorkflowLink(): JSX.Element {
 }
 
 /**
- * Every workflow, in the order the controller lists them, each with the
- * switch that turns its triggers on or off.
+ * Renders the workflows in the order the controller returns them, or an
+ * empty state when there are none.
  */
 function Workflows(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
@@ -34,15 +34,15 @@ function Workflows(): JSX.Element {
   useLiveInvalidation(live, queryClient, "workflow");
 
   const workflows = useSuspenseQuery(workflowsQuery(client)).data.items;
-  // Ages read the clock, not the last invalidation, so an age moves on by
-  // itself as a thread row's does.
+  // Ages come from a clock that ticks every minute, not from the last
+  // refetch, so they stay current, like the ages on thread rows.
   const now = useMinuteClock();
 
   if (workflows.length === 0) {
     return (
       <EmptyState
         headline="No workflows yet."
-        lead="A workflow is written as YAML: what starts it, the steps it runs, and where they run. Its triggers make it standing work."
+        lead="A workflow is written in YAML: what starts it, the steps it runs, and where they run. Its triggers start it automatically."
       >
         <NewWorkflowLink />
       </EmptyState>

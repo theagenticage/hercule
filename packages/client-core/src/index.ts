@@ -130,7 +130,7 @@ export { createTokenStore } from "./token-store";
 export {
   listWorkflowCompletions,
   type CompletionList,
-  type CompletionOffer,
+  type CompletionOption,
   type WorkflowCatalog,
 } from "./workflow-completion";
 export {
@@ -144,15 +144,15 @@ export {
   decideIssueState,
   formatProblemCount,
   locateIssues,
-  readWorkflowSource,
+  parseWorkflowSourceWithRanges,
   type LocatedIssue,
-  type WorkflowSourceReading,
+  type ParsedWorkflowSource,
   type WorkflowValidation,
   type WorkflowValidationState,
 } from "./workflow-source";
 export {
   editDraft,
-  followStoredSource,
+  applyStoredSourceChange,
   markDraftSaved,
   type WorkflowDraft,
 } from "./workflow-draft";

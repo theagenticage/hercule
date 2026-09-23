@@ -1,13 +1,14 @@
-/**
- * The delete of a workflow's page: the question that asks first, and the
- * write, which returns to the list once the controller answers.
- */
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
 
-/** The delete mutation of the page, whether the page asks to delete, and the answers. */
+/**
+ * Handles Delete on a workflow's page: a confirmation question first, then
+ * the delete request, then a return to the list once it succeeds. Returns
+ * the delete mutation, whether the question is showing, and functions that
+ * open the question, close it, and confirm the delete.
+ */
 export const useWorkflowDelete = (client: HerculeClient) => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -15,8 +16,8 @@ export const useWorkflowDelete = (client: HerculeClient) => {
 
   const remove = useMutation({
     mutationFn: (id: string) => client.workflow.delete({ params: { id } }),
-    // The list is read again before it shows, so it never shows the
-    // workflow that is gone.
+    // `refetchType: "all"` also refetches the list while it is not on
+    // screen, so the list never shows the deleted workflow.
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: queryKeys.workflows(), refetchType: "all" }),
   });
@@ -24,7 +25,7 @@ export const useWorkflowDelete = (client: HerculeClient) => {
   return {
     remove,
     isAsking,
-    /** Asks to delete. The question replaces what the last delete said. */
+    /** Shows the question, and clears the error of the last delete. */
     ask: (): void => {
       remove.reset();
       setIsAsking(true);
@@ -35,11 +36,11 @@ export const useWorkflowDelete = (client: HerculeClient) => {
     deleteWorkflow: (id: string): void => {
       setIsAsking(false);
       remove.mutate(id, {
-        // A callback of one call runs only while the page is mounted, so an
-        // author who left before the answer is not brought back.
+        // A per-call `onSuccess` runs only while the component is mounted, so
+        // a user who already left the page is not pulled back.
         onSuccess: () => {
           void navigate({ to: "/workflows", ignoreBlocker: true }).then(() => {
-            // Removed only once the page is gone, because the page reads it until then.
+            // Removed only after the navigation, because the page reads it until it unmounts.
             queryClient.removeQueries({ queryKey: queryKeys.workflow(id) });
           });
         },

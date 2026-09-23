@@ -7,9 +7,9 @@ import { cn } from "./cn";
  * belongs to, and the whole row is a bigger thing to hit. Wearing `Input`'s
  * border and focus means the platform's box is off and the tick is drawn here.
  *
- * A ticked box is filled with ink, as a switch that is on is. It has no hue,
- * because the design language keeps colour to word and dot scale, and the
- * live hue means that something runs.
+ * A checked box is filled with ink, like a switch that is on. It uses no
+ * colour, because the design language uses colour only at the size of a word
+ * or a dot, and the live colour means that something is running.
  */
 export function Checkbox({
   label,

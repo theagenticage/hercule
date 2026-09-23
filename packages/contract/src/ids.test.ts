@@ -20,7 +20,7 @@ describe("the External Ref grammar", () => {
 });
 
 describe("the id grammar", () => {
-  it("says what an id looks like, and not the pattern that checks it", () => {
+  it("describes an id in words in its error message, instead of showing the regex", () => {
     const failed = Schema.decodeUnknownExit(Id)("1234");
     expect(failed._tag).toBe("Failure");
     if (failed._tag !== "Failure") return;

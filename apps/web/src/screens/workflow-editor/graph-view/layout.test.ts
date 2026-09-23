@@ -1,15 +1,16 @@
 /**
- * The layout of the graph: where each node goes, and where each edge and its
- * label run. The graph is read from left to right. Each edge leaves a side of
- * its source and enters a side of its target, at a point of its own, clear of
- * the corners, and everything drawn is inside the size. No route runs through
- * a node, or through the label of another edge.
+ * The layout must satisfy these rules:
+ * - The graph reads from left to right.
+ * - Each edge leaves a side of its source and enters a side of its target, at
+ *   its own point, clear of the corners.
+ * - Everything drawn is inside the layout's size.
+ * - No route runs through a node, or through another edge's label.
  */
 import { describe, expect, it } from "vitest";
 import {
+  computeDrawingViewport,
   computeGraphLayout,
   LARGEST_PLACED_ZOOM,
-  placeDrawing,
   type EdgeRoute,
   type Point,
   type Size,
@@ -17,13 +18,13 @@ import {
 
 const CARD: Size = { width: 144, height: 52 };
 const LABEL: Size = { width: 120, height: 20 };
-/** The part at each end of a card's side where no edge attaches. */
+/** The length at each end of a card's side where no edge attaches. */
 const SIDE_MARGIN = 14;
 
 type Layout = ReturnType<typeof computeGraphLayout>;
 type LayoutEdges = Parameters<typeof computeGraphLayout>[1];
 
-/** A box on the drawing. */
+/** A rectangle in the drawing. */
 type Box = Point & Size;
 
 const buildNodes = (...ids: ReadonlyArray<string>) => ids.map((id) => ({ id, ...CARD }));
@@ -40,18 +41,18 @@ const readRoute = (layout: Layout, id: string): EdgeRoute => {
   return route;
 };
 
-/** Whether two boxes share any area. */
+/** Returns true when two rectangles overlap. */
 const overlaps = (a: Box, b: Box): boolean =>
   a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
-/** The box of a label of some size around its centre. */
+/** Builds the rectangle of a label centred on a point. */
 const buildLabelBox = (centre: Point, size: Size = LABEL): Box => ({
   x: centre.x - size.width / 2,
   y: centre.y - size.height / 2,
   ...size,
 });
 
-/** Whether the straight line from `from` to `to` passes through the inside of a box. */
+/** Returns true when the straight line from `from` to `to` passes through the inside of a rectangle. */
 const crossesBox = (from: Point, to: Point, box: Box): boolean => {
   for (let step = 0; step <= 100; step += 1) {
     const x = from.x + ((to.x - from.x) * step) / 100;
@@ -64,9 +65,11 @@ const crossesBox = (from: Point, to: Point, box: Box): boolean => {
 };
 
 /**
- * Each node, point and label of a layout lies inside its size, no label
- * covers a node or another label, no route runs through a node or the label
- * of another edge, and no two edges meet a card at one point.
+ * Checks that a layout is clear:
+ * - every node, route point and label is inside the layout's size,
+ * - no label covers a node or another label,
+ * - no route runs through a node or another edge's label,
+ * - no two edges meet a card at the same point.
  */
 const expectClearDrawing = (layout: Layout, edges: LayoutEdges): void => {
   const { width, height } = layout.size;
@@ -116,7 +119,7 @@ const expectClearDrawing = (layout: Layout, edges: LayoutEdges): void => {
   }
 };
 
-/** Whether a point lies on the left or the right side of a card, clear of the margin at each end. */
+/** Returns true when a point is on a card's left or right side, clear of the margin at each end. */
 const isOnSide = (point: Point | undefined, card: Point, side: "left" | "right"): boolean =>
   point !== undefined &&
   point.x === card.x + (side === "right" ? CARD.width : 0) &&
@@ -124,10 +127,10 @@ const isOnSide = (point: Point | undefined, card: Point, side: "left" | "right")
   point.y <= card.y + CARD.height - SIDE_MARGIN;
 
 /**
- * The route of an edge starts on a side of the source and ends on a side of
- * the target, clear of the corners, and it meets each side at a right angle.
- * `direction` is `forward` for an edge that leaves the source's right side and
- * enters the target's left side, and `back` for the other way.
+ * Checks that an edge's route starts on a side of the source and ends on a
+ * side of the target, clear of the corners, and meets each side at a right
+ * angle. `forward` means the edge leaves the source's right side and enters
+ * the target's left side. `back` means the opposite.
  */
 const expectHandleToHandle = (
   layout: Layout,
@@ -148,7 +151,7 @@ const expectHandleToHandle = (
   expect(Math.sign((last?.x ?? 0) - (beforeLast?.x ?? 0))).toBe(isForward ? 1 : -1);
 };
 
-/** A generator of numbers from 0 to 1 that gives the same numbers for the same seed. */
+/** Creates a seeded random number generator that returns numbers from 0 to 1. */
 const createRandom = (seed: number) => {
   let state = seed;
   return (): number => {
@@ -184,14 +187,14 @@ describe("computeGraphLayout", () => {
 
     expect(labelBox.x).toBeGreaterThanOrEqual(readNode(layout, "review").x + CARD.width);
     expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(readNode(layout, "comment").x);
-    // The route runs level through the label, so the label sits on it.
+    // The route runs horizontally through the label, so the label sits on the line.
     expect(route.points).toContainEqual({ x: labelBox.x, y: route.label?.y });
     expect(route.points).toContainEqual({ x: labelBox.x + labelBox.width, y: route.label?.y });
     expectClearDrawing(layout, edges);
   });
 
   it("draws an edge from a node to itself as a loop over the node, clear of the node above it", () => {
-    // Two nodes in one rank, so a node stands above the node with the loop.
+    // Two nodes share a rank, so another node sits above the node with the loop.
     const edges = [
       { id: "e0", from: "labelled", to: "review" },
       { id: "e1", from: "nightly", to: "review" },
@@ -212,7 +215,7 @@ describe("computeGraphLayout", () => {
     expectClearDrawing(layout, edges);
   });
 
-  it("steps two loops of one node apart, each clear of the other's label", () => {
+  it("spaces two self-loops of one node apart, each clear of the other's label", () => {
     const edges = [
       { id: "inner", from: "poll", to: "poll", label: LABEL },
       { id: "outer", from: "poll", to: "poll", label: LABEL },
@@ -249,7 +252,7 @@ describe("computeGraphLayout", () => {
     expectClearDrawing(layout, edges);
   });
 
-  it("gives two edges on one side of a card two points of their own, clear of the corners", () => {
+  it("attaches two edges on one side of a card at separate points, clear of the corners", () => {
     const edges = [
       { id: "forward", from: "implement", to: "review" },
       { id: "back", from: "review", to: "implement", label: LABEL, closesLoop: true },
@@ -275,8 +278,8 @@ describe("computeGraphLayout", () => {
     expectClearDrawing(layout, edges);
   });
 
-  it("draws the edge that closes a loop backwards whatever order the nodes and edges come in", () => {
-    // A signal trigger that leads into the last step of the loop comes first.
+  it("draws the edge that closes a loop backwards, regardless of the order of nodes and edges", () => {
+    // A signal trigger into the loop's last step comes first in both lists.
     const edges = [
       { id: "signal", from: "rerun_review", to: "review" },
       { id: "back", from: "review", to: "implement", label: LABEL, closesLoop: true },
@@ -298,7 +301,7 @@ describe("computeGraphLayout", () => {
     expectClearDrawing(layout, edges);
   });
 
-  it("draws an edge forward when it closes no loop, even when it is marked as one that does", () => {
+  it("draws an edge forward when it is not part of a loop, even if closesLoop is set", () => {
     const edges = [{ id: "e0", from: "open_task", to: "review", closesLoop: true }];
     const layout = computeGraphLayout(buildNodes("open_task", "review"), edges, SIDE_MARGIN);
 
@@ -306,7 +309,7 @@ describe("computeGraphLayout", () => {
     expectHandleToHandle(layout, "e0", "open_task", "review");
   });
 
-  it("brings two edges back into one node, each clear of the other's label", () => {
+  it("routes two backward edges into the same node, each clear of the other's label", () => {
     const edges = [
       { id: "e0", from: "plan", to: "build" },
       { id: "e1", from: "build", to: "test" },
@@ -326,7 +329,7 @@ describe("computeGraphLayout", () => {
     expectClearDrawing(layout, edges);
   });
 
-  it("lays out three edges between the same two nodes, which the engine's order search cannot place", () => {
+  it("lays out three edges between the same two nodes, which makes dagre's order search throw", () => {
     const edges = [
       { id: "e0", from: "b", to: "c", label: LABEL },
       { id: "e1", from: "a", to: "b" },
@@ -367,8 +370,8 @@ describe("computeGraphLayout", () => {
       ];
       const layout = computeGraphLayout(buildNodes(...ids), edges, SIDE_MARGIN);
 
-      // The line through every node goes from left to right, and the edges
-      // that go back to an earlier node are the ones drawn backwards.
+      // The chain through every node goes from left to right, so the edges
+      // back to an earlier node are the ones drawn backwards.
       for (const [index, id] of ids.slice(1).entries()) {
         expect(readNode(layout, ids[index]!).x).toBeLessThan(readNode(layout, id).x);
       }
@@ -377,25 +380,25 @@ describe("computeGraphLayout", () => {
   );
 });
 
-describe("placeDrawing", () => {
-  it("draws a small drawing larger, up to its largest zoom, and a large one at the legible zoom from the pane's edge", () => {
+describe("computeDrawingViewport", () => {
+  it("scales a small drawing up to the largest zoom, and shows a large one at the legible zoom from the pane's edge", () => {
     const pane: Size = { width: 1200, height: 800 };
 
     // Three cards in a row fit the pane at the largest zoom, centred.
     const small: Size = { width: 520, height: 52 };
-    expect(placeDrawing(pane, small)).toEqual({
+    expect(computeDrawingViewport(pane, small)).toEqual({
       x: (1200 - 520 * LARGEST_PLACED_ZOOM) / 2,
       y: (800 - 52 * LARGEST_PLACED_ZOOM) / 2,
       zoom: LARGEST_PLACED_ZOOM,
     });
 
-    // A drawing that fits only a little larger is drawn as large as it fits.
+    // A drawing that fits only slightly above the legible zoom gets the largest zoom that fits.
     const wide: Size = { width: 1052, height: 200 };
-    expect(placeDrawing(pane, wide).zoom).toBeCloseTo((1200 - 2 * 16) / 1052);
+    expect(computeDrawingViewport(pane, wide).zoom).toBeCloseTo((1200 - 2 * 16) / 1052);
 
-    // A drawing wider than the pane is drawn at the legible zoom and starts
-    // at the pane's edge, and it is centred on the axis where it fits.
+    // A drawing wider than the pane gets the legible zoom and starts at the
+    // pane's left edge. It is still centred vertically, where it fits.
     const large: Size = { width: 2000, height: 300 };
-    expect(placeDrawing(pane, large)).toEqual({ x: 16, y: (800 - 300) / 2, zoom: 1 });
+    expect(computeDrawingViewport(pane, large)).toEqual({ x: 16, y: (800 - 300) / 2, zoom: 1 });
   });
 });

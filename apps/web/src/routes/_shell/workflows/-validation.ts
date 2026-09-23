@@ -1,7 +1,3 @@
-/**
- * The controller's validation of the source on a workflow's page. The page
- * owns the request, and the editor marks the answer that the page hands it.
- */
 import { useEffect, useEffectEvent, useState } from "react";
 import { keepPreviousData, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { HerculeClient, Live, WorkflowValidation } from "@hercule/client-core";
@@ -9,18 +5,22 @@ import type { Issue } from "@hercule/contract";
 import { workflowValidationQuery } from "../../../app/queries";
 import { readErrorMessage } from "../../../screens/save-status";
 
-/** How long the source must stay unchanged before the controller validates it. */
+/** How long the source must stay unchanged before the page asks the controller to validate it. */
 const VALIDATION_DELAY_MS = 400;
 
 /**
- * The controller's last answer about a source of the page. The controller
- * validates a source once it has stayed unchanged for about 400 ms, so a
- * source that the author is still typing sends no request. A source that was
- * validated before answers from the cache, with no wait for the controller.
- * While the answer about the new source is to come, the answer about the
- * source before it stays, and it names the source that it is about. A
- * validation that could not run runs again when the live connection comes
- * back, because that is when the controller can be reached again.
+ * Asks the controller to validate the page's source. Returns the latest
+ * result, which is either the issues or the reason the request failed, or
+ * `undefined` while there is no result yet.
+ *
+ * - The request is sent once the source has not changed for 400 ms, so no
+ *   request is sent while the user is still typing.
+ * - The result for a source that was validated before comes from the cache.
+ * - While a new source is being validated, the previous result stays. Each
+ *   result includes the source it belongs to, so the editor can tell them
+ *   apart.
+ * - A failed validation runs again when the live connection reconnects,
+ *   because that is when the controller is reachable again.
  */
 export const useWorkflowValidation = (
   client: HerculeClient,
@@ -54,19 +54,19 @@ export const useWorkflowValidation = (
   );
 
   if (!validation.isError) return validation.data;
-  // A validation that runs again after a failure has no answer yet.
+  // A retry after a failure has no result yet.
   return validation.isFetching
     ? undefined
     : { source: validatedSource, reason: readErrorMessage(validation.error) };
 };
 
 /**
- * Records the errors that the controller refused a save of `source` with, as
- * its answer about that source. A refusal is an answer about its source as a
- * validation is, and the last answer to arrive wins: a validation of the same
- * source that answers after the refusal replaces it. The warnings of an
- * earlier validation of the same source stay, because a refusal names errors
- * only.
+ * Stores the errors from a rejected save of `source` as the validation result
+ * for that source, so the editor marks them like any other validation errors.
+ * The result that arrives last wins: a validation of the same source that
+ * returns after the rejection replaces it. Warnings from an earlier
+ * validation of the same source are kept, because a rejected save returns
+ * errors only.
  */
 export const recordSaveRefusal = (
   queryClient: QueryClient,

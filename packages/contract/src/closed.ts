@@ -44,11 +44,11 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(fields: 
     }),
   );
   const struct = Schema.Struct(fields);
-  // The refusal is read at the key's own path, so the message needs no name.
-  const refused = Schema.Never.annotate({
+  // The error is reported at the key's own path, so the message does not need to include the key.
+  const undeclaredKeyValue = Schema.Never.annotate({
     message: "This field is not known here. Correct its name, or remove it.",
   });
-  return Schema.StructWithRest(struct, [Schema.Record(undeclared, refused)]).pipe(
+  return Schema.StructWithRest(struct, [Schema.Record(undeclared, undeclaredKeyValue)]).pipe(
     Schema.decodeTo(struct, {
       decode: SchemaGetter.passthrough({ strict: false }),
       encode: SchemaGetter.passthrough({ strict: false }),

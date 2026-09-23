@@ -37,9 +37,10 @@ const rows = Object.entries(table);
 const visible = rows.filter(([, row]) => row.hidden !== true);
 
 /**
- * Every field a visible row puts on the command line, addressed the way a
- * failure should read. A field the row hides is not on it, as a hidden row is
- * not.
+ * Returns every field that a visible row puts on the command line, as
+ * `[operation id, field name, row]`, so the name of a failing test includes the
+ * field. Hidden
+ * fields are left out, like hidden rows.
  */
 const fields = (): ReadonlyArray<[string, string, FieldRow]> =>
   visible.flatMap(([id, row]) =>

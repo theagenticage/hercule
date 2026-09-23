@@ -1,9 +1,9 @@
 /**
- * What the workflow tests build on: a controller past first-run setup with a
- * provider for Agents and a local GitHub for triggers, the calls that make,
- * change and list what a case needs, the read of what a refusal names, and
- * the sources that the cases send. Written once here, so the suites that check
- * different rules arrange the same controller and send the same sources.
+ * Shared helpers for the workflow tests: a set-up controller with a provider
+ * for Agents and a local GitHub plugin for triggers, HTTP helpers that create,
+ * update and list workflows and triggers, a reader for validation errors, and
+ * sample workflow sources. The suites share them so that they all run against
+ * the same controller setup and the same sources.
  */
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
@@ -27,7 +27,7 @@ import {
 import { fixture, providerDefinition } from "../plugins/testing";
 import type { WorkflowPage } from "./service";
 
-/** A canonical UUIDv7 that names nothing on this controller. */
+/** A valid UUIDv7 that is not the id of anything on the test controller. */
 export const ABSENT_ID = "0192f0a1-0000-7000-8000-00000000dead";
 
 /** The token the local GitHub connection type accepts. */
@@ -37,10 +37,11 @@ export const ACCEPTED_GITHUB_TOKEN = "ghp_a-token";
 export const AGENT_PROVIDER = providerDefinition("test-provider", { token: "t" });
 
 /**
- * GitHub, locally: its connection type and the one event kind these cases
- * name. The shipped plugin's `validate` asks api.github.com who a token
- * belongs to, which no test may do. The words it declares, and the qualified
- * ids the host makes from them, are the shipped ones.
+ * A local stand-in for the GitHub plugin, with its Connection type and the one
+ * event kind these tests use. The real plugin's `validate` calls
+ * api.github.com to check a token, and tests must not make network calls. The
+ * ids it declares, and so the qualified ids, are the same as the real
+ * plugin's.
  */
 const localGithubPlugin: Plugin = {
   manifest: {
@@ -81,7 +82,7 @@ const localGithubPlugin: Plugin = {
   activate: () => Effect.succeed(Effect.void),
 };
 
-/** A controller past first-run setup, and the user's credential on it. */
+/** A controller that has completed first-run setup, and the user's token for it. */
 export interface SetUpController {
   readonly harness: ServerHarness;
   readonly base: string;
@@ -89,9 +90,10 @@ export interface SetUpController {
 }
 
 /**
- * A controller past setup, with a provider for Agents and GitHub for triggers.
- * `additionalPlugins` are installed beside the two, for a suite whose cases
- * need a Connection type or a workflow action that GitHub does not declare.
+ * Starts a controller, completes first-run setup, and runs `body` against it.
+ * The controller has a provider for Agents and the local GitHub plugin for
+ * triggers. `additionalPlugins` are installed too, for tests that need a
+ * Connection type or a workflow action that GitHub does not declare.
  */
 export const withSetUpController = (
   body: (controller: SetUpController) => Promise<void>,
@@ -112,9 +114,9 @@ export const withSetUpController = (
   );
 
 /**
- * An action step that files a task, as YAML lines under `steps:`. Most cases
- * need steps that are valid in every way, so that the one broken element is
- * the only thing refused. Each extra line is written under the step.
+ * Builds the YAML lines of a valid action step that creates a task, for use
+ * under `steps:`. Each extra line is added to the step. Most tests need valid
+ * steps, so that the one broken part is the only error.
  */
 export const buildTaskStep = (id: string, ...extraLines: ReadonlyArray<string>): string =>
   [
@@ -128,8 +130,8 @@ export const buildTaskStep = (id: string, ...extraLines: ReadonlyArray<string>):
   ].join("\n");
 
 /**
- * The smallest workflow a controller accepts: one step that files a task.
- * `description` is the description of the workflow, where a case needs one.
+ * Builds the smallest valid workflow source: one step that creates a task.
+ * `description` becomes the workflow's description if given.
  */
 export const buildFileTaskSource = (name: string, description?: string): string =>
   [
@@ -140,9 +142,9 @@ export const buildFileTaskSource = (name: string, description?: string): string 
     "",
   ].join("\n");
 
-// The sources below are refused by the parse, before any check of meaning.
-// Each one is broken in one place and valid in every other way, so a refusal
-// names exactly the place that is broken.
+// The sources below fail to parse, so they never reach the controller's
+// validation. Each one is broken in exactly one place, so the error points at
+// that place and nowhere else.
 
 /** Line 9 of this source has a stray word after a closing quote, at column 20. */
 export const SYNTAX_ERROR_SOURCE = `# A workflow with one broken line.
@@ -157,7 +159,7 @@ steps:
       description: body
 `;
 
-/** A step with a kind that does not exist. */
+/** A step with an unknown kind. */
 export const WRONG_KIND_SOURCE = `name: wrong kind
 steps:
   - id: file_task
@@ -172,7 +174,7 @@ ${buildTaskStep("file_task")}
 ${buildTaskStep("file_task")}
 `;
 
-/** A step id that is not snake_case. The snake_case spelling is open_pr. */
+/** A step id that is not snake_case. The snake_case form is open_pr. */
 export const KEBAB_CASE_STEP_ID_SOURCE = `name: kebab step
 steps:
 ${buildTaskStep("open-pr")}
@@ -189,10 +191,9 @@ export const updateWorkflow = (
 ): Promise<Response> => send("PATCH", base, `/api/v1/workflows/${id}`, { body, token });
 
 /**
- * The issues a validation refusal names, each with its path and its message.
- * A case that reads only the paths reads them from `readRefusal`. The status
- * is checked before the body is read as a refusal, so a save that was taken
- * fails here with the body it answered.
+ * Returns the issues of a 400 `validation` error response, each with its path
+ * and message. Asserts the status first, so if the request succeeded, the test
+ * fails here and shows the response body.
  */
 export const readIssues = async (response: Response): Promise<ReadonlyArray<Issue>> => {
   expect(response.status, await response.clone().text()).toBe(400);
@@ -203,9 +204,9 @@ export const readIssues = async (response: Response): Promise<ReadonlyArray<Issu
 };
 
 /**
- * A create that worked, answered with the record it stored. Which of the two
- * success statuses this controller uses for a create is not what these cases
- * are about, so either one is taken and the body is what is read.
+ * Creates a workflow and returns it, or fails the test if the create fails.
+ * Accepts either 200 or 201, because these tests are not about which success
+ * status a create returns.
  */
 export const createWorkflowOrFail = async (
   base: string,
@@ -237,13 +238,13 @@ export const queryTriggers = async (
   return ((await response.json()) as { items: ReadonlyArray<Trigger> }).items;
 };
 
-/** A refusal left no workflow and no trigger row behind. */
+/** Asserts that no workflow and no trigger is stored, for example after a failed save. */
 export const expectNothingStored = async (base: string, token: string): Promise<void> => {
   expect((await queryWorkflows(base, token)).items).toEqual([]);
   expect(await queryTriggers(base, token)).toEqual([]);
 };
 
-/** An Agent on the test provider, which an agent step can name by its id. */
+/** Creates an Agent on the test provider and returns its id, for use in an agent step. */
 export const createAgent = async (base: string, token: string): Promise<string> => {
   const providers = await get(base, "/api/v1/providers", token);
   expect(providers.status, await providers.clone().text()).toBe(200);
@@ -273,8 +274,8 @@ export const createAgent = async (base: string, token: string): Promise<string> 
 };
 
 /**
- * A Connection of a qualified type, such as `github/github`, which a trigger on
- * one of that type's event kinds can name.
+ * Creates a Connection of a qualified type, such as `github/github`, and
+ * returns its id, for use in a trigger on one of that type's event kinds.
  */
 export const createConnection = async (
   base: string,

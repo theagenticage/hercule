@@ -305,9 +305,9 @@ const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
 );
 
 /**
- * A trigger is declared in its workflow's source and its row is written with
- * the workflow, so the workflow service serves it; the group is separate
- * because the operation is `trigger.query`.
+ * A trigger is declared in its workflow's YAML, and its row is written together
+ * with the workflow, so the workflow service lists triggers. The routes are a
+ * separate group only because the operation is `trigger.query`.
  */
 const triggerRoutes = HttpApiBuilder.group(api, "trigger", (handlers) =>
   Effect.gen(function* () {
@@ -317,9 +317,9 @@ const triggerRoutes = HttpApiBuilder.group(api, "trigger", (handlers) =>
 );
 
 /**
- * The action catalog is the plugins domain's, because the plugins and the core
- * register into it at boot; the group is separate because the operation is
- * `workflowAction.query`.
+ * The action catalog belongs to the plugins domain, because plugins and the
+ * core register their actions into it at boot. The routes are a separate group
+ * only because the operation is `workflowAction.query`.
  */
 const workflowActionRoutes = HttpApiBuilder.group(api, "workflowAction", (handlers) =>
   Effect.gen(function* () {
@@ -480,10 +480,11 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 );
 
 /**
- * The event kinds a trigger can name. The events domain lists them from what
- * the plugins domain registered, and the plugins domain appends to the event
- * log, so the events domain may not import it. The two meet here, where the
- * whole controller is assembled.
+ * Builds the `EventKinds` service. The events domain lists the event kinds that
+ * the plugins domain registered. The plugins domain already imports the events
+ * domain to append to the event log, so the events domain cannot import the
+ * plugins domain. The two are wired together here, where the whole controller
+ * is assembled.
  */
 const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer));
 
@@ -547,8 +548,8 @@ export const operationLayers = Layer.mergeAll(
   ProvisioningLayer,
   SubscriptionServiceLayer,
   EventKindsOperationLayer,
-  // The workflow service checks a trigger against the kinds a trigger can
-  // name, so it reads the same list that `eventKind.query` answers.
+  // The workflow service validates each trigger against the same list of event
+  // kinds that `eventKind.query` returns.
   WorkflowServiceLayer.pipe(Layer.provide(EventKindsOperationLayer)),
   LiveTopicsLayer,
   WsTicketsLayer,

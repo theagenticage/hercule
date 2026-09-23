@@ -1,28 +1,27 @@
 /**
- * The source that an author writes on a workflow's page, before it is saved,
- * and the rules for a stored source that changes while the page is open.
+ * The unsaved source on a workflow's page, and how it reacts when the stored
+ * workflow changes while the page is open.
  */
 
-/** The source on a workflow's page, and the stored source that it was written from. */
+/** The source being edited on a workflow's page, and the stored source it started from. */
 export interface WorkflowDraft {
   /** The source on the page, as the author typed it. */
   readonly source: string;
   /**
-   * The stored source that `source` was written from. While it differs from
-   * the stored source, the stored source changed elsewhere, and a save
-   * replaces that change.
+   * The stored source that `source` started from. When this differs from the
+   * current stored source, someone changed the workflow elsewhere, and a save
+   * overwrites that change.
    */
   readonly baseSource: string;
   /**
-   * Whether the author edited the source since the page last took a stored
-   * source. An undo back to the base does not clear it, because the author
-   * still works on the source. Only a save, or a stored source that is the
-   * author's source, clears it.
+   * True once the author edits the source, until the next save or until the
+   * stored source matches the author's source. Undoing back to the base
+   * source does not reset it, because the author is still editing.
    */
   readonly hasDiverged: boolean;
 }
 
-/** The draft after the author changed its source to `source`. */
+/** Returns the draft with its source replaced by the author's edit. */
 export const editDraft = (draft: WorkflowDraft, source: string): WorkflowDraft => ({
   ...draft,
   source,
@@ -30,9 +29,9 @@ export const editDraft = (draft: WorkflowDraft, source: string): WorkflowDraft =
 });
 
 /**
- * The draft after a save stored `savedSource`. The saved source is the new
- * base. The draft stays diverged only when the author typed while the save
- * was in flight.
+ * Returns the draft after a successful save of `savedSource`, which becomes
+ * the new base. The draft stays diverged only if the author typed more while
+ * the save was in flight.
  */
 export const markDraftSaved = (draft: WorkflowDraft, savedSource: string): WorkflowDraft => ({
   ...draft,
@@ -41,15 +40,23 @@ export const markDraftSaved = (draft: WorkflowDraft, savedSource: string): Workf
 });
 
 /**
- * The draft after the stored source became `storedSource`, as when another
- * client saves the workflow. A draft that the author did not edit follows the
- * stored source. An edited draft keeps its source and its base: a base that
- * differs from the stored source then tells the page that the stored source
- * changed elsewhere. When the stored source is the author's source, it is the
- * new base. The same draft comes back when nothing changes, so a caller can
- * tell.
+ * Returns the draft after the stored source changed to `storedSource`, for
+ * example because another client saved the workflow.
+ *
+ * - A draft the author has not edited takes the new stored source.
+ * - A draft whose source equals the new stored source takes it as its base,
+ *   and is no longer diverged.
+ * - Any other edited draft is returned unchanged. Its base now differs from
+ *   the stored source. The page uses that difference to show that the
+ *   workflow changed elsewhere.
+ *
+ * Returns the same object when nothing changed, so the caller can skip an
+ * update.
  */
-export const followStoredSource = (draft: WorkflowDraft, storedSource: string): WorkflowDraft => {
+export const applyStoredSourceChange = (
+  draft: WorkflowDraft,
+  storedSource: string,
+): WorkflowDraft => {
   if (draft.baseSource === storedSource) return draft;
   if (draft.source === storedSource || !draft.hasDiverged) {
     return { source: storedSource, baseSource: storedSource, hasDiverged: false };

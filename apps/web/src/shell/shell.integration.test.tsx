@@ -122,7 +122,7 @@ describe("the two-face sidebar", () => {
     ]);
   });
 
-  it("marks the item of the screen that a page inside it belongs to", async () => {
+  it("highlights the item of the screen whose path contains the current page", async () => {
     await renderApp({
       path: "/workflows/new",
       api: stubApi({
@@ -398,10 +398,10 @@ describe("the top bar", () => {
     }
   });
 
-  it("names a screen that renders its own chrome when the screen fails to load", async () => {
-    // A workflow's page renders its own header. When its workflow cannot be
-    // read, the failure is drawn instead, and nothing else would name the
-    // screen.
+  it("shows the title of a screen with its own header when that screen fails to load", async () => {
+    // A workflow's page draws its own header. When the workflow cannot be
+    // read, the page shows the error instead of that header, so the shell's
+    // top bar must show the title.
     const workflowId = "0199c0ff-1111-7000-8000-00000000dead";
     await renderApp({
       path: `/workflows/${workflowId}`,

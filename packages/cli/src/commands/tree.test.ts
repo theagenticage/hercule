@@ -135,11 +135,11 @@ describe("the spelling of a command", () => {
   });
 });
 
-// the row and the schema say the same thing about the fields. A row that names
-// a field the operation does not take, hidden or not, stops the tree from being
-// built at all, so every test of this package fails on it.
+// the row and the schema list the same fields. If a row lists a field that the
+// operation does not have, hidden or not, building the command tree throws, so
+// every test in this package fails.
 describe("a command's fields against the schema", () => {
-  it("names exactly the fields the schema reflects, and leaves out the ones the row hides", () => {
+  it("has exactly the fields of the schema, minus the ones the row hides", () => {
     for (const command of COMMANDS) {
       const reflected = [...command.positionals, ...command.payload, ...command.query].map(
         (field) => field.name,

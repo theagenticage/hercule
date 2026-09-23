@@ -1,8 +1,7 @@
 /**
- * What the header of a workflow's page says beside Save. More than one
- * sentence can be true at once, and the header says only the first, so where
- * the order matters, a test makes two sentences true and checks which one
- * the header says.
+ * Several status lines can apply at once, and the header shows only the
+ * first. So where the priority matters, a test sets up two of them and checks
+ * which one wins.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -14,7 +13,7 @@ import {
 const STORED = "name: Stored\n";
 const TYPED = "name: Typed by the author\n";
 
-/** A stored workflow that is on, opened with no changes, with no write since. */
+/** A stored workflow that is turned on, opened and not yet edited, saved or deleted. */
 const OPENED: WorkflowHeaderFacts = {
   draft: { source: STORED, baseSource: STORED, hasDiverged: false },
   storedSource: STORED,
@@ -44,12 +43,12 @@ const buildFailedSave = (error: Error): WorkflowHeaderFacts => ({
 });
 
 describe("decideWorkflowHeaderStatus", () => {
-  it("says nothing about a page with no write and no change elsewhere", () => {
+  it("shows nothing when there was no save, no delete and no change elsewhere", () => {
     expect(decideWorkflowHeaderStatus(OPENED)).toBeUndefined();
     expect(decideWorkflowHeaderStatus(TYPED_FACTS)).toBeUndefined();
   });
 
-  it("says why a delete failed before why a save failed", () => {
+  it("shows a failed delete before a failed save", () => {
     expect(
       decideWorkflowHeaderStatus({
         ...buildFailedSave(DISK_FULL),
@@ -58,7 +57,7 @@ describe("decideWorkflowHeaderStatus", () => {
     ).toEqual({ text: "Not deleted: The database is locked.", tone: "fail" });
   });
 
-  it("says why a save failed, and that a refused source has problems, before a change elsewhere", () => {
+  it("shows a failed save, or a save rejected by validation, before a change elsewhere", () => {
     const changedElsewhere = { storedSource: "name: Changed elsewhere\n" };
 
     expect(
@@ -69,7 +68,7 @@ describe("decideWorkflowHeaderStatus", () => {
     ).toEqual({ text: "Not saved: the text has problems.", tone: "fail" });
   });
 
-  it("says nothing of a save of another source than the source on the page", () => {
+  it("ignores a save result for a source other than the one on the page", () => {
     const retyped = {
       draft: { source: `${TYPED}# more\n`, baseSource: STORED, hasDiverged: true },
     };
@@ -86,7 +85,7 @@ describe("decideWorkflowHeaderStatus", () => {
     ).toBeUndefined();
   });
 
-  it("says that a workflow is deleted elsewhere in place of a save that found it gone", () => {
+  it("shows that the workflow was deleted elsewhere, instead of the save's not_found error", () => {
     expect(
       decideWorkflowHeaderStatus({ ...buildFailedSave(NOT_FOUND), isDeletedElsewhere: true }),
     ).toEqual({
@@ -95,7 +94,7 @@ describe("decideWorkflowHeaderStatus", () => {
     });
   });
 
-  it("says that the stored source changed elsewhere, but not while a save is in flight", () => {
+  it("shows that the stored source changed elsewhere, but not while a save is in flight", () => {
     const changedElsewhere: WorkflowHeaderFacts = {
       ...TYPED_FACTS,
       storedSource: "name: Changed elsewhere\n",
@@ -113,7 +112,7 @@ describe("decideWorkflowHeaderStatus", () => {
     ).toBeUndefined();
   });
 
-  it("says Saved. once the source on the page is saved", () => {
+  it("shows Saved. once the page's source is saved", () => {
     expect(
       decideWorkflowHeaderStatus({
         ...OPENED,
@@ -124,7 +123,7 @@ describe("decideWorkflowHeaderStatus", () => {
     ).toEqual({ text: "Saved.", tone: "muted" });
   });
 
-  it("says that a new workflow was created, until its source changes or it is turned on", () => {
+  it("shows that a new workflow was created, until its source is edited or it is turned on", () => {
     const created: WorkflowHeaderFacts = { ...OPENED, isJustCreated: true, isStoredOff: true };
 
     expect(decideWorkflowHeaderStatus(created)).toEqual({

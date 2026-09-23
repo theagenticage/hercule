@@ -30,7 +30,7 @@
  * `maxRequestBodySize` and, for the socket, as `maxPayloadLength`, so an
  * oversize body is refused by the transport before a byte of it is read and
  * before this module runs at all. That `413` is the one response the API sends
- * outside the error envelope, and it is deliberate: an enveloped answer would
+ * outside the error envelope, and it is deliberate: an enveloped response would
  * mean reading the body first, which is the cost the cap exists to avoid.
  *
  * Each request is one fiber, and `BunHttpServer` wires the request's abort
@@ -60,12 +60,13 @@ import { withWebBundle, type WebBundle } from "./static";
  * The largest request body the controller reads, in bytes. The listener is
  * given this as `maxRequestBodySize`, so it is enforced by the transport.
  *
- * The largest value the public API takes is a workflow's source, at most 256K
- * characters. As JSON, one character takes at most six bytes, because JSON
- * writes a control character as an escape such as `\u0001`. So a source
- * can need 1.5 MiB, and the cap is above that. Every source short enough to
- * store then reaches the controller, and a refusal of it is an answer in the
- * error envelope and not the bare `413` of the transport. Without a cap, an
+ * The largest value the public API accepts is a workflow's YAML source, at most
+ * 256K characters. Encoded as JSON, one character can take up to six bytes,
+ * because JSON escapes a control character as, for example, `\u0001`. So a
+ * source can need 1.5 MiB, and the cap is set above that. Any source within the
+ * length limit then reaches the controller, and a source that is too long gets
+ * a normal error in the error envelope instead of the transport's bare `413`.
+ * Without a cap, an
  * unauthenticated caller can push arbitrary bytes into durable storage through
  * a failed login's audit row. The cap is the listener's, so it holds for every
  * operation and for paths no operation owns, and an oversize body is refused

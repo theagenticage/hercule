@@ -75,11 +75,11 @@ it("carries a table column's alignment as a class", () => {
   expect(cells[2]).toContain("text-right");
 });
 
-// The fence for style attributes. Markdown that an agent wrote must never set
-// a style on the page, and the app's own markup keeps to classes: the policy
-// that the controller serves admits inline styles only because the workflow
-// editor needs them. Any markdown construct that starts emitting a style
-// attribute fails here.
+// Guards against style attributes. Markdown written by an agent must never set
+// a style on the page. The controller's Content-Security-Policy allows inline
+// styles only because the workflow editor needs them, and the app's own markup
+// uses classes only. Any markdown construct that starts to emit a style
+// attribute fails this test.
 it("puts no inline style on anything it renders", () => {
   const { container } = render(<Markdown text={ALIGNED_TABLE} />);
 

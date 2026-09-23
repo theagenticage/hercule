@@ -1,12 +1,11 @@
 /**
- * Workflow rows and trigger rows. This module only reads and writes them. It
- * decides no policy: who may write, what a source means and whether it is
- * valid are the service's questions.
+ * Reads and writes the `workflows` and `triggers` tables. This module has no
+ * policy: permissions, parsing and validation belong to the service.
  *
- * A workflow listing is one walk: a keyset over `updated_at` and the id, which
- * the index on `workflows` serves. A trigger listing is one walk too, over
- * `created_at`, the workflow and the trigger id, which is how a trigger is
- * named.
+ * Both listings use keyset pagination. Workflows are paged by `updated_at` and
+ * id, which the index on `workflows` covers. Triggers are paged by
+ * `created_at`, workflow id and trigger id, because a trigger is identified by
+ * its workflow id and trigger id.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -37,30 +36,29 @@ import {
   type Page,
 } from "../db";
 
-/** A text and the definition it parses to, which are always written together. */
+/** A YAML source and the definition it parses to. They are always stored together. */
 export interface ParsedSource {
   readonly source: string;
   readonly definition: WorkflowDefinition;
 }
 
-/** What an edit sets. An absent field is left as it was. */
+/** The fields an update sets. An absent field is left unchanged. */
 export interface WorkflowEdit {
   readonly parsedSource?: ParsedSource;
   readonly enabled?: boolean;
 }
 
-/** A workflow as an edit left it, and which of its fields the edit changed. */
+/** A workflow after an update, and which of its fields the update changed. */
 export interface WorkflowUpdate {
   readonly workflow: Workflow;
   /**
-   * The fields whose stored value the edit changed. A field that the edit
-   * sets to the value it had is not in it, so a save of the same text
-   * changes nothing.
+   * The fields whose stored value changed. A field set to the value it
+   * already had is not listed, so saving the same source lists nothing.
    */
   readonly changed: ReadonlyArray<"source" | "enabled">;
 }
 
-/** A trigger as a source declares it: every field of its row that the source gives. */
+/** A trigger as the workflow source declares it: the fields of its row that come from the source. */
 export interface DeclaredTrigger {
   readonly triggerId: string;
   readonly kind: TriggerKind;
@@ -121,7 +119,7 @@ interface TriggerRow {
 
 const WORKFLOW_COLUMNS = "id, enabled, source, created_at, updated_at";
 
-/** The name is read out of the definition, which is where the source puts it. */
+/** The workflow's name is not a column. It is read from the stored definition. */
 const NAME_FROM_DEFINITION = "json_extract(workflows.definition, '$.name')";
 
 const toWorkflow = (row: WorkflowRow): Workflow => ({
@@ -140,7 +138,7 @@ const toSummary = (row: SummaryRow): WorkflowSummary => ({
   updatedAt: row.updated_at,
 });
 
-/** A field the trigger does not have is absent from the record, not null. */
+/** Maps a trigger row to a `Trigger`. A NULL column becomes an absent field, not `null`. */
 const toTrigger = (row: TriggerRow): Trigger => ({
   workflowId: uuidToString(row.workflow_id),
   workflowName: row.workflow_name,
@@ -162,10 +160,10 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   /**
-   * A string bound as its UTF-8 bytes and stored as text, so that the stored
-   * text has every character of the string. A string that is not Latin-1 is
-   * bound as UTF-16, and SQLite reads a U+FEFF at the start of UTF-16 text as
-   * a byte order mark and drops it. The author's text can start with one.
+   * Binds a string as UTF-8 bytes cast to TEXT, so that SQLite stores every
+   * character. A string that is not Latin-1 is otherwise bound as UTF-16, and
+   * SQLite treats a U+FEFF at the start of UTF-16 text as a byte order mark
+   * and drops it. An author's YAML can start with U+FEFF.
    */
   const bindExactText = (text: string): Fragment => sql`CAST(${utf8.encode(text)} AS TEXT)`;
 
@@ -183,7 +181,7 @@ const make = Effect.gen(function* () {
   return {
     read,
 
-    /** Stores a new workflow. A new workflow is off. */
+    /** Inserts a new workflow, disabled, and returns it. */
     insert: (parsedSource: ParsedSource, savedAt: string): Effect.Effect<Workflow, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
@@ -202,17 +200,16 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Applies an edit, and answers the workflow as the edit left it with the
-     * fields that the edit changed, or nothing where no workflow has the id.
-     * Only the columns the edit names are written, and the text and its
-     * definition are only written together. The caller holds the
-     * transaction, so the row cannot change between the read and the write.
+     * Updates a workflow. Returns the updated workflow and the fields that
+     * changed, or `None` if no workflow has the id. Writes only the columns
+     * that `edit` sets, and always writes the source and the definition
+     * together. The caller holds the transaction, so the row cannot change
+     * between the read and the write.
      *
-     * `updated_at` is when the text last changed. `enabled` is row state
-     * outside the text, so turning a workflow on or off does not move it, and
-     * neither does a save of the same text. A listing sorts by `updated_at`,
-     * so a workflow keeps its place in the list when its switch is pressed.
-     * The audit log records each update.
+     * `updated_at` is when the source last changed. Enabling or disabling a
+     * workflow does not change it, and neither does saving the same source.
+     * The list is sorted by `updated_at`, so a workflow keeps its place in the
+     * list when the user toggles it. The audit log records every update.
      */
     update: (
       id: string,
@@ -250,9 +247,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Removes the workflow, and answers the name it had, or nothing where no
-     * workflow has the id. Its trigger rows go with it, through the foreign
-     * key.
+     * Deletes a workflow. Returns its name, or `None` if no workflow has the
+     * id. The foreign key deletes its trigger rows too.
      */
     delete: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
@@ -301,17 +297,19 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Makes the workflow's trigger rows the triggers its source declares.
+     * Updates a workflow's trigger rows to match the triggers its source
+     * declares:
      *
-     * A trigger whose id the source no longer has loses its row. A trigger
-     * whose id is new gets a row: `active` for a start trigger, and no status
-     * for a signal trigger. A trigger whose id stays keeps its row, its
-     * `created_at` and its status, and its other fields become what the source
-     * says now; its `updated_at` moves only when one of them changed.
-     *
-     * A trigger whose id stays but whose kind changes is a new trigger: a
-     * start trigger and a signal trigger are different things. It gets a new
-     * `created_at`, and a start trigger is `active` again.
+     * - A trigger whose id is no longer in the source is deleted.
+     * - A trigger with a new id is inserted, with status `active` for a start
+     *   trigger and no status for a signal trigger.
+     * - A trigger whose id stays keeps its row, `created_at` and status. Its
+     *   other fields are overwritten from the source, and `updated_at` changes
+     *   only if one of them changed.
+     * - A trigger whose id stays but whose kind changes counts as a new
+     *   trigger, because a start trigger and a signal trigger are different
+     *   things. It gets a new `created_at`, and a start trigger is `active`
+     *   again.
      */
     reconcileTriggers: (
       workflowId: string,
@@ -404,5 +402,5 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** Everything the workflow service reads and writes. */
+/** The repository of the `workflows` and `triggers` tables. */
 export const workflowRepository = make;

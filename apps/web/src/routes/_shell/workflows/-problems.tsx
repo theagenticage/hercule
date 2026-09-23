@@ -4,18 +4,18 @@ import { cn } from "@hercule/ui";
 import type { MarkedIssue } from "../../../screens/workflow-editor";
 
 /**
- * The problems that the text shows marked, under the editor in every view:
- * errors first, then warnings, each with its line. A problem is a button,
- * because a press takes the cursor to its line.
+ * Renders the problems panel below the editor, in every view. It lists the
+ * errors first, then the warnings, each with its line number. Each problem
+ * is a button, because clicking it moves the cursor to its line.
  *
- * The panel has one height whatever it holds, and a long list scrolls inside
- * it. The editor and the graph above it keep their size, and their place,
- * when the first problem comes or the last one goes.
+ * The panel has a fixed height, and a long list scrolls inside it. So the
+ * editor and the graph above keep their size and position when problems
+ * appear or disappear.
  *
- * "No problems." is said only when the validation has answered, because
- * until then a source with no marks can still have problems. A validation
- * that could not run is said apart from the problems, because it is not a
- * problem of the source.
+ * "No problems." shows only after the validation has returned, because until
+ * then a source with no marks can still have problems. A validation that
+ * could not run is shown separately, because it is not a problem in the
+ * source.
  */
 export function ProblemsPanel({
   issues,
@@ -29,7 +29,7 @@ export function ProblemsPanel({
   return (
     <section
       aria-label="Problems"
-      // The header and two and a half rows: a row that is cut in half shows
+      // Fits the header and two and a half rows. The half-visible row shows
       // that the list scrolls.
       className="flex h-[104px] shrink-0 flex-col rounded-card border border-line-soft bg-surface"
     >
@@ -39,8 +39,8 @@ export function ProblemsPanel({
         ) : validationState.status === "validated" ? (
           <span className="text-muted">No problems.</span>
         ) : null}
-        {/* The spaces between the parts of the panel are for the text that a
-            screen reader reads: a flex row or column draws no space of its own. */}{" "}
+        {/* The `{" "}` spaces are for screen readers. Flex layout adds no
+            space between items, so without them the texts run together. */}{" "}
         {validationState.status === "validating" ? (
           <span className="text-faint">Checking…</span>
         ) : validationState.status === "failed" ? (
@@ -52,8 +52,8 @@ export function ProblemsPanel({
       {issues.length === 0 ? null : (
         <ul className="flex min-h-0 flex-col overflow-y-auto px-1.5 pb-1.5">
           {issues.map((issue, index) => (
-            // The list is replaced as a whole on each change, so a place in
-            // it is a key that holds for as long as the list does.
+            // The whole list is replaced on every change, so the index is a
+            // stable key.
             <li key={index}>
               <button
                 type="button"
@@ -66,7 +66,7 @@ export function ProblemsPanel({
                   "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
                 )}
               >
-                {/* Colour at dot scale, in the hue of the severity, as the editor's own marks. */}
+                {/* A small dot in the colour of the severity, like the editor's own marks. */}
                 <span
                   aria-hidden="true"
                   className={cn(

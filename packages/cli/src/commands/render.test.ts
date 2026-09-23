@@ -1,7 +1,7 @@
 /**
- * The renderings that are not the generic table: what a spawn teaches, what a
- * transcript reads like, what a workflow read, save and check print, and what
- * the two catalogs a workflow is written from print. And one rule of the
+ * Tests the output that is not the generic table: the hint after a spawn, the
+ * transcript, the output of workflow read, create, update and validate, and
+ * the two catalogs used to write a workflow. Also tests one rule of the
  * table: each row stays on one line.
  */
 import { describe, expect, it } from "vitest";
@@ -120,13 +120,13 @@ describe("hercule workflow", () => {
     updatedAt: "2026-09-22T10:00:00.000Z",
   };
 
-  it("prints the source of a read as it is, and nothing else", () => {
+  it("prints the source of a read unchanged, and nothing else", () => {
     expect(renderHuman({ kind: "value", value: record }, command("workflow", "read"))).toEqual([
       SOURCE,
     ]);
   });
 
-  it("ends a read of a CRLF source with a carriage return, so the line printed after it ends in CRLF", () => {
+  it("adds a carriage return after a CRLF source, so its last line ends in CRLF when printed", () => {
     const crlfSource = SOURCE.replaceAll("\n", "\r\n").slice(0, -"\r\n".length);
     expect(
       renderHuman(
@@ -136,7 +136,7 @@ describe("hercule workflow", () => {
     ).toEqual([`${crlfSource}\r`]);
   });
 
-  it("keeps each row of a listing on one line when a description or a filter has several", () => {
+  it("keeps each row of a list on one line when a description or a filter has several lines", () => {
     const listed = renderHuman(
       {
         kind: "value",
@@ -163,7 +163,7 @@ describe("hercule workflow", () => {
     expect(triggers).toEqual(["triggerId  filter", "on_label   event.a == 1 && ..."]);
   });
 
-  it("prints one line per error and per warning after a check, or one line when there is none", () => {
+  it("prints one line per error and per warning after validate, or one line when there are none", () => {
     const validate = command("workflow", "validate");
     expect(
       renderHuman(
@@ -185,7 +185,7 @@ describe("hercule workflow", () => {
     ]);
   });
 
-  it("prints the id, whether it is on and one line per warning after a save, and never the source", () => {
+  it("prints the id, whether it is enabled and one line per warning after a save, and never the source", () => {
     const saved = {
       workflow: record,
       warnings: [
@@ -204,8 +204,8 @@ describe("hercule workflow", () => {
   });
 });
 
-describe("a catalog that answers with the whole array", () => {
-  it("prints the event kinds as the table a page prints", () => {
+describe("a catalog query that returns a plain array", () => {
+  it("prints the event kinds as a table, like a page", () => {
     expect(
       renderHuman(
         {
@@ -224,7 +224,7 @@ describe("a catalog that answers with the whole array", () => {
     ]);
   });
 
-  it("names the params of each workflow action, marking an optional one, in place of their schema", () => {
+  it("lists the params of each workflow action by name, marking optional ones, instead of their schema", () => {
     expect(
       renderHuman(
         {

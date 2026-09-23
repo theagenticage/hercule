@@ -99,17 +99,16 @@
   /* What an overlay dims the page behind it with. */
   --scrim: rgba(23, 26, 33, 0.22);
 
-  /* The syntax palette: the colours of the parts of a text of code, such as a
-     workflow's YAML. Colour is at word scale only. Keys are blue, quoted text
-     is olive, and comments and punctuation are grey in the hue of the
-     neutrals, so the structure of a text shows at a glance. Plain values are
-     ink. Each colour has a contrast of at least 4.5:1 on the raised layer.
-     Each hue sits between two hues of the colour doctrine, and at least 29
-     degrees of oklch hue from each of them, in the light and in the dark
-     theme: keys at 255 between live (222 to 224) and the hercule dot (286 to
-     287), quoted text at 117 between attention (77 to 81) and done (155 to
-     157), and meta at 317 between the two project dots (286 to 287, and 347
-     to 348). */
+  /* Syntax highlighting colours for code, such as a workflow's YAML. Keys are
+     blue, quoted strings are olive, and comments and punctuation are grey in
+     the neutrals' hue, so the structure is visible at a glance. Plain values
+     use ink. Each colour has at least 4.5:1 contrast on the raised layer.
+
+     So that code is never mistaken for a status, each hue is at least 29
+     degrees of oklch hue away from the colour doctrine's hues, in both themes:
+     - keys at 255, between live (222-224) and the hercule dot (286-287)
+     - strings at 117, between attention (77-81) and done (155-157)
+     - meta at 317, between the two project dots (286-287 and 347-348) */
   --syn-key: oklch(46% 0.1 255);
   --syn-string: oklch(50% 0.075 117);
   --syn-comment: oklch(55% 0.0156 265);

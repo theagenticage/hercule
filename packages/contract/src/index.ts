@@ -48,7 +48,7 @@ export {
   createNotFoundError,
   createUnauthenticatedError,
   createValidationError,
-  describeIssue,
+  formatIssue,
   listDecodeIssues,
   listSchemaIssues,
   type ApiError,
@@ -302,7 +302,7 @@ export {
   WorkflowCreateInput,
   WorkflowFilter,
   WorkflowIssues,
-  WorkflowSaved,
+  WorkflowSaveResult,
   WorkflowSummary,
   WorkflowUpdateInput,
   WorkflowValidateInput,
@@ -310,7 +310,7 @@ export {
 export {
   ANY_CONNECTION,
   decodeWorkflowDefinition,
-  limitIssues,
+  truncateIssues,
   listEntrySteps,
   readFieldNotation,
   WorkflowDefinition,
@@ -320,10 +320,10 @@ export {
   parseWorkflowDocument,
   parseWorkflowSource,
   renderWorkflowSource,
-  spellPathKey,
+  convertKeyToPathSegment,
 } from "./groups/workflow-source";
 export { STARTER_WORKFLOW_SOURCE } from "./groups/workflow-starter";
-export { cutShort, excerptMessage, joinNames, quoteWritten } from "./excerpts";
+export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
 export { WorkflowAction } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";
 export {

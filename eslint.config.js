@@ -82,8 +82,8 @@ const workflowEditor = "apps/web/src/screens/workflow-editor";
  * The selectors of a dynamic `import()` whose source matches a regular
  * expression: a source written as a string, and a source written as a
  * template literal, whose text before its first `${}` is matched.
- * `no-restricted-imports` sees static imports only, so a fence refuses
- * `import()` with these. A regular expression here writes a slash as `\x2F`,
+ * `no-restricted-imports` sees static imports only, so a fence also rejects
+ * an `import()` that matches these selectors. A regular expression here writes a slash as `\x2F`,
  * because the selector syntax ends a regular expression at a slash.
  */
 const buildImportCalls = (source, message) => [
@@ -94,7 +94,7 @@ const buildImportCalls = (source, message) => [
 /**
  * Each library of the workflow editor sits behind a facade of the editor's
  * own, so that it can be replaced there without a change anywhere else. A
- * fence refuses the library's packages everywhere but in its facade, in a
+ * fence rejects an import of the library's packages everywhere but in its facade, in a
  * static import and in a dynamic `import()` alike.
  */
 const fenceLibrary = (scopes, message) => ({
@@ -134,7 +134,7 @@ const workflowEditorFenceCalls = buildImportCalls(
  * text is parsed once, and the same way the controller parses it.
  */
 const yamlMessage =
-  "Read a workflow's text with readWorkflowSource from @hercule/client-core, which parses it once and as the controller does.";
+  "Parse a workflow's text with parseWorkflowSourceWithRanges from @hercule/client-core, which parses it once and as the controller does.";
 const yamlPath = { name: "yaml", message: yamlMessage };
 const yamlPattern = { group: ["yaml/*"], message: yamlMessage };
 const yamlCalls = buildImportCalls("/^yaml(\\x2F|$)/", yamlMessage);

@@ -1,19 +1,17 @@
 /**
- * What the editor offers at the cursor in a workflow's source. Each test
- * writes a source with the cursor where the author leaves it while typing: at
- * the end, or on a line above keys that are written already. It reads the
- * offers there. The keys and the fixed values come from the definition's
- * schema, and the ids from the catalog.
+ * Each test puts the cursor where an author would be while typing: at the end
+ * of the source, or on a line above existing keys. It then checks the
+ * completion options at the cursor.
  */
 import { describe, expect, it } from "vitest";
 import {
   listWorkflowCompletions,
-  readWorkflowSource,
+  parseWorkflowSourceWithRanges,
   type CompletionList,
   type WorkflowCatalog,
 } from "@hercule/client-core";
 
-/** An Agent's id, which a step names. */
+/** The id of the Agent in the test catalog. */
 const AGENT_ID = "0199e0e7-1111-7000-8000-0000000000ab";
 
 const CATALOG: WorkflowCatalog = {
@@ -24,29 +22,33 @@ const CATALOG: WorkflowCatalog = {
   ],
 };
 
-/** The offers at the end of a source written as lines. */
+/** Joins `lines` into a source and returns the completions at its end. */
 const completeAtEnd = (lines: ReadonlyArray<string>): CompletionList | undefined => {
   const source = lines.join("\n");
-  return listWorkflowCompletions(readWorkflowSource(source), source.length, CATALOG);
+  return listWorkflowCompletions(parseWorkflowSourceWithRanges(source), source.length, CATALOG);
 };
 
-/** Marks the cursor in a source that `completeAtMark` reads. It is not a part of the source. */
+/** Marks the cursor position in a test source. `completeAtMark` removes it before parsing. */
 const CURSOR = "‸";
 
-/** The offers at the cursor mark of a source written as lines, joined with a line break. */
+/** Joins `lines` with `lineBreak` and returns the completions at the `CURSOR` mark. */
 const completeAtMark = (
   lines: ReadonlyArray<string>,
   lineBreak = "\n",
 ): CompletionList | undefined => {
   const marked = lines.join(lineBreak);
   const source = marked.replace(CURSOR, "");
-  return listWorkflowCompletions(readWorkflowSource(source), marked.indexOf(CURSOR), CATALOG);
+  return listWorkflowCompletions(
+    parseWorkflowSourceWithRanges(source),
+    marked.indexOf(CURSOR),
+    CATALOG,
+  );
 };
 
 const listLabels = (completions: CompletionList | undefined): ReadonlyArray<string> =>
-  (completions?.offers ?? []).map((offer) => offer.label);
+  (completions?.options ?? []).map((option) => option.label);
 
-/** The keys of an agent step that are not id, kind or agent, in the order of the schema. */
+/** The keys of an agent step other than id, kind and agent, in schema order. */
 const AGENT_STEP_KEYS_AFTER_AGENT = [
   "name",
   "prompt",
@@ -62,7 +64,7 @@ const AGENT_STEP_KEYS_AFTER_AGENT = [
 ];
 
 describe("listWorkflowCompletions", () => {
-  it("offers the fixed values that the schema gives a key, after the key", () => {
+  it("offers the schema's fixed values for a key after the key", () => {
     expect(
       listLabels(completeAtEnd(["name: Review", "triggers:", "  - id: nightly", "    kind: "])),
     ).toEqual(["start", "signal"]);
@@ -90,7 +92,7 @@ describe("listWorkflowCompletions", () => {
     ).toEqual(["true", "false"]);
   });
 
-  it("offers the keys of the mapping that it does not have yet, in the order of the schema", () => {
+  it("offers the keys the mapping does not have yet, in schema order", () => {
     expect(listLabels(completeAtEnd(["name: Review", "steps: []", ""]))).toEqual([
       "description",
       "inputs",
@@ -103,7 +105,7 @@ describe("listWorkflowCompletions", () => {
     ).toEqual(["to", "condition", "maxTraversals"]);
   });
 
-  it("replaces the part of a key that the author typed, which does not count as written", () => {
+  it("replaces the typed part of a key, and does not count that key as present", () => {
     const lines = ["name: Review", "steps:", "  - id: review", "    kind: agent", "    pro"];
     const completions = completeAtEnd(lines);
 
@@ -129,7 +131,7 @@ describe("listWorkflowCompletions", () => {
     );
     const source = marked.replace(CURSOR, "");
     const completions = listWorkflowCompletions(
-      readWorkflowSource(source),
+      parseWorkflowSourceWithRanges(source),
       marked.indexOf(CURSOR),
       CATALOG,
     );
@@ -147,41 +149,41 @@ describe("listWorkflowCompletions", () => {
     }
   });
 
-  it("offers the keys of each step kind in a new list item, before the step says its kind", () => {
+  it("offers the keys of every step kind in a new list item that has no kind yet", () => {
     const labels = listLabels(completeAtEnd(["name: Review", "steps:", "  - "]));
 
     expect(labels).toEqual(expect.arrayContaining(["id", "kind", "action", "agent", "prompt"]));
     expect(new Set(labels).size).toBe(labels.length);
   });
 
-  it("writes a prompt as a block on the next line, and an expression in double quotes", () => {
+  it("inserts a prompt as a | block and an expression in double quotes", () => {
     const lines = ["name: Review", "steps:", "  - id: review", "    kind: agent", "    "];
     const completions = completeAtEnd(lines);
-    const offers = completions?.offers;
+    const options = completions?.options;
 
-    // A key's offer writes at the cursor and replaces nothing.
+    // A key option inserts at the cursor and replaces nothing.
     expect(completions?.from).toBe(lines.join("\n").length);
     expect(completions?.to).toBe(lines.join("\n").length);
-    expect(offers?.find((offer) => offer.label === "prompt")).toEqual({
+    expect(options?.find((option) => option.label === "prompt")).toEqual({
       label: "prompt",
       text: "prompt: |\n      ",
     });
-    expect(offers?.find((offer) => offer.label === "condition")).toEqual({
+    expect(options?.find((option) => option.label === "condition")).toEqual({
       label: "condition",
       text: 'condition: ""',
       cursor: 'condition: "'.length,
     });
-    expect(offers?.find((offer) => offer.label === "name")).toEqual({
+    expect(options?.find((option) => option.label === "name")).toEqual({
       label: "name",
       text: "name: ",
     });
   });
 
-  it("writes a schedule and each expression of a trigger in double quotes", () => {
+  it("inserts a schedule and each trigger expression in double quotes", () => {
     const listQuotedKeys = (lines: ReadonlyArray<string>) =>
-      (completeAtEnd(lines)?.offers ?? [])
-        .filter((offer) => offer.text === `${offer.label}: ""`)
-        .map((offer) => offer.label);
+      (completeAtEnd(lines)?.options ?? [])
+        .filter((option) => option.text === `${option.label}: ""`)
+        .map((option) => option.label);
 
     expect(
       listQuotedKeys([
@@ -225,11 +227,11 @@ describe("listWorkflowCompletions", () => {
         "  - id: open_task",
         "    kind: action",
         "    action: task",
-      ])?.offers,
+      ])?.options,
     ).toEqual([{ label: "task.create", detail: "Create a task", text: "task.create" }]);
     expect(
       completeAtEnd(["name: Review", "steps:", "  - id: review", "    kind: agent", "    agent: "])
-        ?.offers,
+        ?.options,
     ).toEqual([{ label: "Reviewer", text: AGENT_ID }]);
     expect(
       listLabels(
@@ -245,20 +247,20 @@ describe("listWorkflowCompletions", () => {
     ).toEqual(["cron.tick"]);
   });
 
-  it("tells two agents with one name apart by the tail of each one's id", () => {
+  it("shows the end of the id for agents that share a name", () => {
     const other = "0199e0e7-1111-7000-8000-0000000000cd";
     const lines = ["name: Review", "steps:", "  - id: review", "    kind: agent", "    agent: "];
     const source = lines.join("\n");
 
     expect(
-      listWorkflowCompletions(readWorkflowSource(source), source.length, {
+      listWorkflowCompletions(parseWorkflowSourceWithRanges(source), source.length, {
         ...CATALOG,
         agents: [
           { id: AGENT_ID, name: "Reviewer" },
           { id: other, name: "Reviewer" },
           { id: "0199e0e7-1111-7000-8000-0000000000ef", name: "Fixer" },
         ],
-      })?.offers,
+      })?.options,
     ).toEqual([
       { label: "Reviewer", detail: "000000ab", text: AGENT_ID },
       { label: "Reviewer", detail: "000000cd", text: other },
@@ -267,10 +269,10 @@ describe("listWorkflowCompletions", () => {
   });
 
   it.each(["", "p", "pr", "con"])(
-    "offers the keys that the step does not have, with %j typed on the line above its kind",
+    "offers the step's missing keys with %j typed on the line above its kind",
     (typed) => {
-      // The parser reads a word on the line directly above a key as the first
-      // word of that key, so the step's kind is written below the cursor only.
+      // The parser joins the typed word with the `kind` key on the next line.
+      // The step's kind must still be read from that line.
       const completions = completeAtMark([
         "name: Review",
         "steps:",
@@ -288,7 +290,7 @@ describe("listWorkflowCompletions", () => {
     },
   );
 
-  it("counts each key below the cursor as written, however far below", () => {
+  it("treats every key below the cursor as present, however far below", () => {
     expect(
       listLabels(
         completeAtMark([
@@ -307,7 +309,7 @@ describe("listWorkflowCompletions", () => {
     ).toEqual(AGENT_STEP_KEYS_AFTER_AGENT.filter((key) => key !== "prompt" && key !== "join"));
   });
 
-  it("offers a key at the top of the source above the keys written there", () => {
+  it("offers top-level keys on a line above existing keys", () => {
     expect(listLabels(completeAtMark(["name: Review", `st${CURSOR}`, "steps: []", ""]))).toEqual([
       "description",
       "inputs",
@@ -317,14 +319,14 @@ describe("listWorkflowCompletions", () => {
     ]);
   });
 
-  it("reads a source with \\r\\n line breaks as it reads one with \\n line breaks", () => {
+  it("handles \\r\\n line breaks the same as \\n", () => {
     const lines = ["name: Review", "steps:", "  - id: review", "    kind: agent", `    ${CURSOR}`];
 
-    expect(completeAtMark(lines, "\r\n")?.offers).toEqual(completeAtMark(lines)?.offers);
+    expect(completeAtMark(lines, "\r\n")?.options).toEqual(completeAtMark(lines)?.options);
     expect(listLabels(completeAtMark(lines, "\r\n"))).toContain("agent");
   });
 
-  it("offers nothing inside a value that a line before the cursor started", () => {
+  it("offers nothing inside a multi-line value that started on an earlier line", () => {
     expect(
       completeAtEnd([
         "name: Review",

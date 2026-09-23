@@ -1,19 +1,16 @@
-/**
- * The source on a workflow's page, as the author types it, and the stored
- * source that it was written from.
- */
 import { useState } from "react";
 import {
   editDraft,
-  followStoredSource,
+  applyStoredSourceChange,
   markDraftSaved,
   type WorkflowDraft,
 } from "@hercule/client-core";
 
 /**
- * The draft of the page, which follows a stored source that changes
- * elsewhere while the author has not edited the draft, and the two changes
- * the page makes to it.
+ * Tracks the source that the user edits on a workflow's page, and the stored
+ * source that the edit started from. Returns the draft and two functions
+ * that update it. While the user has not edited the draft, it follows
+ * changes that another client makes to the stored source.
  */
 export const useWorkflowDraft = (storedSource: string) => {
   const [heldDraft, setHeldDraft] = useState<WorkflowDraft>({
@@ -21,15 +18,15 @@ export const useWorkflowDraft = (storedSource: string) => {
     baseSource: storedSource,
     hasDiverged: false,
   });
-  const draft = followStoredSource(heldDraft, storedSource);
+  const draft = applyStoredSourceChange(heldDraft, storedSource);
   if (draft !== heldDraft) setHeldDraft(draft);
   return {
     draft,
-    /** Takes the source that the author typed. */
+    /** Replaces the draft's source with what the user typed. */
     editSource: (source: string): void => {
       setHeldDraft((held) => editDraft(held, source));
     },
-    /** Takes the source that an update of the page's workflow stored as the new base. */
+    /** Makes `savedSource` the new base, after an update of this page's workflow succeeds. */
     markSaved: (savedSource: string): void => {
       setHeldDraft((held) => markDraftSaved(held, savedSource));
     },

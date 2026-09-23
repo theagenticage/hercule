@@ -4,7 +4,8 @@
  * `event.read` and `event.emit`, and amends a pipeline event for the
  * enrichment use case in the controller daemon. Beside them are the walks that
  * are not a public read, the cursor a durable consumer keeps its place in, and
- * the kinds a trigger can name, which `eventKind.query` answers.
+ * the catalog of event kinds a trigger can listen for, which `eventKind.query`
+ * lists.
  */
 export {
   AUDIT_KINDS,

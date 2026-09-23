@@ -75,9 +75,8 @@ describe("the page", () => {
       expect(page.headers.get("content-security-policy")).toBe(CONTENT_SECURITY_POLICY);
       expect(chunk.headers.get("content-security-policy")).toBe(CONTENT_SECURITY_POLICY);
       expect(CONTENT_SECURITY_POLICY).toContain("script-src 'self'");
-      // Inline code is admitted for styles and for nothing else: the workflow
-      // editor puts its base styles in a `<style>` element, and a script is
-      // never inline.
+      // Only styles may be inline, because the workflow editor adds its base
+      // styles in a `<style>` element. Inline scripts stay blocked.
       expect(
         CONTENT_SECURITY_POLICY.split("; ").filter((directive) =>
           directive.includes("unsafe-inline"),

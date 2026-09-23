@@ -1,7 +1,7 @@
 /**
- * The workflow editor module. The rest of the app reaches it only through
- * this file, so that its insides, and the libraries behind them, can change
- * without a change anywhere else.
+ * The workflow editor module. The rest of the app imports it only through
+ * this file, so its internals, and the libraries they use, can change without
+ * changes anywhere else.
  */
 export {
   WorkflowEditor,

@@ -143,8 +143,8 @@ const make = Effect.gen(function* () {
     one,
 
     /**
-     * The qualified type of each of these Connections that exists, by id, in
-     * one query: what a workflow's check reads.
+     * Returns a map from Connection id to its qualified type, using one query.
+     * An id with no Connection is missing from the map.
      */
     readTypes: (
       ids: ReadonlyArray<string>,

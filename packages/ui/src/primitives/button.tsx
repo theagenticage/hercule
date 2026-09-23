@@ -2,9 +2,9 @@ import type { ComponentProps, JSX } from "react";
 import { cn } from "./cn";
 
 /**
- * A button that cannot be used is either `disabled`, or `aria-disabled` when it
- * must keep the keyboard focus, as a Save whose write is in flight must. The
- * two look the same.
+ * A button that cannot be used is either `disabled` or `aria-disabled`. Use
+ * `aria-disabled` when the button must keep keyboard focus, such as a Save
+ * button while its save is in flight. Both look the same.
  *
  * A quiet button stays borderless when it cannot be used: a box is the one shape
  * that says "this commits", which is what the `form` variant means.
@@ -30,16 +30,16 @@ const disabledPrimary = [
 ].join(" ");
 
 /**
- * A form's submit keeps its box and fades its label when it cannot be used. It
- * fades the label only, and not the whole button, so the focus ring of an
- * `aria-disabled` Save keeps its full contrast.
+ * A form button that cannot be used keeps its border and fades only its label.
+ * Fading the whole button would also fade the focus ring of an
+ * `aria-disabled` Save button.
  */
 const disabledForm = [
   "disabled:cursor-not-allowed disabled:text-faint",
   "aria-disabled:cursor-not-allowed aria-disabled:text-faint",
 ].join(" ");
 
-/** Hover is on a button that can be used only. */
+/** Hover styles apply only to a button that is neither `disabled` nor `aria-disabled`. */
 const usableHover = "enabled:not-aria-disabled:hover:bg-line-soft";
 
 /**
@@ -48,8 +48,8 @@ const usableHover = "enabled:not-aria-disabled:hover:bg-line-soft";
  * exception, and it is not a monitoring surface: a form's submit carries a
  * hairline and a surface ground so it reads as the thing that commits.
  *
- * Hover is on the usable state only, because a button that cannot be pressed
- * still receives the pointer: it has to answer for its own cursor.
+ * Hover styles apply only to a usable button. A button that cannot be pressed
+ * still receives pointer events, so it must show its own not-allowed cursor.
  */
 const variants = {
   quiet: `text-muted ${usableHover} enabled:not-aria-disabled:hover:text-ink ${disabledQuiet}`,
@@ -68,7 +68,7 @@ export const buttonClassName = (variant: ButtonVariant, className: string | unde
     className,
   );
 
-/** A button. While it is `aria-disabled`, it keeps the focus and ignores presses. */
+/** While `aria-disabled`, the button keeps focus but ignores clicks and does not submit its form. */
 export function Button({
   variant = "quiet",
   type = "button",

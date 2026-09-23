@@ -40,13 +40,16 @@ const ContributionName = Schema.String.check(
 );
 
 /**
- * The bare word a plugin calls a contribution that the host qualifies: an
- * event source, a workflow action or a Connection type. The host puts the
- * plugin's id and a `/` in front of it to make the qualified id, so a `/` in
- * the word would give the qualified id two readings.
+ * The unqualified id a plugin gives an event source, a workflow action or a
+ * Connection type. The host prefixes it with the plugin id and a `/` to build
+ * the qualified id (`github/pr.merge`). A `/` in the word would make the
+ * qualified id ambiguous, so it is rejected.
  */
 export const ContributionWord = ContributionName.check(
-  Schema.isPattern(/^[^/]+$/, { message: "The word cannot hold a / character." }),
+  Schema.isPattern(/^[^/]+$/, {
+    message:
+      "The id cannot contain a / character, because the host joins it to the plugin id with a / to build the qualified id.",
+  }),
 );
 
 /**
@@ -108,10 +111,10 @@ export interface EventSourceDefinition {
 }
 
 /**
- * The two names a workflow action is identified and shown by. They reach a
- * column and the wire, so they are decoded rather than taken as the plugin
- * wrote them. The schemas and `execute` are not here: no schema of this kind
- * can describe a live schema or a function.
+ * The id and display name of a workflow action. Both are stored in a column
+ * and sent over the API, so the host decodes them instead of trusting the
+ * plugin. The input and output schemas and `execute` are not in this schema,
+ * because a schema cannot validate an Effect schema or a function.
  */
 export const WorkflowActionNames = Schema.Struct({
   id: ContributionWord,
@@ -119,9 +122,9 @@ export const WorkflowActionNames = Schema.Struct({
 });
 
 /**
- * An action failed, in words the step record keeps. `code` is a short word a
- * program can tell failures apart by, and `message` is the sentence for a
- * person.
+ * The error a workflow action fails with. The step record stores it. `code`
+ * is a short machine-readable identifier for the kind of failure, and
+ * `message` is a sentence for a person.
  */
 export class ActionError extends Schema.TaggedError<ActionError>()("ActionError", {
   code: Schema.String,
@@ -129,13 +132,13 @@ export class ActionError extends Schema.TaggedError<ActionError>()("ActionError"
 }) {}
 
 /**
- * Where one execution of a workflow action sits. The run's API client and its
- * cancel signal join this context when runs execute actions.
+ * The context passed to one execution of a workflow action. The run's API
+ * client and its cancel signal will be added when runs execute actions.
  */
 export interface ActionContext {
   /**
    * The Connection the step acts through, with its credentials and config
-   * decoded. Present only for an action that declares a connection type.
+   * decoded. Set only for an action that declares a Connection type.
    */
   readonly connection?: {
     readonly id: string;
@@ -146,23 +149,24 @@ export interface ActionContext {
 }
 
 /**
- * What a plugin contributes as a workflow action: the thing an action step
- * calls. `id` is the bare word, often `<entity>.<verb>` such as `pr.merge`;
- * the host qualifies it with the plugin's id, so a step names the action as
- * `github/pr.merge`.
+ * A workflow action that a plugin registers, for an action step to call.
  *
- * `input` is the shape of the step's params and must be a struct, because a
- * step writes its params as named fields. `output` is what the step answers,
- * which an expression reads as `steps.<id>.output`.
+ * - `id` is the unqualified id, often `<entity>.<verb>` such as `pr.merge`.
+ *   The host prefixes the plugin id, so a step calls the action as
+ *   `github/pr.merge`.
+ * - `input` is the schema of the step's params. It must be a struct, because
+ *   a step writes its params as named fields.
+ * - `output` is the schema of the action's result, which an expression reads
+ *   as `steps.<id>.output`.
  */
 export interface WorkflowActionContribution {
   readonly id: string;
   readonly displayName: string;
-  /** One line, shown where an author picks an action. */
+  /** One line, shown in the action picker. */
   readonly description: string;
   readonly input: Schema.Top;
   readonly output: Schema.Top;
-  /** The qualified type of the one Connection the action acts through, where it acts through one. */
+  /** The qualified type of the Connection the action acts through, if it uses one. */
   readonly connection?: { readonly type: string };
   readonly execute: (input: unknown, context: ActionContext) => Effect.Effect<unknown, ActionError>;
 }

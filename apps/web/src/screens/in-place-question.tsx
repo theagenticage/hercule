@@ -3,16 +3,19 @@ import { flushSync } from "react-dom";
 import { Button } from "@hercule/ui";
 
 /**
- * A question asked in place, beside what asked it, rather than behind a
- * browser dialog, like every other question this app puts to the reader.
+ * A confirmation question with two buttons, shown inline next to the control
+ * that asked it. The app asks every question this way, never with a browser
+ * dialog.
  *
- * The answer that declines comes first and the answer that accepts comes
- * last, as everywhere in the app. The focus moves to the answer that
- * declines, so a key press that follows the question cannot accept it. After
- * that answer, the focus goes back to the element that asked, so the caller
- * keeps that element mounted while the question shows. A question that takes
- * the place of another needs a key of its own: it then starts again, takes
- * the focus, and keeps the element that asked it.
+ * - The decline button comes first and the accept button last, as everywhere
+ *   in the app.
+ * - Focus moves to the decline button, so a stray key press right after the
+ *   question appears cannot accept it.
+ * - After a decline, focus returns to the element that had focus when the
+ *   question appeared. The caller must keep that element mounted while the
+ *   question shows.
+ * - When one question replaces another, give the new one its own React `key`.
+ *   It then remounts, takes focus, and remembers its own asking element.
  */
 export function InPlaceQuestion({
   question,
@@ -27,20 +30,20 @@ export function InPlaceQuestion({
   readonly onDecline: () => void;
   readonly onAccept: () => void;
 }): JSX.Element {
-  // The first render comes before the answer that declines takes the focus,
-  // so the element with the focus is the element that asked.
+  // The first render runs before the decline button takes focus, so the
+  // focused element is still the one that asked.
   const [asker] = useState(() => document.activeElement);
   return (
     <div className="flex min-w-0 items-center gap-1.5 text-row text-muted">
-      {/* A long question is cut off where the row is narrow, so the whole question is in its tooltip. */}
+      {/* A long question is truncated in a narrow row, so the tooltip shows the full text. */}
       <span title={question} className="min-w-0 truncate">
         {question}
       </span>
       <Button
         autoFocus
         onClick={() => {
-          // The element that asked can take the focus only after the page
-          // has rendered without the question.
+          // The asking element can take focus only after the page re-renders
+          // without the question, so that render is flushed first.
           flushSync(onDecline);
           if (asker instanceof HTMLElement) asker.focus();
         }}

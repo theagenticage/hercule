@@ -1,17 +1,17 @@
 /**
- * What the editor completes from: the actions a step can name, the event
- * kinds a trigger can name, and the Agents. The two pages of the editor read
- * the three before they show, so the page never waits on them.
+ * The data the workflow editor uses for autocomplete: the actions a step can
+ * use, the event kinds a trigger can use, and the Agents. The new and the
+ * stored workflow pages both load it before they render.
  *
- * The route files load this file before the page, so it reads nothing with a
- * hook: a hook here would bring the query library's React part into the first
- * paint of the app.
+ * The route files import this file before the page itself loads, so it must
+ * not use hooks. A hook here would pull React Query's React code into the
+ * app's first load.
  */
 import type { QueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import { agentsQuery, eventKindsQuery, workflowActionsQuery } from "../../../app/queries";
 
-/** Reads the three catalogs into the cache, or answers at once when the cache holds them. */
+/** Loads the three autocomplete lists into the query cache. Resolves at once when they are cached. */
 export const prefetchWorkflowCatalog = async (
   client: HerculeClient,
   queryClient: QueryClient,

@@ -1,17 +1,22 @@
 /**
- * Stored workflows over a real socket: what a create keeps, what an update
- * changes, what the listings answer, the trigger rows a save leaves behind,
- * who may do each of these, and what the live socket is told.
+ * Tests the workflow and trigger operations over a real HTTP server and live
+ * socket:
+ * - what a create stores and what an update changes
+ * - what the workflow list and the trigger list return
+ * - which trigger rows a save leaves behind
+ * - which actors may call each operation, and which actor each write is stamped with
+ * - which pushes a live subscription receives
  *
- * Every case goes through the public API, because the text a person wrote is
- * the thing under test, and only the wire can say whether it came back byte
- * for byte. One step is arranged behind the API: a start trigger's status is
- * set in the database, because no operation pauses a trigger yet.
+ * Every test goes through the public API, because the tests check that the
+ * YAML source a person wrote comes back byte for byte, and only a real HTTP
+ * round trip can show that. One step bypasses the API: a test sets a start
+ * trigger's status directly in the database, because no operation pauses a
+ * trigger yet.
  *
- * Every source a case expects to be saved is a workflow the controller would
- * also accept once it checks meaning and not only shape: its agents and its
- * Connection exist, its actions and event kinds are ones the controller knows,
- * and every step is reached from where a run begins.
+ * Every source that a test expects to be saved passes all of the controller's
+ * validation, not only the schema: its agents and its Connection exist, the
+ * controller knows its actions and event kinds, and every step can be reached
+ * from the start of a run.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
@@ -56,8 +61,9 @@ import {
 } from "./testing";
 
 /**
- * Three, because a case about a session token waits for the fleet to be
- * probed and then for each session it starts.
+ * Allows three wait deadlines: a test that uses session tokens waits once for
+ * the agent fleet to be probed, then once for each session it starts (at most
+ * two).
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
@@ -89,10 +95,11 @@ const waitForNextMillisecond = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 10));
 
 /**
- * Everything a formatter would change: comments, blank lines, keys out of
- * contract order, a block prompt that keeps an indented line, trailing
- * whitespace, a character outside ASCII, and two newlines at the end. A store
- * that reformats, trims or re-encodes anything gives back other bytes.
+ * Returns a YAML source that contains everything a formatter would change:
+ * comments, blank lines, keys out of canonical order, a block prompt with an
+ * extra-indented line, trailing whitespace, a non-ASCII character, and two
+ * newlines at the end. If the store reformats, trims or re-encodes anything,
+ * the bytes read back differ from the bytes sent.
  */
 const buildHandWrittenSource = (agentId: string): string =>
   [
@@ -115,7 +122,7 @@ const buildHandWrittenSource = (agentId: string): string =>
     "",
   ].join("\n");
 
-/** A definition with its keys out of contract order and a description on two lines. */
+/** A definition object with its keys out of canonical order and a two-line description. */
 const FILE_TASK_DEFINITION = {
   steps: [
     {
@@ -158,8 +165,10 @@ steps:
 `;
 
 /**
- * A step that reuses a trigger's id. The text writes the steps first, and the
- * step is still the later node: triggers come before steps in the definition.
+ * A step that reuses a trigger's id. The YAML lists the steps before the
+ * triggers, but the error must still point at the step: a duplicate id is
+ * reported at the later node in definition order, and triggers come before
+ * steps in that order.
  */
 const STEP_REUSING_TRIGGER_ID_SOURCE = `name: a step that reuses a trigger id
 steps:
@@ -198,10 +207,10 @@ steps:
       description: The first.
 `;
 
-/** The filter start trigger `a` carries, as it is written in the source. */
+/** The filter of start trigger `a`, as written in the source. */
 const LABEL_FILTER = '"triage" in event.payload.added';
 
-/** The source of start trigger `b`: a weekday schedule in a named zone. */
+/** The YAML of start trigger `b`: a weekday schedule in a named timezone. */
 const CRON_TRIGGER_B_SOURCE = `  - id: b
     kind: start
     source:
@@ -210,7 +219,7 @@ const CRON_TRIGGER_B_SOURCE = `  - id: b
     timezone: Europe/Amsterdam
 `;
 
-/** The source of start trigger `c`, which an update adds in place of `b`. */
+/** The YAML of start trigger `c`, which an update puts in place of `b`. */
 const TASK_TRIGGER_C_SOURCE = `  - id: c
     kind: start
     source:
@@ -218,9 +227,11 @@ const TASK_TRIGGER_C_SOURCE = `  - id: c
 `;
 
 /**
- * The Label triage workflow: start trigger `a` on a labelled pull request
- * through a named Connection, a second start trigger, and signal trigger `s`
- * that fires when the filed task changes and leads to the terminal step.
+ * Returns the source of the Label triage workflow, with these triggers:
+ * - start trigger `a`, on a labelled pull request from the Connection `connectionId`
+ * - `secondStartTrigger`, inserted as written
+ * - signal trigger `s`, which fires when the filed task changes and leads to
+ *   the terminal step
  */
 const buildLabelTriageSource = (connectionId: string, secondStartTrigger: string): string =>
   `name: Label triage
@@ -258,8 +269,8 @@ edges:
 `;
 
 /**
- * Another workflow's trigger, for the listing to stand beside. Its cron
- * trigger names no timezone.
+ * A second workflow, so that the trigger list holds the triggers of two
+ * workflows. Its cron trigger has no timezone.
  */
 const NIGHTLY_SWEEP_SOURCE = `name: Nightly sweep
 triggers:
@@ -278,17 +289,17 @@ steps:
 `;
 
 describe("workflow.create with a source", () => {
-  it("reads back the five fields and nothing else, with the source byte for byte as it was sent", async () => {
+  it("returns exactly the five workflow fields, with the source byte for byte as sent", async () => {
     await withSetUpController(async ({ base, token }) => {
       const source = buildHandWrittenSource(await createAgent(base, token));
 
       const response = await createWorkflow(base, token, { source });
       expect([200, 201], await response.clone().text()).toContain(response.status);
-      const saveAnswer = (await response.json()) as Record<string, unknown>;
-      // The save answers with the record and the warnings of the save, apart.
-      expect(Object.keys(saveAnswer).sort()).toEqual(["warnings", "workflow"]);
-      expect(saveAnswer["warnings"]).toEqual([]);
-      const workflow = saveAnswer["workflow"] as Workflow;
+      const responseBody = (await response.json()) as Record<string, unknown>;
+      // The response holds the workflow and the save's warnings as separate fields.
+      expect(Object.keys(responseBody).sort()).toEqual(["warnings", "workflow"]);
+      expect(responseBody["warnings"]).toEqual([]);
+      const workflow = responseBody["workflow"] as Workflow;
 
       const stored = await readWorkflow(base, token, workflow.id);
       expect(Object.keys(stored).sort()).toEqual([
@@ -306,7 +317,7 @@ describe("workflow.create with a source", () => {
 });
 
 describe("workflow.create with a definition", () => {
-  it("stores the canonical render of the definition", async () => {
+  it("stores the definition rendered as canonical YAML", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
         definition: FILE_TASK_DEFINITION,
@@ -318,7 +329,7 @@ describe("workflow.create with a definition", () => {
     });
   });
 
-  it("refuses a create that sends both a source and a definition, or neither, and stores nothing", async () => {
+  it("fails with a validation error and stores nothing when both source and definition are sent, or neither", async () => {
     await withSetUpController(async ({ base, token }) => {
       for (const body of [
         { source: buildFileTaskSource("Both"), definition: FILE_TASK_DEFINITION },
@@ -334,22 +345,22 @@ describe("workflow.create with a definition", () => {
   });
 });
 
-describe("a source that is refused", () => {
-  it("names a YAML syntax error once, with no path, by its line and column", async () => {
+describe("workflow.create with an invalid source", () => {
+  it("reports a YAML syntax error as one issue with an empty path, and gives its line and column", async () => {
     await withSetUpController(async ({ base, token }) => {
       const response = await createWorkflow(base, token, { source: SYNTAX_ERROR_SOURCE });
       const refusal = await readRefusal(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
       expect(refusal.issues).toEqual([[]]);
-      // The refusal holds this one issue, so its message is where the numbers are.
+      // The error has only this one issue, so the body contains its line (9) and column (20).
       expect(refusal.text).toMatch(/\b9\b/);
       expect(refusal.text).toMatch(/\b20\b/);
       await expectNothingStored(base, token);
     });
   });
 
-  it("points a field of the wrong shape at that field", async () => {
+  it("reports a schema error at the path of the invalid field", async () => {
     await withSetUpController(async ({ base, token }) => {
       const response = await createWorkflow(base, token, { source: WRONG_KIND_SOURCE });
       const refusal = await readRefusal(response);
@@ -360,7 +371,7 @@ describe("a source that is refused", () => {
     });
   });
 
-  it("points two nodes that share an id at the later one in definition order: triggers, then steps", async () => {
+  it("reports a duplicate id at the later node, with triggers ordered before steps", async () => {
     await withSetUpController(async ({ base, token }) => {
       for (const [source, path] of [
         [DUPLICATE_STEP_ID_SOURCE, ["steps", "1", "id"]],
@@ -377,7 +388,7 @@ describe("a source that is refused", () => {
     });
   });
 
-  it("points an id that is not snake_case at that id and suggests the snake_case spelling", async () => {
+  it("reports an id that is not snake_case at that id, and suggests the snake_case spelling", async () => {
     await withSetUpController(async ({ base, token }) => {
       const stepResponse = await createWorkflow(base, token, {
         source: KEBAB_CASE_STEP_ID_SOURCE,
@@ -416,7 +427,7 @@ describe("workflow.update", () => {
     });
   });
 
-  it("stores the canonical render of a new definition", async () => {
+  it("stores a new definition rendered as canonical YAML", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
         source: buildFileTaskSource("First"),
@@ -429,7 +440,7 @@ describe("workflow.update", () => {
     });
   });
 
-  it("flips enabled alone and leaves the source byte-equal", async () => {
+  it("changes only enabled, and leaves the source byte for byte the same", async () => {
     await withSetUpController(async ({ base, token }) => {
       const source = `# Kept as written.   \n${buildFileTaskSource("Toggled")}\n`;
       const workflow = await createWorkflowOrFail(base, token, { source });
@@ -442,10 +453,11 @@ describe("workflow.update", () => {
     });
   });
 
-  // The listing sorts by updatedAt. If a toggle moved it, the Workflows
-  // screen would move a row to the top when its switch is pressed, and a
-  // second press at the same place would reach another workflow.
-  it("moves updatedAt only when the text changes, so a toggle keeps the workflow's place in the list", async () => {
+  // The workflow list is sorted by updatedAt. If toggling enabled changed
+  // updatedAt, the Workflows screen would move the row to the top when its
+  // switch is clicked, and a second click at the same spot would toggle a
+  // different workflow.
+  it("changes updatedAt only when the source changes, so toggling enabled keeps the workflow's place in the list", async () => {
     await withSetUpController(async ({ base, token }) => {
       const older = await createWorkflowOrFail(base, token, {
         source: buildFileTaskSource("Older"),
@@ -472,14 +484,14 @@ describe("workflow.update", () => {
       ).toBe(older.updatedAt);
       expect((await readWorkflow(base, token, older.id)).updatedAt).toBe(older.updatedAt);
       expect(await listIds()).toEqual([newer.id, older.id]);
-      // The audit log records the toggle, although the workflow's own time does not move.
+      // The event log still records the toggle, although updatedAt did not change.
       const toggleEntry = (await readLog(base, token))[entriesBefore];
       expect(toggleEntry?.kind).toBe("workflow.updated");
       expect(toggleEntry?.payload).toEqual({ workflowId: older.id, changed: ["enabled"] });
-      // A save of the same text is one entry too, and it names no change.
-      const sameTextEntry = (await readLog(base, token))[entriesBefore + 1];
-      expect(sameTextEntry?.kind).toBe("workflow.updated");
-      expect(sameTextEntry?.payload).toEqual({ workflowId: older.id, changed: [] });
+      // Saving the same source also writes one entry, with an empty changed list.
+      const sameSourceEntry = (await readLog(base, token))[entriesBefore + 1];
+      expect(sameSourceEntry?.kind).toBe("workflow.updated");
+      expect(sameSourceEntry?.payload).toEqual({ workflowId: older.id, changed: [] });
 
       await waitForNextMillisecond();
       const rewritten = await updateWorkflowOrFail(base, token, older.id, {
@@ -490,7 +502,7 @@ describe("workflow.update", () => {
     });
   });
 
-  it("leaves the stored workflow unchanged when an update is refused", async () => {
+  it("leaves the stored workflow unchanged when an update fails validation", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
         source: buildFileTaskSource("Kept"),
@@ -512,9 +524,9 @@ describe("workflow.update", () => {
     });
   });
 
-  it("answers not_found for an id that names no workflow", async () => {
+  it("fails with not_found for an id that matches no workflow", async () => {
     await withSetUpController(async ({ base, token }) => {
-      // One workflow stands beside it, so not found is an answer about this id.
+      // Another workflow exists, so the not_found is about this id and not about an empty table.
       await createWorkflowOrFail(base, token, { source: buildFileTaskSource("Present") });
 
       const response = await updateWorkflow(base, token, ABSENT_ID, { enabled: true });
@@ -525,8 +537,8 @@ describe("workflow.update", () => {
   });
 });
 
-describe("whether a workflow is enabled", () => {
-  it("reads false after a create, whether a source or a definition was sent", async () => {
+describe("the enabled flag", () => {
+  it("is false after a create from a source or from a definition", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflowFromSource = await createWorkflowOrFail(base, token, {
         source: buildFileTaskSource("Text"),
@@ -542,7 +554,7 @@ describe("whether a workflow is enabled", () => {
     });
   });
 
-  it("turns on only through an update that says enabled: true, and a new source leaves it as it is", async () => {
+  it("is set to true only by an update with enabled: true, and a new source does not change it", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
         source: buildFileTaskSource("Off"),
@@ -563,7 +575,7 @@ describe("whether a workflow is enabled", () => {
     });
   });
 
-  it("refuses a source that says enabled, because enabled is not part of the text", async () => {
+  it("fails with a validation error when set in the source, because it is not part of the workflow YAML", async () => {
     await withSetUpController(async ({ base, token }) => {
       const response = await createWorkflow(base, token, {
         source: `enabled: true\n${buildFileTaskSource("Switched on in the text")}`,
@@ -578,7 +590,7 @@ describe("whether a workflow is enabled", () => {
 });
 
 describe("workflow.query", () => {
-  it("pages through every workflow once, each item the five fields its definition gives", async () => {
+  it("returns every workflow once across pages, each with its id, name, description, enabled and updatedAt", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflows: Array<Workflow> = [];
       for (let index = 0; index < 5; index++) {
@@ -621,7 +633,7 @@ describe("workflow.query", () => {
     });
   });
 
-  it("answers the name and description of the definition stored last", async () => {
+  it("returns the name and description of the latest saved source", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
         source: buildFileTaskSource("Before", "Said before."),
@@ -661,7 +673,7 @@ describe("workflow.query", () => {
 });
 
 describe("workflow.delete", () => {
-  it("removes the workflow and every trigger row of it, and a read afterwards is not found", async () => {
+  it("deletes the workflow and all its trigger rows, and a later read fails with not_found", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflowToDelete = await createWorkflowOrFail(base, token, {
         source: NIGHTLY_SWEEP_SOURCE,
@@ -689,7 +701,7 @@ describe("workflow.delete", () => {
 });
 
 describe("trigger.query", () => {
-  it("lists every workflow's triggers with every field, newest first, filtered by each field it takes", async () => {
+  it("lists the triggers of every workflow with all fields, newest first, and filters by each query parameter", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
       const connectionId = await createConnection(base, token, "github/github", {
         pat: ACCEPTED_GITHUB_TOKEN,
@@ -746,7 +758,7 @@ describe("trigger.query", () => {
         status: "active",
         ...timestampMatchers,
       });
-      // A signal trigger has no status: it is not a thing that can be paused.
+      // A signal trigger has no status, because it cannot be paused.
       expect(findTrigger(allTriggers, "s")).toEqual({
         workflowId: labelTriage.id,
         workflowName: "Label triage",
@@ -755,9 +767,9 @@ describe("trigger.query", () => {
         eventKind: "task.updated",
         ...timestampMatchers,
       });
-      // The row repeats what the source says, and this source names no
-      // timezone. The user's timezone setting applies when the tick fires,
-      // not when the trigger is saved.
+      // The row copies the trigger from the source, and this source has no
+      // timezone. The user's timezone setting is applied when the cron tick
+      // fires, not when the trigger is saved.
       expect(findTrigger(allTriggers, "nightly")).toEqual({
         workflowId: nightlySweep.id,
         workflowName: "Nightly sweep",
@@ -788,7 +800,7 @@ describe("trigger.query", () => {
         "nightly",
       ]);
 
-      // No operation pauses a trigger yet, so the row is paused where it lives.
+      // No operation pauses a trigger yet, so the test pauses it in the database.
       await Effect.runPromise(
         Effect.orDie(harness.sql`UPDATE triggers SET status = 'paused' WHERE trigger_id = 'a'`),
       );
@@ -818,7 +830,7 @@ describe("trigger.query", () => {
   });
 });
 
-/** One entry of the event log, as much of it as these cases read. */
+/** The fields of an event log entry that these tests read. */
 interface LogEntry {
   readonly id: number;
   readonly kind: string;
@@ -826,22 +838,22 @@ interface LogEntry {
   readonly payload: unknown;
 }
 
-/** The whole log, oldest first, read by the user. */
+/** Returns the whole event log, oldest first, read with the user's token. */
 const readLog = async (base: string, token: string): Promise<ReadonlyArray<LogEntry>> => {
   const response = await get(base, "/api/v1/events?sort=id:asc&limit=500", token);
   expect(response.status, await response.clone().text()).toBe(200);
   return ((await response.json()) as { items: ReadonlyArray<LogEntry> }).items;
 };
 
-/** The entries about workflows, oldest first. */
+/** Returns the event log entries about workflows, oldest first. */
 const readWorkflowEntries = async (base: string, token: string): Promise<ReadonlyArray<LogEntry>> =>
   (await readLog(base, token)).filter((entry) => entry.kind.startsWith("workflow."));
 
-describe("who a workflow write is stamped with", () => {
-  it("writes one audit entry for each create, update and delete, stamped with the user", async () => {
+describe("the actor stamped on workflow writes", () => {
+  it("writes one event log entry per create, update and delete, stamped with the user", async () => {
     await withSetUpController(async ({ base, token }) => {
-      // Nothing else runs on this controller, so every entry a write appends
-      // is that write's.
+      // Nothing else runs on this controller, so every entry appended during a
+      // write comes from that write.
       const collectEntriesAppendedBy = async (
         write: () => Promise<void>,
       ): Promise<ReadonlyArray<LogEntry>> => {
@@ -904,7 +916,7 @@ describe("who a workflow write is stamped with", () => {
     });
   });
 
-  it("refuses a session whose profile lacks workflow.write by the grant's name, and writes nothing", async () => {
+  it("fails with forbidden and names the grant when the session's profile lacks workflow.write, and writes nothing", async () => {
     await withAgentFleet(async (arranged) => {
       const base = arranged.harness.base;
       const userWorkflow = await createWorkflowOrFail(base, arranged.token, {
@@ -912,7 +924,7 @@ describe("who a workflow write is stamped with", () => {
       });
       const storedBefore = await readWorkflow(base, arranged.token, userWorkflow.id);
       const workflowEntriesBefore = await readWorkflowEntries(base, arranged.token);
-      // The shipped assistant profile reads workflows and does not write them.
+      // The shipped assistant profile has workflow.read but not workflow.write.
       const assistantSession = await agentOn(arranged, await profileNamed(arranged, "assistant"));
 
       for (const response of [
@@ -937,8 +949,8 @@ describe("who a workflow write is stamped with", () => {
   });
 });
 
-describe("what reading workflows and triggers needs", () => {
-  it("needs workflow.read for the listing, the read and the trigger listing", async () => {
+describe("reading workflows and triggers", () => {
+  it("requires workflow.read for the workflow list, a single workflow and the trigger list", async () => {
     await withAgentFleet(async (arranged) => {
       const base = arranged.harness.base;
       const userWorkflow = await createWorkflowOrFail(base, arranged.token, {
@@ -950,7 +962,7 @@ describe("what reading workflows and triggers needs", () => {
         "/api/v1/triggers",
       ];
 
-      // The shipped worker profile holds no workflow grant at all.
+      // The shipped worker profile has no workflow grant.
       const workerSession = await agentOn(arranged, await profileNamed(arranged, "worker"));
       for (const path of readPaths) {
         const response = await get(base, path, workerSession.token);
@@ -960,7 +972,7 @@ describe("what reading workflows and triggers needs", () => {
         expect(refusal.grant).toBe("workflow.read");
       }
 
-      // The shipped assistant profile holds workflow.read.
+      // The shipped assistant profile has workflow.read.
       const assistantSession = await agentOn(arranged, await profileNamed(arranged, "assistant"));
       for (const path of readPaths) {
         const response = await get(base, path, assistantSession.token);
@@ -970,8 +982,8 @@ describe("what reading workflows and triggers needs", () => {
   });
 });
 
-describe("what a workflow subscription is told", () => {
-  it("names the workflow once for each committed create, update and delete, and hears nothing of a refused write", async () => {
+describe("a workflow subscription", () => {
+  it("receives one push with the workflow id per committed create, update and delete, and none for a failed write", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
       const ticket = await ticketFor(base, token);
 
@@ -981,7 +993,10 @@ describe("what a workflow subscription is told", () => {
           const workflowPushes = yield* collecting(client, { topic: "workflow" });
           yield* Effect.promise(() => expectHeld(harness.live, 1, "workflow"));
 
-          /** Waits for push number `count`, then out-waits one more that must not come. */
+          /**
+           * Waits for push number `count`, checks that no later push arrives
+           * within 300 ms, and returns push number `count`.
+           */
           const awaitPush = (count: number) =>
             Effect.promise(async () => {
               expect(await within(1000, () => workflowPushes.received.length >= count)).toBe(true);
@@ -1002,14 +1017,14 @@ describe("what a workflow subscription is told", () => {
             kind: "created",
           });
 
-          const refusedUpdate = yield* Effect.promise(() =>
+          const failedUpdate = yield* Effect.promise(() =>
             updateWorkflow(base, token, workflow.id, { source: SYNTAX_ERROR_SOURCE }),
           );
-          expect(refusedUpdate.status).toBe(400);
-          const refusedCreate = yield* Effect.promise(() =>
+          expect(failedUpdate.status).toBe(400);
+          const failedCreate = yield* Effect.promise(() =>
             createWorkflow(base, token, { source: KEBAB_CASE_STEP_ID_SOURCE }),
           );
-          expect(refusedCreate.status).toBe(400);
+          expect(failedCreate.status).toBe(400);
           yield* expectNoPushAfter(1);
 
           yield* Effect.promise(() =>
@@ -1040,8 +1055,8 @@ describe("what a workflow subscription is told", () => {
   });
 });
 
-describe("a save the controller refuses with a validation error, never an internal one", () => {
-  it("refuses an alias, half of a surrogate pair, and a value nested thousands of levels deep", async () => {
+describe("saves that fail with a validation error instead of an internal error", () => {
+  it("fails on a YAML alias, a lone surrogate, and a value nested thousands of levels deep", async () => {
     await withSetUpController(async ({ base, token }) => {
       const aliasedResponse = await createWorkflow(base, token, {
         source: "name: dangling alias\nsteps: *nowhere\n",
@@ -1051,15 +1066,15 @@ describe("a save the controller refuses with a validation error, never an intern
       expect(aliased.code).toBe("validation");
       expect(aliased.issues).toEqual([["steps"]]);
 
-      // The half pair is in the description of a source that is valid
-      // otherwise, so only the check for half pairs can refuse it.
-      const halfPair = String.fromCharCode(0xd800);
-      const surrogate = await readIssues(
+      // The lone surrogate is in the description of an otherwise valid source,
+      // so only the surrogate check can reject it.
+      const loneSurrogate = String.fromCharCode(0xd800);
+      const surrogateIssues = await readIssues(
         await createWorkflow(base, token, {
-          source: buildFileTaskSource("Half a pair", `a${halfPair}b`),
+          source: buildFileTaskSource("Half a pair", `a${loneSurrogate}b`),
         }),
       );
-      expect(surrogate).toEqual([
+      expect(surrogateIssues).toEqual([
         { path: [], message: expect.stringContaining("line 2, column 15") as unknown },
       ]);
 
@@ -1085,7 +1100,7 @@ describe("a save the controller refuses with a validation error, never an intern
     });
   });
 
-  it("refuses a key the save does not take, on a create and on an update", async () => {
+  it("fails on an unknown key, on a create and on an update", async () => {
     await withSetUpController(async ({ base, token }) => {
       const onCreateResponse = await createWorkflow(base, token, {
         source: buildFileTaskSource("On"),
@@ -1110,7 +1125,7 @@ describe("a save the controller refuses with a validation error, never an intern
     });
   });
 
-  it("refuses a definition whose canonical text is longer than the longest source, saying so of the workflow", async () => {
+  it("fails on a definition whose canonical YAML is longer than the maximum source length, with the issue at the root path", async () => {
     await withSetUpController(async ({ base, token }) => {
       const issues = await readIssues(
         await createWorkflow(base, token, {
@@ -1118,15 +1133,15 @@ describe("a save the controller refuses with a validation error, never an intern
         }),
       );
       expect(issues).toEqual([
-        { path: [], message: expect.stringContaining("A workflow is at most") as unknown },
+        { path: [], message: expect.stringContaining("A workflow can be at most") as unknown },
       ]);
       await expectNothingStored(base, token);
     });
   });
 });
 
-describe("a definition object that is refused", () => {
-  it("is refused at the same paths, with the same messages, as the same mistakes sent as text", async () => {
+describe("an invalid definition object", () => {
+  it("gets the same issue paths and messages as the same mistakes sent as YAML source", async () => {
     await withSetUpController(async ({ base, token }) => {
       const definitionIssues = await readIssues(
         await createWorkflow(base, token, {
@@ -1160,8 +1175,8 @@ steps:
   });
 });
 
-describe("the bytes of a stored source", () => {
-  it("are the bytes sent: a leading byte order mark, CRLF, tabs, trailing spaces and a character outside the BMP", async () => {
+describe("a stored source", () => {
+  it("keeps the exact bytes sent, including a leading byte order mark, CRLF, tabs, trailing spaces and a character outside the BMP", async () => {
     await withSetUpController(async ({ base, token }) => {
       const fileTask = buildFileTaskSource("Exact");
       const sources = [
@@ -1185,10 +1200,10 @@ describe("the bytes of a stored source", () => {
     });
   });
 
-  it("are the bytes sent for a source of the longest length, most of it characters that JSON writes as six bytes", async () => {
+  it("keeps the exact bytes of a maximum-length source made mostly of characters that JSON escapes as six bytes", async () => {
     await withSetUpController(async ({ base, token }) => {
       const fileTask = buildFileTaskSource("Escaped");
-      // A comment of control characters fills the source to the longest length.
+      // A comment of control characters fills the source to the maximum length.
       const comment = String.fromCharCode(1).repeat(256 * 1024 - fileTask.length - 1);
       const source = `${fileTask}#${comment}`;
       const workflow = await createWorkflowOrFail(base, token, { source });

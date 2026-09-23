@@ -1,12 +1,12 @@
 /**
- * The answer to the questions the events domain asks about event kinds.
+ * Implements the events domain's `EventKindCatalog` service from the event
+ * kinds that plugins registered at boot.
  *
- * The events domain must be able to read a kind's payload schema, and to list
- * the kinds a trigger can name, and the plugins domain already appends audit
- * entries to the event log, so an import the other way would close a cycle.
- * The questions are declared over there as `EventKindCatalog`; this is the
- * plugins domain answering them, from what the boot's registration pass
- * registered.
+ * The events domain needs to read a kind's payload schema and to list the
+ * kinds a trigger can use. It cannot import the plugins domain to do so,
+ * because the plugins domain already imports the events domain to append
+ * audit entries to the event log. So the events domain declares the service
+ * interface, and this module provides it.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

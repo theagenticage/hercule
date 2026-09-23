@@ -1,22 +1,23 @@
 /**
- * Workflows as the API sees them: `workflow.query`, `read`, `create`,
- * `update`, `delete` and `validate`, and `trigger.query` over the triggers
- * their sources declare.
+ * The workflow operations: `workflow.query`, `read`, `create`, `update`,
+ * `delete` and `validate`, and `trigger.query`, which lists the triggers that
+ * the stored workflows declare.
  *
- * The text is the truth (ADR 0029). The stored source is only ever the text a
- * caller sent, or the canonical text of the definition object a caller sent,
- * and the stored definition is only ever what that source parses to. Turning a
- * workflow on or off writes neither. A source is parsed and checked before any
- * row is written, so a refused save leaves the stored workflow as it was. A
- * save and a check run the same checks, so an editor that shows the answer of
- * a check shows what a save will say.
+ * The YAML source is the source of truth (ADR 0029). The stored source is
+ * either the YAML a caller sent, or the YAML generated from the definition
+ * object a caller sent. The stored definition is always the result of parsing
+ * the stored source. Enabling or disabling a workflow changes neither.
  *
- * The trigger rows are written in the transaction that writes the workflow, so
- * a listing never shows the triggers of a source that was not stored.
+ * A save parses and validates the workflow before it writes any row, so a
+ * failed save leaves the stored workflow unchanged. `validate` runs the same
+ * checks as a save, so an editor that shows the result of `validate` shows
+ * the errors that a save would return.
  *
- * Every mutation writes one event in that transaction too. The actor is
- * stamped here, on the event envelope, and the event names the workflow, so a
- * client that watches the `workflow` topic is told once the write commits.
+ * A save writes the workflow, its trigger rows and one audit event in a single
+ * transaction. So a trigger listing never shows the triggers of a workflow
+ * that failed to save. The event holds the actor and the workflow's id, so a
+ * client that watches the `workflow` topic learns about the change after it
+ * commits.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -52,7 +53,7 @@ import {
   type Workflow,
   type WorkflowDefinition,
   type WorkflowIssues,
-  type WorkflowSaved,
+  type WorkflowSaveResult,
   type WorkflowSummary,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
@@ -63,9 +64,9 @@ import { AuditLog, EventKinds } from "../events";
 import { PluginHost } from "../plugins";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
 import {
-  checkDefinitionAgainst,
-  listNamedAgentIds,
-  listNamedConnectionIds,
+  listReferencedAgentIds,
+  listReferencedConnectionIds,
+  validateDefinition,
   type ResolvedReferences,
 } from "./validation";
 
@@ -109,30 +110,29 @@ export interface TriggerPage {
 }
 
 /**
- * Both listings answer the newest first when the caller names no direction:
- * the workflow changed last, and the trigger added last. A listing is read to
- * find what was worked on.
+ * Both listings return the newest first when the caller gives no sort
+ * direction: the most recently changed workflow, and the most recently added
+ * trigger. People usually open a listing to find what they worked on last.
  */
 const DEFAULT_DIRECTION: SortDirection = "desc";
 
 const NO_SUCH_WORKFLOW = "no such workflow";
 
-/** Why a request that sends the text and the object together is refused. */
 const SOURCE_AND_DEFINITION_TOGETHER =
-  "Send source or definition, not the two together. The stored text comes from one of them.";
+  "The request sent both source and definition. Send only one of them: the workflow is stored from one or the other.";
 
-/** Why a request that must send a workflow and sends none is refused. */
-const NO_CONTENT = "Send the workflow as source or as definition.";
+const NO_CONTENT =
+  "The request sent no workflow. Send it as source (YAML text) or as definition (an object).";
 
-/** What a request sends a workflow as: its text, or a definition object. */
+/** A workflow as a request sent it: as YAML source, or as a definition object. */
 type WorkflowContent =
   | { readonly source: string; readonly definition?: undefined }
   | { readonly source?: undefined; readonly definition: unknown };
 
 /**
- * The workflow a request sent, or `undefined` where it sent none. A request
- * that sends the text and the object together is refused, because the stored
- * text can come from one of them only.
+ * Returns the workflow a request sent, or `undefined` if it sent none. Fails
+ * with a `Validation` error if the request sent both source and definition,
+ * because the stored YAML can come from only one of them.
  */
 const chooseContent = (input: {
   readonly source?: string;
@@ -148,8 +148,8 @@ const chooseContent = (input: {
   return Effect.succeed(undefined);
 };
 
-/** The workflow a request sent, where the request must send one. */
-const requireContent = (input: {
+/** Same as `chooseContent`, but also fails with a `Validation` error if the request sent no workflow. */
+const chooseRequiredContent = (input: {
   readonly source?: string;
   readonly definition?: unknown;
 }): Effect.Effect<WorkflowContent, Validation> =>
@@ -160,11 +160,14 @@ const requireContent = (input: {
   );
 
 /**
- * The text a workflow is stored as, and the definition it says, or every
- * problem of shape that stops it from being one. A definition object is
- * checked, then written as its canonical text, and that text is parsed as a
- * sent text is. So a problem is named at the same path whichever way it
- * arrived, and the stored definition is always what the stored text says.
+ * Parses the workflow a request sent. Returns its YAML source and the parsed
+ * definition, or every schema error found.
+ *
+ * A request sends the workflow either as YAML text or as a definition object.
+ * An object is first validated against the schema, then converted to YAML,
+ * and that YAML is parsed like any other text. So both kinds of input report
+ * errors at the same paths, and the stored definition always matches the
+ * stored YAML.
  */
 const parseContent = (
   content: WorkflowContent,
@@ -178,13 +181,13 @@ const parseContent = (
   );
 };
 
-/** The text and definition of the workflow a save sent, or the refusal of every problem of shape. */
-const requireParsedContent = (content: WorkflowContent): Effect.Effect<ParsedSource, Validation> =>
+/** Same as `parseContent`, but fails with a `Validation` error that lists every schema error. */
+const parseContentOrFail = (content: WorkflowContent): Effect.Effect<ParsedSource, Validation> =>
   Effect.mapError(Effect.fromResult(parseContent(content)), (issues) =>
     createValidationError(issues),
   );
 
-/** The rows a definition's triggers are listed by, one each. */
+/** Builds one trigger row for each trigger that the definition declares. */
 const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<DeclaredTrigger> =>
   (definition.triggers ?? []).map((trigger) => ({
     triggerId: trigger.id,
@@ -196,15 +199,15 @@ const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<De
     timezone: trigger.kind === "start" ? trigger.timezone : undefined,
   }));
 
-/** How every call can refuse, or fail on the database. */
+/** The errors that every method of the service can fail with. */
 type CallError = Unauthenticated | Forbidden | Validation | SqlError;
 
-/** Refuses a save whose definition fails a check of meaning, with every error the check found. */
-const requireNoErrors = (problems: WorkflowIssues): Effect.Effect<void, Validation> =>
+/** Fails with a `Validation` error that lists every error in `problems`, if there are any. */
+const failOnErrors = (problems: WorkflowIssues): Effect.Effect<void, Validation> =>
   problems.errors.length === 0 ? Effect.void : Effect.fail(createValidationError(problems.errors));
 
-/** Answers the workflow an effect found, or `not_found` where it found none. */
-const requireFound = <A, E>(
+/** Returns the value that `found` produces, or fails with a `NotFound` error if it produces none. */
+const failIfWorkflowNotFound = <A, E>(
   found: Effect.Effect<Option.Option<A>, E>,
 ): Effect.Effect<A, E | NotFound> =>
   Effect.flatMap(
@@ -225,10 +228,12 @@ const make = Effect.gen(function* () {
   const eventKinds = yield* EventKinds;
 
   /**
-   * What a definition names, as the controller holds it now: the actions,
-   * event kinds and Connection types that can be named, and the Agents and
-   * Connections that the definition names and that exist. A save reads it
-   * inside its transaction.
+   * Reads from the database and the plugin host what validating the definition
+   * needs: the available actions, event kinds and Connection types, and which
+   * of the Agents and Connections that the definition refers to exist.
+   *
+   * A save calls this inside its transaction, so the rows cannot change
+   * between the validation and the write.
    */
   const readReferences = (
     definition: WorkflowDefinition,
@@ -241,26 +246,25 @@ const make = Effect.gen(function* () {
         eventKinds: new Map(
           (yield* eventKinds.list()).map((eventKind) => [eventKind.kind, eventKind]),
         ),
-        agentIds: yield* agents.readExistingIds(listNamedAgentIds(definition)),
-        connectionTypeById: yield* connections.readTypes(listNamedConnectionIds(definition)),
+        agentIds: yield* agents.readExistingIds(listReferencedAgentIds(definition)),
+        connectionTypeById: yield* connections.readTypes(listReferencedConnectionIds(definition)),
         connectionTypes: new Set(yield* host.listActiveConnectionTypes()),
       };
     });
 
   /**
-   * Every problem of a definition's meaning, and the one warning: what
-   * `validate` answers. It reads what the definition names from the database,
-   * and checks the definition against it.
+   * Reads what the definition refers to, then validates the definition against
+   * it. Returns every error and warning found.
    */
-  const readReferencesAndCheck = (
+  const readReferencesAndValidate = (
     definition: WorkflowDefinition,
   ): Effect.Effect<WorkflowIssues, SqlError> =>
     Effect.flatMap(readReferences(definition), (references) =>
-      checkDefinitionAgainst(definition, references),
+      validateDefinition(definition, references),
     );
 
   return {
-    /** One page of the workflows, the one changed last first. */
+    /** Returns one page of workflows, the most recently changed first. */
     query: (input: QueryInput): Effect.Effect<WorkflowPage, CallError> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.query");
@@ -286,22 +290,22 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("workflow.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        return yield* requireFound(workflows.read(id));
+        return yield* failIfWorkflowNotFound(workflows.read(id));
       }),
 
-    /** Stores a new workflow, off, from a text or from a definition object. */
-    create: (input: WorkflowCreateInput): Effect.Effect<WorkflowSaved, CallError> =>
+    /** Stores a new workflow, disabled, from YAML source or from a definition object. */
+    create: (input: WorkflowCreateInput): Effect.Effect<WorkflowSaveResult, CallError> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
-        const parsedSource = yield* requireParsedContent(yield* requireContent(decoded));
+        const parsedSource = yield* parseContentOrFail(yield* chooseRequiredContent(decoded));
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const problems = yield* readReferencesAndCheck(parsedSource.definition);
-            yield* requireNoErrors(problems);
-            // One clock read, inside the transaction: the workflow, its
-            // triggers and the event that records them carry one instant.
+            const problems = yield* readReferencesAndValidate(parsedSource.definition);
+            yield* failOnErrors(problems);
+            // Read the clock once, inside the transaction, so the workflow,
+            // its triggers and the audit event all get the same timestamp.
             const savedAt = yield* nowIso;
             const stored = yield* workflows.insert(parsedSource, savedAt);
             yield* workflows.reconcileTriggers(
@@ -313,8 +317,9 @@ const make = Effect.gen(function* () {
               kind: "workflow.created",
               actor: yield* currentStamp,
               record: { topic: "workflow", id: stored.id },
-              // The id and the name only. The source holds the prompts the
-              // workflow's agents are given, and the log is read more widely.
+              // Only the id and the name. The source contains the prompts
+              // given to the workflow's agents, and more people can read the
+              // audit log than can read workflows.
               payload: { workflowId: stored.id, name: parsedSource.definition.name },
               at: savedAt,
             });
@@ -324,10 +329,11 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Changes a workflow's text, or turns it on or off. A new text takes the
-     * place of the old one whole, and the trigger rows follow it.
+     * Replaces a workflow's source, enables or disables it, or both. A new
+     * source replaces the old one completely, and the trigger rows are updated
+     * to match it.
      */
-    update: (input: UpdateInput): Effect.Effect<WorkflowSaved, CallError | NotFound> =>
+    update: (input: UpdateInput): Effect.Effect<WorkflowSaveResult, CallError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.update");
         const decoded = yield* Effect.mapError(decodeUpdate(input), createDecodeValidationError);
@@ -337,18 +343,17 @@ const make = Effect.gen(function* () {
             createValidationError([{ path: [], message: "name a field to change" }]),
           );
         }
-        const parsedSource =
-          content === undefined ? undefined : yield* requireParsedContent(content);
+        const parsedSource = content === undefined ? undefined : yield* parseContentOrFail(content);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const problems =
               parsedSource === undefined
                 ? undefined
-                : yield* readReferencesAndCheck(parsedSource.definition);
-            if (problems !== undefined) yield* requireNoErrors(problems);
+                : yield* readReferencesAndValidate(parsedSource.definition);
+            if (problems !== undefined) yield* failOnErrors(problems);
             const savedAt = yield* nowIso;
-            const { workflow: stored, changed } = yield* requireFound(
+            const { workflow: stored, changed } = yield* failIfWorkflowNotFound(
               workflows.update(
                 decoded.id,
                 {
@@ -368,25 +373,24 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "workflow.updated",
               actor: yield* currentStamp,
-              // The entry names the workflow also when nothing changed, so
-              // the live topic says that the workflow was updated, and a
-              // client reads it again. That read finds the same workflow. A
-              // save that changes nothing is rare, and one rule for every
-              // update is simpler than a second path that stays silent.
+              // The event is written even when nothing changed. Clients that
+              // watch the topic then read the workflow again and find it
+              // unchanged. A save that changes nothing is rare, and always
+              // writing the event is simpler than a separate silent path.
               record: { topic: "workflow", id: stored.id },
-              // Which of the two changed, never the new text. A save of the
-              // same text is recorded with nothing in `changed`.
+              // Which fields changed, never the new source. A save of the same
+              // source is recorded with an empty `changed`.
               payload: { workflowId: stored.id, changed },
               at: savedAt,
             });
-            // Turning a workflow on or off does not read its text, so it
-            // answers no warning about it.
+            // Enabling or disabling a workflow does not validate its source,
+            // so it returns no warnings.
             return { workflow: stored, warnings: problems?.warnings ?? [] };
           }),
         );
       }),
 
-    /** Removes a workflow, and the trigger rows of its source with it. */
+    /** Deletes a workflow and its trigger rows. */
     delete: (input: Identified): Effect.Effect<Record<string, never>, CallError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.delete");
@@ -395,7 +399,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const deletedAt = yield* nowIso;
-            const name = yield* requireFound(workflows.delete(id));
+            const name = yield* failIfWorkflowNotFound(workflows.delete(id));
             yield* audit.append({
               kind: "workflow.deleted",
               actor: yield* currentStamp,
@@ -409,21 +413,21 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Checks a workflow as a save does, and stores nothing. Every problem is
-     * in the answer, a problem of shape included, because the answer is what
-     * an editor shows while the author types.
+     * Validates a workflow like a save does, but stores nothing. Returns every
+     * error, schema errors included, instead of failing, because an editor
+     * shows the result while the author types.
      */
     validate: (input: WorkflowValidateInput): Effect.Effect<WorkflowIssues, CallError> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.validate");
         const decoded = yield* Effect.mapError(decodeValidate(input), createDecodeValidationError);
-        const parsed = parseContent(yield* requireContent(decoded));
+        const parsed = parseContent(yield* chooseRequiredContent(decoded));
         return Result.isSuccess(parsed)
-          ? yield* readReferencesAndCheck(parsed.success.definition)
+          ? yield* readReferencesAndValidate(parsed.success.definition)
           : { errors: parsed.failure, warnings: [] };
       }),
 
-    /** One page of the triggers of every workflow, the newest first. */
+    /** Returns one page of triggers across all workflows, the newest first. */
     queryTriggers: (input: TriggerQueryInput): Effect.Effect<TriggerPage, CallError> =>
       Effect.gen(function* () {
         yield* requireGrant("trigger.query");
@@ -450,7 +454,6 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The workflow service. */
 export class WorkflowService extends Context.Service<
   WorkflowService,
   Effect.Success<typeof make>

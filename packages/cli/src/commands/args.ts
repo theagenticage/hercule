@@ -314,15 +314,14 @@ export const parseArguments = async (
   }
 
   if (reading.length > 0) {
-    // One trailing newline is taken off, as a heredoc and an editor add one.
-    // A file saved on Windows ends its last line with `\r\n`, and that pair is
-    // the one newline too.
+    // Strip one trailing newline, because heredocs and editors add one. Files
+    // saved on Windows end with `\r\n`, which counts as that newline.
     const text = (await readStdin()).replace(/\r?\n$/, "");
     if (reading.length === 1) {
       const field = reading[0]!;
       payload[field.name] = coerce(field, text, help);
     } else {
-      // A `\r\n` ends a line here too, so no line keeps a `\r` of a CRLF file.
+      // Split at `\r\n` too, so no line of a Windows file keeps a trailing `\r`.
       const lines = text.split(/\r?\n/);
       if (lines.length !== reading.length) {
         throw new UsageError(

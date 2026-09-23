@@ -1,8 +1,3 @@
-/**
- * What a failure says: the issues of a refusal, which the web app marks in a
- * form or a text and the CLI prints one line each, and whether the record
- * asked for is not there.
- */
 import { describe, expect, it } from "vitest";
 import {
   ApiError,
@@ -18,12 +13,12 @@ describe("readValidationIssues", () => {
     { path: [], message: "3 more problems." },
   ];
 
-  it("answers the issues that a validation refusal names, in their order", () => {
+  it("returns the issues of a validation error, in order", () => {
     const refusal = new ApiError("validation", "The workflow is not valid.", { issues: ISSUES });
     expect(readValidationIssues(refusal)).toEqual(ISSUES);
   });
 
-  it("answers nothing for a failure that names no problem of what was sent", () => {
+  it("returns undefined for any other error", () => {
     expect(readValidationIssues(new ApiError("not_found", "No workflow has that id."))).toBe(
       undefined,
     );
@@ -33,14 +28,15 @@ describe("readValidationIssues", () => {
     expect(
       readValidationIssues(new ConnectionError("http://controller.test", new Error("refused"))),
     ).toBe(undefined);
-    // A request that never left names its issues on the error itself.
+    // A RequestError fails before the request is sent. Its issues are on the
+    // error itself, not in a controller response.
     expect(readValidationIssues(new RequestError(ISSUES, new Error("bad input")))).toBe(undefined);
     expect(readValidationIssues(new Error("no"))).toBe(undefined);
   });
 });
 
 describe("isNotFound", () => {
-  it("is true only of the controller's answer that the record is not there", () => {
+  it("returns true only for a not_found response from the controller", () => {
     expect(isNotFound(new ApiError("not_found", "No workflow has that id."))).toBe(true);
     expect(isNotFound(new ApiError("forbidden", "No."))).toBe(false);
     expect(isNotFound(new ConnectionError("http://controller.test", new Error("refused")))).toBe(

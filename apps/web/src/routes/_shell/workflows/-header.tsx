@@ -3,9 +3,9 @@ import { Link } from "@tanstack/react-router";
 import type { WorkflowHeaderStatus } from "@hercule/client-core";
 import { Button, SegmentedControl, SegmentedControlItem, cn } from "@hercule/ui";
 import type { WorkflowView } from "../../../screens/workflow-editor";
-import { readWorkflowView, WORKFLOW_VIEWS } from "./-view";
+import { parseWorkflowView, WORKFLOW_VIEWS } from "./-view";
 
-/** What the view control calls each view. */
+/** The label of each view in the view control. */
 const VIEW_LABELS: Readonly<Record<WorkflowView, string>> = {
   yaml: "YAML",
   graph: "Graph",
@@ -13,20 +13,21 @@ const VIEW_LABELS: Readonly<Record<WorkflowView, string>> = {
 };
 
 /**
- * The header of a workflow's page: the way back to the list, the workflow's
- * name, the view control, and at the right whatever the page puts there.
+ * Renders the header of a workflow's page: a link back to the list, the
+ * workflow's name, the view control, and on the right whatever the page
+ * passes as children.
  *
- * The title stands where the shell's bar puts every other screen's title,
- * and the page under the header starts where every other screen starts: the
- * row is one line of the title high, and the controls, which are higher, are
- * centred on that line. Every control is as high as the view control, and
- * each is centred in the row, so Save lines up with the view control and
- * does not move when Delete comes or goes.
- *
- * The row has three columns, and the middle one holds the view control. The
- * two outer columns share the rest of the width equally, so the view control
- * stays in one place whatever the title, the status or a question holds, and
- * a pointer that rests on it never finds another view under it.
+ * Layout:
+ * - The title sits where the shell's top bar puts every other screen's
+ *   title, and the content below starts at the same height as on other
+ *   screens. The row is one title line high, and the taller controls are
+ *   centred on that line.
+ * - Every control has the height of the view control, so Save lines up with
+ *   it and does not move when Delete appears or disappears.
+ * - The row is a three-column grid with the view control in the middle
+ *   column. The outer columns share the remaining width equally, so the view
+ *   control never moves when the title, the status or a question changes.
+ *   The pointer never ends up over a different view than the one it was on.
  */
 export function WorkflowHeader({
   name,
@@ -37,7 +38,7 @@ export function WorkflowHeader({
   readonly name: string;
   readonly view: WorkflowView;
   readonly onViewChange: (view: WorkflowView) => void;
-  /** The status and the actions of the page, or the question that stands in their place. */
+  /** The status text and the action buttons, or a question that replaces them. */
   readonly children: ReactNode;
 }): JSX.Element {
   return (
@@ -45,12 +46,11 @@ export function WorkflowHeader({
       <div className="flex min-w-0 items-baseline gap-2 tracking-[-0.015em]">
         <Link
           to="/workflows"
-          // The link is the current page only on the list itself. A
-          // workflow's page is under the list's address, and the link leads
-          // out of it.
+          // Marked as current only on the list itself. A workflow's page is
+          // under /workflows, but from there this link leads away.
           activeOptions={{ exact: true }}
           // The padding gives the focus ring room around the word, and the
-          // margin keeps the word where it stands.
+          // negative margin cancels the padding so the word does not move.
           className="-mx-1 shrink-0 rounded-control px-1 text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live"
         >
           Workflows
@@ -58,7 +58,7 @@ export function WorkflowHeader({
         <span aria-hidden="true" className="text-faint">
           /
         </span>
-        {/* A long name is cut off, so the whole name is in its tooltip. */}
+        {/* A long name is truncated, so the tooltip shows the full name. */}
         <h1 title={name} className="min-w-0 truncate font-emph text-ink">
           {name}
         </h1>
@@ -68,7 +68,7 @@ export function WorkflowHeader({
         className="h-8 w-auto"
         value={view}
         onValueChange={(next) => {
-          onViewChange(readWorkflowView(next));
+          onViewChange(parseWorkflowView(next));
         }}
       >
         {WORKFLOW_VIEWS.map((option) => (
@@ -89,10 +89,10 @@ const STATUS_TONE: Readonly<Record<WorkflowHeaderStatus["tone"], string>> = {
 };
 
 /**
- * What the header of a workflow's page holds at its right: what the page's
- * last write said, Delete for a stored workflow, and Save. A question takes
- * their place while it shows. They are hidden then, and not removed, so the
- * focus can go back to the button that asked.
+ * Renders the right side of a workflow's header: the result of the last save
+ * or delete, Delete (for a stored workflow only), and Save. While a question
+ * shows, these are hidden instead of unmounted, so the focus can return to
+ * the button that opened the question.
  */
 export function WorkflowHeaderActions({
   isHidden,
@@ -127,8 +127,9 @@ export function WorkflowHeaderActions({
           Delete
         </Button>
       ) : null}
-      {/* `aria-disabled`, and not `disabled`, so that Save keeps the focus
-          while its write is in flight and after it lands. */}
+      {/* `aria-disabled` instead of `disabled`, so Save keeps the focus while
+          the save is in flight and after it finishes. A `disabled` button
+          loses the focus. */}
       <Button variant="form" aria-disabled={isSaveDisabled} onClick={onSave}>
         Save
       </Button>

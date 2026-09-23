@@ -1,23 +1,22 @@
 /**
- * Workflows: the list, the page on which a workflow is written, the problems
- * panel under the editor, and the control that chooses what the page shows.
+ * Tests for the Workflows screens: the list, the editor page, the problems
+ * panel below the editor, and the view control.
  *
- * The stub controller keeps the workflows that a test gives it, and it changes
- * them on each write as the real controller does. Thus a screen that reads its
- * list again after a write sees the result of the write.
+ * The stub controller keeps the workflows that a test gives it, and updates
+ * them on each write like the real controller. So a screen that refetches its
+ * list after a write sees the result.
  *
- * The editor draws only the lines near the caret, so the text on the page is
- * not always the full text. Thus a test reads the text as a user copies it:
- * it selects all of the text and copies the selection. A test writes text as a
- * user pastes it: it selects all of the text and pastes over the selection. A
- * paste adds no indentation, so the text that the page sends must be equal to
- * the pasted text, byte for byte.
+ * The editor renders only the lines near the cursor, so the DOM does not
+ * always hold the full text. Tests therefore read the text the way a user
+ * copies it (select all, copy), and write it the way a user pastes it (select
+ * all, paste). A paste adds no indentation, so the text that the page sends
+ * must match the pasted text byte for byte.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { QueryClient } from "@tanstack/react-query";
-import { ageOf, queryKeys, readWorkflowSource } from "@hercule/client-core";
+import { ageOf, queryKeys, parseWorkflowSourceWithRanges } from "@hercule/client-core";
 import type {
   DeclaredEventKind,
   Issue,
@@ -41,16 +40,15 @@ type User = ReturnType<typeof userEvent.setup>;
 type AppRouter = Awaited<ReturnType<typeof renderApp>>["router"];
 
 /**
- * How long a test waits for the editor to show. The first page with an editor
- * also loads the libraries of the editor, and under jsdom that load can take
- * some seconds.
+ * How long a test waits for the editor to appear. The first editor page also
+ * loads the editor's libraries, which can take a few seconds under jsdom.
  */
 const EDITOR_LOAD_TIMEOUT_MS = 5_000;
 
-/** How long a test that opens the editor can run. The first load of the editor is included. */
+/** The timeout of a test that opens the editor, including the first editor load. */
 const EDITOR_TEST_TIMEOUT_MS = 20_000;
 
-/** How long a test waits for the validation of the source. It starts after typing stops. */
+/** How long a test waits for the validation result. Validation starts only after typing stops. */
 const VALIDATION_TIMEOUT_MS = 3_000;
 
 const MINUTE_MS = 60_000;
@@ -58,11 +56,11 @@ const HOUR_MINUTES = 60;
 const DAY_MINUTES = 24 * HOUR_MINUTES;
 const WEEK_MINUTES = 7 * DAY_MINUTES;
 
-/** The instant `minutes` minutes before now, written as the wire writes an instant. */
+/** Returns the ISO timestamp of `minutes` minutes ago. */
 const buildTimestampMinutesAgo = (minutes: number): string =>
   new Date(Date.now() - minutes * MINUTE_MS).toISOString();
 
-/** The number of the line of `source` that is equal to `line`, counted from one. */
+/** Returns the 1-based number of the line in `source` that equals `line`. Throws when none does. */
 const findLineNumber = (source: string, line: string): number => {
   const index = source.split("\n").indexOf(line);
   if (index === -1) throw new Error(`no line of the source is ${JSON.stringify(line)}`);
@@ -77,8 +75,8 @@ const TRIAGE_NAME = "Triage labelled PRs";
 const TRIAGE_DESCRIPTION = "Files a task when a pull request is labelled.";
 
 /**
- * A text that a reformat changes: comments, blank lines, trailing spaces, a
- * `|` block, and keys in an order that is not the order of the definition.
+ * A source that reformatting would change: comments, blank lines, trailing
+ * spaces, a `|` block, and keys in a different order than the definition's.
  */
 const TRIAGE_SOURCE = [
   "# Files a task for each pull request labelled needs-triage.",
@@ -103,7 +101,7 @@ const TRIAGE_SOURCE = [
   "",
 ].join("\n");
 
-/** The same workflow after an edit that the user did not save yet. */
+/** The same workflow with an edit that the user has not saved yet. */
 const EDITED_TRIAGE_SOURCE = TRIAGE_SOURCE.replace(
   "Read the diff first.",
   "Read the diff and the tests first.",
@@ -140,7 +138,7 @@ steps:
     action: task.query
 `;
 
-/** What a user writes on the page for a new workflow. */
+/** The source that a user writes on the page for a new workflow. */
 const CREATED_SOURCE = `# Files a task each morning.
 name: Morning task
 steps:
@@ -153,8 +151,8 @@ steps:
 `;
 
 /**
- * A text that parses, with two problems that only the controller can find:
- * an event kind and an action that do not exist.
+ * A source that parses, but has two problems that only the controller can
+ * find: an event kind and an action that do not exist.
  */
 const PROBLEM_SOURCE = `name: ${TRIAGE_NAME}
 triggers:
@@ -186,12 +184,18 @@ const SECOND_STEP_LINE = findLineNumber(PROBLEM_SOURCE, "  - id: comment");
 
 const UNKNOWN_KIND: Issue = {
   path: ["triggers", "0", "source", "kind"],
-  message: "github.pr.labelled is not an event kind that a trigger can name.",
+  message:
+    '"github.pr.labelled" is not a known event kind. ' +
+    "A trigger can listen for a core event kind or an event kind of an active plugin. " +
+    "The known event kinds are: cron.tick, task.created, github.pr.labeled.",
 };
 
 const UNKNOWN_ACTION: Issue = {
   path: ["steps", "1", "action"],
-  message: "task.creat is not an action. The actions are task.create, task.update and task.query.",
+  message:
+    '"task.creat" is not a known action. ' +
+    "A step can use a built-in action or an action of an active plugin. " +
+    "The known actions are: task.create, task.update, task.query.",
 };
 
 const NO_TERMINAL_STEP: Issue = {
@@ -224,16 +228,16 @@ const WEEKLY: Workflow = {
 };
 
 /**
- * The order in which the stub controller lists the workflows. It is not the
- * order of the names and not the order of the ages. Thus a screen that sorts
- * the list again shows a different order.
+ * The order in which the stub controller lists the workflows. It matches
+ * neither name order nor age order, so a screen that sorted the list itself
+ * would show a different order.
  */
 const LISTED_WORKFLOWS: readonly Workflow[] = [TRIAGE, NIGHTLY, WEEKLY];
 
 /** The id that the stub controller gives to the workflow that a test creates. */
 const CREATED_ID = "0199c0ff-1111-7000-8000-0000000000aa";
 
-/** The actions that a step can name, as `workflowAction.query` answers them. */
+/** The actions that a step can use, as `workflowAction.query` returns them. */
 const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
   {
     id: "task.create",
@@ -259,7 +263,7 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
   },
 ];
 
-/** The event kinds that a trigger can name, as `eventKind.query` answers them. */
+/** The event kinds that a trigger can use, as `eventKind.query` returns them. */
 const EVENT_KINDS: readonly DeclaredEventKind[] = [
   { kind: "cron.tick", description: "A schedule came due.", connectionRequired: false },
   { kind: "task.created", description: "A task was created.", connectionRequired: false },
@@ -276,13 +280,13 @@ const EVENT_KINDS: readonly DeclaredEventKind[] = [
 
 const NO_PROBLEMS: WorkflowIssues = { errors: [], warnings: [] };
 
-/** A validation that finds `issues` in `source`, and nothing in a different source. */
+/** Returns a validate function that finds `issues` in `source`, and nothing in any other source. */
 const buildValidation =
   (source: string, issues: WorkflowIssues) =>
   (validated: string): WorkflowIssues =>
     validated === source ? issues : NO_PROBLEMS;
 
-/** A save refused with `issues`, in the envelope the API sends. */
+/** Returns the response to a save rejected with `issues`, in the API's error envelope. */
 const buildRefusal = (issues: readonly Issue[]) => ({
   status: 400,
   body: {
@@ -292,15 +296,15 @@ const buildRefusal = (issues: readonly Issue[]) => ({
 
 const WORKFLOW_NOT_FOUND = { status: 404, body: envelope("not_found", "No workflow has that id.") };
 
-/** The value that the top-level `key` of a source has, where the source writes one. */
+/** Returns the value of the top-level `key` in `source`, or `undefined` when the source does not set it. */
 const readTopLevelValue = (source: string, key: string): string | undefined =>
   new RegExp(`^${key}: (.+)$`, "m").exec(source)?.[1];
 
 /**
- * A stored workflow as one `workflow.query` item. The controller reads the
- * name and the description from the definition. Each source in this file
- * writes both at the start of a line with no indentation, so the stub reads
- * them from the text.
+ * Converts a stored workflow to a `workflow.query` item. The real controller
+ * reads the name and the description from the parsed definition. Every
+ * source in this file writes both unindented at the start of a line, so the
+ * stub can read them from the text.
  */
 const buildSummary = (workflow: Workflow): WorkflowSummary => {
   const description = readTopLevelValue(workflow.source, "description");
@@ -314,11 +318,13 @@ const buildSummary = (workflow: Workflow): WorkflowSummary => {
 };
 
 /**
- * A controller past setup that holds `workflows`, and lists them in the order
- * given. Each write changes what the controller holds. `validate` answers
- * `workflow.validate`. `overrides` replaces the answer of a route, or adds a
- * route. `changeElsewhere` and `deleteElsewhere` change what the controller
- * holds as another client does.
+ * Builds a stub controller that has finished setup and holds `workflows`,
+ * listed in the given order. Each write updates the workflows it holds.
+ * - `validate` handles `workflow.validate`.
+ * - `overrides` replaces the handler of a route, or adds a route.
+ *
+ * Returns the routes, and `changeElsewhere` and `deleteElsewhere`, which
+ * change the stored workflows the way another client would.
  */
 const buildController = ({
   workflows,
@@ -351,8 +357,8 @@ const buildController = ({
         ...workflow,
         source: change.source ?? workflow.source,
         enabled: change.enabled ?? workflow.enabled,
-        // A workflow's time is when its text last changed, so turning it on
-        // or off does not move it.
+        // `updatedAt` tracks changes to the source only, so turning a
+        // workflow on or off does not change it.
         updatedAt:
           change.source === undefined || change.source === workflow.source
             ? workflow.updatedAt
@@ -439,9 +445,9 @@ const openApp = async ({
 };
 
 /**
- * The writes that the screen made, in order. The live connection asks for a
- * ticket on every screen, and the page validates its source without storing it,
- * so neither of the two is a write.
+ * Returns the writes that the screen made, in order. The live connection
+ * requests a ticket on every screen, and a validation stores nothing, so
+ * neither counts as a write.
  */
 const listWrites = (api: { readonly calls: readonly Call[] }): readonly Call[] =>
   api.calls.filter(
@@ -451,16 +457,15 @@ const listWrites = (api: { readonly calls: readonly Call[] }): readonly Call[] =
       call.path !== "/api/v1/workflows/validate",
   );
 
-/** One write as its route and its body. */
+/** Returns a write as its route and its body. */
 const describeWrite = (call: Call): readonly [string, unknown] => [
   `${call.method} ${call.path}`,
   call.body,
 ];
 
 /**
- * Waits until the app has no read and no write in flight. A save is a
- * mutation of the query client of the app, so when all mutations are done, the
- * page knows the result of the save.
+ * Waits until the app has no read or write in flight. A save is a React Query
+ * mutation, so once no mutation is running, the page has the save's result.
  */
 const waitForIdleRequests = (queryClient: QueryClient): Promise<void> =>
   waitFor(() => {
@@ -469,25 +474,25 @@ const waitForIdleRequests = (queryClient: QueryClient): Promise<void> =>
   });
 
 /* ------------------------------------------------------------------------ */
-/* The page, as a user reads it and works on it.                             */
+/* Helpers that read and use the page the way a user does.                  */
 /* ------------------------------------------------------------------------ */
 
-/** The requests that read the stored workflow with `id`. */
+/** Returns the requests that read the stored workflow with `id`. */
 const listWorkflowReads = (api: { readonly calls: readonly Call[] }, id: string): readonly Call[] =>
   api.calls.filter((call) => call.method === "GET" && call.path === `/api/v1/workflows/${id}`);
 
-/** The editor, when it shows. */
+/** Waits for the editor to appear and returns it. */
 const findEditor = (): Promise<HTMLElement> =>
   screen.findByRole("textbox", { name: "Workflow source" }, { timeout: EDITOR_LOAD_TIMEOUT_MS });
 
-/** Replaces all of the text of the editor with `source`: select all, then paste. */
+/** Replaces all of the editor's text with `source`, by selecting all and pasting. */
 const replaceEditorSource = async (user: User, source: string): Promise<void> => {
   await user.click(await findEditor());
   await user.keyboard("{Control>}a{/Control}");
   await user.paste(source);
 };
 
-/** All of the text of the editor: select all, then copy. */
+/** Returns all of the editor's text, by selecting all and copying. */
 const readEditorSource = async (user: User): Promise<string | undefined> => {
   await user.click(await findEditor());
   await user.keyboard("{Control>}a{/Control}");
@@ -496,9 +501,9 @@ const readEditorSource = async (user: User): Promise<string | undefined> => {
 };
 
 /**
- * The text of the line that holds the caret. The editor draws each line of
- * the text as one element in the text box, so the line with the caret is the
- * element around the anchor of the selection.
+ * Returns the text of the line that holds the cursor. The editor renders each
+ * line as one child element of the text box, so the line with the cursor is
+ * the child that contains the selection's anchor.
  */
 const readCaretLine = (editor: HTMLElement): string | undefined => {
   const selection = document.getSelection();
@@ -511,7 +516,7 @@ const readCaretLine = (editor: HTMLElement): string | undefined => {
 const findProblemsPanel = (): Promise<HTMLElement> =>
   screen.findByRole("region", { name: "Problems" });
 
-/** The entry of the problems panel for the problem at `line` that says `message`. */
+/** Waits for the problems panel entry at `line` with `message`, and returns it. */
 const findProblem = (panel: HTMLElement, line: number, message: string): Promise<HTMLElement> =>
   within(panel).findByRole(
     "button",
@@ -521,25 +526,25 @@ const findProblem = (panel: HTMLElement, line: number, message: string): Promise
     { timeout: VALIDATION_TIMEOUT_MS },
   );
 
-/** A link of the sidebar, which is how a user goes to another screen. */
+/** Returns a sidebar link, which is how a user moves to another screen. */
 const getNavLink = (name: string): HTMLElement =>
   within(screen.getByRole("navigation", { name: "Hercule" })).getByRole("link", { name });
 
 /**
- * One option of the view control. The control is the segmented control of the
- * app, and each option of a segmented control is a radio button.
+ * Returns one option of the view control. The view control is a segmented
+ * control, and its options have the radio role.
  */
 const getViewOption = (name: "YAML" | "Graph" | "Split"): HTMLElement =>
   screen.getByRole("radio", { name });
 
-/** The `view` search parameter of the current address, or `null` when it has none. */
+/** Returns the `view` search param of the current URL, or `null` when there is none. */
 const readViewParam = (router: AppRouter): string | null =>
   new URLSearchParams(router.state.location.searchStr).get("view");
 
-/** The list of workflows: the one list on the screen. */
+/** Returns the workflow list, which is the only list on the screen. */
 const getWorkflowList = (): HTMLElement => within(screen.getByRole("main")).getByRole("list");
 
-/** The list item of the workflow whose link is named `name`. */
+/** Returns the list item whose link is named `name`. */
 const getWorkflowRow = (name: string): HTMLElement => {
   const row = within(getWorkflowList())
     .getAllByRole("listitem")
@@ -551,14 +556,14 @@ const getWorkflowRow = (name: string): HTMLElement => {
 const getEnabledSwitch = (name: string): HTMLElement =>
   within(getWorkflowRow(name)).getByRole("switch", { name: "Enabled" });
 
-/** The header of a workflow's page, which holds its title. */
+/** Returns the header of a workflow's page, which holds its title. */
 const getPageHeader = (): HTMLElement => {
   const header = screen.getByRole("heading", { level: 1 }).closest("header");
   if (header === null) throw new Error("the page's title is not in a header");
   return header;
 };
 
-/** What the page's header says beside Save, or `undefined` when it says nothing. */
+/** Returns the status text beside Save in the page header, or `undefined` when there is none. */
 const readHeaderStatus = (): string | undefined => {
   const header = getPageHeader();
   const statusLine = within(header).queryByRole("alert") ?? within(header).queryByRole("status");
@@ -566,8 +571,8 @@ const readHeaderStatus = (): string | undefined => {
 };
 
 /**
- * A handler that answers only once the test releases it, so that a test can
- * look at the page while a request is in flight.
+ * Returns a handler that responds only after the test calls `release`, so the
+ * test can inspect the page while the request is in flight.
  */
 const holdAnswer = (answer: (call: Call) => Answer) => {
   let release = (): void => {};
@@ -581,7 +586,7 @@ const holdAnswer = (answer: (call: Call) => Answer) => {
   return { handler, release };
 };
 
-/** A push that says that the workflow with `id` changed elsewhere. */
+/** Sends a live push saying that the workflow with `id` was updated or deleted elsewhere. */
 const pushWorkflowChange = (
   live: Awaited<ReturnType<typeof openApp>>["live"],
   id: string,
@@ -592,28 +597,28 @@ const pushWorkflowChange = (
   });
 };
 
-/** Waits until the page follows the changes of its workflow that are made elsewhere. */
-const waitForLiveWorkflow = (live: Awaited<ReturnType<typeof openApp>>["live"]) =>
+/** Waits until the page subscribes to live changes of workflows. */
+const waitForWorkflowSubscription = (live: Awaited<ReturnType<typeof openApp>>["live"]) =>
   waitFor(() => {
     expect(live.topics()).toContain("workflow");
   });
 
-/** The sources that the page asked the controller to validate, in the order it asked. */
+/** Returns the sources that the page sent for validation, in order. */
 const listValidatedSources = (api: { readonly calls: readonly Call[] }): readonly string[] =>
   api.calls
     .filter((call) => call.path === "/api/v1/workflows/validate")
     .map((call) => (call.body as { readonly source: string }).source);
 
 /**
- * Pastes `text` at the cursor of the editor with a plain event. user-event
- * waits for a timer after each action, and a fake clock never lets that timer
- * fire, so a test under a fake clock pastes without user-event.
+ * Pastes `text` at the editor's cursor with a plain DOM event. user-event
+ * waits on a timer after each action, and a fake clock never fires that
+ * timer, so tests that use a fake clock paste without user-event.
  */
 const pasteUnderFakeClock = (editor: HTMLElement, text: string): void => {
   fireEvent.paste(editor, { clipboardData: { getData: () => text } });
 };
 
-/** Moves the fake clock on, and lets React and the promises it settles catch up. */
+/** Advances the fake clock, and lets React and the promises it resolves catch up. */
 const advanceClock = (milliseconds: number) =>
   act(async () => {
     await vi.advanceTimersByTimeAsync(milliseconds);
@@ -628,7 +633,7 @@ afterEach(() => {
 /* ------------------------------------------------------------------------ */
 
 describe("Workflows > the list", () => {
-  it("lists each workflow in the order the controller answers, with its name, description, switch and age", async () => {
+  it("lists each workflow in the controller's order, with its name, description, switch and age", async () => {
     await openApp({ path: "/workflows" });
 
     await screen.findByRole("link", { name: TRIAGE_NAME });
@@ -651,14 +656,14 @@ describe("Workflows > the list", () => {
       );
       if (description !== undefined) expect(reading(row)).toContain(description);
       expect(getEnabledSwitch(name).getAttribute("aria-checked")).toBe(String(workflow.enabled));
-      // The age is read with the same function as every other age in the app.
-      // Its smallest unit is a minute, so this read and the read of the row
-      // agree unless the two fall on each side of a minute boundary.
+      // The expected age uses the same function as the app. Its smallest unit
+      // is a minute, so the two agree unless a minute boundary falls between
+      // them.
       expect(reading(row)).toContain(ageOf(workflow.updatedAt, new Date()));
     }
   });
 
-  it("turns a workflow on and off with its switch, and sends only enabled", async () => {
+  it("turns a workflow on and off with its switch, sending only `enabled`", async () => {
     const user = userEvent.setup();
     const { api } = await openApp({ path: "/workflows" });
     await screen.findByRole("link", { name: TRIAGE_NAME });
@@ -679,7 +684,7 @@ describe("Workflows > the list", () => {
     ]);
   });
 
-  it("opens a workflow from its name", { timeout: EDITOR_TEST_TIMEOUT_MS }, async () => {
+  it("opens a workflow when its name is clicked", { timeout: EDITOR_TEST_TIMEOUT_MS }, async () => {
     const user = userEvent.setup();
     const { router } = await openApp({ path: "/workflows" });
 
@@ -709,7 +714,7 @@ describe("Workflows > the list", () => {
     },
   );
 
-  it("keeps the empty state when there are no workflows, and offers New workflow in it", async () => {
+  it("shows an empty state with New workflow when there are no workflows", async () => {
     await openApp({ path: "/workflows", workflows: [] });
 
     expect(await screen.findByRole("heading", { name: "No workflows yet." })).toBeDefined();
@@ -720,14 +725,14 @@ describe("Workflows > the list", () => {
 });
 
 describe("Workflows > a new workflow", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
-  it("opens the editor on a starter whose first line is a comment and which parses to a definition", async () => {
+  it("opens the editor on a starter source that starts with a comment and parses as a workflow", async () => {
     const user = userEvent.setup();
     await openApp({ path: "/workflows/new" });
 
     const starter = (await readEditorSource(user)) ?? "";
 
     expect(starter.split("\n")[0]).toMatch(/^\s*#/);
-    expect(readWorkflowSource(starter).definition).toBeDefined();
+    expect(parseWorkflowSourceWithRanges(starter).definition).toBeDefined();
   });
 
   it("creates the workflow from the text as typed, then opens it", async () => {
@@ -743,20 +748,20 @@ describe("Workflows > a new workflow", { timeout: EDITOR_TEST_TIMEOUT_MS }, () =
     expect(listWrites(api).map(describeWrite)).toEqual([
       ["POST /api/v1/workflows", { source: CREATED_SOURCE }],
     ]);
-    // The page of the new workflow replaces the page of the draft only when
-    // the navigation is complete.
+    // The new workflow's page replaces the draft's page only once the
+    // navigation finishes.
     await waitFor(() => {
       expect(router.state.status).toBe("idle");
     });
     expect(await readEditorSource(user)).toBe(CREATED_SOURCE);
   });
 
-  // The validation of the source finds only a warning. The save is refused
-  // all the same, as when something changed on the controller between the
-  // validation and the save, for example an Agent that was deleted. The test
-  // waits for the warning before it saves, so the answer of the validation
-  // cannot arrive after the refusal and replace the issues of the refusal.
-  it("keeps the text as typed and lists the issues when the create is refused", async () => {
+  // The validation finds only a warning, but the save is still rejected. This
+  // happens when something changes on the controller between the validation
+  // and the save, for example when an Agent is deleted. The test waits for
+  // the warning before it saves, so the validation result cannot arrive after
+  // the rejection and replace its errors.
+  it("keeps the text and lists the errors when the create is rejected", async () => {
     const user = userEvent.setup();
     const { router } = await openApp({
       path: "/workflows/new",
@@ -798,10 +803,10 @@ describe("Workflows > a stored workflow", { timeout: EDITOR_TEST_TIMEOUT_MS }, (
     expect(router.state.location.pathname).toBe(`/workflows/${TRIAGE.id}`);
   });
 
-  // As for a create: the validation finds only a warning, and the test waits
-  // for it, so only the refusal can list the error. The refusal names errors
-  // only, so the warning of the validation of the same source stays.
-  it("keeps the text as typed and lists the issues when the update is refused, with the warnings of the validation", async () => {
+  // As in the create test, the validation finds only a warning and the test
+  // waits for it, so only the rejection can add the error. A rejection
+  // returns errors only, so the warning from the validation stays.
+  it("keeps the text and lists the errors when the update is rejected, next to the validation's warnings", async () => {
     const user = userEvent.setup();
     const { api, router } = await openApp({
       path: `/workflows/${TRIAGE.id}`,
@@ -833,7 +838,7 @@ describe("Workflows > a stored workflow", { timeout: EDITOR_TEST_TIMEOUT_MS }, (
     expect(await readEditorSource(user)).toBe(PROBLEM_SOURCE);
   });
 
-  it("asks in place before it deletes, then deletes the workflow and returns to the list", async () => {
+  it("asks for confirmation on the page, not in a browser dialog, then deletes and returns to the list", async () => {
     const user = userEvent.setup();
     const browserDialog = vi.spyOn(window, "confirm").mockReturnValue(true);
     const { api, router } = await openApp({ path: `/workflows/${TRIAGE.id}` });
@@ -852,7 +857,7 @@ describe("Workflows > a stored workflow", { timeout: EDITOR_TEST_TIMEOUT_MS }, (
     expect(listWrites(api).map((call) => `${call.method} ${call.path}`)).toEqual([
       `DELETE /api/v1/workflows/${TRIAGE.id}`,
     ]);
-    // The list is read again, and the deleted workflow is not in it.
+    // The list is refetched and no longer has the deleted workflow.
     expect(await screen.findByRole("link", { name: NIGHTLY_NAME })).toBeDefined();
     expect(screen.queryByRole("link", { name: TRIAGE_NAME })).toBeNull();
     expect(browserDialog).not.toHaveBeenCalled();
@@ -876,7 +881,7 @@ describe("Workflows > a stored workflow", { timeout: EDITOR_TEST_TIMEOUT_MS }, (
 });
 
 describe("Workflows > leaving with unsaved changes", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
-  it("asks in place before it leaves, and Stay keeps the page and the text", async () => {
+  it("asks for confirmation on the page before leaving, and Stay keeps the page and the text", async () => {
     const user = userEvent.setup();
     const browserDialog = vi.spyOn(window, "confirm").mockReturnValue(true);
     const { router } = await openApp({ path: `/workflows/${TRIAGE.id}` });
@@ -911,7 +916,7 @@ describe("Workflows > leaving with unsaved changes", { timeout: EDITOR_TEST_TIME
     });
   });
 
-  it("asks nothing when nothing was changed", async () => {
+  it("does not ask when nothing changed", async () => {
     const user = userEvent.setup();
     const { router } = await openApp({ path: `/workflows/${TRIAGE.id}` });
     await findEditor();
@@ -924,7 +929,7 @@ describe("Workflows > leaving with unsaved changes", { timeout: EDITOR_TEST_TIME
     expect(screen.queryByText(/Leave without saving\?/)).toBeNull();
   });
 
-  it("asks nothing while a save of the text on the page is in flight", async () => {
+  it("does not ask while a save of the current text is in flight", async () => {
     const user = userEvent.setup();
     const held = holdAnswer((call) => {
       const { source } = call.body as { readonly source: string };
@@ -950,10 +955,10 @@ describe("Workflows > leaving with unsaved changes", { timeout: EDITOR_TEST_TIME
     ]);
   });
 
-  // The link is pressed before the page renders the save, so the question
-  // can show. Once the page knows that the text is being saved, the held
-  // navigation goes on.
-  it("goes on with a navigation that it held once a save of the text is in flight", async () => {
+  // The link is clicked before the page re-renders with the pending save, so
+  // the navigation is blocked at first. Once the page sees the save, the
+  // blocked navigation continues.
+  it("lets a blocked navigation continue once a save of the text is in flight", async () => {
     const user = userEvent.setup();
     const held = holdAnswer((call) => {
       const { source } = call.body as { readonly source: string };
@@ -980,7 +985,7 @@ describe("Workflows > leaving with unsaved changes", { timeout: EDITOR_TEST_TIME
     await waitForIdleRequests(queryClient);
   });
 
-  it("asks nothing once the changes are saved", async () => {
+  it("does not ask once the changes are saved", async () => {
     const user = userEvent.setup();
     const { api, router, queryClient } = await openApp({ path: `/workflows/${TRIAGE.id}` });
 
@@ -1019,14 +1024,14 @@ describe("Workflows > the problems panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     const unknownAction = await findProblem(panel, UNKNOWN_ACTION_LINE, UNKNOWN_ACTION.message);
     const noTerminalStep = await findProblem(panel, SECOND_STEP_LINE, NO_TERMINAL_STEP.message);
 
-    // The warning is on a line above the second error, so an order by line
-    // puts the warning between the two errors.
+    // The warning's line is above the second error's line, so sorting by line
+    // would put the warning between the two errors.
     expect(SECOND_STEP_LINE).toBeLessThan(UNKNOWN_ACTION_LINE);
     expectInDocumentOrder([unknownKind, unknownAction, noTerminalStep]);
     expect(reading(panel)).toContain("3 problems");
   });
 
-  it("counts one problem in the singular", async () => {
+  it("uses the singular for one problem", async () => {
     const user = userEvent.setup();
     await openApp({
       path: `/workflows/${TRIAGE.id}`,
@@ -1040,14 +1045,14 @@ describe("Workflows > the problems panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(reading(panel)).toMatch(/\b1 problem\b/);
   });
 
-  it("says in one line that there are no problems when there are none", async () => {
+  it('shows "No problems." when there are none', async () => {
     await openApp({ path: `/workflows/${TRIAGE.id}` });
     await findEditor();
 
     const panel = await findProblemsPanel();
 
-    // Until the controller answers the validation of the source, the panel can
-    // show a note that it runs. "No problems." is true only after the answer.
+    // Until the validation returns, the panel may show "Checking…". "No
+    // problems." appears only after the result arrives.
     await waitFor(
       () => {
         expect(reading(panel)).toContain("No problems.");
@@ -1058,7 +1063,7 @@ describe("Workflows > the problems panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(within(panel).queryAllByRole("button", { name: /\bLine \d+/ })).toEqual([]);
   });
 
-  it("moves the cursor to the line of the problem that is clicked", async () => {
+  it("moves the cursor to the line of a clicked problem", async () => {
     const user = userEvent.setup();
     await openApp({
       path: `/workflows/${TRIAGE.id}`,
@@ -1114,7 +1119,7 @@ describe("Workflows > the problems panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
 });
 
 describe("Workflows > the view control", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
-  it("shows the text and the graph side by side when the address names no view", async () => {
+  it("shows the text and the graph side by side when the URL has no view", async () => {
     await openApp({ path: `/workflows/${TRIAGE.id}` });
 
     await findEditor();
@@ -1128,12 +1133,12 @@ describe("Workflows > the view control", { timeout: EDITOR_TEST_TIMEOUT_MS }, ()
     { view: "graph", option: "Graph", showsText: false, showsGraph: true },
     { view: "split", option: "Split", showsText: true, showsGraph: true },
   ] as const)(
-    "shows what view=$view chooses when the address is opened, and the problems panel",
+    "opens view=$view with the matching panes and the problems panel",
     async ({ view, option, showsText, showsGraph }) => {
       await openApp({ path: `/workflows/${TRIAGE.id}?view=${view}` });
 
-      // What the view shows is found first, so the page is complete before
-      // the test looks for what the view does not show.
+      // Wait for what the view shows first, so the page is fully rendered
+      // before the test checks what the view hides.
       if (showsText) await findEditor();
       if (showsGraph) {
         await screen.findByRole(
@@ -1153,7 +1158,7 @@ describe("Workflows > the view control", { timeout: EDITOR_TEST_TIMEOUT_MS }, ()
     },
   );
 
-  it("puts the chosen view in the address, and a reload keeps it", async () => {
+  it("writes the chosen view to the URL, and a reload keeps it", async () => {
     const user = userEvent.setup();
     const { router, unmount } = await openApp({ path: `/workflows/${TRIAGE.id}` });
     await findEditor();
@@ -1183,7 +1188,7 @@ describe("Workflows > the view control", { timeout: EDITOR_TEST_TIMEOUT_MS }, ()
     });
     expect(screen.getByRole("region", { name: "Workflow graph" })).toBeDefined();
 
-    // A reload opens the same address again in a new page.
+    // Simulates a reload by rendering the same URL again.
     const address = router.state.location.href;
     unmount();
     await openApp({ path: address });
@@ -1201,7 +1206,7 @@ describe("Workflows > the view control", { timeout: EDITOR_TEST_TIMEOUT_MS }, ()
 });
 
 describe("Workflows > the switch in the list", () => {
-  it("shows the new state while the write is in flight, and takes no second press until it lands", async () => {
+  it("shows the new state while the request is in flight, and ignores clicks until it finishes", async () => {
     const user = userEvent.setup();
     const held = holdAnswer(() => ({
       body: { workflow: { ...TRIAGE, enabled: true }, warnings: [] },
@@ -1216,7 +1221,7 @@ describe("Workflows > the switch in the list", () => {
     await waitFor(() => {
       expect(getEnabledSwitch(TRIAGE_NAME).getAttribute("aria-checked")).toBe("true");
     });
-    // It ignores presses while the write is in flight, and keeps the focus.
+    // While the request is in flight, the switch ignores clicks and keeps the focus.
     expect(getEnabledSwitch(TRIAGE_NAME).getAttribute("aria-disabled")).toBe("true");
     expect(document.activeElement).toBe(getEnabledSwitch(TRIAGE_NAME));
     await user.click(getEnabledSwitch(TRIAGE_NAME));
@@ -1230,7 +1235,7 @@ describe("Workflows > the switch in the list", () => {
     expect(document.activeElement).toBe(getEnabledSwitch(TRIAGE_NAME));
   });
 
-  it("says under the row why a write was refused, and shows the state that is stored", async () => {
+  it("shows under the row why the update failed, and keeps the stored state", async () => {
     const user = userEvent.setup();
     const { queryClient } = await openApp({
       path: "/workflows",
@@ -1253,10 +1258,10 @@ describe("Workflows > the switch in the list", () => {
   });
 });
 
-describe("Workflows > what the page says", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
-  // Save is `aria-disabled` rather than `disabled`, so that it keeps the
-  // focus after a save lands.
-  it("keeps Save off while the text is the stored text", async () => {
+describe("Workflows > the page header", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
+  // Save uses `aria-disabled` instead of `disabled`, so it keeps the focus
+  // after a save finishes.
+  it("disables Save while the text matches the stored text", async () => {
     const user = userEvent.setup();
     const { api } = await openApp({ path: `/workflows/${TRIAGE.id}` });
     await findEditor();
@@ -1273,7 +1278,7 @@ describe("Workflows > what the page says", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(listWrites(api)).toEqual([]);
   });
 
-  it("keeps the focus on Save while the save is in flight and after it lands", async () => {
+  it("keeps the focus on Save while the save is in flight and after it finishes", async () => {
     const user = userEvent.setup();
     const held = holdAnswer((call) => {
       const { source } = call.body as { readonly source: string };
@@ -1302,7 +1307,7 @@ describe("Workflows > what the page says", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(listWrites(api)).toHaveLength(1);
   });
 
-  it("says Saved. once the text is saved, and nothing once the text changes again", async () => {
+  it('shows "Saved." after a save, and clears it when the text changes again', async () => {
     const user = userEvent.setup();
     await openApp({ path: `/workflows/${TRIAGE.id}` });
 
@@ -1317,7 +1322,7 @@ describe("Workflows > what the page says", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(readHeaderStatus()).toBeUndefined();
   });
 
-  it("says why a save failed when the controller did not take it, and keeps the text", async () => {
+  it("shows why a save failed, and keeps the text", async () => {
     const user = userEvent.setup();
     await openApp({
       path: `/workflows/${TRIAGE.id}`,
@@ -1338,7 +1343,7 @@ describe("Workflows > what the page says", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(await readEditorSource(user)).toBe(EDITED_TRIAGE_SOURCE);
   });
 
-  it("says that a refused text has problems, until the text changes", async () => {
+  it("shows that a rejected text has problems, until the text changes", async () => {
     const user = userEvent.setup();
     await openApp({
       path: `/workflows/${TRIAGE.id}`,
@@ -1355,7 +1360,7 @@ describe("Workflows > what the page says", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(readHeaderStatus()).toBeUndefined();
   });
 
-  it("says why a delete failed, and stays on the page", async () => {
+  it("shows why a delete failed, and stays on the page", async () => {
     const user = userEvent.setup();
     const { router } = await openApp({
       path: `/workflows/${TRIAGE.id}`,
@@ -1377,13 +1382,13 @@ describe("Workflows > what the page says", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(router.state.location.pathname).toBe(`/workflows/${TRIAGE.id}`);
   });
 
-  it("names the page after the name in the text, and keeps it while the text does not parse", async () => {
+  it("titles the page with the name in the text, and keeps the last name while the text does not parse", async () => {
     const user = userEvent.setup();
     await openApp({ path: `/workflows/${TRIAGE.id}` });
     await findEditor();
     const readTitle = () => screen.getByRole("heading", { level: 1 }).textContent;
     expect(readTitle()).toBe(TRIAGE_NAME);
-    // The way back to the list is a link out of the page, not the page itself.
+    // The link back to the list is not marked as the current page.
     const back = within(getPageHeader()).getByRole("link", { name: "Workflows" });
     expect(back.getAttribute("href")).toBe("/workflows");
     expect(back.getAttribute("aria-current")).toBeNull();
@@ -1395,23 +1400,23 @@ describe("Workflows > what the page says", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     expect(readTitle()).toBe(NIGHTLY_NAME);
   });
 
-  it("names a new workflow after the starter's name, and a stored text that never parsed Workflow", async () => {
+  it('titles a new workflow with the starter\'s name, and a stored source that never parsed "Workflow"', async () => {
     const { unmount } = await openApp({ path: "/workflows/new" });
     await findEditor();
     const starterName = screen.getByRole("heading", { level: 1 }).textContent;
     expect(starterName).not.toBe("");
-    // The starter's name is the author's to change, so it is not the name of a control.
+    // The title comes from the starter source, not from the "New workflow" button label.
     expect(starterName).not.toBe("New workflow");
     unmount();
 
-    // A text stored before the contract refused something in it.
+    // A source that was stored before a contract change made it invalid.
     const unreadable: Workflow = { ...TRIAGE, source: "name: [Triage\n" };
     await openApp({ path: `/workflows/${TRIAGE.id}`, workflows: [unreadable] });
     await findEditor();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Workflow");
   });
 
-  it("says Checking… until the validation answers, and why a validation could not run", async () => {
+  it('shows "Checking…" until the validation returns, then why it could not run', async () => {
     const held = holdAnswer(() => ({
       status: 500,
       body: envelope("internal", "The validation timed out."),
@@ -1439,7 +1444,7 @@ describe("Workflows > what the page says", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
 });
 
 describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
-  it("validates about 400 ms after the source stops changing, with the source as it is then", async () => {
+  it("validates the source about 400 ms after it stops changing", async () => {
     const { api } = await openApp({ path: `/workflows/${TRIAGE.id}` });
     const editor = await findEditor();
     // The stored source is validated as the page opens.
@@ -1458,19 +1463,19 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
       pasteUnderFakeClock(editor, "# B\n");
       await advanceClock(200);
 
-      // The last change was 200 ms ago: the author may still be typing.
+      // The last change was 200 ms ago, so the user may still be typing.
       expect(listValidatedSources(api)).toEqual([TRIAGE_SOURCE]);
 
       await advanceClock(800);
 
-      // The source that stood for only 200 ms is never validated.
+      // The source in between, unchanged for only 200 ms, is never validated.
       expect(listValidatedSources(api)).toEqual([TRIAGE_SOURCE, `# A\n# B\n${TRIAGE_SOURCE}`]);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("lists nothing of an answer that arrives about a source that the page no longer holds", async () => {
+  it("ignores a validation result for a source that the page no longer shows", async () => {
     const user = userEvent.setup();
     const held = holdAnswer(() => ({ body: { errors: [UNKNOWN_ACTION], warnings: [] } }));
     const { api, queryClient } = await openApp({
@@ -1505,7 +1510,7 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     expect(within(panel).queryAllByRole("button", { name: /\bLine \d+/ })).toEqual([]);
   });
 
-  it("lists nothing of a refusal of a source that the page no longer holds", async () => {
+  it("ignores a save rejection for a source that the page no longer shows", async () => {
     const user = userEvent.setup();
     const held = holdAnswer(() => buildRefusal([UNKNOWN_ACTION]));
     const { queryClient } = await openApp({
@@ -1531,7 +1536,7 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     expect(readHeaderStatus()).toBeUndefined();
   });
 
-  it("answers at once from the cache for a source that was validated before", async () => {
+  it("shows the cached result at once for a source that was validated before", async () => {
     const user = userEvent.setup();
     let isAnswering = true;
     const held = holdAnswer(() => ({ body: { errors: [UNKNOWN_ACTION], warnings: [] } }));
@@ -1558,8 +1563,8 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
       { timeout: VALIDATION_TIMEOUT_MS },
     );
 
-    // The controller answers nothing more about the source now, and the
-    // answer that the page holds shows all the same.
+    // From here on the controller never responds for this source, so the
+    // result can only come from the cache.
     isAnswering = false;
     await replaceEditorSource(user, PROBLEM_SOURCE);
 
@@ -1567,10 +1572,10 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     held.release();
   });
 
-  // The live connection comes back when the controller can be reached again,
-  // so that is when a validation that could not reach it runs again. An
-  // answer that stands is not asked for again.
-  it("validates the source again when the live connection comes back after a failure, and not while an answer stands", async () => {
+  // The live connection reconnects when the controller is reachable again,
+  // so that is when a failed validation runs again. A successful result is
+  // not requested again.
+  it("retries a failed validation when the live connection reconnects, but not a successful one", async () => {
     let isReachable = false;
     const held = holdAnswer(() => ({ body: NO_PROBLEMS }));
     const { api, live, queryClient } = await openApp({
@@ -1584,7 +1589,7 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
     });
     await findEditor();
     const panel = await findProblemsPanel();
-    await waitForLiveWorkflow(live);
+    await waitForWorkflowSubscription(live);
     await waitForIdleRequests(queryClient);
     await waitFor(
       () => {
@@ -1598,7 +1603,7 @@ describe("Workflows > the validation of the source", { timeout: EDITOR_TEST_TIME
       live.drop();
     });
 
-    // The live connection waits about a second before it connects again.
+    // The live connection waits about a second before it reconnects.
     await waitFor(
       () => {
         expect(reading(panel)).toContain("Checking…");
@@ -1645,7 +1650,7 @@ describe(
       const user = userEvent.setup();
       const { live, changeElsewhere } = await openApp({ path: `/workflows/${TRIAGE.id}` });
       const editor = await findEditor();
-      await waitForLiveWorkflow(live);
+      await waitForWorkflowSubscription(live);
 
       changeElsewhere(TRIAGE.id, CHANGED_ELSEWHERE_SOURCE);
       pushWorkflowChange(live, TRIAGE.id, "updated");
@@ -1660,11 +1665,11 @@ describe(
       expect(readHeaderStatus()).toBeUndefined();
     });
 
-    it("keeps the author's changes, says beside Save that a save replaces the other change, and saves them", async () => {
+    it("keeps the user's changes, warns beside Save that saving replaces the other change, and saves them", async () => {
       const user = userEvent.setup();
       const { api, live, changeElsewhere } = await openApp({ path: `/workflows/${TRIAGE.id}` });
       await replaceEditorSource(user, EDITED_TRIAGE_SOURCE);
-      await waitForLiveWorkflow(live);
+      await waitForWorkflowSubscription(live);
 
       changeElsewhere(TRIAGE.id, CHANGED_ELSEWHERE_SOURCE);
       pushWorkflowChange(live, TRIAGE.id, "updated");
@@ -1683,13 +1688,13 @@ describe(
       ]);
     });
 
-    it("says that a workflow deleted elsewhere is gone, keeps the text, and creates a new workflow on Save", async () => {
+    it("shows that the workflow was deleted elsewhere, keeps the text, and creates a new workflow on Save", async () => {
       const user = userEvent.setup();
       const { api, live, router, deleteElsewhere } = await openApp({
         path: `/workflows/${TRIAGE.id}`,
       });
       await replaceEditorSource(user, EDITED_TRIAGE_SOURCE);
-      await waitForLiveWorkflow(live);
+      await waitForWorkflowSubscription(live);
 
       deleteElsewhere(TRIAGE.id);
       pushWorkflowChange(live, TRIAGE.id, "deleted");
@@ -1713,14 +1718,14 @@ describe(
       ]);
     });
 
-    // The new workflow has a new id. The page of the deleted one offers to
-    // create it, so Back must not lead to that page again.
-    it("puts the new workflow's page in the place of the deleted one's, and says that it was created", async () => {
+    // The new workflow gets a new id. The deleted workflow's page would offer
+    // to create the workflow again, so Back must not return to that page.
+    it("replaces the deleted workflow's page in the history, and shows that the new one was created", async () => {
       const user = userEvent.setup();
       const { live, router, queryClient, deleteElsewhere } = await openApp({ path: "/workflows" });
       await user.click(await screen.findByRole("link", { name: TRIAGE_NAME }));
       await replaceEditorSource(user, EDITED_TRIAGE_SOURCE);
-      await waitForLiveWorkflow(live);
+      await waitForWorkflowSubscription(live);
       deleteElsewhere(TRIAGE.id);
       pushWorkflowChange(live, TRIAGE.id, "deleted");
       await waitFor(() => {
@@ -1747,12 +1752,12 @@ describe(
       });
     });
 
-    // The text of a workflow deleted elsewhere is on this page only.
-    it("asks before it leaves a workflow deleted elsewhere, also with no changes", async () => {
+    // The source of a workflow deleted elsewhere exists only on this page.
+    it("asks before leaving a workflow deleted elsewhere, even without changes", async () => {
       const user = userEvent.setup();
       const { live, router, deleteElsewhere } = await openApp({ path: `/workflows/${TRIAGE.id}` });
       await findEditor();
-      await waitForLiveWorkflow(live);
+      await waitForWorkflowSubscription(live);
       deleteElsewhere(TRIAGE.id);
       pushWorkflowChange(live, TRIAGE.id, "deleted");
       await waitFor(() => {
@@ -1767,9 +1772,9 @@ describe(
       expect(router.state.location.pathname).toBe(`/workflows/${TRIAGE.id}`);
     });
 
-    // The controller says on the live connection that the workflow is gone
-    // before the delete itself answers.
-    it("never says that its own delete happened elsewhere", async () => {
+    // The live push that the workflow is gone arrives before the delete
+    // request returns.
+    it("does not report its own delete as a delete made elsewhere", async () => {
       const user = userEvent.setup();
       const held = holdAnswer(() => ({ body: {} }));
       const { api, live, router, queryClient, deleteElsewhere } = await openApp({
@@ -1777,7 +1782,7 @@ describe(
         overrides: { [`DELETE /api/v1/workflows/${TRIAGE.id}`]: held.handler },
       });
       await findEditor();
-      await waitForLiveWorkflow(live);
+      await waitForWorkflowSubscription(live);
 
       await user.click(screen.getByRole("button", { name: "Delete" }));
       await user.click(screen.getByRole("button", { name: "Confirm" }));
@@ -1797,7 +1802,7 @@ describe(
       });
     });
 
-    it("says that the workflow is gone when a save finds it deleted before the page heard of it", async () => {
+    it("shows that the workflow is gone when a save finds it deleted before any live push", async () => {
       const user = userEvent.setup();
       const { deleteElsewhere } = await openApp({ path: `/workflows/${TRIAGE.id}` });
       await replaceEditorSource(user, EDITED_TRIAGE_SOURCE);
@@ -1816,7 +1821,7 @@ describe(
 );
 
 describe("Workflows > a create or a delete", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
-  it("keeps the view when it moves to the new workflow's page", async () => {
+  it("keeps the view when it navigates to the new workflow's page", async () => {
     const user = userEvent.setup();
     const { router } = await openApp({ path: "/workflows/new?view=yaml" });
     await findEditor();
@@ -1829,8 +1834,8 @@ describe("Workflows > a create or a delete", { timeout: EDITOR_TEST_TIMEOUT_MS }
     expect(readViewParam(router)).toBe("yaml");
   });
 
-  // The author can choose another view while the create is in flight.
-  it("moves to the view that the address holds when the create answers", async () => {
+  // The user can choose another view while the create is in flight.
+  it("uses the view in the URL at the time the create returns", async () => {
     const user = userEvent.setup();
     const held = holdAnswer((call) => {
       const { source } = call.body as { readonly source: string };
@@ -1855,7 +1860,7 @@ describe("Workflows > a create or a delete", { timeout: EDITOR_TEST_TIMEOUT_MS }
     expect(readViewParam(router)).toBe("graph");
   });
 
-  it("says on the new workflow's page that it was created, and puts the focus in its text", async () => {
+  it("shows that the workflow was created on its new page, and focuses its text", async () => {
     const user = userEvent.setup();
     const { router } = await openApp({ path: "/workflows/new" });
     await replaceEditorSource(user, CREATED_SOURCE);
@@ -1872,14 +1877,14 @@ describe("Workflows > a create or a delete", { timeout: EDITOR_TEST_TIMEOUT_MS }
       expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Workflow source" }));
     });
 
-    // What the create did is said until the text changes.
+    // The "Created" status stays until the text changes.
     await replaceEditorSource(user, `${CREATED_SOURCE}# One more line.\n`);
     expect(readHeaderStatus()).toBeUndefined();
   });
 
   // The new workflow's page starts from the stored text, so text typed while
-  // the create is in flight would be lost in the move.
-  it("takes no text while the create is in flight", async () => {
+  // the create is in flight would be lost in the navigation.
+  it("blocks typing while the create is in flight", async () => {
     const user = userEvent.setup();
     const held = holdAnswer((call) => {
       const { source } = call.body as { readonly source: string };
@@ -1906,7 +1911,7 @@ describe("Workflows > a create or a delete", { timeout: EDITOR_TEST_TIMEOUT_MS }
     expect(await readEditorSource(user)).toBe(CREATED_SOURCE);
   });
 
-  it("stays where the author went when the author leaves before the create answers", async () => {
+  it("stays on the page the user moved to when the create returns after the user left", async () => {
     const user = userEvent.setup();
     const held = holdAnswer((call) => {
       const { source } = call.body as { readonly source: string };
@@ -1929,7 +1934,7 @@ describe("Workflows > a create or a delete", { timeout: EDITOR_TEST_TIMEOUT_MS }
     expect(router.state.location.pathname).toBe("/runs");
   });
 
-  it("stays where the author went when the author leaves before a delete answers", async () => {
+  it("stays on the page the user moved to when the delete returns after the user left", async () => {
     const user = userEvent.setup();
     const held = holdAnswer(() => ({ body: {} }));
     const { router, queryClient } = await openApp({
@@ -1950,7 +1955,7 @@ describe("Workflows > a create or a delete", { timeout: EDITOR_TEST_TIMEOUT_MS }
     expect(router.state.location.pathname).toBe("/runs");
   });
 
-  it("sends one create for two clicks that come before the page shows the save", async () => {
+  it("sends one create for two clicks that land before the page re-renders", async () => {
     const user = userEvent.setup();
     const { api, router } = await openApp({ path: "/workflows/new" });
     await replaceEditorSource(user, CREATED_SOURCE);
@@ -1970,44 +1975,48 @@ describe("Workflows > a create or a delete", { timeout: EDITOR_TEST_TIMEOUT_MS }
   });
 });
 
-describe("Workflows > the questions in the header", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
-  it("puts the focus on Cancel when it asks to delete, and back on Delete after Cancel", async () => {
-    const user = userEvent.setup();
-    await openApp({ path: `/workflows/${TRIAGE.id}` });
-    await findEditor();
-
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-
-    const cancel = screen.getByRole("button", { name: "Cancel" });
-    expect(document.activeElement).toBe(cancel);
-    // The answer that declines comes first, and the answer that accepts comes last.
-    expectInDocumentOrder([cancel, screen.getByRole("button", { name: "Confirm" })]);
-
-    await user.click(cancel);
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Delete" }));
-  });
-
-  it("puts the focus on Stay when it asks to leave, and back on the link that asked after Stay", async () => {
-    const user = userEvent.setup();
-    await openApp({ path: `/workflows/${TRIAGE.id}` });
-    await replaceEditorSource(user, EDITED_TRIAGE_SOURCE);
-
-    await user.click(getNavLink("Runs"));
-
-    const stay = await screen.findByRole("button", { name: "Stay" });
-    expect(document.activeElement).toBe(stay);
-    expectInDocumentOrder([stay, screen.getByRole("button", { name: "Leave" })]);
-
-    await user.click(stay);
-    expect(document.activeElement).toBe(getNavLink("Runs"));
-  });
-});
-
 describe(
-  "Workflows > the questions in the header, one at a time",
+  "Workflows > the confirmation questions in the header",
   { timeout: EDITOR_TEST_TIMEOUT_MS },
   () => {
-    it("closes the question to delete when it asks to leave, and does not bring it back after Stay", async () => {
+    it("puts the focus on Cancel when it asks to delete, and back on Delete after Cancel", async () => {
+      const user = userEvent.setup();
+      await openApp({ path: `/workflows/${TRIAGE.id}` });
+      await findEditor();
+
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      expect(document.activeElement).toBe(cancel);
+      // Cancel comes before Confirm.
+      expectInDocumentOrder([cancel, screen.getByRole("button", { name: "Confirm" })]);
+
+      await user.click(cancel);
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Delete" }));
+    });
+
+    it("puts the focus on Stay when it asks to leave, and back on the clicked link after Stay", async () => {
+      const user = userEvent.setup();
+      await openApp({ path: `/workflows/${TRIAGE.id}` });
+      await replaceEditorSource(user, EDITED_TRIAGE_SOURCE);
+
+      await user.click(getNavLink("Runs"));
+
+      const stay = await screen.findByRole("button", { name: "Stay" });
+      expect(document.activeElement).toBe(stay);
+      expectInDocumentOrder([stay, screen.getByRole("button", { name: "Leave" })]);
+
+      await user.click(stay);
+      expect(document.activeElement).toBe(getNavLink("Runs"));
+    });
+  },
+);
+
+describe(
+  "Workflows > one confirmation question at a time",
+  { timeout: EDITOR_TEST_TIMEOUT_MS },
+  () => {
+    it("closes the delete question when the leave question opens, and does not reopen it after Stay", async () => {
       const user = userEvent.setup();
       await openApp({ path: `/workflows/${TRIAGE.id}` });
       await replaceEditorSource(user, EDITED_TRIAGE_SOURCE);
@@ -2029,7 +2038,7 @@ describe(
 );
 
 describe("Workflows > a link to a workflow that was deleted", () => {
-  it("says that the workflow was deleted, and leads to the list", async () => {
+  it("shows that the workflow was deleted, with a link to the list", async () => {
     await openApp({ path: `/workflows/${TRIAGE.id}`, workflows: [] });
 
     expect(
@@ -2037,13 +2046,13 @@ describe("Workflows > a link to a workflow that was deleted", () => {
     ).toBeDefined();
     const back = screen.getByRole("link", { name: "Go to Workflows" });
     expect(back.getAttribute("href")).toBe("/workflows");
-    // The shell's bar names the screen, because the page's own header is not there.
+    // The page's own header is not rendered, so the shell's top bar shows the title.
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Workflow");
     expect(screen.queryByText("This screen did not load")).toBeNull();
   });
 });
 
-describe("Workflows > a view that does not exist", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
+describe("Workflows > an unknown view", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
   it("opens the text and the graph side by side, with Split chosen", async () => {
     await openApp({ path: `/workflows/${TRIAGE.id}?view=sideways` });
 

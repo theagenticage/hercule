@@ -1,13 +1,13 @@
 /**
- * A workflow's YAML text: the one parse of a text into a definition, and the
- * one canonical text of a definition object. The controller and the browser
- * both call them, so two programs can never disagree about what a text means
- * or about how an object is written as text.
+ * Parses workflow YAML into a definition (`parseWorkflowSource`) and converts
+ * a definition object to canonical YAML (`renderWorkflowSource`). The
+ * controller and the browser both call these functions, so they always agree
+ * on what a source means and on how an object is written as YAML.
  *
- * They sit apart from the definition's shape in `./workflow-definition`,
- * because they need the YAML library and the shape does not. The web app's first paint
- * loads the shapes of the whole API, and the YAML library loads only with the
- * pages that edit a workflow.
+ * These functions live apart from the schema in `./workflow-definition`,
+ * because they need the YAML library and the schema does not. The web app's
+ * initial bundle includes the schemas of the whole API, and the YAML library
+ * loads only with the pages that edit a workflow.
  */
 import { Result, Schema } from "effect";
 import {
@@ -24,48 +24,54 @@ import {
   type YAMLError,
 } from "yaml";
 import type { Issue } from "../errors";
-import { excerptMessage } from "../excerpts";
-import { decodeWorkflowDefinition, limitIssues, WorkflowDefinition } from "./workflow-definition";
+import { shortenLibraryMessage } from "../excerpts";
+import {
+  decodeWorkflowDefinition,
+  truncateIssues,
+  WorkflowDefinition,
+} from "./workflow-definition";
 
 /**
- * The longest text of a workflow the API stores, in characters, whether the
- * caller sent the text or a definition object that was written as text. The
- * prompts of several agent steps fit in it many times over.
+ * The maximum length, in characters, of a workflow's YAML source that the API
+ * stores. It applies whether the caller sent YAML or a definition object that
+ * was converted to YAML. The prompts of several agent steps fit in it many
+ * times over.
  */
 const MAX_WORKFLOW_SOURCE_LENGTH = 256 * 1024;
 
 /**
- * A problem of a workflow's text, with what an editor needs to mark its place.
- * The public API sends only the path and the message, because the API names
- * a problem by its path and never by a position in a text.
+ * An issue in a workflow's source, with the extra information an editor needs
+ * to highlight it. The public API sends only the path and the message, because
+ * the API identifies an issue by its path, never by a position in the text.
  */
 interface WorkflowSourceIssue extends Issue {
   /**
-   * The place of a problem of the YAML itself, as offsets into the text: the
-   * first character of the problem, and the character after its last. Such a
-   * problem has an empty path, because the text did not become a definition,
-   * and its message gives the line and the column.
+   * The position of an error in the YAML itself, as offsets into the source:
+   * the first character of the error and the character after its last. Such
+   * an issue has an empty path, because the source did not parse to a
+   * definition, and its message gives the line and column.
    */
   readonly range?: readonly [from: number, to: number];
 }
 
-/** A problem as the public API names it: by its path and its message only. */
+/** Returns only the path and message of an issue: the fields the public API sends. */
 const buildPublicIssue = ({ path, message }: Issue): Issue => ({ path, message });
 
 /**
- * Half of a UTF-16 surrogate pair with no other half beside it. It is not a
- * character, and the database cannot store it: it joins it to the next code
- * unit, so the stored text would say something the sent text does not.
+ * A lone UTF-16 surrogate: half of a surrogate pair without its other half.
+ * It is not a valid character, and the database cannot store it: the database
+ * joins it to the next code unit, so the stored text would differ from the
+ * text that was sent.
  */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 const LONE_SURROGATE_MESSAGE =
-  "contains half of a UTF-16 surrogate pair, which is not a character. Remove it, or write the whole character.";
+  "contains a lone UTF-16 surrogate, which is not a valid character. Remove it, or write the whole character.";
 
 /**
- * The line and the column of an offset into a text, both counted from 1. The
- * column counts characters, as the messages about templates do. A character
- * such as an emoji is two UTF-16 code units of the text, and one column.
+ * Returns the line and column of an offset into the text, both counted from
+ * 1. The column counts characters, as the template error messages do. An
+ * emoji, for example, is two UTF-16 code units but one column.
  */
 const findLineAndColumn = (
   text: string,
@@ -77,10 +83,11 @@ const findLineAndColumn = (
 };
 
 /**
- * A YAML syntax error as an issue. The path is empty because the text did not
- * become a definition, so the place is given in the text, by line and column.
+ * Converts a YAML syntax error to an issue. The path is empty because the
+ * source did not parse to a definition, so the message gives the line and
+ * column instead.
  */
-const describeSyntaxError = (
+const buildSyntaxIssue = (
   text: string,
   error: YAMLError,
   lines: LineCounter,
@@ -90,24 +97,24 @@ const describeSyntaxError = (
     path: [],
     message:
       `The YAML is not valid at line ${String(line)}, column ${String(column)}. ` +
-      `The parser says: ${excerptMessage(error.message)} Correct the text at this position.`,
+      `Parser error: ${shortenLibraryMessage(error.message)} Fix the source at this position.`,
     range: error.pos,
   };
 };
 
 /**
- * The `%` that starts a YAML directive: the first character of a line, or the
- * first character after a leading byte order mark.
+ * Matches the `%` that starts a YAML directive: at the start of a line, or
+ * right after a leading byte order mark.
  */
 const DIRECTIVE_START = /(?<=^\uFEFF?|\n)%/g;
 
 /**
- * Each YAML directive of a text, as an issue at its line and column. A
- * directive changes how the rest of the text is read: under `%YAML 1.1`, `yes`
- * is a boolean and a date is a time in the local zone, so one text could say
- * two things. A directive can stand only before the
- * document starts, and the parser keeps no place for it, so the directives are
- * found in the text before the document's first character.
+ * Returns an issue for each YAML directive in the text, with its line and
+ * column. A directive changes how the rest of the text is parsed: under
+ * `%YAML 1.1`, `yes` is a boolean and a date is a time in the local time zone,
+ * so the same text could mean two things. A directive can only appear before
+ * the document starts, and the parser does not record its position, so this
+ * function searches the text before the document's first character.
  */
 const listDirectiveIssues = (
   text: string,
@@ -121,38 +128,37 @@ const listDirectiveIssues = (
       path: [],
       message:
         `The text at line ${String(line)}, column ${String(column)} is a YAML directive. ` +
-        "A workflow does not use directives, because a directive changes how the rest of the text is read. Remove the line.",
+        "Workflows cannot use directives, because a directive changes how the rest of the text is parsed. Remove the line.",
       range: [directive.index, lineEnd === -1 ? text.length : lineEnd],
     };
   });
 
-/** Why a workflow's text may not use anchors or aliases. */
+/** The error message for a YAML anchor or alias. */
 const NO_ANCHORS =
-  "A workflow does not use YAML anchors or aliases. " +
-  "Write the value out in full at each place that needs it.";
+  "Workflows cannot use YAML anchors or aliases. " +
+  "Write the value out in full everywhere it is needed.";
 
-/** Why a workflow's text may not use tags. */
+/** The error message for a YAML tag. */
 const NO_TAGS =
-  "A workflow does not use YAML tags, because a tag can make a value other than what the text shows. " +
-  "Remove the tag, and write the value in quotes where it must be read as text.";
+  "Workflows cannot use YAML tags, because a tag can turn a value into something other than what the text shows. " +
+  "Remove the tag, and put the value in quotes if it must be text.";
 
-/** Why a key may not be a mapping or a list. */
+/** The error message for a mapping key that is itself a mapping or a list. */
 const NO_COLLECTION_KEYS =
-  "A key in this mapping is a mapping or a list. Write each key as one plain value.";
+  "A key in this mapping is a mapping or a list. Use a plain value, such as a word, as each key.";
 
 const REPEATED_KEY =
-  "A key before this one in the same mapping reads as the same key. " +
-  "Remove one of the two, or give each its own name.";
+  "This key is the same as an earlier key in the same mapping. " + "Remove or rename one of them.";
 
 /**
- * A key of a YAML mapping as the parsed value spells it, and so as a path
- * into the definition spells it: the value of a scalar as text, so `1` and
- * `"1"` are one key, and an empty key as "". The core schema, with no tag
- * resolved, reads a scalar as a string, a number, a boolean or null. An alias
- * as a key is spelled "" too, and the walk refuses the alias where it meets
- * it. An editor spells keys the same way to find the node that a path names.
+ * Converts a YAML mapping key to the string used for it in a definition path.
+ * A scalar becomes its value as a string, so `1` and `"1"` are the same key,
+ * and an empty key becomes "". Without tag resolution, the core schema parses
+ * a scalar as a string, a number, a boolean or null. An alias used as a key
+ * also becomes "", and `collectNodeIssues` rejects the alias itself. The
+ * editor uses this function too, to find the node that a path refers to.
  */
-export const spellPathKey = (key: unknown): string => {
+export const convertKeyToPathSegment = (key: unknown): string => {
   const value: unknown = isScalar(key) ? key.value : null;
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
     ? String(value)
@@ -160,19 +166,22 @@ export const spellPathKey = (key: unknown): string => {
 };
 
 /**
- * Adds to `issues` each problem of a parsed node, and of the nodes inside it,
- * that the definition cannot see once the text becomes a value. Anchors and
- * aliases copy one part of the text into other places. A tag can make a value
- * other than what the text shows. A key that the value spells as an earlier
- * key of its mapping would silently replace that key's value, and a key that
- * is a mapping or a list has no single spelling. A half surrogate pair can be
- * written as an escape in a quoted scalar. Each problem is named at its place
- * in the definition, with each key spelled as the value spells it, so the
- * editor finds the place from the path.
+ * Adds to `issues` every problem in a parsed YAML node and its children that
+ * would be lost once the YAML is converted to a plain value:
  *
- * The walk makes one call for each level of the text. The parser that made
- * the nodes made several calls for each level, and it refuses a text nested
- * too deep for it, so the walk cannot exhaust the call stack.
+ * - Anchors and aliases copy one part of the source into other places.
+ * - A tag can turn a value into something other than what the text shows.
+ * - A key equal to an earlier key of its mapping would silently replace that
+ *   key's value.
+ * - A key that is a mapping or a list has no string form for a path.
+ * - A lone surrogate can be written as an escape in a quoted string.
+ *
+ * Each issue is reported at its path in the definition, with keys converted
+ * by `convertKeyToPathSegment`, so the editor can find the position from the path.
+ *
+ * The recursion goes one call deeper per level of nesting. The YAML parser
+ * used several calls per level and rejects YAML nested too deep for it, so
+ * this function cannot overflow the call stack.
  */
 const collectNodeIssues = (
   node: unknown,
@@ -191,14 +200,14 @@ const collectNodeIssues = (
     issues.push({ path, message: `This value ${LONE_SURROGATE_MESSAGE}` });
   }
   if (isMap(node)) {
-    // One set for each mapping, so the check is linear in the number of keys.
+    // One Set per mapping keeps the duplicate check linear in the number of keys.
     const keys = new Set<string>();
     for (const pair of node.items) {
       if (isMap(pair.key) || isSeq(pair.key)) {
         issues.push({ path, message: NO_COLLECTION_KEYS });
         continue;
       }
-      const key = spellPathKey(pair.key);
+      const key = convertKeyToPathSegment(pair.key);
       const keyPath = [...path, key];
       if (keys.has(key)) issues.push({ path: keyPath, message: REPEATED_KEY });
       keys.add(key);
@@ -214,42 +223,45 @@ const collectNodeIssues = (
 };
 
 /**
- * What one parse of a workflow's text found: the YAML document, and the
- * definition that the text says or the problems that stop the text from being
- * one.
+ * The result of parsing a workflow's source: the YAML document, and either the
+ * definition or the issues found.
  */
 interface ParsedWorkflowDocument {
   /**
-   * The YAML document, with the range in the text of each node. An editor
-   * reads it to find the place in the text of a problem that is named by its
-   * path, and to find what the author writes at the cursor. It is absent for a
-   * text too long to parse.
+   * The YAML document, with each node's range in the source. The editor uses
+   * it to find the position of an issue from its path, and to find what the
+   * author is typing at the cursor. Absent when the source is too long to
+   * parse.
    */
   readonly document: Document.Parsed | undefined;
-  /** Where each line of the text starts, which gives the line of an offset. Absent with `document`. */
+  /** The start offset of each line, used to find the line of an offset. Absent when `document` is. */
   readonly lines: LineCounter | undefined;
   /**
-   * The definition, or the problems that stop the text from being one: at
-   * most `MAX_ISSUES` problems, and one more problem that counts the others.
+   * The definition, or the issues: at most `MAX_ISSUES`, plus one issue that
+   * counts the rest.
    */
   readonly result: Result.Result<WorkflowDefinition, ReadonlyArray<WorkflowSourceIssue>>;
 }
 
-/** Why a text is refused before it is parsed. */
+/** The issue for a source that is too long to parse. */
 const TOO_LONG_ISSUE: WorkflowSourceIssue = {
   path: [],
-  // Said of the workflow and not of a text, because a definition object is
-  // measured by the text it is written as.
-  message: `A workflow is at most ${String(MAX_WORKFLOW_SOURCE_LENGTH)} characters of YAML. This one is longer. Make it shorter.`,
+  // The message is about the workflow, not the text, because a definition
+  // object is also measured by the length of its YAML.
+  message: `A workflow can be at most ${String(MAX_WORKFLOW_SOURCE_LENGTH)} characters of YAML, and this one is longer. Shorten it.`,
 };
 
 /**
- * The definition a workflow's text says, or the problems that stop the text
- * from being one: a text that is too long or not valid Unicode, YAML syntax,
- * directives, tags, anchors and aliases, repeated keys, and everything
- * `decodeWorkflowDefinition` refuses. The YAML document of the text comes
- * with the answer, so a program that must also find places in the text parses
- * the text once. The text itself is never changed.
+ * Parses a workflow's YAML source. Returns the YAML document and either the
+ * definition or every issue found:
+ *
+ * - a source that is too long or not valid Unicode;
+ * - YAML syntax errors;
+ * - directives, tags, anchors, aliases and duplicate keys;
+ * - everything `decodeWorkflowDefinition` rejects.
+ *
+ * The YAML document is returned too, so a caller that also needs positions in
+ * the source parses it only once. The source itself is never changed.
  */
 export const parseWorkflowDocument = (text: string): ParsedWorkflowDocument => {
   if (text.length > MAX_WORKFLOW_SOURCE_LENGTH) {
@@ -259,25 +271,25 @@ export const parseWorkflowDocument = (text: string): ParsedWorkflowDocument => {
   const document = parseDocument(text, {
     lineCounter: lines,
     prettyErrors: false,
-    // The parser's own check of repeated keys compares each key with every
-    // earlier key of its mapping, which takes quadratic time, and it misses
-    // two keys that the value spells alike, such as `1` and `"1"`. The walk
-    // checks the keys instead.
+    // The parser's own duplicate-key check compares each key with every
+    // earlier key in its mapping, which takes quadratic time, and it misses
+    // keys that are equal as strings, such as `1` and `"1"`.
+    // `collectNodeIssues` checks the keys instead.
     uniqueKeys: false,
-    // `<<` is an ordinary key, as YAML 1.2 reads it.
+    // Treat `<<` as an ordinary key, as YAML 1.2 does.
     merge: false,
-    // A tag such as `!!binary` is not decoded. The walk refuses each tag.
+    // Do not decode tags such as `!!binary`. `collectNodeIssues` rejects every tag.
     resolveKnownTags: false,
   });
-  const refuse = (issues: ReadonlyArray<WorkflowSourceIssue>): ParsedWorkflowDocument => ({
+  const failWithIssues = (issues: ReadonlyArray<WorkflowSourceIssue>): ParsedWorkflowDocument => ({
     document,
     lines,
-    result: Result.fail(limitIssues(issues)),
+    result: Result.fail(truncateIssues(issues)),
   });
   const surrogate = text.search(LONE_SURROGATE);
   if (surrogate !== -1) {
     const { line, column } = findLineAndColumn(text, lines, surrogate);
-    return refuse([
+    return failWithIssues([
       {
         path: [],
         message: `The text at line ${String(line)}, column ${String(column)} ${LONE_SURROGATE_MESSAGE}`,
@@ -286,20 +298,20 @@ export const parseWorkflowDocument = (text: string): ParsedWorkflowDocument => {
     ]);
   }
   if (document.errors.length > 0) {
-    return refuse(document.errors.map((error) => describeSyntaxError(text, error, lines)));
+    return failWithIssues(document.errors.map((error) => buildSyntaxIssue(text, error, lines)));
   }
   const issues: Array<WorkflowSourceIssue> = [
     ...listDirectiveIssues(text, document.range[0], lines),
   ];
   collectNodeIssues(document.contents, [], issues);
-  if (issues.length > 0) return refuse(issues);
+  if (issues.length > 0) return failWithIssues(issues);
   return { document, lines, result: decodeWorkflowDefinition(document.toJS()) };
 };
 
 /**
- * The definition a workflow's text says, or the problems that stop the text
- * from being one, as `parseWorkflowDocument` finds them. Each problem is named
- * by its path and its message, as the public API names it.
+ * Parses a workflow's YAML source, as `parseWorkflowDocument` does. Returns
+ * the definition, or the issues with only the path and message that the
+ * public API sends.
  */
 export const parseWorkflowSource = (
   text: string,
@@ -307,23 +319,23 @@ export const parseWorkflowSource = (
   Result.mapError(parseWorkflowDocument(text).result, (issues) => issues.map(buildPublicIssue));
 
 /**
- * Puts the keys of every object in the order the definition declares them.
- * Marked pure, so that a bundle that never renders a text, as the web app's,
- * leaves it out.
+ * Puts the keys of every object in the order the definition schema declares
+ * them. Marked pure, so a bundle that never renders YAML, such as the web
+ * app's, can drop it.
  */
 const orderDefinitionKeys = /* @__PURE__ */ Schema.encodeSync(WorkflowDefinition);
 
 /**
- * A string that only holds spaces, tabs and at least one line break. A block
- * scalar reads its first lines of such whitespace as indentation, so such a
- * string does not come back from a block as it went in, and it is
- * double-quoted. Only the whitespace of YAML itself counts: a no-break space
- * is text to YAML, and a block holds it. The YAML writer double-quotes a
- * string with a carriage return itself.
+ * Checks whether a string holds only spaces, tabs and line breaks, with at
+ * least one line break. A block scalar treats leading lines of such whitespace
+ * as indentation, so the string would not parse back unchanged from a block.
+ * Such a string is double-quoted instead. Only YAML whitespace counts: a
+ * no-break space is text to YAML, and a block can hold it. The YAML writer
+ * already double-quotes a string with a carriage return.
  */
 const isBlankLines = (text: string): boolean => text.includes("\n") && /^[ \t\n]*$/.test(text);
 
-/** The same value, with each string that needs double quotes marked for them. */
+/** Returns a copy of the value in which each string that needs double quotes is marked for them. */
 const markDoubleQuotes = (value: unknown): unknown => {
   if (typeof value === "string" && isBlankLines(value)) {
     const scalar = new Scalar(value);
@@ -340,17 +352,21 @@ const markDoubleQuotes = (value: unknown): unknown => {
 };
 
 /**
- * The canonical text of a definition object. The same object always gives the
- * same bytes. The keys that the definition declares follow the definition's
- * order, whatever order they were sent in. The keys that the author chooses,
- * in `params`, `options`, `outputSchema`, an input's `schema` and `default`,
- * and a trigger's `inputs` and `outputs`, keep the order in which they were
- * sent, because the definition gives them no order. A string with a newline
- * is a `|` block, a string that needs quotes has double quotes, and each level
- * is indented by two spaces. No line is folded, because a folded line is a
- * second way to write one string. A string of whitespace and line breaks
- * only, and a string with a control character, cannot be held by a block, and
- * is double-quoted.
+ * Converts a definition object to canonical YAML. The same object always
+ * gives the same bytes:
+ *
+ * - Keys that the schema declares follow the schema's order, whatever order
+ *   they were sent in.
+ * - Keys that the author chooses keep the order in which they were sent,
+ *   because the schema gives them no order. These are the keys in `params`,
+ *   `options`, `outputSchema`, an input's `schema` and `default`, and a
+ *   trigger's `inputs` and `outputs`.
+ * - A string with a newline is a `|` block, and a string that needs quotes
+ *   gets double quotes. A string of only whitespace and line breaks, or with
+ *   a control character, cannot be held by a block, so it is double-quoted.
+ * - Each level is indented by two spaces.
+ * - No line is folded, because folding would be a second way to write the
+ *   same string.
  */
 export const renderWorkflowSource = (definition: WorkflowDefinition): string =>
   stringify(markDoubleQuotes(orderDefinitionKeys(definition)), {

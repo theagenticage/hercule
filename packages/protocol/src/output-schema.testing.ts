@@ -7,13 +7,13 @@
  * subset and outside what any value can satisfy, so every harness has to reach
  * a schema failure its own way.
  *
- * Beside them is the value that each test of the depth bound, `MAX_JSON_DEPTH`,
- * builds. The bound is declared in this package, and each package that
- * applies it tests it with this value.
+ * `nestInLists` builds values for tests of the depth limit, `MAX_JSON_DEPTH`.
+ * The limit is declared in this package, and every package that applies it
+ * uses this helper in its tests.
  */
 import type { OutputSchema } from "./output-schema";
 
-/** A value nested in lists this many levels deep. */
+/** Returns a string wrapped in `levels` nested arrays. */
 export const nestInLists = (levels: number): unknown =>
   Array.from({ length: levels }).reduce<unknown>((inner) => [inner], "bottom");
 

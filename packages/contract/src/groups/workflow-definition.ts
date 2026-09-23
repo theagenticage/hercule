@@ -1,22 +1,20 @@
 /**
- * What a workflow's text says: the shape of a definition, and the one check of
- * a definition value.
+ * The schema of a workflow definition, and `decodeWorkflowDefinition`, the
+ * function that validates a definition value.
  *
- * The text the author wrote is the stored form of a workflow, and it is kept
- * byte for byte, comments and layout included (ADR 0029). `WorkflowDefinition`
- * is what that text says. The controller parses the text into it on every
- * write, and a client parses the text to show the same thing.
+ * A workflow is stored as the YAML source the author wrote, byte for byte,
+ * including comments and layout (ADR 0029). `WorkflowDefinition` is the schema
+ * of what that YAML parses to. The controller parses the source on every
+ * write, and clients parse it to show the same result.
  *
- * `decodeWorkflowDefinition` is the one check of a definition value, here
- * beside the shape. `parseWorkflowSource`, the one parse of the text, and
- * `renderWorkflowSource`, the one canonical text of a definition object, are
- * in `./workflow-source`, because they need the YAML library and this module
- * does not. The records and the operations of the API that store a workflow
- * are in `./workflow`.
+ * `parseWorkflowSource` (which parses YAML source) and `renderWorkflowSource`
+ * (which converts a definition object to canonical YAML) are in
+ * `./workflow-source`, because they need the YAML library and this module
+ * does not. The workflow records and API operations are in `./workflow`.
  *
- * Every object in the shape refuses a key it does not declare. A key that the
- * author spelled wrong would otherwise be dropped, and the stored workflow
- * would do something other than what its text says.
+ * Every object in the schema rejects keys it does not declare. Otherwise a
+ * misspelled key would be silently dropped, and the stored workflow would
+ * behave differently from what its source shows.
  */
 import { Result, Schema, SchemaAST, SchemaIssue } from "effect";
 import {
@@ -28,7 +26,7 @@ import {
 } from "@hercule/protocol";
 import { closedStruct } from "../closed";
 import { listSchemaIssues, type Issue } from "../errors";
-import { MAX_QUOTED_LENGTH, quoteWritten } from "../excerpts";
+import { MAX_QUOTED_LENGTH, quoteAuthorText } from "../excerpts";
 import { isId } from "../ids";
 import { atMost, bounded, Timezone } from "../strings";
 import { EventKind } from "./event";
@@ -39,64 +37,71 @@ import {
   SpawnCheckout,
 } from "./session";
 
-/** A value the author wrote, as a message names it without repeating a mapping or a list. */
+/**
+ * Describes a value the author wrote, for an error message. Text is quoted
+ * and truncated. A list or a mapping is described as "a list" or "a mapping",
+ * so a message never repeats its contents.
+ */
 const describeWritten = (value: unknown): string => {
-  if (typeof value === "string") return quoteWritten(value);
+  if (typeof value === "string") return quoteAuthorText(value);
   if (Array.isArray(value)) return "a list";
   if (typeof value === "object" && value !== null) return "a mapping";
   return String(value);
 };
 
 /**
- * What a step id or a trigger id may look like: a CEL identifier. An
- * expression reads an id as `steps.<id>`, and CEL reads `steps.open-pr` as
- * `steps.open - pr`. That expression passes a check and fails only when a run
- * evaluates it.
+ * The pattern for step ids and trigger ids: a CEL identifier. Expressions
+ * refer to an id as `steps.<id>`, and CEL parses `steps.open-pr` as
+ * `steps.open - pr`. Such an expression passes validation and fails only when
+ * a run evaluates it.
  */
 const NODE_ID_PATTERN = /^[a-z][a-z0-9_]*$/;
 
 /**
- * The snake_case spelling of an id that is not one, or `undefined` where the
- * id holds no letters to spell it with.
+ * Converts an invalid id to snake_case, to suggest in an error message.
+ * Returns `undefined` if no valid id can be built from it.
  */
-const spellInSnakeCase = (id: string): string | undefined => {
-  const spelled = id
+const convertToSnakeCase = (id: string): string | undefined => {
+  const snakeCase = id
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((word) => word !== "")
     .join("_");
-  return NODE_ID_PATTERN.test(spelled) ? spelled : undefined;
+  return NODE_ID_PATTERN.test(snakeCase) ? snakeCase : undefined;
 };
 
 /**
- * The words that have the form of an id or a name, but that an expression
- * cannot read as a field name, each with the reason. CEL reads `in` as an
- * operator and `true`, `false` and `null` as values, so `steps.in.output` does
- * not parse. The evaluator that the controller uses cannot read an object
- * that has a field named `constructor`, so each expression that reads
- * `inputs` or `steps` would fail when a run evaluates it. The evaluator reads
- * a field named `__proto__`, but an object that code builds by assignment
- * does not keep it: the assignment sets the object's prototype and adds no
- * field. So a run that builds its inputs or its outputs that way could not
- * read the value.
+ * Words that match the id or name pattern but that an expression cannot use
+ * as a field name, each with the reason:
+ *
+ * - CEL parses `in` as an operator, and `true`, `false` and `null` as literal
+ *   values, so `steps.in.output` does not parse.
+ * - The expression evaluator the controller uses fails on an object with a
+ *   field named `constructor`, so every expression that reads `inputs` or
+ *   `steps` would fail at run time.
+ * - The evaluator can read a field named `__proto__`, but assigning a field
+ *   with that name to an object sets the object's prototype instead of adding
+ *   the field. So a run that builds its inputs or outputs by assignment could
+ *   not read the value.
  */
 const UNREADABLE_FIELD_NAMES: ReadonlyMap<string, string> = new Map([
-  ["in", "CEL reads in as an operator"],
-  ["true", "CEL reads true as a value"],
-  ["false", "CEL reads false as a value"],
-  ["null", "CEL reads null as a value"],
-  ["constructor", "the expression evaluator cannot read an object that has a field with this name"],
+  ["in", "CEL parses in as an operator"],
+  ["true", "CEL parses true as a literal value"],
+  ["false", "CEL parses false as a literal value"],
+  ["null", "CEL parses null as a literal value"],
+  ["constructor", "the expression evaluator fails on an object with a field of this name"],
   [
     "__proto__",
-    "an object that code builds by assignment loses a field with this name, so a run could not read it",
+    "assigning a field of this name to an object sets its prototype instead, so a run could not read the value",
   ],
 ]);
 
 /**
- * Why an expression cannot read a word that has the form of a field name, or
- * `undefined` for a word that it can read. `readAs` is how an expression reads
- * the value, such as `steps.<id>`, and `noun` is what the word is.
+ * Returns an error message if an expression cannot use `word` as a field
+ * name, or `undefined` if it can. `readAs` is how an expression refers to the
+ * value, such as `steps.<id>`, and `noun` is whether the word is an id or a
+ * name.
  */
 const describeUnreadableWord = (
   word: string,
@@ -106,113 +111,116 @@ const describeUnreadableWord = (
   const reason = UNREADABLE_FIELD_NAMES.get(word);
   return reason === undefined
     ? undefined
-    : `An expression reads this value as ${readAs}, and it cannot read ${quoteWritten(word)} there: ${reason}. Write another ${noun}.`;
+    : `Expressions refer to this value as ${readAs}, and cannot use ${quoteAuthorText(word)} there: ${reason}. Choose another ${noun}.`;
 };
 
-/** The id of a step or a trigger. The refusal gives the spelling to write instead. */
+/** The id of a step or a trigger. The error message suggests a valid spelling. */
 const NodeId = Schema.String.check(
   Schema.makeFilter((id: string) => {
     if (NODE_ID_PATTERN.test(id)) return describeUnreadableWord(id, "steps.<id>", "id");
-    const suggestion = spellInSnakeCase(id);
+    const suggestion = convertToSnakeCase(id);
     return (
-      `${quoteWritten(id)} is not a valid id. An expression reads an id as steps.<id>. ` +
-      "Thus an id starts with a lowercase letter and contains only lowercase letters, digits and underscores. " +
+      `${quoteAuthorText(id)} is not a valid id. Expressions refer to an id as steps.<id>, ` +
+      "so an id must start with a lowercase letter and contain only lowercase letters, digits and underscores. " +
       (suggestion === undefined || suggestion.length > MAX_QUOTED_LENGTH
-        ? "Write the id in this form."
-        : `Write ${suggestion}.`)
+        ? "Rename the id to match."
+        : `Use ${suggestion} instead.`)
     );
   }),
 );
 
 /**
- * The annotation that names the notation of a string field of the definition,
- * where the field is not plain words. An editor reads it to write the value in
- * a form that YAML keeps as written. An expression or a schedule often holds
- * characters that YAML reads as its own, such as `: ` or ` #` in the middle
- * and a quote, `*`, `!` or `{` at the start, so the editor writes it in double
- * quotes. A template is text for an agent, usually on several lines, so the
- * editor writes it as a `|` block.
+ * The annotation key that marks a string field of the definition whose value
+ * is not plain words. The editor reads it to choose a YAML style that keeps
+ * the value exactly as written:
+ *
+ * - Expressions and schedules often contain characters that YAML treats as
+ *   syntax, such as `: ` or ` #` in the middle, or a quote, `*`, `!` or `{` at
+ *   the start. So the editor writes them in double quotes.
+ * - A template is text for an agent, usually on several lines. So the editor
+ *   writes it as a `|` block.
  */
 const NOTATION_ANNOTATION = "notation";
 
-/** The notations of the string fields of the definition. `NOTATION_ANNOTATION` says what each is for. */
+/** The notations of the definition's string fields. See `NOTATION_ANNOTATION` for what each is for. */
 export type FieldNotation = "expression" | "schedule" | "template";
 
 /**
- * The notation of a field of the definition, from its schema, or `undefined`
- * for plain words. Only the schemas of this file set the annotation, and each
+ * Returns the notation of a definition field from its schema, or `undefined`
+ * for plain words. Only the schemas in this file set the annotation, and each
  * sets a `FieldNotation`.
  */
 export const readFieldNotation = (ast: SchemaAST.AST): FieldNotation | undefined =>
   ast.annotations?.[NOTATION_ANNOTATION] as FieldNotation | undefined;
 
-/** A CEL expression. What it may read depends on the place it is written. */
+/** A CEL expression. Which values it can read depends on where it is written. */
 const Expression = Schema.String.annotate({ [NOTATION_ANNOTATION]: "expression" });
 
-/** A cron expression, which says when a `cron.tick` trigger fires. */
+/** A cron expression that sets when a `cron.tick` trigger fires. */
 const CronSchedule = Schema.String.annotate({ [NOTATION_ANNOTATION]: "schedule" });
 
-/** Text whose `{{ expr }}` templates a run renders with the values of `inputs` and `steps`. */
+/** Text with `{{ expr }}` templates, which a run fills in from `inputs` and `steps`. */
 const TemplateText = Schema.String.annotate({ [NOTATION_ANNOTATION]: "template" });
 
 /**
- * What an input name or a signal trigger's output name may look like: a CEL
- * identifier. An expression reads an input as `inputs.<name>` and an output as
- * `steps.<id>.output.<name>`, and CEL reads `inputs.pr-url` as
- * `inputs.pr - url`. That expression passes a check and fails only when a run
- * evaluates it. Case is free, because such a name is a field name, and a field
- * name is often written in camelCase.
+ * The pattern for input names and signal trigger output names: a CEL
+ * identifier. Expressions refer to an input as `inputs.<name>` and to an
+ * output as `steps.<id>.output.<name>`, and CEL parses `inputs.pr-url` as
+ * `inputs.pr - url`. Such an expression passes validation and fails only when
+ * a run evaluates it. Uppercase letters are allowed, because these names are
+ * field names, which are often camelCase.
  */
 const EXPRESSION_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
- * Why a name that is not a CEL identifier is refused, and a spelling that an
- * expression can read, where the name holds one. `readAs` is how an
- * expression reads the name, such as `inputs.<name>`.
+ * Returns the error message for a name that is not a CEL identifier, with a
+ * suggested valid spelling when one can be built. `readAs` is how an
+ * expression refers to the name, such as `inputs.<name>`.
  */
 const describeMalformedName = (name: string, readAs: string): string => {
   const suggestion = name.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
   return (
-    `${quoteWritten(name)} is not a name that an expression can read. An expression reads this value as ${readAs}. ` +
-    "Thus the name starts with a letter or an underscore and contains only letters, digits and underscores. " +
+    `${quoteAuthorText(name)} is not a valid name. Expressions refer to this value as ${readAs}, ` +
+    "so the name must start with a letter or an underscore and contain only letters, digits and underscores. " +
     (EXPRESSION_NAME_PATTERN.test(suggestion) && suggestion.length <= MAX_QUOTED_LENGTH
-      ? `Write ${suggestion}.`
-      : "Write the name in this form.")
+      ? `Use ${suggestion} instead.`
+      : "Rename it to match.")
   );
 };
 
 /**
- * Why an expression cannot read a name, or `undefined` for a name that it can
- * read. `readAs` is how an expression reads the name, such as `inputs.<name>`.
+ * Returns an error message if an expression cannot use `name`, or `undefined`
+ * if it can. `readAs` is how an expression refers to the name, such as
+ * `inputs.<name>`.
  */
 const describeUnreadableName = (name: string, readAs: string): string | undefined =>
   EXPRESSION_NAME_PATTERN.test(name)
     ? describeUnreadableWord(name, readAs, "name")
     : describeMalformedName(name, readAs);
 
-/** The name of an input, which an expression reads as `inputs.<name>`. */
+/** The name of an input. Expressions refer to it as `inputs.<name>`. */
 const InputName = Schema.String.check(
   Schema.makeFilter((name: string) => describeUnreadableName(name, "inputs.<name>")),
 );
 
 /**
- * A signal trigger's outputs: each name, to an expression over `event`. Each
- * name that an expression cannot read is refused at its own key.
+ * A signal trigger's outputs: a map from output name to an expression over
+ * `event`. Each invalid name is reported at its own key.
  */
 const SignalOutputs = Schema.Record(Schema.String, Expression).check(
   Schema.makeFilter((outputs: { readonly [name: string]: string }) =>
     Object.keys(outputs).flatMap((name) => {
-      const refusal = describeUnreadableName(name, "steps.<id>.output.<name>");
-      return refusal === undefined ? [] : [{ path: [name], issue: refusal }];
+      const message = describeUnreadableName(name, "steps.<id>.output.<name>");
+      return message === undefined ? [] : [{ path: [name], issue: message }];
     }),
   ),
 );
 
 /**
- * Refuses a JSON value in a definition that has more than `MAX_JSON_DEPTH`
- * levels of mappings and lists, the bound an output schema has too. The
- * database and the YAML writer both recurse once for each level, and the bound
- * keeps each value far below the depth at which they fail.
+ * Rejects a JSON value nested deeper than `MAX_JSON_DEPTH` levels of mappings
+ * and lists, the same limit output schemas have. The database and the YAML
+ * writer both recurse once per level, and the limit keeps every value far
+ * below the depth at which they fail.
  */
 const refuseDeepJson = Schema.makeFilter((value: unknown) =>
   isNestedWithin(value, MAX_JSON_DEPTH)
@@ -220,20 +228,21 @@ const refuseDeepJson = Schema.makeFilter((value: unknown) =>
     : `This value has more than ${String(MAX_JSON_DEPTH)} levels of mappings and lists. Make it less deep.`,
 );
 
-/** A JSON object whose keys the author chooses. */
+/** A JSON object with keys the author chooses. */
 const JsonObject = Schema.Record(Schema.String, Schema.Json).check(refuseDeepJson);
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
-/** The longest workflow name. The name labels the workflow in every listing. */
+/** The maximum length of a workflow name. The name labels the workflow in every list. */
 const MAX_WORKFLOW_NAME_LENGTH = 128;
 
 /**
- * A workflow's name: one line of plain text. A control character would cut the
- * name short, or break the line, where a listing shows it. The line and
- * paragraph separators break the line too. A text direction mark makes the
- * name show in an order other than the order of its characters, so two names
- * could look the same and be different.
+ * A workflow's name: one line of plain text. The schema rejects:
+ *
+ * - control characters and line or paragraph separators, which cut the name
+ *   short or break the line where a list shows it;
+ * - text direction marks, which make the name display in a different order
+ *   from its characters, so two different names could look the same.
  */
 const WorkflowName = bounded(1, MAX_WORKFLOW_NAME_LENGTH).check(
   Schema.makeFilter((name: string) =>
@@ -245,61 +254,63 @@ const WorkflowName = bounded(1, MAX_WORKFLOW_NAME_LENGTH).check(
 );
 
 /**
- * A workflow's description: text on as many lines as it needs. A control
- * character other than a tab or a line break is not text, and a NUL cuts the
- * description short where a listing reads it from the database.
+ * A workflow's description: text on any number of lines. The schema rejects
+ * control characters other than tabs and line breaks. For example, a NUL
+ * character would cut the description short when a list reads it from the
+ * database.
  */
 const WorkflowDescription = Schema.String.check(
   Schema.makeFilter((description: string) =>
     // eslint-disable-next-line no-control-regex
     /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(description)
-      ? "A description is text. Remove the control characters from it. Tabs and line breaks can stay."
+      ? "A description cannot contain control characters other than tabs and line breaks. Remove them."
       : undefined,
   ),
 );
 
 /**
- * What a trigger's `connectionId` says to take the events of each Connection
- * of the event kind's type.
+ * The `connectionId` value that makes a trigger accept events from every
+ * Connection of the event kind's type.
  */
 export const ANY_CONNECTION = "any";
 
 /**
  * Which Connection an event must arrive through: one Connection by its id, or
- * `any` Connection of the event kind's type, chosen on purpose.
+ * `any` to accept every Connection of the event kind's type. There is no
+ * default, so the author must choose `any` explicitly.
  */
 export const ConnectionSelection = Schema.String.check(
   Schema.makeFilter((selection: string) =>
     selection === ANY_CONNECTION || isId(selection)
       ? undefined
-      : `${quoteWritten(selection)} names no Connection. ` +
-        "Write the id of a Connection, or write any for each Connection of the event kind's type.",
+      : `${quoteAuthorText(selection)} is not a Connection id. ` +
+        "Write the id of a Connection, or write any to accept events from every Connection of the event kind's type.",
   ),
 );
 
-/** What a trigger listens for. */
+/** The events a trigger listens for. */
 const EventSelector = closedStruct({
   kind: EventKind,
-  /** Absent for a kind the core emits, which arrives through no Connection. */
+  /** Absent for a kind the core emits, because those events arrive through no Connection. */
   connectionId: Schema.optionalKey(ConnectionSelection),
-  /** Over `event`. The event is admitted when it is true. */
+  /** An expression over `event`. The trigger accepts the event only when it is true. */
   filter: Schema.optionalKey(Expression),
 });
 
-/** A trigger that starts a new run for each event it admits. */
+/** A trigger that starts a new run for each event it accepts. */
 const StartTrigger = closedStruct({
   id: NodeId,
   kind: Schema.Literal("start"),
   source: EventSelector,
-  /** Each input by name, to an expression over `event`. */
+  /** Maps each input name to an expression over `event`. */
   inputs: Schema.optionalKey(Schema.Record(Schema.String, Expression)),
-  /** How many runs the trigger may start in one window. */
+  /** The maximum number of runs the trigger can start in one time window. */
   spawnBound: Schema.optionalKey(
     closedStruct({ maxRuns: PositiveInt, windowSeconds: PositiveInt }),
   ),
   /** On a `cron.tick` trigger only. */
   schedule: Schema.optionalKey(CronSchedule),
-  /** The zone the schedule is read in. Absent reads it in the user's timezone setting. */
+  /** The time zone of the schedule. When absent, the user's timezone setting is used. */
   timezone: Schema.optionalKey(Timezone),
 });
 
@@ -308,21 +319,22 @@ const SignalTrigger = closedStruct({
   id: NodeId,
   kind: Schema.Literal("signal"),
   source: EventSelector,
-  /** The event reaches the run when the two sides give equal values. */
+  /** The event is delivered to the run when both expressions give equal values. */
   correlation: closedStruct({
-    /** Over `event`. */
+    /** An expression over `event`. */
     event: Expression,
-    /** Over `inputs` and `steps`. */
+    /** An expression over `inputs` and `steps`. */
     run: Expression,
   }),
-  /** Each output by name, to an expression over `event`. Absent gives the whole event. */
+  /** Maps each output name to an expression over `event`. When absent, the output is the whole event. */
   outputs: Schema.optionalKey(SignalOutputs),
 });
 
 /**
- * A value a run starts with. Its type is a JSON Schema, or a Connection of one
- * type. The two are one object and not a union, so a mistake in either is
- * named at its own field and not at the whole input.
+ * A value a run starts with. Its type is either a JSON Schema (`schema`) or a
+ * Connection type (`connection`). Both are fields of one object instead of a
+ * union, so an error in either is reported at its own field and not at the
+ * whole input.
  */
 const InputDeclaration = closedStruct({
   name: InputName,
@@ -334,21 +346,21 @@ const InputDeclaration = closedStruct({
 }).check(
   Schema.makeFilter((input) =>
     (input.schema === undefined) === (input.connection === undefined)
-      ? "An input declares its type with schema or with connection. Write one of the two."
+      ? "An input sets its type with either schema or connection. Set exactly one of the two."
       : undefined,
   ),
 );
 
-/** The fields of a step that say how the step sits in the graph. */
+/** The step fields that control how a step runs within the graph. */
 const STEP_GRAPH_FIELDS = {
-  /** Over `inputs` and `steps`. The step is skipped when it is false. */
+  /** An expression over `inputs` and `steps`. The step is skipped when it is false. */
   condition: Schema.optionalKey(Expression),
   /**
-   * `any` runs the step again for each incoming edge that fires. `all` runs
-   * it once, when each incoming edge has fired or can no longer fire.
+   * `any` runs the step again each time an incoming edge fires. `all` runs it
+   * once, after every incoming edge has fired or can no longer fire.
    */
   join: Schema.optionalKey(Schema.Literals(["any", "all"])),
-  /** The run starts here, as it does at a step with no incoming edges. */
+  /** The run starts at this step, as it does at a step with no incoming edges. */
   entry: Schema.optionalKey(Schema.Boolean),
   /** When this step completes, the run completes. */
   terminal: Schema.optionalKey(Schema.Boolean),
@@ -361,23 +373,23 @@ const ActionStep = closedStruct({
   name: Schema.optionalKey(Schema.String),
   /** An operation id for a built-in action, a qualified id for a plugin's action. */
   action: Schema.String,
-  /** Each field of the action's input: a literal, or a string with `{{ }}` templates. */
+  /** The action's input fields. Each value is a literal, or a string with `{{ }}` templates. */
   params: Schema.optionalKey(JsonObject),
   ...STEP_GRAPH_FIELDS,
 });
 
 /**
- * The id of the Agent that an agent step runs. A person who writes the text by
- * hand often writes the name of the Agent here. The schema library would say
- * only that it expected a UUIDv7, so the refusal says what to write and where
- * the author finds it.
+ * The id of the Agent that an agent step runs. People who write the YAML by
+ * hand often write the Agent's name here. The schema library's own message
+ * reports only that a UUIDv7 was expected, so this error message explains
+ * what to write and where to find it.
  */
 const AgentId = Schema.String.check(
   Schema.makeFilter((agent: string) =>
     isId(agent)
       ? undefined
-      : `${quoteWritten(agent)} is not the id of an Agent. Write the id of an Agent. ` +
-        "The command hercule agent list shows the id of each Agent.",
+      : `${quoteAuthorText(agent)} is not an Agent id. Write the id of an Agent. ` +
+        "Run hercule agent list to see the id of each Agent.",
   ),
 );
 
@@ -387,36 +399,36 @@ const AgentStep = closedStruct({
   kind: Schema.Literal("agent"),
   name: Schema.optionalKey(Schema.String),
   agent: AgentId,
-  /** The first turn's input. */
+  /** The input of the first turn. */
   prompt: TemplateText,
-  /** A model slug, in place of the Agent's model. */
+  /** A model slug that overrides the Agent's model. */
   model: Schema.optionalKey(Schema.NonEmptyString),
-  /** The choices of that model. */
+  /** The options for that model. */
   options: Schema.optionalKey(ModelSelection.fields.options),
-  /** In place of the Agent's access mode. */
+  /** Overrides the Agent's access mode. */
   accessMode: Schema.optionalKey(AccessMode),
-  /** Each iteration starts a new session, and not the next turn of the same one. */
+  /** Each iteration starts a new session instead of the next turn of the same session. */
   freshSession: Schema.optionalKey(Schema.Boolean),
-  /** What each turn must answer with. It declares `steps.<id>.output`. */
+  /** The schema each turn's output must match. It sets the type of `steps.<id>.output`. */
   outputSchema: Schema.optionalKey(OutputSchema),
   ...STEP_GRAPH_FIELDS,
 });
 
-/** A way through the graph, from a step or a signal trigger to a step. */
+/** A link in the graph, from a step or a signal trigger to a step. */
 const Edge = closedStruct({
   from: Schema.String,
   to: Schema.String,
-  /** Over `inputs` and `steps`. The edge fires only when it is true. */
+  /** An expression over `inputs` and `steps`. The edge fires only when it is true. */
   condition: Schema.optionalKey(Expression),
-  /** How many times the edge may fire in one run. A cycle needs one such edge. */
+  /** How many times the edge can fire in one run. Every cycle needs at least one edge with this set. */
   maxTraversals: Schema.optionalKey(PositiveInt),
 });
 
 /**
- * The one workspace each agent step of a run works in: a repo's main
- * workspace, or an ephemeral workspace made for the run. The shapes are the
- * ones `session.spawn` takes, except a workspace that stands already, which a
- * run cannot name.
+ * The workspace that every agent step of a run works in: a repo's main
+ * workspace, or an ephemeral workspace created for the run. The schemas are
+ * the ones `session.spawn` accepts, except that a run cannot use an existing
+ * workspace.
  */
 const WorkspacePolicy = Schema.Union([
   closedStruct(PrimarySpawnWorkspace.fields),
@@ -427,11 +439,12 @@ const WorkspacePolicy = Schema.Union([
 ]);
 
 /**
- * What a workflow's text says. The keys are declared in the order the
- * canonical text writes them, at every level.
+ * The schema of a workflow definition: what a workflow's YAML source parses
+ * to. At every level, the keys are declared in the order that the canonical
+ * YAML writes them.
  *
- * The shape alone does not refuse an id that two triggers or steps share:
- * `decodeWorkflowDefinition` does, and it is the one way to check a value.
+ * The schema alone does not reject an id shared by two triggers or steps.
+ * `decodeWorkflowDefinition` does, so always validate a value with it.
  */
 export const WorkflowDefinition = closedStruct({
   name: WorkflowName,
@@ -440,20 +453,20 @@ export const WorkflowDefinition = closedStruct({
   triggers: Schema.optionalKey(Schema.Array(Schema.Union([StartTrigger, SignalTrigger]))),
   steps: Schema.Array(Schema.Union([ActionStep, AgentStep])),
   edges: Schema.optionalKey(Schema.Array(Edge)),
-  /** Absent runs each agent step with no checkout. */
+  /** When absent, each agent step runs with no checkout. */
   workspace: Schema.optionalKey(WorkspacePolicy),
 });
 
 export type WorkflowDefinition = Schema.Schema.Type<typeof WorkflowDefinition>;
 
 /**
- * The entry steps of a definition, in definition order: the steps that a run
- * starts at. A step is an entry step when it says `entry: true`, or when no
- * edge leads into it. Only an edge that may join its two ends leads into a
- * step: an edge from a step or a signal trigger, to a step. A step that only
- * a signal trigger leads into is not an entry step, because it waits for its
- * signal. The controller's check and the editor's graph both read the entry
- * steps here, so the two cannot disagree about where a run begins.
+ * Returns the entry steps of a definition, in definition order: the steps a
+ * run starts at. A step is an entry step when it sets `entry: true`, or when
+ * no edge leads into it. Only a valid edge counts: one from a step or a signal
+ * trigger, to a step. A step that only a signal trigger leads into is not an
+ * entry step, because it waits for its signal. The controller's validation and
+ * the editor's graph both use this function, so they always agree on where a
+ * run starts.
  */
 export const listEntrySteps = (
   definition: WorkflowDefinition,
@@ -476,7 +489,7 @@ export const listEntrySteps = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** The value at a path inside a value, or `undefined` where the path leads nowhere. */
+/** Returns the value at `path` inside `value`, or `undefined` if the path does not exist. */
 const readValueAt = (value: unknown, path: ReadonlyArray<PropertyKey>): unknown =>
   path.reduce<unknown>(
     (inner, key) =>
@@ -486,7 +499,7 @@ const readValueAt = (value: unknown, path: ReadonlyArray<PropertyKey>): unknown 
     value,
   );
 
-/** The kinds a union of the definition tells its members apart by, in declaration order. */
+/** Returns the `kind` literals that tell a union's members apart, in declaration order. */
 const listKinds = (union: SchemaAST.Union): ReadonlyArray<string> =>
   union.types.flatMap((member) =>
     SchemaAST.isObjects(member)
@@ -498,13 +511,14 @@ const listKinds = (union: SchemaAST.Union): ReadonlyArray<string> =>
       : [],
   );
 
-/** Words as a list of choices: `a, b or c`. */
+/** Joins words as a list of choices: `a, b or c`. */
 const joinChoices = (words: ReadonlyArray<string>): string =>
   `${words.slice(0, -1).join(", ")} or ${String(words.at(-1))}`;
 
 /**
- * The kind of value that a type takes, in the words that a message uses, or
- * `undefined` for a type that takes more than one plain value.
+ * Describes the kind of value a schema accepts, in the words an error message
+ * uses, such as "text" or "true or false". Returns `undefined` for any other
+ * schema.
  */
 const describeValueKind = (ast: SchemaAST.AST): string | undefined => {
   if (SchemaAST.isString(ast)) return "text";
@@ -517,8 +531,9 @@ const describeValueKind = (ast: SchemaAST.AST): string | undefined => {
 };
 
 /**
- * The problem of a key that the author wrote with no value after it, such as
- * `action:` alone. YAML reads the value as null.
+ * Returns the error for a key the author wrote with no value, such as
+ * `action:` alone, which YAML parses as null. Returns `undefined` when the
+ * expected kind of value has no short description.
  */
 const describeEmptyValue = (
   ast: SchemaAST.AST,
@@ -527,21 +542,26 @@ const describeEmptyValue = (
   const kind = describeValueKind(ast);
   return kind === undefined
     ? undefined
-    : [{ path, message: `Write a value here. ${String(path.at(-1))} takes ${kind}.` }];
+    : [{ path, message: `${String(path.at(-1))} has no value. It takes ${kind}.` }];
 };
 
 /**
- * The problems that one leaf of a failed decode of the definition stands for,
- * or `undefined` for a leaf that the schema library words well enough. `value`
- * is the whole value that was decoded, where a message reads what was written.
+ * Returns the issues for one leaf of a failed definition decode, or
+ * `undefined` to keep the schema library's message. `value` is the whole
+ * decoded value, used to quote what the author wrote.
  *
- * Four problems are said here and not by the schema library, which describes
- * a shape it expected as a line of TypeScript. A key that is missing is named
- * with what to do. A key with no value after it, where one plain value
- * belongs, is named with the kind of value to write. A value that must be a
- * mapping and is not one says so. A union whose members are told apart by
- * `kind` refuses an unknown kind at `kind`, because the author only wrote one
- * wrong word.
+ * The schema library describes an expected shape as a line of TypeScript,
+ * which does not help a workflow author. So this function writes its own
+ * message for four cases:
+ *
+ * - A missing key: tell the author to add it.
+ * - A key with no value where a plain value belongs: give the kind of value
+ *   to write.
+ * - A value that must be a mapping but is not: state that a mapping is
+ *   expected.
+ * - An unknown `kind` in a union whose members are told apart by `kind`:
+ *   reports the error at `kind`, because the author only got that one word
+ *   wrong.
  */
 const describeDefinitionLeaf = (
   leaf: SchemaIssue.Issue,
@@ -550,7 +570,7 @@ const describeDefinitionLeaf = (
 ): ReadonlyArray<Issue> | undefined => {
   switch (leaf._tag) {
     case "MissingKey":
-      return [{ path, message: `Add ${String(path.at(-1))}. It is necessary here.` }];
+      return [{ path, message: `Add ${String(path.at(-1))}. It is required here.` }];
     case "InvalidType": {
       const written = readValueAt(value, path);
       if (!SchemaAST.isObjects(leaf.ast)) {
@@ -591,12 +611,12 @@ const describeDefinitionLeaf = (
 };
 
 /**
- * Refuses an id that an earlier trigger or step has already. Triggers and
- * steps share one set of ids, because an expression reads a signal trigger as
- * `steps.<id>` too. The later of the two is refused, in the order of the
- * definition: triggers first, then steps, in whichever order the text writes
- * them. It reads the value as it was written, so it finds a repeated id also
- * where other fields have the wrong shape.
+ * Returns an issue for each trigger or step whose id an earlier trigger or
+ * step already uses. Triggers and steps share one set of ids, because
+ * expressions refer to a signal trigger as `steps.<id>` too. Triggers count as
+ * earlier than steps, whatever order the source lists them in. The function
+ * reads the raw value, so it finds repeated ids even when other fields are
+ * invalid.
  */
 const listRepeatedIds = (value: unknown): ReadonlyArray<Issue> => {
   if (!isRecord(value)) return [];
@@ -612,8 +632,8 @@ const listRepeatedIds = (value: unknown): ReadonlyArray<Issue> => {
         issues.push({
           path: [list, String(index), "id"],
           message:
-            `A trigger or step before this one has the id ${quoteWritten(id)} already. ` +
-            "Give each trigger and each step an id of its own.",
+            `The id ${quoteAuthorText(id)} is already used by an earlier trigger or step. ` +
+            "Give each trigger and step a unique id.",
         });
       }
       seen.add(id);
@@ -625,19 +645,21 @@ const listRepeatedIds = (value: unknown): ReadonlyArray<Issue> => {
 const decodeDefinition = Schema.decodeUnknownResult(WorkflowDefinition);
 
 /**
- * The most issues one refusal names. A text of a few hundred kilobytes can
- * hold a mistake on each of thousands of lines, and a refusal that named each
- * one would be many times the size of the request.
+ * The maximum number of issues in one error response. A source of a few
+ * hundred kilobytes can have an error on each of thousands of lines, and a
+ * response that listed every one would be many times the size of the request.
  */
 const MAX_ISSUES = 100;
 
 /**
- * The first `MAX_ISSUES` issues, and one more issue that says how many are
- * left out. The parse of a text, the check of a definition object and the
- * controller's checks of meaning all refuse through this, so no refusal of a
- * workflow names more.
+ * Returns the first `MAX_ISSUES` issues, plus one issue that counts the ones
+ * left out. The YAML parse, the definition decode and the controller's
+ * validation all pass their issues through this function, so no workflow
+ * error response lists more.
  */
-export const limitIssues = <I extends Issue>(issues: ReadonlyArray<I>): ReadonlyArray<I | Issue> =>
+export const truncateIssues = <I extends Issue>(
+  issues: ReadonlyArray<I>,
+): ReadonlyArray<I | Issue> =>
   issues.length <= MAX_ISSUES
     ? issues
     : [
@@ -646,16 +668,16 @@ export const limitIssues = <I extends Issue>(issues: ReadonlyArray<I>): Readonly
           path: [],
           message:
             `There are ${String(issues.length - MAX_ISSUES)} more problems. ` +
-            "Correct the problems before this one, then send the workflow again to see the others.",
+            "Fix the problems listed, then send the workflow again to see the rest.",
         },
       ];
 
 /**
- * The definition a value holds, or the problems that stop it from being one:
- * a field of the wrong shape, an id that is not a CEL identifier, a JSON value
- * nested too deep, and an id used twice. A definition parsed from a text and a
- * definition object sent as JSON are checked here alike, so the same mistake
- * is named the same way, at the same path, whichever way it arrived.
+ * Validates a value as a workflow definition. Returns the definition, or every
+ * error found: a field with the wrong shape, an invalid id or name, a JSON
+ * value nested too deep, or an id used twice. Definitions parsed from YAML and
+ * definition objects sent as JSON are both validated here, so the same
+ * mistake gets the same message at the same path either way.
  */
 export const decodeWorkflowDefinition = (
   value: unknown,
@@ -664,7 +686,7 @@ export const decodeWorkflowDefinition = (
   const repeated = listRepeatedIds(value);
   if (Result.isSuccess(decoded) && repeated.length === 0) return Result.succeed(decoded.success);
   return Result.fail(
-    limitIssues([
+    truncateIssues([
       ...(Result.isFailure(decoded)
         ? listSchemaIssues(decoded.failure.issue, {
             describeLeaf: (leaf, path) => describeDefinitionLeaf(leaf, path, value),

@@ -1,26 +1,26 @@
 /**
- * The look of the text editor, built from the design tokens and the syntax
- * palette of `@hercule/ui`. Each colour is a CSS variable, so the editor
- * follows the light and the dark theme as the rest of the app does, and the
- * editor library's own colours never show. The popups are the app's menus: the
- * radius of a card, a padding of 6px, and rows with the radius of a control.
+ * The text editor's styles, built from the design tokens and syntax colours
+ * of `@hercule/ui`. Every colour is a CSS variable, so the editor follows the
+ * light and dark themes like the rest of the app, and CodeMirror's default
+ * colours never show. The popups match the app's menus: card radius, 6px
+ * padding, and rows with control radius.
  */
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
 /**
- * The colour of each part of the YAML text, from the tags that the YAML
- * grammar gives. A plain value has no rule, so it is ink.
+ * The colour of each YAML token, keyed by the tags from the YAML grammar. A
+ * plain value has no rule, so it uses ink.
  */
 export const syntaxHighlightStyle = syntaxHighlighting(
   HighlightStyle.define([
     { tag: tags.propertyName, color: "var(--syn-key)" },
     { tag: tags.string, color: "var(--syn-string)" },
     { tag: tags.comment, color: "var(--syn-comment)", fontStyle: "italic" },
-    // The `|` of a block is punctuation of the text, and not a string.
+    // The `|` that starts a block scalar is punctuation, not a string.
     { tag: [tags.punctuation, tags.special(tags.string)], color: "var(--syn-punctuation)" },
-    // Directives, anchors, aliases and tags. A workflow refuses each of them.
+    // Directives, anchors, aliases and tags. Workflow validation rejects all of them.
     {
       tag: [tags.keyword, tags.attributeValue, tags.meta, tags.labelName, tags.typeName],
       color: "var(--syn-meta)",
@@ -28,7 +28,7 @@ export const syntaxHighlightStyle = syntaxHighlighting(
   ]),
 );
 
-/** A wavy line under the text of a problem, in the hue of its severity. */
+/** Builds a wavy underline style in the severity's colour. */
 const buildUnderline = (colour: string) => ({
   backgroundImage: "none",
   textDecoration: `underline wavy ${colour} 1px`,
@@ -36,14 +36,14 @@ const buildUnderline = (colour: string) => ({
   textDecorationSkipInk: "none",
 });
 
-/** The padding of a popup, and the padding of a row in it, as in the app's menus. */
+/** Popup and row padding, as in the app's menus. */
 const POPUP_PADDING = "6px";
 const ROW_PADDING = { block: "5px", inline: "8px" };
 
 /**
- * A 6px dot before the message of a problem, in the hue of its severity, on
- * the middle of the message's first line. Colour appears at dot scale only,
- * so the message itself stays in ink.
+ * Builds a 6px dot in the severity's colour, placed before an error message
+ * and centred on its first line. Only the dot shows the severity's colour, so
+ * the message text stays in ink.
  */
 const buildSeverityDot = (colour: string) => ({
   content: '""',
@@ -57,9 +57,9 @@ const buildSeverityDot = (colour: string) => ({
 });
 
 /**
- * How far the completion list moves to the left, so that the labels of its
- * rows start where the text that the author typed starts: the list's border,
- * its padding, and the padding of a row.
+ * How far the completion list shifts left, so its labels line up with the
+ * text the author typed. The shift is the list's border plus its padding plus
+ * a row's padding.
  */
 const COMPLETION_LABEL_INSET = `calc(-1px - ${POPUP_PADDING} - ${ROW_PADDING.inline})`;
 
@@ -82,16 +82,16 @@ export const editorTheme = EditorView.theme({
     padding: "0 4px 0 16px",
     fontVariantNumeric: "tabular-nums",
   },
-  // The line of the cursor shows only while the author writes in the editor.
+  // The cursor's line is highlighted only while the editor has focus.
   ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "transparent" },
   "&.cm-focused .cm-activeLine": { backgroundColor: "var(--line-soft)" },
   "&.cm-focused .cm-activeLineGutter": { color: "var(--muted)" },
   "& .cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-content ::selection":
     { backgroundColor: "color-mix(in oklch, var(--ink) 14%, transparent)" },
 
-  // A character that is not seen, such as a stray carriage return or a line
-  // separator, shows as a sign in the hue of a failure, because the author
-  // most likely did not mean to write it.
+  // An invisible character, such as a stray carriage return or a Unicode line
+  // separator, shows as a symbol in the failure colour, because the author
+  // most likely did not mean to type it.
   ".cm-specialChar": { color: "var(--fail)" },
 
   ".cm-lintRange-error": buildUnderline("var(--fail)"),

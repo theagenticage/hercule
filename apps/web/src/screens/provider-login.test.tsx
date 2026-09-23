@@ -107,7 +107,7 @@ describe("a login the vendor wants a code pasted into", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("Code", { exact: true })).toBeDefined();
     });
-    // The answer that declines comes first, and the answer that accepts comes last.
+    // Cancel comes first and Submit last, as everywhere in the app.
     expectInDocumentOrder([
       screen.getByRole("button", { name: "Cancel" }),
       screen.getByRole("button", { name: /submit/i }),

@@ -1,7 +1,7 @@
 /**
- * The event kinds that plugins declare, asked for as a question rather than
- * taken from whoever answers it: the schema an event kind's payload must
- * satisfy, and the kinds a trigger can name.
+ * Declares the questions other domains ask about the event kinds that plugins
+ * declare: which schema an event kind's payload must satisfy, and which kinds a
+ * trigger can listen for. Only the interface lives here.
  *
  * A kind is declared by a plugin at registration, so the answer lives in the
  * plugins domain. That domain appends audit entries to this log, so it already
@@ -16,20 +16,20 @@ import type * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 
 /**
- * An event kind that a trigger can name, as the controller holds it: the
- * contract's `DeclaredEventKind`, with the qualified Connection type in place
- * of `connectionRequired`. The check of a trigger compares the type with the
- * type of the Connection that the trigger names. A client of the API needs to
- * know only whether a trigger names a Connection.
+ * An event kind that a trigger can listen for, as the controller stores it.
+ * It is the contract's `DeclaredEventKind` with the qualified Connection type
+ * in place of the `connectionRequired` flag. Validating a trigger compares this
+ * type with the type of the trigger's Connection. An API client only needs to
+ * know whether a Connection is required.
  */
 export interface DeclaredEventKindWithConnectionType {
   readonly kind: string;
-  /** One line that says what an event of this kind means. */
+  /** A one-line description of what an event of this kind means. */
   readonly description: string;
   /**
    * The qualified Connection type that events of this kind arrive through,
-   * such as `github/github`. Absent for a kind the core declares, because its
-   * events arrive through no Connection.
+   * such as `github/github`. Absent for a core event kind, because its events
+   * do not arrive through a Connection.
    */
   readonly connectionType?: string;
 }
@@ -40,9 +40,9 @@ export class EventKindCatalog extends Context.Service<
     /** What a payload of this kind must be, or nothing for a kind nobody declared. */
     readonly readPayloadSchema: (kind: string) => Effect.Effect<Option.Option<Schema.Top>>;
     /**
-     * The kinds of every plugin that runs now. The kinds of a plugin that is
-     * disabled, or that did not start, are not in it: no event of theirs
-     * arrives while the plugin does not run.
+     * Returns the event kinds of every plugin that is running now. The kinds
+     * of a disabled plugin, or of a plugin that failed to start, are left out,
+     * because no event of those kinds arrives while the plugin is not running.
      */
     readonly listActiveEventKinds: () => Effect.Effect<
       ReadonlyArray<DeclaredEventKindWithConnectionType>

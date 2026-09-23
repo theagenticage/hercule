@@ -18,10 +18,9 @@ globalThis.ResizeObserver = class {
 window.scrollTo = () => {};
 
 /**
- * jsdom does no layout, so a text range has no `getClientRects`. The text
- * editor of the workflow editor asks a range for its rectangles to place the
- * cursor and its popups, so a range answers as a browser does for text that
- * is not drawn: with no rectangles.
+ * jsdom does no layout, so `Range` has no `getClientRects`. The workflow
+ * editor's text editor calls it to position the cursor and popups. This stub
+ * returns an empty list, as a browser does for text that is not rendered.
  */
 Range.prototype.getClientRects = function () {
   return Object.assign([], { item: () => null });

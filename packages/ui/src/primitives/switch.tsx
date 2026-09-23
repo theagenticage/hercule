@@ -2,26 +2,29 @@ import type { ComponentProps, JSX } from "react";
 import { cn } from "./cn";
 
 /**
- * A switch that turns one thing on or off, and does it at once: there is no
- * form to submit after it. A checkbox is for a choice that a form sends later.
+ * An on/off toggle that takes effect at once, with no form to submit. Use a
+ * Checkbox for a choice that a form sends later.
  *
- * It has no hue, because the design language keeps colour to word and dot
- * scale, and the live hue means that something runs. Off is a track outlined
- * in the faint colour with a muted knob, flat, so that the knob has a
- * contrast of at least 3:1 against the row in both themes. On is an ink track
- * with an ink knob, and a ring in the colour of the row at the edge of the
- * knob separates the knob from the track. In the dark theme the ink is light,
- * and a knob in the colour of the ground would look like a hole in the track.
+ * The switch uses no colour, because the design language uses colour only at
+ * the size of a word or a dot, and the live colour means that something is
+ * running.
+ * - Off: a track with a faint outline and a muted knob. The knob has at
+ *   least 3:1 contrast against the row in both themes.
+ * - On: an ink track and an ink knob. A ring in the row's colour around the
+ *   knob separates it from the track. The knob is not simply the row's
+ *   colour, because in the dark theme ink is light, and such a knob would
+ *   look like a hole in the track.
  *
- * The switch is smaller than a pointer target must be, so an invisible area
- * around it takes a press that misses by a few pixels. In a row that opens a
- * page, such a press turns the switch and does not open the page.
+ * The switch is smaller than the minimum pointer target, so an invisible
+ * area around it catches clicks that miss by a few pixels. In a row that
+ * links to a page, such a click toggles the switch instead of opening the
+ * page.
  *
- * `aria-disabled` keeps the switch in the tab order while it ignores presses,
- * as while its write is in flight, so the keyboard focus stays on it. The
- * state is kept in `aria-checked` only, so what a screen reader reads and
- * what the switch shows cannot disagree. A switch has no visible name of its
- * own, so the caller names it with `aria-label` or a label element.
+ * With `aria-disabled`, the switch ignores clicks but stays in the tab order,
+ * so keyboard focus stays on it while its save is in flight. The on/off state
+ * is only in `aria-checked`, so a screen reader always announces what the
+ * switch shows. The switch has no visible label, so the caller must name it
+ * with `aria-label` or a label element.
  */
 export function Switch({
   checked,
@@ -46,9 +49,8 @@ export function Switch({
       className={cn(
         "group relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full border p-px",
         "border-faint aria-checked:border-ink aria-checked:bg-ink",
-        // The padding box is 14 px high, so an inset of -6 px makes the area
-        // 26 px high: 24 px, the size of a pointer target, and a pixel to spare
-        // on each side.
+        // The padding box is 14px high. A -6px inset makes the click area 26px
+        // high: the 24px minimum pointer target, plus 1px to spare on each side.
         "after:absolute after:-inset-[6px] after:content-['']",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
         "disabled:cursor-not-allowed disabled:opacity-50",
@@ -62,7 +64,7 @@ export function Switch({
         className={cn(
           "size-3 rounded-full bg-muted",
           "group-aria-checked:translate-x-3 group-aria-checked:bg-ink",
-          // Inset, so that the ring stays inside the track and never cuts its edge.
+          // An inset ring stays inside the knob, so it never covers the track's edge.
           "group-aria-checked:inset-ring-[1.5px] group-aria-checked:inset-ring-surface",
           "motion-safe:transition-transform",
         )}

@@ -211,7 +211,7 @@ describe("task.update", () => {
     expect(error).toMatchObject({ error: { code: "not_found" } });
   });
 
-  it("refuses an update that names no field to change, saying what to add", async () => {
+  it("fails with a Validation error that asks for a field when the update sets none", async () => {
     const error = await runError(
       Effect.flatMap(TaskService, (tasks) =>
         Effect.flatMap(tasks.create({ title: "Unchanged", description: "d" }), (created) =>

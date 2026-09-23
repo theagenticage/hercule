@@ -297,7 +297,7 @@ describe("createLive", () => {
     );
   });
 
-  it("stops telling a status listener once the listener is taken off", async () => {
+  it("stops calling a status listener after it is removed", async () => {
     const { fetch } = ticketServer();
     const started = supervisor(fetch);
     const statuses: Array<string> = [];
@@ -685,14 +685,14 @@ describe("queryKeysFor", () => {
     assert.deepStrictEqual(queryKeysFor("runner", []), [["runners"], ["runner"]]);
   });
 
-  it("maps a workflow push to the listing and the page of each workflow named", () => {
+  it("maps a workflow push to the listing and the page of each workflow id in it", () => {
     assert.deepStrictEqual(queryKeysFor("workflow", ["w1", "w2"]), [
       queryKeys.workflows(),
       queryKeys.workflow("w1"),
       queryKeys.workflow("w2"),
     ]);
 
-    // A push naming no workflow means every one of them moved.
+    // A push with no ids means any workflow may have changed.
     assert.deepStrictEqual(queryKeysFor("workflow", []), [["workflows"], ["workflow"]]);
   });
 

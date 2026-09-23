@@ -1,25 +1,24 @@
 /**
- * The checks of meaning that a workflow's definition must pass before it is
- * stored: the inputs, the triggers, the steps with their actions, params and
- * agents, the edges, the graph as a whole, and the expression at every place.
- * The parse in `@hercule/contract` has checked the shape and the ids already.
- * The graph, which holds the nodes that an edge may join and the rules about
- * the graph as a whole, is in `./graph`, and the checks here call it.
+ * Validates a parsed workflow definition before it is stored. The parser in
+ * `@hercule/contract` has already checked the schema and the ids. This module
+ * checks the rest: the inputs, the triggers, the steps with their actions,
+ * params and Agents, the edges, and every expression and template. The rules
+ * about the graph as a whole are in `./graph`.
  *
- * Every problem is named by its path into the definition, so the author can
- * correct them in one round and an editor can show each one at its place.
- * The checks read every place of the definition and name each problem they
- * find, with one exception: a template names only its first problem. Every
- * problem of a template has the path of the template, and the text after a
- * `{{` that no `}}` closes cannot be read at all. A problem that follows from
- * another one is not named a second time: the schedule of a trigger on an
- * unknown event kind is not read, and an edge that names no node is left out
- * of the graph.
+ * Every error has its path in the definition, so the author can fix all of
+ * them in one round and an editor can show each one in place. The checks
+ * report every error they find, with two exceptions:
  *
- * The checks read nothing themselves. What they need of the rest of the
- * controller is handed to them as `ResolvedReferences`, which the service reads
- * inside the transaction of a save, so a check and the write it allows see the
- * same rows.
+ * - A template reports only its first error. All errors of a template have
+ *   the same path, and the text after a `{{` without a closing `}}` cannot be
+ *   parsed at all.
+ * - An error that follows from another error is not reported. A trigger with
+ *   an unknown event kind gets no schedule errors, and an edge whose end is
+ *   not a valid node is left out of the graph checks.
+ *
+ * The checks do no I/O. The service reads what they need into a
+ * `ResolvedReferences` inside the save's transaction, so the checks and the
+ * write see the same rows.
  */
 import * as Cron from "effect/Cron";
 import * as DateTime from "effect/DateTime";
@@ -31,12 +30,12 @@ import * as SchemaAST from "effect/SchemaAST";
 import type * as SchemaIssue from "effect/SchemaIssue";
 import {
   ANY_CONNECTION,
-  excerptMessage,
+  shortenLibraryMessage,
   isId,
   joinNames,
-  limitIssues,
+  truncateIssues,
   listSchemaIssues,
-  quoteWritten,
+  quoteAuthorText,
   type Issue,
   type WorkflowDefinition,
   type WorkflowIssues,
@@ -55,19 +54,19 @@ import type { RegisteredWorkflowAction } from "../plugins";
 import { listEdgeEndIssues, listGraphIssues, type GraphEdge, type GraphNodes } from "./graph";
 
 /**
- * What a definition names, as the controller holds it now. Each collection
- * holds only what exists: a name that is not in it names nothing.
+ * The things a definition can refer to that exist on the controller now. If a
+ * name is not in a collection, the thing it refers to does not exist.
  */
 export interface ResolvedReferences {
-  /** The actions a step can name, by id. */
+  /** The workflow actions a step can use, by id. */
   readonly actions: ReadonlyMap<string, RegisteredWorkflowAction>;
-  /** The event kinds a trigger can name, by kind. */
+  /** The event kinds a trigger can listen for, by kind. */
   readonly eventKinds: ReadonlyMap<string, DeclaredEventKindWithConnectionType>;
-  /** The ids of the Agents that the definition names and that exist. */
+  /** The ids of the Agents that the definition refers to and that exist. */
   readonly agentIds: ReadonlySet<string>;
-  /** The qualified type of each Connection that the definition names and that exists, by the Connection's id. */
+  /** The qualified type of each Connection that the definition refers to and that exists, by Connection id. */
   readonly connectionTypeById: ReadonlyMap<string, string>;
-  /** The qualified name of each Connection type of a plugin that runs. */
+  /** The qualified name of every Connection type of an active plugin. */
   readonly connectionTypes: ReadonlySet<string>;
 }
 
@@ -79,17 +78,20 @@ type ActionStep = Extract<Step, { readonly kind: "action" }>;
 type AgentStep = Extract<Step, { readonly kind: "agent" }>;
 type Edge = NonNullable<WorkflowDefinition["edges"]>[number];
 
-/** The ids of the Agents a definition names, each one once. */
-export const listNamedAgentIds = (definition: WorkflowDefinition): ReadonlyArray<string> => [
+/** Returns the ids of the Agents that a definition's steps refer to, without duplicates. */
+export const listReferencedAgentIds = (definition: WorkflowDefinition): ReadonlyArray<string> => [
   ...new Set(definition.steps.flatMap((step) => (step.kind === "agent" ? [step.agent] : []))),
 ];
 
 /**
- * The ids of the Connections a definition names, each one once: in a
- * trigger's Connection selection, and as the default of a Connection input.
- * A default that is not an id names no Connection and is not read.
+ * Returns the ids of the Connections that a definition refers to, without
+ * duplicates: in a trigger's `connectionId`, and as the default of a
+ * Connection input. A default that is not a valid id cannot refer to a
+ * Connection, so it is skipped.
  */
-export const listNamedConnectionIds = (definition: WorkflowDefinition): ReadonlyArray<string> => [
+export const listReferencedConnectionIds = (
+  definition: WorkflowDefinition,
+): ReadonlyArray<string> => [
   ...new Set([
     ...(definition.triggers ?? []).flatMap((trigger) =>
       trigger.source.connectionId === undefined || trigger.source.connectionId === ANY_CONNECTION
@@ -103,8 +105,8 @@ export const listNamedConnectionIds = (definition: WorkflowDefinition): Readonly
 ];
 
 /**
- * The issue of a check of an expression or a template, at the place the
- * checked text is written, or no issue where the check passes.
+ * Runs the check of an expression or a template. Returns its error as one
+ * issue at `path`, or no issue if the check passes.
  */
 const listCheckIssues = (
   path: ReadonlyArray<string>,
@@ -115,8 +117,11 @@ const listCheckIssues = (
     onFailure: (refusal) => [{ path, message: refusal.message }],
   });
 
-/** Each expression of a map, such as a trigger's input mappings, checked at its own key. */
-const checkExpressionsAt = (
+/**
+ * Checks each expression in a map, such as a trigger's input mappings.
+ * Returns an issue at `path` plus the key for each expression that fails.
+ */
+const checkExpressionMap = (
   expressions: Readonly<Record<string, string>> | undefined,
   scope: ExpressionScope,
   path: ReadonlyArray<string>,
@@ -129,10 +134,12 @@ const checkExpressionsAt = (
   );
 
 /**
- * A Connection input's type and default: the type is one of a plugin that
- * runs, and a default, when it is present, names a Connection that exists and
- * has the input's type. A plugin that does not run acts through none of its
- * Connections, as its event kinds and its actions are not in use either.
+ * Validates a Connection input. Its type must be a Connection type of an
+ * active plugin, and its default, if present, must be the id of an existing
+ * Connection of that type. Returns no issues for any other kind of input.
+ *
+ * A plugin that is not active cannot act through its Connections, in the same
+ * way that its event kinds and actions cannot be used.
  */
 const listInputIssues = (
   input: Input,
@@ -143,16 +150,16 @@ const listInputIssues = (
   const path = ["inputs", String(index)];
   const wanted = input.connection.type;
   if (!references.connectionTypes.has(wanted)) {
-    // The default is read against the type, so a type that does not exist
-    // leaves the default unread: the type is the mistake, and it is named.
+    // The default can only be checked against a valid type. If the type is
+    // unknown, report the type and skip the default.
     return [
       {
         path: [...path, "connection", "type"],
         message:
-          `${quoteWritten(wanted)} is not a Connection type of a plugin that runs, so no Connection of this type can be used. ` +
+          `${quoteAuthorText(wanted)} is not a Connection type of an active plugin. ` +
           (references.connectionTypes.size === 0
-            ? "No plugin that runs declares a Connection type. Enable the plugin that declares this type, or remove the input."
-            : "Enable the plugin that declares this type, or write one of the Connection types of the plugins that run: " +
+            ? "No active plugin declares a Connection type. Enable the plugin that declares this type, or remove the input."
+            : "Enable the plugin that declares this type, or use one of the Connection types of the active plugins: " +
               `${[...references.connectionTypes].join(", ")}.`),
       },
     ];
@@ -163,7 +170,7 @@ const listInputIssues = (
     return [
       {
         path: [...path, "default"],
-        message: `This default names no Connection. Write the id of a Connection of type ${quoteWritten(wanted)}.`,
+        message: `No Connection has this id. Write the id of a Connection of type ${quoteAuthorText(wanted)}.`,
       },
     ];
   }
@@ -173,16 +180,20 @@ const listInputIssues = (
         {
           path: [...path, "default"],
           message:
-            `This default names a Connection of type ${found}, but the input takes a Connection of type ${quoteWritten(wanted)}. ` +
-            `Write the id of a Connection of type ${quoteWritten(wanted)}.`,
+            `This Connection is of type ${found}, but the input needs a Connection of type ${quoteAuthorText(wanted)}. ` +
+            `Write the id of a Connection of type ${quoteAuthorText(wanted)}.`,
         },
       ];
 };
 
 /**
- * A trigger's event kind and its Connection selection: the kind is one a
- * trigger can name, a plugin's kind names a Connection of its type or `any`,
- * and a core kind names none.
+ * Validates a trigger's event kind and `connectionId`. `eventKind` is the
+ * declared event kind, or `undefined` if no event kind has that name.
+ *
+ * - The event kind must exist.
+ * - An event kind of a plugin needs a `connectionId`: the id of a Connection
+ *   of the kind's Connection type, or `any`.
+ * - A core event kind must have no `connectionId`.
  */
 const listEventSourceIssues = (
   trigger: Trigger,
@@ -197,9 +208,9 @@ const listEventSourceIssues = (
       {
         path: [...path, "kind"],
         message:
-          `${quoteWritten(kind)} is not an event kind that a trigger can name. ` +
-          "A trigger can name a kind of the core, or a kind of a plugin that runs. " +
-          `The kinds are: ${[...references.eventKinds.keys()].join(", ")}.`,
+          `${quoteAuthorText(kind)} is not a known event kind. ` +
+          "A trigger can listen for a core event kind or an event kind of an active plugin. " +
+          `The known event kinds are: ${[...references.eventKinds.keys()].join(", ")}.`,
       },
     ];
   }
@@ -208,9 +219,9 @@ const listEventSourceIssues = (
       {
         path: [...path, "kind"],
         message:
-          `A signal trigger cannot listen for ${CRON_TICK_EVENT_KIND}. The Scheduler starts runs from its ticks ` +
-          "and never signals a live run with one, so this trigger could never fire. " +
-          "Write a start trigger with a schedule, or listen for another kind.",
+          `A signal trigger cannot listen for ${CRON_TICK_EVENT_KIND}. The Scheduler uses its ticks only to start runs, ` +
+          "never to signal a running run, so this trigger would never fire. " +
+          "Write a start trigger with a schedule, or listen for another event kind.",
       },
     ];
   }
@@ -222,16 +233,16 @@ const listEventSourceIssues = (
       : [
           {
             path: connectionPath,
-            message: `Events of kind ${kind} come from the core and arrive through no Connection. Remove connectionId.`,
+            message: `Events of kind ${kind} are core events and do not come through a Connection. Remove connectionId.`,
           },
         ];
   }
-  const choice = `Write the id of a Connection of type ${connectionType}, or write ${ANY_CONNECTION} for each Connection of that type.`;
+  const choice = `Write the id of a Connection of type ${connectionType}, or write ${ANY_CONNECTION} to listen on every Connection of that type.`;
   if (connectionId === undefined) {
     return [
       {
         path: connectionPath,
-        message: `Events of kind ${kind} arrive through a Connection of type ${connectionType}, and a trigger names which one. ${choice}`,
+        message: `Events of kind ${kind} come through a Connection of type ${connectionType}, so the trigger must say which Connection to listen on. ${choice}`,
       },
     ];
   }
@@ -244,14 +255,15 @@ const listEventSourceIssues = (
     : [
         {
           path: connectionPath,
-          message: `This Connection is of type ${found}, but events of kind ${kind} arrive through a Connection of type ${connectionType}. ${choice}`,
+          message: `This Connection is of type ${found}, but events of kind ${kind} come through a Connection of type ${connectionType}. ${choice}`,
         },
       ];
 };
 
 /**
- * A start trigger's schedule and timezone: a trigger on `cron.tick` has a
- * valid schedule, and a trigger on any other kind has neither field.
+ * Validates a start trigger's `schedule` and `timezone`. A trigger on
+ * `cron.tick` needs a valid schedule, and its timezone, if present, must be
+ * valid. A trigger on any other event kind must have neither field.
  */
 const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray<Issue> => {
   const path = ["triggers", String(index)];
@@ -262,7 +274,7 @@ const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray
         : [
             {
               path: [...path, "schedule"],
-              message: `Only a trigger on ${CRON_TICK_EVENT_KIND} has a schedule. Remove schedule.`,
+              message: `Only a trigger on ${CRON_TICK_EVENT_KIND} can have a schedule. Remove schedule.`,
             },
           ]),
       ...(trigger.timezone === undefined
@@ -270,7 +282,7 @@ const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray
         : [
             {
               path: [...path, "timezone"],
-              message: `Only a trigger on ${CRON_TICK_EVENT_KIND} has a timezone. Remove timezone.`,
+              message: `Only a trigger on ${CRON_TICK_EVENT_KIND} can have a timezone. Remove timezone.`,
             },
           ]),
     ];
@@ -282,19 +294,19 @@ const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray
     issues.push({
       path: [...path, "timezone"],
       message:
-        `${quoteWritten(trigger.timezone)} is not a timezone. ` +
+        `${quoteAuthorText(trigger.timezone)} is not a timezone. ` +
         "Write an IANA timezone, such as Europe/Amsterdam, or remove timezone to use the timezone of your settings.",
     });
   }
   if (trigger.schedule === undefined) {
     issues.push({
       path: [...path, "schedule"],
-      message: `A trigger on ${CRON_TICK_EVENT_KIND} needs a schedule, which says when it fires. Add schedule, such as "0 9 * * 1-5" for 09:00 on weekdays.`,
+      message: `A trigger on ${CRON_TICK_EVENT_KIND} needs a schedule that sets when it fires. Add schedule, such as "0 9 * * 1-5" for 09:00 on weekdays.`,
     });
     return issues;
   }
-  // A cron expression has five fields. The parser also reads six, with a
-  // field for seconds first, and a schedule in seconds could start a run each
+  // A cron expression has five fields. The parser also accepts six, with
+  // seconds first, but a schedule with seconds could start a run every
   // second.
   if (trigger.schedule.trim().split(/\s+/).length === 6) {
     issues.push({
@@ -305,23 +317,23 @@ const listScheduleIssues = (trigger: StartTrigger, index: number): ReadonlyArray
     });
     return issues;
   }
-  // The schedule is read in the trigger's timezone where that is valid. A
-  // timezone that is not valid is refused above, and is not refused a second
-  // time here.
+  // Parse the schedule in the trigger's timezone if the timezone is valid. An
+  // invalid timezone is already reported above, so it is not reported again.
   const parsed = Cron.parse(trigger.schedule, Option.getOrUndefined(zone));
   if (Result.isFailure(parsed)) {
     issues.push({
       path: [...path, "schedule"],
-      message: `This schedule is not a cron expression. ${excerptMessage(parsed.failure.message)} Write five fields, such as "0 9 * * 1-5" for 09:00 on weekdays.`,
+      message: `This schedule is not a cron expression. ${shortenLibraryMessage(parsed.failure.message)} Write five fields, such as "0 9 * * 1-5" for 09:00 on weekdays.`,
     });
   }
   return issues;
 };
 
 /**
- * A start trigger's input mappings: each one maps an input the workflow
- * declares, and the trigger maps every required input that has no default,
- * because a run it starts cannot begin without one.
+ * Validates a start trigger's input mappings. Each mapping must be for an
+ * input that the workflow declares. Every required input without a default
+ * must be mapped, because a run that the trigger starts cannot begin without
+ * it.
  */
 const listInputMappingIssues = (
   trigger: StartTrigger,
@@ -343,7 +355,7 @@ const listInputMappingIssues = (
       (input) =>
         input.required && input.default === undefined && !Object.hasOwn(mapped, input.name),
     )
-    .map((input) => quoteWritten(input.name));
+    .map((input) => quoteAuthorText(input.name));
   if (unmapped.length === 0) return undeclared;
   const isSingleInput = unmapped.length === 1;
   return [
@@ -351,7 +363,7 @@ const listInputMappingIssues = (
     {
       path,
       message:
-        `The start trigger ${quoteWritten(trigger.id)} does not map the ${isSingleInput ? "input" : "inputs"} ${joinNames(unmapped)}. ` +
+        `The start trigger ${quoteAuthorText(trigger.id)} does not map the ${isSingleInput ? "input" : "inputs"} ${joinNames(unmapped)}. ` +
         `${isSingleInput ? "The input is" : "The inputs are"} required and ${isSingleInput ? "has" : "have"} no default, so a run that this trigger starts could not begin. ` +
         `Map ${isSingleInput ? "the input" : "each input"} under inputs here, or give ${isSingleInput ? "it" : "each one"} a default.`,
     },
@@ -359,8 +371,8 @@ const listInputMappingIssues = (
 };
 
 /**
- * A trigger's filter: it admits an event where it gives true, so it reads
- * only the event and gives true or false.
+ * Checks a trigger's filter. The trigger accepts an event only when the filter
+ * is true, so the filter must be a condition that reads only the event.
  */
 const checkFilter = (trigger: Trigger, index: number): Effect.Effect<ReadonlyArray<Issue>> =>
   trigger.source.filter === undefined
@@ -370,7 +382,7 @@ const checkFilter = (trigger: Trigger, index: number): Effect.Effect<ReadonlyArr
         checkCondition(trigger.source.filter, "event"),
       );
 
-/** Every problem of one trigger, its expressions included. */
+/** Checks one trigger, its expressions included. Returns every issue found. */
 const checkTrigger = (
   trigger: Trigger,
   index: number,
@@ -382,11 +394,11 @@ const checkTrigger = (
   const issues: Array<Issue> = [...listEventSourceIssues(trigger, index, eventKind, references)];
   const expressionChecks = [checkFilter(trigger, index)];
   if (trigger.kind === "start") {
-    // A schedule is read against the kind, so an unknown kind leaves it
-    // unread: the kind is the mistake, and it is named already.
+    // The schedule rules depend on the event kind. If the kind is unknown,
+    // that error is already reported, so skip the schedule.
     if (eventKind !== undefined) issues.push(...listScheduleIssues(trigger, index));
     issues.push(...listInputMappingIssues(trigger, index, definition.inputs ?? []));
-    expressionChecks.push(checkExpressionsAt(trigger.inputs, "event", [...path, "inputs"]));
+    expressionChecks.push(checkExpressionMap(trigger.inputs, "event", [...path, "inputs"]));
   } else {
     expressionChecks.push(
       listCheckIssues(
@@ -397,7 +409,7 @@ const checkTrigger = (
         [...path, "correlation", "run"],
         checkExpression(trigger.correlation.run, "run"),
       ),
-      checkExpressionsAt(trigger.outputs, "event", [...path, "outputs"]),
+      checkExpressionMap(trigger.outputs, "event", [...path, "outputs"]),
     );
   }
   return Effect.map(Effect.all(expressionChecks), (expressionIssues) => [
@@ -406,15 +418,16 @@ const checkTrigger = (
   ]);
 };
 
-/** One param an action takes: its name, and whether a step may leave it out. */
+/** A param that an action takes: its name, and whether a step may omit it. */
 interface ActionParam {
   readonly name: string;
   readonly optional: boolean;
 }
 
 /**
- * The params an action takes. The host registers only an action whose input
- * is a struct, so each param is one property of it.
+ * Returns the params that an action takes. The plugin host registers an action
+ * only if its input schema is a struct, so each param is one property of that
+ * struct.
  */
 const listActionParams = (action: RegisteredWorkflowAction): ReadonlyArray<ActionParam> =>
   SchemaAST.isObjects(action.input.ast)
@@ -425,16 +438,16 @@ const listActionParams = (action: RegisteredWorkflowAction): ReadonlyArray<Actio
       )
     : [];
 
-/** A text that is a template, and the path of the place it is written in the definition. */
+/** A template string and its path in the definition. */
 interface PlacedTemplate {
   readonly path: ReadonlyArray<string>;
   readonly template: string;
 }
 
 /**
- * Every string in a value that is a template, however deep it sits: the value
- * itself, an item of a list, or a field of a mapping. The parse bounds how
- * deep a param's value is, so the walk cannot exhaust the call stack.
+ * Returns every template string in a value, at any depth: the value itself,
+ * an array item, or an object field. The parser limits how deeply a param
+ * value can nest, so the recursion cannot overflow the call stack.
  */
 const listTemplates = (
   value: unknown,
@@ -448,10 +461,10 @@ const listTemplates = (
 };
 
 /**
- * The params read against the action's input as one value, so a rule about
- * the params as a whole is checked too, such as the rule that an update names
- * a field to change. A key that the input does not declare, deeper in the
- * value, is refused, because the action would not receive it.
+ * Decodes a step's params against the action's input schema as one value, so
+ * that rules which span several fields are checked too, such as the rule that
+ * an update must set at least one field. An unknown key at any depth is an
+ * error, because the action would never receive it.
  */
 const decodeParams = (action: RegisteredWorkflowAction, params: unknown) =>
   Schema.decodeUnknownResult(action.input as Schema.Codec<unknown>)(params, {
@@ -460,12 +473,12 @@ const decodeParams = (action: RegisteredWorkflowAction, params: unknown) =>
   });
 
 /**
- * Whether a decode issue at a template is about the value that a run renders
- * there: the value is not of the field's type, is not a value the field
- * takes, or fails a check of the field. That value is known only when a run
- * renders the template, so such an issue says nothing yet. Every other issue
- * at a template is named: a key that the input does not declare, and a field
- * that takes no value at all, such as a field that the core stamps.
+ * Returns whether a schema issue at a template is about the value that a run
+ * will render there: a wrong type, a value the field does not allow, or a
+ * failed check. That value is unknown until a run renders the template, so
+ * such an issue is ignored. Other issues at a template are still reported,
+ * such as an unknown key, or a field that accepts no value at all (for
+ * example a field that the core fills in).
  */
 const isAboutRenderedValue = (issue: SchemaIssue.Issue): boolean => {
   switch (issue._tag) {
@@ -475,8 +488,8 @@ const isAboutRenderedValue = (issue: SchemaIssue.Issue): boolean => {
     case "Filter":
       return true;
     case "AnyOf":
-      // No member of a union takes the value, such as a template in a field
-      // of fixed words.
+      // No member of the union accepts the value, for example a template in
+      // a field that only allows fixed literals.
       return issue.issues.length === 0;
     default:
       return false;
@@ -484,17 +497,18 @@ const isAboutRenderedValue = (issue: SchemaIssue.Issue): boolean => {
 };
 
 /**
- * The words of a key that the action's input does not declare. The schema
- * library says only that it expected no such key.
+ * The message for a key that the action's input schema does not declare. The
+ * schema library's own message only reports that the key is unexpected.
  */
 const UNKNOWN_PARAM_FIELD =
-  "No field has this name at this place of the action's input. Remove the field, or correct its name.";
+  "The action's input has no field with this name at this level. Remove the field, or fix its name.";
 
 /**
- * Each problem that a decode of the params found, at its path in the
- * definition, except a problem at a template that is about the value a run
- * renders there. `path` is the path of `issue` in the definition, and
- * `templatePaths` holds the path of each template, as JSON.
+ * Converts the schema issue from decoding a step's params into a list of
+ * issues at their paths in the definition. Skips an issue at a template if it
+ * is about the value that a run will render there. `path` is the path of
+ * `issue` in the definition, and `templatePaths` holds the path of each
+ * template, as JSON.
  */
 const listParamIssues = (
   issue: SchemaIssue.Issue,
@@ -512,16 +526,18 @@ const listParamIssues = (
   });
 
 /**
- * An action step's action and its params: the action is one a step can name,
- * every param it requires is present, every param is one it takes, and the
- * params have the form its input takes.
+ * Validates an action step's action and params:
  *
- * A string that holds a `{{` is a template wherever it sits in the params,
- * and its value is known only when a run renders it. So a template is taken
- * for a field of any type, and the decode's problem with the template's value
- * is not named. A rule about the params as a whole is checked only when every
- * field decodes, so a template that its field refuses leaves that rule
- * unchecked.
+ * - the action must exist;
+ * - every required param must be present;
+ * - every param must be one that the action takes;
+ * - the params must decode against the action's input schema.
+ *
+ * A string that contains `{{` is a template, wherever it is in the params, and
+ * its value is known only when a run renders it. So a template is accepted
+ * for a field of any type, and a schema error about its value is ignored. A
+ * rule that spans several fields is checked only when every field decodes, so
+ * a template in a field that rejects strings leaves that rule unchecked.
  */
 const listActionIssues = (
   step: ActionStep,
@@ -536,9 +552,9 @@ const listActionIssues = (
       {
         path: [...path, "action"],
         message:
-          `${quoteWritten(step.action)} is not an action that a step can name. ` +
-          "A step can name a built-in action, or an action of a plugin that runs. " +
-          `The actions are: ${[...references.actions.keys()].join(", ")}.`,
+          `${quoteAuthorText(step.action)} is not a known action. ` +
+          "A step can use a built-in action or an action of an active plugin. " +
+          `The known actions are: ${[...references.actions.keys()].join(", ")}.`,
       },
     ];
   }
@@ -567,25 +583,26 @@ const listActionIssues = (
   if (Result.isSuccess(decoded)) return issues;
   const paramsPath = [...path, "params"];
   const templatePaths = new Set(templates.map((template) => JSON.stringify(template.path)));
-  // A missing param and an unknown one are named above, with the params the
-  // action takes, so the decode's own words about them are not repeated.
+  // Missing and unknown params are reported above, together with the list of
+  // params the action takes, so skip the decoder's errors about them.
   const namedAbove = new Set([...missing, ...unknown]);
   for (const issue of listParamIssues(decoded.failure.issue, paramsPath, templatePaths)) {
     const param = issue.path[paramsPath.length];
     if (param !== undefined && namedAbove.has(param)) continue;
     issues.push({
       path: issue.path,
-      message: `The action ${action.id} cannot take ${param === undefined ? "these params" : "this value"}. ${excerptMessage(issue.message)}`,
+      message: `The action ${action.id} cannot take ${param === undefined ? "these params" : "this value"}. ${shortenLibraryMessage(issue.message)}`,
     });
   }
   return issues;
 };
 
 /**
- * An agent step's Agent and output schema: the Agent exists, and the schema
- * is in the subset that every provider accepts, with one issue for each rule
- * it breaks. The lint is the one a session's spawn runs, so a step that passes
- * here does not fail at its first turn.
+ * Validates an agent step's Agent and output schema. The Agent must exist, and
+ * the output schema must stay within the JSON Schema subset that every
+ * provider accepts, with one issue per broken rule. A session runs the same
+ * lint when it spawns, so a step that passes here does not fail at its first
+ * turn.
  */
 const listAgentIssues = (
   step: AgentStep,
@@ -607,12 +624,12 @@ const listAgentIssues = (
       ? []
       : lintOutputSchema(step.outputSchema).map((finding) => ({
           path: [...path, "outputSchema"],
-          message: `The output schema is not in the subset that every provider accepts. ${excerptMessage(finding)} Correct the schema at that place.`,
+          message: `The output schema is outside the JSON Schema subset that every provider accepts. ${shortenLibraryMessage(finding)} Fix that part of the schema.`,
         }))),
   ];
 };
 
-/** Every problem of one step, its expressions and templates included. */
+/** Checks one step, its expressions and templates included. Returns every issue found. */
 const checkStep = (
   step: Step,
   index: number,
@@ -641,18 +658,18 @@ const checkStep = (
   );
 };
 
-/** An edge's condition, which lets the edge fire where it gives true. */
+/** Checks an edge's condition. A run follows the edge only when its condition is true. */
 const checkEdgeCondition = (edge: Edge, index: number): Effect.Effect<ReadonlyArray<Issue>> =>
   edge.condition === undefined
     ? Effect.succeed([])
     : listCheckIssues(["edges", String(index), "condition"], checkCondition(edge.condition, "run"));
 
 /**
- * The one warning. A run ends by itself when a terminal step completes, or
- * when nothing runs or waits any more, and a signal trigger waits as long as
- * the run lives. So a run of a workflow with a signal trigger and no terminal
- * step ends only when someone cancels it. That can be what the author wants,
- * so it does not stop a save.
+ * Returns the only warning a definition can get: it has a signal trigger and
+ * no terminal step. A run ends by itself when a terminal step completes, or
+ * when nothing is running or waiting any more. A signal trigger keeps waiting
+ * as long as the run lives, so such a run ends only when someone cancels it.
+ * That may be what the author wants, so it is a warning and not an error.
  */
 const listWarnings = (definition: WorkflowDefinition): ReadonlyArray<Issue> =>
   (definition.triggers ?? []).some((trigger) => trigger.kind === "signal") &&
@@ -668,12 +685,12 @@ const listWarnings = (definition: WorkflowDefinition): ReadonlyArray<Issue> =>
     : [];
 
 /**
- * Every problem of a definition's meaning, and the one warning, against what
- * the controller holds as `references`: it reads nothing itself. The errors
- * are in definition order, the rules about the graph as a whole last, and
- * there are at most as many as one refusal names.
+ * Validates a definition against `references`, which describe what exists on
+ * the controller now. Does no I/O. Returns the errors and the warnings. The
+ * errors are in definition order with the whole-graph errors last, and capped
+ * by `truncateIssues`.
  */
-export const checkDefinitionAgainst = (
+export const validateDefinition = (
   definition: WorkflowDefinition,
   references: ResolvedReferences,
 ): Effect.Effect<WorkflowIssues> =>
@@ -687,9 +704,9 @@ export const checkDefinitionAgainst = (
       signalIds: listTriggerIds("signal"),
       startIds: listTriggerIds("start"),
     };
-    // An edge with an end that names no node it may join is refused, and it
-    // is left out of the graph that the rules about the whole graph read. The
-    // issues of the ends are found once, for the errors and for the graph.
+    // An edge whose end is not a valid node is reported, and it is left out
+    // of the graph that the whole-graph rules check. The end issues are
+    // computed once and used for both.
     const edgeEndIssues = definedEdges.map((edge, index) => listEdgeEndIssues(edge, index, nodes));
     const edges: ReadonlyArray<GraphEdge> = definedEdges.flatMap((edge, index) =>
       edgeEndIssues[index]!.length === 0
@@ -714,5 +731,5 @@ export const checkDefinitionAgainst = (
       )).flat(),
       ...listGraphIssues(definition, edges, nodes),
     ];
-    return { errors: limitIssues(errors), warnings: listWarnings(definition) };
+    return { errors: truncateIssues(errors), warnings: listWarnings(definition) };
   });

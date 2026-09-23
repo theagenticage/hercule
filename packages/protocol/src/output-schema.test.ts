@@ -305,14 +305,14 @@ describe("the size bound on a schema", () => {
 });
 
 /**
- * The length is measured with `JSON.stringify`, which recurses once for each
- * level. So a schema is refused for its depth before its length is measured,
- * or a deep enough schema throws instead of being refused.
+ * The length is measured with `JSON.stringify`, which recurses once per
+ * level. So the depth must be checked first, or a deep enough schema throws
+ * instead of failing validation.
  */
 describe("the depth bound on a schema", () => {
   const decode = Schema.decodeUnknownResult(OutputSchema);
 
-  it("takes a schema at the bound, and refuses one level past it", () => {
+  it("accepts a schema at the depth limit, and rejects one a level deeper", () => {
     // The schema object itself is the first level.
     expect(decode({ items: nestInLists(MAX_JSON_DEPTH - 1) })._tag).toBe("Success");
     const refused = decode({ items: nestInLists(MAX_JSON_DEPTH) });
@@ -320,7 +320,7 @@ describe("the depth bound on a schema", () => {
     expect(JSON.stringify(refused)).toContain(`${String(MAX_JSON_DEPTH)} levels`);
   });
 
-  it("refuses a schema a hundred thousand levels deep, and does not throw", () => {
+  it("rejects a schema 100,000 levels deep without throwing", () => {
     const refused = decode({ items: nestInLists(100_000) });
     expect(refused._tag).toBe("Failure");
     expect(JSON.stringify(refused)).toContain(`${String(MAX_JSON_DEPTH)} levels`);

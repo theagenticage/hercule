@@ -1,14 +1,15 @@
 /**
- * Triggers: a workflow's rules for when events enter it, one row each.
+ * Triggers: the parts of a workflow that decide which events start a run or
+ * resume one.
  *
- * A trigger is written in its workflow's source, and the controller keeps a
- * row for it beside the workflow, so the triggers of every workflow can be
- * listed together: a scheduled-tasks view is a listing of the cron triggers.
- * A trigger is named by its workflow's id and by the id the source gives it,
- * which is unique only inside that workflow.
+ * A trigger is defined in its workflow's source. The controller also stores a
+ * row for each trigger next to the workflow, so the triggers of all workflows
+ * can be listed together. For example, a scheduled-tasks view lists the cron
+ * triggers. A trigger is identified by its workflow's id plus its id in the
+ * source, which is unique only within that workflow.
  *
- * Every field of a trigger is in the listing, so there is no read of one
- * trigger. A field the trigger does not have is absent, not null.
+ * The list returns every field of each trigger, so there is no operation that
+ * reads one trigger. A field the trigger does not have is absent, not null.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -21,15 +22,15 @@ import { Timezone } from "../strings";
 import { EventKind } from "./event";
 import { ConnectionSelection } from "./workflow-definition";
 
-/** A start trigger starts runs. A signal trigger resumes a run that is live. */
+/** A start trigger starts runs. A signal trigger resumes a live run. */
 export const TriggerKind = Schema.Literals(["start", "signal"]);
 
 export type TriggerKind = Schema.Schema.Type<typeof TriggerKind>;
 
 /**
- * Whether a start trigger starts runs. It is state of the row and not part of
- * the source, so pausing a trigger never rewrites the text. A signal trigger
- * has no status: it cannot be paused.
+ * Whether a start trigger starts runs. The status is stored on the trigger's
+ * row, not in the source, so pausing a trigger never changes the workflow's
+ * text. A signal trigger has no status, because it cannot be paused.
  */
 export const TriggerStatus = Schema.Literals(["active", "paused"]);
 
@@ -37,27 +38,27 @@ export type TriggerStatus = Schema.Schema.Type<typeof TriggerStatus>;
 
 export const Trigger = Schema.Struct({
   workflowId: Id,
-  /** The name the workflow's definition gives it, so a listing needs no second read. */
+  /** The workflow's name, included so a client can show it without reading the workflow. */
   workflowName: Schema.String,
-  /** The id the source gives the trigger. */
+  /** The trigger's id in the workflow's source. */
   triggerId: Schema.String,
   kind: TriggerKind,
   eventKind: EventKind,
   connectionId: Schema.optionalKey(ConnectionSelection),
   filter: Schema.optionalKey(Schema.String),
   schedule: Schema.optionalKey(Schema.String),
-  /** As the source writes it. A cron trigger with none is read in the user's timezone setting. */
+  /** As written in the source. A cron trigger without one uses the user's timezone setting. */
   timezone: Schema.optionalKey(Timezone),
-  /** On a start trigger only. */
+  /** Set on start triggers only. */
   status: Schema.optionalKey(TriggerStatus),
   createdAt: Timestamp,
-  /** When the trigger itself last changed, which a save of its workflow does not always do. */
+  /** When the trigger itself last changed. Saving its workflow does not always change it. */
   updatedAt: Timestamp,
 });
 
 export type Trigger = Schema.Schema.Type<typeof Trigger>;
 
-/** What narrows a trigger listing. Each field narrows; there is no negation. */
+/** Filters for the trigger list. Each field narrows the list; there is no negation. */
 export const TriggerFilter = Schema.Struct({
   workflowId: Schema.optionalKey(Id),
   kind: Schema.optionalKey(TriggerKind),
@@ -65,7 +66,7 @@ export const TriggerFilter = Schema.Struct({
   status: Schema.optionalKey(TriggerStatus),
 });
 
-/** What a trigger listing may be sorted by. */
+/** The fields the trigger list can be sorted by. */
 export const TRIGGER_SORT_FIELDS = ["createdAt"] as const;
 
 export const trigger = HttpApiGroup.make("trigger")

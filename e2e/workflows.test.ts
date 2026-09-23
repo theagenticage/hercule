@@ -1,16 +1,17 @@
 /**
- * A workflow through the shipped program: written to `hercule workflow create`
- * on stdin, and printed back by `hercule workflow read` as the bytes that were
- * written, comments, blank lines and trailing spaces included.
+ * Tests a workflow round trip through the real program: `hercule workflow
+ * create` reads a workflow from stdin, and `hercule workflow read` must print
+ * back exactly the same bytes, including comments, blank lines and trailing
+ * spaces.
  *
- * The CLI has no workflow code of its own: its commands, their stdin rule and
- * their rendering come from the contract. So the round trip is only proven
- * when it runs through a real process: argv, stdin, stdout and the exit code.
+ * The CLI has no workflow-specific code. Its commands, how they read stdin and
+ * how they print results all come from the contract. So only a real process,
+ * with real argv, stdin, stdout and exit code, proves the round trip.
  *
  * The suite is in vitest's `binary` project, so `pnpm test:binary` runs it and
- * `pnpm test` does not. It runs the release binary where one has been built
- * and the dispatcher's source where none has: what it exercises is the
- * controller's and the CLI's own surface, which is the same program either way.
+ * `pnpm test` does not. It runs the release binary if one has been built, and
+ * the dispatcher's source otherwise. This suite tests the controller and the
+ * CLI, not the packaging, so both give the same result.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -35,12 +36,12 @@ const hercule = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
   cli(args, { home: state.home, binary, stdin });
 
 /**
- * A file as a person writes one: comments, blank lines, keys out of contract
- * order, a block scalar that keeps an indented line, and trailing spaces. The
- * schedule is quoted because the person chose to quote it; the store keeps the
- * quotes. The file ends with one newline, as an editor saves it: the CLI
- * sends it without that newline and prints the stored source with one, so the
- * bytes printed are the bytes of the file.
+ * A workflow file as a person would write it: comments, blank lines, keys in a
+ * different order than the contract's, a block scalar with an indented line,
+ * and trailing spaces. The schedule is quoted, and the stored source must keep
+ * the quotes. The file ends with one newline, as an editor saves it. The CLI
+ * strips that newline before sending and adds one when it prints the stored
+ * source, so the printed bytes equal the file.
  */
 const WORKFLOW_FILE = [
   "# Files a task every weekday morning.   ",
@@ -91,8 +92,8 @@ afterAll(async () => {
   state.remove();
 });
 
-describe("a workflow written on stdin and read back", () => {
-  it("prints the file's bytes, and not key-value lines", async () => {
+describe("a workflow created from stdin and read back", () => {
+  it("prints the exact bytes of the file, not key-value lines", async () => {
     const createAnswer = jsonOk<{ readonly workflow: { readonly id: string } }>(
       await hercule(["workflow", "create", "--json"], WORKFLOW_FILE),
     );

@@ -194,33 +194,31 @@ export const createInternalError = (message: string): Internal =>
   new Internal({ error: { code: "internal", message } });
 
 /**
- * Formats one issue as a line of text: the path with its keys joined by dots,
- * then the message. An issue with an empty path formats as its message alone.
- * The CLI prints each issue in this format, and the controller uses the same
- * format when it tells a plugin about a field it registered wrong, so an issue
- * reads the same in both places.
+ * Formats an issue as one line: the path joined with dots, a colon, then the
+ * message. An issue with an empty path formats as the message alone. The CLI
+ * prints issues in this format, and the controller uses it when it reports a
+ * field that a plugin registered wrongly, so issues look the same in both
+ * places.
  */
-export const describeIssue = (issue: Issue): string =>
+export const formatIssue = (issue: Issue): string =>
   issue.path.length === 0 ? issue.message : `${issue.path.join(".")}: ${issue.message}`;
 
 const formatStandardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
 /**
- * Lists every leaf issue of a Schema issue tree, each at its path, as the
- * contract's `Issue` entries. The list has one entry per problem, so a caller
- * can fix every field in one retry. Path segments are stringified because a
- * JSON document has no other kind of key.
+ * Flattens a Schema issue tree into a list of the contract's `Issue` entries,
+ * one per problem, so a caller can fix every field in one retry. Path segments
+ * are converted to strings, because JSON object keys are always strings.
  *
- * The walk goes through pointers, encodings, composite issues, and unions
- * whose members all failed, down to the leaves. The options change two things:
+ * The function walks through pointers, encodings, composite issues and unions
+ * whose members all failed, down to the leaf issues. Options:
  *
- * - `path` is the path of the decoded value. Every returned path starts with it.
- * - `describeLeaf` returns the issues for one leaf in the caller's own words.
- *   It returns `undefined` to keep the schema library's message, and an empty
- *   list to drop the leaf.
+ * - `path`: the path of the decoded value. Every returned path starts with it.
+ * - `describeLeaf`: returns custom issues for one leaf. Return `undefined` to
+ *   keep the schema library's message, or an empty list to drop the leaf.
  *
- * The workflow checks word their issues through this function, so they all
- * report a decode failure in the same way.
+ * The workflow validators build their issues with this function, so they all
+ * report decode failures the same way.
  */
 export const listSchemaIssues = (
   issue: SchemaIssue.Issue,

@@ -122,7 +122,7 @@ const make = Effect.gen(function* () {
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toAgent),
       ),
 
-    /** Which of these ids name an Agent, in one query: what a workflow's check reads. */
+    /** Returns the subset of `ids` that belong to an existing Agent, using one query. */
     readExistingIds: (ids: ReadonlyArray<string>): Effect.Effect<ReadonlySet<string>, SqlError> =>
       ids.length === 0
         ? Effect.succeed(new Set())

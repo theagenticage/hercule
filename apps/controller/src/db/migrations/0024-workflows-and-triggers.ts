@@ -1,26 +1,28 @@
 /**
- * Workflows, and a row for each trigger their sources declare.
+ * Creates the `workflows` table, and the `triggers` table with one row per
+ * trigger declared in a workflow's YAML.
  *
- * `source` is the text the author wrote, and only a write of a new text changes
- * it. `definition` is what that text parses to, as JSON. It is computed again
- * from `source` on every write and is never written on its own, so the two
- * cannot disagree. A listing reads a workflow's name and description out of
- * it. `enabled` is state of the row and not part of the text.
+ * `source` is the YAML the author wrote. Only saving new YAML changes it.
+ * `definition` is the parsed YAML, stored as JSON. It is parsed again from
+ * `source` on every write and never written on its own, so the two cannot
+ * disagree. Listings read a workflow's name and description from
+ * `definition`. `enabled` belongs to the row and is not part of the YAML.
  *
- * A trigger row repeats what its workflow's source says about the trigger, so
- * that the triggers of every workflow can be listed and filtered together. It
- * is keyed by its workflow and by the id the source gives it, because that id
- * is unique only inside its workflow. `workflow_id` is a real foreign key: a
- * trigger means nothing without its workflow, and the cascade removes the
- * trigger rows in the statement that removes the workflow.
+ * A trigger row copies the trigger's fields from the workflow's YAML, so the
+ * triggers of every workflow can be listed and filtered together. The primary
+ * key is the workflow id plus the trigger id from the YAML, because a trigger
+ * id is unique only inside its workflow. `workflow_id` is a real foreign key:
+ * a trigger means nothing without its workflow, and the cascade deletes the
+ * trigger rows in the same statement that deletes the workflow.
  *
- * `status` is state of the row too, and only a start trigger has one. A save
- * keeps the status of each trigger whose id is still in the source, so a paused
- * trigger stays paused while its workflow is edited. The check puts a status on
- * each start trigger and on no signal trigger.
+ * `status` also belongs to the row, and only a start trigger has one. Saving a
+ * workflow keeps the status of every trigger whose id is still in the YAML, so
+ * a paused trigger stays paused while its workflow is edited. The CHECK
+ * constraint requires a status on every start trigger and forbids one on a
+ * signal trigger.
  *
- * `connection_id` is text and not an id column, because it holds either the id
- * of a Connection or the word `any`.
+ * `connection_id` is TEXT and not a BLOB id column, because it stores either a
+ * Connection id or the word `any`.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -38,7 +40,7 @@ export default Effect.gen(function* () {
       updated_at TEXT NOT NULL
     )
   `;
-  // The one listing: the workflow changed last first.
+  // Serves the workflow listing, which puts the most recently updated first.
   yield* sql`CREATE INDEX workflows_updated ON workflows (updated_at, id)`;
 
   yield* sql`
@@ -58,7 +60,8 @@ export default Effect.gen(function* () {
       CHECK ((kind = 'start') = (status IS NOT NULL))
     )
   `;
-  // The listing across every workflow: the newest trigger first. The primary
-  // key serves the listing of one workflow's triggers, and the cascade.
+  // Serves the listing of triggers across all workflows, newest first. The
+  // primary key serves the listing of one workflow's triggers, and the cascade
+  // delete.
   yield* sql`CREATE INDEX triggers_created ON triggers (created_at, workflow_id, trigger_id)`;
 });

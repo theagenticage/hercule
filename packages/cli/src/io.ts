@@ -30,10 +30,10 @@ export interface Io {
 }
 
 /**
- * The text of the bytes read from stdin, which must be UTF-8. A byte that is
- * not part of a UTF-8 character is refused, and not replaced: a replacement
- * would change what the caller sent before any operation could see it. A
- * leading byte order mark is kept, because it is part of what was sent.
+ * Decodes the bytes read from stdin as UTF-8. Throws a UsageError if they are
+ * not valid UTF-8. Invalid bytes are not replaced with U+FFFD, because that
+ * would silently change what the caller sent. A leading byte order mark is
+ * kept, because it is part of what was sent.
  */
 export const decodeStdin = (bytes: Uint8Array): string => {
   try {

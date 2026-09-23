@@ -10,16 +10,18 @@ import { WorkflowEditorPage } from "./-page";
 import { validateWorkflowViewSearch } from "./-view";
 
 export const Route = createFileRoute("/_shell/workflows/$workflowId")({
-  // The page's own header names the workflow, so the shell's bar stands down.
+  // The page draws its own header with the workflow's name, so the shell
+  // hides its top bar.
   staticData: { title: "Workflow", ownsTopBar: true },
   validateSearch: validateWorkflowViewSearch,
-  // The workflow and the catalogs that the editor completes from are read
-  // before it shows.
+  // Loads the workflow and the editor's autocomplete data before the page
+  // renders, so the page never waits on them.
   loader: async ({ context: { client, queryClient }, params }) => {
     await Promise.all([
       queryClient.ensureQueryData(workflowQuery(client, params.workflowId)).catch((error) => {
-        // A link to a workflow that was deleted, as from the history or a
-        // bookmark, says so. It does not say that the screen failed.
+        // A link to a deleted workflow, for example from the browser history
+        // or a bookmark, shows that the workflow was deleted instead of a
+        // load error.
         throw isNotFound(error) ? notFound() : error;
       }),
       prefetchWorkflowCatalog(client, queryClient),
@@ -29,7 +31,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflowId")({
   notFoundComponent: DeletedWorkflow,
 });
 
-/** A stored workflow, written from its source as it is stored. */
+/** Renders the editor page for a saved workflow. */
 function StoredWorkflow(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
   const { workflowId } = Route.useParams();
@@ -39,16 +41,16 @@ function StoredWorkflow(): JSX.Element {
   useLiveInvalidation(live, queryClient, "workflow");
 
   const read = useSuspenseQuery(workflowQuery(client, workflowId));
-  // A workflow deleted elsewhere answers not_found when it is read again. The
-  // read keeps the workflow it had, so the page keeps the author's text and
-  // says that the workflow is gone.
+  // If another client deletes the workflow, the next refetch fails with
+  // not_found. The query keeps its last data, so the page keeps the user's
+  // text and shows that the workflow is gone.
   const isGone = isNotFound(read.error);
 
   return (
     <WorkflowEditorPage
-      // Each workflow has a page of its own: nothing that one workflow's
-      // page holds, such as the marks in its text or the undo history,
-      // carries over to the next.
+      // Keyed by id, so moving to another workflow mounts a fresh page.
+      // Otherwise state such as the error marks and the undo history would
+      // carry over from the previous workflow.
       key={workflowId}
       client={client}
       live={live}
@@ -60,7 +62,7 @@ function StoredWorkflow(): JSX.Element {
   );
 }
 
-/** The page of a workflow that the controller does not have. */
+/** Renders the page for a workflow id that the controller does not have. */
 function DeletedWorkflow(): JSX.Element {
   return (
     <EmptyState headline="This workflow was deleted.">

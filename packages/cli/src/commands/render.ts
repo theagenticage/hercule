@@ -7,13 +7,13 @@
  * CLI accepts back as an argument.
  */
 import {
-  cutShort,
-  describeIssue,
+  truncateText,
+  formatIssue,
   type StructuredResult,
   type Workflow,
   type WorkflowAction,
   type WorkflowIssues,
-  type WorkflowSaved,
+  type WorkflowSaveResult,
 } from "@hercule/contract";
 import type { Outcome } from "./execute";
 import type { Command } from "./tree";
@@ -43,10 +43,10 @@ const columnsOf = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<
 };
 
 /**
- * A table cell on one line. A value that spans several lines, such as a
- * description, would break its row across the columns, so the cell shows the
- * value's first line and " ..." to say that more follows. The space keeps the
- * dots apart from a full stop that ends the first line.
+ * Returns the first line of a multi-line table cell, followed by " ..." to
+ * show that more lines follow. A cell with a line break would break the table
+ * row. The space before the dots keeps them apart from a full stop that ends
+ * the first line.
  */
 const keepOnOneLine = (text: string): string => {
   const lineBreak = text.search(/[\r\n]/);
@@ -133,7 +133,7 @@ const TRANSCRIPT_FIELD = 100;
  * --json` is what hands back the text in full.
  */
 const brief = (value: unknown): string =>
-  cutShort(cell(value).replace(/\s+/g, " ").trim(), TRANSCRIPT_FIELD);
+  truncateText(cell(value).replace(/\s+/g, " ").trim(), TRANSCRIPT_FIELD);
 
 /**
  * Describes what a turn answered under its session's output schema, as a
@@ -182,32 +182,32 @@ const transcript = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray
   rows.length === 0 ? ["no results"] : rows.map(transcriptLine);
 
 /**
- * What a workflow save answers, without the source the caller has just sent:
- * the id to read it back by, whether it is on, and one line per warning, each
- * naming its place in the definition.
+ * Returns the lines printed after a workflow is created or updated: its id,
+ * whether it is enabled, and one line per warning with its path in the
+ * definition. The source is not printed, because the caller has just sent it.
  */
-const renderWorkflowSaved = (answer: WorkflowSaved): ReadonlyArray<string> => [
+const renderWorkflowSaveResult = (answer: WorkflowSaveResult): ReadonlyArray<string> => [
   ...keyValues({ id: answer.workflow.id, enabled: answer.workflow.enabled }),
-  ...answer.warnings.map((warning) => `warning: ${describeIssue(warning)}`),
+  ...answer.warnings.map((warning) => `warning: ${formatIssue(warning)}`),
 ];
 
 /**
- * What a check of a workflow answers: one line per error and one per warning,
- * each naming its place in the definition, or one line that says there is no
- * problem.
+ * Returns the lines printed for `workflow validate`: one line per error and
+ * per warning, each with its path in the definition, or one line that reports
+ * the workflow as valid.
  */
 const renderWorkflowIssues = (answer: WorkflowIssues): ReadonlyArray<string> =>
   answer.errors.length === 0 && answer.warnings.length === 0
     ? ["valid: no errors and no warnings"]
     : [
-        ...answer.errors.map((error) => `error: ${describeIssue(error)}`),
-        ...answer.warnings.map((warning) => `warning: ${describeIssue(warning)}`),
+        ...answer.errors.map((error) => `error: ${formatIssue(error)}`),
+        ...answer.warnings.map((warning) => `warning: ${formatIssue(warning)}`),
       ];
 
 /**
- * One workflow action as a row: its params by name, each optional one marked
- * with `?`, in place of the JSON Schema they are declared in, which does not
- * fit on a line. `--json` prints the schema.
+ * Returns a workflow action as a table row. The params are listed by name,
+ * with `?` after each optional one, because the full JSON Schema does not fit
+ * on one line. `--json` prints the schema.
  */
 const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown> => {
   const properties = Object.keys(action.inputSchema["properties"] ?? {});
@@ -226,8 +226,8 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
   if (outcome.kind === "items") return asLines(outcome.items);
 
   const value = outcome.value;
-  // The two catalogs a workflow is written from answer with the whole array,
-  // a short list that ends, so each one is printed as a table, as a page is.
+  // These two queries return a short, complete array instead of a page, so
+  // print the array as a table, like the items of a page.
   if (command.id === "workflowAction.query") {
     return table((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction));
   }
@@ -243,18 +243,18 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
   }
   if (typeof value === "object" && value !== null) {
     const record = value as Record<string, unknown>;
-    // A workflow's source is a document, and it is printed as it is, so what a
-    // read prints can be edited and piped back into the command that stores
-    // it. A save prints no source at all: the caller has just sent it.
+    // Print a workflow's source unchanged, so the output can be edited and
+    // piped back into `workflow update`. A create or an update prints no
+    // source, because the caller has just sent it.
     if (command.id === "workflow.read") {
       const { source } = value as Workflow;
-      // The CLI ends each printed line with `\n`. A source whose first line
-      // break is `\r\n` gets a `\r` before it, so the output ends with the
-      // line break the source uses, and a CRLF file comes back byte for byte.
+      // The CLI ends each printed line with `\n`. If the source's first line
+      // break is `\r\n`, add a `\r` at the end, so the output ends in `\r\n`
+      // and a CRLF file comes back byte for byte.
       return [/^[^\n]*\r\n/.test(source) ? `${source}\r` : source];
     }
     if (command.id === "workflow.create" || command.id === "workflow.update") {
-      return renderWorkflowSaved(value as WorkflowSaved);
+      return renderWorkflowSaveResult(value as WorkflowSaveResult);
     }
     if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
     const lines = [...keyValues(record)];

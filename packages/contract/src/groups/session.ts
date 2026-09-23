@@ -128,7 +128,7 @@ export const PrimarySpawnWorkspace = Schema.Struct({
   branch: Schema.optionalKey(Branch),
 });
 
-/** A new workspace with a worktree of each repo it names. */
+/** A new workspace with a worktree for each repo in `checkouts`. */
 export const EphemeralSpawnWorkspace = Schema.Struct({
   kind: Schema.Literal("ephemeral"),
   /** Empty makes a scratch workspace: a directory and no checkout at all. */

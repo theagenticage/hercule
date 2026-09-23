@@ -227,8 +227,9 @@ const buildField = (
     kind: scalarKind(value),
     decodeShorthand: readShorthandDecoder(schema),
     repeated: element !== undefined,
-    // A row may make a field the command needs although the operation does
-    // not, where the command line has no other way to give its value.
+    // A row can make a field required on the command line even when the
+    // operation's schema makes it optional. This is for a field that is the
+    // only way to pass its value on the command line.
     optional: ast.context?.isOptional === true && !("required" in row && row.required === true),
     nullable: isNullable(ast) || isNullable(value),
     choices: literalsOf(withoutNull(value)),
@@ -243,8 +244,8 @@ const buildField = (
  * Every field of one schema, the paging triple left out: `--limit`, `--cursor`
  * and `--sort` are handled by name everywhere and so have no row. A field the
  * table does not write is a row missing from the contract, and it is said here
- * rather than rendered as a nameless flag. A field whose row hides it is not
- * on the command line at all.
+ * rather than rendered as a nameless flag. A field whose row is hidden gets no
+ * flag at all.
  */
 const buildFields = (
   id: OperationId,
@@ -342,9 +343,9 @@ const build = (): ReadonlyArray<Command> => {
         error?: unknown;
       };
       const payloadSchema = readPayloadSchema(each.payload);
-      // A row that names a field the operation does not take is stale, hidden
-      // or not. It is refused here, as `buildFields` refuses a field with no
-      // row, so the table and the schemas can never disagree about the fields.
+      // A row that lists a field the operation does not have is out of date,
+      // hidden or not. Throw here, as `buildFields` throws for a field with no
+      // row, so the CLI table and the schemas always list the same fields.
       const taken = new Set(
         [each.params, payloadSchema, each.query].flatMap((schema) =>
           propertyNames((schema as { ast?: Ast } | undefined)?.ast),
@@ -352,7 +353,9 @@ const build = (): ReadonlyArray<Command> => {
       );
       const stale = Object.keys(row.fields).find((name) => !taken.has(name));
       if (stale !== undefined) {
-        throw new Error(`${id}: the row names ${stale}, which the operation does not take`);
+        throw new Error(
+          `${id}: the CLI row lists the field ${stale}, but the operation has no such field`,
+        );
       }
 
       const params = new Map(

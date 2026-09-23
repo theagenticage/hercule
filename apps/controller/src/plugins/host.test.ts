@@ -519,14 +519,14 @@ describe("a secret-valued field declared outside a provider", () => {
   });
 });
 
-/** The message of an errored plugin, or `undefined` for a plugin that is not errored. */
+/** Returns the message of an errored plugin, or `undefined` if the plugin is not errored. */
 const readErroredMessage = (status: Option.Option<unknown>): string | undefined => {
   const found = Option.getOrNull(status) as { readonly _tag: string; readonly message?: string };
   return found._tag === "errored" ? found.message : undefined;
 };
 
 describe("the workflow action catalog", () => {
-  it("holds a row for each built-in action, owned by the core, and each plugin action under its qualified id", async () => {
+  it("has a row for each built-in action, owned by core, and one for each plugin action under its qualified id", async () => {
     const rows = await run(
       Effect.gen(function* () {
         yield* Effect.flatMap(PluginHost, (host) => host.boot([notesPlugin]));
@@ -549,7 +549,7 @@ describe("the workflow action catalog", () => {
     ]);
   });
 
-  it("errors a plugin whose action word holds a /, or whose input is not a struct", async () => {
+  it("marks a plugin errored if its action id contains a / or its input schema is not a struct", async () => {
     const statuses = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
@@ -568,7 +568,7 @@ describe("the workflow action catalog", () => {
       }),
     );
 
-    expect(readErroredMessage(statuses.slashed)).toContain("The word cannot hold a / character.");
+    expect(readErroredMessage(statuses.slashed)).toContain("The id cannot contain a / character");
     expect(readErroredMessage(statuses.listed)).toContain("struct");
     expect(statuses.actions.map((action) => action.id)).toEqual([
       "task.create",
@@ -578,7 +578,7 @@ describe("the workflow action catalog", () => {
   });
 });
 
-/** A plugin that declares one event source, under a word, with one kind. */
+/** Builds a plugin that declares one event source, with the id `word`, and one event kind. */
 const buildEventSourcePlugin = (id: string, word: string, kind: string): Plugin => ({
   manifest: {
     id,
@@ -602,7 +602,7 @@ const buildEventSourcePlugin = (id: string, word: string, kind: string): Plugin 
 });
 
 describe("the event source catalog", () => {
-  it("errors a plugin whose event source word holds a /, because the qualified id would have two readings", async () => {
+  it("marks a plugin errored if its event source id contains a /", async () => {
     const status = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
@@ -611,10 +611,10 @@ describe("the event source catalog", () => {
       }),
     );
 
-    expect(readErroredMessage(status)).toContain("The word cannot hold a / character.");
+    expect(readErroredMessage(status)).toContain("The id cannot contain a / character");
   });
 
-  it("errors a plugin that declares a kind the core declares, naming the kind", async () => {
+  it("marks a plugin errored if it declares a core event kind, and includes the kind in the message", async () => {
     const statuses = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
@@ -631,13 +631,13 @@ describe("the event source catalog", () => {
       [statuses[1]!, "cron.tick"],
     ] as const) {
       const message = readErroredMessage(status);
-      expect(message, kind).toContain(`the event kind ${kind} is a kind the core declares`);
+      expect(message, kind).toContain(`the event kind ${kind} is already declared by the core`);
     }
   });
 });
 
 describe("a registry that lists a plugin with the id core", () => {
-  it("fails the boot, because the core owns its built-in contributions under that id", async () => {
+  it("fails the boot, because that id is reserved for the built-in contributions", async () => {
     const crash = await run(
       Effect.flatMap(PluginHost, (host) => host.boot([fixture({ id: "core" }).plugin])).pipe(
         Effect.as("booted"),

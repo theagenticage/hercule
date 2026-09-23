@@ -272,7 +272,7 @@ const make = Effect.gen(function* () {
     named: (type: string): Effect.Effect<Option.Option<RegisteredConnectionType>> =>
       Effect.map(Ref.get(declared), (all) => Option.fromUndefinedOr(all.get(type))),
 
-    /** Every type this boot registered, in the order it registered them. */
+    /** Returns every connection type this boot registered, in registration order. */
     list: (): Effect.Effect<ReadonlyArray<RegisteredConnectionType>> =>
       Effect.map(Ref.get(declared), (all) => [...all.values()]),
 

@@ -75,8 +75,8 @@ describe("the HttpApi declaration", () => {
     expect(Object.keys(document.paths).length).toBeGreaterThan(0);
   });
 
-  it("describes the definition a workflow save sends by its shape, although the transport takes any JSON value there", () => {
-    /** The part of a JSON Schema this case reads. */
+  it("documents the full schema of a workflow save's definition, although the request schema accepts any JSON value there", () => {
+    /** The parts of a JSON Schema this test reads. */
     interface SchemaPart {
       readonly properties?: Record<string, SchemaPart>;
       readonly required?: ReadonlyArray<string>;

@@ -180,7 +180,7 @@ export const fixture = (options: {
   return { plugin, calls, contexts, hosts, running: () => up };
 };
 
-/** The one action the notes plugin declares, by its bare word. */
+/** The workflow action that `notesPlugin` declares, with its unqualified id. */
 export const NOTE_APPEND_ACTION: WorkflowActionContribution = {
   id: "note.append",
   displayName: "Append a note",
@@ -190,10 +190,10 @@ export const NOTE_APPEND_ACTION: WorkflowActionContribution = {
   execute: () => Effect.succeed({ noteId: "note-1" }),
 };
 
-/** The id a step names the notes plugin's action by: the host puts the plugin id first. */
+/** The qualified id a step uses to call `NOTE_APPEND_ACTION`: the host prefixes the plugin id. */
 export const NOTE_APPEND_ACTION_ID = "notes/note.append";
 
-/** A plugin that declares one workflow action and does nothing else. */
+/** Builds a plugin that declares one workflow action and does nothing else. */
 export const buildActionPlugin = (id: string, action: WorkflowActionContribution): Plugin => ({
   manifest: {
     id,
@@ -206,5 +206,5 @@ export const buildActionPlugin = (id: string, action: WorkflowActionContribution
   activate: () => Effect.succeed(Effect.void),
 });
 
-/** The plugin whose action a workflow step names in the tests: `notes`, with `note.append`. */
+/** A plugin with the id `notes` that declares `NOTE_APPEND_ACTION`, for tests of action steps. */
 export const notesPlugin: Plugin = buildActionPlugin("notes", NOTE_APPEND_ACTION);

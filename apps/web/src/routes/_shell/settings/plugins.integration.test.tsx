@@ -423,7 +423,7 @@ describe("Settings > Plugins > reset", () => {
     await user.click(await screen.findByRole("button", { name: "Reset plugin state" }));
 
     expect(writesTo(api, CONFIGURABLE.id)).toEqual([]);
-    // The answer that declines comes first, and the answer that accepts comes last.
+    // Cancel comes before Confirm.
     const confirm = screen.getByRole("button", { name: "Confirm" });
     expectInDocumentOrder([screen.getByRole("button", { name: "Cancel" }), confirm]);
 
