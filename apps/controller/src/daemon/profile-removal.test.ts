@@ -113,7 +113,7 @@ describe("profile.delete", () => {
       }),
     );
     expect(error).toMatchObject({ error: { code: "invalid_state" } });
-    expect(readRefusalMessage(error)).toContain("Hercule ships");
+    expect(readRefusalMessage(error)).toContain("is a shipped profile");
   });
 
   it("fails with not_found for an unknown id", async () => {

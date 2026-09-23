@@ -6,7 +6,7 @@ import { MAX_PROJECT_NAME_LENGTH } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer, type AuditKind } from "../events";
+import { AuditLog, AuditLogLayer } from "../events";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { ProjectService, ProjectServiceLayer, type ProjectPage, type QueryInput } from "./index";
 
@@ -66,9 +66,9 @@ const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
 const A_MINUTE = 60_000;
 
 /** The three `project.*` audit kinds these tests read back. */
-const CREATED = "project.created" as AuditKind;
-const UPDATED = "project.updated" as AuditKind;
-const DELETED = "project.deleted" as AuditKind;
+const CREATED = "project.created";
+const UPDATED = "project.updated";
+const DELETED = "project.deleted";
 
 /**
  * Returns the project snapshot in an event payload, under whatever key it is
