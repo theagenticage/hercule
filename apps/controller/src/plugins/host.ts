@@ -51,8 +51,14 @@ import { Secrets, type SecretOwner } from "../secrets";
 // the only direction the two point in.
 import { ConnectionTypes, PluginConfigs, type RegisteredConnectionType } from "../connections";
 import { asPluginError, describeFieldIssues, truncateMessage } from "./errors";
-import { registerEventSourceContribution } from "./event-sources";
+import { registerEventSourceContribution, type RegisteredEventKind } from "./event-sources";
 import { pluginRepository, type NewContribution } from "./repository";
+import {
+  CORE_CONTRIBUTION_OWNER,
+  registerBuiltInWorkflowActions,
+  registerWorkflowActionContribution,
+  type RegisteredWorkflowAction,
+} from "./workflow-actions";
 
 /**
  * The manifest schema accepts every capability name the system will ever have,
@@ -65,6 +71,7 @@ const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
   "secrets",
   "connections",
   "event-sources",
+  "workflow-actions",
 ];
 
 export interface LoadedPlugin {
@@ -214,7 +221,8 @@ const registrationHost = (
   declared: Array<NewContribution>,
   live: Array<ProviderDefinition>,
   types: Array<RegisteredConnectionType>,
-  kinds: Map<string, Schema.Top>,
+  kinds: Map<string, RegisteredEventKind>,
+  actions: Map<string, RegisteredWorkflowAction>,
 ): RegistrationHost => ({
   ...(manifest.capabilities.includes("providers")
     ? {
@@ -333,6 +341,14 @@ const registrationHost = (
         },
       }
     : {}),
+  ...(manifest.capabilities.includes("workflow-actions")
+    ? {
+        workflowActions: {
+          register: (contribution) =>
+            registerWorkflowActionContribution(manifest.id, contribution, declared, actions),
+        },
+      }
+    : {}),
 });
 
 const make = Effect.gen(function* () {
@@ -346,7 +362,12 @@ const make = Effect.gen(function* () {
   // only at boot, so this is settled for the life of the process.
   const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
   /** Every event kind this boot registered, by name. Settled with the providers. */
-  const eventKinds = yield* Ref.make<ReadonlyMap<string, Schema.Top>>(new Map());
+  const eventKinds = yield* Ref.make<ReadonlyMap<string, RegisteredEventKind>>(new Map());
+  /**
+   * Every workflow action this boot registered, the built-in ones included, by
+   * the id a step names it by. Settled with the providers.
+   */
+  const workflowActions = yield* Ref.make<ReadonlyMap<string, RegisteredWorkflowAction>>(new Map());
   /**
    * One permit for the whole host, held across a move's reads, hooks and
    * writes. Without it two moves interleave around the await inside a hook and
@@ -363,6 +384,20 @@ const make = Effect.gen(function* () {
       next.set(id, { ...entry, ...change });
       return next;
     });
+
+  /**
+   * The plugins that run now. A plugin is active only while it is enabled and
+   * its activation succeeded: a disable stops it before the flag is written.
+   */
+  const listActivePluginIds: Effect.Effect<ReadonlySet<string>> = Effect.map(
+    Ref.get(entries),
+    (booted) =>
+      new Set(
+        [...booted.values()]
+          .filter((entry) => entry.status._tag === "active")
+          .map((entry) => entry.id),
+      ),
+  );
 
   const markErrored = (
     id: string,
@@ -451,10 +486,11 @@ const make = Effect.gen(function* () {
     declared: Array<NewContribution>,
     live: Array<ProviderDefinition>,
     types: Array<RegisteredConnectionType>,
-    kinds: Map<string, Schema.Top>,
+    kinds: Map<string, RegisteredEventKind>,
+    actions: Map<string, RegisteredWorkflowAction>,
   ): Effect.Effect<PluginStatus> =>
     Effect.suspend(() =>
-      plugin.register(registrationHost(manifest, declared, live, types, kinds)),
+      plugin.register(registrationHost(manifest, declared, live, types, kinds, actions)),
     ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
@@ -534,7 +570,11 @@ const make = Effect.gen(function* () {
         const catalog: Array<NewContribution> = [];
         const registeredProviders: Array<ProviderDefinition> = [];
         const registeredTypes: Array<RegisteredConnectionType> = [];
-        const registeredKinds = new Map<string, Schema.Top>();
+        const registeredKinds = new Map<string, RegisteredEventKind>();
+        const registeredActions = new Map<string, RegisteredWorkflowAction>();
+        // The core's own actions go first and into the same catalog, so every
+        // reader finds the built-in actions and the plugins' actions in one list.
+        registerBuiltInWorkflowActions(catalog, registeredActions);
 
         for (const [index, plugin] of registry.entries()) {
           const manifest = yield* decodeManifest(plugin.manifest, index);
@@ -543,6 +583,16 @@ const make = Effect.gen(function* () {
             // sharing one share all three. The registry is compiled in.
             return yield* Effect.die(
               new Error(`The plugin registry lists ${manifest.id} more than once.`),
+            );
+          }
+          if (manifest.id === CORE_CONTRIBUTION_OWNER) {
+            // The core owns the built-in contributions under this id, and a
+            // plugin row with it would decide whether they are enabled.
+            return yield* Effect.die(
+              new Error(
+                `The plugin registry lists a plugin with the id ${CORE_CONTRIBUTION_OWNER}. ` +
+                  "The core owns its built-in contributions under that id, so no plugin can have it. Give the plugin another id.",
+              ),
             );
           }
           const facts = {
@@ -568,14 +618,24 @@ const make = Effect.gen(function* () {
           const declared: Array<NewContribution> = [];
           const live: Array<ProviderDefinition> = [];
           const types: Array<RegisteredConnectionType> = [];
-          const kinds = new Map<string, Schema.Top>();
-          const status = yield* registerPass(plugin, manifest, declared, live, types, kinds);
+          const kinds = new Map<string, RegisteredEventKind>();
+          const actions = new Map<string, RegisteredWorkflowAction>();
+          const status = yield* registerPass(
+            plugin,
+            manifest,
+            declared,
+            live,
+            types,
+            kinds,
+            actions,
+          );
           const registered = status._tag !== "errored";
           if (registered) {
             catalog.push(...declared);
             registeredProviders.push(...live);
             registeredTypes.push(...types);
             for (const [kind, entry] of kinds) registeredKinds.set(kind, entry);
+            for (const [id, action] of actions) registeredActions.set(id, action);
           }
           booted.set(manifest.id, {
             ...facts,
@@ -596,6 +656,7 @@ const make = Effect.gen(function* () {
         yield* Ref.set(entries, booted);
         yield* Ref.set(providers, registeredProviders);
         yield* Ref.set(eventKinds, registeredKinds);
+        yield* Ref.set(workflowActions, registeredActions);
         yield* connectionTypes.replace(registeredTypes);
 
         yield* gate.withPermits(1)(
@@ -622,7 +683,40 @@ const make = Effect.gen(function* () {
     providers: (): Effect.Effect<ReadonlyArray<ProviderDefinition>> => Ref.get(providers),
 
     /** Every event kind this boot registered, by name. */
-    eventKinds: (): Effect.Effect<ReadonlyMap<string, Schema.Top>> => Ref.get(eventKinds),
+    eventKinds: (): Effect.Effect<ReadonlyMap<string, RegisteredEventKind>> => Ref.get(eventKinds),
+
+    /**
+     * The event kinds of every active plugin. A trigger can name only these:
+     * the event sources of a plugin that is disabled, or that did not start,
+     * ingest nothing, so a trigger on one of their kinds could never match.
+     */
+    listActiveEventKinds: (): Effect.Effect<ReadonlyArray<RegisteredEventKind>> =>
+      Effect.map(Effect.zip(Ref.get(eventKinds), listActivePluginIds), ([kinds, active]) =>
+        [...kinds.values()].filter((kind) => active.has(kind.pluginId)),
+      ),
+
+    /**
+     * The workflow actions a step can name, ordered by id: the built-in ones,
+     * and those of every active plugin. The action of a plugin that is disabled,
+     * or that did not start, has nothing running behind it to call.
+     */
+    listActiveWorkflowActions: (): Effect.Effect<ReadonlyArray<RegisteredWorkflowAction>> =>
+      Effect.map(Effect.zip(Ref.get(workflowActions), listActivePluginIds), ([actions, active]) =>
+        [...actions.values()]
+          .filter((action) => action.owner === CORE_CONTRIBUTION_OWNER || active.has(action.owner))
+          .sort((left, right) => left.id.localeCompare(right.id)),
+      ),
+
+    /**
+     * The qualified name of each Connection type of every active plugin. A
+     * workflow input can take a Connection of only these types: a plugin that
+     * is disabled, or that did not start, acts through none of its
+     * Connections.
+     */
+    listActiveConnectionTypes: (): Effect.Effect<ReadonlyArray<string>> =>
+      Effect.map(Effect.zip(connectionTypes.list(), listActivePluginIds), ([types, active]) =>
+        types.filter((type) => active.has(type.pluginId)).map((type) => type.contribution.type),
+      ),
 
     refresh,
     stop,

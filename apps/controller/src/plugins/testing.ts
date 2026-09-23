@@ -11,11 +11,13 @@ import { Effect, Layer, Schema } from "effect";
 import {
   HOST_API,
   PluginError,
+  registerWorkflowAction,
   type ActivationContext,
   type Plugin,
   type PluginCapability,
   type ProviderDefinition,
   type RegistrationHost,
+  type WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { homePaths, HerculeHome } from "../config";
@@ -177,3 +179,32 @@ export const fixture = (options: {
 
   return { plugin, calls, contexts, hosts, running: () => up };
 };
+
+/** The one action the notes plugin declares, by its bare word. */
+export const NOTE_APPEND_ACTION: WorkflowActionContribution = {
+  id: "note.append",
+  displayName: "Append a note",
+  description: "Appends one line of text to the notes of the run.",
+  input: Schema.Struct({ text: Schema.String, pinned: Schema.optionalKey(Schema.Boolean) }),
+  output: Schema.Struct({ noteId: Schema.String }),
+  execute: () => Effect.succeed({ noteId: "note-1" }),
+};
+
+/** The id a step names the notes plugin's action by: the host puts the plugin id first. */
+export const NOTE_APPEND_ACTION_ID = "notes/note.append";
+
+/** A plugin that declares one workflow action and does nothing else. */
+export const buildActionPlugin = (id: string, action: WorkflowActionContribution): Plugin => ({
+  manifest: {
+    id,
+    displayName: `Plugin ${id}`,
+    hostApi: HOST_API,
+    capabilities: ["workflow-actions"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) => registerWorkflowAction(host, action),
+  activate: () => Effect.succeed(Effect.void),
+});
+
+/** The plugin whose action a workflow step names in the tests: `notes`, with `note.append`. */
+export const notesPlugin: Plugin = buildActionPlugin("notes", NOTE_APPEND_ACTION);

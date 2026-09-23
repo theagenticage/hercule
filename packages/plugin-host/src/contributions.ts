@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { type Effect, Schema } from "effect";
 import { AccessMode } from "@hercule/protocol";
 import { SchemaValue } from "./manifest";
 
@@ -40,6 +40,16 @@ const ContributionName = Schema.String.check(
 );
 
 /**
+ * The bare word a plugin calls a contribution that the host qualifies: an
+ * event source, a workflow action or a Connection type. The host puts the
+ * plugin's id and a `/` in front of it to make the qualified id, so a `/` in
+ * the word would give the qualified id two readings.
+ */
+export const ContributionWord = ContributionName.check(
+  Schema.isPattern(/^[^/]+$/, { message: "The word cannot hold a / character." }),
+);
+
+/**
  * A provider's static self-description, which is the whole of what a provider
  * plugin contributes. `defaultConfig` is the value the plugin's own function
  * already returned: a function would not survive the crossing into the catalog.
@@ -77,7 +87,7 @@ export interface EventKindDeclaration {
  * of this kind can describe.
  */
 export const EventSourceNames = Schema.Struct({
-  id: ContributionName,
+  id: ContributionWord,
   connectionType: ContributionName,
 });
 
@@ -95,4 +105,64 @@ export interface EventSourceDefinition {
   readonly id: string;
   readonly connectionType: string;
   readonly kinds: Record<string, EventKindDeclaration>;
+}
+
+/**
+ * The two names a workflow action is identified and shown by. They reach a
+ * column and the wire, so they are decoded rather than taken as the plugin
+ * wrote them. The schemas and `execute` are not here: no schema of this kind
+ * can describe a live schema or a function.
+ */
+export const WorkflowActionNames = Schema.Struct({
+  id: ContributionWord,
+  displayName: ContributionName,
+});
+
+/**
+ * An action failed, in words the step record keeps. `code` is a short word a
+ * program can tell failures apart by, and `message` is the sentence for a
+ * person.
+ */
+export class ActionError extends Schema.TaggedError<ActionError>()("ActionError", {
+  code: Schema.String,
+  message: Schema.String,
+}) {}
+
+/**
+ * Where one execution of a workflow action sits. The run's API client and its
+ * cancel signal join this context when runs execute actions.
+ */
+export interface ActionContext {
+  /**
+   * The Connection the step acts through, with its credentials and config
+   * decoded. Present only for an action that declares a connection type.
+   */
+  readonly connection?: {
+    readonly id: string;
+    readonly credentials: unknown;
+    readonly config: unknown;
+  };
+  readonly run: { readonly runId: string; readonly stepId: string };
+}
+
+/**
+ * What a plugin contributes as a workflow action: the thing an action step
+ * calls. `id` is the bare word, often `<entity>.<verb>` such as `pr.merge`;
+ * the host qualifies it with the plugin's id, so a step names the action as
+ * `github/pr.merge`.
+ *
+ * `input` is the shape of the step's params and must be a struct, because a
+ * step writes its params as named fields. `output` is what the step answers,
+ * which an expression reads as `steps.<id>.output`.
+ */
+export interface WorkflowActionContribution {
+  readonly id: string;
+  readonly displayName: string;
+  /** One line, shown where an author picks an action. */
+  readonly description: string;
+  readonly input: Schema.Top;
+  readonly output: Schema.Top;
+  /** The qualified type of the one Connection the action acts through, where it acts through one. */
+  readonly connection?: { readonly type: string };
+  readonly execute: (input: unknown, context: ActionContext) => Effect.Effect<unknown, ActionError>;
 }

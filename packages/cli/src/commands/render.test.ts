@@ -1,7 +1,8 @@
 /**
  * The renderings that are not the generic table: what a spawn teaches, what a
- * transcript reads like, and what a workflow read and save print. And one rule
- * of the table: each row stays on one line.
+ * transcript reads like, what a workflow read, save and check print, and what
+ * the two catalogs a workflow is written from print. And one rule of the
+ * table: each row stays on one line.
  */
 import { describe, expect, it } from "vitest";
 import { renderHuman } from "./render";
@@ -162,6 +163,28 @@ describe("hercule workflow", () => {
     expect(triggers).toEqual(["triggerId  filter", "on_label   event.a == 1 && ..."]);
   });
 
+  it("prints one line per error and per warning after a check, or one line when there is none", () => {
+    const validate = command("workflow", "validate");
+    expect(
+      renderHuman(
+        {
+          kind: "value",
+          value: {
+            errors: [{ path: ["steps", "1", "action"], message: "task.creat is not an action." }],
+            warnings: [{ path: ["steps"], message: "A run can end only when someone cancels it." }],
+          },
+        },
+        validate,
+      ),
+    ).toEqual([
+      "error: steps.1.action: task.creat is not an action.",
+      "warning: steps: A run can end only when someone cancels it.",
+    ]);
+    expect(renderHuman({ kind: "value", value: { errors: [], warnings: [] } }, validate)).toEqual([
+      "valid: no errors and no warnings",
+    ]);
+  });
+
   it("prints the id, whether it is on and one line per warning after a save, and never the source", () => {
     const saved = {
       workflow: record,
@@ -178,5 +201,52 @@ describe("hercule workflow", () => {
         "warning: steps.0: Nothing starts this step.",
       ]);
     }
+  });
+});
+
+describe("a catalog that answers with the whole array", () => {
+  it("prints the event kinds as the table a page prints", () => {
+    expect(
+      renderHuman(
+        {
+          kind: "value",
+          value: [
+            { kind: "cron.tick", description: "A schedule came due.", connectionRequired: false },
+            { kind: "github.pr.labeled", description: "Labels changed.", connectionRequired: true },
+          ],
+        },
+        command("event-kind", "list"),
+      ),
+    ).toEqual([
+      "kind               description           connectionRequired",
+      "cron.tick          A schedule came due.  false",
+      "github.pr.labeled  Labels changed.       true",
+    ]);
+  });
+
+  it("names the params of each workflow action, marking an optional one, in place of their schema", () => {
+    expect(
+      renderHuman(
+        {
+          kind: "value",
+          value: [
+            {
+              id: "task.create",
+              displayName: "Create a task",
+              description: "Creates one Task.",
+              inputSchema: {
+                type: "object",
+                properties: { title: {}, description: {}, labels: {} },
+                required: ["title", "description"],
+              },
+            },
+          ],
+        },
+        command("workflow-action", "list"),
+      ),
+    ).toEqual([
+      "id           params                     description",
+      "task.create  title description labels?  Creates one Task.",
+    ]);
   });
 });

@@ -210,6 +210,29 @@ describe("task.update", () => {
     );
     expect(error).toMatchObject({ error: { code: "not_found" } });
   });
+
+  it("refuses an update that names no field to change, saying what to add", async () => {
+    const error = await runError(
+      Effect.flatMap(TaskService, (tasks) =>
+        Effect.flatMap(tasks.create({ title: "Unchanged", description: "d" }), (created) =>
+          tasks.update({ id: created.id }),
+        ),
+      ),
+    );
+    expect(error).toMatchObject({
+      error: {
+        code: "validation",
+        details: {
+          issues: [
+            {
+              path: [],
+              message: expect.stringContaining("at least one field to change") as unknown,
+            },
+          ],
+        },
+      },
+    });
+  });
 });
 
 describe("task.delete", () => {

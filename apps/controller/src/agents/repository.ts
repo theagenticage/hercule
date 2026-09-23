@@ -122,6 +122,17 @@ const make = Effect.gen(function* () {
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toAgent),
       ),
 
+    /** Which of these ids name an Agent, in one query: what a workflow's check reads. */
+    readExistingIds: (ids: ReadonlyArray<string>): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Set())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array }>`
+              SELECT id FROM agents WHERE id IN ${sql.in(ids.map(uuidFromString))}
+            `,
+            (rows) => new Set(rows.map((row) => uuidToString(row.id))),
+          ),
+
     insert: (agent: NewAgent): Effect.Effect<StoredAgent, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();

@@ -1247,3 +1247,35 @@ describe("the source of a workflow through the CLI", () => {
     expect(joinPrintedLines(readIo.stdout)).toBe(crlfFile);
   });
 });
+
+/**
+ * A check of a workflow answers like any other read, with the problems as its
+ * answer. A script checks a workflow before it saves one, so the exit code
+ * says whether the check found an error, as a refused save does.
+ */
+describe("hercule workflow validate", () => {
+  const CREDENTIAL_ENV = { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" };
+  const SOURCE = "name: Check me\nsteps: []\n";
+  const ERROR = { path: ["steps", "0", "action"], message: "task.creat is not an action." };
+  const WARNING = { path: ["steps"], message: "A run can end only when someone cancels it." };
+
+  it.each([
+    ["an error", { errors: [ERROR], warnings: [WARNING] }, 1],
+    ["only a warning", { errors: [], warnings: [WARNING] }, 0],
+    ["nothing", { errors: [], warnings: [] }, 0],
+  ] as const)(
+    "exits with the code of a refused save when it finds %s, with and without --json",
+    async (_found, answer, code) => {
+      for (const extra of [[], ["--json"]]) {
+        const fetch = stubFetch(() => answer);
+        const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: SOURCE });
+
+        expect(await main(["--home", home, "workflow", "validate", ...extra], io)).toBe(code);
+        expect(fetch.calls[0]).toMatchObject({
+          method: "POST",
+          path: "/api/v1/workflows/validate",
+        });
+      }
+    },
+  );
+});

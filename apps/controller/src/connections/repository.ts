@@ -143,6 +143,22 @@ const make = Effect.gen(function* () {
     one,
 
     /**
+     * The qualified type of each of these Connections that exists, by id, in
+     * one query: what a workflow's check reads.
+     */
+    readTypes: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array; readonly type: string }>`
+              SELECT id, type FROM connections WHERE id IN ${sql.in(ids.map(uuidFromString))}
+            `,
+            (rows) => new Map(rows.map((row) => [uuidToString(row.id), row.type])),
+          ),
+
+    /**
      * Whether a resource still acts through this connection, which is what
      * makes a delete refusable. The question is asked here rather than of the
      * resources domain so the two do not import each other.

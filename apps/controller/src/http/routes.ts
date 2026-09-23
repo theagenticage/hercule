@@ -31,7 +31,7 @@ import { AgentService, AgentServiceLayer } from "../agents";
 import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
-import { EventService, EventServiceLayer } from "../events";
+import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
 import { Controller, ControllerLayer } from "../controller";
 import {
@@ -299,7 +299,8 @@ const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
       .handle("update", ({ params, payload }) =>
         operation(workflows.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => operation(workflows.delete(params)));
+      .handle("delete", ({ params }) => operation(workflows.delete(params)))
+      .handle("validate", ({ payload }) => operation(workflows.validate(payload)));
   }),
 );
 
@@ -312,6 +313,25 @@ const triggerRoutes = HttpApiBuilder.group(api, "trigger", (handlers) =>
   Effect.gen(function* () {
     const workflows = yield* WorkflowService;
     return handlers.handle("query", ({ query }) => operation(workflows.queryTriggers(query)));
+  }),
+);
+
+/**
+ * The action catalog is the plugins domain's, because the plugins and the core
+ * register into it at boot; the group is separate because the operation is
+ * `workflowAction.query`.
+ */
+const workflowActionRoutes = HttpApiBuilder.group(api, "workflowAction", (handlers) =>
+  Effect.gen(function* () {
+    const plugins = yield* Plugins;
+    return handlers.handle("query", () => operation(plugins.queryWorkflowActions()));
+  }),
+);
+
+const eventKindRoutes = HttpApiBuilder.group(api, "eventKind", (handlers) =>
+  Effect.gen(function* () {
+    const eventKinds = yield* EventKinds;
+    return handlers.handle("query", () => operation(eventKinds.query()));
   }),
 );
 
@@ -460,6 +480,14 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
 );
 
 /**
+ * The event kinds a trigger can name. The events domain lists them from what
+ * the plugins domain registered, and the plugins domain appends to the event
+ * log, so the events domain may not import it. The two meet here, where the
+ * whole controller is assembled.
+ */
+const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer));
+
+/**
  * Every service an operation resolves, and the controller daemon beside them:
  * the listener forks the controller daemon's drivers, so they are built here
  * rather than a second time somewhere else. One list, because a controller
@@ -518,7 +546,10 @@ export const operationLayers = Layer.mergeAll(
   ).pipe(Layer.provideMerge(LiveLayer), Layer.provideMerge(DispatchLayer)),
   ProvisioningLayer,
   SubscriptionServiceLayer,
-  WorkflowServiceLayer,
+  EventKindsOperationLayer,
+  // The workflow service checks a trigger against the kinds a trigger can
+  // name, so it reads the same list that `eventKind.query` answers.
+  WorkflowServiceLayer.pipe(Layer.provide(EventKindsOperationLayer)),
   LiveTopicsLayer,
   WsTicketsLayer,
 );
@@ -543,6 +574,8 @@ export const handlerLayers = Layer.mergeAll(
   subscriptionRoutes,
   workflowRoutes,
   triggerRoutes,
+  workflowActionRoutes,
+  eventKindRoutes,
   runnerRoutes,
   pluginRoutes,
   providerRoutes,

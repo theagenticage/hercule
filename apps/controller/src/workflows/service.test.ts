@@ -8,15 +8,20 @@ import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
-import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { AuditLog, EventKindsLayer } from "../events";
+import { EventKindCatalogLayer, PluginHost } from "../plugins";
+import { pluginStack } from "../plugins/testing";
 import { WorkflowService, WorkflowServiceLayer } from "./index";
 
-type Deps = WorkflowService | AuditLog | SqlClient.SqlClient;
+type Deps = WorkflowService | AuditLog | PluginHost | SqlClient.SqlClient;
 
+/**
+ * The service over the real plugin host, which holds the built-in actions a
+ * saved workflow's steps are checked against.
+ */
 const layer = WorkflowServiceLayer.pipe(
-  Layer.provideMerge(AuditLogLayer),
-  Layer.provideMerge(TestDatabase),
+  Layer.provideMerge(EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer))),
+  Layer.provideMerge(pluginStack()),
 );
 
 const USER: Actor = {
@@ -25,27 +30,36 @@ const USER: Actor = {
   credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
 };
 
-/** Every test runs on a `TestClock`, so a later write is later by a clock step and not by a race. */
+/**
+ * Every test runs on a `TestClock`, so a later write is later by a clock step
+ * and not by a race. The host boots with no plugin first, which registers the
+ * built-in actions.
+ */
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
-    effect.pipe(
+    Effect.andThen(
+      Effect.flatMap(PluginHost, (host) => host.boot([])),
+      effect,
+    ).pipe(
       Effect.provideService(CurrentActor, USER),
       Effect.provide(layer),
       Effect.provide(TestClock.layer()),
     ),
   );
 
-/** The text of a prompt that no audit entry may repeat. */
-const SECRET_PROMPT = "Read the private notes and say nothing of them";
+/** The text of a param that no audit entry may repeat. */
+const SECRET_TEXT = "Read the private notes and say nothing of them";
 
 const buildSource = (name: string): string =>
   [
     `name: ${name}`,
     "steps:",
-    "  - id: review",
-    "    kind: agent",
-    "    agent: 0199e0e7-1111-7000-8000-0000000000ab",
-    `    prompt: ${SECRET_PROMPT}`,
+    "  - id: file_task",
+    "    kind: action",
+    "    action: task.create",
+    "    params:",
+    "      title: Look at the private notes",
+    `      description: ${SECRET_TEXT}`,
     "",
   ].join("\n");
 
@@ -92,7 +106,7 @@ describe("what the event log is told about a workflow", () => {
       { workflowId: expect.any(String) as unknown, name: "Audited again" },
     ]);
     for (const entry of entries) {
-      expect(JSON.stringify(entry.payload)).not.toContain(SECRET_PROMPT);
+      expect(JSON.stringify(entry.payload)).not.toContain(SECRET_TEXT);
     }
   });
 });

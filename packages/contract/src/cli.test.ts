@@ -116,8 +116,13 @@ const COMMANDS: Record<string, string> = {
   "workflow.create": "workflow create",
   "workflow.update": "workflow update",
   "workflow.delete": "workflow delete",
+  "workflow.validate": "workflow validate",
 
   "trigger.query": "trigger list",
+
+  "workflowAction.query": "workflow-action list",
+
+  "eventKind.query": "event-kind list",
 
   "runner.query": "runner list",
   "runner.read": "runner read",
@@ -208,6 +213,7 @@ const STDIN_FIELDS = [
   "provider.create config",
   "workflow.create source",
   "workflow.update source",
+  "workflow.validate source",
 ];
 
 /** Every field whose id tail is resolved, and the listing that resolves it. */

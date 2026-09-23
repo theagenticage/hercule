@@ -804,12 +804,45 @@ steps:
   });
 });
 
+/** A source whose step params are one mapping with this many keys. */
+const buildWideSource = (keyCount: number): string => {
+  const keys = Array.from({ length: keyCount }, (_, index) => `k${String(index)}: 0`).join(", ");
+  return `name: wide
+steps:
+  - id: file_task
+    kind: action
+    action: task.create
+    params: { ${keys} }
+`;
+};
+
 /**
- * The longest a parse of a mapping with twenty thousand keys may take. The
- * parser's own check of repeated keys compares each key with every earlier key,
- * and took well over a second for this many.
+ * The shortest time of five parses of a wide source, for each count of keys.
+ * The parses of the counts take turns, so a period of other work on the
+ * machine slows each count, and the shortest parse is the one that such work
+ * slowed least.
  */
-const TWENTY_THOUSAND_KEYS_MS = 500;
+const measureWideParses = (keyCounts: ReadonlyArray<number>): ReadonlyArray<number> => {
+  const sources = keyCounts.map(buildWideSource);
+  const fastest = keyCounts.map(() => Number.POSITIVE_INFINITY);
+  for (let round = 0; round < 5; round += 1) {
+    for (const [index, source] of sources.entries()) {
+      const started = performance.now();
+      parseDefinition(source);
+      fastest[index] = Math.min(fastest[index]!, performance.now() - started);
+    }
+  }
+  return fastest;
+};
+
+/**
+ * How many times longer a parse of four times the keys may take. A check that
+ * reads each key once takes about four times as long, and a check that
+ * compares each key with every earlier key, as the parser's own check of
+ * repeated keys does, takes about sixteen times as long. Eight leaves room for
+ * the noise of a machine under load and still refuses the second check.
+ */
+const MAX_GROWTH_FOR_FOUR_TIMES_THE_KEYS = 8;
 
 describe("parsing a source that writes one key twice in a mapping", () => {
   it('refuses the second of two keys the value spells alike, such as 1 and "1"', () => {
@@ -853,18 +886,11 @@ steps:
     expect(listIssuePaths(issues)).toEqual([["steps", "0", "params"]]);
   });
 
-  it("checks a mapping of twenty thousand keys in well under a second", () => {
-    const keys = Array.from({ length: 20_000 }, (_, index) => `k${String(index)}: 0`).join(", ");
-    const started = performance.now();
-    const definition = parseDefinition(`name: wide
-steps:
-  - id: file_task
-    kind: action
-    action: task.create
-    params: { ${keys} }
-`);
-    expect(performance.now() - started).toBeLessThan(TWENTY_THOUSAND_KEYS_MS);
-    const [step] = definition.steps;
+  it("checks a mapping in a time that grows as its keys do, and not as their square", () => {
+    const [fiveThousand, twentyThousand] = measureWideParses([5_000, 20_000]);
+    expect(twentyThousand! / fiveThousand!).toBeLessThan(MAX_GROWTH_FOR_FOUR_TIMES_THE_KEYS);
+
+    const [step] = parseDefinition(buildWideSource(20_000)).steps;
     expect(Object.keys(step?.kind === "action" ? (step.params ?? {}) : {})).toHaveLength(20_000);
   });
 });
@@ -1029,5 +1055,119 @@ describe("rendering strings that a block cannot hold as they are", () => {
     const source = renderWorkflowSource(withText);
     expect(source).toMatch(/^description: \|/m);
     expect(parseDefinition(source)).toEqual(withText);
+  });
+});
+
+/**
+ * A source with two inputs and a signal trigger with two outputs. The first
+ * input and the first output are always readable, so each place the parse
+ * refuses is the second one.
+ */
+const buildNamedValuesSource = (
+  inputName: string,
+  outputName: string,
+): string => `name: named values
+inputs:
+  - name: prUrl
+    schema:
+      type: string
+    required: false
+  - name: ${inputName}
+    schema:
+      type: string
+    required: false
+triggers:
+  - id: on_create
+    kind: start
+    source:
+      kind: task.created
+  - id: pr_merged
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.file_task.output.id
+    outputs:
+      prUrl: event.payload.url
+      ${outputName}: event.payload.url
+steps:
+  - id: file_task
+    kind: action
+    action: task.create
+`;
+
+describe("parsing the names an expression reads", () => {
+  it("points an input name that is not a CEL identifier at the name, saying what an expression can read", () => {
+    const issues = collectIssues(buildNamedValuesSource("pr-url", "pr_url"));
+    expect(listIssuePaths(issues)).toEqual([["inputs", "1", "name"]]);
+    expect(issues[0]!.message).toMatch(/expression/i);
+  });
+
+  it("points a signal output name that is not a CEL identifier at its key, saying what an expression can read", () => {
+    const issues = collectIssues(buildNamedValuesSource("pr_url", "pr-url"));
+    expect(listIssuePaths(issues)).toEqual([["triggers", "1", "outputs", "pr-url"]]);
+    expect(issues[0]!.message).toMatch(/expression/i);
+  });
+
+  it("accepts prUrl and pr_url as input names and as signal output names", () => {
+    const definition = parseDefinition(buildNamedValuesSource("pr_url", "pr_url"));
+    expect(definition.inputs?.map((input) => input.name)).toEqual(["prUrl", "pr_url"]);
+  });
+});
+
+/**
+ * A source whose step id, input name and signal output name are the words of
+ * a case. The trigger's correlation reads the step, so the step is read as
+ * `steps.<id>`.
+ */
+const buildWordsSource = (stepId: string, inputName: string, outputName: string): string =>
+  `name: words
+inputs:
+  - name: "${inputName}"
+    schema:
+      type: string
+    required: false
+triggers:
+  - id: pr_merged
+    kind: signal
+    source:
+      kind: task.updated
+    correlation:
+      event: event.payload.taskId
+      run: steps.file_task.output.id
+    outputs:
+      "${outputName}": event.payload.url
+steps:
+  - id: "${stepId}"
+    kind: action
+    action: task.create
+`;
+
+describe("parsing a word that an expression cannot read as a field name", () => {
+  it.each([
+    ["CEL reads as an operator", "in", "in", "in"],
+    ["CEL reads as a value", "true", "false", "null"],
+    ["a run could not read in its values", "constructor", "constructor", "__proto__"],
+  ])(
+    "refuses an id, an input name and an output name that %s, at each place, naming the word",
+    (_why, stepId, inputName, outputName) => {
+      const issues = collectIssues(buildWordsSource(stepId, inputName, outputName));
+      expect(listIssuePaths(issues)).toEqual([
+        ["inputs", "0", "name"],
+        ["triggers", "0", "outputs", outputName],
+        ["steps", "0", "id"],
+      ]);
+      expect(issues[0]!.message).toContain(`"${inputName}"`);
+      expect(issues[1]!.message).toContain(`"${outputName}"`);
+      expect(issues[2]!.message).toContain(`"${stepId}"`);
+      for (const issue of issues) expect(issue.message).toMatch(/Write another (id|name)\.$/);
+    },
+  );
+
+  it("accepts a word that CEL reserves but reads as a field name, such as if and as", () => {
+    const definition = parseDefinition(buildWordsSource("if", "as", "while"));
+    expect(definition.steps[0]!.id).toBe("if");
+    expect(definition.inputs?.[0]!.name).toBe("as");
   });
 });

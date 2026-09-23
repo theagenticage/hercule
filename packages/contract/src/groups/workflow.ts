@@ -43,7 +43,8 @@ import {
 } from "@hercule/protocol";
 import { closedStruct } from "../closed";
 import { Forbidden, Internal, Issue, NotFound, Unauthenticated, Validation } from "../errors";
-import { Id, Timestamp } from "../ids";
+import { excerptMessage, MAX_QUOTED_LENGTH, quoteWritten } from "../excerpts";
+import { Id, isId, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded, Timezone } from "../strings";
@@ -54,27 +55,6 @@ import {
   PrimarySpawnWorkspace,
   SpawnCheckout,
 } from "./session";
-
-/**
- * The first `max` characters of a text, and "..." after them where the text
- * is longer. The cut never falls between the two halves of a surrogate pair,
- * because half of a pair is not a character.
- */
-const cutShort = (text: string, max: number): string => {
-  if (text.length <= max) return text;
-  const end = /[\uD800-\uDBFF]/.test(text.charAt(max - 1)) ? max - 1 : max;
-  return `${text.slice(0, end)}...`;
-};
-
-/**
- * The most characters of what the author wrote that a message quotes. A
- * message that repeated a long value would make the refusal as large as the
- * request, once for each problem.
- */
-const MAX_QUOTED_LENGTH = 40;
-
-/** Text the author wrote, in quotes, cut short where it is long. */
-const quoteWritten = (text: string): string => JSON.stringify(cutShort(text, MAX_QUOTED_LENGTH));
 
 /** A value the author wrote, as a message names it without repeating a mapping or a list. */
 const describeWritten = (value: unknown): string => {
@@ -106,10 +86,50 @@ const spellInSnakeCase = (id: string): string | undefined => {
   return NODE_ID_PATTERN.test(spelled) ? spelled : undefined;
 };
 
+/**
+ * The words that have the form of an id or a name, but that an expression
+ * cannot read as a field name, each with the reason. CEL reads `in` as an
+ * operator and `true`, `false` and `null` as values, so `steps.in.output` does
+ * not parse. The evaluator that the controller uses cannot read an object
+ * that has a field named `constructor`, so each expression that reads
+ * `inputs` or `steps` would fail when a run evaluates it. The evaluator reads
+ * a field named `__proto__`, but an object that code builds by assignment
+ * does not keep it: the assignment sets the object's prototype and adds no
+ * field. So a run that builds its inputs or its outputs that way could not
+ * read the value.
+ */
+const UNREADABLE_FIELD_NAMES: ReadonlyMap<string, string> = new Map([
+  ["in", "CEL reads in as an operator"],
+  ["true", "CEL reads true as a value"],
+  ["false", "CEL reads false as a value"],
+  ["null", "CEL reads null as a value"],
+  ["constructor", "the expression evaluator cannot read an object that has a field with this name"],
+  [
+    "__proto__",
+    "an object that code builds by assignment loses a field with this name, so a run could not read it",
+  ],
+]);
+
+/**
+ * Why an expression cannot read a word that has the form of a field name, or
+ * `undefined` for a word that it can read. `readAs` is how an expression reads
+ * the value, such as `steps.<id>`, and `noun` is what the word is.
+ */
+const describeUnreadableWord = (
+  word: string,
+  readAs: string,
+  noun: "id" | "name",
+): string | undefined => {
+  const reason = UNREADABLE_FIELD_NAMES.get(word);
+  return reason === undefined
+    ? undefined
+    : `An expression reads this value as ${readAs}, and it cannot read ${quoteWritten(word)} there: ${reason}. Write another ${noun}.`;
+};
+
 /** The id of a step or a trigger. The refusal gives the spelling to write instead. */
 const NodeId = Schema.String.check(
   Schema.makeFilter((id: string) => {
-    if (NODE_ID_PATTERN.test(id)) return undefined;
+    if (NODE_ID_PATTERN.test(id)) return describeUnreadableWord(id, "steps.<id>", "id");
     const suggestion = spellInSnakeCase(id);
     return (
       `${quoteWritten(id)} is not a valid id. An expression reads an id as steps.<id>. ` +
@@ -123,6 +143,59 @@ const NodeId = Schema.String.check(
 
 /** A CEL expression. What it may read depends on the place it is written. */
 const Expression = Schema.String;
+
+/**
+ * What an input name or a signal trigger's output name may look like: a CEL
+ * identifier. An expression reads an input as `inputs.<name>` and an output as
+ * `steps.<id>.output.<name>`, and CEL reads `inputs.pr-url` as
+ * `inputs.pr - url`. That expression passes a check and fails only when a run
+ * evaluates it. Case is free, because such a name is a field name, and a field
+ * name is often written in camelCase.
+ */
+const EXPRESSION_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Why a name that is not a CEL identifier is refused, and a spelling that an
+ * expression can read, where the name holds one. `readAs` is how an
+ * expression reads the name, such as `inputs.<name>`.
+ */
+const describeMalformedName = (name: string, readAs: string): string => {
+  const suggestion = name.replace(/[^A-Za-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+  return (
+    `${quoteWritten(name)} is not a name that an expression can read. An expression reads this value as ${readAs}. ` +
+    "Thus the name starts with a letter or an underscore and contains only letters, digits and underscores. " +
+    (EXPRESSION_NAME_PATTERN.test(suggestion) && suggestion.length <= MAX_QUOTED_LENGTH
+      ? `Write ${suggestion}.`
+      : "Write the name in this form.")
+  );
+};
+
+/**
+ * Why an expression cannot read a name, or `undefined` for a name that it can
+ * read. `readAs` is how an expression reads the name, such as `inputs.<name>`.
+ */
+const describeUnreadableName = (name: string, readAs: string): string | undefined =>
+  EXPRESSION_NAME_PATTERN.test(name)
+    ? describeUnreadableWord(name, readAs, "name")
+    : describeMalformedName(name, readAs);
+
+/** The name of an input, which an expression reads as `inputs.<name>`. */
+const InputName = Schema.String.check(
+  Schema.makeFilter((name: string) => describeUnreadableName(name, "inputs.<name>")),
+);
+
+/**
+ * A signal trigger's outputs: each name, to an expression over `event`. Each
+ * name that an expression cannot read is refused at its own key.
+ */
+const SignalOutputs = Schema.Record(Schema.String, Expression).check(
+  Schema.makeFilter((outputs: { readonly [name: string]: string }) =>
+    Object.keys(outputs).flatMap((name) => {
+      const refusal = describeUnreadableName(name, "steps.<id>.output.<name>");
+      return refusal === undefined ? [] : [{ path: [name], issue: refusal }];
+    }),
+  ),
+);
 
 /**
  * Refuses a JSON value in a definition that has more than `MAX_JSON_DEPTH`
@@ -181,8 +254,11 @@ const WorkflowDescription = Schema.String.check(
  */
 const MAX_WORKFLOW_SOURCE_LENGTH = 256 * 1024;
 
-/** Whether a string is an id. */
-const isId = Schema.is(Id);
+/**
+ * What a trigger's `connectionId` says to take the events of each Connection
+ * of the event kind's type.
+ */
+export const ANY_CONNECTION = "any";
 
 /**
  * Which Connection an event must arrive through: one Connection by its id, or
@@ -190,7 +266,7 @@ const isId = Schema.is(Id);
  */
 export const ConnectionSelection = Schema.String.check(
   Schema.makeFilter((selection: string) =>
-    selection === "any" || isId(selection)
+    selection === ANY_CONNECTION || isId(selection)
       ? undefined
       : `${quoteWritten(selection)} names no Connection. ` +
         "Write the id of a Connection, or write any for each Connection of the event kind's type.",
@@ -236,7 +312,7 @@ const SignalTrigger = closedStruct({
     run: Expression,
   }),
   /** Each output by name, to an expression over `event`. Absent gives the whole event. */
-  outputs: Schema.optionalKey(Schema.Record(Schema.String, Expression)),
+  outputs: Schema.optionalKey(SignalOutputs),
 });
 
 /**
@@ -245,7 +321,7 @@ const SignalTrigger = closedStruct({
  * named at its own field and not at the whole input.
  */
 const InputDeclaration = closedStruct({
-  name: Schema.String,
+  name: InputName,
   schema: Schema.optionalKey(JsonObject),
   /** The value is the id of a Connection of this qualified type, such as `github/github`. */
   connection: Schema.optionalKey(closedStruct({ type: Schema.String })),
@@ -484,10 +560,11 @@ const MAX_ISSUES = 100;
 
 /**
  * The first `MAX_ISSUES` issues, and one more issue that says how many are
- * left out. The parse of a text and the check of a definition object both
- * refuse through this, so no refusal of a workflow names more.
+ * left out. The parse of a text, the check of a definition object and the
+ * controller's checks of meaning all refuse through this, so no refusal of a
+ * workflow names more.
  */
-const limitIssues = (issues: ReadonlyArray<Issue>): ReadonlyArray<Issue> =>
+export const limitIssues = (issues: ReadonlyArray<Issue>): ReadonlyArray<Issue> =>
   issues.length <= MAX_ISSUES
     ? issues
     : [
@@ -538,25 +615,17 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
 const LONE_SURROGATE_MESSAGE =
   "contains half of a UTF-16 surrogate pair, which is not a character. Remove it, or write the whole character.";
 
-/** The most characters of a message from the YAML parser that a refusal repeats. */
-const MAX_PARSER_MESSAGE_LENGTH = 120;
-
 /**
  * A YAML syntax error as an issue. The path is empty because the text did not
  * become a definition, so the place is given in the text, by line and column.
- * The parser's own words can repeat what the author wrote, so they are cut
- * short.
  */
 const describeSyntaxError = (error: YAMLError, lines: LineCounter): Issue => {
   const { line, col } = lines.linePos(error.pos[0]);
-  const parserMessage = cutShort(error.message, MAX_PARSER_MESSAGE_LENGTH);
-  // Words that end in punctuation, or in the dots of a cut, get no second full stop.
-  const fullStop = /[.!?]$/.test(parserMessage) ? "" : ".";
   return {
     path: [],
     message:
       `The YAML is not valid at line ${String(line)}, column ${String(col)}. ` +
-      `The parser says: ${parserMessage}${fullStop} Correct the text at this position.`,
+      `The parser says: ${excerptMessage(error.message)} Correct the text at this position.`,
   };
 };
 
@@ -873,6 +942,28 @@ export const WorkflowUpdateInput = closedStruct(WORKFLOW_UPDATE_FIELDS);
 
 export type WorkflowUpdateInput = Schema.Schema.Type<typeof WorkflowUpdateInput>;
 
+/**
+ * What checking a workflow takes: the text, or a definition object, as a
+ * create takes them. Exactly one of the two.
+ */
+export const WorkflowValidateInput = closedStruct(WORKFLOW_CONTENT_FIELDS);
+
+export type WorkflowValidateInput = Schema.Schema.Type<typeof WorkflowValidateInput>;
+
+/**
+ * What a check of a workflow finds. A save of the same content is refused with
+ * `errors`, in the same order, and answers `warnings` beside the stored
+ * workflow. Both are empty for a workflow that a save stores with no warning.
+ */
+export const WorkflowIssues = Schema.Struct({
+  /** Problems that stop a save. */
+  errors: Schema.Array(Issue),
+  /** Problems that do not stop a save. */
+  warnings: Schema.Array(Issue),
+});
+
+export type WorkflowIssues = Schema.Schema.Type<typeof WorkflowIssues>;
+
 /** What narrows a workflow listing. */
 export const WorkflowFilter = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
@@ -911,6 +1002,16 @@ export const workflow = HttpApiGroup.make("workflow")
       params: { id: Id },
       success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * Checks a workflow as a save does and stores nothing. A workflow with
+     * problems is still a successful check: the problems are the answer. Only
+     * a request that sends no content, or two, is refused.
+     */
+    HttpApiEndpoint.post("validate", "/workflows/validate", {
+      payload: WorkflowValidateInput,
+      success: WorkflowIssues,
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
   )
   .middleware(Authenticated);

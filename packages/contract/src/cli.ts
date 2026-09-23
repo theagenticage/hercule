@@ -1011,7 +1011,8 @@ export const CLI = {
         flag: "source",
         help: "The replacement YAML source, stored exactly as sent.",
       },
-      // Hidden for the reason the create row gives.
+      // The object form is for a program that builds a definition in code. On
+      // the command line the source is the text itself, and stdin carries it.
       definition: { hidden: true },
       enabled: {
         flag: "enabled",
@@ -1033,6 +1034,42 @@ export const CLI = {
         help: "The workflow's id, or a tail of eight or more characters.",
         resolves: "workflow.query",
       },
+    },
+  },
+  "workflow.validate": {
+    command: "workflow validate",
+    help: "Checks the YAML read from stdin as `hercule workflow create` does, and stores nothing. Prints one line per error and per warning, each named by its place in the definition, or valid when there is none: then a save of the same source succeeds with no warning. Exits with 1 when there is an error, as a refused save does, and with 0 when there are only warnings or nothing. Find the actions a step can name with `hercule workflow-action list`, and the event kinds a trigger can name with `hercule event-kind list`.",
+    examples: [
+      {
+        args: [],
+        stdin: [
+          "name: Morning failures",
+          "triggers:",
+          "  - id: weekday_morning",
+          "    kind: start",
+          "    source:",
+          "      kind: cron.tick",
+          '    schedule: "0 9 * * 1-5"',
+          "steps:",
+          "  - id: file_task",
+          "    kind: action",
+          "    action: task.create",
+          "    params:",
+          "      title: Look at the overnight failures",
+          "      description: Filed by a workflow.",
+        ].join("\n"),
+      },
+    ],
+    fields: {
+      source: {
+        stdin: true,
+        flag: "source",
+        help: "The workflow's YAML source, checked exactly as sent.",
+        required: true,
+      },
+      // The object form is for a program that builds a definition in code. On
+      // the command line the source is the text itself, and stdin carries it.
+      definition: { hidden: true },
     },
   },
 
@@ -1064,6 +1101,20 @@ export const CLI = {
         help: "Only the start triggers that are active or paused; a signal trigger has no status.",
       },
     },
+  },
+
+  "workflowAction.query": {
+    command: "workflow-action list",
+    help: "Lists every action a workflow step can name now, with the params each one takes. An optional param ends in ?, and --json gives the params as JSON Schema. A built-in action has the id of the operation it calls. A plugin's action is named <plugin>/<word>, and is listed only while the plugin runs.",
+    examples: [{ args: [] }, { args: ["--json"] }],
+    fields: {},
+  },
+
+  "eventKind.query": {
+    command: "event-kind list",
+    help: "Lists every event kind a workflow trigger can name now. A kind that needs a Connection comes from a plugin, and its trigger names a Connection or any; a core kind names none. A plugin's kinds are listed only while the plugin runs.",
+    examples: [{ args: [] }],
+    fields: {},
   },
 
   "runner.query": {
@@ -2140,11 +2191,17 @@ export const NOUNS = {
   workflow: {
     summary:
       "Workflows: standing work written as YAML - what starts it, the steps it runs, and where they run.",
-    flow: "hercule workflow create stores one from stdin, hercule workflow read prints its source, hercule workflow update replaces the source or turns the workflow on, hercule workflow delete removes it.",
+    flow: "hercule workflow validate checks a source from stdin, hercule workflow create stores one, hercule workflow read prints its source, hercule workflow update replaces the source or turns the workflow on, hercule workflow delete removes it.",
   },
   trigger: {
     summary:
       "Triggers: the rules in a workflow's source for when an event starts a run or resumes one.",
+  },
+  "workflow-action": {
+    summary: "Workflow actions: what an action step of a workflow can call.",
+  },
+  "event-kind": {
+    summary: "Event kinds: what a trigger of a workflow can listen for.",
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",

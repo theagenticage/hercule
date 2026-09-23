@@ -16,7 +16,8 @@ import { ApiError, ConnectionError, RequestError, createClient } from "@hercule/
 import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hercule/home";
 import { Result } from "effect";
 import { parseArguments, said } from "./commands/args";
-import { execute } from "./commands/execute";
+import type { WorkflowIssues } from "@hercule/contract";
+import { execute, type Outcome } from "./commands/execute";
 import { commandHelp, nounHelp, rootHelp, shellExample } from "./commands/help";
 import { describeIssue, renderHuman } from "./commands/render";
 import { commandAt, wordsAfter, type Command } from "./commands/tree";
@@ -138,8 +139,22 @@ const runOperation = async (
   } else {
     for (const line of renderHuman(outcome, command)) io.out(line);
   }
-  return EXIT.ok;
+  return decideExitCode(command, outcome);
 };
+
+/**
+ * The exit code of an operation the controller answered. A check of a
+ * workflow that found an error answers like any other check, but a script
+ * that checks a workflow before it saves one must be able to stop on the
+ * error. So it ends as a refused save of the same workflow does. Warnings
+ * alone do not stop a save, and do not change the code.
+ */
+const decideExitCode = (command: Command, outcome: Outcome): number =>
+  command.id === "workflow.validate" &&
+  outcome.kind === "value" &&
+  (outcome.value as WorkflowIssues).errors.length > 0
+    ? EXIT.api
+    : EXIT.ok;
 
 /**
  * Where the command's words end and its arguments begin.

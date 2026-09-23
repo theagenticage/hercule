@@ -24,7 +24,6 @@ import {
   get,
   onSocket,
   readRefusal,
-  send,
   ticketFor,
   within,
 } from "../http/testing";
@@ -39,6 +38,8 @@ import {
   expectNothingStored,
   queryTriggers,
   queryWorkflows,
+  readIssues,
+  updateWorkflow,
   withSetUpController,
   type TriggerItem,
   type WorkflowItem,
@@ -50,13 +51,6 @@ import {
  * probed and then for each session it starts.
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
-
-const updateWorkflow = (
-  base: string,
-  token: string,
-  id: string,
-  body: unknown,
-): Promise<Response> => send("PATCH", base, `/api/v1/workflows/${id}`, { body, token });
 
 const updateWorkflowOrFail = async (
   base: string,
@@ -1048,25 +1042,6 @@ describe("what a workflow subscription is told", () => {
     });
   });
 });
-
-/**
- * The issues a validation refusal names, each with its path and its message.
- * A case that reads only the paths reads them from `readRefusal`.
- */
-const readIssues = async (
-  response: Response,
-): Promise<ReadonlyArray<{ readonly path: ReadonlyArray<string>; readonly message: string }>> => {
-  const refusal = await readRefusal(response);
-  expect(response.status, refusal.text).toBe(400);
-  expect(refusal.code).toBe("validation");
-  return (
-    JSON.parse(refusal.text) as {
-      error: {
-        details: { issues: ReadonlyArray<{ path: ReadonlyArray<string>; message: string }> };
-      };
-    }
-  ).error.details.issues;
-};
 
 /** A value nested in lists this many levels deep. */
 const nestInLists = (levels: number): unknown =>

@@ -1,12 +1,15 @@
 /**
- * Workflows as the API sees them: `workflow.query`, `read`, `create`, `update`
- * and `delete`, and `trigger.query` over the triggers their sources declare.
+ * Workflows as the API sees them: `workflow.query`, `read`, `create`,
+ * `update`, `delete` and `validate`, and `trigger.query` over the triggers
+ * their sources declare.
  *
  * The text is the truth (ADR 0029). The stored source is only ever the text a
  * caller sent, or the canonical text of the definition object a caller sent,
  * and the stored definition is only ever what that source parses to. Turning a
  * workflow on or off writes neither. A source is parsed and checked before any
- * row is written, so a refused save leaves the stored workflow as it was.
+ * row is written, so a refused save leaves the stored workflow as it was. A
+ * save and a check run the same checks, so an editor that shows the answer of
+ * a check shows what a save will say.
  *
  * The trigger rows are written in the transaction that writes the workflow, so
  * a listing never shows the triggers of a source that was not stored.
@@ -38,7 +41,9 @@ import {
   WORKFLOW_UPDATE_FIELDS,
   WorkflowCreateInput,
   WorkflowFilter,
+  WorkflowValidateInput,
   type Forbidden,
+  type Issue,
   type NotFound,
   type SortDirection,
   type Trigger,
@@ -46,13 +51,23 @@ import {
   type Validation,
   type Workflow,
   type WorkflowDefinition,
+  type WorkflowIssues,
   type WorkflowSaved,
   type WorkflowSummary,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
+import { agentRepository } from "../agents";
+import { connectionRepository } from "../connections";
 import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
-import { AuditLog } from "../events";
+import { AuditLog, EventKinds } from "../events";
+import { PluginHost } from "../plugins";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
+import {
+  checkDefinitionAgainst,
+  listNamedAgentIds,
+  listNamedConnectionIds,
+  type ResolvedReferences,
+} from "./validation";
 
 const QueryInput = Schema.Struct({
   ...WorkflowFilter.fields,
@@ -79,6 +94,7 @@ export type Identified = Schema.Schema.Type<typeof Identified>;
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(WorkflowCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
+const decodeValidate = Schema.decodeUnknownEffect(WorkflowValidateInput);
 const decodeTriggerQuery = Schema.decodeUnknownEffect(TriggerQueryInput);
 const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
@@ -101,41 +117,68 @@ const DEFAULT_DIRECTION: SortDirection = "desc";
 
 const NO_SUCH_WORKFLOW = "no such workflow";
 
-/** Why a save that sends the text and the object together is refused. */
+/** Why a request that sends the text and the object together is refused. */
 const SOURCE_AND_DEFINITION_TOGETHER =
   "Send source or definition, not the two together. The stored text comes from one of them.";
 
+/** Why a request that must send a workflow and sends none is refused. */
+const NO_CONTENT = "Send the workflow as source or as definition.";
+
+/** What a request sends a workflow as: its text, or a definition object. */
+type WorkflowContent =
+  | { readonly source: string; readonly definition?: undefined }
+  | { readonly source?: undefined; readonly definition: unknown };
+
 /**
- * The text a save stores: the text the caller sent, or the canonical text of
- * the definition object the caller sent. `undefined` where the caller sent
- * neither. A definition object is checked before it is written as text, with
- * the check a parsed text gets, so its problems are named at the same paths.
+ * The workflow a request sent, or `undefined` where it sent none. A request
+ * that sends the text and the object together is refused, because the stored
+ * text can come from one of them only.
  */
-const chooseText = (input: {
+const chooseContent = (input: {
   readonly source?: string;
   readonly definition?: unknown;
-}): Effect.Effect<string | undefined, Validation> => {
+}): Effect.Effect<WorkflowContent | undefined, Validation> => {
   if (input.source !== undefined && input.definition !== undefined) {
     return Effect.fail(validation([{ path: [], message: SOURCE_AND_DEFINITION_TOGETHER }]));
   }
-  if (input.definition === undefined) return Effect.succeed(input.source);
-  const decoded = decodeWorkflowDefinition(input.definition);
-  return Result.isSuccess(decoded)
-    ? Effect.succeed(renderWorkflowSource(decoded.success))
-    : Effect.fail(validation(decoded.failure));
+  if (input.source !== undefined) return Effect.succeed({ source: input.source });
+  if (input.definition !== undefined) return Effect.succeed({ definition: input.definition });
+  return Effect.succeed(undefined);
 };
 
+/** The workflow a request sent, where the request must send one. */
+const requireContent = (input: {
+  readonly source?: string;
+  readonly definition?: unknown;
+}): Effect.Effect<WorkflowContent, Validation> =>
+  Effect.flatMap(chooseContent(input), (content) =>
+    content === undefined
+      ? Effect.fail(validation([{ path: [], message: NO_CONTENT }]))
+      : Effect.succeed(content),
+  );
+
 /**
- * The definition a text says, or the refusal that names every problem in it.
- * Every save runs its text through this one place, the rendered text of a
- * definition object included, and nothing is written before it answers.
+ * The text a workflow is stored as, and the definition it says, or every
+ * problem of shape that stops it from being one. A definition object is
+ * checked, then written as its canonical text, and that text is parsed as a
+ * sent text is. So a problem is named at the same path whichever way it
+ * arrived, and the stored definition is always what the stored text says.
  */
-const requireValidDefinition = (source: string): Effect.Effect<ParsedSource, Validation> => {
-  const parsed = parseWorkflowSource(source);
-  return Result.isSuccess(parsed)
-    ? Effect.succeed({ source, definition: parsed.success })
-    : Effect.fail(validation(parsed.failure));
+const parseContent = (
+  content: WorkflowContent,
+): Result.Result<ParsedSource, ReadonlyArray<Issue>> => {
+  const text =
+    content.source !== undefined
+      ? Result.succeed(content.source)
+      : Result.map(decodeWorkflowDefinition(content.definition), renderWorkflowSource);
+  return Result.flatMap(text, (source) =>
+    Result.map(parseWorkflowSource(source), (definition) => ({ source, definition })),
+  );
 };
+
+/** The text and definition of the workflow a save sent, or the refusal of every problem of shape. */
+const requireParsedContent = (content: WorkflowContent): Effect.Effect<ParsedSource, Validation> =>
+  Effect.mapError(Effect.fromResult(parseContent(content)), (issues) => validation(issues));
 
 /** The rows a definition's triggers are listed by, one each. */
 const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<DeclaredTrigger> =>
@@ -151,6 +194,10 @@ const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<De
 
 /** How every call can refuse, or fail on the database. */
 type CallError = Unauthenticated | Forbidden | Validation | SqlError;
+
+/** Refuses a save whose definition fails a check of meaning, with every error the check found. */
+const requireNoErrors = (problems: WorkflowIssues): Effect.Effect<void, Validation> =>
+  problems.errors.length === 0 ? Effect.void : Effect.fail(validation(problems.errors));
 
 /** Answers the workflow an effect found, or `not_found` where it found none. */
 const requireFound = <A, E>(
@@ -168,6 +215,45 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const workflows = yield* workflowRepository;
   const audit = yield* AuditLog;
+  const agents = yield* agentRepository;
+  const connections = yield* connectionRepository;
+  const host = yield* PluginHost;
+  const eventKinds = yield* EventKinds;
+
+  /**
+   * What a definition names, as the controller holds it now: the actions,
+   * event kinds and Connection types that can be named, and the Agents and
+   * Connections that the definition names and that exist. A save reads it
+   * inside its transaction.
+   */
+  const readReferences = (
+    definition: WorkflowDefinition,
+  ): Effect.Effect<ResolvedReferences, SqlError> =>
+    Effect.gen(function* () {
+      return {
+        actions: new Map(
+          (yield* host.listActiveWorkflowActions()).map((action) => [action.id, action]),
+        ),
+        eventKinds: new Map(
+          (yield* eventKinds.list()).map((eventKind) => [eventKind.kind, eventKind]),
+        ),
+        agentIds: yield* agents.readExistingIds(listNamedAgentIds(definition)),
+        connectionTypeById: yield* connections.readTypes(listNamedConnectionIds(definition)),
+        connectionTypes: new Set(yield* host.listActiveConnectionTypes()),
+      };
+    });
+
+  /**
+   * Every problem of a definition's meaning, and the one warning: what
+   * `validate` answers. It reads what the definition names from the database,
+   * and checks the definition against it.
+   */
+  const readReferencesAndCheck = (
+    definition: WorkflowDefinition,
+  ): Effect.Effect<WorkflowIssues, SqlError> =>
+    Effect.flatMap(readReferences(definition), (references) =>
+      checkDefinitionAgainst(definition, references),
+    );
 
   return {
     /** One page of the workflows, the one changed last first. */
@@ -204,16 +290,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("workflow.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), validationOf);
-        const text = yield* chooseText(decoded);
-        if (text === undefined) {
-          return yield* Effect.fail(
-            validation([{ path: [], message: "Send the workflow as source or as definition." }]),
-          );
-        }
-        const parsedSource = yield* requireValidDefinition(text);
-        const workflow = yield* withTransaction(
+        const parsedSource = yield* requireParsedContent(yield* requireContent(decoded));
+        return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const problems = yield* readReferencesAndCheck(parsedSource.definition);
+            yield* requireNoErrors(problems);
             // One clock read, inside the transaction: the workflow, its
             // triggers and the event that records them carry one instant.
             const savedAt = yield* nowIso;
@@ -232,10 +314,9 @@ const make = Effect.gen(function* () {
               payload: { workflowId: stored.id, name: parsedSource.definition.name },
               at: savedAt,
             });
-            return stored;
+            return { workflow: stored, warnings: problems.warnings };
           }),
         );
-        return { workflow, warnings: [] };
       }),
 
     /**
@@ -246,14 +327,20 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("workflow.update");
         const decoded = yield* Effect.mapError(decodeUpdate(input), validationOf);
-        const text = yield* chooseText(decoded);
-        if (text === undefined && decoded.enabled === undefined) {
+        const content = yield* chooseContent(decoded);
+        if (content === undefined && decoded.enabled === undefined) {
           return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
         }
-        const parsedSource = text === undefined ? undefined : yield* requireValidDefinition(text);
-        const workflow = yield* withTransaction(
+        const parsedSource =
+          content === undefined ? undefined : yield* requireParsedContent(content);
+        return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const problems =
+              parsedSource === undefined
+                ? undefined
+                : yield* readReferencesAndCheck(parsedSource.definition);
+            if (problems !== undefined) yield* requireNoErrors(problems);
             const savedAt = yield* nowIso;
             const stored = yield* requireFound(
               workflows.update(
@@ -286,10 +373,11 @@ const make = Effect.gen(function* () {
               },
               at: savedAt,
             });
-            return stored;
+            // Turning a workflow on or off does not read its text, so it
+            // answers no warning about it.
+            return { workflow: stored, warnings: problems?.warnings ?? [] };
           }),
         );
-        return { workflow, warnings: [] };
       }),
 
     /** Removes a workflow, and the trigger rows of its source with it. */
@@ -312,6 +400,21 @@ const make = Effect.gen(function* () {
           }),
         );
         return {};
+      }),
+
+    /**
+     * Checks a workflow as a save does, and stores nothing. Every problem is
+     * in the answer, a problem of shape included, because the answer is what
+     * an editor shows while the author types.
+     */
+    validate: (input: WorkflowValidateInput): Effect.Effect<WorkflowIssues, CallError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("workflow.validate");
+        const decoded = yield* Effect.mapError(decodeValidate(input), validationOf);
+        const parsed = parseContent(yield* requireContent(decoded));
+        return Result.isSuccess(parsed)
+          ? yield* readReferencesAndCheck(parsed.success.definition)
+          : { errors: parsed.failure, warnings: [] };
       }),
 
     /** One page of the triggers of every workflow, the newest first. */
@@ -350,5 +453,5 @@ export class WorkflowService extends Context.Service<
 export const WorkflowServiceLayer: Layer.Layer<
   WorkflowService,
   never,
-  SqlClient.SqlClient | AuditLog
+  SqlClient.SqlClient | AuditLog | PluginHost | EventKinds
 > = Layer.effect(WorkflowService)(make);

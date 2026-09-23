@@ -38,12 +38,16 @@ export {
 } from "./connections";
 
 export {
+  ActionError,
   DeclaredCapabilities,
   EventSourceNames,
   MAX_CONTRIBUTION_NAME_LENGTH,
   ProviderDefinition,
+  WorkflowActionNames,
+  type ActionContext,
   type EventKindDeclaration,
   type EventSourceDefinition,
+  type WorkflowActionContribution,
 } from "./contributions";
 
 export {
@@ -51,6 +55,7 @@ export {
   registerConnectionType,
   registerEventSource,
   registerProvider,
+  registerWorkflowAction,
   type ActivationContext,
   type Deactivate,
   type EventSourceRegistration,
@@ -59,4 +64,5 @@ export {
   type PluginSecrets,
   type ProviderRegistration,
   type RegistrationHost,
+  type WorkflowActionRegistration,
 } from "./plugin";

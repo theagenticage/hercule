@@ -6,7 +6,14 @@
  * object becomes aligned key-value lines, and ids are shortened to the tail the
  * CLI accepts back as an argument.
  */
-import type { Issue, StructuredResult, Workflow, WorkflowSaved } from "@hercule/contract";
+import type {
+  Issue,
+  StructuredResult,
+  Workflow,
+  WorkflowAction,
+  WorkflowIssues,
+  WorkflowSaved,
+} from "@hercule/contract";
 import type { Outcome } from "./execute";
 import type { Command } from "./tree";
 
@@ -192,6 +199,34 @@ const renderWorkflowSaved = (answer: WorkflowSaved): ReadonlyArray<string> => [
   ...answer.warnings.map((warning) => `warning: ${describeIssue(warning)}`),
 ];
 
+/**
+ * What a check of a workflow answers: one line per error and one per warning,
+ * each naming its place in the definition, or one line that says there is no
+ * problem.
+ */
+const renderWorkflowIssues = (answer: WorkflowIssues): ReadonlyArray<string> =>
+  answer.errors.length === 0 && answer.warnings.length === 0
+    ? ["valid: no errors and no warnings"]
+    : [
+        ...answer.errors.map((error) => `error: ${describeIssue(error)}`),
+        ...answer.warnings.map((warning) => `warning: ${describeIssue(warning)}`),
+      ];
+
+/**
+ * One workflow action as a row: its params by name, each optional one marked
+ * with `?`, in place of the JSON Schema they are declared in, which does not
+ * fit on a line. `--json` prints the schema.
+ */
+const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown> => {
+  const properties = Object.keys(action.inputSchema["properties"] ?? {});
+  const required = new Set((action.inputSchema["required"] ?? []) as ReadonlyArray<string>);
+  return {
+    id: action.id,
+    params: properties.map((name) => (required.has(name) ? name : `${name}?`)).join(" "),
+    description: action.description,
+  };
+};
+
 /** The lines the CLI prints for a successful command, without `--json`. */
 export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   const asLines = command.id === "transcript.read" ? transcript : table;
@@ -199,6 +234,14 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
   if (outcome.kind === "items") return asLines(outcome.items);
 
   const value = outcome.value;
+  // The two catalogs a workflow is written from answer with the whole array,
+  // a short list that ends, so each one is printed as a table, as a page is.
+  if (command.id === "workflowAction.query") {
+    return table((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction));
+  }
+  if (command.id === "eventKind.query") {
+    return table(value as ReadonlyArray<Record<string, unknown>>);
+  }
   if (isPage(value)) {
     const lines = [...asLines(value.items)];
     if (value.nextCursor !== undefined) {
@@ -221,6 +264,7 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
     if (command.id === "workflow.create" || command.id === "workflow.update") {
       return renderWorkflowSaved(value as WorkflowSaved);
     }
+    if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
     const lines = [...keyValues(record)];
     // The one teaching line this build has. A caller who has just spawned a
     // session wants to watch it. It is not pointed at a subscription on that

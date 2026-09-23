@@ -1,11 +1,13 @@
 /**
  * What the workflow HTTP tests build on: a controller past first-run setup with
- * a provider for Agents and a local GitHub for triggers, and the calls that
- * make and list what a case needs. Written once here, so two suites that check
- * different rules arrange the same controller.
+ * a provider for Agents and a local GitHub for triggers, the calls that make,
+ * change and list what a case needs, and the read of what a refusal names.
+ * Written once here, so two suites that check different rules arrange the same
+ * controller.
  */
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
+import type { Issue } from "@hercule/contract";
 import {
   ConnectionValidationFailed,
   HOST_API,
@@ -13,7 +15,15 @@ import {
   registerEventSource,
   type Plugin,
 } from "@hercule/plugin-host";
-import { completeSetup, get, post, withServer, type ServerHarness } from "../http/testing";
+import {
+  completeSetup,
+  get,
+  post,
+  readRefusal,
+  send,
+  withServer,
+  type ServerHarness,
+} from "../http/testing";
 import { fixture, providerDefinition } from "../plugins/testing";
 
 /** A canonical UUIDv7 that names nothing on this controller. */
@@ -77,9 +87,14 @@ export interface SetUpController {
   readonly token: string;
 }
 
-/** A controller past setup, with a provider for Agents and GitHub for triggers. */
+/**
+ * A controller past setup, with a provider for Agents and GitHub for triggers.
+ * `additionalPlugins` are installed beside the two, for a suite whose cases
+ * need a Connection type or a workflow action that GitHub does not declare.
+ */
 export const withSetUpController = (
   body: (controller: SetUpController) => Promise<void>,
+  additionalPlugins: ReadonlyArray<Plugin> = [],
 ): Promise<void> =>
   withServer(
     async (harness) => {
@@ -90,6 +105,7 @@ export const withSetUpController = (
       plugins: [
         fixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin,
         localGithubPlugin,
+        ...additionalPlugins,
       ],
     },
   );
@@ -130,6 +146,27 @@ export interface TriggerItem {
 
 export const createWorkflow = (base: string, token: string, body: unknown): Promise<Response> =>
   post(base, "/api/v1/workflows", body, token);
+
+export const updateWorkflow = (
+  base: string,
+  token: string,
+  id: string,
+  body: unknown,
+): Promise<Response> => send("PATCH", base, `/api/v1/workflows/${id}`, { body, token });
+
+/**
+ * The issues a validation refusal names, each with its path and its message.
+ * A case that reads only the paths reads them from `readRefusal`. The status
+ * is checked before the body is read as a refusal, so a save that was taken
+ * fails here with the body it answered.
+ */
+export const readIssues = async (response: Response): Promise<ReadonlyArray<Issue>> => {
+  expect(response.status, await response.clone().text()).toBe(400);
+  const refusal = await readRefusal(response);
+  expect(refusal.code).toBe("validation");
+  return (JSON.parse(refusal.text) as { error: { details: { issues: ReadonlyArray<Issue> } } })
+    .error.details.issues;
+};
 
 /**
  * A create that worked, answered with the record it stored. Which of the two

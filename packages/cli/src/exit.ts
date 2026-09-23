@@ -8,7 +8,10 @@
 export const EXIT = {
   /** The operation succeeded. */
   ok: 0,
-  /** The controller answered with the error envelope. */
+  /**
+   * The controller answered with the error envelope, or a check of a
+   * workflow found an error.
+   */
   api: 1,
   /** The command line was wrong: unknown command, missing argument, bad value. */
   usage: 2,

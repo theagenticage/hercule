@@ -169,7 +169,7 @@ const make = Effect.gen(function* () {
         // quoted string literal, so nothing a caller writes can reach the
         // grammar. The check stands for the sources a trigger stores later,
         // which are written by hand.
-        yield* Effect.mapError(checkExpression(condition), (failure) =>
+        yield* Effect.mapError(checkExpression(condition, "event"), (failure) =>
           invalidState(failure.message),
         );
         const subscriptionId = yield* withTransaction(

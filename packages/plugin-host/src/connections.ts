@@ -10,6 +10,7 @@
 import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { PluginError } from "./plugin";
+import { ContributionWord } from "./contributions";
 import { SchemaValue } from "./manifest";
 
 /** Where a connection stands. Ingest runs in `connected` and nowhere else. */
@@ -72,10 +73,7 @@ export const ConnectionType = Schema.Struct({
    * is refused here, where the plugin is told, so that the qualified string has
    * exactly one reading.
    */
-  type: Schema.String.check(
-    Schema.isMinLength(1),
-    Schema.isPattern(/^[^/]+$/, { message: "A connection type cannot hold a / character." }),
-  ),
+  type: ContributionWord,
   displayName: Schema.String.check(Schema.isMinLength(1)),
   setup: Schema.Array(SetupStep),
   oauth: Schema.optionalKey(OAuthDeclaration),

@@ -14,6 +14,7 @@ import { auth } from "./groups/auth";
 import { connection } from "./groups/connection";
 import { controller } from "./groups/controller";
 import { event } from "./groups/event";
+import { eventKind } from "./groups/event-kind";
 import { input } from "./groups/input";
 import { plugin } from "./groups/plugin";
 import { profile } from "./groups/profile";
@@ -31,6 +32,7 @@ import { transcript } from "./groups/transcript";
 import { trigger } from "./groups/trigger";
 import { user } from "./groups/user";
 import { workflow } from "./groups/workflow";
+import { workflowAction } from "./groups/workflow-action";
 import { workspace } from "./groups/workspace";
 
 export const api = HttpApi.make("hercule")
@@ -50,6 +52,8 @@ export const api = HttpApi.make("hercule")
     subscription,
     workflow,
     trigger,
+    workflowAction,
+    eventKind,
     runner,
     plugin,
     provider,

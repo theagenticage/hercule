@@ -19,6 +19,9 @@ export const Id = Schema.String.check(
 
 export type Id = Schema.Schema.Type<typeof Id>;
 
+/** Whether a value is an id. */
+export const isId = Schema.is(Id);
+
 /** An instant on the wire: ISO-8601 UTC with milliseconds. */
 export const Timestamp = Schema.String.check(
   Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, {
@@ -81,12 +84,13 @@ export const ExternalRef = Schema.String.check(
   // A filter rather than a pattern check, so that the refusal quotes the ref
   // the caller wrote: a pattern check reports the position of the value and
   // never the value, and a caller sending a list of refs cannot act on a
-  // position alone.
+  // position alone. The ref comes last, so a reader that cuts a long message
+  // short keeps what the message asks for.
   Schema.makeFilter((ref) =>
     EXTERNAL_REF_PATTERN.test(ref)
       ? undefined
-      : `${ref} is not an external ref: write <system>:<kind>:<identity>, ` +
-        `lowercase system, no whitespace`,
+      : "Write an external ref as <system>:<kind>:<identity>, with a lowercase system and no whitespace. " +
+        `This value is not one: ${ref}`,
   ),
 );
 

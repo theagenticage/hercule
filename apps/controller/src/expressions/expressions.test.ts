@@ -10,9 +10,12 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Duration, Effect, Exit, Option } from "effect";
 import {
+  checkCondition,
   checkExpression,
+  checkTemplate,
   evaluateExpression,
   ExpressionBudget,
+  isTemplate,
   parseExpression,
   type ExpressionError,
 } from "./index";
@@ -76,11 +79,11 @@ describe("checkExpression", () => {
     ["a presence test on a loose payload", `has(event.payload.subject) && event.payload.x == 1`],
     ["a bounded macro", `event.payload.labels.exists(label, label == "ci")`],
   ])("passes %s and answers nothing else", (_what, source) => {
-    expect(Effect.runSync(checkExpression(source))).toBeUndefined();
+    expect(Effect.runSync(checkExpression(source, "event"))).toBeUndefined();
   });
 
   it("refuses a syntax error", () => {
-    expect(failureMessage(checkExpression("event.kind =="))).not.toBe("");
+    expect(failureMessage(checkExpression("event.kind ==", "event"))).not.toBe("");
   });
 
   it.each([
@@ -90,14 +93,113 @@ describe("checkExpression", () => {
     ["maxMapEntries", () => buildMapSource(10000)],
     ["maxCallArguments", () => callWith(200)],
   ])("refuses a source over %s, naming the limit and its value", (limit, build) => {
-    const message = failureMessage(checkExpression(build()));
+    const message = failureMessage(checkExpression(build(), "event"));
 
     expect(message).toContain(limit);
     expect(numbersIn(message)).toBeGreaterThanOrEqual(1);
   });
 
   it("refuses a call to a function nobody registered, naming the function", () => {
-    expect(failureMessage(checkExpression(`sendEmail("rogier")`))).toContain("sendEmail");
+    expect(failureMessage(checkExpression(`sendEmail("rogier")`, "event"))).toContain("sendEmail");
+  });
+});
+
+describe("checkExpression in a scope", () => {
+  it("lets an expression over one event read event, and nothing a run has", () => {
+    expect(Effect.runSync(checkExpression(`event.payload.number > 3`, "event"))).toBeUndefined();
+
+    const message = failureMessage(checkExpression(`steps.review.output.id == "x"`, "event"));
+    expect(message).toContain("steps");
+    expect(message).toContain("Read only event");
+  });
+
+  it("lets an expression inside a run read inputs and steps, and tells how to reach the event", () => {
+    expect(
+      Effect.runSync(checkExpression(`has(inputs.pr) && steps.review.output.ok`, "run")),
+    ).toBeUndefined();
+
+    const message = failureMessage(checkExpression(`event.kind == "task.updated"`, "run"));
+    expect(message).toContain("Read only inputs and steps");
+    expect(message).toContain("inputs.<name>");
+  });
+
+  it("refuses a variable no scope declares, naming it", () => {
+    expect(failureMessage(checkExpression(`request.id == 1`, "run"))).toContain("request");
+  });
+});
+
+describe("checkCondition", () => {
+  it("passes a source that gives a bool, and one whose type is known only when it is evaluated", () => {
+    for (const [source, scope] of [
+      [`event.payload.number > 3`, "event"],
+      [`has(event.payload.subject)`, "event"],
+      [`event.payload.merged`, "event"],
+      [`steps.review.output.approved`, "run"],
+    ] as const) {
+      expect(Effect.runSync(checkCondition(source, scope)), source).toBeUndefined();
+    }
+  });
+
+  it("refuses a source whose type is known and is not bool, naming the type and saying what the place needs", () => {
+    const text = failureMessage(checkCondition(`'yes'`, "run"));
+    expect(text).toContain("string");
+    expect(text).toContain("true or false");
+
+    expect(failureMessage(checkCondition(`size(inputs.labels)`, "run"))).toContain("int");
+  });
+
+  it("refuses what checkExpression refuses, with the same message", () => {
+    expect(failureMessage(checkCondition(`steps.x.output.ok`, "event"))).toBe(
+      failureMessage(checkExpression(`steps.x.output.ok`, "event")),
+    );
+  });
+});
+
+describe("checkTemplate", () => {
+  it("passes a text with no expression, and expressions over inputs and steps", () => {
+    for (const template of [
+      "Review the pull request.",
+      "Review {{ inputs.prUrl }}. The last reviewer said {{ steps.review.output.notes }}.",
+      "{{inputs.count + 1}}",
+    ]) {
+      expect(Effect.runSync(checkTemplate(template)), template).toBeUndefined();
+    }
+  });
+
+  it("reads {{ '{{' }} as an expression whose value is a literal {{", () => {
+    expect(Effect.runSync(checkTemplate("Write {{ '{{' }} where a template starts."))).toBe(
+      undefined,
+    );
+  });
+
+  it("refuses a {{ that no }} closes, at its character", () => {
+    const message = failureMessage(checkTemplate("Review {{ inputs.prUrl }} and {{ steps.x"));
+    expect(message).toContain("character 31");
+    expect(message).toContain("}}");
+  });
+
+  it("refuses the first expression that is not valid in a run, at its character", () => {
+    const syntax = failureMessage(checkTemplate("Review {{ inputs.prUrl + }}."));
+    expect(syntax).toContain("character 8");
+    expect(syntax).toContain("not valid CEL");
+
+    const scoped = failureMessage(checkTemplate("{{ inputs.a }} {{ event.payload.title }}"));
+    expect(scoped).toContain("character 16");
+    expect(scoped).toContain("event");
+  });
+
+  it("counts an emoji before the {{ as one character, as the author counts it", () => {
+    // The emoji is two UTF-16 code units, so an offset would name character 4.
+    expect(failureMessage(checkTemplate("😀 {{ inputs.a"))).toContain("character 3 ");
+    expect(failureMessage(checkTemplate("😀 {{ event.id }}"))).toContain("character 3 ");
+  });
+});
+
+describe("isTemplate", () => {
+  it("says whether a text holds a {{, which opens an expression", () => {
+    expect(isTemplate("{{ inputs.labels }}")).toBe(true);
+    expect(isTemplate("Write {{ '{{' }} here.")).toBe(true);
+    expect(isTemplate("A plain title with } and { in it")).toBe(false);
   });
 });
 
@@ -108,6 +210,16 @@ describe("parseExpression", () => {
 
   it("refuses a syntax error", () => {
     expect(failureMessage(parseExpression("event.kind =="))).not.toBe("");
+  });
+
+  it("says why a source cannot be used, as a stored health message does, without the repair a save adds", () => {
+    const parsed = failureMessage(parseExpression("event.kind =="));
+    const checked = failureMessage(checkExpression("event.kind ==", "event"));
+
+    expect(parsed).toMatch(/^that expression is not valid CEL: /);
+    expect(checked).toMatch(/^This expression is not valid CEL: /);
+    expect(checked).toMatch(/Correct the expression\.$/);
+    expect(parsed).not.toContain("Correct");
   });
 
   it("refuses a source over a structural limit, naming the limit", () => {

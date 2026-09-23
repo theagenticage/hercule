@@ -160,10 +160,28 @@ const TABLE = {
     method: "DELETE",
     path: "/api/v1/workflows/:id",
   },
+  // A check stores nothing, so it needs the grant that reads a workflow and not
+  // the one that writes one. Like a save, it tells the caller whether the
+  // Agents and Connections that the workflow names exist.
+  "workflow.validate": {
+    requires: "workflow.read",
+    method: "POST",
+    path: "/api/v1/workflows/validate",
+  },
 
   // Every trigger belongs to a workflow and is read as part of it, so reading
   // one needs the workflow grant; there is no trigger family.
   "trigger.query": { requires: "workflow.read", method: "GET", path: "/api/v1/triggers" },
+
+  // The two catalogs a workflow is written against: what a step can call and
+  // what a trigger can listen for. They are read to write a workflow, so they
+  // need the workflow grant; neither has a family of its own.
+  "workflowAction.query": {
+    requires: "workflow.read",
+    method: "GET",
+    path: "/api/v1/workflow-actions",
+  },
+  "eventKind.query": { requires: "workflow.read", method: "GET", path: "/api/v1/event-kinds" },
 
   "runner.query": { requires: "infra.read", method: "GET", path: "/api/v1/runners" },
   "runner.read": { requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },

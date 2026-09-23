@@ -32,6 +32,7 @@ import {
   TaskCreateInput,
   TaskFilter,
   TaskUpdateInput,
+  refuseEmptyTaskUpdate,
   validation,
   validationOf,
   type Forbidden,
@@ -51,8 +52,14 @@ const QueryInput = Schema.Struct({ ...TaskFilter.fields, ...pageInput(TASK_SORT_
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
-/** What identifies one task: the id, and what an edit does to it. */
-const UpdateInput = Schema.Struct({ id: Id, ...TaskUpdateInput.fields });
+/**
+ * What identifies one task: the id, and what an edit does to it. The edit is
+ * refused when it names no field to change, by the rule the request's own
+ * schema carries.
+ */
+const UpdateInput = Schema.Struct({ id: Id, ...TaskUpdateInput.fields }).check(
+  refuseEmptyTaskUpdate,
+);
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
@@ -213,10 +220,11 @@ const make = Effect.gen(function* () {
     /**
      * Changes a task and says what changed.
      *
-     * A patch that names no field is refused, and a patch that asks for the
-     * values the task already holds writes nothing at all: either would move
-     * `updatedAt` and stamp a `task.updated` row describing nothing, and a
-     * workflow triggering on that event would wake for no change.
+     * A patch that names no field is refused by the decode, and a patch that
+     * asks for the values the task already holds writes nothing at all:
+     * either would move `updatedAt` and stamp a `task.updated` row describing
+     * nothing, and a workflow triggering on that event would wake for no
+     * change.
      */
     update: (
       input: UpdateInput,
@@ -224,9 +232,6 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.update");
         const { id, ...patch } = yield* Effect.mapError(decodeUpdate(input), validationOf);
-        if (Object.keys(patch).length === 0) {
-          return yield* Effect.fail(validation([{ path: [], message: "name a field to change" }]));
-        }
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

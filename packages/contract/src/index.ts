@@ -84,7 +84,15 @@ export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 /** The form-validation interface the schemas above answer to. */
 export type { StandardSchemaV1 } from "effect/StandardSchema";
 
-export { Actor, ExternalRef, Id, MAX_EXTERNAL_REF_LENGTH, NullableActor, Timestamp } from "./ids";
+export {
+  Actor,
+  ExternalRef,
+  Id,
+  isId,
+  MAX_EXTERNAL_REF_LENGTH,
+  NullableActor,
+  Timestamp,
+} from "./ids";
 
 export { Authenticated, SetupToken } from "./security";
 
@@ -229,6 +237,7 @@ export {
   TaskPriority,
   TaskStatus,
   TaskUpdateInput,
+  refuseEmptyTaskUpdate,
 } from "./groups/task";
 export {
   MAX_PROJECT_DESCRIPTION_LENGTH,
@@ -290,14 +299,21 @@ export {
   Workflow,
   WorkflowCreateInput,
   WorkflowFilter,
+  WorkflowIssues,
   WorkflowSaved,
   WorkflowSummary,
   WorkflowUpdateInput,
+  WorkflowValidateInput,
+  ANY_CONNECTION,
   decodeWorkflowDefinition,
+  limitIssues,
   parseWorkflowSource,
   renderWorkflowSource,
   type WorkflowDefinition,
 } from "./groups/workflow";
+export { excerptMessage, quoteWritten } from "./excerpts";
+export { WorkflowAction } from "./groups/workflow-action";
+export { DeclaredEventKind } from "./groups/event-kind";
 export {
   TRIGGER_SORT_FIELDS,
   Trigger,

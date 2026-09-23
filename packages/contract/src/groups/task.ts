@@ -94,6 +94,16 @@ export const ProvenanceEntry = Schema.Struct({
 export type ProvenanceEntry = Schema.Schema.Type<typeof ProvenanceEntry>;
 
 /**
+ * A field of a provenance entry that the core sets when it stores the entry.
+ * No value a caller writes is accepted, and the refusal says why.
+ */
+const CoreStampedField = Schema.Never.annotate({
+  description: "stamped by the core",
+  message:
+    "The core sets this field when it stores the entry, so a caller cannot write it. Remove the field.",
+});
+
+/**
  * A provenance entry as a caller writes it. `at` and `actor` are declared and
  * uninhabited rather than left out: an excess property is dropped in silence,
  * and a caller who thinks they stamped an entry with someone else's actor
@@ -103,8 +113,8 @@ const ProvenanceInput = Schema.Struct({
   ref: Schema.optionalKey(ExternalRef),
   eventId: Schema.optionalKey(EventId),
   runId: Schema.optionalKey(Id),
-  at: Schema.optionalKey(Schema.Never.annotate({ description: "stamped by the core" })),
-  actor: Schema.optionalKey(Schema.Never.annotate({ description: "stamped by the core" })),
+  at: Schema.optionalKey(CoreStampedField),
+  actor: Schema.optionalKey(CoreStampedField),
 }).check(
   Schema.makeFilter((entry) =>
     entry.ref === undefined && entry.eventId === undefined && entry.runId === undefined
@@ -167,8 +177,8 @@ export const TaskCreateInput = Schema.Struct({
 
 export type TaskCreateInput = Schema.Schema.Type<typeof TaskCreateInput>;
 
-/** What editing a task takes. Every field is optional; an absent one is untouched. */
-export const TaskUpdateInput = Schema.Struct({
+/** The fields an edit of a task may change. */
+const TASK_UPDATE_FIELDS = {
   title: Schema.optionalKey(TaskTitle),
   description: Schema.optionalKey(TaskDescription),
   status: Schema.optionalKey(TaskStatus),
@@ -184,7 +194,29 @@ export const TaskUpdateInput = Schema.Struct({
   removeLabels: Schema.optionalKey(atMost(Label, MAX_TASK_LABELS)),
   /** Appends. Provenance is never edited and never removed. */
   provenance: Schema.optionalKey(atMost(ProvenanceInput, MAX_PROVENANCE_APPEND)),
-});
+};
+
+/**
+ * Refuses an edit of a task that names no field to change. Such an edit would
+ * move `updatedAt` and record a `task.updated` event that describes nothing,
+ * and a workflow that such an event starts would start for no change. The
+ * `task.update` operation and the built-in action that calls the operation
+ * both check their input with this, so the two refuse the same edits.
+ */
+export const refuseEmptyTaskUpdate = Schema.makeFilter(
+  (update: { readonly [Field in keyof typeof TASK_UPDATE_FIELDS]?: unknown }) =>
+    Object.keys(TASK_UPDATE_FIELDS).some(
+      (field) => update[field as keyof typeof TASK_UPDATE_FIELDS] !== undefined,
+    )
+      ? undefined
+      : "An edit of a task names at least one field to change. Add each field to change, such as title or status.",
+);
+
+/**
+ * What editing a task takes. Every field is optional, and an absent one is
+ * untouched, but at least one field is present.
+ */
+export const TaskUpdateInput = Schema.Struct(TASK_UPDATE_FIELDS).check(refuseEmptyTaskUpdate);
 
 export type TaskUpdateInput = Schema.Schema.Type<typeof TaskUpdateInput>;
 

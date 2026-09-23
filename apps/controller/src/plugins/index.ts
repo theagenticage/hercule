@@ -6,3 +6,4 @@ export { EventKindCatalogLayer } from "./event-kinds";
 export { PluginConfigsLayer, PluginHost, PluginHostLayer } from "./host";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";
+export { type RegisteredWorkflowAction } from "./workflow-actions";

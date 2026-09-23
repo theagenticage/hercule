@@ -1,5 +1,6 @@
 /**
- * The `plugin.*` operations.
+ * The `plugin.*` operations, and `workflowAction.query` over the action
+ * catalog the plugins and the core register into.
  *
  * A plugin as a caller sees it joins what the user decided (enabled, config)
  * with what this boot found (status, catalog rows); only the first survives a
@@ -22,6 +23,7 @@ import {
   type PluginDetail,
   type Unauthenticated,
   type Validation,
+  type WorkflowAction,
 } from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
@@ -150,6 +152,19 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("plugin.read");
         return yield* one(id);
+      }),
+
+    /** Every workflow action a step can name, with the params it takes as JSON Schema. */
+    queryWorkflowActions: (): Effect.Effect<ReadonlyArray<WorkflowAction>, Forbidden> =>
+      Effect.gen(function* () {
+        yield* requireGrant("workflowAction.query");
+        const actions = yield* host.listActiveWorkflowActions();
+        return actions.map(({ id, displayName, description, inputSchema }) => ({
+          id,
+          displayName,
+          description,
+          inputSchema,
+        }));
       }),
 
     enable: (id: string): Effect.Effect<PluginDetail, MoveError> =>
