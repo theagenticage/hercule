@@ -617,7 +617,7 @@ export const CLI = {
       },
       connectionId: {
         flag: "connection",
-        help: "The Connection Hercule acts through for it; a repo takes a github one.",
+        help: "The Connection Hercule acts through for it; a repo's connection must be a GitHub connection.",
       },
       setupCommand: {
         flag: "setup-command",
@@ -673,7 +673,7 @@ export const CLI = {
   },
   "resource.delete": {
     command: "resource delete",
-    help: "Removes a Resource and the project links it had. It fails while a workspace still uses the resource; dispose of the workspace before deleting the resource. A main workspace cannot be disposed of; it stops using the resource when its runner is retired.",
+    help: "Removes a Resource and the project links it had. It fails while a workspace still uses the resource; dispose of the workspace before deleting the resource, or retire its runner if it is a main workspace.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -684,7 +684,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "a workspace still uses that resource; dispose of the workspace before deleting the resource (a main workspace cannot be disposed of; it stops using the resource when its runner is retired)",
+        "a workspace still uses that resource; dispose of the workspace before deleting the resource, or retire its runner if it is a main workspace",
     },
   },
 
