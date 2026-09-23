@@ -165,11 +165,14 @@ const childIn = (
   writeFileSync(script, CHILD);
   return {
     command: [process.execPath, "run", script, "--state", state, "--announce", announce, ...extra],
+    // The child can still be writing its last line while the test reads the
+    // file. Only lines that end with a line break are complete, so the text
+    // after the last line break is ignored.
     notes: () =>
       existsSync(state)
         ? readFileSync(state, "utf8")
             .split("\n")
-            .filter((line) => line !== "")
+            .slice(0, -1)
             .map((line) => JSON.parse(line) as Note)
         : [],
   };
