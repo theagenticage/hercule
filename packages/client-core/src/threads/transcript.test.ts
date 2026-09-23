@@ -18,13 +18,13 @@ const listPositions = (rows: readonly TranscriptRow[]): number[] =>
   rows.map((each) => each.position);
 
 describe("mergeTranscript", () => {
-  it("appends rows that carry on from what is held", () => {
+  it("appends rows that follow the cached rows", () => {
     expect(
       listPositions(mergeTranscript([buildRow(1), buildRow(2)], [buildRow(3), buildRow(4)])),
     ).toEqual([1, 2, 3, 4]);
   });
 
-  it("places a replay that arrives after the rows it comes before", () => {
+  it("puts replayed rows before later rows that arrived first", () => {
     expect(
       listPositions(
         mergeTranscript([buildRow(4), buildRow(5)], [buildRow(1), buildRow(2), buildRow(3)]),
@@ -32,17 +32,17 @@ describe("mergeTranscript", () => {
     ).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it("keeps the row it already holds for a position delivered twice", () => {
+  it("keeps the cached row when a position is delivered twice", () => {
     const held = [buildRow(1), buildRow(2)];
     const merged = mergeTranscript(held, [buildRow(2), buildRow(3)]);
     expect(listPositions(merged)).toEqual([1, 2, 3]);
     expect(merged[1]).toBe(held[1]);
   });
 
-  it("returns what it was given when every row is one it holds", () => {
+  it("returns the same array when every incoming row is already cached", () => {
     const held = [buildRow(1), buildRow(2)];
-    // The same reference, so a cache that took this delivery does not notify
-    // its observers over rows it already had.
+    // The same reference, so a cache that receives this delivery does not
+    // notify its observers about rows it already had.
     expect(mergeTranscript(held, [buildRow(1), buildRow(2)])).toBe(held);
   });
 });

@@ -1,12 +1,12 @@
 /**
- * What the model options selector draws: one row per descriptor the model
- * declares, with the choices as the provider wrote them. A boolean descriptor
- * has no choices of its own, so it reads as the two-way switch it is - and the
- * row says so, because a pick under it goes back as a boolean, not as "on".
+ * Builds the rows of the model options selector: one row per option the model
+ * declares, with the choices as the provider defined them. A boolean option
+ * has no choices of its own, so it is shown as an off/on switch. Its row is
+ * marked `boolean`, because a pick is sent back as a boolean, not as "on".
  */
 import type { ModelOption } from "@hercule/contract";
 
-/** A boolean descriptor is a two-way switch, and reads as one. */
+/** The two choices of a boolean option. */
 const SWITCH = [
   { value: "off", label: "off" },
   { value: "on", label: "on" },
@@ -16,7 +16,7 @@ export interface ModelOptionRow {
   readonly id: string;
   readonly label: string;
   readonly choices: readonly { readonly value: string; readonly label: string }[];
-  /** What is picked under it now: the value stored, else the declared default. */
+  /** The current pick: the stored value, or else the declared default. */
   readonly value: string;
   readonly boolean: boolean;
 }

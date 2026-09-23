@@ -18,7 +18,7 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-/** A controller that logs in, mints a key, and logs out. */
+/** A stub controller that logs in, creates a key, and logs out. */
 const stubController = () =>
   stubFetch((request: StubRequest) => {
     if (request.path === "/api/v1/auth/login") {
@@ -38,7 +38,7 @@ const stubController = () =>
 const buildCredentialsPath = () => join(home, "credentials.json");
 
 describe("hercule login", () => {
-  it("logs in, mints a key under the bearer, stores the key and drops the bearer", async () => {
+  it("logs in, creates a key with the bearer token, stores the key and revokes the bearer", async () => {
     const fetch = stubController();
     const io = stubIo({ fetch, stdin: "hunter2\n", hostname: "laptop" });
 
@@ -79,7 +79,7 @@ describe("hercule login", () => {
     expect(fetch.calls[0]?.body).toEqual({ username: "rogier", password: "hunter2" });
   });
 
-  it("writes the credential file readable by no one else", async () => {
+  it("writes a credential file that no other user can read", async () => {
     const io = stubIo({ fetch: stubController(), stdin: "hunter2" });
     await main(
       ["--home", home, "login", "http://c.test", "--username", "rogier", "--password-stdin"],
@@ -88,7 +88,7 @@ describe("hercule login", () => {
     expect(statSync(buildCredentialsPath()).mode & 0o777).toBe(0o600);
   });
 
-  it("never writes the key into an existing file anyone could read", async () => {
+  it("never writes the key into an existing file other users can read", async () => {
     writeFileSync(buildCredentialsPath(), "{}", { mode: 0o644 });
     const before = statSync(buildCredentialsPath()).ino;
 
@@ -100,8 +100,8 @@ describe("hercule login", () => {
 
     const after = statSync(buildCredentialsPath());
     expect(after.mode & 0o777).toBe(0o600);
-    // A new inode: the key went into a fresh 0600 file that was renamed over the
-    // old one, so it was never held at 0644 waiting for a chmod.
+    // A new inode: the key was written to a new 0600 file that was renamed over
+    // the old one, so it was never readable at 0644 while waiting for a chmod.
     expect(after.ino).not.toBe(before);
     expect(JSON.parse(readFileSync(buildCredentialsPath(), "utf8"))).toEqual({
       url: "http://c.test",
@@ -173,7 +173,7 @@ describe("hercule login", () => {
     expect(fetch.calls[1]?.body).toEqual({ name: "ci" });
   });
 
-  it("reads its flags with the one parser: --flag=value, and a flag with no value", async () => {
+  it("parses its flags with the shared parser: --flag=value, and a flag with no value", async () => {
     const fetch = stubController();
     const io = stubIo({ fetch, stdin: "hunter2" });
     expect(
@@ -208,7 +208,7 @@ describe("hercule login", () => {
     expect(fetch.calls[0]?.body).toEqual({ username: "rogier", password: "hunter2" });
   });
 
-  it("refuses to wedge on a prompt when stdin is not a terminal", async () => {
+  it("fails instead of waiting on a prompt when stdin is not a terminal", async () => {
     const io = stubIo({ fetch: stubController() });
     expect(await main(["--home", home, "login", "http://c.test", "--username", "rogier"], io)).toBe(
       2,
@@ -217,7 +217,7 @@ describe("hercule login", () => {
     expect(io.prompts).toEqual([]);
   });
 
-  it("has no --password flag, and says why", async () => {
+  it("rejects --password, and says why", async () => {
     const io = stubIo({ fetch: stubController() });
     expect(
       await main(

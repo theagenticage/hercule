@@ -1,11 +1,13 @@
 /**
- * How a transcript cache takes rows that arrive live. The log is append-only
- * and strictly ordered on `position`, but the deliveries are not: two
- * subscriptions seeded from the same empty cache both replay from the start of
- * the log, and the later one's rows can land before the earlier one's. Merging
- * on `position` rather than after whatever the cache last held is what makes
- * the result the same whichever order they arrive in - a row already held is
- * the same row, so the one in hand stands and the rest are placed in order.
+ * Merges transcript rows that arrive live into the cached transcript. Returns
+ * `current` unchanged when every incoming row is already cached.
+ *
+ * The transcript log is append-only and ordered by `position`, but deliveries
+ * are not ordered: two subscriptions started from the same empty cache both
+ * replay from the start of the log, and the later one's rows can arrive first.
+ * Merging by `position`, instead of appending, gives the same result in any
+ * arrival order. A row whose position is already cached is the same row, so
+ * the cached copy is kept.
  */
 import type { TranscriptRow } from "@hercule/contract";
 

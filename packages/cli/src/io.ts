@@ -1,9 +1,9 @@
 /**
- * Everything the CLI touches outside itself, in one record.
+ * Everything outside the CLI that the CLI uses, in one record.
  *
- * The CLI is a pure function of `argv` plus this: tests hand it a stub `fetch`,
- * a captured stdout and a canned stdin, and never touch the real process. It is
- * a test seam and nothing more - there is exactly one production `Io`.
+ * The CLI depends only on `argv` and this record. Tests pass a stub `fetch`, a
+ * captured stdout and a fixed stdin, and never touch the real process. It
+ * exists only for tests: there is exactly one production `Io`.
  */
 import { createInterface } from "node:readline";
 import { hostname } from "node:os";
@@ -17,15 +17,15 @@ export interface Io {
   readonly out: (line: string) => void;
   /** Writes one line to stderr. */
   readonly err: (line: string) => void;
-  /** All of stdin, as text. Read at most once per invocation. */
+  /** Reads all of stdin as text. Called at most once per invocation. */
   readonly stdin: () => Promise<string>;
-  /** True when stdin is a terminal, so a password may be prompted for. */
+  /** Returns true when stdin is a terminal, so the CLI may prompt for a password. */
   readonly isTty: () => boolean;
-  /** Reads a password with echo off. The one prompt the CLI is allowed. */
+  /** Reads a password with echo off. This is the only prompt the CLI may show. */
   readonly prompt: (label: string) => Promise<string>;
-  /** The machine name, the default `hercule login --name`. */
+  /** Returns the machine's hostname, the default for `hercule login --name`. */
   readonly hostname: () => string;
-  /** The transport `client-core` sends through; the one seam a test replaces. */
+  /** The `fetch` that `client-core` sends requests with; tests replace it with a stub. */
   readonly fetch: FetchLike;
 }
 
@@ -52,11 +52,12 @@ const readAllStdin = async (): Promise<string> => {
 };
 
 /**
- * An echo-off password prompt: the one exception to "the CLI never prompts".
+ * Prompts for a password with echo off. This is the only exception to "the
+ * CLI never prompts".
  *
- * `readline` writes the prompt itself and then every echoed character; muting
- * the output stream after the prompt has been written is what turns the echo
- * off without hiding the label.
+ * `readline` writes the prompt label and then echoes every typed character.
+ * Muting the output stream after the label is written turns off the echo
+ * without hiding the label.
  */
 const promptPassword = (label: string): Promise<string> =>
   new Promise((resolve) => {

@@ -4,8 +4,8 @@ import { parseArguments } from "./args";
 import { COMMANDS, findCommandByWords, findMentions } from "./tree";
 
 /**
- * The table, read structurally, so this test asserts the values the contract
- * publishes rather than the shape of its types.
+ * The CLI table's rows, typed loosely so these tests check the values the
+ * contract publishes rather than the shape of its types.
  */
 interface RowField {
   readonly positional?: true;
@@ -33,28 +33,28 @@ const hidden = Object.entries(table).filter(([, row]) => row.hidden === true);
 const readRow = (id: string): Row => table[id]!;
 const readSpelling = (command: { readonly spelling: string }): string => command.spelling;
 
-/** `:name` path parameters, in the order the route writes them. */
+/** Returns the `:name` path parameters of a route, in order. */
 const listPathParams = (path: string): ReadonlyArray<string> =>
   [...path.matchAll(/:([A-Za-z0-9_]+)/g)].map((match) => match[1]!);
 
-/** The words the CLI reserves everywhere; no command may spell a flag with one. */
+/** The flag names the CLI reserves everywhere; no command may use one for a field. */
 const RESERVED_FLAGS = ["json", "help", "home", "all", "limit", "cursor", "sort", "setup-token"];
 
 const KEBAB = /^[a-z]+(-[a-z]+)*$/;
 
-// commands and non-hidden operations are one-to-one.
+// Commands and visible operations match one to one.
 describe("the command tree", () => {
   it("has exactly one command per visible operation", () => {
     expect(COMMANDS.map((command) => command.id).sort()).toEqual(visible.map(([id]) => id).sort());
   });
 
-  it("names exactly one operation per command, and spells each one once", () => {
+  it("maps each command to exactly one operation, with a unique spelling", () => {
     const spellings = COMMANDS.map(readSpelling);
     expect(new Set(spellings).size).toBe(spellings.length);
     expect(new Set(COMMANDS.map((command) => command.id)).size).toBe(COMMANDS.length);
   });
 
-  it("answers at every command's words, and nowhere for a hidden operation", () => {
+  it("finds every command by its words, and no hidden operation", () => {
     for (const command of COMMANDS) {
       expect(findCommandByWords(command.words)?.id, readSpelling(command)).toBe(command.id);
     }
@@ -63,16 +63,16 @@ describe("the command tree", () => {
       expect(findCommandByWords([entity, verb]), `${id} is hidden`).toBeUndefined();
     }
     expect(findCommandByWords(["auth", "ws-ticket"])).toBeUndefined();
-    // The id spelling is not a second way in.
+    // The operation id is not a second way to call a command.
     expect(findCommandByWords(["apiKey", "query"])).toBeUndefined();
     expect(findCommandByWords(["task", "query"])).toBeUndefined();
     expect(findCommandByWords(["runner", "create-join-token"])).toBeUndefined();
   });
 });
 
-// how every visible command is spelled.
+// How every visible command is spelled.
 describe("the spelling of a command", () => {
-  it("is the spelling the table writes", () => {
+  it("is the spelling in the table", () => {
     const spelled = Object.fromEntries(
       COMMANDS.map((command) => [command.id, readSpelling(command)]),
     );
@@ -80,9 +80,9 @@ describe("the spelling of a command", () => {
     expect(spelled).toEqual(written);
   });
 
-  it("never takes a query parameter as a bare word", () => {
-    // The tree refuses such a row while it builds, so this holds for every
-    // command there is; what it asserts is that the rule is applied at all.
+  it("never makes a query parameter positional", () => {
+    // Building the tree throws for such a row, so this always holds. The test
+    // checks that the rule is applied at all.
     for (const command of COMMANDS) {
       for (const field of command.query) {
         expect(field.positional, `${readSpelling(command)}: --${field.spelling}`).toBe(false);
@@ -90,7 +90,7 @@ describe("the spelling of a command", () => {
     }
   });
 
-  it("writes every word in kebab-case", () => {
+  it("spells every word in kebab-case", () => {
     for (const command of COMMANDS) {
       for (const word of command.words) {
         expect(word, `${readSpelling(command)}: ${word}`).toMatch(KEBAB);
@@ -98,7 +98,7 @@ describe("the spelling of a command", () => {
     }
   });
 
-  it("writes every flag in kebab-case, unique within the command", () => {
+  it("spells every flag in kebab-case, unique within the command", () => {
     for (const command of COMMANDS) {
       const flags = [...command.payload, ...command.query].map((field) => field.spelling);
       for (const flag of flags) {
@@ -108,7 +108,7 @@ describe("the spelling of a command", () => {
     }
   });
 
-  it("never spells a flag with a global or paging name", () => {
+  it("never uses a global or paging flag name for a field", () => {
     for (const command of COMMANDS) {
       for (const field of [...command.payload, ...command.query]) {
         expect(
@@ -119,15 +119,15 @@ describe("the spelling of a command", () => {
     }
   });
 
-  it("takes the path parameters positionally, in route order, before any other bare word", () => {
+  it("takes the path parameters as positionals, in route order, before any other positional", () => {
     for (const command of COMMANDS) {
       const inPath = command.positionals.filter((field) => field.carriedIn === "path");
       expect(
         inPath.map((field) => field.name),
         readSpelling(command),
       ).toEqual(listPathParams(command.path));
-      // A payload field the table writes as a bare word stands after them, and
-      // nothing else is ever a bare word.
+      // A payload positional comes after them, and no other field is ever
+      // positional.
       const rest = command.positionals.slice(inPath.length);
       expect(
         rest.every((field) => field.carriedIn === "payload"),
@@ -137,7 +137,7 @@ describe("the spelling of a command", () => {
   });
 });
 
-// the row and the schema list the same fields. If a row lists a field that the
+// The row and the schema list the same fields. If a row lists a field that the
 // operation does not have, hidden or not, building the command tree throws, so
 // every test in this package fails.
 describe("a command's fields against the schema", () => {
@@ -161,7 +161,7 @@ describe("a command's fields against the schema", () => {
     }
   });
 
-  it("resolves a tail only through a listing that needs no argument of its own", () => {
+  it("resolves a tail only through a list operation that takes no positional argument", () => {
     const targets = COMMANDS.flatMap((command) =>
       [...command.positionals, ...command.payload, ...command.query]
         .filter((field) => field.resolves !== undefined)
@@ -180,11 +180,11 @@ describe("a command's fields against the schema", () => {
   });
 
   /**
-   * Deleting a Permission Profile is refused while a session carries it or an
-   * Agent names it. Both listings take the profile, so the user can read back
-   * what the refusal is about.
+   * Deleting a Permission Profile fails while a session uses it or an Agent
+   * refers to it. Both list operations filter by profile, so the user can see
+   * what is blocking the delete.
    */
-  it("narrows both the session listing and the agent listing by a profile", () => {
+  it("lets both session list and agent list filter by profile", () => {
     for (const words of [
       ["session", "list"],
       ["agent", "list"],
@@ -213,7 +213,7 @@ describe("a command's fields against the schema", () => {
     ).toBe(2);
   });
 
-  it("reads a field's kind, its repetition, its optionality and its closed value set", () => {
+  it("reads a field's kind, whether it repeats, whether it is optional, and its choices", () => {
     const create = findCommandByWords(["profile", "create"])!;
     expect(create.payload.find((field) => field.name === "name")).toMatchObject({
       kind: "string",
@@ -244,7 +244,7 @@ describe("the placeholders a usage line shows", () => {
       .positionals.map((field) => `<${field.spelling}>`)
       .join(" ");
 
-  /** Every command whose positionals are not one plain `<id>`. */
+  /** Every command whose positionals are not a single plain `<id>`. */
   const NAMED: Record<string, string> = {
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
@@ -256,13 +256,13 @@ describe("the placeholders a usage line shows", () => {
     "transcript read": "<session-id>",
   };
 
-  it("says whose id a positional holds where its own name would not", () => {
+  it("names whose id a positional holds when the field name alone would not", () => {
     expect(
       Object.fromEntries(Object.keys(NAMED).map((spelled) => [spelled, buildUsageShape(spelled)])),
     ).toEqual(NAMED);
   });
 
-  it("spells every other positional <id>, and takes none where the table takes none", () => {
+  it("spells every other positional <id>, and has none when the table has none", () => {
     for (const command of COMMANDS) {
       const spelled = readSpelling(command);
       if (spelled in NAMED) continue;
@@ -271,9 +271,9 @@ describe("the placeholders a usage line shows", () => {
   });
 });
 
-// the half the contract's own test leaves to the parser.
+// The contract's own test checks the examples' shape; this checks that the parser accepts them.
 describe("every example in the table", () => {
-  it("parses through the argument parser it is written for", async () => {
+  it("is accepted by the argument parser", async () => {
     for (const [id, row] of visible) {
       const command = findCommandByWords((row.command ?? "").split(" "))!;
       for (const [index, example] of (row.examples ?? []).entries()) {
@@ -286,9 +286,9 @@ describe("every example in the table", () => {
   });
 });
 
-// help that names a command the tree cannot answer to teaches a misspelling.
-describe("every command the table's prose names", () => {
-  /** Every string a mention can hide in, addressed the way a failure should read. */
+// Help that mentions a command that is not in the tree teaches a misspelling.
+describe("every command mentioned in the table's text", () => {
+  /** Returns every text that can mention a command, each labelled with where it comes from. */
   const collectProse = (): ReadonlyArray<[string, string]> => {
     const found: Array<[string, string]> = [];
     for (const [id, row] of visible) {
@@ -311,7 +311,7 @@ describe("every command the table's prose names", () => {
     return found;
   };
 
-  it("resolves against the tree", () => {
+  it("is in the tree", () => {
     for (const [where, text] of collectProse()) {
       for (const mention of findMentions(text)) {
         expect(

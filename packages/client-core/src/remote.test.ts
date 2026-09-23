@@ -2,7 +2,7 @@ import { assert, describe, it } from "vitest";
 import { isClonableRemote } from "./remote";
 
 describe("isClonableRemote", () => {
-  it("takes an https URL and git's own scp-like spelling", () => {
+  it("accepts an https URL and git's scp-like form", () => {
     assert.isTrue(isClonableRemote("https://github.com/acme/webshop"));
     assert.isTrue(isClonableRemote("https://github.com/acme/webshop.git"));
     assert.isTrue(isClonableRemote("HTTPS://github.com/acme/webshop"));
@@ -10,7 +10,7 @@ describe("isClonableRemote", () => {
     assert.isTrue(isClonableRemote("  git@github.com:acme/webshop  "));
   });
 
-  it("refuses what would clone whatever the machine happens to hold", () => {
+  it("rejects other schemes and local paths", () => {
     assert.isFalse(isClonableRemote("http://github.com/acme/webshop"));
     assert.isFalse(isClonableRemote("ssh://git@github.com/acme/webshop"));
     assert.isFalse(isClonableRemote("file:///Users/you/code/webshop"));
@@ -18,7 +18,7 @@ describe("isClonableRemote", () => {
     assert.isFalse(isClonableRemote("acme/webshop"));
   });
 
-  it("refuses a word git would read as an option, and an empty one", () => {
+  it("rejects a value git would read as an option, and an empty value", () => {
     assert.isFalse(isClonableRemote("--upload-pack=rm -rf /"));
     assert.isFalse(isClonableRemote("-https://github.com/acme/webshop"));
     assert.isFalse(isClonableRemote(""));

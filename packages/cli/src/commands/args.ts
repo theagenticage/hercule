@@ -1,40 +1,41 @@
 /**
- * Turning a command line into one operation's request.
+ * Parses a command line into one operation's request.
  *
- * Positionals come first, in the order the command writes them; every other
- * field is `--<flag>`, spelled as the contract's CLI table spells it; paging is
- * `--limit`, `--cursor`, `--sort` and `--all`. Nothing about a particular
- * operation is written here: the rules are applied to the `Command` the tree
- * produced.
+ * - Positionals come first, in the order the command declares them.
+ * - Every other field is a `--<flag>`, spelled as in the contract's CLI table.
+ * - Paging uses `--limit`, `--cursor`, `--sort` and `--all`.
  *
- * One field per command carries content, and it arrives on stdin rather than in
- * `argv`, where a password would be visible in process lists and a document
- * would have to be folded onto one line. Such a field has no inline flag at
- * all. Required, it is read unasked; optional, only when its
- * `--<flag>-stdin` marker says so, so an empty pipe never blanks a field.
+ * Nothing here is specific to one operation: the rules are applied to the
+ * `Command` the tree built.
  *
- * `hercule user set-password` is the one command that reads two fields, one line
- * each, in the order its schema declares them - never in the order the markers
- * were written, or two passwords would silently swap.
+ * A field that holds content is read from stdin rather than from `argv`,
+ * where a password would be visible in process lists and a document would
+ * have to fit on one line. Such a field has no flag that takes a value. A
+ * required one is always read; an optional one only when its `--<flag>-stdin`
+ * marker is given, so an empty pipe never clears a field.
+ *
+ * `hercule user set-password` is the only command that reads two fields, one
+ * line each, in the order its schema declares them. Never in the order the
+ * markers were written, or the two passwords could silently swap.
  */
 import { UsageError } from "../exit";
 import type { Command, Field } from "./tree";
 
 export interface SortArgument {
   readonly field: string;
-  /** Absent when `--sort` named no direction: the operation's own default order stands. */
+  /** Absent when `--sort` has no direction, so the operation's default order applies. */
   readonly direction?: "asc" | "desc";
 }
 
 export interface Arguments {
-  /** The bare words, in the order the command takes them, as written. */
+  /** The positional arguments, in order, as written. */
   readonly positionals: ReadonlyArray<string>;
   readonly payload: Record<string, unknown>;
   readonly query: Record<string, unknown>;
   readonly limit: number | undefined;
   readonly cursor: string | undefined;
   readonly sort: SortArgument | undefined;
-  /** Follow `nextCursor` to the end. */
+  /** Whether to follow `nextCursor` to the last page. */
   readonly all: boolean;
   readonly json: boolean;
   /** The one-time setup token, for `setup complete`. */
@@ -42,9 +43,9 @@ export interface Arguments {
 }
 
 /**
- * How a message names a field: the way the caller had to write it. A field read
- * from stdin has no flag to name, and naming one would send the reader looking
- * for a flag that does not exist.
+ * Returns a field's name for an error message, the way the caller had to write
+ * it. A field read from stdin has no flag, and naming one would send the
+ * reader looking for a flag that does not exist.
  */
 export const formatFieldName = (field: Field): string =>
   field.stdin
@@ -54,24 +55,24 @@ export const formatFieldName = (field: Field): string =>
       : `--${field.spelling}`;
 
 /**
- * The value a field holds, from the text that was written for it.
+ * Converts the text given for a field into the field's value. Throws a
+ * `UsageError` when the text is not a valid value.
  *
- * A field whose schema carries a shorthand is decoded by that schema, so the
- * one word a person types becomes the value the wire carries and the terminal's
- * spelling is never sent. The schema's own refusal is what the writer reads:
- * it knows the forms the word may take, and this loop does not.
+ * A field whose schema has a shorthand is decoded by that schema, so the word
+ * a person types becomes the value the API expects, and the typed shorthand is
+ * never sent. On failure the user sees the schema's own error message: the
+ * schema knows which forms the word may take, and this function does not.
  */
 export const coerceFieldValue = (field: Field, text: string, help: string): unknown => {
   if (field.decodeShorthand !== undefined) {
     try {
-      // For a query field the derived client encodes the decoded value back to
-      // the written word, so the round trip costs nothing and the one codec
-      // still owns what the word means.
+      // For a query field, the derived client encodes the decoded value back
+      // into the typed word. The round trip changes nothing, and the codec
+      // stays the only place that defines what the word means.
       return field.decodeShorthand(text);
     } catch (failure) {
-      // The codec's own message says which forms the word may take. The error
-      // around it is the decoder's wrapper and says nothing a writer can act
-      // on.
+      // The codec's message lists the forms the word may take. Any wrapper
+      // around it adds nothing the user can act on.
       const refusal = failure instanceof Error ? failure.message : String(failure);
       throw new UsageError(`${formatFieldName(field)}: ${refusal}`, help);
     }
@@ -106,14 +107,14 @@ export const coerceFieldValue = (field: Field, text: string, help: string): unkn
 };
 
 /**
- * The value a field holds, from the text written for it in `argv`.
+ * Converts the text given for a field in `argv` into the field's value.
  *
- * The bare word `null` is how a nullable field is cleared, and it is checked
- * before anything else: a field that accepts null accepts it whatever shape its
- * other values have, and `null` is not one of a closed value set. The cost is
- * that a nullable string field cannot be given the four letters themselves,
- * which is the trade every command line that spells null makes. Content read
- * from stdin is a document and never a shortcut, so it does not pass here.
+ * The word `null` clears a nullable field, and it is checked first: a field
+ * that accepts null accepts it whatever type its other values have, and
+ * `null` is never one of a field's choices. The cost is that a nullable string
+ * field cannot be set to the text "null", the usual trade-off for a command
+ * line that spells null this way. Content read from stdin is a document, not
+ * a shorthand, so it is not converted here.
  */
 const parseWrittenValue = (field: Field, text: string, help: string): unknown =>
   field.nullable && text === "null" ? null : coerceFieldValue(field, text, help);
@@ -128,10 +129,11 @@ const assignFieldValue = (into: Record<string, unknown>, field: Field, value: un
 };
 
 /**
- * `--sort <field>[:<asc|desc>]`.
+ * Parses `--sort <field>[:<asc|desc>]`. Throws a `UsageError` for a field the
+ * command cannot sort on, or an unknown direction.
  *
  * A field with no direction leaves the direction unset rather than assuming
- * `asc`: the operation declares its own default order, and inventing one here
+ * `asc`: the operation declares its own default order, and choosing one here
  * would silently override it.
  */
 const parseSort = (text: string, command: Command, help: string): SortArgument => {
@@ -152,11 +154,11 @@ const parseSort = (text: string, command: Command, help: string): SortArgument =
 };
 
 /**
- * One token of a command line: a bare positional, or a flag.
+ * One token of a command line: a positional argument, or a flag.
  *
- * `value()` is what reads a flag's argument, from `--flag=value` or from the
- * next token; calling it on a flag that has neither is the usage error. A flag
- * that takes no value simply never calls it.
+ * `value()` reads a flag's value, from `--flag=value` or from the next token.
+ * It throws a usage error when the flag has neither. A flag that takes no
+ * value never calls it.
  */
 export type Token =
   | { readonly kind: "positional"; readonly text: string }
@@ -169,21 +171,21 @@ export type Token =
     };
 
 /**
- * The one command-line token loop, shared by every command.
+ * Splits a command line into tokens. Every command uses this one loop.
  *
- * It knows only the shape of a token, never what any flag means: the caller
- * decides that. `value()` advances the loop past the token it consumed, so it
- * must be called before the generator is asked for the next token - which is
- * what a `for...of` body does naturally.
+ * It knows only what a token looks like, never what a flag means: the caller
+ * decides that. `value()` moves the loop past the token it reads, so it must
+ * be called before the next token is requested, which is what a `for...of`
+ * body does naturally.
  */
 export function* tokenize(tokens: ReadonlyArray<string>, help: string): Generator<Token> {
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
 
     if (!token.startsWith("--")) {
-      // A single dash is a word every shell knows and no flag of this CLI is
-      // spelled with one, so `-x` is a mistake rather than an argument: taken
-      // as a positional it would be counted as an id and reported as one.
+      // No flag of this CLI starts with a single dash, so `-x` is a mistake
+      // rather than an argument. Treated as a positional, it would be taken
+      // as an id and reported as one. A lone `-` is still a positional.
       if (token.startsWith("-") && token !== "-") {
         throw new UsageError(`unknown flag ${token}`, help);
       }
@@ -209,11 +211,12 @@ export function* tokenize(tokens: ReadonlyArray<string>, help: string): Generato
 }
 
 /**
- * Parse the tokens after the command's own words.
+ * Parses the tokens after the command's words. Throws a `UsageError` for any
+ * mistake in the command line.
  *
- * `readStdin` is called at most once, and only when the command has a field to
- * read from it, so a command that takes nothing from stdin never blocks on a
- * pipe.
+ * `readStdin` is called at most once, and only when the command has a field
+ * to read from it, so a command that reads nothing from stdin never waits on
+ * a pipe.
  */
 export const parseArguments = async (
   command: Command,
@@ -274,8 +277,8 @@ export const parseArguments = async (
     if (name.endsWith("-stdin")) {
       const field = payloadFields.get(name.slice(0, -"-stdin".length));
       if (field === undefined || !field.stdin) throw new UsageError(`unknown flag --${name}`, help);
-      // The marker asks for the read; it never carries the value, or the value
-      // would be back in `argv`, which is the whole point of reading stdin.
+      // The marker only asks for the read. It never takes the value, or the
+      // value would be back in `argv`, which reading stdin exists to avoid.
       if (inline !== undefined) throw new UsageError(`--${name} takes no value`, help);
       marked.add(field);
       continue;
@@ -286,7 +289,7 @@ export const parseArguments = async (
     if (field === undefined) throw new UsageError(`unknown flag --${name}`, help);
     if (field.stdin) {
       throw new UsageError(
-        `--${name} does not exist: ${command.id} reads ${field.name} from stdin, never from argv, where it would show in process lists and in shell history. Pipe it in; --${name}-stdin ${field.optional ? "asks for the read" : "is accepted and not needed"}.`,
+        `--${name} does not exist: ${command.id} reads ${field.name} from stdin, never from argv, where it would show in process lists and in shell history. Pipe it in; --${name}-stdin ${field.optional ? "tells the CLI to read it" : "is accepted but not needed"}.`,
         help,
       );
     }
@@ -297,14 +300,14 @@ export const parseArguments = async (
     );
   }
 
-  // A required content field is read unasked; an optional one only where its
-  // marker said so, so an empty pipe never blanks a field that was not named.
+  // A required content field is always read; an optional one only when its
+  // marker was given, so an empty pipe never clears a field nobody named.
   const reading = command.payload.filter(
     (field) => field.stdin && (!field.optional || marked.has(field)),
   );
 
-  // Everything argv alone can settle is settled before the pipe is touched, so
-  // a command line that was never going to work does not first consume stdin.
+  // Check everything that argv alone can decide before reading the pipe, so a
+  // command line that cannot work does not consume stdin first.
   if (positionals.length !== command.positionals.length) {
     const expected = command.positionals.map((field) => `<${field.spelling}>`).join(" ");
     throw new UsageError(
@@ -332,7 +335,7 @@ export const parseArguments = async (
       const lines = text.split(/\r?\n/);
       if (lines.length !== reading.length) {
         throw new UsageError(
-          `stdin has ${lines.length} line(s) but ${reading.length} fields read from it: ${reading
+          `stdin has ${lines.length} line(s), but ${reading.length} fields are read from it, one per line: ${reading
             .map((field) => field.name)
             .join(", then ")}`,
           help,

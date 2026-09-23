@@ -8,10 +8,10 @@ import {
 import { ApiError } from "./errors";
 
 /**
- * The schemas here are written the way the controller serves them: the derived
- * JSON Schema document a plugin's config schema becomes, carried as the open
- * record the wire declares. A field model built from anything narrower would
- * not be reachable from what the screen actually holds.
+ * The schemas here have the form the controller sends: the JSON Schema
+ * document derived from a plugin's config schema, typed as the open record
+ * the contract declares. Fields built from a narrower type would not match
+ * what the screen actually receives.
  */
 const buildObjectSchema = (
   properties: Record<string, unknown>,
@@ -24,7 +24,7 @@ const buildObjectSchema = (
 });
 
 describe("buildConfigFields", () => {
-  it("gives one field per property, in schema order, with the kind its type names", () => {
+  it("returns one field per property, in schema order, with the kind from its type", () => {
     const fields = buildConfigFields(
       buildObjectSchema({
         endpoint: { type: "string" },
@@ -52,7 +52,7 @@ describe("buildConfigFields", () => {
     ]);
   });
 
-  it("marks required exactly the properties the schema requires", () => {
+  it("marks as required exactly the properties the schema requires", () => {
     const fields = buildConfigFields(
       buildObjectSchema(
         {
@@ -69,7 +69,7 @@ describe("buildConfigFields", () => {
     ]);
   });
 
-  it("reads the label off the title where there is one, and the description through", () => {
+  it("uses the title as the label when there is one, and passes the description through", () => {
     const fields = buildConfigFields(
       buildObjectSchema({
         endpoint: {
@@ -92,7 +92,7 @@ describe("buildConfigFields", () => {
     expect(fields[1]?.description).toBeUndefined();
   });
 
-  it("has nothing to show for a plugin with nothing to configure", () => {
+  it("returns no fields for a plugin with nothing to configure", () => {
     expect(buildConfigFields(buildObjectSchema({}))).toEqual([]);
   });
 });
@@ -107,7 +107,7 @@ describe("buildConfigDraft", () => {
     }),
   );
 
-  it("reads the stored config into what each widget holds", () => {
+  it("converts the stored config into each widget's value", () => {
     expect(
       buildConfigDraft(fields, {
         endpoint: "https://notes.test",
@@ -123,7 +123,7 @@ describe("buildConfigDraft", () => {
     });
   });
 
-  it("gives an unset setting the empty form of its own kind", () => {
+  it("gives an unset setting the empty value of its kind", () => {
     expect(buildConfigDraft(fields, {})).toEqual({
       endpoint: "",
       retries: "",
@@ -144,7 +144,7 @@ describe("buildConfigPayload", () => {
     }),
   );
 
-  it("sends each setting as the type its schema names", () => {
+  it("sends each setting as the type its schema declares", () => {
     expect(
       buildConfigPayload(
         fields,
@@ -166,7 +166,7 @@ describe("buildConfigPayload", () => {
     });
   });
 
-  it("leaves out what nobody filled in, rather than sending an empty one", () => {
+  it("leaves out empty fields rather than sending an empty value", () => {
     expect(
       buildConfigPayload(
         fields,
@@ -176,13 +176,13 @@ describe("buildConfigPayload", () => {
     ).toEqual({});
   });
 
-  it("keeps writing a checkbox and a list the stored config already has an answer for", () => {
+  it("keeps sending a checkbox and a list that the stored config already has a value for", () => {
     expect(
       buildConfigPayload(fields, { verbose: false, tags: [] }, { verbose: true, tags: ["alpha"] }),
     ).toEqual({ verbose: false, tags: [] });
   });
 
-  it("sends a required checkbox and list even where nothing is stored", () => {
+  it("sends a required checkbox and list even when nothing is stored", () => {
     const required = buildConfigFields(
       buildObjectSchema({ verbose: { type: "boolean" }, tags: { type: "array" } }, [
         "verbose",
@@ -202,7 +202,7 @@ describe("readConfigIssues", () => {
     buildObjectSchema({ endpoint: { type: "string" }, retries: { type: "integer" } }),
   );
 
-  it("keys a refused write's messages by the setting each blamed", () => {
+  it("keys a rejected write's error messages by field", () => {
     const refusal = new ApiError("validation", "the config does not match", {
       issues: [
         { path: ["endpoint"], message: "must be an https URL" },
@@ -216,7 +216,7 @@ describe("readConfigIssues", () => {
     });
   });
 
-  it("leaves the form to say what no rendered setting carries", () => {
+  it("sets rest for an error that belongs to no rendered field", () => {
     expect(readConfigIssues(new ApiError("internal", "the database is locked"), fields)).toEqual({
       perField: {},
       rest: true,
@@ -225,14 +225,14 @@ describe("readConfigIssues", () => {
       perField: {},
       rest: true,
     });
-    // A refusal about the payload as a whole belongs to the form, not a field.
+    // An error about the payload as a whole belongs to the form, not a field.
     expect(
       readConfigIssues(
         new ApiError("validation", "no", { issues: [{ path: [], message: "no" }] }),
         fields,
       ),
     ).toEqual({ perField: {}, rest: true });
-    // A setting this form does not render would otherwise be shown nowhere.
+    // Without `rest`, an error on a setting this form does not render would be shown nowhere.
     expect(
       readConfigIssues(
         new ApiError("validation", "no", { issues: [{ path: ["gone"], message: "unknown key" }] }),
@@ -241,11 +241,11 @@ describe("readConfigIssues", () => {
     ).toEqual({ perField: {}, rest: true });
   });
 
-  it("says nothing at all when the write was not refused", () => {
+  it("returns no errors when the write did not fail", () => {
     expect(readConfigIssues(null, fields)).toEqual({ perField: {}, rest: false });
   });
 
-  it("reads a group's own fields out of a path that names the group", () => {
+  it("reads a group's fields from paths that start with the group's name", () => {
     const refusal = new ApiError("validation", "the credentials were refused", {
       issues: [
         { path: ["credentials", "token"], message: "that token was rejected" },
@@ -255,7 +255,7 @@ describe("readConfigIssues", () => {
 
     expect(readConfigIssues(refusal, [{ name: "token" }], "credentials")).toEqual({
       perField: { token: "that token was rejected" },
-      // The settings issue lands on no field this form draws.
+      // The settings error matches no field this form renders.
       rest: true,
     });
     expect(readConfigIssues(refusal, fields, "config")).toEqual({
@@ -264,13 +264,13 @@ describe("readConfigIssues", () => {
     });
   });
 
-  it("leaves the form to say what it draws no field for, group or not", () => {
+  it("sets rest for an error on a field the form does not render, in a group or not", () => {
     const refusal = new ApiError("validation", "refused", {
       issues: [{ path: ["config", "endpoint"], message: "must be an https URL" }],
     });
 
-    // The type is gone, so this form draws nothing: without this the message
-    // would be filed under a field nobody can see and never shown.
+    // The type is gone, so this form renders no fields. Without `rest`, the
+    // message would belong to a field nobody can see and never be shown.
     expect(readConfigIssues(refusal, [], "config")).toEqual({ perField: {}, rest: true });
   });
 });

@@ -1,10 +1,10 @@
 /**
- * The three failures a client call can reject with.
+ * The three errors a client call can reject with.
  *
- * Nothing Effect-shaped crosses this boundary: `client-core` is the only client
- * package that writes Effect code, so every failure the
- * derived client can produce is folded into one of these three plain errors
- * before it reaches the web app or the CLI.
+ * No Effect types cross this boundary: `client-core` is the only client
+ * package that writes Effect code, so every failure of the derived client is
+ * converted into one of these three plain errors before it reaches the web
+ * app or the CLI.
  */
 import {
   ERROR_CODES,
@@ -26,12 +26,15 @@ export interface ErrorEnvelope {
 }
 
 /**
- * The API answered with the error envelope.
+ * The API responded with an error envelope.
  *
- * Discriminate on `code`, never on a `_tag`: the envelope carries none. The
- * shape of `details` is fixed per code by the contract (`{ grant }` for
- * `forbidden`, `{ issues }` for `validation`, a size or a count for
- * `cap_exceeded`, absent otherwise).
+ * Tell errors apart by `code`, never by a `_tag`: the envelope has none. The
+ * contract fixes the shape of `details` for each code:
+ *
+ * - `{ grant }` for `forbidden`;
+ * - `{ issues }` for `validation`;
+ * - a size or a count for `cap_exceeded`;
+ * - absent for every other code.
  */
 export class ApiError extends Error {
   override readonly name = "ApiError";
@@ -46,7 +49,7 @@ export class ApiError extends Error {
     this.details = details;
   }
 
-  /** The envelope again, so `JSON.stringify(err)` is what `--json` prints. */
+  /** Returns the envelope again, so `JSON.stringify(err)` is what `--json` prints. */
   toJSON(): ErrorEnvelope {
     return {
       error: {
@@ -59,13 +62,13 @@ export class ApiError extends Error {
 }
 
 /**
- * The request never left: the caller's input does not match the operation's
- * input schema, so there was nothing to send.
+ * The request was never sent: the caller's input does not match the
+ * operation's input schema.
  *
  * This is the caller's mistake, not the controller's, and it is not an
  * `ApiError`: no request was made, so there is no envelope and no status. The
- * `issues` list is the contract's own, so a bad flag on the command line and a
- * bad field over HTTP read the same.
+ * `issues` use the contract's issue type, so a bad flag on the command line
+ * and a bad field over HTTP produce the same messages.
  */
 export class RequestError extends Error {
   override readonly name = "RequestError";
@@ -77,7 +80,7 @@ export class RequestError extends Error {
   }
 }
 
-/** The controller could not be reached at all: no response, so no envelope. */
+/** The controller could not be reached: there was no response, so there is no envelope. */
 export class ConnectionError extends Error {
   override readonly name = "ConnectionError";
   readonly url: string;
@@ -94,8 +97,8 @@ export const isNotFound = (error: unknown): boolean =>
 
 /**
  * Returns the issues of a `validation` error response, in order, or
- * `undefined` for any other error. Only a `validation` response lists problems
- * with the request the caller sent.
+ * `undefined` for any other error. Only a `validation` response lists what was
+ * wrong with the request.
  */
 export const readValidationIssues = (error: unknown): ReadonlyArray<Issue> | undefined => {
   if (!(error instanceof ApiError) || error.code !== "validation") return undefined;
@@ -110,7 +113,10 @@ export const readValidationIssues = (error: unknown): ReadonlyArray<Issue> | und
 const isErrorCode = (u: unknown): u is ErrorCode =>
   typeof u === "string" && ERROR_CODES.includes(u as ErrorCode);
 
-/** An envelope the derived client decoded into one of the contract's classes. */
+/**
+ * Returns the failure as an error envelope (the derived client decodes one into
+ * a contract error class), or `undefined` when it is not one.
+ */
 const asEnvelope = (u: unknown): ErrorEnvelope | undefined => {
   if (typeof u !== "object" || u === null || !("error" in u)) return undefined;
   const error: unknown = u.error;
@@ -121,17 +127,22 @@ const asEnvelope = (u: unknown): ErrorEnvelope | undefined => {
 };
 
 /**
- * Fold anything the derived client can fail with into `RequestError`,
- * `ApiError` or `ConnectionError`.
+ * Converts any failure of the derived client into a `RequestError`, an
+ * `ApiError` or a `ConnectionError`.
  *
- * `sent` says whether the request reached the transport. A schema failure
- * before it did is the caller's input, not the controller's answer, so it
- * becomes a `RequestError` and never an envelope the controller never sent.
+ * `sent` is true when the request reached the transport. A schema error
+ * before that point comes from the caller's input, not from the controller,
+ * so it becomes a `RequestError` rather than an envelope the controller never
+ * sent.
  *
- * A response that arrived but could not be decoded - an undeclared status, a
- * body that is not the envelope, a success that does not match its schema -
- * becomes `internal`. The caller got something it cannot act on structurally,
- * which is exactly what `internal` means; the original is kept as `cause`.
+ * A response that arrived but could not be decoded becomes an `internal`
+ * `ApiError`, with the original failure kept as `cause`. That covers:
+ *
+ * - a status the contract does not declare;
+ * - a body that is not an error envelope;
+ * - a success body that does not match its schema.
+ *
+ * The caller cannot act on any of these, which is what `internal` means.
  */
 export const toClientError = (
   failure: unknown,

@@ -1,9 +1,8 @@
 /**
- * A thread row's age: how long since `at`, read at the coarsest unit that
- * still fits - minutes, then hours, then days, then weeks - because a row is
- * scanned, not read to the second. The instant is a parameter rather than a
- * clock this module reads, so the caller decides what "now" is and a test can
- * pin it.
+ * Formats a thread row's age: the time since `at`, in the largest unit that
+ * fits (minutes, hours, days or weeks), because a row is scanned, not read to
+ * the second. `now` is a parameter rather than a clock this module reads, so
+ * the caller decides what "now" is and a test can fix it.
  */
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;

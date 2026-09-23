@@ -1,11 +1,12 @@
 /**
- * Which item a session's transcript is still in the middle of, if any: the
- * one whose `item.started` has no matching `item.completed` yet. Everything
- * before it is settled and already the transcript's own text, so this is the
- * one item a live token stream still has something to say about.
+ * Returns the id of the item a session's transcript is still in the middle of,
+ * or `null` if there is none. That is the latest item whose `item.started` has
+ * no matching `item.completed` yet. Earlier items are complete and their text
+ * is already in the transcript, so the open item is the only one that live
+ * token deltas can still add to.
  *
  * A `user_message` is never open: it is complete the moment it is sent, and
- * both its `item.started` and `item.completed` carry the same text.
+ * its `item.started` and `item.completed` have the same text.
  */
 import type { TranscriptRow } from "@hercule/contract";
 

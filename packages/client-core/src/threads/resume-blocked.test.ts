@@ -1,6 +1,6 @@
 /**
- * `findResumeBlockedReason(session)` says why a thread cannot take input, or
- * `null` when it can.
+ * Tests `findResumeBlockedReason(session)`, which returns why a thread cannot
+ * take input, or `null` when it can.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
@@ -33,22 +33,22 @@ const BASE: Session = {
 const buildSession = (overrides: Partial<Session>): Session => ({ ...BASE, ...overrides });
 
 describe("findResumeBlockedReason", () => {
-  it("blocks nothing on a session that is not exited", () => {
+  it("returns null for a session that has not exited", () => {
     expect(findResumeBlockedReason(buildSession({ status: "idle" }))).toBeNull();
     expect(findResumeBlockedReason(buildSession({ status: "busy" }))).toBeNull();
   });
 
-  it("blocks nothing on an exited session that is resumable", () => {
+  it("returns null for an exited session that can be resumed", () => {
     const exited = buildSession({ status: "exited", resumable: true, nativeSessionId: "n" });
     expect(findResumeBlockedReason(exited)).toBeNull();
   });
 
-  it("says the transcript is gone when an unresumable exit kept no native session", () => {
+  it("says the transcript is gone when a session that cannot be resumed has no native session id", () => {
     const exited = buildSession({ status: "exited", resumable: false, nativeSessionId: null });
     expect(findResumeBlockedReason(exited)).toBe("its transcript is gone");
   });
 
-  it("says the runner was retired when an unresumable exit still has its native session", () => {
+  it("says the runner was retired when a session that cannot be resumed still has its native session id", () => {
     const exited = buildSession({ status: "exited", resumable: false, nativeSessionId: "n" });
     expect(findResumeBlockedReason(exited)).toBe("its runner was retired");
   });

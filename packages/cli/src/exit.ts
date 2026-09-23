@@ -1,5 +1,5 @@
 /**
- * How the CLI ends, by class of failure.
+ * The CLI's exit codes, one per kind of failure.
  *
  * The codes are part of the CLI's contract with the scripts and agents that
  * drive it, so they are named here and printed by `hercule --help`: a caller can
@@ -22,7 +22,10 @@ export const EXIT = {
 /** The command line was wrong. Nothing was sent. */
 export class UsageError extends Error {
   override readonly name = "UsageError";
-  /** What `--help` to suggest, e.g. `profile create`; absent for a top-level mistake. */
+  /**
+   * The command whose `--help` to suggest, for example `profile create`; absent
+   * for a top-level mistake.
+   */
   readonly help: string | undefined;
 
   constructor(message: string, help?: string) {

@@ -3,7 +3,7 @@ import { ApiError, ConnectionError, RequestError, createClient, type FetchLike }
 
 const BASE = "http://controller.test";
 
-/** A `fetch` that answers every call with one canned response and records it. */
+/** Returns a `fetch` that responds to every call with one canned response and records the call. */
 const stubFetch = (respond: (request: Request) => Response) => {
   const seen: Array<Request> = [];
   const fetch: FetchLike = (url, init) => {
@@ -32,7 +32,7 @@ describe("createClient", () => {
     assert.strictEqual(sent(0).method, "GET");
   });
 
-  it("sends the bearer token only while one is held", async () => {
+  it("sends the bearer token only while one is set", async () => {
     const { fetch, sent } = stubFetch(() => buildJsonResponse({ complete: false }));
     const client = createClient({ baseUrl: BASE });
 
@@ -93,7 +93,7 @@ describe("createClient", () => {
     });
   });
 
-  it("turns a refused connection into a ConnectionError", async () => {
+  it("turns a failed connection into a ConnectionError", async () => {
     const refused = new Error("connect ECONNREFUSED 127.0.0.1:7717");
     const client = createClient({
       baseUrl: BASE,
@@ -167,9 +167,9 @@ describe("createClient", () => {
     expectTypeOf(client.presentToken).toEqualTypeOf<(token: string | null) => void>();
   });
 
-  it("reaches every plugin operation on the route the contract names", async () => {
-    // The listing answers an array and every other plugin call answers one
-    // plugin, so the stub tells them apart by the route it was called on.
+  it("calls every plugin operation on the route the contract defines", async () => {
+    // The list operation returns an array and every other plugin operation
+    // returns one plugin, so the stub picks its response by route.
     const detail = {
       id: "claude-code",
       displayName: "Claude Code",
@@ -224,13 +224,13 @@ describe("createClient", () => {
       "busy",
     ]);
 
-    // One status still travels bare, which is what every other caller sends.
+    // A single status is still sent as a plain value, as every other caller sends it.
     await client.session.query({ query: { status: "exited" } });
     assert.deepStrictEqual(new URL(sent(1).url).searchParams.getAll("status"), ["exited"]);
   });
 });
 
-/** A token store over a plain variable, so a test can read what it kept. */
+/** A token store backed by a plain variable, so a test can read what it stored. */
 const createFakeStore = (initial: string | null = null) => {
   let held = initial;
   return {
@@ -247,7 +247,7 @@ const createFakeStore = (initial: string | null = null) => {
 const PROFILE = { params: { id: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b" } };
 
 describe("createClient with a token store", () => {
-  it("starts with the token the store holds", async () => {
+  it("starts with the stored token", async () => {
     const { fetch, sent } = stubFetch(() => buildJsonResponse({}));
     const client = createClient({ baseUrl: BASE, fetch, tokenStore: createFakeStore("tok_kept") });
 
@@ -255,7 +255,7 @@ describe("createClient with a token store", () => {
     assert.strictEqual(sent(0).headers.get("authorization"), "Bearer tok_kept");
   });
 
-  it("prefers an explicit token over the stored one, and keeps it", () => {
+  it("prefers an explicit token over the stored one, and stores it", () => {
     const store = createFakeStore("tok_kept");
     const client = createClient({ baseUrl: BASE, token: "tok_given", tokenStore: store });
 
@@ -263,7 +263,7 @@ describe("createClient with a token store", () => {
     assert.strictEqual(store.held, "tok_given");
   });
 
-  it("writes through what setToken is given", () => {
+  it("stores the token passed to setToken", () => {
     const store = createFakeStore();
     const client = createClient({ baseUrl: BASE, tokenStore: store });
 
@@ -274,7 +274,7 @@ describe("createClient with a token store", () => {
     assert.strictEqual(store.held, null);
   });
 
-  it("sends a presented token without writing it", async () => {
+  it("sends a presented token without storing it", async () => {
     const store = createFakeStore();
     const { fetch, sent } = stubFetch(() => buildJsonResponse({ complete: false }));
     const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
@@ -287,7 +287,7 @@ describe("createClient with a token store", () => {
     assert.strictEqual(store.held, null);
   });
 
-  it("keeps the token setup.complete hands back", async () => {
+  it("stores the token setup.complete returns", async () => {
     const store = createFakeStore();
     const { fetch } = stubFetch(() => buildJsonResponse({ token: "tok_setup" }));
     const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
@@ -300,7 +300,7 @@ describe("createClient with a token store", () => {
     assert.strictEqual(client.getToken(), "tok_setup");
   });
 
-  it("keeps the token auth.login hands back", async () => {
+  it("stores the token auth.login returns", async () => {
     const store = createFakeStore();
     const { fetch } = stubFetch(() =>
       buildJsonResponse({ token: "tok_login", expiresAt: "2026-10-07T07:14:00.000Z" }),
@@ -323,7 +323,7 @@ describe("createClient with a token store", () => {
     assert.strictEqual(client.getToken(), null);
   });
 
-  it("clears the token on an unauthenticated answer, and still surfaces it", async () => {
+  it("clears the token on an unauthenticated error, and still throws the error", async () => {
     const store = createFakeStore("tok_stale");
     const { fetch } = stubFetch(() =>
       buildJsonResponse({ error: { code: "unauthenticated", message: "token expired" } }, 401),

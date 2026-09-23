@@ -1,9 +1,9 @@
 /**
- * `submission(thread, picks, message)` is what the composer hands the system
- * on send: a spawn on a draft thread, one input on an active one, each tagged
- * with which it is. What matters on the active side is what it leaves out - a
- * session's access mode and machine are fixed, so an input carries the text
- * and only the picks the user actually made.
+ * Tests `buildSubmission(thread, picks, message)`, which builds the request the
+ * composer sends: a spawn for a draft thread and an input for an active one,
+ * each tagged with its kind. For an active thread, what matters is what it
+ * leaves out: a session's access mode and runner are fixed, so an input has
+ * the text and only the picks the user actually made.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
@@ -62,7 +62,7 @@ describe("buildSubmission: a draft thread", () => {
     });
   });
 
-  it("overlays the picks made since the draft was built", () => {
+  it("applies the picks made since the draft was built", () => {
     expect(
       buildSubmission(
         DRAFT,
@@ -119,7 +119,7 @@ describe("buildSubmission: an active thread", () => {
     });
   });
 
-  it("carries no other key, whatever else the picks hold", () => {
+  it("sends no other key, whatever else the picks hold", () => {
     expect(
       buildSubmission(ACTIVE, { accessMode: "full-access", runnerId: "r-remote" }, MESSAGE),
     ).toEqual({ kind: "input", sessionId: SESSION.id, payload: { text: "ship it" } });
@@ -127,14 +127,14 @@ describe("buildSubmission: an active thread", () => {
 });
 
 /**
- * Slice 3 of #72 (AC-17): the project and the workspace ride the spawn.
+ * The project and the workspace are sent with the spawn (#72).
  *
- * `ThreadConfig.projectId` and `ThreadConfig.workspace` are what the composer
- * holds (see `composer-fields.test.ts` for the shapes): `workspace` is the
- * contract's own `SpawnWorkspace` plus `{ kind: "none" }` for a thread with no
- * checkout, and `null` for a draft that has not resolved one. Neither of those
- * two is a `session.spawn` field, so neither is sent - the contract spells a
- * thread with no checkout by leaving `workspace` off.
+ * The composer holds `ThreadConfig.projectId` and `ThreadConfig.workspace`
+ * (see `composer-fields.test.ts` for the types). `workspace` is the
+ * contract's `SpawnWorkspace`, plus `{ kind: "none" }` for a thread with no
+ * checkout, and `null` for a draft with no workspace chosen yet. Neither of
+ * those two is a valid `session.spawn` value, so neither is sent: the
+ * contract expresses a thread with no checkout by leaving `workspace` out.
  */
 const IN_PROJECT = {
   ...CONFIG,
@@ -143,8 +143,8 @@ const IN_PROJECT = {
   workspace: { kind: "primary" as const, resourceId: "res-webshop" },
 };
 
-describe("buildSubmission: the project and the workspace (AC-17)", () => {
-  it("carries the project and the main workspace the draft works in", () => {
+describe("buildSubmission: the project and the workspace", () => {
+  it("sends the project and the main workspace the draft works in", () => {
     expect(buildSubmission({ kind: "draft", config: IN_PROJECT }, {}, MESSAGE)).toEqual({
       kind: "spawn",
       input: {
@@ -161,7 +161,7 @@ describe("buildSubmission: the project and the workspace (AC-17)", () => {
     });
   });
 
-  it("carries the branch the main workspace is to be switched to", () => {
+  it("sends the branch the main workspace should switch to", () => {
     const input = buildSubmission(
       {
         kind: "draft",
@@ -181,7 +181,7 @@ describe("buildSubmission: the project and the workspace (AC-17)", () => {
     });
   });
 
-  it("carries one checkout per repo, with the base branch each starts from", () => {
+  it("sends one checkout per repo, with each one's base branch", () => {
     const input = buildSubmission(
       {
         kind: "draft",
@@ -215,7 +215,7 @@ describe("buildSubmission: the project and the workspace (AC-17)", () => {
     });
   });
 
-  it("carries the workspace a thread joins", () => {
+  it("sends the workspace a thread joins", () => {
     expect(
       buildSubmission(
         {
@@ -241,7 +241,7 @@ describe("buildSubmission: the project and the workspace (AC-17)", () => {
     expect(input.projectId).toBe("p-webshop");
   });
 
-  it("sends neither key for a draft in no project that has resolved no workspace", () => {
+  it("sends neither key for a draft with no project and no workspace", () => {
     const sent = buildSubmission(
       { kind: "draft", config: { ...IN_PROJECT, projectId: null, workspace: null } },
       {},
@@ -253,7 +253,7 @@ describe("buildSubmission: the project and the workspace (AC-17)", () => {
     expect(input.workspace).toBeUndefined();
   });
 
-  it("overlays a workspace picked since the draft was built", () => {
+  it("applies a workspace picked since the draft was built", () => {
     expect(
       buildSubmission(
         { kind: "draft", config: IN_PROJECT },
@@ -265,7 +265,7 @@ describe("buildSubmission: the project and the workspace (AC-17)", () => {
     });
   });
 
-  it("sends nothing of the workspace on an active thread, whose placement is fixed", () => {
+  it("sends no workspace for an active thread, whose placement is fixed", () => {
     expect(
       buildSubmission(ACTIVE, { workspace: { kind: "none" }, projectId: "p-webshop" }, MESSAGE),
     ).toEqual({ kind: "input", sessionId: SESSION.id, payload: { text: "ship it" } });

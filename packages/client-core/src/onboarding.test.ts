@@ -6,7 +6,7 @@ describe("onboarding", () => {
     assert.strictEqual(findNextOnboardingStep([]), ONBOARDING_STEPS[0]);
   });
 
-  it("is complete once every known step is present", () => {
+  it("is complete once every known step is in the list", () => {
     assert.strictEqual(findNextOnboardingStep([...ONBOARDING_STEPS]), null);
   });
 

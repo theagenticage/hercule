@@ -15,7 +15,7 @@ const undrivable = buildInstance("codex", "Codex", [
   }),
 ]);
 
-/** What the screen would put on the buttons, in order. */
+/** Returns the button labels the screen would show, in order. */
 const listOfferedLabels = (state: SessionsEmptyState): ReadonlyArray<string> =>
   state.kind !== "sign-in"
     ? []
@@ -29,13 +29,13 @@ const readLead = (state: SessionsEmptyState): string =>
   state.kind === "sign-in" ? state.lead : "";
 
 describe("decideSessionsEmptyState", () => {
-  it("has nothing to offer when no runner answered on this machine", () => {
+  it("returns no-runner when there is no local runner", () => {
     expect(decideSessionsEmptyState(null, [waiting])).toEqual({ kind: "no-runner" });
   });
 
-  it("reads a local runner that is not connected as no runner at all", () => {
-    // The screen offers a login, and a login runs on the machine: a row that
-    // says `offline` can no more be logged in to than one that is absent.
+  it("treats a local runner that is not online as no runner", () => {
+    // A login runs on the runner's machine, so an offline runner is as
+    // useless for logging in as no runner at all.
     expect(
       decideSessionsEmptyState({ ...WITH_CLAUDE, connectivity: "offline" }, [waiting]),
     ).toEqual({
@@ -43,11 +43,11 @@ describe("decideSessionsEmptyState", () => {
     });
   });
 
-  it("says the machine has no harness when it reported none", () => {
+  it("returns no-harness when the runner reported no harness", () => {
     expect(decideSessionsEmptyState(BARE, [waiting, undrivable])).toEqual({ kind: "no-harness" });
   });
 
-  it("offers a login for every harness that is there and not logged in", () => {
+  it("offers a login for every installed harness that is not logged in", () => {
     const state = decideSessionsEmptyState(WITH_CLAUDE, [waiting, undrivable]);
 
     expect(state.kind).toBe("sign-in");
@@ -56,9 +56,9 @@ describe("decideSessionsEmptyState", () => {
     expect(readLead(state)).toContain("Log in to use it in Hercule.");
   });
 
-  it("says `them` when the headline names more than one harness", () => {
-    // The lead points back at the headline's list, so a list of two read with
-    // a singular pronoun would leave the reader guessing which one it meant.
+  it("says `them` when more than one harness is offered", () => {
+    // The lead refers back to the harnesses in the headline. With two of
+    // them, a singular pronoun would leave the reader guessing which one.
     const machine = {
       ...WITH_CLAUDE,
       facts: {
@@ -79,9 +79,9 @@ describe("decideSessionsEmptyState", () => {
     expect(readLead(state)).toContain("Log in to use them in Hercule.");
   });
 
-  it("still offers the login when the last probe of a harness that is here failed", () => {
-    // A failed probe does not mean the harness is missing; an install prompt
-    // would send the user nowhere.
+  it("still offers the login when the last probe of an installed harness failed", () => {
+    // A failed probe does not mean the harness is missing, so an install
+    // prompt would not help.
     const stale = buildInstance("claude-code", "Claude Code", [
       buildSnapshot({
         auth: { status: "error", message: "the harness did not answer within 15s" },
@@ -93,7 +93,7 @@ describe("decideSessionsEmptyState", () => {
     expect(listOfferedLabels(state)).toEqual(["Log in"]);
   });
 
-  it("is ready once one instance on this machine is logged in", () => {
+  it("is ready once one instance on the local runner is logged in", () => {
     expect(decideSessionsEmptyState(WITH_CLAUDE, [loggedIn])).toEqual({
       kind: "ready",
       name: "Claude Code",
@@ -101,8 +101,8 @@ describe("decideSessionsEmptyState", () => {
   });
 
   it("is ready even when another instance is still waiting for a login", () => {
-    // One usable harness is what the screen is about; the rest is Fleet's
-    // business, and a "log in" headline over a working install reads as broken.
+    // One usable harness is enough for this screen; the others are managed on
+    // the Fleet screen. A "log in" headline when a harness works looks broken.
     const second = buildInstance("codex", "Codex", [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
@@ -114,11 +114,11 @@ describe("decideSessionsEmptyState", () => {
 });
 
 /**
- * A harness signed in with a value the user types rather than a browser flow.
- * What the screen says about where that value goes has to be true of it: it is
- * kept by the controller, not by the machine the thread happens to run on.
+ * A harness that signs in with a value the user types, rather than a browser
+ * login. The screen must say correctly where that value is stored: by the
+ * controller, not on the machine the thread runs on.
  */
-describe("decideSessionsEmptyState for a harness that takes a key", () => {
+describe("decideSessionsEmptyState for a harness that signs in with a key", () => {
   const FIELD = {
     name: "zaiApiKey",
     title: "Z.ai API key",
@@ -141,7 +141,7 @@ describe("decideSessionsEmptyState for a harness that takes a key", () => {
     },
   };
 
-  it("offers the key, and says where the key is kept", () => {
+  it("offers the key, and says where the key is stored", () => {
     const state = decideSessionsEmptyState(WITH_PI, [keyed]);
 
     expect(listOfferedLabels(state)).toEqual(["Enter Z.ai API key"]);
@@ -173,9 +173,9 @@ describe("decideSessionsEmptyState for a harness that takes a key", () => {
     expect(readLead(state)).toContain("Enter their keys to use them in Hercule.");
   });
 
-  it("says where each kind of credential goes where both are on offer", () => {
-    // Neither sentence is true of the other offer, so a screen showing both
-    // says both.
+  it("says where each kind of credential is stored when both are offered", () => {
+    // Each sentence is true of only one kind of credential, so a screen that
+    // offers both shows both sentences.
     const state = decideSessionsEmptyState(
       {
         ...WITH_PI,
@@ -191,7 +191,7 @@ describe("decideSessionsEmptyState for a harness that takes a key", () => {
     expect(listOfferedLabels(state)).toEqual(["Enter Z.ai API key", "Log in"]);
     expect(readLead(state)).toContain("stays there");
     expect(readLead(state)).toContain("kept by the controller");
-    // Both kinds on offer is two harnesses at least, so this lead is plural.
+    // Offering both kinds needs at least two harnesses, so this lead is plural.
     expect(readLead(state)).toContain("Sign in to use them in Hercule.");
   });
 });

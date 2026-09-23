@@ -1,17 +1,17 @@
 /**
- * A plugin's configuration form, as data: fields from JSON Schema, the stored
- * config read into them, and the config a draft means. All three are readings
- * of the domain, so they live here with a test rather than in a component.
+ * A plugin's configuration form, as data: the fields built from a JSON Schema,
+ * the stored config converted into a draft, and a draft converted back into a
+ * config. These rules live here with a test rather than in a component.
  *
- * The shapes handled are exactly the ones the host derives - a flat object of
- * strings, numbers, integers, booleans, string enums and string arrays -
- * because a plugin whose schema goes beyond that is refused at load and carries
- * no schema at all.
+ * Only the schemas the plugin host accepts are handled: a flat object of
+ * strings, numbers, integers, booleans, string enums and string arrays. The
+ * host refuses to load a plugin whose schema uses anything else, so such a
+ * plugin has no schema here.
  */
 import type { PluginConfigureInput } from "@hercule/contract";
 import { readValidationIssues } from "./errors";
 
-/** What one setting is, and which widget renders it. */
+/** The type of a setting, which decides the widget that renders it. */
 export type ConfigFieldKind = "string" | "number" | "integer" | "boolean" | "enum" | "stringList";
 
 export interface ConfigField {
@@ -26,7 +26,7 @@ export interface ConfigField {
 
 export type ConfigJson = PluginConfigureInput["config"];
 
-/** What a widget holds while the user is editing. One shape per kind. */
+/** The value a widget holds while the user edits it. Each kind uses one of these types. */
 export type ConfigValue = string | boolean | ReadonlyArray<string>;
 
 /** The whole form, keyed by field name. */
@@ -40,7 +40,7 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 const asStrings = (value: unknown): ReadonlyArray<string> | undefined =>
   Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
 
-/** Which widget one property asks for. */
+/** Returns the field kind for a schema property. */
 const decideFieldKind = (property: Record<string, unknown>): ConfigFieldKind => {
   const type = property["type"];
   if (type === "boolean" || type === "number" || type === "integer") return type;
@@ -48,7 +48,7 @@ const decideFieldKind = (property: Record<string, unknown>): ConfigFieldKind => 
   return "stringList";
 };
 
-/** The fields one config schema asks for, in the order it lists them. */
+/** Returns the form fields for a config schema, in the schema's order. */
 export const buildConfigFields = (
   schema: Record<string, unknown> | undefined,
 ): ReadonlyArray<ConfigField> => {
@@ -82,6 +82,10 @@ const toDraftValue = (field: ConfigField, stored: unknown): ConfigValue => {
   return "";
 };
 
+/**
+ * Returns the form's starting values: the stored config, converted to each
+ * field's widget value.
+ */
 export const buildConfigDraft = (
   fields: ReadonlyArray<ConfigField>,
   config: unknown,
@@ -93,9 +97,10 @@ export const buildConfigDraft = (
 };
 
 /**
- * A checkbox and a list both have a value at rest, so writing every one back
- * would store a `false` or an `[]` under a setting nobody touched, which is not
- * the same as unset. A required one is written either way: it has no unset.
+ * Checks whether a checkbox or list field should be left out of the payload.
+ * Both always have a value (`false`, `[]`), so writing each one back would
+ * store a value for a setting nobody touched, which is not the same as unset.
+ * A required field is always written, because it cannot be unset.
  */
 const isUnfilled = (
   field: ConfigField,
@@ -104,11 +109,11 @@ const isUnfilled = (
 ): boolean => atRest && !field.required && stored[field.name] === undefined;
 
 /**
- * The config a draft means, typed the way the schema names. An empty text or
- * number field is left out rather than sent as `""` or `NaN`: absent is the one
- * thing every schema can say about a setting nobody filled in, and whether that
- * is allowed is the plugin's schema to answer. The stored config is read for
- * the same reason - it says which settings the user has an answer for.
+ * Returns the config to send for a draft, with each value converted to the
+ * type the schema declares. An empty text or number field is left out rather
+ * than sent as `""` or `NaN`: every schema can express "absent", and the
+ * plugin's schema decides whether that is allowed. The stored config is read
+ * for the same reason: it shows which settings the user has already set.
  */
 export const buildConfigPayload = (
   fields: ReadonlyArray<ConfigField>,
@@ -132,26 +137,29 @@ export const buildConfigPayload = (
   return payload;
 };
 
-/** What a refused write blamed, split by whether this form can show it. */
+/**
+ * The validation errors of a rejected write, split by whether the form can show
+ * them on a field.
+ */
 export interface ConfigIssues {
-  /** The message per field, keyed by the field its path names. */
+  /** The error message for each field, keyed by field name. */
   readonly perField: Readonly<Record<string, string>>;
   /**
-   * Whether anything the call was refused for lands on no rendered field. It
-   * has to be said as the form's own failure, or a write is refused and the
-   * card says nothing.
+   * Whether any error does not belong to a rendered field. The form must then
+   * show a general error, or the write fails and the card shows nothing.
    */
   readonly rest: boolean;
 }
 
 /**
- * What a refused write blamed, read against the fields this form renders.
+ * Returns the errors of a failed write, matched to the fields this form
+ * renders.
  *
- * A write that carries more than one set of fields - a connection's pasted
- * credentials beside the type's own settings - names the set in the path, which
- * is what `prefix` reads. Anything that does not land on a field this form drew
- * is the form's own failure either way: a message under a field nobody can see
- * is a refusal nobody is told about.
+ * A write with more than one set of fields (for example a connection's pasted
+ * credentials next to the type's own settings) puts the set's name first in
+ * each issue path; `prefix` selects the set this form renders. Any error that
+ * does not match a rendered field sets `rest`, because a message under a field
+ * nobody can see is an error nobody is told about.
  */
 export const readConfigIssues = (
   error: unknown,

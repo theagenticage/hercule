@@ -1,9 +1,12 @@
 /**
- * `computeThreadDefaults` is the one rule the composer and Settings > Threads both
- * prefill a new thread from, and `computeInstanceDefaults` is the runner-then-model
- * order it resolves in. What matters here: a stored setting always wins, a
- * stale instance id falls back, the model is read from the runner the thread
- * would actually be placed on, and nothing picked is `null` rather than "".
+ * Tests `computeThreadDefaults`, the rule the composer and Settings > Threads
+ * both use to prefill a new thread, and `computeInstanceDefaults`, which
+ * resolves the runner first and then the model. The tests check that:
+ *
+ * - a stored setting always wins;
+ * - a stale instance id falls back to the default instance;
+ * - the model is read from the runner the thread would actually be placed on;
+ * - nothing picked is `null`, never an empty string.
  */
 import { describe, expect, it } from "vitest";
 import type { Profile, ProviderInstance, Runner, SettingsState } from "@hercule/contract";
@@ -30,7 +33,7 @@ const buildProfile = (id: string, name: string): Profile => ({
 const UNRESTRICTED = buildProfile("p-unrestricted", "unrestricted");
 const WORKER = buildProfile("p-worker", "worker");
 
-/** One instance, logged in on `runnerId` with the models given. */
+/** Returns an instance logged in on `runnerId`, with the given models. */
 const buildSnapshotOn = (
   runnerId: string,
   models: ProviderInstance["snapshots"][number]["models"],
@@ -43,9 +46,9 @@ const HAIKU = { slug: "claude-haiku-5", name: "Haiku", options: [] };
 const NO_SETTINGS: SettingsState["user"] = {};
 
 describe("computeInstanceDefaults", () => {
-  it("resolves the runner first and reads the model from that runner's own catalog", () => {
-    // The local machine is not logged in, so the thread lands on the remote
-    // one - and the model must come from the remote one's catalog, not from
+  it("resolves the runner first and reads the model from that runner's catalog", () => {
+    // The local runner is not logged in, so the thread is placed on the remote
+    // runner, and the model must come from that runner's catalog, not from
     // whichever snapshot happens to be first.
     const claude = buildInstance("claude-code", "Claude Code", [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [SONNET] }),
@@ -58,7 +61,7 @@ describe("computeInstanceDefaults", () => {
     });
   });
 
-  it("prefers the local runner and the catalog's own default model", () => {
+  it("prefers the local runner and the catalog's default model", () => {
     const claude = buildInstance("claude-code", "Claude Code", [
       buildSnapshotOn(REMOTE.id, [HAIKU]),
       buildSnapshotOn(LOCAL.id, [OPUS, SONNET]),
@@ -96,7 +99,7 @@ describe("computeThreadDefaults", () => {
   ]);
   const codex = buildInstance("codex", "Codex", [buildSnapshotOn(LOCAL.id, [HAIKU])]);
 
-  it("prefills from the shipped fallbacks when no thread setting is stored", () => {
+  it("prefills from the built-in defaults when no thread setting is stored", () => {
     expect(
       computeThreadDefaults(
         NO_SETTINGS,
@@ -114,7 +117,7 @@ describe("computeThreadDefaults", () => {
     });
   });
 
-  it("lets every stored thread setting win over the fallback", () => {
+  it("lets every stored thread setting win over the default", () => {
     const stored: SettingsState["user"] = {
       "thread.instanceId": codex.id,
       "thread.model": "claude-haiku-5",
@@ -133,7 +136,7 @@ describe("computeThreadDefaults", () => {
     });
   });
 
-  it("falls back to the shipped instance when the stored id names none, rather than leaving nothing picked", () => {
+  it("falls back to the default instance when the stored id matches none, rather than picking nothing", () => {
     const stale: SettingsState["user"] = { "thread.instanceId": "instance-that-went-away" };
 
     expect(
@@ -141,7 +144,7 @@ describe("computeThreadDefaults", () => {
     ).toBe(claude.id);
   });
 
-  it("keeps a stored model the resolved runner does not offer, rather than swapping it silently", () => {
+  it("keeps a stored model the resolved runner does not offer, rather than silently replacing it", () => {
     const stored: SettingsState["user"] = { "thread.model": "claude-haiku-5" };
 
     expect(computeThreadDefaults(stored, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id).model).toBe(
@@ -155,7 +158,7 @@ describe("computeThreadDefaults", () => {
     ).toBe(WORKER.id);
   });
 
-  it("is null all the way down when nothing exists to pick", () => {
+  it("returns null for every field when there is nothing to pick", () => {
     expect(computeThreadDefaults(NO_SETTINGS, [], [], [], null)).toEqual({
       instanceId: null,
       model: null,

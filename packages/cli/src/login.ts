@@ -1,16 +1,16 @@
 /**
  * `hercule login <url>`.
  *
- * Two calls, on purpose: `auth.login` trades the password for a 30-day bearer,
- * and `apiKey.create` mints the long-lived key under it. The key is what lands
- * in `credentials.json`; the bearer is revoked and never written to disk. There
- * is no login mode that hands out a long-lived key directly, so minting a key
- * stays an ordinary authenticated operation.
+ * Logging in takes two calls, on purpose: `auth.login` exchanges the password
+ * for a 30-day bearer token, and `apiKey.create` uses that token to create a
+ * long-lived API key. The key is stored in `credentials.json`; the bearer is
+ * revoked and never written to disk. No login mode returns a long-lived key
+ * directly, so creating a key stays an ordinary authenticated operation.
  *
- * The password arrives on stdin (`--password-stdin`) or, on a terminal only,
- * through the echo-off prompt that is the single exception to "the CLI never
- * prompts". A bare `--password` flag does not exist: it would sit in `ps` and
- * in shell history.
+ * The password comes from stdin (`--password-stdin`) or, on a terminal only,
+ * from an echo-off prompt, the only exception to "the CLI never prompts".
+ * There is no `--password` flag: its value would be visible in `ps` and in
+ * shell history.
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -45,13 +45,17 @@ const HELP = [
   "  --json             print { url, apiKeyId, name }; the key itself is never printed",
 ];
 
+/** Returns the help text of `hercule login`, one line per entry. */
 export const getLoginHelp = (): ReadonlyArray<string> => HELP;
 
-/** The URL as the client wants it: an origin, with no trailing slash. */
+/**
+ * Returns the URL without a trailing slash. Throws a `UsageError` unless it is
+ * an http or https URL.
+ */
 const normalizeUrl = (text: string): string => {
   if (!/^https?:\/\//.test(text)) {
     throw new UsageError(
-      `${text} is not a controller URL; it starts with http:// or https://`,
+      `${text} is not a controller URL: it must start with http:// or https://`,
       "login",
     );
   }
@@ -59,14 +63,15 @@ const normalizeUrl = (text: string): string => {
 };
 
 /**
- * Write `{ url, apiKey }` where only this OS user can read it.
+ * Writes `{ url, apiKey }` to the credential file, readable only by this OS
+ * user. Returns the file's path.
  *
- * Never into the target file: `writeFileSync`'s `mode` applies only when it
- * creates the file, so writing over an existing world-readable
- * `credentials.json` would hold the new API key at the old mode until a
- * follow-up `chmod`, and any local process reading in that window gets the key.
- * A fresh file in the same directory is 0600 from its first byte, and renaming
- * it over the target replaces the credential atomically.
+ * It never writes into the target file directly. `writeFileSync`'s `mode`
+ * applies only when it creates a file, so writing over an existing
+ * world-readable `credentials.json` would leave the new key readable until a
+ * later `chmod`, and any local process could read it in that window. A new
+ * file in the same directory is 0600 from its first byte, and renaming it
+ * over the target replaces the credential atomically.
  */
 const writeCredentials = (home: string, url: string, apiKey: string): string => {
   const path = locateCredentialsFile(home);
@@ -85,6 +90,11 @@ const writeCredentials = (home: string, url: string, apiKey: string): string => 
   return path;
 };
 
+/**
+ * Runs `hercule login` with the tokens after `login`. Returns what was stored.
+ * Throws a `UsageError` for a bad command line, and an `ApiError` when a call
+ * to the controller fails.
+ */
 export const login = async (
   tokens: ReadonlyArray<string>,
   home: string,
@@ -128,7 +138,7 @@ export const login = async (
     password = await io.prompt("password: ");
   } else {
     throw new UsageError(
-      "no password and no terminal to prompt on. Pipe it in with --password-stdin.",
+      "no password was given, and there is no terminal to prompt on. Pipe the password in with --password-stdin.",
       "login",
     );
   }
@@ -151,8 +161,8 @@ export const login = async (
     const path = writeCredentials(home, url, key.token);
     return { url, apiKeyId: key.id, name: key.name, path, json };
   } finally {
-    // The bearer has done its one job. Revoking it is best effort: a login that
-    // succeeded must not fail because the cleanup call did.
+    // The bearer token is no longer needed. Revoking it is best effort: a login
+    // that succeeded must not fail because the cleanup call failed.
     await client.auth.logout().catch(() => undefined);
   }
 };

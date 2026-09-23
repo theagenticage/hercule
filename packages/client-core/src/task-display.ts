@@ -1,10 +1,10 @@
 /**
- * How a task reads on screen.
+ * How a task is shown on screen.
  *
- * Priority is drawn in shape and grey and never in colour, which leaves two
- * axes for four steps: how many of the three bars are painted, and how dark
- * they are. That mapping is a reading of the domain, so it lives here with a
- * test rather than inside a component.
+ * Priority is drawn with shape and grey, never with colour. That leaves two
+ * ways to show four levels: how many of the three bars are filled, and how
+ * dark they are. The mapping lives here with a test rather than inside a
+ * component.
  */
 import type { ProvenanceEntry, TaskPriority, TaskStatus } from "@hercule/contract";
 
@@ -23,15 +23,16 @@ const GLYPHS: Record<TaskPriority, PriorityReading> = {
   urgent: { filled: 3, tone: "ink" },
 };
 
-/** The bars and the grey one priority is drawn with. */
+/** Returns how many bars to fill for a priority, and in which grey. */
 export const readPriorityGlyph = (priority: TaskPriority): PriorityReading => GLYPHS[priority];
 
-/** The statuses a task is no longer worked on in. */
+/** The statuses of a task that is no longer being worked on. */
 const SETTLED: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["done", "cancelled"]);
 
 /**
- * Whether a row steps back out of the way. Work that is finished and work that
- * was never urgent both recede, so what is left reads as what is left to do.
+ * Checks whether a task row should be shown faded. Finished tasks and
+ * low-priority tasks both fade, so the rows that stand out are the work that
+ * is left to do.
  */
 export const shouldTaskRecede = (task: {
   readonly status: TaskStatus;
@@ -39,8 +40,9 @@ export const shouldTaskRecede = (task: {
 }): boolean => SETTLED.has(task.status) || task.priority === "low";
 
 /**
- * What one provenance entry points at, as one line. An entry names at least one
- * of the three, and an entry naming several says all of them.
+ * Returns what a provenance entry points to, as one line. An entry has at
+ * least one of a ref, an event id and a run id; the line lists every one it
+ * has.
  */
 export const describeProvenanceTarget = (entry: ProvenanceEntry): string => {
   const parts: string[] = [];

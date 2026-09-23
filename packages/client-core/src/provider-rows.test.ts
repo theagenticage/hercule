@@ -7,7 +7,7 @@ const buildProviderRow = (runner: Runner, one: ProviderInstance) =>
   buildProviderRows(runner, [one])[0]!;
 
 describe("buildProviderRows", () => {
-  it("reads a logged-in harness as what it is holding and what it offers", () => {
+  it("shows a logged-in harness's account and what it offers", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
       buildInstance("claude-code", "Claude Code", [buildSnapshot()]),
@@ -26,9 +26,9 @@ describe("buildProviderRows", () => {
     });
   });
 
-  it("says the harness is signed in when it reports neither an identity nor a plan", () => {
-    // A harness credentialled from the environment: the login works, but there
-    // is no account name behind it, and an empty sub-line reads as a fault.
+  it("shows signed in when the harness reports neither an identity nor a plan", () => {
+    // A harness that gets its credential from the environment: the login
+    // works, but there is no account name, and an empty line looks like a fault.
     const row = buildProviderRow(
       WITH_CLAUDE,
       buildInstance("claude-code", "Claude Code", [buildSnapshot({ auth: { status: "ok" } })]),
@@ -37,7 +37,7 @@ describe("buildProviderRows", () => {
     expect(row.account).toBe("signed in");
   });
 
-  it("names the token source the harness reported, where it named one", () => {
+  it("shows the token source when the harness reports one", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
       buildInstance("claude-code", "Claude Code", [
@@ -48,7 +48,7 @@ describe("buildProviderRows", () => {
     expect(row.account).toBe("ANTHROPIC_API_KEY");
   });
 
-  it("names a version this build was not tested against", () => {
+  it("flags a version this build was not tested with", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
       buildInstance("claude-code", "Claude Code", [
@@ -59,14 +59,14 @@ describe("buildProviderRows", () => {
     expect(row.verdict).toMatch(/below/);
   });
 
-  it("offers the install, and no login, for a harness that is not on the machine", () => {
+  it("offers the install, and no login, for a harness that is not installed on the runner", () => {
     const row = buildProviderRow(WITH_CLAUDE, buildInstance("codex", "Codex", []));
 
     expect(row).toMatchObject({ install: "blocked", logIn: false, version: "not reported" });
     expect(row.account).toBe("no adapter in this runner build");
   });
 
-  it("offers nothing on a machine that is not holding a connection", () => {
+  it("offers no action on an offline runner", () => {
     const row = buildProviderRow(
       { ...WITH_CLAUDE, connectivity: "offline" },
       buildInstance("claude-code", "Claude Code", [buildSnapshot()]),
@@ -77,11 +77,11 @@ describe("buildProviderRows", () => {
 });
 
 /**
- * A provider logged in with a credential the user types in. What the action
- * offering it reads is decided here, so the fleet row and the Sessions screen
- * cannot word the same offer differently.
+ * A provider that signs in with a credential the user types in. The action's
+ * label is decided here, so the fleet row and the Sessions screen cannot word
+ * the same action differently.
  */
-describe("a provider with a secret-valued field", () => {
+describe("buildProviderRows for a provider with a secret field", () => {
   const FIELD = {
     name: "zaiApiKey",
     title: "Z.ai API key",
@@ -103,7 +103,7 @@ describe("a provider with a secret-valued field", () => {
     },
   };
 
-  it("asks for the key in the plugin's words, and offers to replace one that is there", () => {
+  it("labels the key with the plugin's title, and offers to replace a key that is set", () => {
     expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).secretFields).toEqual([
       { ...FIELD, set: false, label: `Enter ${FIELD.title}` },
     ]);
@@ -112,11 +112,11 @@ describe("a provider with a secret-valued field", () => {
     ]);
   });
 
-  it("offers the key in place of a login: there is no vendor to send the user to", () => {
+  it("offers the key instead of a login, because there is no vendor login page", () => {
     expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).logIn).toBe(false);
   });
 
-  it("offers neither on a machine this harness is not on", () => {
+  it("offers neither on a runner where the harness is not installed", () => {
     expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false))).toMatchObject({
       secretFields: [],
       logIn: false,

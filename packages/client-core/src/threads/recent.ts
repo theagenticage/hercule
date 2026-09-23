@@ -1,7 +1,7 @@
 /**
- * The last three (instance, model) pairs the user picked, newest first. Held
- * by the client: nothing on the API carries it, and the model menu only needs
- * to know what was reached for last.
+ * The last three (instance, model) pairs the user picked, newest first. The
+ * client keeps this list itself: the API does not store it, and the model menu
+ * only uses it to show what was picked recently.
  */
 export interface RecentModel {
   readonly instanceId: string;
@@ -10,6 +10,7 @@ export interface RecentModel {
 
 const LIMIT = 3;
 
+/** Returns `recent` with `pair` moved or added to the front, trimmed to three. */
 export const pushRecent = (
   recent: readonly RecentModel[],
   pair: RecentModel,

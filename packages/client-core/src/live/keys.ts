@@ -1,22 +1,23 @@
 /**
- * The query keys every read is cached under, and what a live push maps to.
+ * The query keys every read is cached under, and the keys a live push
+ * invalidates.
  *
- * A key is a plain array, so this package can own the builders without taking a
- * TanStack dependency: the web app hands what comes back here straight to its
- * query client. They live together with the mapping because they are two halves
- * of one agreement - a push names records, and the reader has to recognise the
- * keys those records are held under. Written apart, they would drift, and the
- * only symptom would be a screen that quietly stops updating.
+ * A key is a plain array, so this package can build keys without depending on
+ * TanStack: the web app passes them straight to its query client. The key
+ * builders and the push mapping live together because they must agree: a push
+ * lists records, and the mapping must return the keys those records are cached
+ * under. If the two were written apart they would drift, and the only symptom
+ * would be a screen that silently stops updating.
  */
 import type { MutableLiveTopic, TaskFilter } from "@hercule/contract";
 
-/** One cache key. Opaque here; the app's query client is what reads it. */
+/** A cache key. This package does not read it; the app's query client does. */
 export type LiveQueryKey = ReadonlyArray<unknown>;
 
 /**
- * Every read the app makes, keyed. The listing builders take their narrowing
- * argument optionally: without it they are the prefix that covers every
- * narrowing of that read at once, which is what an invalidation needs.
+ * The key builder for every read the app makes. The argument of a list or
+ * record key is optional: without it, the key is a prefix that matches every
+ * variant of that read at once, which is what an invalidation needs.
  */
 export const queryKeys = {
   setup: (): LiveQueryKey => ["setup"],
@@ -25,9 +26,12 @@ export const queryKeys = {
     filter === undefined ? ["tasks"] : ["tasks", filter],
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
   projects: (): LiveQueryKey => ["projects"],
-  /** No live topic yet: a resource written elsewhere - the CLI - lands on the next read. */
+  /**
+   * No live topic yet: a resource changed elsewhere, such as from the CLI,
+   * shows up on the next read.
+   */
   resources: (): LiveQueryKey => ["resources"],
-  /** No live topic yet either; a workspace being made is followed by polling it. */
+  /** No live topic yet either: the app polls a workspace while it is being created. */
   workspaces: (): LiveQueryKey => ["workspaces"],
   workspace: (id?: string): LiveQueryKey => (id === undefined ? ["workspace"] : ["workspace", id]),
   connections: (): LiveQueryKey => ["connections"],
@@ -40,9 +44,12 @@ export const queryKeys = {
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
-  /** The whole transcript, ascending; a `:stream` delta appends straight to this entry. */
+  /**
+   * The whole transcript, in ascending order. A `:stream` delta is appended
+   * directly to this entry.
+   */
   transcript: (sessionId: string): LiveQueryKey => ["transcript", sessionId],
-  /** A session's input history, queued rows included; the composer's queued list. */
+  /** A session's input history, including queued inputs. The composer's queued list reads it. */
   inputs: (sessionId?: string): LiveQueryKey =>
     sessionId === undefined ? ["inputs"] : ["inputs", sessionId],
   joinTokens: (): LiveQueryKey => ["join-tokens"],
@@ -67,38 +74,40 @@ export const queryKeys = {
   eventKinds: (): LiveQueryKey => ["event-kinds"],
   /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
   agents: (): LiveQueryKey => ["agents"],
-  /** Keyed on the loopback endpoints it asks, because that is what it depends on. */
+  /** Keyed on the loopback endpoints detection asks, because the result depends on them. */
   localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
 } as const;
 
 /**
- * The keys a mutable topic's push means. Naming no id means every record of the
- * topic changed, which is what a reconnect assumes, so the answer is the two
- * prefixes rather than a list nobody has.
+ * Returns the query keys to invalidate for a push on a mutable topic. A push
+ * with no ids means every record of the topic may have changed (a reconnect
+ * assumes this), so it returns the list and record prefixes rather than one
+ * key per record.
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,
   ids: ReadonlyArray<string>,
 ): ReadonlyArray<LiveQueryKey> => {
-  // A topic nothing reads has no key to invalidate; a topic gains a case here
-  // when a screen starts reading it.
+  // A topic that no screen reads has no key to invalidate. Add a case here
+  // when a screen starts reading a new topic.
   if (topic === "task") {
     return ids.length === 0
       ? [queryKeys.tasks(), queryKeys.task()]
       : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id))];
   }
-  // The listing is reread whichever machine moved; a runner's own page is
-  // reread only when the push names it, or when it names none.
+  // Any runner change refetches the list. A runner's own page is refetched
+  // only when the push lists its id, or when the push lists no ids.
   if (topic === "runner") {
     return ids.length === 0
       ? [queryKeys.runners(), queryKeys.runner()]
       : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id))];
   }
-  // The sidebar and All sessions reread the listing whichever session moved;
-  // a session's own thread page - and its queued-input list, which changes
-  // whenever the session does (a delivery, a queue) - is reread only when the
-  // push names it, or when it names none. The transcript is not here: it
-  // never invalidates, only appends, from the `:stream` topic's own deltas.
+  // Any session change refetches the list that the sidebar and All sessions
+  // read. A session's thread page and its queued-input list are refetched
+  // only when the push lists the session's id, or when the push lists no ids.
+  // The queued-input list is included because it changes whenever the session
+  // does (an input is delivered or queued). The transcript is not listed: it
+  // is never invalidated, only appended to from the `:stream` topic's deltas.
   if (topic === "session") {
     return ids.length === 0
       ? [queryKeys.sessions(), queryKeys.session(), queryKeys.inputs()]
@@ -108,8 +117,8 @@ export const buildQueryKeys = (
           ...ids.map((id) => queryKeys.inputs(id)),
         ];
   }
-  // A connection's own page is reread only when the push names it, or when it
-  // names none; the listing is reread whichever connection moved.
+  // Any connection change refetches the list. A connection's own page is
+  // refetched only when the push lists its id, or when the push lists no ids.
   if (topic === "connection") {
     return ids.length === 0
       ? [queryKeys.connections(), queryKeys.connection()]
@@ -122,11 +131,11 @@ export const buildQueryKeys = (
       ? [queryKeys.workflows(), queryKeys.workflow()]
       : [queryKeys.workflows(), ...ids.map((id) => queryKeys.workflow(id))];
   }
-  // The plugin set is fixed at build time and read as one listing, so which
-  // plugin changed narrows nothing.
+  // The plugin set is fixed at build time and read as one list, so the whole
+  // list is refetched whichever plugin changed.
   if (topic === "plugin") return [queryKeys.plugins()];
-  // Provider instances are read as one listing - there is one per shipped
-  // provider - so which instance changed narrows nothing.
+  // Provider instances are read as one list (there is one per shipped
+  // provider), so the whole list is refetched whichever instance changed.
   if (topic === "provider") return [queryKeys.providers()];
   return [];
 };

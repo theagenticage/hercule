@@ -1,8 +1,7 @@
 /**
- * The tab strip on a thread's chrome. What matters: it appears only where
- * there is something to switch between, it keeps the workspace's own thread
- * order rather than an activity order of its own, and a draft joining the
- * workspace is the last tab.
+ * Tests the tab strip above a thread. It appears only when there is something
+ * to switch between, it keeps the workspace's thread order rather than
+ * sorting by activity, and a draft that joins the workspace is the last tab.
  */
 import { describe, expect, it } from "vitest";
 import { buildSiblingTabs } from "./siblings";
@@ -14,13 +13,13 @@ const SESSIONS = [
 ];
 
 describe("buildSiblingTabs", () => {
-  it("is empty on a thread with no workspace: there is nothing beside it", () => {
+  it("is empty for a thread with no workspace", () => {
     expect(
       buildSiblingTabs({ workspace: undefined, sessions: SESSIONS, activeSessionId: "s-flaky" }),
     ).toEqual([]);
   });
 
-  it("is empty while the workspace holds one thread, whose title is the row", () => {
+  it("is empty while the workspace has one thread, whose title is shown alone", () => {
     expect(
       buildSiblingTabs({
         workspace: { ...RUN_3F1, sessionIds: ["s-flaky"] },
@@ -30,7 +29,7 @@ describe("buildSiblingTabs", () => {
     ).toEqual([]);
   });
 
-  it("keeps the workspace's own order, marking the thread on screen", () => {
+  it("keeps the workspace's order, marking the thread on screen as active", () => {
     expect(
       buildSiblingTabs({ workspace: RUN_3F1, sessions: SESSIONS, activeSessionId: "s-flaky" }),
     ).toEqual([
@@ -39,7 +38,7 @@ describe("buildSiblingTabs", () => {
     ]);
   });
 
-  it("puts the draft joining the workspace last, as the one on screen", () => {
+  it("puts a draft that joins the workspace last, as the active tab", () => {
     const tabs = buildSiblingTabs({
       workspace: { ...RUN_3F1, sessionIds: ["s-flaky"] },
       sessions: SESSIONS,
@@ -56,7 +55,7 @@ describe("buildSiblingTabs", () => {
     });
   });
 
-  it("skips a session the listing does not hold rather than drawing an empty tab", () => {
+  it("skips a session that is not in the session list rather than showing an empty tab", () => {
     const tabs = buildSiblingTabs({
       workspace: { ...RUN_3F1, sessionIds: ["s-flaky", "s-gone", "s-runbook"] },
       sessions: SESSIONS,

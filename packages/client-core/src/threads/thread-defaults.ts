@@ -1,14 +1,18 @@
 /**
- * What a new thread starts with: the `thread.*` settings where the user has
- * set them, else the shipped fallbacks (spec 02 §Thread). Written once here
- * because two screens read it - the composer prefills a new thread from it and
- * Settings > Threads presents it as the form's own state - and a rule written
- * twice is a rule that drifts.
+ * Computes what a new thread starts with: the `thread.*` settings the user
+ * has set, and built-in defaults for the rest (spec 02 §Thread). The rule is
+ * written once here because two screens use it: the composer prefills a new
+ * thread from it, and Settings > Threads shows it as the form's state. Two
+ * copies of a rule drift apart.
  *
- * "Nothing picked" is `null` throughout, never an empty string: no instance
- * exists, no runner is logged in to the picked one, no profile has been
- * created. The caller decides what to do with that (dim the field, disable
- * Send); it never gets an id-shaped value the API would refuse.
+ * "Nothing picked" is always `null`, never an empty string. That happens when:
+ *
+ * - no instance exists;
+ * - no runner is logged in to the picked instance;
+ * - no profile has been created.
+ *
+ * The caller decides what to do (dim the field, disable Send); it never gets
+ * an empty id that the API would reject.
  */
 import type {
   AccessMode,
@@ -33,11 +37,11 @@ export interface ThreadDefaults {
 }
 
 /**
- * The runner a new thread on this instance would be placed on, and the model
- * that runner offers by default. Resolved in that order and never separately:
- * a catalog is scoped instance x runner (spec 06 §3.1), so a model read from
- * one machine's snapshot beside a runner that is another machine is a pill
- * reading `not offered on <runner>` before the user has touched anything.
+ * Returns the runner a new thread on this instance would be placed on, and
+ * the default model on that runner. The runner is resolved first, and the
+ * model is read from that runner's snapshot: a catalog belongs to one instance
+ * on one runner (spec 06 §3.1). A model read from another runner's snapshot
+ * could show `not offered on <runner>` before the user has touched anything.
  */
 export const computeInstanceDefaults = (
   instance: ProviderInstance,
@@ -51,6 +55,7 @@ export const computeInstanceDefaults = (
   return { runnerId, model };
 };
 
+/** Returns the defaults for a new thread, from the user's settings and the available catalogs. */
 export const computeThreadDefaults = (
   settingsUser: SettingsState["user"],
   instances: readonly ProviderInstance[],
@@ -58,9 +63,9 @@ export const computeThreadDefaults = (
   profiles: readonly Profile[],
   localRunnerId: string | null,
 ): ThreadDefaults => {
-  // A stored id naming an instance that no longer exists falls back the same
-  // way an unset one does, so there is always a picked instance to read a
-  // catalog from - never the empty, unexplained field a stale id would leave.
+  // A stored instance id that no longer exists falls back the same way an
+  // unset one does. So there is always an instance to read a catalog from,
+  // rather than an empty field with no explanation.
   const instance =
     instances.find((each) => each.id === settingsUser["thread.instanceId"]) ??
     instances.find((each) => each.id === findDefaultInstanceId(instances));
@@ -71,9 +76,9 @@ export const computeThreadDefaults = (
 
   return {
     instanceId: instance?.id ?? null,
-    // A stored model the resolved runner does not offer is still the user's
-    // own choice: it stays picked and the model menu says it is not offered
-    // there, rather than being swapped for another model behind their back.
+    // A stored model that the resolved runner does not offer is still the
+    // user's choice. It stays picked and the model menu shows that it is not
+    // offered there, rather than silently replacing it with another model.
     model: settingsUser["thread.model"] ?? forInstance.model,
     accessMode: settingsUser["thread.accessMode"] ?? DEFAULT_ACCESS_MODE,
     runnerId: forInstance.runnerId,

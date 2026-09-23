@@ -1,10 +1,12 @@
 /**
- * Which fleet runner is the one on the machine the user is sitting at. The
- * controller knows every runner and where none of them are, so only the browser
- * can tell, by asking each reported loopback port who is there.
+ * Detects which runner in the fleet runs on the user's own machine. The
+ * controller knows every runner but not where any of them is, so only the
+ * browser can find out, by asking each runner's loopback identity port which
+ * runner is listening there.
  *
- * A wrong answer would be worse than none, so silence, a hang and a stranger's
- * answer all mean "no local runner" and the caller falls back to a runner by name.
+ * A wrong result would be worse than none. So an error, a timeout, and a
+ * response with an unexpected id all mean "no local runner", and the caller
+ * falls back to choosing a runner by name.
  */
 import type { Runner } from "@hercule/contract";
 import type { FetchLike } from "./client";
@@ -14,16 +16,19 @@ export const IDENTITY_TIMEOUT_MS = 1000;
 const buildIdentityUrl = (port: number): string => `http://127.0.0.1:${String(port)}/identity`;
 
 /**
- * Nothing else about the answer is checked, because the id is compared against
- * one the caller already holds and anything else fails that comparison.
+ * Reads the runner id from an identity response. Nothing else in the response
+ * is checked, because the caller compares the id with the one it expects, and
+ * any other value fails that comparison.
  */
 const readRunnerId = async (response: Response): Promise<unknown> => {
   return ((await response.json()) as { readonly runnerId?: unknown }).runnerId;
 };
 
 /**
- * The wait is bounded here rather than left to the browser: a port that accepts
- * a connection and says nothing would keep detection pending for the page's life.
+ * Asks the identity port which runner is listening, and resolves with its id,
+ * or with `undefined` on an error or a timeout. The timeout is set here rather
+ * than left to the browser: a port that accepts a connection and never
+ * responds would otherwise keep detection pending for the life of the page.
  */
 const fetchRunnerIdOnPort = (port: number, fetch: FetchLike, timeoutMs: number): Promise<unknown> =>
   new Promise((resolve) => {
@@ -47,8 +52,9 @@ export interface LoopbackEndpoint {
 }
 
 /**
- * Exported because what is asked is what an answer depends on, and a caller
- * caching that answer has to key it on the same set.
+ * Returns the identity port of each online runner. Exported because the
+ * detection result depends on exactly these endpoints, so a caller that caches
+ * the result must use them as its cache key.
  */
 export const listLoopbackEndpoints = (
   runners: ReadonlyArray<Runner>,
@@ -60,11 +66,13 @@ export const listLoopbackEndpoints = (
   );
 
 /**
- * Only the id of the runner whose own port answered is taken. Accepting any
- * fleet id from any port would let a machine be told it is one somewhere else,
- * and the alias decides where a person's next session runs.
+ * Returns the id of the local runner, or `null` when none is found. A port
+ * counts only when it responds with the id of the runner that reported that
+ * port. Accepting any fleet id from any port could mistake a runner on another
+ * machine for the local one, and the local runner decides where the user's
+ * next session runs.
  *
- * The whole listing is handed in so a caller cannot forget to filter it.
+ * The caller passes the whole runner list, so it cannot forget to filter it.
  */
 export const detectLocalRunner = async (
   runners: ReadonlyArray<Runner>,

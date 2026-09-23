@@ -1,13 +1,13 @@
 /**
- * The records the workspace readings are written against: a fleet of two
- * machines, a one-repo project and a two-repo one, a main workspace and a
- * live worktree. Shared by every suite that speaks about them - client-core's
- * own and the web app's, through the `@hercule/client-core/threads/testing`
- * export - because a world written five times drifts.
+ * Test fixtures for the workspace functions: two runners, a one-repo project
+ * and a two-repo project, a main workspace and a live worktree. Every test
+ * suite that needs them shares them (client-core's own, and the web app's
+ * through the `@hercule/client-core/threads/testing` export), because five
+ * copies of the fixtures would drift apart.
  *
- * The ids read as words by default. A suite whose records travel over the API
- * is decoded against the contract, which takes UUIDv7 and nothing else, so
- * `buildThreadsWorld` takes one id per slot and the world is built around them.
+ * By default the ids are readable words. A suite that sends the records
+ * through the API needs UUIDv7 ids, because the contract accepts nothing
+ * else, so `buildThreadsWorld` accepts an id for each record.
  */
 import type { Project, Resource, Runner, Session, Workspace } from "@hercule/contract";
 
@@ -36,9 +36,10 @@ export const buildProject = (id: string, name: string): Project => ({
 });
 
 /**
- * A repo, with both spellings of its remote written out. Neither is derived
- * from the other: canonicalizing a remote is the system's own rule, and a
- * fixture that re-implements it backwards is a second rule to keep in step.
+ * Returns a repo resource, with both its remote and its canonical remote given
+ * explicitly. Neither is derived from the other: canonicalizing a remote is the
+ * controller's rule, and a fixture that re-implemented it would be a second
+ * copy to keep in sync.
  */
 export const buildRepo = (
   id: string,
@@ -61,7 +62,7 @@ export const buildRepo = (
 
 export const buildCheckout = (
   resourceId: string,
-  /** Null where the machine could not read one, which the record carries (D-21). */
+  /** `null` when the runner could not read the checkout's branch. */
   branch: string | null,
   branches: readonly string[] = branch === null ? [] : [branch],
   defaultBranch: string | null = "main",
@@ -114,7 +115,7 @@ export const buildSession = (over: Partial<Session> & { id: string }): Session =
   ...over,
 });
 
-/** One id per record the world holds, and per thread the two workspaces list. */
+/** One id for each fixture record, and for each of the two threads in `RUN_3F1`. */
 export interface WorldIds {
   readonly moss: string;
   readonly cove: string;

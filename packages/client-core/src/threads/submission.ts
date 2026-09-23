@@ -1,8 +1,8 @@
 /**
- * What the composer hands the system on send: a spawn on a draft thread, one
- * input on an active one. An active thread's placement, access mode and
- * account are fixed, so its input carries the text and only the picks the user
- * actually made - a key that is absent is a value the session keeps.
+ * Builds the request the composer sends: a spawn for a draft thread, and an
+ * input for an active one. An active thread's placement, access mode and
+ * account are fixed, so its input has the text and only the picks the user
+ * actually made. A key that is left out keeps the session's current value.
  */
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
 import {
@@ -39,12 +39,13 @@ export const buildSubmission = (
     };
   }
 
-  // Nothing unpicked is sent as an empty string: the server has its own
-  // fallback for each of these and `Id` refuses one outright.
+  // A field the user did not pick is left out, never sent as an empty string:
+  // the controller has its own default for each one, and the `Id` schema
+  // rejects an empty string.
   const config = computeEffectiveConfig(readThreadConfig(thread), picks);
-  // A thread that works without a checkout is spelled by leaving `workspace`
-  // off, and a draft that has resolved none says nothing either: neither
-  // `{ kind: "none" }` nor `null` is a value the contract has a field for.
+  // Leave `workspace` out both for a thread that works without a checkout and
+  // for a draft with no workspace chosen yet: the contract accepts neither
+  // `{ kind: "none" }` nor `null` for the field.
   const workspace = config.workspace ?? null;
   return {
     kind: "spawn",

@@ -1,10 +1,14 @@
 /**
- * The composer's model selector, whole: the filter it offers only once there
- * is enough to filter, what was reached for last, the account in use with its
- * older models folded away, and every other account as one row. A catalog is
- * scoped instance x runner (spec 06 §3.1), so every model here is read from
- * the one runner the thread is placed on; switching machines re-resolves the
- * whole menu.
+ * Builds the composer's model selector. It has:
+ *
+ * - a filter field, offered only when there are enough models to filter;
+ * - the recently picked models;
+ * - the models of the current account, with its older models collapsed;
+ * - one row for every other account.
+ *
+ * A catalog belongs to one instance on one runner (spec 06 §3.1), so every
+ * model here is read from the runner the thread is placed on. Switching
+ * runners rebuilds the whole menu.
  */
 import type { ModelDescriptor, ProviderInstance } from "@hercule/contract";
 import {
@@ -18,16 +22,16 @@ import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
 import type { RecentModel } from "./recent";
 import { findReferenceRunner } from "./runner-menu";
 
-/** Past this many models across every account, the menu is worth filtering. */
+/** The menu offers a filter when all accounts together have more models than this. */
 const FILTER_THRESHOLD = 8;
 
-/** How many pairs the Recent lane shows, however many the client kept. */
+/** How many recent models the menu shows, however many the client kept. */
 const RECENT_LIMIT = 3;
 
 const ACCOUNT_FIXED = "account fixed";
 
 export interface ModelMenuRow {
-  /** The account offering it, so a row picked from any lane knows where it lives. */
+  /** The account that offers the model, so a row picked from any section knows its instance. */
   readonly instanceId: string;
   readonly slug: string;
   readonly name: string;
@@ -45,10 +49,10 @@ export interface ModelMenuRecentRow extends RecentModel {
 export interface ModelMenuLane {
   readonly instanceId: string | null;
   readonly providerId: string | null;
-  /** The lane's one-word label, or nothing to label while no account is picked. */
+  /** The section's one-word label, or `null` while no account is picked. */
   readonly label: string | null;
   readonly rows: readonly ModelMenuRow[];
-  /** The models the harness still forwards but no longer lists, folded away. */
+  /** Legacy models the harness still accepts but no longer lists, shown collapsed. */
   readonly older: readonly ModelMenuRow[];
 }
 
@@ -61,9 +65,11 @@ export interface ModelMenuInstanceRow {
   readonly modelCount: number;
   readonly dimmed: string | null;
   readonly login: LoginTarget | null;
-  /** Filled while filtering on a draft: the rows of this account the filter
-   * matched. An active thread's account is fixed, so there is nothing here to
-   * pick and the row stays a row. */
+  /**
+   * The account's models that match the filter, filled only while filtering
+   * on a draft. An active thread's account is fixed, so it cannot pick these
+   * models and this stays empty.
+   */
   readonly rows: readonly ModelMenuRow[];
 }
 
@@ -76,7 +82,7 @@ export interface ModelMenu {
 
 export interface ModelMenuView {
   readonly kind: ThreadKind;
-  /** What was typed in the filter field; empty is no filter at all. */
+  /** The text typed in the filter field; empty means no filter. */
   readonly filter: string;
   readonly recent: readonly RecentModel[];
 }
@@ -84,6 +90,7 @@ export interface ModelMenuView {
 const matchesFilter = (descriptor: ModelDescriptor, filter: string): boolean =>
   descriptor.name.toLowerCase().includes(filter) || descriptor.slug.toLowerCase().includes(filter);
 
+/** Returns the model menu for the thread's current config. */
 export const buildModelMenu = (
   catalogs: ThreadCatalogs,
   current: ThreadConfig,
@@ -109,9 +116,9 @@ export const buildModelMenu = (
       : listModels(instance)
           .filter((descriptor) => filter === "" || matchesFilter(descriptor, filter))
           .map((descriptor) => ({ descriptor, row: buildRow(instance, descriptor) }));
-  // Nothing folds away while filtering - what the user typed is what they are
-  // looking for, legacy or not - and the model in force never folds away
-  // either, or the lane would carry no check mark.
+  // Nothing is collapsed while filtering, because the user is looking for
+  // what they typed, legacy or not. The current model is never collapsed
+  // either, or the section would show no check mark.
   const isFoldable = (descriptor: ModelDescriptor, row: ModelMenuRow): boolean =>
     filter === "" && descriptor.isLegacy === true && !row.current;
 
@@ -183,8 +190,8 @@ export const buildModelMenu = (
             planLabel: snapshot?.auth.planLabel ?? null,
             modelCount: models.length,
             dimmed,
-            // An account the thread cannot move to is not worth logging in
-            // to from here: the login would change nothing on this thread.
+            // Do not offer a login for an account the thread cannot switch to:
+            // the login would change nothing for this thread.
             login:
               view.kind !== "active" &&
               snapshot !== undefined &&

@@ -1,16 +1,16 @@
 /**
  * The command tree.
  *
- * A command is the spelling the contract's CLI table writes for one operation,
- * joined with what the operation's schemas say about its fields. The table
- * decides what exists and how it is spelled; the schemas decide what shape each
- * field has, because the type is the only place that can stay true about it.
- * Nothing per-operation is written here.
+ * A command combines the spelling the contract's CLI table gives one
+ * operation with what the operation's schemas say about its fields. The table
+ * decides which commands exist and how they are spelled; the schemas decide
+ * each field's type, because the type is the only thing that is always
+ * correct about a field. Nothing here is specific to one operation.
  *
- * The AST walk is deliberately shallow. A field is one of five shapes - string,
- * number, boolean, a list of one of those, or anything else, which arrives as
- * JSON - and that is enough for every operation in the API. A deeper mapping
- * would be a schema-to-flags compiler nobody asked for.
+ * The schema reading is deliberately shallow. A field has one of five types
+ * (string, number, boolean, a list of one of those, or anything else, which is
+ * given as JSON), and that is enough for every operation in the API. A deeper
+ * mapping would be a schema-to-flags compiler nobody asked for.
  */
 import {
   CLI,
@@ -28,10 +28,10 @@ import {
 } from "@hercule/contract";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 
-/** How a flag's or positional's text becomes a value. */
+/** How a flag's or positional's text is converted into a value. */
 export type FieldKind = "string" | "number" | "boolean" | "json";
 
-/** Which half of the request a field's value travels in. */
+/** The part of the request a field's value is sent in. */
 export type FieldCarrier = "path" | "payload" | "query";
 
 export interface Field {
@@ -39,42 +39,45 @@ export interface Field {
   readonly name: string;
   /** The word after `--`, or the word inside `<>` for a positional. */
   readonly spelling: string;
-  /** The field is written as a bare word in its place, not as a flag. */
+  /** Whether the field is a positional argument rather than a flag. */
   readonly positional: boolean;
-  /** Where the value travels: the route, the body, or the query string. */
+  /** Where the value is sent: the route, the body, or the query string. */
   readonly carriedIn: FieldCarrier;
   readonly kind: FieldKind;
   /**
-   * Decodes the one word a person writes into the value the wire carries, for
-   * a field whose schema carries a shorthand. `undefined` where the written
-   * text is the value, which is every other field.
+   * Decodes the word a person types into the value the API expects, for a
+   * field whose schema has a shorthand. `undefined` for every other field,
+   * where the typed text is the value.
    */
   readonly decodeShorthand: ((text: string) => unknown) | undefined;
-  /** The flag may be given more than once; the values become a list. */
+  /** Whether the flag may be given more than once; the values become a list. */
   readonly repeated: boolean;
   readonly optional: boolean;
-  /** The field accepts `null`, which on the command line is written `--field null`. */
+  /** Whether the field accepts `null`, which is written `--field null` on the command line. */
   readonly nullable: boolean;
   /** The closed set of accepted values, when the schema declares one. */
   readonly choices: ReadonlyArray<string> | undefined;
   /**
-   * Whether the field holds a Hercule id. The answer comes from the schema: the
-   * field is the contract's `Id`, and not a name or a free word that happens
-   * to sit in a field called `ownerId`.
+   * Whether the field holds a Hercule id. The schema decides: the field's
+   * type is the contract's `Id`, not a name or free text that happens to be in
+   * a field called `ownerId`.
    */
   readonly holdsAnId: boolean;
-  /** The value arrives on stdin; there is no inline flag for it. */
+  /** Whether the value is read from stdin; there is no flag that takes it inline. */
   readonly stdin: boolean;
-  /** The listing an id tail written here is resolved through; absent takes a full id. */
+  /**
+   * The list operation that resolves an id tail given here; absent when only a
+   * full id is accepted.
+   */
   readonly resolves: OperationId | undefined;
   readonly help: string;
 }
 
-/** What comes back, as the help renderer says it. */
+/** What an operation returns, as the help describes it. */
 export interface Returns {
-  /** The success schema's top-level field names; empty when it is a bare list. */
+  /** The top-level field names of the success schema; empty when it is a bare list. */
   readonly fields: ReadonlyArray<string>;
-  /** The fields of one item, when the success is a page or a bare list. */
+  /** The fields of one item, when the result is a page or a bare list. */
   readonly items: ReadonlyArray<string> | undefined;
 }
 
@@ -82,22 +85,21 @@ export interface Command {
   readonly id: OperationId;
   /** The words after `hercule`, in tree order. */
   readonly words: ReadonlyArray<string>;
-  /** The same words as one string, which is how a message and a help line name a command. */
+  /** The same words as one string, which messages and help use to name the command. */
   readonly spelling: string;
   readonly requires: Requirement;
   readonly method: Method;
   readonly path: string;
   /**
-   * The fields given as bare words, in the order the command takes them: the
-   * path parameters in route order, then any payload field the table writes as
-   * a bare word.
+   * The positional fields, in order: the path parameters in route order, then
+   * any payload field the table makes positional.
    */
   readonly positionals: ReadonlyArray<Field>;
-  /** Payload fields given as `--<flag>`; a payload positional is not among them. */
+  /** The payload fields given as `--<flag>`; payload positionals are not included. */
   readonly payload: ReadonlyArray<Field>;
-  /** Query fields other than the pagination triple; given as `--<flag>`. */
+  /** The query fields other than the three paging fields, given as `--<flag>`. */
   readonly query: ReadonlyArray<Field>;
-  /** The operation pages: `--limit`, `--cursor`, `--sort`, `--all` apply. */
+  /** Whether the operation is paged, so `--limit`, `--cursor`, `--sort` and `--all` apply. */
   readonly paged: boolean;
   /** The fields `--sort` accepts, when the operation pages. */
   readonly sortFields: ReadonlyArray<string>;
@@ -105,12 +107,15 @@ export interface Command {
   readonly examples: ReadonlyArray<CliExample>;
   /** The error codes the endpoint declares, in the order it declares them. */
   readonly codes: ReadonlyArray<ErrorCode>;
-  /** What a code means on this operation, where the generic line does not say enough. */
+  /** What an error code means for this operation, when the generic meaning is not enough. */
   readonly meanings: Partial<Record<ErrorCode, string>>;
   readonly returns: Returns;
 }
 
-/** The pagination triple every `query` operation carries; handled by name, not as flags. */
+/**
+ * The three paging fields every `query` operation has. They are handled by
+ * name, not as field flags.
+ */
 const PAGE_FIELDS = new Set(["limit", "cursor", "sort"]);
 
 type Ast = {
@@ -124,7 +129,10 @@ type Ast = {
   readonly typeParameters?: ReadonlyArray<Ast>;
 };
 
-/** The string literals a union is made of, or `undefined` when it is not one. */
+/**
+ * Returns the string literals of a literal or a union of literals, or
+ * `undefined` for any other type.
+ */
 const readStringLiterals = (ast: Ast): ReadonlyArray<string> | undefined => {
   if (ast._tag === "Literal") return typeof ast.literal === "string" ? [ast.literal] : undefined;
   if (ast._tag !== "Union" || ast.types === undefined) return undefined;
@@ -137,9 +145,9 @@ const readStringLiterals = (ast: Ast): ReadonlyArray<string> | undefined => {
 };
 
 /**
- * What is left of `X | null` once the null is taken away. A nullable field is
- * still the shape it holds; only the way it is cleared is different, and on the
- * command line that is `--field null`.
+ * Returns `X` for a type `X | null`, and any other type unchanged. A nullable
+ * field still has the type of its other values; only clearing it is
+ * different, and on the command line that is `--field null`.
  */
 const stripNull = (ast: Ast): Ast => {
   if (ast._tag !== "Union" || ast.types === undefined) return ast;
@@ -147,19 +155,19 @@ const stripNull = (ast: Ast): Ast => {
   return present.length === 1 ? present[0]! : ast;
 };
 
-/** Whether `null` is one of the values this field holds. */
+/** Checks whether the type allows `null`. */
 const isNullable = (ast: Ast): boolean =>
   ast._tag === "Union" &&
   ast.types !== undefined &&
   ast.types.some((member) => member._tag === "Null");
 
 /**
- * The element of a field that holds several values, or `undefined` for one that
- * holds a single value.
+ * Returns the element type of a field that holds a list, or `undefined` for a
+ * field that holds a single value.
  *
- * A filter written `X | X[]` is the same repeatable flag as a plain `X[]`: the
- * one-value member exists so a caller may send a scalar, and on a command line
- * repeating the flag is how that choice is made.
+ * A filter typed `X | X[]` becomes the same repeatable flag as a plain `X[]`.
+ * The single-value member exists so an API caller may send one value; on the
+ * command line, giving the flag once does the same.
  */
 const readElementType = (input: Ast): Ast | undefined => {
   const ast = stripNull(input);
@@ -170,15 +178,15 @@ const readElementType = (input: Ast): Ast | undefined => {
 };
 
 /**
- * The title the contract puts on its `Id` schema. Every id on the wire is a
- * uuidv7, so a schema with this title is the one shape that holds a Hercule id.
+ * The title of the contract's `Id` schema. Every id in the API is a UUIDv7,
+ * so a schema with this title is the only type that holds a Hercule id.
  */
 const UUID = "uuidv7";
 
 /**
- * Whether this field holds a Hercule id. The schema answers, not the field name:
- * a secret's `ownerId` holds a plugin's name. A tail can stand for a canonical
- * UUID and for nothing else.
+ * Checks whether a field holds a Hercule id. The schema decides, not the field
+ * name: a secret's `ownerId` holds a plugin's name. A tail can only stand for
+ * a full UUID.
  */
 const holdsAnId = (input: Ast): boolean =>
   (stripNull(input).checks ?? []).some((check) => check.annotations?.title === UUID);
@@ -198,15 +206,15 @@ const readScalarKind = (input: Ast): FieldKind => {
   }
 };
 
-/** `sessionId` on the wire is `<session-id>` on the command line. */
+/** Converts a camelCase field name to kebab case: `sessionId` becomes `session-id`. */
 const toKebabCase = (name: string): string =>
   name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 
 /**
- * The shape of one field, as the schema has it and the row spells it.
+ * Builds one field from its schema type and its CLI row.
  *
- * `schema` is the field's own schema where the operation declares one, which is
- * what a shorthand is read from. The AST alone answers everything else.
+ * `schema` is the field's own schema, when the operation declares one; the
+ * shorthand decoder is read from it. Everything else comes from the AST.
  */
 const buildField = (
   name: string,
@@ -217,8 +225,8 @@ const buildField = (
 ): Field => {
   const element = readElementType(ast);
   const value = element ?? ast;
-  // A positional is spelled by the row where its own name would not say whose
-  // id it is; a flag is always spelled by the row.
+  // A positional uses the row's placeholder when its own name would not say
+  // whose id it is; a flag always uses the row's spelling.
   const spelling = "flag" in row ? row.flag : (row.placeholder ?? toKebabCase(name));
   return {
     name,
@@ -242,11 +250,14 @@ const buildField = (
 };
 
 /**
- * Every field of one schema, the paging triple left out: `--limit`, `--cursor`
- * and `--sort` are handled by name everywhere and so have no row. A field the
- * table does not write is a row missing from the contract, and it is said here
- * rather than rendered as a nameless flag. A field whose row is hidden gets no
- * flag at all.
+ * Builds every field of one schema, except the three paging fields: `--limit`,
+ * `--cursor` and `--sort` are handled by name everywhere and have no row.
+ *
+ * - A field with no row is missing from the contract's CLI table, so this
+ *   throws rather than creating a flag with no name.
+ * - A field whose row is hidden gets no flag.
+ * - A query field whose row makes it positional throws, because the table is
+ *   wrong.
  */
 const buildFields = (
   id: OperationId,
@@ -257,8 +268,9 @@ const buildFields = (
   const struct = schema as
     | { ast?: Ast; fields?: Record<string, unknown>; schema?: { fields?: Record<string, unknown> } }
     | undefined;
-  // A query parameter set arrives wrapped in the codec that reads a query
-  // string, so the struct holding the field schemas is one level down there.
+  // A query parameter schema is wrapped in the codec that reads a query
+  // string, so for a query the struct with the field schemas is one level
+  // down.
   const fields = struct?.fields ?? struct?.schema?.fields;
   const ast = struct?.ast;
   if (ast?.propertySignatures === undefined) return [];
@@ -269,9 +281,9 @@ const buildFields = (
       const row = rows[name];
       if (row === undefined) throw new Error(`${id}: ${name} has no row`);
       if ("hidden" in row) return [];
-      // A bare word is a route parameter or a payload field. A query
-      // parameter written as one would be parsed as a positional and then
-      // sent nowhere, so the table is wrong and says so here.
+      // A positional is a route parameter or a payload field. A positional
+      // query parameter would be parsed and then sent nowhere, so the table
+      // is wrong, and this says so.
       if (carriedIn === "query" && "positional" in row) {
         throw new Error(`${id}: ${name} is a query parameter and cannot be a bare word`);
       }
@@ -279,7 +291,7 @@ const buildFields = (
     });
 };
 
-/** The payload schema hides one level deeper: a media-type map holding a codec. */
+/** Returns the payload schema, which is one level deeper: inside a map from media type to codec. */
 const readPayloadSchema = (payload: unknown): unknown => {
   if (!(payload instanceof Map)) return undefined;
   const json = payload.get("application/json") as { schemas?: ReadonlyArray<unknown> } | undefined;
@@ -289,7 +301,7 @@ const readPayloadSchema = (payload: unknown): unknown => {
 const listPropertyNames = (ast: Ast | undefined): ReadonlyArray<string> =>
   (ast?.propertySignatures ?? []).map((property) => String(property.name));
 
-/** What the success schema answers with: a record, a page of records, or a bare list. */
+/** Returns what the success schema describes: a record, a page of records, or a bare list. */
 const readReturns = (success: unknown): Returns => {
   const ast = [...((success as Set<{ ast?: Ast }> | undefined) ?? [])][0]?.ast;
   if (ast === undefined) return { fields: [], items: undefined };
@@ -302,9 +314,9 @@ const readReturns = (success: unknown): Returns => {
 };
 
 /**
- * The codes an endpoint can answer with. Each declared error is the envelope
- * struct wrapped in a class declaration, so the code is the literal its `error`
- * field carries.
+ * Returns the error codes an endpoint declares. Each declared error is the
+ * envelope struct wrapped in a class declaration, so the code is the literal
+ * type of the `error.code` field.
  */
 const listErrorCodes = (errors: unknown): ReadonlyArray<ErrorCode> => {
   const codes: Array<ErrorCode> = [];
@@ -318,13 +330,14 @@ const listErrorCodes = (errors: unknown): ReadonlyArray<ErrorCode> => {
   return codes;
 };
 
-/** `:name` path parameters, in the order the route writes them. */
+/** Returns the `:name` path parameters of a route, in order. */
 const listPathParams = (path: string): ReadonlyArray<string> =>
   [...path.matchAll(/:([A-Za-z0-9_]+)/g)].map((match) => match[1]!);
 
-/** The table, read through its row type rather than through its literal shape. */
+/** The CLI table, typed by its row type rather than by its literal type. */
 const TABLE: Record<OperationId, CliRow> = CLI;
 
+/** Builds every visible command from the API and the CLI table. Throws when the two disagree. */
 const buildCommands = (): ReadonlyArray<Command> => {
   const commands: Array<Command> = [];
 
@@ -373,10 +386,10 @@ const buildCommands = (): ReadonlyArray<Command> => {
         requires: operation.requires,
         method: operation.method,
         path: operation.path,
-        // A route parameter the params schema does not declare is a contract
-        // mistake, not a string: the CLI would send a value nothing decodes.
-        // A payload field the table writes as a bare word follows them, so a
-        // command whose one argument is its content is typed as that word and
+        // A route parameter the params schema does not declare is a mistake in
+        // the contract, not a string: the CLI would send a value nothing
+        // decodes. Payload positionals come after the route parameters, so a
+        // command whose only argument is its content takes it as a positional,
         // not as a flag.
         positionals: [
           ...inPath.map((name) => params.get(name)!),
@@ -384,8 +397,8 @@ const buildCommands = (): ReadonlyArray<Command> => {
         ],
         payload: payload.filter((field) => !field.positional),
         query,
-        // The paging triple travels together, so the sort field is enough to
-        // say the operation pages.
+        // The three paging fields always come together, so the sort field alone
+        // shows that the operation is paged.
         paged: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast).includes("sort"),
         sortFields: readSortFields(each.query),
         help: row.help,
@@ -400,24 +413,27 @@ const buildCommands = (): ReadonlyArray<Command> => {
   return commands;
 };
 
-/** Every visible command, in the contract's own order. */
+/** Every visible command, in the contract's order. */
 export const COMMANDS: ReadonlyArray<Command> = buildCommands();
 
-/** A key no single word can collide with, so `hercule "task list"` is not a command. */
+/**
+ * Joins words into a map key that no single word can match, so `hercule "task
+ * list"` is not a command.
+ */
 const buildWordsKey = (words: ReadonlyArray<string>): string => words.join("\u0000");
 
 const BY_WORDS = new Map(COMMANDS.map((command) => [buildWordsKey(command.words), command]));
 
 const BY_ID = new Map(COMMANDS.map((command) => [command.id, command]));
 
-/** The command spelled by exactly these words, or `undefined`. */
+/** Returns the command spelled by exactly these words, or `undefined`. */
 export const findCommandByWords = (words: ReadonlyArray<string>): Command | undefined =>
   BY_WORDS.get(buildWordsKey(words));
 
-/** The command an operation id names; `undefined` for a hidden operation. */
+/** Returns the command of an operation id, or `undefined` for a hidden operation. */
 export const findCommandById = (id: OperationId): Command | undefined => BY_ID.get(id);
 
-/** Every command spelled under this prefix, in the contract's order. */
+/** Returns every command whose words start with this prefix, in the contract's order. */
 export const listCommandsUnder = (prefix: ReadonlyArray<string>): ReadonlyArray<Command> =>
   COMMANDS.filter(
     (command) =>
@@ -426,9 +442,10 @@ export const listCommandsUnder = (prefix: ReadonlyArray<string>): ReadonlyArray<
   );
 
 /**
- * The words that may follow this prefix, in the contract's order: the nouns at
- * the root, and a noun's verbs and nested nouns below it. Empty when the prefix
- * is not a node of the tree, which is what makes a word unknown.
+ * Returns the words that may follow this prefix, in the contract's order: the
+ * nouns at the root, and a noun's verbs and nested nouns below it. Returns an
+ * empty list when the prefix is not in the tree, which is how an unknown word
+ * is detected.
  */
 export const listWordsAfter = (prefix: ReadonlyArray<string>): ReadonlyArray<string> => {
   const next: Array<string> = [];
@@ -440,32 +457,32 @@ export const listWordsAfter = (prefix: ReadonlyArray<string>): ReadonlyArray<str
 };
 
 /**
- * The hand-written commands, which have no row: help may name them and the
- * scanner below must not call them unknown.
+ * The hand-written commands, which have no CLI row. Help text may mention
+ * them, and `findMentions` must not treat them as unknown.
  */
 const HAND_WRITTEN = ["login", "setup-url", "serve"];
 
-/** One `hercule ...` the prose named, resolved against the tree. */
+/** One `hercule ...` mentioned in a text, looked up in the tree. */
 export interface Mention {
-  /** The words the prose wrote after `hercule`. */
+  /** The words after `hercule` in the text. */
   readonly words: ReadonlyArray<string>;
   /**
-   * The longest leading run of those words the tree answers to, or `undefined`
-   * when it answers to none of them - or when the prose ran on past a run that
-   * is a noun rather than a whole command, which reads as a misspelling.
+   * The longest run of leading words that is in the tree. `undefined` when
+   * none of them is, or when the text continues after a run that is only a
+   * noun rather than a whole command, which looks like a misspelling.
    */
   readonly names: string | undefined;
-  /** The command that run spells; absent when the run is only a noun. */
+  /** The command those words spell; `undefined` when they are only a noun. */
   readonly command: Command | undefined;
 }
 
 /**
- * Every `hercule ...` a piece of prose names. One scanner, so what the help
- * offers as the next command and what the table's test accepts are the same
- * reading.
+ * Returns every `hercule ...` mentioned in a text. The help and the CLI table's
+ * tests both use this one function, so the commands the help suggests next
+ * and the mentions the tests accept always agree.
  *
- * A flag, a `<placeholder>` or any other punctuation ends the mention, and
- * prose that runs on after a whole command - "hercule task list to find work" -
+ * A flag, a `<placeholder>` or any other punctuation ends a mention, and text
+ * that continues after a whole command ("hercule task list to find work")
  * keeps the command.
  */
 export const findMentions = (text: string): ReadonlyArray<Mention> =>

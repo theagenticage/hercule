@@ -1,30 +1,32 @@
 /**
- * Running one command: id tails, paging, and the call itself.
+ * Runs one command: resolves id tails, handles paging, and makes the call.
  *
- * Two behaviours live here that the wire deliberately does not have. **Id
- * tails** are resolved client-side through the listing the field's row names -
- * a positional and a flag alike - so the API only ever sees canonical ids.
- * **`--all`** follows `nextCursor` to the end, so a caller who wants everything
- * writes one flag instead of a loop.
+ * Two features live here that the API deliberately does not have:
+ *
+ * - **Id tails** are resolved on the client, through the list operation the
+ *   field's CLI row names, for positionals and flags alike. The API only ever
+ *   receives full ids.
+ * - **`--all`** follows `nextCursor` to the last page, so a caller who wants
+ *   everything writes one flag instead of a loop.
  */
 import { ApiError, type HerculeClient } from "@hercule/client-core";
 import { UsageError } from "../exit";
 import { coerceFieldValue, formatFieldName, type Arguments } from "./args";
 import { findCommandById, type Command, type Field } from "./tree";
 
-/** The operations, as the dynamic tree reaches them: `client[entity][verb](request)`. */
+/** The client's operations, as the command tree calls them: `client[entity][verb](request)`. */
 type Callable = Record<string, Record<string, (request?: unknown) => Promise<unknown>>>;
 
-/** The operation's own function on the client, found by the two halves of its id. */
+/** Returns the client function for a command's operation, found by the two parts of its id. */
 const findOperationFunction = (client: HerculeClient, command: Command) => {
   const [entity, verb] = command.id.split(".") as [string, string];
   return (client as unknown as Callable)[entity]![verb]!;
 };
 
-/** A canonical lowercase UUIDv7, the only id shape the wire carries. */
+/** A canonical lowercase UUIDv7, the only id format the API accepts. */
 const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-/** The shortest tail that may stand in for an id. */
+/** The shortest tail that may be used in place of an id. */
 const MIN_TAIL = 8;
 
 interface Page {
@@ -33,8 +35,8 @@ interface Page {
 }
 
 /**
- * Small fixed listings - plugins, provider instances - answer with the whole
- * array. Nothing to follow, so it is read as a single page that ends.
+ * Converts a list response into a page. Small fixed lists (plugins, provider
+ * instances) return the whole array, which becomes a single, last page.
  */
 const toPage = (answer: unknown): Page =>
   Array.isArray(answer)
@@ -42,14 +44,15 @@ const toPage = (answer: unknown): Page =>
     : (answer as Page);
 
 /**
- * Every item of a paged operation from `from` onwards, following `nextCursor`
- * to the end. `from` absent starts at the beginning.
+ * Returns every item of a paged operation from the cursor `from` onwards,
+ * following `nextCursor` to the last page. Without `from`, starts at the
+ * first page.
  *
- * `params` is what an operation that pages inside one record needs - a
- * transcript is the rows of one session - and is absent for a plain listing.
+ * `params` is needed by an operation that pages inside one record (a
+ * transcript is the rows of one session); it is absent for a plain list.
  *
- * A cursor that does not move is treated as the end rather than as an infinite
- * loop: a broken server should stall the caller once, not forever.
+ * A cursor that does not change is treated as the end rather than looping
+ * forever: a broken server should stop the caller once, not hang it.
  */
 const readAll = async (
   client: HerculeClient,
@@ -74,12 +77,18 @@ const readAll = async (
 };
 
 /**
- * The canonical id the text written for a field stands for.
+ * Returns the full id that the text given for a field refers to.
  *
- * A full id is used as written. Anything else is a tail: the listing the row
- * names is paged through and the ids that end with it are the candidates. This
- * costs a round trip and needs that listing's read grant, which is the price of
- * the wire never carrying a tail.
+ * A full id is returned as it is. Anything else is a tail: the list the
+ * field's row names is read in full, and the ids that end with the tail are
+ * the candidates. Fails with:
+ *
+ * - a `UsageError` when the text is too short to be a tail;
+ * - a `not_found` `ApiError` when no id matches;
+ * - a `conflict` `ApiError` when several ids match.
+ *
+ * This costs extra requests and needs the list's read grant. That is the
+ * price of the API never accepting a tail.
  */
 const resolveTail = async (
   client: HerculeClient,
@@ -89,8 +98,8 @@ const resolveTail = async (
 ): Promise<string> => {
   if (CANONICAL_ID.test(text)) return text;
 
-  // Too short to be a tail and not an id: the command line is wrong, so
-  // nothing is sent, exactly as for a tail nothing can resolve.
+  // Too short to be a tail, and not an id: the command line is wrong, so
+  // nothing is sent.
   if (text.length < MIN_TAIL) {
     throw new UsageError(
       `${formatFieldName(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
@@ -101,12 +110,11 @@ const resolveTail = async (
   const listing = findCommandById(field.resolves!)!;
   const noun = listing.words[0]!;
 
-  // Ordered by creation, not by the listing's own default. A keyset walk never
-  // skips a row only as long as nothing moves the key it walks, and the default
-  // order of a task listing is `updatedAt`, which is the one column every write
-  // touches: a task updated while the sweep is between pages jumps above the
-  // cursor and is never visited, so a tail that exists answers `not_found`.
-  // `createdAt` is written once and never again.
+  // Sort by creation time, not by the list's default order. Keyset paging
+  // skips no row only as long as the sort key does not change. A task list's
+  // default order is `updatedAt`, which every write changes: a task updated
+  // between two pages moves above the cursor and is never seen, so a tail
+  // that exists would get `not_found`. `createdAt` never changes.
   const stable = listing.sortFields.includes("createdAt")
     ? { sort: { field: "createdAt", direction: "asc" } }
     : {};
@@ -125,20 +133,21 @@ const resolveTail = async (
   });
 };
 
-/** What a tail looks like, so a field that cannot resolve one can refuse it. */
+/** Matches text that looks like an id tail, so a field that cannot resolve tails can reject it. */
 const LOOKS_LIKE_A_TAIL = /^[0-9a-f]{8,}$/;
 
 /**
- * A field whose row names no listing takes its value as written: a plugin is
- * named `github`, a secret is named `deadbeef` if its owner says so. Where the
- * schema says the field holds a Hercule id, text shaped like a tail is refused
- * rather than sent, because sending it would answer `not_found` and teach the
- * caller that the id was wrong.
+ * Returns the value of a field whose row names no list operation, unchanged:
+ * a plugin is named `github`, and a secret may be named `deadbeef`. But when
+ * the schema says the field holds a Hercule id, text that looks like a tail
+ * throws a `UsageError` rather than being sent. Sending it would return
+ * `not_found`, and the caller would wrongly conclude that the id does not
+ * exist.
  */
 const validateWrittenId = (command: Command, field: Field, text: string): string => {
   if (field.holdsAnId && LOOKS_LIKE_A_TAIL.test(text) && !CANONICAL_ID.test(text)) {
     throw new UsageError(
-      `${formatFieldName(field)}: ${text} reads as an id tail, and nothing lists these ids to resolve it against; give the full id`,
+      `${formatFieldName(field)}: ${text} looks like an id tail, but there is no list of these ids to look it up in; give the full id`,
       command.spelling,
     );
   }
@@ -146,10 +155,9 @@ const validateWrittenId = (command: Command, field: Field, text: string): string
 };
 
 /**
- * Resolves every tail in one command's fields to the full id. One pass handles
- * a field written as a bare word and a field written as a flag. A tail may
- * stand for any field that holds an id, and a tail that resolves to nothing is
- * refused, whichever way the field was written.
+ * Resolves every tail in a command's fields to the full id, for positionals
+ * and flags alike. Any field that holds an id may be given a tail, and a tail
+ * that matches no id fails, however the field was written.
  */
 const resolveTails = async (
   client: HerculeClient,
@@ -171,11 +179,15 @@ const resolveTails = async (
   return resolved;
 };
 
-/** What a command produced: an operation's output, or every item of a `--all` sweep. */
+/** The result of a command: an operation's output, or every item of an `--all` read. */
 export type Outcome =
   | { readonly kind: "value"; readonly value: unknown }
   | { readonly kind: "items"; readonly items: ReadonlyArray<Record<string, unknown>> };
 
+/**
+ * Runs a command with parsed arguments and returns its result. Fails with a
+ * `UsageError` for a bad value, and with the client's errors for a failed call.
+ */
 export const execute = async (
   client: HerculeClient,
   command: Command,
@@ -185,13 +197,13 @@ export const execute = async (
   const writtenParams: Record<string, unknown> = {};
   const writtenPayload: Record<string, unknown> = { ...args.payload };
   for (const [index, field] of command.positionals.entries()) {
-    // Every positional is checked against its own field here, where a failure
-    // is still a usage error and nothing has been sent. A numeric path
-    // parameter is the value itself, never a tail of a longer id: the event log
-    // numbers its rows, and `42` is row 42.
+    // Check every positional against its field here, while a failure is still
+    // a usage error and nothing has been sent. A numeric path parameter is the
+    // value itself, never a tail of a longer id: the event log numbers its
+    // rows, and `42` is row 42.
     const value = coerceFieldValue(field, args.positionals[index]!, command.spelling);
-    // A bare word is a route parameter or a payload field, and it travels in
-    // the half of the request its own field names.
+    // A positional is a route parameter or a payload field, and is sent in
+    // the part of the request its field declares.
     if (field.carriedIn === "payload") writtenPayload[field.name] = value;
     else writtenParams[field.name] = value;
   }
@@ -208,13 +220,13 @@ export const execute = async (
     ...args.query,
   });
 
-  // `--limit` is the page size on a `--all` sweep, not a cap on the total: a
-  // caller asking for everything is asking for everything.
+  // With `--all`, `--limit` is the page size, not a limit on the total: a
+  // caller asking for everything gets everything.
   if (args.limit !== undefined) query["limit"] = args.limit;
   if (args.sort !== undefined) query["sort"] = args.sort;
 
-  // `--cursor` with `--all` is where the sweep starts, not something to drop: a
-  // caller who paged to a cursor and then asked for the rest gets the rest.
+  // With `--all`, `--cursor` is where the read starts, not something to drop:
+  // a caller who paged to a cursor and then asks for the rest gets the rest.
   if (args.all) {
     return {
       kind: "items",

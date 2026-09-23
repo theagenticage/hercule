@@ -1,8 +1,8 @@
 /**
- * `buildModelMenu(catalogs, config, { kind, filter, recent })` is the shape the
- * rebuilt model selector renders: a filter box only past eight models, a
- * Recent lane, the current account's lane with its legacy models folded
- * away, and one row per other instance.
+ * Tests `buildModelMenu(catalogs, config, { kind, filter, recent })`, which
+ * builds what the model selector renders: a filter field only when there are
+ * more than eight models, the recent models, the current account's models
+ * with its legacy models collapsed, and one row per other instance.
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
@@ -57,7 +57,7 @@ const CODEX_OUT = buildInstance("codex", "Codex", [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
 ]);
 
-/** Found on no machine at all: no snapshot for any runner. */
+/** Found on no runner: it has no snapshot for any runner. */
 const PI = buildInstance("pi", "pi", []);
 
 const buildCatalogs = (instances: readonly ProviderInstance[]) => ({
@@ -66,7 +66,7 @@ const buildCatalogs = (instances: readonly ProviderInstance[]) => ({
   localRunnerId: LOCAL.id,
 });
 
-/** The thread's config, of which this menu reads the account and the model. */
+/** Returns the thread's config. The menu reads only the instance and the model. */
 const buildConfig = (instanceId: string, model: string): ThreadConfig => ({
   instanceId,
   model,
@@ -78,7 +78,7 @@ const buildConfig = (instanceId: string, model: string): ThreadConfig => ({
 
 const DRAFT = { kind: "draft" as const, filter: "", recent: [] };
 
-/** `count` models on one instance, so the filter threshold can be crossed. */
+/** Returns one instance with `count` models, to test the filter threshold. */
 const buildCountedInstance = (id: string, name: string, count: number): ProviderInstance =>
   withModels(
     CLAUDE,
@@ -92,7 +92,7 @@ const buildCountedInstance = (id: string, name: string, count: number): Provider
   );
 
 describe("buildModelMenu: filterable", () => {
-  it("offers no filter at eight models across every instance", () => {
+  it("offers no filter at eight models across all instances", () => {
     const menu = buildModelMenu(
       buildCatalogs([
         buildCountedInstance("instance-a", "a", 5),
@@ -105,7 +105,7 @@ describe("buildModelMenu: filterable", () => {
     expect(menu.filterable).toBe(false);
   });
 
-  it("offers a filter at nine models across every instance", () => {
+  it("offers a filter at nine models across all instances", () => {
     const menu = buildModelMenu(
       buildCatalogs([
         buildCountedInstance("instance-a", "a", 5),
@@ -205,7 +205,7 @@ describe("buildModelMenu: recent", () => {
     expect(menu.recent.map((row) => row.model)).toEqual([GPT.slug]);
   });
 
-  it("dims a recent row on another instance with account fixed on an active thread", () => {
+  it("dims a recent row from another instance as account fixed on an active thread", () => {
     const menu = buildModelMenu(
       buildCatalogs([WORK, PERSONAL, CODEX]),
       buildConfig(WORK.id, SONNET.slug),
@@ -224,8 +224,8 @@ describe("buildModelMenu: recent", () => {
   });
 });
 
-describe("buildModelMenu: the current lane", () => {
-  it("labels the lane with the account name when the provider has more than one instance", () => {
+describe("buildModelMenu: the current account", () => {
+  it("labels the section with the account name when the provider has more than one instance", () => {
     const menu = buildModelMenu(
       buildCatalogs([WORK, PERSONAL]),
       buildConfig(WORK.id, SONNET.slug),
@@ -235,7 +235,7 @@ describe("buildModelMenu: the current lane", () => {
     expect(menu.current.label).toBe("work");
   });
 
-  it("labels the lane with the provider's display name when it has one instance", () => {
+  it("labels the section with the provider's display name when it has one instance", () => {
     const menu = buildModelMenu(
       buildCatalogs([CLAUDE, CODEX]),
       buildConfig(CLAUDE.id, SONNET.slug),
@@ -258,7 +258,7 @@ describe("buildModelMenu: the current lane", () => {
     });
   });
 
-  it("folds legacy models into older, out of the rows", () => {
+  it("moves legacy models from rows into older", () => {
     const menu = buildModelMenu(
       buildCatalogs([CLAUDE]),
       buildConfig(CLAUDE.id, SONNET.slug),
@@ -269,7 +269,7 @@ describe("buildModelMenu: the current lane", () => {
     expect(menu.current.older.map((row) => row.slug)).toEqual([LEGACY.slug]);
   });
 
-  it("unfolds the legacy models into the rows while filtering", () => {
+  it("keeps legacy models in rows while filtering", () => {
     const menu = buildModelMenu(buildCatalogs([CLAUDE]), buildConfig(CLAUDE.id, SONNET.slug), {
       ...DRAFT,
       filter: "sonnet",
@@ -298,7 +298,7 @@ describe("buildModelMenu: the other instances", () => {
     });
   });
 
-  it("dims an instance the runner has not logged in to, and carries the login it needs", () => {
+  it("dims an instance that is not logged in on the runner, and includes the login it needs", () => {
     const menu = buildModelMenu(
       buildCatalogs([CLAUDE, CODEX_OUT]),
       buildConfig(CLAUDE.id, SONNET.slug),
@@ -311,7 +311,7 @@ describe("buildModelMenu: the other instances", () => {
     });
   });
 
-  it("dims an instance the runner has no snapshot for, naming the machine", () => {
+  it("dims an instance with no snapshot on the runner, naming the runner", () => {
     const menu = buildModelMenu(
       buildCatalogs([CLAUDE, PI]),
       buildConfig(CLAUDE.id, SONNET.slug),
@@ -321,7 +321,7 @@ describe("buildModelMenu: the other instances", () => {
     expect(menu.others[0]).toMatchObject({ instanceId: PI.id, dimmed: "not on moss" });
   });
 
-  it("lists every other instance, however many there are - only Recent is capped", () => {
+  it("lists every other instance, however many there are; only the recent models are capped", () => {
     const others = [1, 2, 3, 4].map((n) =>
       buildCountedInstance(`instance-${String(n)}`, `account ${String(n)}`, 1),
     );
@@ -349,7 +349,7 @@ describe("buildModelMenu: the other instances", () => {
     expect(menu.others[0]?.rows).toEqual([]);
   });
 
-  it("dims every other instance with account fixed on an active thread", () => {
+  it("dims every other instance as account fixed on an active thread", () => {
     const menu = buildModelMenu(
       buildCatalogs([CLAUDE, CODEX]),
       buildConfig(CLAUDE.id, SONNET.slug),

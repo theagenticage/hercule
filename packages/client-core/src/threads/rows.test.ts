@@ -1,13 +1,13 @@
 /**
- * `buildThreadRows(sessions, mode)` turns sessions into the rows the sidebar and
- * All sessions render, sorted most-recently-active first.
+ * Tests `buildThreadRows(sessions, mode)`, which turns sessions into the rows
+ * the sidebar and All sessions render, most recently active first.
  */
 import { describe, expect, it } from "vitest";
 import type { Session, SessionStatus } from "@hercule/contract";
 import { buildInstance, buildSnapshot } from "../providers.testing";
 import { buildThreadRows } from "./rows";
 
-/** The one instance a row's model is named from, offering two models. */
+/** The instance whose catalog gives rows their model names. It offers two models. */
 const CLAUDE = buildInstance("claude-code", "Claude Code", [
   buildSnapshot({
     models: [
@@ -74,7 +74,7 @@ describe("buildThreadRows", () => {
     expect(gone[0]).toMatchObject({ id: "s2", mark: "exited" });
   });
 
-  it("carries the session's title and lastActivityAt through as activityAt, raw and unformatted", () => {
+  it("passes the session's title through, and lastActivityAt unformatted as activityAt", () => {
     const rows = buildThreadRows(
       [
         buildSession({
@@ -92,7 +92,7 @@ describe("buildThreadRows", () => {
     });
   });
 
-  it("names the model on the second line as the catalog names it, in meta mode", () => {
+  it("shows the model's catalog name on the second line in meta mode", () => {
     const rows = buildThreadRows(
       [
         buildSession({
@@ -107,7 +107,7 @@ describe("buildThreadRows", () => {
     expect(rows[0]!.secondLine).toBe("Claude Opus 5");
   });
 
-  it("names the provider's own default by its display name rather than the word default", () => {
+  it("shows the provider's default model by its display name rather than the word default", () => {
     const rows = buildThreadRows(
       [
         buildSession({
@@ -122,7 +122,7 @@ describe("buildThreadRows", () => {
     expect(rows[0]!.secondLine).toBe("Default (recommended)");
   });
 
-  it("falls back to the slug for a model no catalog on offer holds", () => {
+  it("falls back to the slug for a model that no catalog offers", () => {
     const rows = buildThreadRows(
       [
         buildSession({

@@ -1,15 +1,21 @@
 /**
- * `--help`, at any position, written for an agent reading it mid-task.
+ * Builds `--help` output at every level, written for an agent reading it in
+ * the middle of a task.
  *
- * Three levels, each rendered from the contract's CLI table and the operation's
- * schemas: the root lists the nouns and the conventions that hold everywhere, a
- * noun lists its verbs, and a command says what it does, shows a working
- * invocation, then describes every argument, what comes back and what each
- * failure means. The sections are always the same and always in the same order,
- * so a reader can skip to the one it wants.
+ * There are three levels, each built from the contract's CLI table and the
+ * operation's schemas:
  *
- * Static help and 403s that name the missing grant are the two teaching
- * channels, so every screen names the grant a command needs.
+ * - the root lists the nouns, and the conventions that apply everywhere;
+ * - a noun lists its verbs;
+ * - a command says what it does, shows a working example, then describes
+ *   every argument, what it returns and what each error means.
+ *
+ * The sections are always the same and in the same order, so a reader can
+ * skip to the one it wants.
+ *
+ * Help text and 403 errors that name the missing grant are the two ways a
+ * caller learns about grants, so every help page names the grant a command
+ * needs.
  */
 import {
   NOUNS,
@@ -20,16 +26,22 @@ import {
 } from "@hercule/contract";
 import { COMMANDS, listCommandsUnder, findMentions, type Command, type Field } from "./tree";
 
-/** How wide a line is allowed to be before it is wrapped. */
+/** The maximum line width before a line is wrapped. */
 const WIDTH = 94;
 
-/** The grant an operation needs, or `undefined` for one of the three markers. */
+/**
+ * Returns the grant an operation needs, or `undefined` for one of the three
+ * requirements that are not grants.
+ */
 const findRequiredGrant = (requires: Requirement): Grant | undefined =>
   requires === "unauthenticated" || requires === "setup-token" || requires === "authenticated"
     ? undefined
     : requires;
 
-/** The three markers are not grants, so they are rendered as prose. */
+/**
+ * Returns a requirement as text. The three requirements that are not grants are
+ * described in words.
+ */
 const describeRequirement = (requires: Requirement): string => {
   const grant = findRequiredGrant(requires);
   if (grant !== undefined) return `grant ${grant}`;
@@ -38,13 +50,13 @@ const describeRequirement = (requires: Requirement): string => {
       return "the one-time setup token, as --setup-token <token>";
     case "authenticated":
       return "any authenticated caller";
-    // Only "unauthenticated" is left: a grant was answered above.
+    // Only "unauthenticated" is left: a grant returned above.
     default:
       return "no credential needed";
   }
 };
 
-/** One paragraph, broken at spaces so nothing runs past the width. */
+/** Wraps one paragraph at spaces so no line is longer than the width. */
 const wrapParagraph = (text: string, indent: string): ReadonlyArray<string> => {
   const lines: Array<string> = [];
   let line = indent;
@@ -60,28 +72,31 @@ const wrapParagraph = (text: string, indent: string): ReadonlyArray<string> => {
   return line === indent ? lines : [...lines, line];
 };
 
-/** A label and its prose, the prose hanging under the label when it wraps. */
+/** Formats a label and its text, indenting wrapped lines of the text past the label. */
 const formatLabelledText = (label: string, width: number, text: string): ReadonlyArray<string> => {
   const indent = " ".repeat(width + 4);
   const [first = "", ...rest] = wrapParagraph(text, indent);
   return [`  ${label.padEnd(width)}  ${first.trimStart()}`, ...rest];
 };
 
-/** What the help says before the first full stop. */
+/** Returns the text up to and including its first full stop. */
 const extractFirstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
 
-/** One token of a shell line, quoted only where a shell would need it. */
+/** Quotes a shell argument, but only when a shell would need quotes. */
 const quoteShellArg = (text: string): string => {
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(text)) return text;
   return text.includes('"') ? `'${text}'` : `"${text}"`;
 };
 
 /**
- * One invocation as lines a reader can paste, used both by the examples and by
- * the refusal a terminal gets in place of a read. What is piped in decides the
- * shape: a one-line value goes through `echo`, and anything with a newline in
- * it needs a heredoc, whose body and terminator stay at the left margin because
- * a shell takes the body literally and ends it only on a bare `EOF`.
+ * Returns one command invocation as lines a reader can paste. Used by the help
+ * examples, and by the error shown when a command would read stdin from a
+ * terminal. The stdin value decides the form:
+ *
+ * - a one-line value is piped in with `echo`;
+ * - a value with a newline needs a heredoc. Its body and terminator stay at
+ *   the left margin, because a shell takes the body literally and ends it
+ *   only on a line that is exactly `EOF`.
  */
 export const buildShellExample = (
   command: Command,
@@ -96,8 +111,8 @@ export const buildShellExample = (
 
 const buildPlaceholder = (field: Field): string => {
   if (field.choices !== undefined) return `<${field.spelling}>`;
-  // A field written as one word shows that word, whatever shape the value
-  // behind it has: `<json>` would send the writer looking for a brace.
+  // A field that takes a shorthand word shows `<word>`, whatever type its
+  // decoded value has: `<json>` would make the reader think it needs braces.
   if (field.decodeShorthand !== undefined) return "<word>";
   switch (field.kind) {
     case "string":
@@ -111,7 +126,7 @@ const buildPlaceholder = (field: Field): string => {
   }
 };
 
-/** What a code means when the row says nothing more particular. */
+/** What each error code means, used when the command's CLI row gives no more specific meaning. */
 const GENERIC: Record<ErrorCode, string> = {
   unauthenticated: "no credential, or one this operation does not accept",
   forbidden: "you lack the grant this operation needs",
@@ -123,7 +138,7 @@ const GENERIC: Record<ErrorCode, string> = {
   internal: "the controller failed",
 };
 
-/** The commands a help text names, in the order it names them, itself excluded. */
+/** Returns the other commands a command's help text mentions, in order of first mention. */
 const listMentionedCommands = (command: Command): ReadonlyArray<string> => {
   const found: Array<string> = [];
   for (const mention of findMentions(command.help)) {
@@ -134,7 +149,7 @@ const listMentionedCommands = (command: Command): ReadonlyArray<string> => {
   return found;
 };
 
-/** `hercule <noun>... <verb> --help`. */
+/** Builds the help of one command: `hercule <noun>... <verb> --help`. */
 export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   const flags = [...command.payload.filter((field) => !field.stdin), ...command.query];
   const onStdin = command.payload.filter((field) => field.stdin);
@@ -164,8 +179,8 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   }
 
   if (takesFlags) {
-    // Every row is collected before any is printed, so the label column is as
-    // wide as what is actually shown and no wider.
+    // Collect every row before printing any, so the label column is exactly as
+    // wide as the widest label shown.
     const rows: Array<{ label: string; notes: string; help?: string }> = flags.map((field) => {
       const notes = [field.optional ? "optional" : "required"];
       if (field.repeated) notes.push("repeatable");
@@ -208,16 +223,15 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   }
 
   if (onStdin.length > 0) {
-    // The row's own line first, then the rule the CLI applies to it, so the
-    // field is said once and the mechanics once. The one-field rule keeps
-    // "there is no --<flag> flag" on a line of its own, where nothing can wrap
-    // it in half.
+    // First the field's own help, then the rule for reading it, so each is
+    // said once. For a single field, "There is no --<flag> flag" gets a line of
+    // its own, so wrapping can never split it.
     const one = onStdin.length === 1 ? onStdin[0]! : undefined;
     const rule =
       one !== undefined
         ? one.optional
-          ? `Read only with --${one.spelling}-stdin: the whole of stdin, one trailing newline removed.`
-          : "Required, read unasked: the whole of stdin, one trailing newline removed."
+          ? `Read only with --${one.spelling}-stdin: the whole of stdin, with one trailing newline removed.`
+          : "Required, always read: the whole of stdin, with one trailing newline removed."
         : `${onStdin.length} lines, one per field, in this order: ${onStdin
             .map((field) => field.name)
             .join(", then ")}. The markers ${onStdin
@@ -234,7 +248,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       "",
       "paging:",
       ...wrapParagraph(
-        "One page at a time, newest first unless --sort says otherwise. The answer carries nextCursor while more remain; pass it back as --cursor, or let --all follow it to the end.",
+        "One page at a time, newest first unless --sort says otherwise. The response includes nextCursor while more pages remain; pass it back as --cursor, or use --all to follow it to the end.",
         "  ",
       ),
     );
@@ -243,9 +257,9 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   lines.push("", "returns:");
   const { fields, items } = command.returns;
   if (items === undefined) {
-    lines.push(...wrapParagraph(fields.join(", ") || "nothing but the status", "  "));
+    lines.push(...wrapParagraph(fields.join(", ") || "only the status", "  "));
   } else {
-    // A page names its items; a small fixed listing answers with the bare list.
+    // A page has an `items` field; a small fixed list is returned as a bare array.
     const said = fields.includes("items")
       ? `items[] (${items.join(", ")})`
       : `a list of (${items.join(", ")})`;
@@ -278,7 +292,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   return lines;
 };
 
-/** The daemon forms of `hercule runner`, which are not operations and have no rows. */
+/** The daemon forms of `hercule runner`, which are not operations and have no CLI rows. */
 const DAEMON_FORMS = [
   "daemon forms (this machine's own runner, not the fleet):",
   "  hercule runner",
@@ -287,7 +301,7 @@ const DAEMON_FORMS = [
   "  hercule runner set-controller <controller-url>",
 ];
 
-/** `hercule <noun> --help`, and the same for a nested noun. */
+/** Builds the help of a noun, or a nested noun: `hercule <noun> --help`. */
 export const buildNounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<string> => {
   const noun = prefix.join(" ");
   const commands = listCommandsUnder(prefix);
@@ -296,7 +310,7 @@ export const buildNounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<stri
       ...command.words.slice(prefix.length),
       ...command.positionals.map((field) => `<${field.spelling}>`),
     ].join(" ");
-  // Only a root noun is introduced; a nested one is introduced by its parent.
+  // Only a root noun has a summary; a nested noun is described by its parent.
   const noted: NounRow | undefined =
     prefix.length === 1 ? NOUNS[prefix[0] as keyof typeof NOUNS] : undefined;
 
@@ -318,7 +332,7 @@ export const buildNounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<stri
   return lines;
 };
 
-/** Every noun at the root, in the contract's order, with what sits under it. */
+/** Returns every root noun in the contract's order, with its verbs and nested nouns. */
 const listRootNouns = (): ReadonlyArray<{
   readonly noun: string;
   readonly verbs: ReadonlyArray<string>;
@@ -343,7 +357,7 @@ const listRootNouns = (): ReadonlyArray<{
   });
 };
 
-/** `hercule --help`. */
+/** Builds the root help: `hercule --help`. */
 export const buildRootHelp = (): ReadonlyArray<string> => {
   const nouns = listRootNouns();
   const width = Math.max(...nouns.map((each) => each.noun.length));
@@ -370,14 +384,14 @@ export const buildRootHelp = (): ReadonlyArray<string> => {
     "  hercule login <url>, hercule setup-url, hercule serve, and the daemon forms of hercule runner.",
     "",
     "conventions:",
-    "  ids       An id in full, or its last eight characters or more where a command's help",
-    "            says a listing resolves them. Human output prints the last eight; --json",
-    "            prints them whole.",
+    "  ids       An id in full, or its last eight or more characters where a command's help",
+    "            says a list resolves them. Human output prints the last eight; --json",
+    "            prints them in full.",
     "  --json    Prints the operation's output, or the error envelope, verbatim.",
     "  stdin     A description, a prompt, a password, a config or a workflow's source is",
     "            piped in, never passed as a flag. A required one is always read from stdin;",
     "            an optional one only when its --<flag>-stdin flag is given.",
-    "  paging    A listing takes --limit, --cursor and --sort; --all follows nextCursor to",
+    "  paging    A list takes --limit, --cursor and --sort; --all follows nextCursor to",
     "            the end.",
     "  exit      0 succeeded, 1 the controller returned an error envelope or `workflow",
     "            validate` found errors, 2 the command line was wrong and nothing was sent, 3",

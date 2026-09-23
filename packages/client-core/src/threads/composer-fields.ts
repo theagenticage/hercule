@@ -1,9 +1,9 @@
 /**
- * Every lock, blocker and pill part the composer shows, decided in one place.
- * A thread's placement is copied at spawn and never read through afterwards
- * (spec 02 §Session), so once a thread is active its access mode, workspace
- * and machine are facts rather than fields - only the model and its options
- * stay live, and they stay live inside the instance the thread spawned in.
+ * Decides, in one place, every lock, blocker and pill the composer shows.
+ * A thread's placement is copied when it is spawned and never re-read
+ * afterwards (spec 02 §Session). So once a thread is active, its access mode,
+ * workspace and runner are fixed. Only the model and its options can still
+ * change, and only within the instance the thread was spawned on.
  */
 import type {
   AccessMode,
@@ -30,11 +30,11 @@ import {
 } from "./workspaces";
 
 export interface ComposerField {
-  /** Why this cannot be changed here, as the sentence the tooltip reads. */
+  /** Why the field cannot be changed here, as the tooltip text, or `null` when it can. */
   readonly locked: string | null;
 }
 
-/** The provider mark, the account where it is worth naming, and the model. */
+/** The model pill: the provider logo, the account name when it is needed, and the model. */
 export interface ModelPill {
   readonly providerId: string | null;
   readonly account: string | null;
@@ -43,59 +43,65 @@ export interface ModelPill {
 
 export interface ComposerBlocked {
   readonly reason: string;
-  /** The login that would clear it, where logging in is what is missing. */
+  /** The login that would fix the problem, when a missing login is the problem. */
   readonly login: LoginTarget | null;
 }
 
-/** One machine the thread could be placed on, and whether it is the one in force. */
+/** A runner the thread could be placed on, and whether it is the current one. */
 export interface MachineRow extends RunnerMenuRow {
   readonly current: boolean;
-  /** Where a new thread would land without a pick, as the row's own badge. */
+  /** Whether a new thread goes to this runner when none is picked. Shown as a badge. */
   readonly isDefault: boolean;
-  /** `1/4`: the sessions this machine is hosting, against what it will host. */
+  /** `1/4`: the sessions this runner is hosting, out of its maximum. */
   readonly capacity: string;
   /**
-   * `webshop is not cloned there · clones on first use`, on a draft opening in
-   * a main workspace. It dims nothing: a machine without the repo yet is a
-   * machine that clones it, which is a wait and not a refusal.
+   * `webshop is not cloned there · clones on first use`, for a draft that
+   * opens in a main workspace. It does not dim the row: a runner without the
+   * repo will clone it, which only takes longer.
    */
   readonly notCloned: string | null;
 }
 
 export interface ComposerFields {
-  /** The mode in force, and the four the menu offers under it. */
+  /** The current access mode, and the four modes the menu offers. */
   readonly accessMode: ComposerField & {
     readonly value: AccessMode;
     readonly rows: readonly AccessModeMenuItem[];
   };
   readonly model: { readonly pill: ModelPill };
-  /** What the current model offers to pick under it; none means no selector. */
+  /** The current model's options, or `null` when it has none and there is no selector. */
   readonly options: readonly ModelOption[] | null;
-  /** Where the thread works: the pick in force, and whether it can still change. */
+  /** Where the thread works: the current pick, and whether it can still change. */
   readonly workspace: ComposerField & { readonly value: WorkspacePick };
-  /** The machine: the one in force, named with why it is dimmed, and the fleet. */
+  /** The runner: the current one with the reason it is dimmed, if it is, and all runners. */
   readonly machine: ComposerField & {
     readonly label: string;
     /**
-     * The machine everything else reads from. It is not `config.runnerId`: a
-     * draft whose fleet holds nothing selectable has picked none, and falls
-     * back to the machine it would really be placed on (`findReferenceRunner`).
-     * Anything asking "is the repo cloned there" has to ask about that one, or
-     * the lead sentence and the menu under it name two different machines.
+     * The runner every other field reads from. It is not always
+     * `config.runnerId`: when no runner is selectable, the draft has picked
+     * none, and this falls back to the runner it would really be placed on
+     * (`findReferenceRunner`). Anything that checks whether the repo is cloned
+     * must check this runner, or the lead sentence and the menu below it would
+     * refer to two different runners.
      */
     readonly runnerId: string | null;
     readonly rows: readonly MachineRow[];
   };
-  /** The sentence a draft stands under; an active thread stands under none. */
+  /** The lead sentence above a draft, or `null` for an active thread. */
   readonly lead: readonly Phrase[] | null;
-  /** Why this draft cannot start at all; null once it can, and on a thread that has. */
+  /** Why the draft cannot start, or `null` when it can and for an active thread. */
   readonly blocked: ComposerBlocked | null;
 }
 
 /**
- * Why a draft cannot start, in the order the user can act on: something to
- * run it with, a machine to run it on, then a login on that machine. Only the
- * last of the three is something a button can fix from here.
+ * Returns why a draft cannot start, or `null` when it can. Checks, in the
+ * order the user can fix them:
+ *
+ * - a provider instance to run it with;
+ * - a runner to run it on;
+ * - a login for the instance on that runner.
+ *
+ * Only the last one can be fixed with a button from here.
  */
 const findBlocker = (
   instance: ProviderInstance | undefined,
@@ -117,6 +123,7 @@ const findBlocker = (
 const findLockedReason = (kind: ThreadKind, field: string): string | null =>
   kind === "active" ? `Create a new thread to change the ${field}` : null;
 
+/** Returns everything the composer shows for a thread's config. */
 export const buildComposerFields = (
   catalogs: ThreadCatalogs,
   config: ThreadConfig,
@@ -127,20 +134,20 @@ export const buildComposerFields = (
   const workspaces = catalogs.workspaces ?? [];
   const projectId = config.projectId ?? null;
   const repos = listProjectRepos(resources, projectId);
-  // The pick the user made stands; otherwise the default follows the stored
-  // setting, and the repos of the project are what either can name.
+  // Use the user's pick if there is one; otherwise the default, which follows
+  // the stored setting and the project's repos.
   const pick =
     config.workspace ?? decideDefaultWorkspacePick(repos, config.preferredWorkspace ?? null);
-  // Read only on a draft: a thread that has started is locked because it
-  // started, which is what its tooltip has to say, and its own machine is the
-  // one worth naming rather than the workspace that chose it.
+  // Only read for a draft. A started thread is locked because it started,
+  // which is what its tooltip must say, and its label names its own runner
+  // rather than the workspace that chose it.
   const joined =
     kind === "draft" && pick.kind === "existing"
       ? workspaces.find((each) => each.id === pick.workspaceId)
       : undefined;
-  // A workspace that already stands is on one machine and never moves, so a
-  // draft joining one takes that machine as its default before anything is
-  // read off it; a machine the user picked is in `config.runnerId` already.
+  // An existing workspace is on one runner and never moves, so a draft that
+  // joins one uses that runner. A runner the user picked is already in
+  // `config.runnerId`.
   const runner = findReferenceRunner(
     catalogs.runners,
     joined?.runnerId ?? config.runnerId,
@@ -149,8 +156,9 @@ export const buildComposerFields = (
   const snapshot = instance === undefined ? undefined : findSnapshotOn(instance, runner?.id);
   const descriptor = snapshot?.models.find((model) => model.slug === config.model);
 
-  // The name and the reason come off one machine, never off two: a machine
-  // named with another's reason would send the user to fix the wrong thing.
+  // The label's name and dimmed reason come from the same runner. A runner
+  // shown with another runner's reason would send the user to fix the wrong
+  // thing.
   const menu =
     instance === undefined
       ? null
@@ -189,27 +197,26 @@ export const buildComposerFields = (
       pill: {
         providerId: instance?.providerId ?? null,
         account: instance === undefined ? null : findAccountName(catalogs.instances, instance),
-        // A slug the snapshot no longer offers is still what the thread runs
-        // under, so the pill names it rather than going blank.
+        // A slug the snapshot no longer offers is still the thread's model, so
+        // the pill shows the slug rather than going blank.
         name: descriptor?.name ?? config.model,
       },
     },
     options:
       descriptor === undefined || descriptor.options.length === 0 ? null : descriptor.options,
     workspace: {
-      // A project with no repo works in none, so there is nothing to choose
-      // between and the selector is its value with the way out as its reason
-      // (D-20d) - which is a different way out on a draft that stands in no
-      // project at all, where there is nothing to add a repo to yet.
+      // A project with no repo has no workspace to choose, so the selector is
+      // locked, and its reason tells the user how to get one. A draft with no
+      // project gets a different reason, because there is no project to add a
+      // repo to yet.
       locked:
         findLockedReason(kind, "workspace") ??
         (repos.length > 0 ? null : projectId === null ? NO_PROJECT_REASON : NO_WORKSPACE_REASON),
       value: pick,
     },
     machine: {
-      // A workspace that already stands is on one machine and never moves, so
-      // joining it settles the machine rather than offering it (spec 02
-      // §Workspace).
+      // An existing workspace is on one runner and never moves, so joining it
+      // decides the runner instead of offering a choice (spec 02 §Workspace).
       locked:
         joined === undefined
           ? findLockedReason(kind, "machine")
@@ -238,10 +245,10 @@ export const buildComposerFields = (
 };
 
 /**
- * What the card says between a model pick and the submission that carries it.
- * A pick does not reach the session on its own (spec 14 §What locks at start:
- * the picks ride `session.input`), so the thread still runs the model it
- * runs this turn with until the next message goes out.
+ * Returns the note the composer shows after a model pick on an active thread,
+ * until the pick is sent. A pick is only sent with the next message (spec 14
+ * §What locks at start: the picks are sent with `session.input`), so until
+ * then the thread keeps running its current model.
  */
 export const buildPendingModelNote = (kind: ThreadKind, picks: ThreadPicks): string | null =>
   kind === "active" && picks.model !== undefined ? "model change applies on send" : null;

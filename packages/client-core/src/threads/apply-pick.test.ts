@@ -1,10 +1,11 @@
 /**
- * `applyPick(catalogs, config, picks, pick)` folds one selector choice into
- * the picks the composer holds. What matters: the per-model options belong to
- * the model that offered them, so anything that changes the catalog under
- * them clears them, and picking what is already in force is not a change at
- * all - it is the config that says what is in force, not the picks, which
- * hold only what the user has touched.
+ * Tests `applyPick(catalogs, config, picks, pick)`, which applies one
+ * selector choice to the picks the composer holds. The tests check that:
+ *
+ * - the model options belong to the model that offered them, so anything
+ *   that changes the catalog clears them;
+ * - picking the value that already applies is not a change. The config holds
+ *   what applies; the picks hold only what the user changed.
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
@@ -28,7 +29,7 @@ const CLAUDE = buildInstance("claude-code", "Claude Code", [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS] }),
 ]);
 
-/** Logged in on the remote machine only, so an instance pick moves the runner too. */
+/** Logged in on the remote runner only, so picking this instance changes the runner too. */
 const CODEX = buildInstance("codex", "Codex", [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [GPT] }),
@@ -40,7 +41,10 @@ const CATALOGS: {
   readonly localRunnerId: string | null;
 } = { instances: [CLAUDE, CODEX], runners: [LOCAL, REMOTE], localRunnerId: LOCAL.id };
 
-/** What the thread runs with while the picks below are made: the defaults overlaid with them. */
+/**
+ * Returns what the thread runs with while the picks are made: the defaults with
+ * the picks applied.
+ */
 const CONFIG: ThreadConfig = {
   instanceId: CLAUDE.id,
   model: SONNET.slug,
@@ -51,7 +55,7 @@ const CONFIG: ThreadConfig = {
 };
 
 describe("applyPick", () => {
-  it("sets a new model and drops the options the old model carried", () => {
+  it("sets a new model and drops the old model's options", () => {
     expect(
       applyPick(
         CATALOGS,
@@ -62,10 +66,10 @@ describe("applyPick", () => {
     ).toEqual({ model: OPUS.slug });
   });
 
-  it("drops the pick, and the options under it, when the model in force is picked back", () => {
-    // The config is the thread's own, so picking its model after another is
-    // picking nothing: the picks are left with neither the model nor the
-    // choices made under the one just left.
+  it("drops the model pick and its options when the current model is picked again", () => {
+    // The config is the thread's own, so picking its model again after another
+    // one undoes the change: the picks keep neither the model nor the options
+    // picked for the other model.
     expect(
       applyPick(
         CATALOGS,
@@ -76,7 +80,7 @@ describe("applyPick", () => {
     ).toEqual({});
   });
 
-  it("changes nothing when the model in force is picked again, whatever the picks hold", () => {
+  it("changes nothing when the current model is picked and no other model was picked before", () => {
     const picks = { options: { effort: "high" } };
 
     expect(applyPick(CATALOGS, CONFIG, picks, { kind: "model", value: SONNET.slug })).toEqual(
@@ -84,7 +88,7 @@ describe("applyPick", () => {
     );
   });
 
-  it("takes the runner and the model from the instance's own defaults, and drops the options", () => {
+  it("takes the runner and model from the instance's defaults, and drops the options", () => {
     expect(
       applyPick(
         CATALOGS,
@@ -110,7 +114,7 @@ describe("applyPick", () => {
     ).toEqual({ options: { effort: "low", thinking: true } });
   });
 
-  it("overwrites an option picked before under the same id", () => {
+  it("overwrites an earlier pick of the same option", () => {
     expect(
       applyPick(
         CATALOGS,
@@ -132,7 +136,7 @@ describe("applyPick", () => {
     ).toEqual({ model: SONNET.slug, options: { effort: "high" }, accessMode: "full-access" });
   });
 
-  it("sets the runner and drops the options, since a catalog is scoped instance x runner", () => {
+  it("sets the runner and drops the options, because a catalog belongs to one instance on one runner", () => {
     expect(
       applyPick(
         CATALOGS,

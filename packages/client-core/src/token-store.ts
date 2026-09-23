@@ -1,18 +1,18 @@
 /**
  * Where the bearer token lives between page loads.
  *
- * The token is kept in `localStorage` under `hercule:token:<origin>`, so one
- * browser talking to two controllers holds two tokens and neither sees the
- * other's. The origin is the controller's, exactly as the client's `baseUrl`
- * names it - the same string the app reaches the controller with.
+ * The token is kept in `localStorage` under `hercule:token:<origin>`, so a
+ * browser that talks to two controllers keeps two separate tokens. The origin
+ * is the controller's, exactly as the client's `baseUrl` spells it.
  *
- * Storage is an injected seam rather than a reach for the global, so the store
- * runs in a test with no DOM.
+ * The storage is passed in rather than read from the global, so the store can
+ * run in a test with no DOM.
  *
- * Every access is guarded. A browser that denies site data - a private window,
- * a hardened profile, an embedded webview - throws on the reach itself, and the
- * app has to load and offer a sign-in rather than fail before React mounts. The
- * cost of a denied store is that the token does not survive a page load.
+ * Every access is wrapped in `try`. A browser that blocks site data (a private
+ * window, a hardened profile, an embedded webview) throws as soon as
+ * `localStorage` is touched, and the app must still load and offer a sign-in
+ * rather than fail before React mounts. Then the token only lasts until the
+ * page reloads.
  */
 
 /** The slice of `localStorage` this module uses. */
@@ -24,15 +24,15 @@ export interface StorageLike {
 
 /** The bearer token for one controller, held across page loads. */
 export interface TokenStore {
-  /** The token held, or `null` if there is none. */
+  /** Returns the stored token, or `null` if there is none. */
   read(): string | null;
-  /** Hold this token from now on; `null` removes it. */
+  /** Stores `token`, replacing any earlier one; `null` removes it. */
   write(token: string | null): void;
 }
 
 export const buildTokenStorageKey = (origin: string): string => `hercule:token:${origin}`;
 
-/** The browser's `localStorage`, or nothing where reaching it throws. */
+/** Returns the browser's `localStorage`, or `undefined` when accessing it throws. */
 const findLocalStorage = (): StorageLike | undefined => {
   try {
     return globalThis.localStorage;
@@ -59,8 +59,8 @@ export const createTokenStore = (
         if (token === null) storage?.removeItem(key);
         else storage?.setItem(key, token);
       } catch {
-        // Nothing to do: the token is held in memory for this page load either
-        // way, and there is no other place to put it.
+        // Nothing to do: the app keeps the token in memory for this page load
+        // anyway, and there is nowhere else to store it.
       }
     },
   };

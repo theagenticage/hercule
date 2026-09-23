@@ -5,7 +5,7 @@ import { formatSince, formatStamp, formatTimeContext } from "./time-context";
 const MONDAY_MORNING = new Date("2026-09-07T07:14:00Z");
 
 describe("formatTimeContext", () => {
-  it("names the weekday and the 24-hour clock time in the zone given", () => {
+  it("formats the weekday and 24-hour time in the given zone", () => {
     assert.strictEqual(formatTimeContext(MONDAY_MORNING, "Europe/Amsterdam"), "Monday 09:14");
     assert.strictEqual(formatTimeContext(MONDAY_MORNING, "UTC"), "Monday 07:14");
   });
@@ -22,23 +22,23 @@ describe("formatTimeContext", () => {
     assert.strictEqual(formatTimeContext(instant, "Europe/Amsterdam"), "Sunday 00:05");
   });
 
-  it("answers nothing for an instant that is not a date", () => {
+  it("returns undefined for an invalid date", () => {
     assert.isUndefined(formatTimeContext(new Date("0000-00-00T00:00:00.000Z"), "UTC"));
     assert.isUndefined(formatTimeContext(new Date(Number.NaN), "UTC"));
   });
 
-  it("answers nothing for a zone this runtime cannot format", () => {
+  it("returns undefined for a zone this runtime cannot format", () => {
     assert.isUndefined(formatTimeContext(MONDAY_MORNING, "Europe/Nowhere"));
     assert.isUndefined(formatTimeContext(MONDAY_MORNING, ""));
   });
 });
 
 describe("formatSince", () => {
-  it("prefixes the same reading", () => {
+  it("prefixes the time context with since", () => {
     assert.strictEqual(formatSince(MONDAY_MORNING, "UTC"), "since Monday 07:14");
   });
 
-  it("answers nothing wherever the reading itself is nothing", () => {
+  it("returns undefined whenever the time context is undefined", () => {
     assert.isUndefined(formatSince(new Date("0000-00-00T00:00:00.000Z"), "UTC"));
     assert.isUndefined(formatSince(MONDAY_MORNING, "Europe/Nowhere"));
   });
@@ -48,18 +48,18 @@ describe("formatStamp", () => {
   /** 17:21 in Amsterdam on the fourth. */
   const instant = new Date("2026-09-04T15:21:31.646Z");
 
-  it("reads a moment in the zone given, on a 24-hour clock", () => {
+  it("formats an instant in the given zone, on a 24-hour clock", () => {
     assert.strictEqual(formatStamp(instant, "Europe/Amsterdam"), "4 Sep 17:21");
     assert.strictEqual(formatStamp(instant, "UTC"), "4 Sep 15:21");
   });
 
-  it("answers nothing for a zone it cannot format or a moment that is not one", () => {
+  it("returns undefined for an unusable zone or an invalid date", () => {
     assert.isUndefined(formatStamp(instant, "Europe/Nowhere"));
     assert.isUndefined(formatStamp(new Date(Number.NaN), "UTC"));
   });
 });
 
-describe("the formatters these readings need", () => {
+describe("formatter caching", () => {
   /** How many `Intl.DateTimeFormat`s `run` builds. */
   const countFormattersBuilt = (run: () => void): number => {
     const original = Intl.DateTimeFormat;
@@ -78,8 +78,8 @@ describe("the formatters these readings need", () => {
     return count;
   };
 
-  it("are built once per zone and reading, however many rows are read", () => {
-    // A zone no other test here asks for, so nothing is held for it yet.
+  it("builds each formatter once per zone and format, however many rows are formatted", () => {
+    // A zone no other test here uses, so no formatter is cached for it yet.
     const zone = "Pacific/Auckland";
     const rows = 50;
 
@@ -94,7 +94,7 @@ describe("the formatters these readings need", () => {
     assert.strictEqual(formatStamp(MONDAY_MORNING, zone), "7 Sep 19:14");
   });
 
-  it("does not rebuild for a zone this runtime has already refused", () => {
+  it("does not retry a zone this runtime has already rejected", () => {
     const count = countFormattersBuilt(() => {
       assert.isUndefined(formatStamp(MONDAY_MORNING, "Europe/Atlantis"));
       assert.isUndefined(formatStamp(MONDAY_MORNING, "Europe/Atlantis"));

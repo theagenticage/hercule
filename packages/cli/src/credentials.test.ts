@@ -23,14 +23,14 @@ afterEach(() => {
 });
 
 describe("resolveCredential", () => {
-  it("takes the environment token first", () => {
+  it("uses the environment token first", () => {
     writeCredentials({ url: "http://file", apiKey: "from-file" });
     expect(
       resolveCredential(home, { HERCULE_TOKEN: "from-env", HERCULE_API_URL: "http://env" }),
     ).toEqual({ url: "http://env", token: "from-env", source: "environment" });
   });
 
-  it("takes the file when the environment has no token", () => {
+  it("uses the file when the environment has no token", () => {
     writeCredentials({ url: "http://file", apiKey: "from-file" });
     expect(resolveCredential(home, {})).toEqual({
       url: "http://file",
@@ -49,7 +49,7 @@ describe("resolveCredential", () => {
     );
   });
 
-  it("refuses a lone HERCULE_API_URL even when there is no credential file at all", () => {
+  it("rejects a lone HERCULE_API_URL even when there is no credential file", () => {
     expect(() => resolveCredential(home, { HERCULE_API_URL: "http://env" })).toThrow(
       /HERCULE_TOKEN/,
     );
@@ -64,13 +64,13 @@ describe("resolveCredential", () => {
     });
   });
 
-  it("refuses the file outright inside a session", () => {
+  it("never reads the file inside a session", () => {
     writeCredentials({ url: "http://file", apiKey: "from-file" });
     expect(() => resolveCredential(home, { HERCULE_SESSION: "1" })).toThrow(CredentialError);
     expect(() => resolveCredential(home, { HERCULE_SESSION: "1" })).toThrow(/HERCULE_SESSION=1/);
   });
 
-  it("still takes the environment token inside a session", () => {
+  it("still uses the environment token inside a session", () => {
     writeCredentials({ url: "http://file", apiKey: "from-file" });
     expect(
       resolveCredential(home, {
@@ -81,15 +81,15 @@ describe("resolveCredential", () => {
     ).toEqual({ url: "http://controller", token: "session-token", source: "environment" });
   });
 
-  it("says what to do when there is nothing at all", () => {
+  it("says what to do when there is no credential at all", () => {
     expect(() => resolveCredential(home, {})).toThrow(/hercule login/);
   });
 
-  it("refuses a token with no URL", () => {
+  it("rejects a token with no URL", () => {
     expect(() => resolveCredential(home, { HERCULE_TOKEN: "t" })).toThrow(/HERCULE_API_URL/);
   });
 
-  it("treats a broken credential file as an error, not as anonymity", () => {
+  it("treats a broken credential file as an error, not as no credential", () => {
     writeCredentials("not json");
     expect(() => resolveCredential(home, {})).toThrow(/not valid JSON/);
     writeCredentials({ url: "http://file" });
@@ -104,7 +104,7 @@ describe("resolveUrl", () => {
     expect(resolveUrl(home, {})).toBe("http://file");
   });
 
-  it("takes a lone HERCULE_API_URL, which carries no credential to leak", () => {
+  it("uses a lone HERCULE_API_URL, which has no credential to leak", () => {
     expect(resolveUrl(home, { HERCULE_API_URL: "http://env" })).toBe("http://env");
   });
 

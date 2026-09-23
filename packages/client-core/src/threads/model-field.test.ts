@@ -1,7 +1,8 @@
 /**
- * `buildThreadModelField(instance, localRunnerId, current)` reads Settings >
- * Threads' model field: the picked instance's models, from the local runner's
- * snapshot when it has one, else the instance's first snapshot.
+ * Tests `buildThreadModelField(instance, localRunnerId, current)`, which
+ * builds the model field of Settings > Threads: the picked instance's models,
+ * from the local runner's snapshot when there is one, else from the
+ * instance's first snapshot.
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance } from "@hercule/contract";
@@ -28,7 +29,7 @@ const MODELS = [
 ];
 
 describe("buildThreadModelField", () => {
-  it("offers the local runner's snapshot when it has one", () => {
+  it("offers the models of the local runner's snapshot when there is one", () => {
     const instance: Pick<ProviderInstance, "snapshots"> = {
       snapshots: [
         buildSnapshot(OTHER, [{ slug: "claude-haiku-5", name: "Haiku 5", options: [] }]),
@@ -46,7 +47,7 @@ describe("buildThreadModelField", () => {
     expect(field.options.find((option) => option.slug === "claude-opus-5")?.isDefault).toBe(true);
   });
 
-  it("falls back to the instance's first snapshot when none is the local runner's", () => {
+  it("falls back to the instance's first snapshot when none is from the local runner", () => {
     const instance: Pick<ProviderInstance, "snapshots"> = {
       snapshots: [buildSnapshot(OTHER, MODELS)],
     };
@@ -73,7 +74,7 @@ describe("buildThreadModelField", () => {
     ]);
   });
 
-  it("is dimmed with no options when the instance carries no snapshot at all", () => {
+  it("is dimmed with no options when the instance has no snapshot", () => {
     const instance: Pick<ProviderInstance, "snapshots"> = { snapshots: [] };
 
     const field = buildThreadModelField(instance, LOCAL, "claude-sonnet-5");
@@ -82,7 +83,7 @@ describe("buildThreadModelField", () => {
     expect(field.options).toEqual([]);
   });
 
-  it("is dimmed when the snapshot exists but the probe found no login", () => {
+  it("is dimmed when the snapshot exists but is not logged in", () => {
     const instance: Pick<ProviderInstance, "snapshots"> = {
       snapshots: [{ ...buildSnapshot(LOCAL, MODELS), auth: { status: "unauthenticated" } }],
     };

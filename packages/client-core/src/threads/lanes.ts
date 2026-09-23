@@ -1,8 +1,9 @@
 /**
- * Sessions read the check-in page's lane shape here too, but nothing in this
- * build ever produces a waiting decision or an assistant session, so those two
- * lanes always come back empty - the fixed order is what a screen renders,
- * not a guess about what is populated.
+ * Groups sessions into the lanes of the check-in page, and builds its
+ * headline. Nothing in this build produces a waiting decision or an assistant
+ * session yet, so those two lanes are always empty. The lanes are still
+ * returned in their fixed order, because that order is what the screen
+ * renders.
  */
 import type { Session } from "@hercule/contract";
 import { isSettled, WORKING_STATUSES } from "./status";
@@ -15,9 +16,9 @@ export interface Lane {
 }
 
 /**
- * An exit that can be resumed still takes input, so it reads as idle wherever
- * an idle thread does: what is neither working nor over for good is waiting
- * for the user.
+ * Checks whether a session is waiting for the user: it is neither working nor
+ * over for good. An exited session that can be resumed still takes input, so
+ * it counts as idle.
  */
 const takesInput = (session: Session): boolean =>
   !WORKING_STATUSES.has(session.status) && !isSettled(session);
@@ -54,8 +55,8 @@ export const buildHeadline = (sessions: readonly Session[], now: Date): string =
   if (settled > 0) segments.push(`${String(settled)} settled this week`);
 
   if (segments.length > 0) return segments.join(" · ");
-  // Nothing at all reads as "No sessions yet"; sessions that exist but count
-  // toward nothing this sentence names (an old exit, an exit with no
-  // `exitedAt`) read as merely quiet rather than as if there were none.
+  // With no sessions at all, say "No sessions yet". Sessions that exist but
+  // fall in none of the counts above (an exit older than a week, or one with
+  // no `exitedAt`) get "Nothing active this week" instead.
   return sessions.length === 0 ? "No sessions yet" : "Nothing active this week";
 };

@@ -15,14 +15,14 @@ const stubClient = (handler: Handler) => {
   return { fetch, client };
 };
 
-/** A join token reference, as `runner join-token list` answers with them. */
+/** Returns a join token, as `runner join-token list` returns it. */
 const joinToken = (tail: string) => ({
   id: buildId(tail),
   createdAt: "2026-09-15T10:00:00.000Z",
   expiresAt: "2026-09-15T11:00:00.000Z",
 });
 
-/** A session, as `session list` answers with them. */
+/** Returns a session, as `session list` returns it. */
 const buildSession = (tail: string) => ({
   id: buildId(tail),
   title: "a thread",
@@ -61,9 +61,9 @@ const buildInput = (inputId: string, sessionId: string) => ({
   reason: null,
 });
 
-// what the row's `resolves` does with a tail.
-describe("a positional the row resolves", () => {
-  it("sweeps the listing the row names, then acts on the full id", async () => {
+// Tests how a tail is resolved through the list operation a row's `resolves` names.
+describe("a positional whose row resolves tails", () => {
+  it("reads the list the row names, then calls the operation with the full id", async () => {
     const token = joinToken("aaaaaaa1");
     const { fetch, client } = stubClient((request) =>
       request.path === "/api/v1/runners/join-tokens" && request.method === "GET" ? [token] : {},
@@ -109,12 +109,12 @@ describe("a positional the row resolves", () => {
 });
 
 /**
- * A field whose schema is a struct, or a union of them, is written as JSON on
- * the command line: the one way a terminal can spell a nested value. What the
- * flag holds reaches the request as the object it decodes to, not as text.
+ * A field whose schema is a struct, or a union of structs, is given as JSON on
+ * the command line, the only way to write a nested value in a terminal. The
+ * request gets the parsed object, not the text.
  */
-describe("a flag over a structured field", () => {
-  it("sends the JSON a workspace flag carries as the object it is", async () => {
+describe("a flag for a structured field", () => {
+  it("sends a workspace flag's JSON as an object", async () => {
     const row = buildSession("ccccccc3");
     const { fetch, client } = stubClient(() => row);
     const command = lookUpCommand("session", "spawn");
@@ -135,7 +135,7 @@ describe("a flag over a structured field", () => {
     });
   });
 
-  it("refuses a workspace that is not JSON, naming the flag, and calls nothing", async () => {
+  it("rejects a workspace that is not JSON, naming the flag, and calls nothing", async () => {
     const { fetch } = stubClient(() => ({}));
     const command = lookUpCommand("session", "spawn");
 
@@ -146,11 +146,11 @@ describe("a flag over a structured field", () => {
   });
 });
 
-describe("a field the row does not resolve", () => {
-  it("refuses a tail for a Hercule id, names the full id, and calls nothing", async () => {
+describe("a field whose row does not resolve tails", () => {
+  it("rejects a tail for a Hercule id, asks for the full id, and calls nothing", async () => {
     const { fetch, client } = stubClient(() => ({}));
-    // A queued input's own id: a Hercule id with no listing of its own, so a
-    // tail has nothing to be resolved against and is refused rather than sent.
+    // A queued input's id: a Hercule id with no list operation, so a tail
+    // cannot be looked up and is rejected rather than sent.
     const command = lookUpCommand("input", "update");
     const args = await parseArguments(
       command,
@@ -163,10 +163,10 @@ describe("a field the row does not resolve", () => {
     expect(fetch.calls).toEqual([]);
   });
 
-  it("takes a plugin id as written, because no tail could ever stand for one", async () => {
+  it("sends a plugin id as written, because a plugin id is never a tail", async () => {
     const { fetch, client } = stubClient(() => ({}));
-    // Hex-shaped, and still a name: plugin ids are not Hercule ids, so there is
-    // no longer id this could be the end of.
+    // It looks like hex, but it is a name: plugin ids are not Hercule ids, so
+    // there is no longer id this could be the end of.
     const command = lookUpCommand("plugin", "read");
     const args = await parseArguments(command, ["1f3a9c2e"], refuseStdinRead);
 
@@ -174,7 +174,7 @@ describe("a field the row does not resolve", () => {
     expect(fetch.calls[0]?.path).toBe("/api/v1/plugins/1f3a9c2e");
   });
 
-  it("still takes the id a plugin actually has", async () => {
+  it("still accepts a plugin's real id", async () => {
     const { fetch, client } = stubClient(() => ({}));
     const command = lookUpCommand("plugin", "enable");
     const args = await parseArguments(command, ["github"], refuseStdinRead);

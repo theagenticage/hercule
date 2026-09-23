@@ -1,9 +1,11 @@
 /**
- * The model options selector's own label: what is picked under the model, in
- * one word. Reads the choice's label rather than its value, because a label is
- * copy and a value is a slug. It says nothing at all where there is no word
- * to say - no reasoning choice, or one that is off - and the selector then
- * carries its own name: a bolt on its own would name nothing.
+ * Builds the label of the model options selector: a short summary of the
+ * picked options, such as `high ⚡`. It uses each choice's label rather than
+ * its value, because a label is display text and a value is a slug.
+ *
+ * Returns `null` when there is no reasoning option to show (the model has
+ * none, or thinking is off). The selector then shows its own name, because a
+ * bolt on its own would mean nothing.
  */
 import type { ModelOption } from "@hercule/contract";
 import { buildOptionsMenu, type ModelOptionRow } from "./options-menu";

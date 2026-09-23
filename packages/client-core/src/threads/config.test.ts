@@ -1,9 +1,9 @@
 /**
- * `readThreadConfig(thread)` is what the thread itself runs with, and
- * `computeEffectiveConfig(base, picks)` is what the composer draws over it and what a
- * draft spawns with. What matters: the options a model carries survive a pick
- * that is not about the model, and go with the model - and with the account -
- * when either is picked.
+ * Tests `readThreadConfig(thread)`, which returns what the thread itself runs
+ * with, and `computeEffectiveConfig(base, picks)`, which returns what the
+ * composer shows and what a draft spawns with. The model options survive a
+ * pick that does not change the model, and are dropped when another model or
+ * account is picked.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
@@ -19,29 +19,29 @@ const BASE: ThreadConfig = {
 };
 
 describe("computeEffectiveConfig", () => {
-  it("is the thread's own configuration when nothing is picked", () => {
+  it("returns the thread's own config when nothing is picked", () => {
     expect(computeEffectiveConfig(BASE, {})).toEqual(BASE);
   });
 
-  it("lays the options picked over the ones the model already runs with", () => {
+  it("applies the picked options over the model's current options", () => {
     expect(computeEffectiveConfig(BASE, { options: { thinking: true } }).options).toEqual({
       effort: "high",
       thinking: true,
     });
   });
 
-  it("drops the stored options when another account is picked: they went with the pair", () => {
+  it("drops the stored options when another account is picked, because they belong to the old account and model", () => {
     expect(computeEffectiveConfig(BASE, { instanceId: "i-codex" }).options).toEqual({});
   });
 
-  it("drops the stored options when another model is picked: they went with it", () => {
+  it("drops the stored options when another model is picked, because they belong to the old model", () => {
     expect(computeEffectiveConfig(BASE, { model: "claude-opus-5" })).toMatchObject({
       model: "claude-opus-5",
       options: {},
     });
   });
 
-  it("keeps the options picked under the model just picked", () => {
+  it("keeps the options picked for the newly picked model", () => {
     expect(
       computeEffectiveConfig(BASE, { model: "claude-opus-5", options: { effort: "low" } }).options,
     ).toEqual({ effort: "low" });
@@ -73,21 +73,21 @@ const SESSION: Session = {
 };
 
 describe("readThreadConfig", () => {
-  it("is the draft's own config, which is all a draft has", () => {
+  it("returns a draft's own config", () => {
     expect(readThreadConfig({ kind: "draft", config: BASE })).toBe(BASE);
   });
 
-  it("reads an active thread off the session: the mode it runs at, not the one asked for", () => {
+  it("reads an active thread from the session, using the access mode it runs with, not the one requested", () => {
     expect(readThreadConfig({ kind: "active", session: SESSION })).toEqual({
       ...BASE,
       projectId: null,
-      // Where it works is the session's own, and a session is in a workspace
-      // that already stands or in none at all - never in one to be made.
+      // A session is in an existing workspace or in none, never in one still
+      // to be created.
       workspace: { kind: "existing", workspaceId: "w-1" },
     });
   });
 
-  it("reads a thread with no workspace as one working without a checkout", () => {
+  it("treats a thread with no workspace as working without a checkout", () => {
     expect(
       readThreadConfig({ kind: "active", session: { ...SESSION, workspaceId: null } }),
     ).toMatchObject({ workspace: { kind: "none" } });

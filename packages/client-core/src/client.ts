@@ -2,11 +2,11 @@
  * The Hercule client: the contract's derived HttpApi client, wrapped into plain
  * promise-returning functions.
  *
- * This module is the whole reason `client-core` exists. The web app and the CLI
- * see nothing but promises, plain objects and three `Error` subclasses; every
- * Effect type stops here. Nothing about a route is written
- * by hand: the shape below is derived from `api`, so an operation added to the
- * contract appears here with no edit.
+ * This module is the reason `client-core` exists. The web app and the CLI see
+ * only promises, plain objects and three `Error` subclasses; no Effect type
+ * gets past this module. No route is written by hand: the client's shape is
+ * derived from `api`, so an operation added to the contract appears here with
+ * no edit.
  */
 import { api } from "@hercule/contract";
 import { Effect, Result } from "effect";
@@ -33,44 +33,48 @@ export type Operations = Promisified<HttpApiClient.ForApi<typeof api>>;
 
 export type HerculeClient = Operations & {
   /**
-   * The bearer token sent on every call from now on, and kept where a token
-   * store was given. `null` sends none and clears what was kept.
+   * Sets the bearer token sent on every later call, and saves it in the token
+   * store when there is one. `null` sends no token and clears the store.
    */
   readonly setToken: (token: string | null) => void;
   /**
-   * The same, for a credential that must not outlive this page load: the
-   * one-time setup token is presented on the call that spends it and is never
-   * written to the store, so a tab closed mid-flight leaves nothing behind.
+   * Sets the bearer token like `setToken`, but never saves it, for a token
+   * that must not outlive this page load. The one-time setup token is sent
+   * only on the call that uses it up, so a tab closed during setup leaves no
+   * token behind.
    */
   readonly presentToken: (token: string | null) => void;
-  /** The bearer token currently held. */
+  /** Returns the current bearer token, or `null` when there is none. */
   readonly getToken: () => string | null;
 };
 
 /**
  * Only the call signature of `fetch`, which is all the transport uses. The
- * global `fetch` type carries extra properties a stub would have to fake.
+ * global `fetch` type has extra properties that a test stub would have to fake.
  */
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface ClientOptions {
-  /** Where the controller lives, e.g. `http://127.0.0.1:7717`. */
+  /** The controller's address, for example `http://127.0.0.1:7717`. */
   readonly baseUrl: string;
   /** The bearer token to start with. */
   readonly token?: string | null;
-  /** The `fetch` to send through. Defaults to the global one; a seam for tests. */
+  /** The `fetch` to send requests with. Defaults to the global one; tests pass a stub. */
   readonly fetch?: FetchLike;
   /**
-   * Where the token survives a page load. Given one, the client starts with
-   * the token it holds and keeps it in step: login and setup put their token
-   * in, logout takes it out, and so does an answer the token was rejected by.
+   * Where the token is kept across page loads. With a store, the client
+   * starts with the stored token and keeps the store up to date:
+   *
+   * - login and setup store their new token;
+   * - logout clears it;
+   * - an `unauthenticated` error clears it too.
    */
   readonly tokenStore?: TokenStore;
 }
 
 /**
- * The operations that change which token is held, and what they change it to.
- * Keyed `<group>.<name>`; the value reads the token out of the answer.
+ * The operations that change the current token, keyed `<group>.<name>`. Each
+ * value returns the new token from the operation's result.
  */
 const TOKEN_FROM: Record<string, (result: unknown) => string | null> = {
   "setup.complete": (result) => (result as { readonly token: string }).token,
@@ -78,11 +82,12 @@ const TOKEN_FROM: Record<string, (result: unknown) => string | null> = {
   "auth.logout": () => null,
 };
 
+/** Creates a client for the controller at `options.baseUrl`. */
 export const createClient = (options: ClientOptions): HerculeClient => {
   const store = options.tokenStore;
 
-  // A token given to the constructor is the caller's answer and replaces
-  // whatever the store holds; only its absence falls back to the store.
+  // A token passed in the options replaces the stored one. The stored token
+  // is used only when the options have none.
   let token = options.token === undefined ? (store?.read() ?? null) : options.token;
   if (options.token !== undefined) store?.write(options.token);
 
@@ -105,17 +110,19 @@ export const createClient = (options: ClientOptions): HerculeClient => {
   ) as Record<string, Record<string, (request?: unknown) => Effect.Effect<unknown, unknown>>>;
 
   /**
-   * The fetch client reads its `fetch` from the fiber running the request, not
-   * from the context the client was built in, so it goes on per call. The
-   * wrapper is what tells a request that could not be encoded from an answer
-   * that could not be decoded: the two fail alike, and only the transport
-   * knows whether anything was sent. The flag is per call, so concurrent calls
-   * do not read each other's.
+   * Runs one call and converts its failure into a client error.
+   *
+   * The fetch client reads `fetch` from the fiber that runs the request, not
+   * from the context the client was built in, so it is provided on each call.
+   * The wrapper records whether the request was sent. That is the only way to
+   * tell a request that could not be encoded from a response that could not
+   * be decoded, because both fail with the same kind of error. The flag is
+   * per call, so concurrent calls do not see each other's.
    */
   const run = (effect: Effect.Effect<unknown, unknown>): Promise<unknown> => {
     let sent = false;
-    // A `FetchLike`, like the one a caller may pass: the transport calls it
-    // with a URL string, which is why `FetchLike` is declared that way.
+    // A `FetchLike`, like the one a caller may pass. The transport calls it
+    // with a URL string, which is why `FetchLike` takes a string.
     const send: FetchLike = (url, init) => {
       sent = true;
       return options.fetch === undefined ? globalThis.fetch(url, init) : options.fetch(url, init);

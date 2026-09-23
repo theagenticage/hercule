@@ -11,7 +11,7 @@
 export const findUniqueOffset = (source: string, fragment: string): number => {
   const first = source.indexOf(fragment);
   if (first === -1 || source.indexOf(fragment, first + 1) !== -1) {
-    throw new Error(`The source does not hold ${JSON.stringify(fragment)} exactly once.`);
+    throw new Error(`The source does not contain ${JSON.stringify(fragment)} exactly once.`);
   }
   return first;
 };

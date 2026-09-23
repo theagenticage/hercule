@@ -23,7 +23,7 @@ const buildTranscriptRow = (position: number, event: Record<string, unknown>) =>
 });
 
 describe("hercule session spawn", () => {
-  it("prints the session and teaches the command that reads it back", () => {
+  it("prints the session and a hint with the command that reads its transcript", () => {
     const lines = renderHuman(
       { kind: "value", value: { id: SESSION, status: "starting" } },
       lookUpCommand("session", "spawn"),
@@ -31,11 +31,11 @@ describe("hercule session spawn", () => {
 
     expect(lines[0]).toBe(`id      ${SESSION.slice(-8)}`);
     expect(lines).toContain(
-      `read what it says with \`hercule transcript read ${SESSION.slice(-8)}\``,
+      `watch what it does with \`hercule transcript read ${SESSION.slice(-8)}\``,
     );
   });
 
-  it("teaches nothing after an ordinary read", () => {
+  it("prints no hint after an ordinary read", () => {
     const lines = renderHuman(
       { kind: "value", value: { id: SESSION, status: "idle" } },
       lookUpCommand("session", "read"),
@@ -46,7 +46,7 @@ describe("hercule session spawn", () => {
 });
 
 describe("hercule transcript read", () => {
-  it("prints one line per row: position, instant, tag, and what that tag adds", () => {
+  it("prints one line per row: position, time, tag, and the event's own fields", () => {
     const lines = renderHuman(
       {
         kind: "value",
@@ -74,7 +74,7 @@ describe("hercule transcript read", () => {
     ]);
   });
 
-  it("cuts a long delta rather than wrapping the terminal, and says the rest is a page away", () => {
+  it("truncates a long delta rather than wrapping, and shows how to get the next page", () => {
     const lines = renderHuman(
       {
         kind: "value",
@@ -99,7 +99,7 @@ describe("hercule transcript read", () => {
     expect(lines).toContain("more results: --cursor next, or --all");
   });
 
-  it("says so when the session has said nothing yet", () => {
+  it("prints no results when the transcript is empty", () => {
     const lines = renderHuman(
       { kind: "value", value: { items: [] } },
       lookUpCommand("transcript", "read"),

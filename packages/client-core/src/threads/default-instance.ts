@@ -1,10 +1,15 @@
 /**
- * The instance a new thread starts on before `thread.instanceId` is set, and
- * Settings > Threads' fallback when a stored id no longer names an instance:
- * the first instance with a logged-in snapshot anywhere, else the first
- * instance, else none at all - no instance exists, which is `null`. The
- * composer and Settings > Threads both prefill from this same rule (through
- * `computeThreadDefaults`), which is the server's own placement rule (spec 06 §3).
+ * Returns the id of the provider instance a new thread starts on when
+ * `thread.instanceId` is not set. Settings > Threads also uses it when the
+ * stored id no longer matches an instance. Returns, in order of preference:
+ *
+ * - the first instance that is logged in on some runner;
+ * - otherwise the first instance;
+ * - otherwise `null`, when no instance exists.
+ *
+ * The composer and Settings > Threads both prefill from this rule (through
+ * `computeThreadDefaults`). It is the same rule the controller uses for
+ * placement (spec 06 §3).
  */
 import type { ProviderInstance } from "@hercule/contract";
 

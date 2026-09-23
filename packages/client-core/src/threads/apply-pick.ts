@@ -1,12 +1,12 @@
 /**
- * One selector choice folded into the picks the composer holds. Three rules:
- * the config given is the thread's own, without the picks over it, so a pick
- * is compared against what the thread would run with had nothing been picked;
- * a pick that lands back on that value is not a pick at all and leaves the
- * picks without it; and the per-model choices belong to the model that
- * offered them, so anything that changes the catalog underneath them -
- * another model, another account, another machine - drops them rather than
- * carrying a value the new catalog never offered.
+ * Applies one selector choice to the picks the composer holds. Three rules:
+ *
+ * - `config` is the thread's own config, without the picks applied, so a pick
+ *   is compared with what the thread would run with if nothing were picked.
+ * - A pick that equals that value is not a pick: it is removed from the picks.
+ * - The model options belong to the model that offered them. So anything that
+ *   changes the catalog (another model, account or runner) drops them, rather
+ *   than keeping a value the new catalog never offered.
  */
 import type { AccessMode } from "@hercule/contract";
 import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
@@ -26,13 +26,13 @@ type Key = keyof ThreadPicks;
 const omitPicks = (picks: ThreadPicks, ...keys: readonly Key[]): ThreadPicks =>
   Object.fromEntries(Object.entries(picks).filter(([key]) => !keys.includes(key as Key)));
 
-/** The picks without the choices the old model offered, since they go with it. */
+/** Returns the picks without the model options, which belong to the previous model. */
 const omitOptions = (picks: ThreadPicks): ThreadPicks => omitPicks(picks, "options");
 
 /**
- * A pick that lands back on what the thread already runs with: the key goes,
- * so nothing rides the next submission saying what it already says. A key
- * that was never picked means nothing changed at all.
+ * Removes a pick that equals what the thread already runs with, along with
+ * `also`, so the next submission does not resend an unchanged value. Returns
+ * `picks` unchanged when the key was never picked.
  */
 const revertPick = (picks: ThreadPicks, key: Key, ...also: readonly Key[]): ThreadPicks =>
   picks[key] === undefined ? picks : omitPicks(picks, key, ...also);
@@ -45,9 +45,9 @@ export const applyPick = (
 ): ThreadPicks => {
   switch (pick.kind) {
     case "model":
-      // A pick that changes the catalog says nothing about the choices at
-      // all, rather than saying `{}`: the session keeps what it runs with
-      // until the new model's own choices are picked.
+      // A pick that changes the catalog removes the options key rather than
+      // setting it to `{}`: the session keeps its current options until the
+      // user picks the new model's options.
       return config.model === pick.value
         ? revertPick(picks, "model", "options")
         : { ...omitOptions(picks), model: pick.value };
@@ -56,9 +56,9 @@ export const applyPick = (
       if (instance === undefined) return picks;
       if (config.instanceId === pick.value)
         return revertPick(picks, "instanceId", "model", "runnerId", "options");
-      // A catalog is scoped instance x runner, and the machine that hosts the
-      // instance just left need not host this one, so the runner is resolved
-      // first and the model read from that runner's snapshot.
+      // A catalog belongs to one instance on one runner, and the runner of the
+      // previous instance may not host this one. So resolve the runner first,
+      // then read the model from that runner's snapshot.
       const forInstance = computeInstanceDefaults(
         instance,
         catalogs.runners,
@@ -76,10 +76,9 @@ export const applyPick = (
       return config.runnerId === pick.value
         ? revertPick(picks, "runnerId", "options")
         : { ...omitOptions(picks), runnerId: pick.value };
-    // Unlike the others, a workspace pick is not compared against the config:
-    // what the config holds is `null` until something is picked, and the value
-    // that stands in its place is a default resolved from the catalogs, not a
-    // value this function can see.
+    // Unlike the others, a workspace pick is not compared with the config: the
+    // config holds `null` until something is picked, and the default shown in
+    // its place is resolved from the catalogs, which this function cannot see.
     case "workspace":
       return { ...picks, workspace: pick.value };
   }

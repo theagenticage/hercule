@@ -1,19 +1,19 @@
 /**
- * What a client knows about connections that is not a plain read.
+ * Client-side rules about connections that go beyond a plain read.
  *
- * The OAuth redirect URI is derived from the origin the browser is at: the
- * controller cannot see it, and it is what the user registers with the
- * provider, so the screen that shows it and the service that builds it read the
- * same function. The type catalog is read the same way: a connection type is a
- * plugin contribution, so what the screen can offer is a reading of the plugin
- * listing rather than a read of its own.
+ * The OAuth redirect URI is built from the browser's origin, which the
+ * controller cannot see. The user registers that URI with the provider, so the
+ * screen that shows it and the service that builds it use the same function.
+ * The connection types are derived in the same way: a connection type is a
+ * plugin contribution, so the types come from the plugin list rather than from
+ * an operation of their own.
  */
 import { GITHUB_CONNECTION_TYPE, type Connection, type PluginDetail } from "@hercule/contract";
 
 /**
- * The accounts a repo can be reached through. Two screens offer them - the
- * composer's add-repo form and Settings > Threads - and which type counts is a
- * domain fact, not a filter each screen rewrites.
+ * Returns the GitHub connections: the accounts a repo can be cloned through.
+ * Two screens offer them (the composer's add-repo form and Settings > Threads),
+ * so the filter is written once here rather than in each screen.
  */
 export const filterGitHubConnections = (
   connections: readonly Connection[],
@@ -23,7 +23,7 @@ export const filterGitHubConnections = (
 /** The path the controller serves the provider's redirect on. */
 const CALLBACK_PATH = "/oauth/callback";
 
-/** The redirect URI to register for this origin, with no doubled slash. */
+/** Returns the redirect URI to register for this origin, without a double slash. */
 export const buildRedirectUri = (origin: string): string =>
   `${origin.replace(/\/+$/, "")}${CALLBACK_PATH}`;
 
@@ -35,9 +35,9 @@ export interface CredentialField {
 }
 
 /**
- * One step of a setup flow, as the host declares it. A catalog read at runtime
- * can carry a kind a later host added, which is why the screen reading these
- * steps asks what it can render rather than assuming it rendered everything.
+ * One step of a setup flow, as the plugin host declares it. A newer host can
+ * add step kinds this build does not know, so a screen must check which steps
+ * it can render rather than assume it can render them all.
  */
 export type SetupStep =
   | { readonly kind: "checklist"; readonly markdown: string }
@@ -47,29 +47,34 @@ export type SetupStep =
 
 /** A connection type as the screen offers it. */
 export interface ConnectionType {
-  /** `<pluginId>/<word>`, as the catalog lists it. Sent back, never parsed. */
+  /** `<pluginId>/<word>`, as the plugin list has it. Sent back as is, never parsed. */
   readonly type: string;
   readonly displayName: string;
   /**
-   * The plugin that declares it, for the line under the name. Two plugins may
-   * each declare a type called Gmail, so the name alone does not say which.
+   * The name of the plugin that declares the type, for the line under the
+   * type's name. Two plugins may each declare a type called Gmail, so the type
+   * name alone is not enough to tell them apart.
    */
   readonly pluginName: string;
   readonly setup: ReadonlyArray<SetupStep>;
   readonly configSchema?: Record<string, unknown>;
 }
 
-/** A contribution's definition as an object: it crosses the wire as bare JSON. */
+/**
+ * Returns `value` as an object, or `undefined` when it is not one. A
+ * contribution's definition arrives as untyped JSON.
+ */
 const asDefinition = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
 
 /**
- * The connection types the plugin catalog holds. There is no read of its own
- * for them: a type is a contribution, so the catalog the plugins screen already
- * fetches is the whole of it. Whether the plugin is enabled is not asked:
- * `register()` ran either way, so the type can still validate what is pasted.
+ * Returns the connection types declared in the plugin list. There is no
+ * separate operation for them: a type is a plugin contribution, so the plugin
+ * list the plugins screen already fetches contains every type. Disabled
+ * plugins are included, because their `register()` still ran, so their types
+ * can still validate what the user pastes.
  */
 export const listConnectionTypes = (
   plugins: ReadonlyArray<PluginDetail>,
@@ -97,11 +102,11 @@ export const listConnectionTypes = (
   );
 
 /**
- * How a type is set up, as one word. A setup is a list of steps and only one of
- * them decides how the credential is obtained, so every screen that branches on
- * a setup branches on this rather than scanning the steps for itself. A catalog
- * from a newer host can carry a step kind this build cannot render, which is
- * what `unknown` is: a screen says so rather than guessing.
+ * Returns how a connection type is set up. A setup is a list of steps, and
+ * only one of them decides how the credential is obtained. Every screen that
+ * depends on the setup flow uses this function rather than scanning the steps
+ * itself. `unknown` means the steps come from a newer host with a step kind
+ * this build cannot render; the screen then says so rather than guessing.
  */
 export const decideSetupFlow = (
   type: ConnectionType,
@@ -112,6 +117,6 @@ export const decideSetupFlow = (
   return "unknown";
 };
 
-/** The secrets this type's setup asks the user to paste, in the order declared. */
+/** Returns the secret fields the type's setup asks the user to paste, in declared order. */
 export const listCredentialFields = (type: ConnectionType): ReadonlyArray<CredentialField> =>
   type.setup.flatMap((step) => (step.kind === "credentials" ? [...step.fields] : []));

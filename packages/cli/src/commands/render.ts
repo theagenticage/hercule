@@ -1,10 +1,10 @@
 /**
- * Human output.
+ * Formats command output for people.
  *
- * `--json` prints the contract's output schema verbatim and this module is not
- * reached. Everything here is for a person: a page becomes a table, a single
- * object becomes aligned key-value lines, and ids are shortened to the tail the
- * CLI accepts back as an argument.
+ * With `--json` the CLI prints the operation's output unchanged and does not
+ * use this module. Everything here is for a person: a page becomes a table, a
+ * single object becomes aligned key-value lines, and ids are shortened to the
+ * tail the CLI accepts back as an argument.
  */
 import {
   truncateText,
@@ -21,7 +21,10 @@ import type { Command } from "./tree";
 /** A canonical lowercase UUIDv7; the only value shortened to a tail. */
 const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-/** How long a tail the human rendering prints, and the shortest the CLI accepts. */
+/**
+ * The length of the id tail printed for people, which is also the shortest tail
+ * the CLI accepts.
+ */
 const TAIL = 8;
 
 const formatCell = (value: unknown): string => {
@@ -33,7 +36,7 @@ const formatCell = (value: unknown): string => {
   return JSON.stringify(value) ?? "";
 };
 
-/** Every key any row has, in the order the rows introduce them. */
+/** Returns every key of any row, in order of first appearance. */
 const listColumns = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
   const columns: Array<string> = [];
   for (const row of rows) {
@@ -69,9 +72,9 @@ const renderTable = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArra
 };
 
 /**
- * A nested object becomes dotted keys rather than a JSON blob, so
- * `hercule settings read` reads as the flat key set it is. An array stays a cell:
- * its elements are values, not sub-keys.
+ * Flattens a nested object into dotted keys rather than printing JSON, so
+ * `hercule settings read` shows the flat key set it really is. An array stays
+ * one value: its elements are values, not sub-keys.
  */
 const flatten = (
   value: Record<string, unknown>,
@@ -88,8 +91,8 @@ const renderKeyValues = (value: Record<string, unknown>): ReadonlyArray<string> 
   const entries = flatten(value);
   if (entries.length === 0) return ["ok"];
   const width = Math.max(...entries.map(([key]) => key.length));
-  // Trimmed as the table's lines are: a key whose value is empty reads as the
-  // key, not as the key plus the padding that would have held a value.
+  // Trim like the table's lines, so a key with an empty value has no trailing
+  // padding.
   return entries.map(([key, item]) => `${key.padEnd(width)}  ${formatCell(item)}`.trimEnd());
 };
 
@@ -101,16 +104,17 @@ const isPage = (
   Array.isArray((value as { items?: unknown }).items);
 
 /**
- * The fields of a normalized event that do not go on a transcript line. Four
- * say nothing: the event's own id, the session every line belongs to, the
- * instant the line already begins with, and the turn and item ids, which name
- * nothing a reader can look up. `_tag` is left out because the line prints it
- * as its own column. `providerRefs` and `raw` are the vendor passthrough - the
- * escape hatch that keeps a trimmed taxonomy honest - and a line that carried
- * them would be a JSON dump; `--json` is where they are read.
+ * The fields of a normalized event that are left off a transcript line:
  *
- * What is left is the tag's own payload, which is the part that differs from
- * line to line.
+ * - fields that tell the reader nothing: the event's id, the session every
+ *   line belongs to, the time the line already starts with, and the turn and
+ *   item ids, which a reader cannot look up;
+ * - `_tag`, because the line prints it as its own column;
+ * - `providerRefs` and `raw`, the vendor's original data. A line with them
+ *   would be a JSON dump; `--json` shows them.
+ *
+ * What is left is the event's own payload, which is the part that differs
+ * from line to line.
  */
 const TRANSCRIPT_NOISE = new Set([
   "_tag",
@@ -123,23 +127,24 @@ const TRANSCRIPT_NOISE = new Set([
   "itemId",
 ]);
 
-/** How much of one field's value a transcript line shows before it is cut. */
+/** How many characters of one field's value a transcript line shows before truncating it. */
 const TRANSCRIPT_FIELD = 100;
 
 /**
- * One value on a transcript line: on one line, and short. A coalesced
- * `content.delta` carries a whole assistant message or a screenful of command
- * output, and a transcript is read for its shape - `hercule transcript read
- * --json` is what hands back the text in full.
+ * Formats one value for a transcript line: on one line, and short. A merged
+ * `content.delta` can hold a whole assistant message or a screenful of command
+ * output, and a transcript is read for its outline. `hercule transcript read
+ * --json` returns the full text.
  */
 const abbreviateValue = (value: unknown): string =>
   truncateText(formatCell(value).replace(/\s+/g, " ").trim(), TRANSCRIPT_FIELD);
 
 /**
- * Describes what a turn answered under its session's output schema, as a
- * sentence on the turn's own line. The answer is what the session was spawned
- * for, so it reads as a sentence, and not as one more `field=value` beside the
- * turn's state. The sentence gives the value, or the reason there is no value.
+ * Describes a turn's structured result (the value it returned under its
+ * session's output schema), for the turn's own line. The result is what the
+ * session was spawned for, so it is shown as a phrase rather than as one more
+ * `field=value` next to the turn's state. The phrase gives the value, or the
+ * reason there is no value.
  */
 const describeResult = (structuredResult: unknown): string => {
   const answer = structuredResult as StructuredResult;
@@ -151,15 +156,15 @@ const describeResult = (structuredResult: unknown): string => {
   }
 };
 
-/** `<position>  <at>  <tag>  <what that tag adds>`. */
+/** Formats one transcript row as `<position>  <at>  <tag>  <the event's own fields>`. */
 const renderTranscriptLine = (row: Record<string, unknown>): string => {
   const event = (row["event"] ?? {}) as Record<string, unknown>;
   const fields = Object.entries(event)
     .filter(([key]) => !TRANSCRIPT_NOISE.has(key) && key !== "structuredResult")
     .map(([key, value]) => `${key}=${abbreviateValue(value)}`);
-  // The answer is placed right after the turn's state, and not where the event
-  // happens to carry it. The reader reads the line for the answer, and behind
-  // the usage figures the answer wraps off a 120-column terminal.
+  // Put the result right after the turn's state, not where the event happens
+  // to have it. The result is what the reader looks for, and after the usage
+  // figures it would wrap off a 120-column terminal.
   const answered = event["structuredResult"];
   if (answered !== undefined) {
     fields.splice(
@@ -174,9 +179,9 @@ const renderTranscriptLine = (row: Record<string, unknown>): string => {
 };
 
 /**
- * A transcript is a sequence, not a set of records: every row is the same three
- * columns plus a payload whose fields differ per tag, so a table of it would be
- * mostly empty cells. It is rendered as lines instead.
+ * Formats a transcript as lines rather than a table. A transcript is a
+ * sequence, not a set of records: every row has the same three columns plus
+ * fields that differ per event type, so a table would be mostly empty cells.
  */
 const renderTranscript = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
   rows.length === 0 ? ["no results"] : rows.map(renderTranscriptLine);
@@ -219,7 +224,7 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
   };
 };
 
-/** The lines the CLI prints for a successful command, without `--json`. */
+/** Returns the lines the CLI prints for a successful command without `--json`. */
 export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   const asLines = command.id === "transcript.read" ? renderTranscript : renderTable;
 
@@ -258,14 +263,15 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
     }
     if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
     const lines = [...renderKeyValues(record)];
-    // The one teaching line this build has. A caller who has just spawned a
-    // session wants to watch it. It is not pointed at a subscription on that
-    // session: no platform event about a session is emitted yet, so such a
-    // claim is refused. It is pointed at the transcript it can already read.
+    // The only hint this build prints after a command. A caller who has just
+    // spawned a session wants to watch it. The hint does not suggest a
+    // subscription on the session: no platform event about a session is
+    // emitted yet, so the controller would reject it. It points at the
+    // transcript, which the caller can already read.
     if (command.id === "session.spawn") {
       lines.push(
         "",
-        `read what it says with \`hercule transcript read ${formatCell(record["id"])}\``,
+        `watch what it does with \`hercule transcript read ${formatCell(record["id"])}\``,
       );
     }
     return lines;
