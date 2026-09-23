@@ -97,7 +97,7 @@ interface Building {
   items: ThreadItem[];
   itemIndex: Map<string, number>;
   assistantText: string;
-  /** Which item `buildAssistantTextDelta`'s last delta belonged to - a turn's own paragraph break. */
+  /** Which item `assistantText`'s last delta belonged to - a turn's own paragraph break. */
   lastAssistantItemId: string | null;
 }
 

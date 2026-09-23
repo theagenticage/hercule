@@ -90,7 +90,7 @@ export { hashToken };
 /** The two bind hosts that mean "every interface"; a URL needs a reachable one instead. */
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
 
-/** What a boot leaves behind. `buildSetupUrl` is absent once setup is complete. */
+/** What a boot leaves behind. `setupUrl` is absent once setup is complete. */
 export interface BootOutcome {
   readonly paths: HomePaths;
   readonly identityId: string;
