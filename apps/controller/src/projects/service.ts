@@ -1,23 +1,23 @@
 /**
- * Projects as the API sees them: `project.query`, `read`, `create`, `update`
- * and `delete`.
+ * The project operations of the API: `project.query`, `read`, `create`,
+ * `update` and `delete`.
  *
- * A project carries no behaviour. It groups information: a task points at one
- * through `projectId` and a resource joins any number of them through
- * `project_resources`.
+ * A project has no behaviour of its own. It groups information: a task refers
+ * to one project through `projectId`, and a resource can belong to any number
+ * of projects through `project_resources`.
  *
  * Every mutation writes one event in the same transaction as the row it
- * describes, so the log never claims a change that was rolled back and never
+ * describes, so the log never records a change that was rolled back and never
  * misses one that happened. The actor is stamped here, on the event envelope;
  * no payload repeats it.
  *
- * Input is decoded against the contract's own schemas rather than trusted. A
- * request has already been decoded by the transport, but a built-in workflow
- * action calls these methods directly, and the name cap is the same rule
- * whichever way the call arrived.
+ * Input is decoded against the contract's schemas rather than trusted. The
+ * transport has already decoded a request, but a built-in workflow action
+ * calls these methods directly, and the limit on name length must apply
+ * however the call arrives.
  *
- * Delete is soft: `deletedAt` is set and everything that reads a project stops
- * seeing it, while its tasks keep the `projectId` they were given and its
+ * Delete is soft: `deletedAt` is set and every read of projects stops
+ * returning the project, while its tasks keep their `projectId` and its
  * resource links stay. There is no include-deleted option.
  */
 import * as Context from "effect/Context";
@@ -48,12 +48,12 @@ import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../
 import { AuditLog } from "../events";
 import { projectRepository, type ProjectSortField } from "./repository";
 
-/** What listing takes: how much of it, in what order. */
+/** The input of `project.query`: the page size, cursor and sort order. */
 const QueryInput = Schema.Struct(buildPageInputFields(PROJECT_SORT_FIELDS));
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
-/** What identifies one project: the id, and what an edit does to it. */
+/** The input of `project.update`: the project id and the fields to change. */
 const UpdateInput = Schema.Struct({ id: Id, ...ProjectUpdateInput.fields });
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
@@ -73,15 +73,15 @@ export interface ProjectPage {
   readonly nextCursor?: string;
 }
 
-/** What an update reports for a field that changed. */
+/** The old and new value of a changed field, as the `project.updated` event records them. */
 interface ScalarChange {
   readonly old: unknown;
   readonly new: unknown;
 }
 
 /**
- * Alphabetical: a project list is read to pick one, and there are few enough
- * of them that recency says less about which than the name does.
+ * Sorted by name: people read a project list to pick a project, and there are
+ * few enough projects that the name helps more than how recent it is.
  */
 const DEFAULT_SORT: { field: ProjectSortField; direction: SortDirection } = {
   field: "name",
@@ -90,7 +90,7 @@ const DEFAULT_SORT: { field: ProjectSortField; direction: SortDirection } = {
 
 const NO_SUCH_PROJECT = "no such project";
 
-/** The fields an edit may change, in the order an event reports them. */
+/** The fields an edit may change, in the order the event lists them. */
 const FIELDS = ["name", "description"] as const;
 
 const make = Effect.gen(function* () {
@@ -108,7 +108,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    /** One page of the live projects. */
+    /** Returns one page of the projects that are not deleted. */
     query: (
       input: QueryInput,
     ): Effect.Effect<ProjectPage, Unauthenticated | Forbidden | Validation | SqlError> =>
@@ -131,7 +131,7 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** One project by id. A deleted project is not one. */
+    /** Returns one project by id. Fails with `NotFound` if there is none or it is deleted. */
     read: (
       input: Identified,
     ): Effect.Effect<Project, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
@@ -141,7 +141,7 @@ const make = Effect.gen(function* () {
         return yield* readLiveProjectOrFail(id);
       }),
 
-    /** Opens a place to group things under. */
+    /** Creates a project and returns it. */
     create: (
       input: ProjectCreateInput,
     ): Effect.Effect<Project, Unauthenticated | Forbidden | Validation | SqlError> =>
@@ -171,11 +171,12 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Changes a project and says what changed.
+     * Updates a project and returns it as it is after the update.
      *
-     * A patch that names no field is refused, and a patch that asks for the
-     * values the project already holds writes nothing at all: either would
-     * move `updatedAt` and stamp a `project.updated` row describing nothing.
+     * A patch that sets no field fails with a validation error, and a patch
+     * that only repeats the current values writes nothing. Otherwise either
+     * patch would change `updatedAt` and record a `project.updated` event with
+     * no changes in it.
      */
     update: (
       input: UpdateInput,
@@ -198,8 +199,8 @@ const make = Effect.gen(function* () {
             const before = yield* readLiveProjectOrFail(id);
 
             // A project without a description carries no key at all, and
-            // `null` is how an edit puts it back in that state; both read as
-            // `null` in the diff, so the event says the same thing either way.
+            // `null` is how an edit removes the description. Both count as
+            // `null` in the diff, so the event is the same either way.
             const changes: Record<string, ScalarChange> = {};
             const edit: Record<string, string | null> = {};
             for (const field of FIELDS) {
@@ -212,8 +213,8 @@ const make = Effect.gen(function* () {
               }
             }
 
-            // Nothing to change is not a change: the project is handed back as
-            // it is, with no row written and no event claiming one.
+            // No field changed, so return the project as it is, without writing
+            // the row or recording an event.
             if (Object.keys(changes).length === 0) return before;
 
             yield* projects.update(id, edit, at);
@@ -223,16 +224,17 @@ const make = Effect.gen(function* () {
               payload: { projectId: id, changes },
               at,
             });
-            // Read back rather than merge in memory: what the caller gets is
-            // then the row that was written, whatever the edit touched.
+            // Read the row back rather than merge in memory, so the caller gets
+            // exactly the row that was written.
             return yield* readLiveProjectOrFail(id);
           }),
         );
       }),
 
     /**
-     * Retires a project. The row stays, so the tasks and resource links that
-     * name it keep pointing at something.
+     * Deletes a project (a soft delete) and returns an empty object. The row
+     * stays, so the tasks and resource links that refer to it still point at
+     * a row. Fails with `NotFound` if the project does not exist.
      */
     delete: (
       input: Identified,
@@ -249,7 +251,7 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const project = yield* readLiveProjectOrFail(id);
             yield* projects.softDelete(id, at);
-            // The final snapshot, because nothing can read the row afterwards.
+            // The event holds a final snapshot, because no read returns the row afterwards.
             yield* audit.append({
               kind: "project.deleted",
               actor: yield* currentStamp,

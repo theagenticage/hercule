@@ -23,10 +23,11 @@ afterEach(() => {
 });
 
 describe("createDatabaseError", () => {
-  it("names the other controller when a real transaction times out on the write lock", async () => {
-    // The shape a second `hercule serve` hits: one connection holds the write
-    // lock, the other opens a transaction that reads and then writes. The busy
-    // timeout is shortened to keep the suite quick; the default is five seconds.
+  it("reports another controller when a real transaction times out on the write lock", async () => {
+    // This is what a second `hercule serve` runs into: one connection holds the
+    // write lock, and the other opens a transaction that reads and then writes.
+    // The busy timeout is shortened to keep the test quick; the default is five
+    // seconds.
     const holder = new Database(file, { create: true });
     holder.run("PRAGMA journal_mode = WAL");
     holder.run("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
@@ -57,7 +58,7 @@ describe("createDatabaseError", () => {
     }
   });
 
-  it("finds a lock timeout a wrapper buried in the cause chain", () => {
+  it("finds a lock timeout deep in the cause chain", () => {
     const inner = new SqlError({
       reason: new LockTimeoutError({ cause: { code: "SQLITE_BUSY" } }),
     });
@@ -67,7 +68,7 @@ describe("createDatabaseError", () => {
     );
   });
 
-  it("says what it could not do when the failure is not a lock", async () => {
+  it("reports the file it could not use when the failure is not a lock", async () => {
     const error = await Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -79,7 +80,7 @@ describe("createDatabaseError", () => {
 });
 
 describe("one controller per home", () => {
-  it("refuses a second open of the same database file", async () => {
+  it("fails a second open of the same database file", async () => {
     const open = Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* sql`SELECT 1`;

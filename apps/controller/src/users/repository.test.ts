@@ -31,7 +31,7 @@ describe("Users", () => {
     expect(Option.getOrThrow(byId)).toEqual(created);
   });
 
-  it("finds nothing for a name and an id nobody has", async () => {
+  it("finds nothing for an unknown name or id", async () => {
     const [byName, byId] = await run(
       Effect.gen(function* () {
         const users = yield* Users;
@@ -45,7 +45,7 @@ describe("Users", () => {
     expect(Option.isNone(byId)).toBe(true);
   });
 
-  it("refuses a username that is already taken", async () => {
+  it("rejects a username that is already taken", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const users = yield* Users;
@@ -56,7 +56,7 @@ describe("Users", () => {
     expect(exit._tag).toBe("Failure");
   });
 
-  it("replaces the password hash and stamps the row", async () => {
+  it("replaces the password hash and keeps createdAt", async () => {
     const [before, after] = await run(
       Effect.gen(function* () {
         const users = yield* Users;

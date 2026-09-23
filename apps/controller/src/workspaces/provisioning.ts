@@ -1,18 +1,18 @@
 /**
- * Opening a workspace: the row, the checkouts inside it, the entry that records
- * it, and the frame that asks the machine to make it.
+ * Opening a workspace: the workspace row, its checkout rows, the audit entry,
+ * and the frame that asks the runner to create it.
  *
- * It is one function rather than four steps at each call site, because both
- * openings - `workspace.provision` for a repo's main workspace, and a spawn that
- * wants a worktree of its own - have to write exactly the same things, and a
- * caller that forgot the audit row or spelled the payload differently would not
- * be caught by anything. What the machine needs beyond the rows - the remote to
- * clone, the setup command to run, whether to copy what `.workspaceinclude`
- * lists - is the resource's, so the resource is handed in beside the checkout.
+ * This is one function rather than four steps at each call site. Both callers -
+ * `workspace.provision` for a repo's main workspace, and a spawn that wants a
+ * worktree of its own - have to write exactly the same things, and nothing
+ * would catch a caller that forgot the audit entry or built the payload
+ * differently. The runner also needs values that come from the resource, not
+ * the rows: the remote to clone, the setup command to run, and the
+ * `.workspaceinclude` list. So the resource is passed in beside each checkout.
  *
- * No path crosses this boundary. A primary is always a Hercule-managed clone
- * under the machine's own storage, so all the machine is ever told is which
- * repository to make it from.
+ * No path is sent to the runner. A primary is always a Hercule-managed clone
+ * under the runner's own storage, so the runner is only told which repository
+ * to clone.
  */
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -22,12 +22,12 @@ import type { AuditLog } from "../events";
 import type { StoredRepo } from "../resources";
 import type { StoredCheckout, StoredWorkspace, workspaceRepository } from "./repository";
 
-/** One working copy to ask for: the row, the repo behind it, and the words the
- * row has no column for. */
+/** One checkout to ask the runner for: the row, the repo behind it, and the
+ * values the row has no column for. */
 interface CheckoutPlan {
   readonly checkout: StoredCheckout;
   readonly resource: StoredRepo;
-  /** What a new branch starts from; absent takes the resource's default. */
+  /** The branch a new branch starts from; absent means the resource's default. */
   readonly baseBranch?: string;
 }
 
@@ -50,17 +50,17 @@ export const buildProvisionFrame = (
   })),
 });
 
-/** One working copy a workspace is opened with. */
+/** One checkout a workspace is opened with. */
 export interface OpeningCheckout {
   readonly resource: StoredRepo;
   readonly form: CheckoutForm;
   readonly subdirectory: string | null;
   readonly branch: string | null;
-  /** What a new branch starts from; absent takes the resource's default. */
+  /** The branch a new branch starts from; absent means the resource's default. */
   readonly baseBranch?: string;
 }
 
-/** The two writers this needs, which the service already holds. */
+/** The two writers that opening a workspace needs, which the service already holds. */
 export interface WorkspaceWriters {
   readonly workspaces: Effect.Success<typeof workspaceRepository>;
   readonly audit: AuditLog["Service"];
@@ -71,7 +71,7 @@ export const openWorkspace = (
   input: {
     readonly runnerId: string;
     readonly kind: WorkspaceKind;
-    /** The Connection the work in it acts through, settled here and stored. */
+    /** The Connection that work in the workspace acts through, fixed here and stored. */
     readonly designatedConnectionId: string | null;
     readonly checkouts: ReadonlyArray<OpeningCheckout>;
     readonly actor: Actor;
@@ -123,14 +123,18 @@ export const openWorkspace = (
   });
 
 /**
- * The repo's own workspace on one machine, opened. Two openings ask for one -
- * `workspace.provision` by name, and a spawn that wants the main workspace -
- * and they have to write the same thing: a failed attempt stood down so this one
- * takes its place, the row, its single whole-repo checkout, and the entry.
+ * Opens a repo's primary workspace on one runner, and returns the workspace row
+ * and the frame to send. Fails only on a database error. Two callers open a
+ * primary - `workspace.provision`, and a spawn that wants the main workspace -
+ * and both write the same things:
  *
- * Whether a primary already stands is the caller's to answer, because the two
- * answers differ: `workspace.provision` refuses it as a conflict, and a spawn
- * joins it.
+ * - a failed earlier primary is marked `deleted`, so this one replaces it
+ * - the workspace row, with its single whole-repo checkout
+ * - the audit entry
+ *
+ * The caller checks whether a primary already exists, because the two callers
+ * handle that differently: `workspace.provision` rejects it as a conflict, and
+ * a spawn joins it.
  */
 export const openPrimary = (
   writers: WorkspaceWriters,
@@ -145,8 +149,8 @@ export const openPrimary = (
   SqlError
 > =>
   Effect.gen(function* () {
-    // One that could not be made holds nothing; it is stood down here so this
-    // one takes its place rather than living beside it.
+    // A primary that failed to provision holds nothing. It is marked deleted
+    // here so the new one replaces it rather than existing beside it.
     yield* writers.workspaces.supersedeFailedPrimary(input.resource.id, input.runnerId, input.at);
     return yield* openWorkspace(writers, {
       runnerId: input.runnerId,

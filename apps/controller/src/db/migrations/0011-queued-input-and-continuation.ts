@@ -1,19 +1,21 @@
 /**
- * Every input a session was ever given, one row each, and the two things a
- * session carries into the one that continues it.
+ * Every input a session was ever given, one row each, and the two values a
+ * session passes on to the session that continues it.
  *
- * A row exists before the input is sent anywhere, which is what gives the
- * operation an id to answer with, gives the actor stamp somewhere to live, and
- * lets an input the session cannot take yet wait until it can. The queue is the
- * rows still `queued`; `delivered` and `cancelled` are terminal.
+ * A row is written before the input is sent anywhere. That gives:
  *
- * No foreign key, for the reason migration 0010 gives: a session is history and
- * outlives what it named.
+ * - the operation an id to return;
+ * - the actor stamp a place to be stored;
+ * - an input the session cannot take yet a place to wait until it can.
  *
- * `source` carries the full vocabulary although only `user` is written today:
- * the bounds are CHECK constraints, which SQLite cannot widen without
- * rebuilding the table, and the other three sources are already spelled out in
- * the domain.
+ * The queue is the rows still `queued`; `delivered` and `cancelled` are final.
+ *
+ * No foreign key, for the reason explained in migration 0010: a session is
+ * history and outlives what it refers to.
+ *
+ * `source` allows every value although only `user` is written today: the
+ * bounds are CHECK constraints, which SQLite cannot widen without rebuilding
+ * the table, and the other three sources are already defined in the domain.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -42,17 +44,18 @@ export default Effect.gen(function* () {
       reason TEXT
     )
   `;
-  // The one walk there is: a session's own inputs, oldest first.
+  // The only query: a session's own inputs, oldest first.
   yield* sql`CREATE INDEX session_inputs_session ON session_inputs (session_id, created_at, id)`;
 
   /**
-   * The model the session runs under now, which is not what `spec` says:
-   * `session.update` can change it mid-life, and `spec` is the frozen document
-   * the runner was told at start. A resume or a fork reads this one.
+   * The model the session runs with now, which can differ from the one in
+   * `spec`: `session.update` can change it while the session runs, and `spec`
+   * is the frozen document the runner received at start. A resume or a fork
+   * reads this column.
    *
-   * SQLite takes a NOT NULL column only with a default, so the empty document
-   * is there for the ALTER alone; the UPDATE below fills every row that exists
-   * and every insert since writes its own.
+   * SQLite adds a NOT NULL column only with a default, so the empty document
+   * is there only for the ALTER. The UPDATE below fills every existing row,
+   * and every later insert writes its own value.
    */
   yield* sql`
     ALTER TABLE sessions ADD COLUMN model_selection TEXT NOT NULL DEFAULT '{}'
@@ -61,8 +64,8 @@ export default Effect.gen(function* () {
   yield* sql`UPDATE sessions SET model_selection = json_extract(spec, '$.modelSelection')`;
 
   /**
-   * Set only where the session was forked; a resume carries on the same
-   * provider-native session and so has nothing to point at.
+   * Set only when the session was forked. A resume continues the same
+   * provider-native session, so it has nothing to point at.
    */
   yield* sql`ALTER TABLE sessions ADD COLUMN parent_session_id BLOB`;
 });

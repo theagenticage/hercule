@@ -1,6 +1,7 @@
 /**
- * Connections: the external accounts Hercule acts through. The record and its
- * credentials are core-owned; the types are plugin contributions.
+ * Connections: the external accounts Hercule acts through. The core owns the
+ * connection record and its credentials; each connection type comes from a
+ * plugin.
  */
 export { PluginConfigs } from "./plugin-configs";
 export {

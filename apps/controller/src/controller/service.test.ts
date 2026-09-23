@@ -37,7 +37,7 @@ const buildStack = () => {
   );
 };
 
-/** The boot creates the identity before anything binds; so does this. */
+/** Creates the identity, as the boot does, then runs `body` as `actor`. */
 const withIdentity = <A, E>(
   body: Effect.Effect<A, E, Controller | ControllerIdentity>,
   actor: Actor | null = USER,
@@ -54,7 +54,7 @@ const withIdentity = <A, E>(
   );
 
 describe("controller.read", () => {
-  it("answers with the identity the runners verify against, and the baked-in version", async () => {
+  it("returns the identity the runners verify against, and the built-in version", async () => {
     const { record, result } = await withIdentity(
       Effect.flatMap(Controller, (controller) => controller.read()),
     );
@@ -64,7 +64,7 @@ describe("controller.read", () => {
     expect(result.version).toBe(VERSION);
   });
 
-  it("never answers with the private key, which lives in the secrets table", async () => {
+  it("never returns the private key, which is stored in the secrets table", async () => {
     const { result } = await withIdentity(
       Effect.flatMap(Controller, (controller) => controller.read()),
     );
@@ -72,7 +72,7 @@ describe("controller.read", () => {
     expect(Object.keys(result).sort()).toEqual(["defaultRunnerId", "id", "publicKey", "version"]);
   });
 
-  it("refuses a caller without the grant before it reads anything", async () => {
+  it("rejects a caller without the grant before it reads anything", async () => {
     const { result } = await withIdentity(
       Effect.flatMap(Controller, (controller) => Effect.flip(controller.read())),
       null,
@@ -93,7 +93,7 @@ describe("controller.read", () => {
  * reaches the check.
  */
 describe("controller.update", () => {
-  it("refuses a caller without the grant before it writes anything", async () => {
+  it("rejects a caller without the grant before it writes anything", async () => {
     const { result } = await withIdentity(
       Effect.flatMap(Controller, (controller) => Effect.flip(controller.update({}))),
       null,

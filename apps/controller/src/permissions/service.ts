@@ -1,19 +1,20 @@
 /**
- * Permission profiles as the API sees them: `profile.query`, `read`, `create`
- * and `update`, and the delete this domain's own rules allow.
+ * The permission profile operations of the API: `profile.query`, `read`,
+ * `create` and `update`, and the part of delete that this domain checks.
  *
- * The three shipped profiles are editable and not deletable. Editing one is an
- * ordinary update - the user is meant to be able to widen or narrow what an
- * assistant may do - but deleting one would leave the agents that reference it
- * pointing at nothing, so it is `invalid_state` rather than a cascade.
+ * The three shipped profiles can be edited but not deleted. Editing one is an
+ * ordinary update, because the user should be able to widen or narrow what an
+ * assistant may do. Deleting one would leave the agents that use it pointing
+ * at nothing, so it fails with `invalid_state` rather than deleting those
+ * agents too.
  *
- * `profile.delete` itself is the controller daemon's `deleteProfile`: the
- * refusals it gives also read the sessions and the agents that hold the
- * profile, and those rows belong to other domains.
+ * `profile.delete` itself is the controller daemon's `deleteProfile`, because
+ * its checks also read the sessions and agents that use the profile, and those
+ * rows belong to other domains.
  *
- * A name is the key the user knows a profile by, so a name another profile
- * already holds is `conflict` rather than a silently disambiguated second
- * "reviewer".
+ * Users know a profile by its name, so a name that another profile already has
+ * fails with `conflict` rather than creating a second "reviewer" that is
+ * silently renamed.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -43,7 +44,7 @@ import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "./profiles";
 import { SessionTokens } from "./tokens";
 
-/** What listing takes. Absent fields are the defaults, not "no page". */
+/** The input of `profile.query`. An absent field means its default value. */
 export interface QueryInput {
   readonly limit?: number;
   readonly cursor?: string;
@@ -56,10 +57,10 @@ export interface ProfilePage {
   readonly nextCursor?: string;
 }
 
-/** By name, ascending: a profile list is read to find one by the name it is known by. */
+/** Sorted by name, ascending, because people look for a profile by its name. */
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
-/** The one message a name collision gets, whichever operation hit it. */
+/** Returns the conflict error for a taken name, so create and update use the same message. */
 const NAME_TAKEN = (name: string): Conflict =>
   createConflictError(`a profile named ${name} already exists`);
 
@@ -72,13 +73,14 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   /**
-   * The profile this id names, if this domain's own rules allow it to be
-   * deleted. A shipped profile is `invalid_state`: it is part of what Hercule
-   * ships, and the user's way to change it is to edit it.
+   * Returns the profile with this id if the permissions domain allows it to be
+   * deleted. Fails with `NotFound` if there is no such profile, and with
+   * `invalid_state` for a shipped profile: the user changes a shipped profile
+   * by editing it.
    *
-   * What else holds the profile - a live session, an Agent - is read by the
-   * controller daemon's `deleteProfile`, because those rows belong to other
-   * domains. This answers only what the permissions domain knows.
+   * The controller daemon's `deleteProfile` checks whether a running session
+   * or an Agent still uses the profile, because those rows belong to other
+   * domains. This function checks only what the permissions domain knows.
    */
   const requireDeletable = (
     id: string,
@@ -89,7 +91,7 @@ const make = Effect.gen(function* () {
       if (found.value.shipped) {
         return yield* Effect.fail(
           createInvalidStateError(
-            `${found.value.name} is a profile Hercule ships; it cannot be deleted.`,
+            `${found.value.name} is a shipped profile, so it cannot be deleted. Edit it instead.`,
           ),
         );
       }
@@ -97,7 +99,7 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    /** Every profile, shipped ones included, by name. */
+    /** Returns one page of profiles, shipped ones included, sorted by name. */
     query: (
       input: QueryInput,
     ): Effect.Effect<
@@ -123,7 +125,7 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** One profile by id. */
+    /** Returns one profile by id. Fails with `NotFound` if there is none. */
     read: (input: {
       readonly id: string;
     }): Effect.Effect<Profile, Unauthenticated | Forbidden | NotFound | GrantsError | SqlError> =>
@@ -136,7 +138,10 @@ const make = Effect.gen(function* () {
         });
       }),
 
-    /** Creates a profile the user owns. Shipped profiles are seeded, never created here. */
+    /**
+     * Creates a user profile and returns it. Fails with `conflict` if the name
+     * is taken. Shipped profiles are seeded, never created here.
+     */
     create: (input: {
       readonly name: string;
       readonly grants: ReadonlyArray<Grant>;
@@ -159,12 +164,11 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Edits a profile, shipped ones included.
+     * Edits a profile, shipped ones included, and returns it.
      *
-     * A patch that changes nothing is `validation`. It would otherwise answer
-     * 200 and stamp a `profile.updated` row for an edit that did not happen,
-     * and the operation that reads a profile without touching it is
-     * `profile.read`.
+     * A patch with no field fails with a validation error. Otherwise it would
+     * succeed and record a `profile.updated` event for an edit that did not
+     * happen. To read a profile without changing it, use `profile.read`.
      */
     update: (input: {
       readonly id: string;
@@ -192,14 +196,14 @@ const make = Effect.gen(function* () {
               case "absent":
                 return yield* Effect.fail(createNotFoundError(NO_SUCH_PROFILE));
               case "nameTaken":
-                // Only the unique `name` column can make the update an ignore,
-                // so a patch that got here carried one.
+                // Only the unique `name` column can make `UPDATE OR IGNORE`
+                // skip the row, so a patch that gets here has a name.
                 return yield* Effect.fail(NAME_TAKEN(input.name!));
               case "updated":
-                // Every live session on this profile is carrying the grants it
-                // held a moment ago; the next call each makes reads the row
-                // this write just changed. After the commit, so a call in
-                // flight cannot cache the old grants again in between.
+                // The running sessions on this profile have the old grants
+                // cached. Clearing the cache makes their next call read the
+                // new grants. It runs after the commit, so a call that is
+                // running meanwhile cannot cache the old grants again.
                 yield* afterCommit(() => {
                   tokens.forgetProfile(outcome.profile.id);
                 });
@@ -217,9 +221,10 @@ const make = Effect.gen(function* () {
     requireDeletable,
 
     /**
-     * Deletes a profile after this domain's own checks, and stamps it. The
-     * caller is the controller daemon's `deleteProfile`, which enforces the
-     * grant and refuses a profile another domain's rows still hold.
+     * Deletes a profile after this domain's own checks, and records a
+     * `profile.deleted` event. The caller is the controller daemon's
+     * `deleteProfile`, which checks the grant and fails for a profile that
+     * rows in other domains still use.
      */
     delete: (input: {
       readonly id: string;

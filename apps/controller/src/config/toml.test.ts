@@ -32,7 +32,7 @@ describe("parseToml", () => {
     });
   });
 
-  it("reports what it could not read", () => {
+  it("returns an error message for text it cannot read", () => {
     expect(parseAndReadFailure('bind.host = "0.0.0.0"\nbind.port = ?\n')).toContain(
       "Expected a value",
     );
@@ -42,7 +42,7 @@ describe("parseToml", () => {
 
   it("rejects a datetime rather than dropping the key", () => {
     // Bun parses a TOML datetime into a Temporal value, which has no entries to
-    // walk; anything but a plain object at a leaf is a value Hercule cannot use.
+    // flatten. Any value that is not a scalar or a plain object is invalid.
     expect(parseAndReadFailure("backup.time = 1979-05-27T07:32:00Z\n")).toContain("backup.time");
     expect(parseAndReadFailure("backup.day = 1979-05-27\n")).toContain("backup.day");
     expect(parseAndReadFailure("backup.at = 07:32:00\n")).toContain("backup.at");

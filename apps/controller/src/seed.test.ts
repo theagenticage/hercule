@@ -22,8 +22,8 @@ const readProfileByName = (name: string) =>
   });
 
 /**
- * The shipped profiles, listed in full so a change to the seeded grants shows
- * up here as a failing test rather than as drift.
+ * The shipped profiles, listed in full so a change to the seeded grants makes
+ * a test here fail rather than going unnoticed.
  */
 describe("the shipped permission profiles", () => {
   it("seeds assistant with the orchestration surface plus read on everything but secrets", async () => {
@@ -92,7 +92,7 @@ describe("the shipped permission profiles", () => {
     expect(profile.grants).not.toContain("event.audit");
   });
 
-  it("seeds unrestricted at user parity, withholding nothing", async () => {
+  it("seeds unrestricted with every grant, withholding nothing", async () => {
     const [unrestricted, assistant] = await run(
       Effect.flatMap(seed, () =>
         Effect.all([readProfileByName("unrestricted"), readProfileByName("assistant")] as const),
@@ -103,7 +103,7 @@ describe("the shipped permission profiles", () => {
     expect(unrestricted.grants).toContain("credential.write");
     expect(unrestricted.grants).toContain("infra.write");
     expect(unrestricted.grants).toContain("permission.write");
-    // Parity includes the security entries of the event log.
+    // Every grant includes access to the security entries of the event log.
     expect(unrestricted.grants).toContain("event.audit");
   });
 

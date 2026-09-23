@@ -5,10 +5,10 @@
  * minted it. Nothing stores it and no later operation can show it again, which
  * is why `query` lists references only. Losing a key means minting another.
  *
- * Revoking the key the caller is holding is allowed. It takes effect on the
- * next request, so the call that revokes it still answers; the alternative -
- * refusing - would leave a leaked key alive because it happens to be the one in
- * the hand that noticed.
+ * Revoking the key the caller is using is allowed. It takes effect on the next
+ * request, so the call that revokes it still succeeds. Rejecting that call
+ * instead would keep a leaked key alive just because the caller who noticed
+ * the leak was using that key.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -32,7 +32,7 @@ import { AuditLog } from "../events";
 import { Credentials, type ApiKeyRecord } from "./repository";
 import { hashToken, mintToken } from "./token";
 
-/** What listing takes. Absent fields are the defaults, not "no page". */
+/** The input of `apiKey.query`. An absent field takes its default. */
 export interface QueryInput {
   readonly limit?: number;
   readonly cursor?: string;
@@ -46,15 +46,15 @@ export interface ApiKeyPage {
 }
 
 /**
- * Newest first: a listing of credentials is read to find the one just minted or
- * the one to revoke, and both are recent.
+ * Newest first: the user usually looks for the key just minted or the one to
+ * revoke, and both are usually recent.
  */
 const DEFAULT_DIRECTION: SortDirection = "desc";
 
 /**
- * A key as the API shows it. `lastUsedAt` and `revokedAt` are absent rather
- * than null when they have not happened: the contract declares them optional,
- * and a key that has never been used says nothing instead of saying `null`.
+ * Converts a key record to the shape the API returns. `lastUsedAt` and
+ * `revokedAt` are left out, not set to `null`, when the key has not been used
+ * or revoked, because the contract declares them optional.
  */
 const toApiKey = (record: ApiKeyRecord): ApiKey => ({
   id: record.id,
@@ -71,8 +71,8 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Mints a key and returns its token, once. The token is minted outside the
-     * transaction and only its hash goes in, so nothing durable ever holds it.
+     * Mints a key and returns its token. This is the only time the token is
+     * returned: only its hash is stored, so nothing durable ever holds it.
      */
     create: (input: {
       readonly name: string;
@@ -108,8 +108,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The caller's own keys, revoked ones included: a key that was revoked
-     * should read as revoked rather than disappear.
+     * Returns one page of the caller's own keys, revoked ones included, so a
+     * revoked key shows as revoked rather than disappearing.
      */
     query: (
       input: QueryInput,
@@ -134,10 +134,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Revokes one of the caller's keys. A key that is not theirs and a key that
-     * was already revoked are both `not_found`: neither leaves anything for the
-     * caller to do differently, and the first must not confirm that an id
-     * exists.
+     * Revokes one of the caller's keys. Fails with `not_found` both for a key
+     * that is not the caller's and for a key already revoked: in neither case
+     * can the caller do anything differently, and the first must not confirm
+     * that the id exists.
      */
     revoke: (input: {
       readonly id: string;

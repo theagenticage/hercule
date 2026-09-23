@@ -1,16 +1,16 @@
 /**
  * Who is making the current request.
  *
- * The transport resolves the presented credential once and puts the result
- * here; service methods read it rather than taking it as a parameter, so a
- * signature never carries request context and an in-process caller provides the
+ * The transport resolves the presented credential once and stores the result
+ * here. Service methods read it rather than taking it as a parameter, so no
+ * signature carries request context, and an in-process caller provides the
  * same reference. It is a `Context.Reference` with a default, which keeps
  * `CurrentActor` out of every handler's requirement type.
  *
- * v1 authenticates two populations: the user, through a login bearer token or
- * an API key, and a session, through the token the controller minted for it.
- * Run and plugin actors will widen this union later; nothing here is
- * restructured when they do.
+ * v1 authenticates two kinds of caller: the user, through a login bearer token
+ * or an API key, and a session, through the token the controller created for
+ * it. Run and plugin actors will be added to this union later, without
+ * restructuring anything here.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -25,19 +25,19 @@ import {
   type Unauthenticated,
 } from "@hercule/contract";
 
-/** What a caller with no usable credential is told; never why. */
+/** The error message for a caller with no usable credential. It never says why. */
 export const NO_CREDENTIAL = "this operation needs a credential";
 
-/** Which user credential was presented, and the hash that resolved it. */
+/** Which user credential was presented, and the hash it was looked up by. */
 export interface PresentedCredential {
   readonly kind: "login" | "apiKey";
   /** The credential row's id, for stamping and revocation. */
   readonly id: string;
-  /** The SHA-256 hash the token resolved through; the plaintext is not kept. */
+  /** The SHA-256 hash the token was looked up by; the plaintext is not kept. */
   readonly tokenHash: string;
 }
 
-/** The user actor: full parity with the API, no profile applies. */
+/** The user actor: may call every operation, and no profile applies. */
 export interface UserActor {
   readonly _tag: "user";
   readonly userId: string;
@@ -45,13 +45,14 @@ export interface UserActor {
 }
 
 /**
- * An agent inside a session, calling on the token the controller minted for it.
+ * An agent inside a session, calling with the token the controller created for
+ * it.
  *
- * The grants are the session's permission profile as it stood when the token
- * was resolved, carried here rather than looked up again: the check runs before
- * the body is decoded and on every call, and a second read per request would be
- * a join on the request path for a set that changes only when the user edits
- * the profile.
+ * The grants are those of the session's permission profile at the time the
+ * token was resolved, stored here rather than looked up again. The check runs
+ * on every call, before the body is decoded, and a second read per request
+ * would add a join to every request for a set that changes only when the user
+ * edits the profile.
  */
 export interface SessionActor {
   readonly _tag: "session";
@@ -60,7 +61,7 @@ export interface SessionActor {
   readonly grants: ReadonlyArray<Grant>;
 }
 
-/** Nobody has been resolved: an unauthenticated route, or an in-process caller. */
+/** No caller was resolved: an unauthenticated route, or an in-process caller. */
 export interface NoActor {
   readonly _tag: "none";
 }
@@ -69,51 +70,51 @@ export type Actor = UserActor | SessionActor | NoActor;
 
 const NONE: NoActor = { _tag: "none" };
 
-/** The actor behind the current request. Request-scoped, defaulting to nobody. */
+/** The actor behind the current request. Scoped to the request; defaults to no actor. */
 export const CurrentActor = Context.Reference<Actor>("hercule/controller/actor/CurrentActor", {
   defaultValue: () => NONE,
 });
 
 /**
- * How a mutation by the user is stamped in the event log.
- * The user is the bare word; which credential it presented is not part of its
- * identity, and the other actor kinds carry their id (`session:<id>`).
+ * The actor stamp for a mutation by the user. The user is stamped as the bare
+ * word, because the credential it presented is not part of its identity. The
+ * other actor kinds include their id (`session:<id>`).
  */
 export const USER_ACTOR = "user";
 
 /**
- * How a mutation Hercule made on nobody's behalf is stamped. Enlisting a machine
- * that presented a join token, and everything that machine reports about itself
- * afterwards, are changes with no credential behind them and still have to say
- * who made them.
+ * The actor stamp for a mutation the controller made on nobody's behalf.
+ * Enlisting a machine that presented a join token, and everything that machine
+ * reports about itself afterwards, are changes with no credential behind them,
+ * but they still need an actor stamp.
  *
- * It is a stamp and never an actor: nothing carrying it reaches an operation,
- * so `checkGrant` never sees it and the union above gains no member.
+ * It is only a stamp, never an actor: no request carries it into an operation,
+ * so `checkGrant` never sees it and the `Actor` union has no member for it.
  */
 export const SYSTEM_ACTOR = "system";
 
 /**
- * How an actor is stamped on what it changes: the session's own id for a
- * session, which is what a reader of the event log or of a task's provenance
- * follows back to the conversation that made the change, and the bare word for
- * the user.
+ * Returns the actor stamp for an actor: `session:<id>` for a session, and the
+ * bare word `user` for the user. The session id lets a reader of the event log
+ * or of a task's provenance trace a change back to the session that made it.
  *
- * Nobody has no stamp, which is why it is not in the parameter: an operation
- * that mutates anything names a grant, and `requireGrant` refuses an actorless
- * caller that grant, so the only two that reach a write through a request are
- * the user and a session. A write with no request behind it names
- * `SYSTEM_ACTOR` for itself, explicitly, rather than passing nobody here.
+ * `NoActor` has no stamp, which is why the parameter type leaves it out. Every
+ * operation that mutates anything requires a grant, and `requireGrant` rejects
+ * a caller with no actor, so only the user and a session can reach a write
+ * through a request. A write with no request behind it uses `SYSTEM_ACTOR`
+ * explicitly instead of calling this function.
  */
 export const buildActorStamp = (actor: UserActor | SessionActor): string =>
   actor._tag === "session" ? `session:${actor.sessionId}` : USER_ACTOR;
 
 /**
- * How the actor behind the current request is stamped on what it changes. The
- * one place a mutation's `actor` comes from, so no service decides it.
+ * Returns the actor stamp for the actor behind the current request. This is
+ * the only place a mutation's `actor` comes from, so no service decides it.
  *
- * An actorless caller here is a defect, not a failure: it means a write reached
- * stamping without the grant check that would have refused it, and stamping it
- * as the user would attribute the change to a person who made no request.
+ * Dies when there is no actor, because that is a bug, not a failure: a write
+ * reached this point without the grant check that would have rejected it.
+ * Stamping it as the user would attribute the change to a person who made no
+ * request.
  */
 export const currentStamp: Effect.Effect<string> = Effect.flatMap(CurrentActor, (actor) =>
   actor._tag === "none"
@@ -122,8 +123,8 @@ export const currentStamp: Effect.Effect<string> = Effect.flatMap(CurrentActor, 
 );
 
 /**
- * The grant an operation names, or `undefined` where its requirement is not a
- * grant at all.
+ * Returns the grant an operation requires, or `undefined` when its requirement
+ * is not a grant.
  */
 const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
   switch (requirement) {
@@ -137,28 +138,28 @@ const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
 };
 
 /**
- * Whether this actor may reach this operation, and the refusal to answer with
- * if it may not.
+ * Checks whether an actor may call an operation. Returns `undefined` when it
+ * may, and the `Forbidden` error to fail with when it may not.
  *
- * The user actor has full parity: no profile applies, so it passes every grant.
- * A session passes exactly the grants its permission profile holds. Run and
- * plugin actors are ungated - neither exists yet, and both are a branch here
- * rather than a rewrite when they do.
+ * The user actor passes every grant, because no profile applies to it. A
+ * session passes exactly the grants its permission profile holds. Run and
+ * plugin actors do not exist yet; each will be one more case here.
  *
- * It answers with the whole refusal and not with the missing grant, so that a
- * caller is told what it lacks. It takes the operation and not the
- * operation's requirement, so that an operation with a rule of its own can be
- * told apart here.
+ * It returns the whole error rather than only the missing grant, so the caller
+ * is told what it lacks. It takes the operation rather than the operation's
+ * requirement, so an operation with a rule of its own can be recognised here.
  *
  * `session.spawn` has three such rules. All three are enforced in
- * `daemon/placement.ts` and not here, because each of them needs the decoded
- * payload, and this check runs before the decode. First: a spawn from an Agent
- * is open to every actor that holds the grant, a Thread is the user's own, and
- * the payload says which of the two the call asks for. Second: a session actor
- * may spawn only from an Agent whose permission profile grants nothing beyond
- * its own. Third: a session actor may spawn only at or below the access mode
- * the Agent names. The second rule and the third rule both need the Agent row
- * to be read first.
+ * `daemon/placement.ts` and not here, because each needs the decoded payload,
+ * and this check runs before the decode:
+ *
+ * - any actor that holds the grant may spawn from an Agent, but only the user
+ *   may start a Thread, and the payload decides which one the call is;
+ * - a session actor may spawn only from an Agent whose permission profile
+ *   grants nothing beyond its own;
+ * - a session actor may spawn only at or below the Agent's access mode.
+ *
+ * The second and third rules both need the Agent row to be read first.
  */
 export const checkGrant = (id: OperationId, actor: Actor): Forbidden | undefined => {
   const grant = findRequiredGrant(OPERATIONS[id].requires);
@@ -174,9 +175,10 @@ export const checkGrant = (id: OperationId, actor: Actor): Forbidden | undefined
 };
 
 /**
- * The static grant check as a service method runs it: enforcement lives inside
- * the method, not in the handler. Answers with the current actor, which is
- * what the method stamps its mutation with.
+ * Runs the grant check for an operation inside a service method, because
+ * enforcement lives in the method, not in the handler. Returns the current
+ * actor, which the method stamps its mutation with. Fails with `Forbidden`
+ * when the actor lacks the grant.
  */
 export const requireGrant = (id: OperationId): Effect.Effect<Actor, Forbidden> =>
   Effect.flatMap(CurrentActor, (actor) => {
@@ -185,22 +187,24 @@ export const requireGrant = (id: OperationId): Effect.Effect<Actor, Forbidden> =
   });
 
 /**
- * Why an operation the caller holds the grant for is still the user's alone.
- * The grant on the refusal is the one the operation names, so the message has
- * to say that widening the profile is not the answer.
+ * The error message for a session that holds the grant for an operation only
+ * the user may call. The `Forbidden` error includes the operation's grant, so
+ * the message has to say that widening the profile will not help.
  */
 const USER_ONLY = "only the user may make this call; no grant confers it";
 
 /**
- * The same check for an operation that acts on the caller's own rows, and so
- * needs a user rather than an actor of any kind.
+ * Runs the grant check for an operation that acts on the caller's own rows,
+ * and so needs the user rather than any actor. Returns the user actor.
  *
- * A session that holds the grant is refused with it: the credential is good and
- * the profile allows the family, so the answer is 403 naming what was asked
- * for, never the 401 that would tell an agent its token had died. The 401 is
- * for an actorless caller, because nobody was resolved at all - which only
- * happens where the operation's requirement is `authenticated` rather than a
- * grant, since `requireGrant` refuses nobody a grant first.
+ * Fails with:
+ *
+ * - `Forbidden` (403) for a session, even one that holds the grant. The
+ *   credential is valid and the profile allows the grant, so the error must
+ *   not be a 401, which would tell an agent its token had expired.
+ * - `Unauthenticated` (401) for a caller with no actor. That only happens
+ *   when the operation's requirement is `authenticated` rather than a grant,
+ *   because otherwise `requireGrant` has already rejected the caller.
  */
 export const requireUserActor = (
   id: OperationId,

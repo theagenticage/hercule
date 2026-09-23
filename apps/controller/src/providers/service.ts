@@ -1,11 +1,11 @@
 /**
- * Provider instances as the API sees them. An instance is a row plus its
- * provider definition: `displayName` and `declared` are composed at read, never
- * copied into the row, so they cannot go stale.
+ * The provider instance operations. An instance is a row plus its provider
+ * definition: `displayName` and `declared` are added when the row is read,
+ * never copied into the row, so they cannot go stale.
  *
- * A row whose provider this build does not carry is not listed and not
- * readable, but the row stays, so a build that carries the provider again finds
- * it.
+ * A row whose provider this build does not have is not listed and cannot be
+ * read, but the row is kept, so a later build that has the provider again
+ * finds it.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -65,32 +65,33 @@ import { providerRepository, type StoredInstance, type StoredSnapshot } from "./
 import { findVersionFloor, computeVersionVerdict } from "./version";
 
 /**
- * The user is watching a dialog; a cold CLI reaching the vendor is what takes
- * the time.
+ * The user is waiting in a dialog. Most of the time goes to a cold CLI
+ * contacting the vendor.
  */
 const LOGIN_DEADLINE: Duration.Duration = Duration.seconds(30);
 
-/** Tests hand over a deadline they can wait out. */
+/** Lets tests set a deadline short enough to wait for. */
 export const ProviderLoginDeadline = Context.Reference<Duration.Duration>(
   "hercule/controller/providers/ProviderLoginDeadline",
   { defaultValue: (): Duration.Duration => LOGIN_DEADLINE },
 );
 
 /**
- * Longer than the URL's wait: it covers the vendor's own exchange, and giving
- * up early would report a failure that in fact wrote a credential. No longer
- * than that: the HTTP server this answer goes out on cuts a held request, so a
- * wait measured in browser-time could never have been answered anyway.
+ * Longer than the wait for the URL, because it covers the vendor's own
+ * exchange, and giving up early would report a failure for a login that in
+ * fact stored a credential. But no longer than this: the HTTP server that
+ * sends the response closes a request held too long, so a longer wait could
+ * never be answered anyway.
  */
 const LOGIN_CODE_DEADLINE: Duration.Duration = Duration.minutes(2);
 
 /**
- * The runner's own 5min installer budget plus the round trip, so a machine
- * still working is not cut off here.
+ * The runner's own 5min installer timeout plus the round trip, so a runner
+ * that is still installing is not cut off by this deadline.
  */
 const HARNESS_INSTALL_DEADLINE: Duration.Duration = Duration.minutes(6);
 
-/** Which machine a login runs on. The credential lands on that machine alone. */
+/** The instance and the runner a login runs on. The credential is stored on that runner only. */
 const LoginInput = Schema.Struct({ id: Id, ...ProviderLoginInput.fields });
 
 export type LoginInput = Schema.Schema.Type<typeof LoginInput>;
@@ -125,7 +126,7 @@ const decodeInstall = Schema.decodeUnknownEffect(InstallInput);
 
 const NO_SUCH_INSTANCE = "no such provider instance";
 
-/** Who a provider instance's credentials belong to in the secrets table. */
+/** The owner kind a provider instance's credentials are stored under in the secrets table. */
 const OWNER_KIND: SecretOwnerKind = "provider-instance";
 
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
@@ -137,10 +138,11 @@ type WriteError = CreateError | NotFound;
 type AskError = WriteError | InvalidState;
 
 /**
- * A stored credential that will not decrypt fails the move that needed it: a
- * probe answered as if there were none would read as a credential nobody
- * entered. Said as a state rather than as a fault, because it is one the user
- * settles by entering the credential again.
+ * Converts a decryption failure into an `InvalidState` error. A stored
+ * credential that does not decrypt fails the operation that needed it: a
+ * probe run as if there were no credential would look like a credential
+ * nobody entered. It is reported as a state rather than a fault, because the
+ * user fixes it by entering the credential again.
  */
 const createUndecryptableError = (error: SecretDecryptError): InvalidState =>
   createInvalidStateError(
@@ -154,13 +156,14 @@ const isLoginAnswer = (answer: Answer): answer is LoginAnswer =>
   answer._tag === "loginUrl" || answer._tag === "loginFailed" || answer._tag === "loginResult";
 
 const describeLoginFailure = (answer: LoginAnswer): string =>
-  answer._tag === "loginFailed" ? answer.message : "the login did not answer with a URL";
+  answer._tag === "loginFailed" ? answer.message : "the login did not return a URL";
 
 /**
- * All errors at once, so a form can put each message under its own field. Read
- * against the schema without its secret-valued fields: those live in the
- * secrets table, so one written into the config is an unknown key and is
- * refused by name.
+ * Validates a config against the provider's schema, and fails with every
+ * error at once, so a form can show each message under its own field. The
+ * schema excludes the secret fields: those are stored in the secrets table,
+ * so a secret written into the config is an unknown key and is rejected by
+ * name.
  */
 const readConfig = (
   definition: ProviderDefinition,
@@ -189,9 +192,10 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * What the plugin marked secret, said in its own words, with whether this
-   * instance has a value stored under each name. The value itself is never
-   * read here: an instance says a credential is there, never what it is.
+   * Lists the fields the plugin marked secret, with the plugin's own labels,
+   * and whether this instance has a value stored under each name. The value
+   * itself is never read here: an instance shows that a credential exists,
+   * never what it is.
    */
   const listInstanceSecretFields = (
     definition: ProviderDefinition,
@@ -248,7 +252,11 @@ const make = Effect.gen(function* () {
     });
   });
 
-  /** One instance, without the grant check: a write has already been checked once. */
+  /**
+   * Reads one instance without a grant check, because the calling operation
+   * has already checked its grant. Fails with `NotFound` if there is no such
+   * instance, or if this build does not have its provider.
+   */
   const readInstanceOrFail = (
     id: string,
   ): Effect.Effect<ProviderInstance, NotFound | SqlError | Schema.SchemaError> =>
@@ -276,7 +284,7 @@ const make = Effect.gen(function* () {
       return definition === undefined
         ? Effect.fail(
             createValidationError([
-              { path: ["providerId"], message: `no plugin registered ${id}` },
+              { path: ["providerId"], message: `no plugin registered the provider ${id}` },
             ]),
           )
         : Effect.succeed(definition);
@@ -307,8 +315,8 @@ const make = Effect.gen(function* () {
       const answer = yield* connections.asked(runnerId, request, deadline);
       const login = Option.filter(answer, isLoginAnswer);
       return yield* Option.match(login, {
-        // Disconnected, gone, or silent are one thing to the user: it did not
-        // answer.
+        // Disconnected, gone or silent all mean the same to the user: the
+        // runner did not answer.
         onNone: () =>
           Effect.fail(
             createInvalidStateError(
@@ -335,7 +343,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the URL the harness printed; the user opens it in their own
-     * browser, since the machine may have none.
+     * browser, since the runner's machine may have none.
      */
     login: (
       input: LoginInput,
@@ -360,8 +368,8 @@ const make = Effect.gen(function* () {
         );
         if (answer._tag !== "loginUrl")
           return yield* Effect.fail(createInvalidStateError(describeLoginFailure(answer)));
-        // Absent rather than empty: a code is what tells the user's browser,
-        // not this exchange, to finish the login.
+        // Absent rather than empty: a code means the login is finished in the
+        // user's browser, not through this exchange.
         return {
           url: answer.url,
           ...(answer.userCode === undefined ? {} : { userCode: answer.userCode }),
@@ -369,9 +377,11 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * A refused code leaves the login up, so the user can paste again; only
-     * this call fails. A finished login is answered with a fresh probe, because
-     * the harness has not yet been asked whose credential it holds.
+     * Sends a login code to the runner, and returns a fresh snapshot once the
+     * login finishes. A rejected code fails only this call and leaves the login
+     * running, so the user can paste again. The snapshot comes from a new
+     * probe, because the harness has not yet been asked whose credential it
+     * holds.
      */
     submitLoginCode: (input: LoginCodeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
       Effect.gen(function* () {
@@ -391,13 +401,13 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createInvalidStateError(describeLoginFailure(answer)));
         }
         if (!answer.ok) {
-          const said = answer.message ?? "that code was refused";
+          const said = answer.message ?? "that code was rejected";
           return yield* Effect.fail(
             createValidationError([{ path: ["code"], message: said }], said),
           );
         }
-        // Who put a credential on which machine. Never the URL or the code -
-        // they are good for this exchange only.
+        // Records who put a credential on which runner. Never the URL or the
+        // code, which are valid for this exchange only.
         const actor = yield* currentStamp;
         yield* withTransaction(
           sql,
@@ -432,8 +442,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The fleet is swept hourly anyway; this is for when something changed
-     * outside Hercule and the user will not wait.
+     * Probes one instance on one runner now, and returns the snapshot. The
+     * fleet is swept hourly anyway; this is for when something changed
+     * outside Hercule and the user does not want to wait.
      */
     probe: (input: ProbeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
       Effect.gen(function* () {
@@ -464,9 +475,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The runner reports its facts before it says the install finished, so the
-     * row answered with is the machine as it now is. Every instance on it is
-     * swept: a just-installed harness has never been asked anything.
+     * Installs a provider's harness on a runner, and returns the runner. The
+     * runner reports its facts before it reports that the install finished,
+     * so the returned runner is up to date. Every instance is then probed on
+     * that runner, because a newly installed harness has never been probed.
      */
     installHarness: (input: InstallInput): Effect.Effect<RunnerDetail, AskError> =>
       Effect.gen(function* () {
@@ -496,7 +508,7 @@ const make = Effect.gen(function* () {
         return yield* readRunnerOrFail(runnerId);
       }),
 
-    /** Opens a second account on a provider, or the first on one the boot missed. */
+    /** Creates a second account on a provider, or the first on a provider that boot did not seed. */
     create: (input: ProviderInstanceCreateInput): Effect.Effect<ProviderInstance, CreateError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.create");
@@ -506,8 +518,8 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Inside the transaction, because a provider that declines several
-            // accounts must not end up with two by way of two calls at once.
+            // Inside the transaction, so two concurrent calls cannot give a
+            // single-account provider two instances.
             if (!definition.supportsMultipleInstances) {
               const existing = yield* instances.list();
               if (existing.some((row) => row.providerId === definition.id)) {
@@ -515,14 +527,14 @@ const make = Effect.gen(function* () {
                   createValidationError([
                     {
                       path: ["providerId"],
-                      message: `${definition.displayName} holds one account, and it already has one`,
+                      message: `${definition.displayName} supports only one account, and one already exists`,
                     },
                   ]),
                 );
               }
             }
-            // One clock read, inside the transaction: the row and the entry
-            // that records it carry the same instant.
+            // One clock read, inside the transaction, so the row and its audit
+            // entry have the same timestamp.
             const at = yield* nowIso;
             const stored = yield* instances.insert({ ...decoded, at });
             yield* audit.append({
@@ -532,15 +544,15 @@ const make = Effect.gen(function* () {
               record: { topic: "provider", id: stored.id },
               at,
             });
-            // Nothing can be stored under an instance that did not exist a moment ago.
+            // A new instance has no snapshots or secrets yet.
             return buildProviderInstance(stored, definition, [], []);
           }),
         );
       }),
 
     /**
-     * An empty patch is refused: it would move `updatedAt` and stamp an entry
-     * describing nothing.
+     * Updates an instance and returns it. An empty patch is rejected, because
+     * it would change `updatedAt` and write an audit entry for no change.
      */
     update: (input: UpdateInput): Effect.Effect<ProviderInstance, WriteError> =>
       Effect.gen(function* () {
@@ -572,21 +584,22 @@ const make = Effect.gen(function* () {
               record: { topic: "provider", id },
               at,
             });
-            // Read back rather than merge in memory: what the caller gets is
-            // the row that was written, whatever the edit touched.
+            // Read back rather than merged in memory, so the caller gets the
+            // row as it was written, whatever the update changed.
             return yield* readInstanceOrFail(id);
           }),
         ).pipe(
-          // After the commit, unawaited: the edit stales every machine's
-          // snapshot, but the answer to the edit is the edit.
+          // After the commit, without waiting: the update makes every
+          // runner's snapshot stale, but the response only needs the update.
           Effect.tap(() => Effect.forkDetach(probes.sweepInstance(id))),
         );
       }),
 
     /**
-     * Works off the row, not the composed instance, so an instance whose
-     * provider this build no longer carries can still be deleted. The next boot
-     * re-seeds if this was the provider's only instance.
+     * Deletes an instance and its stored credentials. It reads the row, not
+     * the full instance, so an instance whose provider this build no longer
+     * has can still be deleted. If this was the provider's only instance, the
+     * next boot creates a new default one.
      */
     delete: (input: Identified): Effect.Effect<Record<string, never>, WriteError> =>
       Effect.gen(function* () {
@@ -603,9 +616,9 @@ const make = Effect.gen(function* () {
                 onSome: Effect.succeed,
               }),
             );
-            // In the transaction that deletes the row: a credential left
-            // behind belongs to an owner that no longer exists, and the next
-            // instance to be given this id would inherit it.
+            // In the same transaction that deletes the row: a credential left
+            // behind would belong to an owner that no longer exists, and the
+            // next instance given this id would inherit it.
             const held = (yield* secrets.refs(OWNER_KIND, [id])).get(id) ?? [];
             yield* Effect.forEach(
               held,
@@ -615,7 +628,8 @@ const make = Effect.gen(function* () {
               },
             );
             yield* instances.delete(id);
-            // Names rather than the config document: the log is kept for months.
+            // Ids and the name rather than the config document, because the
+            // log is kept for months.
             yield* audit.append({
               kind: "provider.deleted",
               actor: yield* currentStamp,
@@ -625,8 +639,8 @@ const make = Effect.gen(function* () {
             });
             return {};
           }),
-          // A name with a `|` in it is one this table could never have stored,
-          // so a delete refusing on one is a broken row, not a bad request.
+          // This table could never have stored a name containing `|`, so a
+          // delete that fails on one means a broken row, not a bad request.
         ).pipe(Effect.catchTag("SecretNameError", Effect.die));
       }),
   };

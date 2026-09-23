@@ -1,23 +1,28 @@
 /**
- * `controller.read` and `controller.update`: what this controller says about
- * itself, and the one thing a caller may say back.
+ * `controller.read` and `controller.update`: information about this
+ * controller, and the one field a caller may change.
  *
- * Three facts today - the identity the runners verify against, the version
- * baked into the binary, and the runner a placement falls back to. Update
- * availability belongs here too, but there is no update check yet, so it is not
- * answered; it gains its field here once it is built.
+ * `controller.read` returns three values today:
+ *
+ * - the identity the runners verify against;
+ * - the version built into the binary;
+ * - the default runner, which placement falls back to.
+ *
+ * Update availability belongs here too, but there is no update check yet, so
+ * it is not returned; it will get its field here once it is built.
  *
  * The default runner is stored as a controller setting, because there is no
- * controller table to widen. `runners/` writes that key too, when the first
- * runner joins and when the named one retires. Only this file takes the id from
- * a caller, though, so the check that it names a placeable runner sits here
- * alone, and that is why the settings API does not carry the key.
+ * controller table to add a column to. `runners/` also writes that key, when
+ * the first runner joins and when the default runner retires. Only this file
+ * takes the id from a caller, though, so the check that the id is a runner work
+ * can be placed on lives only here. That is why the settings API does not
+ * expose the key.
  *
  * The version comes from `@hercule/home/version`, which `scripts/gen-version.ts`
  * generates at build time: a compiled binary has no `package.json` on disk to
- * read. It is generated into `@hercule/home` because that is the one leaf every
- * role links - the dispatcher prints it for `hercule --version` and the
- * controller answers it here, and neither may depend on the other.
+ * read. It is generated into `@hercule/home` because that is the one leaf
+ * package every role links: the dispatcher prints it for `hercule --version`
+ * and the controller returns it here, and neither may depend on the other.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -49,7 +54,10 @@ const decodeUpdate = Schema.decodeUnknownEffect(ControllerUpdateInput);
 
 const NO_SUCH_RUNNER = "no runner has that id";
 
-/** The other half of the rule `runner.update` enforces: the two never meet. */
+/**
+ * A reserved runner cannot be the default runner. `runner.update` enforces the
+ * same rule from the other side: it rejects reserving the default runner.
+ */
 const RESERVED = "that runner is reserved, so nothing lands on it by default";
 
 const make = Effect.gen(function* () {
@@ -63,9 +71,9 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const record = yield* identity.read;
       if (Option.isNone(record)) {
-        // The boot creates the identity before anything binds, so a controller
-        // answering requests without one is a bug, not a state a caller can do
-        // anything about.
+        // The boot creates the identity before the controller listens, so a
+        // controller serving requests without one is a bug, not something a
+        // caller can fix.
         return yield* Effect.die("the controller has no identity row");
       }
       return {
@@ -77,16 +85,20 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    /** The controller's identity, version and default runner. */
+    /** Returns the controller's identity, version and default runner. */
     read: (): Effect.Effect<
       ControllerInfo,
       Unauthenticated | Forbidden | SettingError | SqlError
     > => Effect.flatMap(requireUserActor("controller.read"), readControllerInfo),
 
     /**
-     * Names the runner a placement falls back to. A patch that names no field
-     * is accepted and writes nothing, which is what makes this safe to send
-     * from a form that may have nothing to say.
+     * Sets or clears the default runner, which placement falls back to, and
+     * returns the updated controller information. A patch with no fields is
+     * accepted and writes nothing, so a form can send it even when nothing
+     * changed.
+     *
+     * Fails with `Validation` when no runner has the id, and with `Conflict`
+     * when the runner is reserved or retired.
      */
     update: (
       input: ControllerUpdateInput,
@@ -102,11 +114,12 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // One clock read, inside the transaction: the row and the event
-            // that records it carry the same instant.
+            // Read the clock once, inside the transaction, so the setting and
+            // the audit entry that records it have the same timestamp.
             const at = yield* nowIso;
-            // Naming the runner already named is not a change: it would
-            // otherwise stamp a `controller.updated` row describing nothing.
+            // Choosing the runner that is already the default is not a change.
+            // Without this check it would write a `controller.updated` entry
+            // that describes nothing.
             if (chosen === (yield* settings.defaultRunnerId())) return yield* readControllerInfo();
             if (chosen !== null) {
               const runner = yield* runners.read(chosen);

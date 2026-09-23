@@ -1,16 +1,16 @@
 /**
  * Password login and logout.
  *
- * Login is the only place in Hercule that checks a password. It hands back an
- * opaque 30-day rolling bearer token: every authenticated use pushes the expiry
- * out (`Credentials.renewLoginToken`, called by the transport gate), and logout
- * revokes it server-side.
+ * Login is the only place in Hercule that checks a password. It returns an
+ * opaque bearer token with a rolling 30-day expiry: every authenticated use
+ * moves the expiry later (`Credentials.renewLoginToken`, called by the
+ * transport gate), and logout revokes the token on the server.
  *
- * A login attempt for a username that does not exist still verifies a password,
- * against a fixed hash. Skipping the verify would answer in a millisecond
- * instead of tens of them and turn login into an oracle for which usernames
- * exist. The response is the same either way, and says only that the pair is
- * wrong.
+ * A login attempt for a username that does not exist still verifies a
+ * password, against a fixed hash. Skipping the check would respond in a
+ * millisecond instead of tens of milliseconds, which would let anyone find out
+ * which usernames exist. The response is the same either way: the error message
+ * says only that the username or password is incorrect.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -30,22 +30,23 @@ import { withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Users, verifyPassword } from "../users";
 
-/** What login takes. The password is never held beyond the verify. */
+/** The input of login. The password is not kept after it is verified. */
 export interface LoginInput {
   readonly username: string;
   readonly password: string;
 }
 
 /**
- * An argon2id hash of a value nobody knows, verified against when the username
- * does not exist so that a miss costs what a hit costs. Its parameters are the
- * production ones; a test that logs in with reduced parameters is comparing
- * two different costs anyway, and only real logins have an attacker.
+ * An argon2id hash of a value nobody knows. Login verifies against it when the
+ * username does not exist, so an unknown username takes as long as a known one.
+ * It uses the production parameters. A test that logs in with reduced
+ * parameters compares two different costs anyway, and only real logins face
+ * an attacker.
  */
 const ABSENT_USER_HASH =
   "$argon2id$v=19$m=65536,t=2,p=1$YLIlnj5jWzl2h0eLh5bwJnAprHHSQtwEWWQ6w/A1kTs$sXIzd3nAnS1MBdrKw0b5NcF5jwAdeRXxdA6YYznxOFk";
 
-/** One message for both halves of a wrong login, so neither is confirmed. */
+/** One error message for a wrong username and a wrong password, so neither is confirmed. */
 const WRONG = "the username or password is incorrect";
 
 const make = Effect.gen(function* () {
@@ -55,7 +56,11 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   return {
-    /** Verifies the password and mints the 30-day rolling bearer token. */
+    /**
+     * Verifies the password and returns a new bearer token with a rolling
+     * 30-day expiry. Fails with `Unauthenticated` when the username or password
+     * is wrong.
+     */
     login: (
       input: LoginInput,
     ): Effect.Effect<
@@ -72,17 +77,17 @@ const make = Effect.gen(function* () {
           }),
         );
         if (Option.isNone(user) || !matches) {
-          // The username is the only thing the attempt carried that is safe to
-          // keep: the password is never written anywhere, failed attempt
-          // included. The actor is nobody, because the credential resolved to
-          // nobody: a row claiming the user would say someone was authenticated
-          // when the whole point of the row is that nobody was.
+          // The username is the only part of the attempt that is safe to keep:
+          // the password is never written anywhere, even for a failed attempt.
+          // The actor is null, because the credential resolved to no one. An
+          // entry stamped with the user would claim someone was authenticated,
+          // when the entry records exactly that no one was.
           //
-          // The append stands alone - there is no mutation for it to roll back
-          // with - so a database that refuses it must not turn a wrong password
-          // into a 500. The caller is told what is true about their credential
-          // and the store's own failure goes to the log, where the next write
-          // in any operation will say the same thing.
+          // The append is not part of any other write, so there is nothing to
+          // roll back with it. A database error here must not turn a wrong
+          // password into a 500. The caller gets the correct answer about their
+          // credential, and the database error goes to the log, where the next
+          // write in any operation will report the same problem.
           yield* audit
             .append({
               kind: "auth.login.failed",
@@ -115,9 +120,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Revokes the login bearer token the call was made with. An API key is not
-     * a login: revoking one is `apiKey.revoke`, which names the key rather than
-     * whichever credential happens to be in the header.
+     * Revokes the login bearer token the call was made with. Fails with
+     * `Validation` when the call was made with any other credential. An API key
+     * is not a login: it is revoked with `apiKey.revoke`, which takes the key's
+     * id rather than whichever credential happens to be in the header.
      */
     logout: (): Effect.Effect<Record<string, never>, Validation | SqlError> =>
       Effect.gen(function* () {

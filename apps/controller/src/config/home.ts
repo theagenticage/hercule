@@ -7,18 +7,20 @@ import { HerculeHomeError } from "./errors";
  * Hercule Home: the one directory holding everything Hercule keeps on a machine.
  * Only `dataDir` (the Data Root) moves with promotion (spec 15 section 5).
  *
- * The layout itself is `@hercule/home`, which every role links; this is the
- * controller's view of it, plus the two effects that put it on disk.
+ * The layout itself is defined in `@hercule/home`, which every role links.
+ * This module provides it as a controller service, plus the two effects that
+ * create it on disk.
  */
 export class HerculeHome extends Context.Service<HerculeHome, HomePaths>()(
   "hercule/controller/config/HerculeHome",
 ) {}
 
 /**
- * Create one directory and its parents, owner-only. Idempotent.
+ * Creates one directory and its parents, readable only by the owner. Does
+ * nothing when the directory exists. Fails with `HerculeHomeError`.
  *
- * The home holds the master key, the setup URL and the database, so nothing in
- * it is another user's business (spec 13 section 2.2).
+ * The home holds the master key, the setup URL and the database, so no other
+ * user may read anything in it (spec 13 section 2.2).
  */
 export const createDirectory = Effect.fn("createDirectory")(function* (path: string) {
   yield* Effect.try({
@@ -28,8 +30,9 @@ export const createDirectory = Effect.fn("createDirectory")(function* (path: str
 });
 
 /**
- * Create every directory of the layout (spec 15 section 5). Idempotent: an
- * existing home keeps everything already in it.
+ * Creates every directory of the layout (spec 15 section 5), and makes the
+ * home readable only by the owner. Fails with `HerculeHomeError`. An existing
+ * home keeps everything already in it.
  */
 export const createLayout = Effect.fn("createLayout")(function* (paths: HomePaths) {
   const directories = [
@@ -43,8 +46,9 @@ export const createLayout = Effect.fn("createLayout")(function* (paths: HomePath
   for (const directory of directories) {
     yield* createDirectory(directory);
   }
-  // `mode` applies only when a directory is created, so a home that predates
-  // this rule, or that someone widened, is narrowed again on every boot.
+  // `mode` applies only when a directory is created, so a home created before
+  // this rule, or whose permissions someone widened, is restricted again on
+  // every boot.
   yield* Effect.try({
     try: () => chmodSync(paths.home, 0o700),
     catch: (cause) => new HerculeHomeError({ action: "secure", path: paths.home, cause }),

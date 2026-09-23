@@ -13,7 +13,7 @@ import { Secret, SecretLayer } from "./service";
 
 const CONNECTION = { kind: "connection", id: "0198e4b0-0000-7000-8000-000000000001" } as const;
 
-/** The two halves of an owner, as an operation's input carries them. */
+/** Returns an owner's kind and id as the two input fields an operation takes. */
 const buildOwnerFields = (owner: { kind: "connection"; id: string }) => ({
   ownerKind: owner.kind,
   ownerId: owner.id,
@@ -34,7 +34,7 @@ afterEach(() => {
   homes = [];
 });
 
-/** The real service over the real repository, a `:memory:` database and a key file. */
+/** Builds the real service over the real repository, a `:memory:` database and a key file. */
 const buildStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-secret-service-"));
   homes.push(home);
@@ -48,7 +48,7 @@ const buildStack = () => {
 
 type Services = Secret | Secrets | AuditLog;
 
-/** Every call runs as the user actor, which is what a request through the API is. */
+/** Runs a call as the user actor, which is the actor of a request through the API. */
 const run = <A, E>(body: (secret: Secret["Service"]) => Effect.Effect<A, E, Services>) =>
   Effect.runPromise(
     Effect.flatMap(Secret, body).pipe(
@@ -58,7 +58,7 @@ const run = <A, E>(body: (secret: Secret["Service"]) => Effect.Effect<A, E, Serv
   );
 
 describe("secret.set", () => {
-  it("stores a value and answers with the reference, never the value", async () => {
+  it("stores a value and returns the reference, never the value", async () => {
     const ref = await run((secret) =>
       secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: VALUE }),
     );
@@ -95,7 +95,7 @@ describe("secret.set", () => {
     expect(first?.rotatedAt).toBeUndefined();
   });
 
-  it("stores what was written, so the value is readable in this process only", async () => {
+  it("stores the value so the repository can read it back in this process", async () => {
     const value = await run((secret) =>
       Effect.gen(function* () {
         yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: VALUE });
@@ -107,7 +107,7 @@ describe("secret.set", () => {
     expect(Option.isSome(value) && Redacted.value(value.value)).toBe(VALUE);
   });
 
-  it("audits the write as created and then as rotated, naming no value", async () => {
+  it("audits the first write as created and the second as rotated, without the value", async () => {
     const rows = await run((secret) =>
       Effect.gen(function* () {
         yield* secret.set({ ...buildOwnerFields(CONNECTION), name: "token", value: VALUE });
@@ -131,7 +131,7 @@ describe("secret.set", () => {
     expect(JSON.stringify(rows)).not.toContain(VALUE);
   });
 
-  it("refuses the core owner: it holds the controller's own key material", async () => {
+  it("rejects the core owner, which holds the controller's own key material", async () => {
     const failure = await run((secret) =>
       Effect.flip(
         secret.set({ ownerKind: "core", ownerId: "controller", name: "signing", value: VALUE }),
@@ -142,7 +142,7 @@ describe("secret.set", () => {
     expect(JSON.stringify(failure)).toContain("ownerKind");
   });
 
-  it("refuses an owner id holding the separator the encryption is bound with", async () => {
+  it("rejects an owner id containing the | separator used in the encryption's associated data", async () => {
     const failure = await run((secret) =>
       Effect.flip(secret.set({ ownerKind: "plugin", ownerId: "a|b", name: "k", value: VALUE })),
     );
@@ -212,7 +212,7 @@ describe("secret.query", () => {
     expect(page.items.map((item) => item.name)).toEqual(["b", "a"]);
   });
 
-  it("refuses a cursor it did not issue rather than quietly starting over", async () => {
+  it("rejects a cursor it did not issue, rather than silently starting from the first page", async () => {
     const failure = await run((secret) => Effect.flip(secret.query({ cursor: "not-a-cursor" })));
 
     expect(failure).toMatchObject({ error: { code: "validation" } });
@@ -239,7 +239,7 @@ describe("secret.delete", () => {
     expect(result.deleted[0]?.actor).toBe("user");
   });
 
-  it("answers not_found for a name nobody stored", async () => {
+  it("returns not_found for a name that is not stored", async () => {
     const failure = await run((secret) =>
       Effect.flip(secret.delete({ ...buildOwnerFields(CONNECTION), name: "absent" })),
     );
@@ -247,7 +247,7 @@ describe("secret.delete", () => {
     expect(failure).toMatchObject({ error: { code: "not_found" } });
   });
 
-  it("refuses the core owner here too", async () => {
+  it("rejects the core owner here too", async () => {
     const failure = await run((secret) =>
       Effect.flip(secret.delete({ ownerKind: "core", ownerId: "controller", name: "signing" })),
     );
@@ -257,7 +257,7 @@ describe("secret.delete", () => {
 });
 
 describe("the grant check", () => {
-  it("runs before anything else, for the in-process caller the transport never gated", async () => {
+  it("runs first, for an in-process caller that never went through the HTTP transport", async () => {
     const failure = await Effect.runPromise(
       Effect.flatMap(Secret, (secret) => Effect.flip(secret.query({}))).pipe(
         Effect.provide(buildStack()),

@@ -1,11 +1,10 @@
 /**
- * A session's claim on a future event, over HTTP: the session registers one,
- * reads back what the controller stored, sees another session's, and cancels
- * its own.
+ * Tests subscriptions over HTTP: a session registers one, reads back what the
+ * controller stored, sees another session's, and cancels its own.
  *
  * A real fleet is needed because the credential under test is a session token,
- * and the only place a session token is ever minted is a start frame on the
- * runner socket.
+ * and a session token is only ever minted in a start frame on the runner
+ * socket.
  *
  * What the event router does with a stored subscription is not here: this
  * suite runs no router.
@@ -22,14 +21,14 @@ import {
   type Arranged,
 } from "../sessions/testing";
 
-/** The fleet each case stands up first is the slow part; three waits fit inside this. */
+/** Starting the fleet is the slow part of each case; the timeout allows three waits. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 /** The External Ref every case here subscribes to, and what it expands into. */
 const REF = "github:pr:o/r#87";
 const REF_CONDITION = `"${REF}" in event.refs`;
 
-/** A canonical UUIDv7 that names nothing on this controller. */
+/** A well-formed UUIDv7 that matches no record on this controller. */
 const ABSENT_ID = "0192f0a1-0000-7000-8000-00000000dead";
 
 interface Subscription {
@@ -49,7 +48,7 @@ const createSubscription = (
   token: string,
 ): Promise<Response> => post(arranged.harness.base, "/api/v1/subscriptions", { target }, token);
 
-/** Registers one and hands back the id, refusing to continue if it did not take. */
+/** Registers a subscription and returns its id. Fails the test if the create did not succeed. */
 const createSubscriptionOrFail = async (
   arranged: Arranged,
   target: unknown,
@@ -61,8 +60,8 @@ const createSubscriptionOrFail = async (
 };
 
 /**
- * One page of subscriptions. The holder is named on the query string in the
- * `<kind>:<id>` shorthand the target shorthand already uses.
+ * Requests one page of subscriptions. The holder goes on the query string in
+ * the same `<kind>:<id>` shorthand that targets use.
  */
 const listSubscriptions = async (
   arranged: Arranged,
@@ -93,10 +92,10 @@ interface EndRow {
 }
 
 /**
- * How a subscription ended, read from the table rather than from
- * `subscription.query`: whether a query answers an ended subscription at all
- * is not pinned anywhere, and what these criteria are about is the row the
- * event router reads.
+ * Reads how a subscription ended from the table rather than from
+ * `subscription.query`. Nothing specifies whether a query returns an ended
+ * subscription at all, and these tests are about the row the event router
+ * reads.
  */
 const readEndRow = (arranged: Arranged, id: string): Promise<ReadonlyArray<EndRow>> =>
   Effect.runPromise(
@@ -110,13 +109,8 @@ const readEndRow = (arranged: Arranged, id: string): Promise<ReadonlyArray<EndRo
 const cancelSubscription = (arranged: Arranged, id: string, token: string): Promise<Response> =>
   del(arranged.harness.base, `/api/v1/subscriptions/${id}`, token);
 
-/**
- * One refusal, as the code it carries and the text a person reads. It takes
- * anything that answers with a body, because a caller that has already read
- * the text hands over a clone, whose type is not the harness's `Response`.
- */
 describe("subscription.create", () => {
-  it("stores the target, its expansion, and the session that asked, as live", async () => {
+  it("stores the target, its expansion and the calling session, as a live subscription", async () => {
     await withAgentFleet(async (arranged) => {
       const agent = await spawnAgentWithGrants(arranged, "subscribers", [
         "subscription.write",
@@ -141,7 +135,7 @@ describe("subscription.create", () => {
     });
   });
 
-  it("refuses each target whose subject this version cannot have, naming it", async () => {
+  it("rejects each target kind this version cannot wait on, and names it", async () => {
     await withAgentFleet(async (arranged) => {
       const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
       const cases: ReadonlyArray<readonly [unknown, RegExp]> = [
@@ -160,7 +154,7 @@ describe("subscription.create", () => {
     });
   });
 
-  it("refuses a user credential, saying a subscription needs a session holder", async () => {
+  it("rejects a user credential, and says a subscription needs a session holder", async () => {
     await withAgentFleet(async (arranged) => {
       const response = await createSubscription(
         arranged,
@@ -176,7 +170,7 @@ describe("subscription.create", () => {
 });
 
 describe("subscription.query", () => {
-  it("answers a session token naming no holder with that session's own, and nothing else", async () => {
+  it("returns only the session's own subscriptions when a session token names no holder", async () => {
     await withAgentFleet(async (arranged) => {
       const profile = await createProfile(arranged, "subscribers", [
         "subscription.write",
@@ -202,7 +196,7 @@ describe("subscription.query", () => {
     });
   });
 
-  it("answers a session token naming another session's holder with that holder's", async () => {
+  it("returns another session's subscriptions when a session token names that holder", async () => {
     await withAgentFleet(async (arranged) => {
       const profile = await createProfile(arranged, "subscribers", [
         "subscription.write",
@@ -223,7 +217,7 @@ describe("subscription.query", () => {
     });
   });
 
-  it("refuses a user credential that names no holder, saying one must be named", async () => {
+  it("rejects a user credential that names no holder, and says a holder is required", async () => {
     await withAgentFleet(async (arranged) => {
       const response = await listSubscriptions(arranged, arranged.token);
       const refused = await readErrorBody(response);
@@ -235,7 +229,7 @@ describe("subscription.query", () => {
 });
 
 describe("subscription.cancel", () => {
-  it("ends the subscription, with cancelled as the reason on the row", async () => {
+  it("ends the subscription, and records cancelled as the reason", async () => {
     await withAgentFleet(async (arranged) => {
       const agent = await spawnAgentWithGrants(arranged, "subscribers", [
         "subscription.write",
@@ -254,13 +248,13 @@ describe("subscription.cancel", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]!.ended_at).not.toBeNull();
       expect(rows[0]!.ended_reason).toBe("cancelled");
-      // Who ended it is stamped like every other mutation: the session that
-      // called, by the same `session:<id>` stamp its own writes carry.
+      // The actor is stamped as on every other mutation: the calling session,
+      // with the same `session:<id>` stamp its other writes carry.
       expect(rows[0]!.ended_actor).toBe(`session:${agent.session.id}`);
     });
   });
 
-  it("answers a second cancel of the same subscription with not found", async () => {
+  it("returns not found for a second cancel of the same subscription", async () => {
     await withAgentFleet(async (arranged) => {
       const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
       const subscriptionId = await createSubscriptionOrFail(
@@ -277,11 +271,11 @@ describe("subscription.cancel", () => {
     });
   });
 
-  it("answers an id naming no subscription with not found", async () => {
+  it("returns not found for an id that matches no subscription", async () => {
     await withAgentFleet(async (arranged) => {
       const agent = await spawnAgentWithGrants(arranged, "subscribers", ["subscription.write"]);
-      // One live subscription stands beside it, so not-found is an answer
-      // about this id and not about an empty table.
+      // One live subscription exists, so the not-found error is about this id
+      // and not about an empty table.
       await createSubscriptionOrFail(arranged, { kind: "ref", ref: REF }, agent.token);
 
       const response = await cancelSubscription(arranged, ABSENT_ID, agent.token);
@@ -293,12 +287,12 @@ describe("subscription.cancel", () => {
 });
 
 /**
- * Added beside the criteria: a subscription belongs to the session that made
- * it, and `subscription.cancel` carries only an id, so nothing but the
- * credential can keep one session from ending another's claim.
+ * A subscription belongs to the session that registered it, and
+ * `subscription.cancel` takes only an id. So only the credential can stop one
+ * session from cancelling another session's subscription.
  */
 describe("whose subscription a session may cancel", () => {
-  it("refuses another session's, leaving it live, and answers as for an unknown id", async () => {
+  it("rejects cancelling another session's subscription, keeps it live, and fails as for an unknown id", async () => {
     await withAgentFleet(async (arranged) => {
       const profile = await createProfile(arranged, "subscribers", [
         "subscription.write",
@@ -317,7 +311,7 @@ describe("whose subscription a session may cancel", () => {
       expect(response.status, refused.text).toBe(404);
       expect(refused.code).toBe("not_found");
 
-      // Still waiting, and still its own holder's to cancel.
+      // Still live, and its holder can still cancel it.
       expect((await listPage(arranged, theirs.token)).map((one) => one.id)).toEqual([other]);
       expect((await cancelSubscription(arranged, other, theirs.token)).status).toBe(200);
     });
@@ -338,8 +332,8 @@ describe("whose subscription a session may cancel", () => {
       const response = await cancelSubscription(arranged, subscriptionId, arranged.token);
       expect(response.status, await response.clone().text()).toBe(200);
       expect(await listPage(arranged, agent.token)).toEqual([]);
-      // The user's own stamp, not the holder's: the row says who ended it and
-      // not merely who was waiting on it.
+      // The user's stamp, not the holder's: the row records who ended the
+      // subscription, not who was waiting on it.
       expect((await readEndRow(arranged, subscriptionId))[0]!.ended_actor).toBe("user");
     });
   });

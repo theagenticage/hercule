@@ -4,18 +4,19 @@
  * Both are opaque random tokens, both are stored only as a SHA-256 hash
  * (`./token.ts`), and both are resolved by one indexed lookup on that hash.
  * Neither is ever deleted: revoking sets `revoked_at`, so a revoked credential
- * stays visible to the audit trail and its hash is never handed out again by
- * chance.
+ * stays visible in the audit trail, and its row keeps its hash from ever being
+ * reused.
  *
- * The plaintext token is minted by the caller, which is the only code that ever
- * holds it: it goes into exactly one response and is not recoverable
- * afterwards. This module sees hashes.
+ * The caller mints the plaintext token and is the only code that ever holds
+ * it: the token goes into exactly one response and cannot be recovered
+ * afterwards. This module only sees hashes.
  *
  * A login bearer's lifetime is **30 days rolling**. Every authenticated use
- * calls `renewLoginToken`, which pushes `expires_at` out by another 30 days, so
- * the token dies 30 days after its last use rather than 30 days after login. The push itself is written at most once every
- * {@link USE_STAMP_INTERVAL_MS}: a rolling window does not need per-request
- * resolution, and the writes it saves are the whole API's.
+ * calls `renewLoginToken`, which moves `expires_at` 30 days past now, so the
+ * token expires 30 days after its last use rather than 30 days after login.
+ * The new expiry is written at most once every {@link USE_STAMP_INTERVAL_MS}:
+ * a rolling window does not need per-request precision, and skipping those
+ * writes saves a write on almost every API request.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -56,8 +57,9 @@ export const LOGIN_TOKEN_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 export const USE_STAMP_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
- * Whether a use is worth writing down. A credential that has never been stamped
- * always is; an unparseable stamp is treated as stale rather than trusted.
+ * Checks whether a use should be written. It always should for a credential
+ * that has never been stamped; a stamp that does not parse is treated as stale
+ * rather than trusted.
  */
 const shouldStampLastUsed = (lastUsedAt: string | null, nowMillis: number): boolean => {
   if (lastUsedAt === null) return true;
@@ -122,9 +124,9 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   /**
-   * The live login bearer behind a presented token, if there is one. A revoked
-   * or expired token is simply not found: the caller has nothing to do with the
-   * difference, and the response says the same either way.
+   * Returns the valid login bearer for a presented token hash, or `None`. A
+   * revoked or expired token is simply not found: the caller cannot act on the
+   * difference, and the response is the same either way.
    */
   const findLoginToken = (
     tokenHash: string,
@@ -139,7 +141,7 @@ const make = Effect.gen(function* () {
       return Option.fromNullishOr(rows[0]).pipe(Option.map(toLoginToken));
     });
 
-  /** The live API key behind a presented token, if there is one. A revoked key is not found. */
+  /** Returns the valid API key for a presented token hash, or `None` when revoked or unknown. */
   const findApiKey = (tokenHash: string): Effect.Effect<Option.Option<ApiKeyRecord>, SqlError> =>
     sql<ApiKeyRow>`
       SELECT id, user_id, name, created_at, last_used_at, revoked_at
@@ -193,8 +195,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Revokes the login bearer behind a presented token. Logging out with a
-     * token that is already revoked is a no-op, not an error: the caller asked
-     * for a state that already holds.
+     * token that is already revoked is a no-op, not an error: the token is
+     * already in the state the caller asked for.
      */
     revokeLoginToken: (tokenHash: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -231,10 +233,10 @@ const make = Effect.gen(function* () {
     findApiKey,
 
     /**
-     * Whether a credential that resolved earlier still resolves to the same
-     * row. A request never has to ask - resolving the token it presents
-     * answers it - but a connection held open for hours presents nothing a
-     * second time, only the hash its first frame resolved through.
+     * Checks whether a credential that resolved earlier still resolves to the
+     * same row. A request never needs this, because it resolves its token
+     * anyway. But a connection held open for hours presents its credential only
+     * once, so the check uses the hash from the connection's first frame.
      */
     stillLive: (credential: PresentedCredential): Effect.Effect<boolean, SqlError> => {
       const found =
@@ -266,9 +268,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * One user's API keys, paged by keyset on `(created_at, id)`. Revoked keys
-     * stay in the listing: a key the user revoked should read as revoked rather
-     * than silently vanish.
+     * Returns one page of a user's API keys, paged by keyset on
+     * `(created_at, id)`. Revoked keys stay in the list, so a revoked key shows
+     * as revoked rather than silently disappearing.
      */
     listApiKeys: (
       userId: string,
@@ -303,9 +305,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Revokes one of a user's API keys, and answers whether it did. A key that
-     * is not this user's and a key that was already revoked both answer false,
-     * so the caller needs no second read to tell either from success.
+     * Revokes one of a user's API keys, and returns whether it did. Returns
+     * false both for a key that is not this user's and for a key already
+     * revoked, so the caller needs no second read to tell either from success.
      */
     revokeApiKey: (userId: string, id: string): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {

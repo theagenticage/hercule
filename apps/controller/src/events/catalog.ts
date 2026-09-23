@@ -1,14 +1,14 @@
 /**
- * Declares the questions other domains ask about the event kinds that plugins
+ * Declares the lookups other domains need for the event kinds that plugins
  * declare: which schema an event kind's payload must satisfy, and which kinds a
  * trigger can listen for. Only the interface lives here.
  *
- * A kind is declared by a plugin at registration, so the answer lives in the
+ * A plugin declares its kinds at registration, so the data lives in the
  * plugins domain. That domain appends audit entries to this log, so it already
- * depends on this one, and an import the other way would make the two a cycle.
- * The question is therefore declared here and the plugins domain provides the
- * Layer, the way the database layer declares `AfterCommit` and the live domain
- * answers it.
+ * depends on this one, and an import the other way would create a cycle. So
+ * the interface is declared here and the plugins domain provides the Layer, in
+ * the same way the database layer declares `AfterCommit` and the live domain
+ * implements it.
  */
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -37,7 +37,10 @@ export interface DeclaredEventKindWithConnectionType {
 export class EventKindCatalog extends Context.Service<
   EventKindCatalog,
   {
-    /** What a payload of this kind must be, or nothing for a kind nobody declared. */
+    /**
+     * Returns the schema a payload of this kind must satisfy, or none if no
+     * plugin declares the kind.
+     */
     readonly readPayloadSchema: (kind: string) => Effect.Effect<Option.Option<Schema.Top>>;
     /**
      * Returns the event kinds of every plugin that is running now. The kinds

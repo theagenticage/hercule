@@ -1,21 +1,20 @@
 /**
- * Agents as the API sees them: `agent.query`, `read`, `create`, `update` and
- * `delete`.
+ * The agent operations: `agent.query`, `read`, `create`, `update` and `delete`.
  *
  * An Agent is configuration and nothing else. A spawn copies the values it uses
  * onto the Session, and nothing reads a running or past session back through
  * the Agent (ADR 0030). Therefore an edit is safe while sessions run. A delete
- * is refused only while a session this agent spawned has not exited. After that
+ * is rejected only while a session this agent spawned has not exited. After that
  * the agent's id on those rows is lineage only.
  *
  * An agent names a provider instance and a permission profile, which are rows
- * in other domains. Both are read at create and at update, because an agent
- * that names a row that does not exist would spawn nothing, and the user would
- * learn that at the first spawn instead of at the mistake.
+ * in other domains. Both are checked at create and at update, because an
+ * agent that names a row that does not exist would spawn nothing, and the user
+ * would learn that at the first spawn instead of when making the mistake.
  *
- * `unenforced` is not stored. What a provider acts on is read from the
- * provider's declaration at every read, so the answer follows this binary and
- * not the row that an older binary wrote.
+ * `unenforced` is not stored. It is computed from the provider's declaration
+ * on every read, so it reflects this binary, not the older binary that may
+ * have written the row.
  *
  * Every mutation writes one event in the transaction that writes the row. The
  * actor is stamped here, on the event envelope.
@@ -84,7 +83,10 @@ export interface AgentPage {
 /** Newest first: an agent list is read as a history of what has been set up. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
 
-/** What an agent's sessions may do unasked where the agent says nothing: they work unattended. */
+/**
+ * The access mode of an agent that sets none. Its sessions work unattended, so
+ * they do not ask for approval.
+ */
 const DEFAULT_ACCESS_MODE: AccessMode = "full-access";
 
 const NO_SUCH_AGENT = "no such agent";
@@ -93,20 +95,20 @@ const NO_SUCH_PROFILE = "no such permission profile";
 
 const NO_SUCH_INSTANCE = "no such provider instance";
 
-/** Why options with no model beside them are refused, and what to send instead. */
+/** The message for options sent without a model, and what to send instead. */
 const NO_MODEL_FOR_OPTIONS =
-  "options are the choices of one model, so name the model too: " +
-  "send model with the slug the agent is on, or with the slug you move it to";
+  "options belong to one model, so send model too: " +
+  "the slug of the agent's current model, or of the model you are switching to";
 
 /**
- * Folds the two fields the API takes, `model` and `options`, into the one
- * selection the record holds. `undefined` is a call that named neither. On an
- * edit that leaves the stored selection as it was. On a create it means the
- * instance's own default model.
+ * Combines the two API fields, `model` and `options`, into the one selection
+ * the record stores. Returns `undefined` when the call sets neither: on an
+ * update the stored selection stays as it was, and on a create the agent uses
+ * the instance's default model. Returns null when `model` is null.
  *
- * Options without a model are refused. A choice belongs to the model that
- * offers it. If the choice were kept and put on another model, the agent would
- * run on a value that model never declared.
+ * Fails with `Validation` if options are sent without a model. A choice
+ * belongs to the model that offers it. If the choice were kept and moved to
+ * another model, the agent would run with a value that model never declared.
  */
 const buildModelSelection = (
   model: string | null | undefined,
@@ -122,9 +124,9 @@ const buildModelSelection = (
 };
 
 /**
- * How every call can refuse. `SchemaError` comes from the provider catalog:
- * reading what a provider declares decodes that provider's stored config, and
- * every operation here reads it to report `unenforced`.
+ * The errors every operation can fail with. `SchemaError` comes from the
+ * provider catalog: reading what a provider declares decodes that provider's
+ * stored config, and every operation here reads it to report `unenforced`.
  */
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError | Schema.SchemaError;
 
@@ -133,10 +135,10 @@ type WriteError = ReadError | GrantsError;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const agents = yield* agentRepository;
-  // Whether a session this agent spawned is still live is the sessions
-  // domain's question, and this is where it is asked. The repository and not
-  // the service: the service enforces `session.query` on whoever is calling,
-  // and a delete of one's own agent is not a read of anybody's sessions.
+  // The sessions domain knows whether a session this agent spawned is still
+  // live. This uses its repository, not its service, because the service
+  // enforces `session.query` on the caller, and deleting an agent is not a
+  // read of anybody's sessions.
   const sessions = yield* sessionRepository;
   const instances = yield* providerRepository;
   const host = yield* PluginHost;
@@ -144,9 +146,10 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   /**
-   * Composes the record from the row, and reads `unenforced` from the
-   * provider's declaration. The catalog is one read from memory, so one
-   * composer answers a whole page as well as a single agent.
+   * Returns a function that builds the API record from a stored agent, with
+   * `unenforced` computed from the provider's declaration. The provider
+   * catalog is read once from memory, so one function serves a whole page as
+   * well as a single agent.
    */
   const agentRecordComposer = Effect.map(
     host.providers(),
@@ -158,10 +161,10 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * Answers which provider is behind the instance an agent names. Refuses an
-   * instance that does not exist, and an instance whose provider this build
-   * does not carry. What the machines that host the provider can do now is not
-   * read: an agent is a stored configuration, not a placement.
+   * Returns the provider id of the instance an agent names. Fails with
+   * `Validation` if the instance does not exist, or if this build does not
+   * include its provider. It does not check what the machines that host the
+   * provider can do now: an agent is a stored configuration, not a placement.
    */
   const readProviderIdOrFail = (instanceId: string): Effect.Effect<string, WriteError> =>
     Effect.gen(function* () {
@@ -188,7 +191,10 @@ const make = Effect.gen(function* () {
       return providerId;
     });
 
-  /** Refuses a `permissionProfileId` naming no profile, before it is written as one. */
+  /**
+   * Checks that a `permissionProfileId` matches a profile before it is
+   * written. Fails with `Validation` if it does not.
+   */
   const validateProfileExists = (profileId: string): Effect.Effect<void, WriteError> =>
     Effect.gen(function* () {
       const profile = yield* profiles.getById(profileId);
@@ -199,7 +205,7 @@ const make = Effect.gen(function* () {
       }
     });
 
-  /** The stored agent, or `not_found` if no agent has this id. */
+  /** Returns the stored agent, or fails with `NotFound` if no agent has this id. */
   const readAgentOrFail = (id: string): Effect.Effect<StoredAgent, NotFound | SqlError> =>
     Effect.flatMap(
       agents.read(id),
@@ -210,7 +216,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    /** One page of the agents, newest first. */
+    /** Returns one page of the agents, newest first by default. */
     query: (input: QueryInput): Effect.Effect<AgentPage, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.query");
@@ -241,7 +247,11 @@ const make = Effect.gen(function* () {
         return composeRecord(yield* readAgentOrFail(id));
       }),
 
-    /** Records a configuration sessions can be spawned from. */
+    /**
+     * Creates an agent that sessions can be spawned from, and returns it. Fails
+     * with `Validation` if the instance or the permission profile does not
+     * exist.
+     */
     create: (input: AgentCreateInput): Effect.Effect<Agent, WriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.create");
@@ -291,7 +301,12 @@ const make = Effect.gen(function* () {
         return composeRecord(stored);
       }),
 
-    /** Changes what sessions spawned from here on will run under. */
+    /**
+     * Updates an agent and returns it. Only sessions spawned afterwards use the
+     * new values. Fails with `Validation` if no field is set or a named
+     * instance or profile does not exist, and with `NotFound` if the agent
+     * does not exist.
+     */
     update: (input: UpdateInput): Effect.Effect<Agent, WriteError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.update");
@@ -321,9 +336,8 @@ const make = Effect.gen(function* () {
               yield* validateProfileExists(edit.permissionProfileId);
             }
             const at = yield* nowIso;
-            // Read for the refusal it can give. An id that no agent holds
-            // must answer `not_found`, and not an update that changed no rows
-            // and reported success.
+            // Read only so that an unknown id fails with `not_found`, instead
+            // of an update that changes no rows and reports success.
             yield* readAgentOrFail(id);
             yield* agents.update(id, edit, at);
             yield* audit.append({
@@ -341,9 +355,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Removes an agent that no session runs under any more. A session this
-     * agent spawned keeps the agent's id. The session is history, and it runs
-     * on its own copy of every value the agent gave it.
+     * Deletes an agent. Fails with `InvalidState` while a session this agent
+     * spawned has not exited. Such a session keeps the agent's id after the
+     * delete: the session is history, and it runs on its own copy of every
+     * value the agent gave it.
      */
     delete: (
       input: Identified,
@@ -357,7 +372,7 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const agent = yield* readAgentOrFail(id);
             // The oldest session this agent spawned that has not exited. It is
-            // named in the refusal, so the user knows which session to end.
+            // named in the error, so the user knows which session to end.
             const live = yield* refuseCursor(
               sessions.list({
                 limit: 1,

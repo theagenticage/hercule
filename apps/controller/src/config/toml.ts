@@ -4,14 +4,16 @@ import { Result } from "effect";
 export type TomlScalar = string | number | boolean;
 
 /**
- * Read `config.toml` and flatten it to dotted keys: `[bind]` + `port = 4937`
- * and `bind.port = 4937` both read as `bind.port`.
+ * Parses `config.toml` and flattens it to dotted keys: `[bind]` + `port = 4937`
+ * and `bind.port = 4937` both become `bind.port`. Returns a failure with the
+ * error message when the text is not TOML or holds a value that is not a
+ * scalar.
  *
- * The parser is Bun's, which the binary and the tests both run on, so this is
- * only the flattening. Bootstrap config is four scalar keys Hercule authors
- * itself (spec 15 section 6), so anything that is not a scalar or a table is
- * rejected by the key it sits under; the caller rejects the keys it does not
- * know.
+ * The parser is Bun's, which both the binary and the tests run on, so this
+ * function only flattens. Bootstrap config is four scalar keys Hercule writes
+ * itself (spec 15 section 6), so any value that is not a scalar or a table is
+ * rejected, and the error names its key. The caller rejects the keys it does
+ * not know.
  */
 export function parseToml(text: string): Result.Result<Record<string, TomlScalar>, string> {
   let parsed: unknown;
@@ -25,7 +27,7 @@ export function parseToml(text: string): Result.Result<Record<string, TomlScalar
   return failure === undefined ? Result.succeed(values) : Result.fail(failure);
 }
 
-/** Render the bootstrap keys as dotted-key TOML, one key per line. */
+/** Formats the bootstrap keys as dotted-key TOML, one key per line. */
 export function formatToml(values: Record<string, TomlScalar>): string {
   const formatLine = (key: string, value: TomlScalar) =>
     `${key} = ${typeof value === "string" ? JSON.stringify(value) : String(value)}`;
@@ -34,7 +36,10 @@ export function formatToml(values: Record<string, TomlScalar>): string {
     .join("\n")}\n`;
 }
 
-/** Walks the parsed tables into dotted keys, or names the first key it cannot flatten. */
+/**
+ * Flattens the parsed tables into dotted keys in `into`. Returns an error
+ * message for the first key it cannot flatten, or `undefined`.
+ */
 function flatten(
   table: Record<string, unknown>,
   prefix: string,
@@ -55,9 +60,9 @@ function flatten(
 }
 
 /**
- * Only a plain object is a table. Bun hands back a `Temporal` value for a TOML
- * datetime, and any check loose enough to admit that would walk it, find no
- * entries, and drop the key without a word.
+ * Checks that a value is a table, which means a plain object. Bun returns a
+ * `Temporal` value for a TOML datetime. A looser check would accept that value,
+ * find no entries in it, and silently drop the key.
  */
 const isTable = (value: unknown): value is Record<string, unknown> => {
   if (typeof value !== "object" || value === null) return false;

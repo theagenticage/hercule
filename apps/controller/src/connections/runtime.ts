@@ -1,14 +1,16 @@
 /**
- * The connection types a boot registered, and the runtime surface each plugin
- * reaches its own connections through.
+ * Holds the connection types registered at boot, and builds the
+ * `ConnectionsRuntime` each plugin uses to reach its own connections.
  *
- * It lives in the connections domain rather than in the plugin host because
- * everything it touches is here: the rows, the secrets they own, the OAuth
- * refresh. The host declares types into this store at boot and asks it for a
- * plugin's surface at activation; nothing points the other way.
+ * This module is in the connections domain rather than in the plugin host,
+ * because everything it uses is here: the connection rows, their secrets and
+ * the OAuth refresh. The plugin host registers types here at boot and asks for
+ * a plugin's `ConnectionsRuntime` at activation; this module never calls the
+ * plugin host.
  *
- * Scope is the `plugin_id` column and nothing else: the column says whose row a
- * connection is, so a plugin reaches its own and learns of no others.
+ * A plugin's access is scoped by the `plugin_id` column alone: a plugin reaches
+ * the connections whose `plugin_id` is its own, and cannot learn that any
+ * others exist.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -44,9 +46,10 @@ import { PluginConfigs } from "./plugin-configs";
 import { connectionRepository, type StoredConnection } from "./repository";
 
 /**
- * One type a plugin declared: the decoded catalog half, and the `validate` no
- * catalog can hold. `contribution.type` is the qualified `<pluginId>/<word>`
- * the host minted, which is what everything else keys on.
+ * A connection type a plugin declared: the decoded catalog entry, plus the
+ * `validate` function, which a catalog cannot hold because it is code.
+ * `contribution.type` is the qualified `<pluginId>/<word>` name the host built,
+ * and every lookup uses that name.
  */
 export interface RegisteredConnectionType {
   readonly pluginId: string;
@@ -93,17 +96,19 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * One permit per connection, so two callers finding the same spent token do
-   * not both spend a refresh token on it - some providers invalidate the old
-   * one, which would leave the second caller holding a set that no longer works.
+   * One semaphore per connection, so two callers that find the same expired
+   * token do not both use the refresh token. Some providers invalidate a
+   * refresh token once it is used, which would leave the second caller with
+   * tokens that no longer work.
    *
-   * Never pruned: the map is bounded by the connections this process ever saw,
-   * and dropping an entry on delete would race a refresh still holding it.
+   * The map is never pruned: it holds at most one entry per connection this
+   * process has seen, and removing an entry on delete could race a refresh
+   * that still holds it.
    */
   const permits = new Map<string, Semaphore.Semaphore>();
 
-  // Made synchronously: an effect between the read and the write is a point two
-  // fibers can both pass, and they would each end up holding a permit of their own.
+  // Synchronous on purpose: if an effect ran between the read and the write, two
+  // fibers could both pass the read and each create a semaphore of its own.
   const readOrCreateRefreshPermit = (connectionId: string): Semaphore.Semaphore => {
     const held = permits.get(connectionId);
     if (held !== undefined) return held;
@@ -114,9 +119,10 @@ const make = Effect.gen(function* () {
 
   const runtimeFor = (pluginId: string): ConnectionsRuntime => {
     /**
-     * One connection of this plugin's, or nothing it may know about: another
-     * plugin's row and an id nobody created are the same answer, because a
-     * plugin may not learn that the first exists.
+     * Returns one of this plugin's connections, or fails with
+     * `ConnectionUnavailable`. Another plugin's connection and an id that does
+     * not exist fail the same way, so a plugin cannot learn that another
+     * plugin's connection exists.
      */
     const readOwnConnectionOrFail = (
       id: string,
@@ -127,14 +133,14 @@ const make = Effect.gen(function* () {
           {
             onNone: () =>
               Effect.fail(
-                new ConnectionUnavailable({ message: `no connection ${id} of this plugin's` }),
+                new ConnectionUnavailable({ message: `this plugin has no connection ${id}` }),
               ),
             onSome: Effect.succeed,
           },
         ),
       );
 
-    /** A connection the core cannot act through until the user has been back. */
+    /** Marks the connection `needs-reauth` with `message` as the detail, and fails with it. */
     const needsReauth = (
       connectionId: string,
       message: string,
@@ -144,16 +150,16 @@ const make = Effect.gen(function* () {
         Effect.fail(new ConnectionUnavailable({ message })),
       );
 
-    /** What was declared for the type this row is, if it is a redirect flow. */
+    /** Returns the OAuth declaration of the connection's type, or `undefined` when it has none. */
     const readDeclaredOAuth = (
       row: StoredConnection,
     ): Effect.Effect<OAuthDeclaration | undefined> =>
       Effect.map(Ref.get(declared), (all) => all.get(row.type)?.contribution.oauth);
 
     /**
-     * What the user pasted, in one read of the connection's own secrets. A
-     * connection holding none cannot be acted through, which is the same answer
-     * as one whose credentials no longer work.
+     * Returns the credentials the user pasted, read from the connection's
+     * secrets in one query. Fails with `ConnectionUnavailable` when the
+     * connection has no secrets.
      */
     const readPastedCredentials = (
       connectionId: string,
@@ -172,7 +178,7 @@ const make = Effect.gen(function* () {
               ),
       );
 
-    /** The token set a connection holds, or nothing it can be acted through with. */
+    /** Returns the stored token set, or marks the connection `needs-reauth` and fails. */
     const readStoredTokens = (
       connectionId: string,
     ): Effect.Effect<TokenSet, ConnectionUnavailable> =>
@@ -185,12 +191,17 @@ const make = Effect.gen(function* () {
       );
 
     /**
-     * Trades the refresh token in for a fresh set and writes it down. Runs under
-     * this connection's permit, so the stored set is read again first: a caller
-     * that waited for another's refresh spends nothing of its own.
+     * Exchanges the refresh token for a new token set, stores it and returns
+     * it. It runs while holding this connection's semaphore and reads the stored
+     * tokens again first, so a caller that waited for another caller's refresh
+     * gets the new tokens without refreshing again.
      *
-     * A provider that answered and said no is a credential to reauthorise; one
-     * that could not be reached is weather, and the status stays as it was.
+     * - With no refresh token or no OAuth client, it marks the connection
+     *   `needs-reauth` and fails.
+     * - When the token endpoint rejects the refresh, it marks the connection
+     *   `needs-reauth` and fails.
+     * - When the token endpoint cannot be reached, it fails and leaves the
+     *   status unchanged.
      */
     const refreshTokens = (
       connectionId: string,
@@ -216,7 +227,7 @@ const make = Effect.gen(function* () {
             Effect.fail(new ConnectionUnavailable({ message: error.message })),
           ),
         );
-        // A provider that hands back no refresh token means the old one stands.
+        // When the response has no refresh token, the old one is still valid.
         const keep = answer.refreshToken ?? tokens.refreshToken;
         const next: TokenSet = { ...answer, refreshToken: keep };
         yield* Effect.orDie(
@@ -230,9 +241,9 @@ const make = Effect.gen(function* () {
       });
 
     /**
-     * The access token of a redirect-flow connection, refreshed first when it is
-     * spent or nearly so. The refresh is the core's: a plugin asks for
-     * credentials and is handed a token that works, or told it cannot act.
+     * Returns the access token of an OAuth connection, refreshing it first when
+     * it has expired or is about to. The core does the refresh, so a plugin that
+     * asks for credentials gets a working token or a `ConnectionUnavailable`.
      */
     const readFreshAccessToken = (
       connectionId: string,
@@ -272,11 +283,11 @@ const make = Effect.gen(function* () {
   };
 
   return {
-    /** What this boot registered, replacing what the last one did. */
+    /** Replaces the registered connection types with the ones this boot declared. */
     replace: (types: ReadonlyArray<RegisteredConnectionType>): Effect.Effect<void> =>
       Ref.set(declared, new Map(types.map((one) => [one.contribution.type, one]))),
 
-    /** The type of this qualified name, if this boot registered one. */
+    /** Returns the connection type with this qualified name, if this boot registered one. */
     named: (type: string): Effect.Effect<Option.Option<RegisteredConnectionType>> =>
       Effect.map(Ref.get(declared), (all) => Option.fromUndefinedOr(all.get(type))),
 
@@ -288,7 +299,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The connection types this boot registered, and what a plugin does with them. */
+/** The connection types this boot registered, and the `ConnectionsRuntime` each plugin uses. */
 export class ConnectionTypes extends Context.Service<
   ConnectionTypes,
   Effect.Success<typeof make>

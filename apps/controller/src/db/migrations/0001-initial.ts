@@ -121,11 +121,11 @@ export default Effect.gen(function* () {
   `;
   // A second emit with the same (connection, dedup key) is a no-op. Core
   // emitters have no connection, and SQLite treats NULLs as distinct in a
-  // unique index, so the index keys on a stand-in blob instead.
+  // unique index, so the index uses an empty blob in place of NULL.
   yield* sql`
     CREATE UNIQUE INDEX events_dedup
       ON events (ifnull(connection_id, x''), dedup_key)
   `;
-  // The retention prune walks the log by arrival time.
+  // The retention prune reads the log in order of arrival time.
   yield* sql`CREATE INDEX events_received_at ON events (received_at)`;
 });

@@ -25,8 +25,9 @@ const USER: Actor = {
 };
 
 /**
- * Every test runs on a `TestClock`, so a test that needs a later `updatedAt`
- * moves time rather than racing the millisecond the first write landed in.
+ * Runs an effect as the test user. Every test runs on a `TestClock`, so a test
+ * that needs a later `updatedAt` moves the clock forward instead of depending
+ * on real time passing between two writes.
  */
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
@@ -37,7 +38,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     ),
   );
 
-/** Runs a call that is expected to fail, and hands the test its error. */
+/** Runs a call that is expected to fail, and returns its error. */
 const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
     effect.pipe(
@@ -49,8 +50,9 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   );
 
 /**
- * Input a caller can put on the wire but the types here rule out. Refusing it
- * is the service's job, so the test has to be able to hand it over.
+ * Casts input that a caller can send over the API but the types here rule out.
+ * Rejecting such input is the service's job, so the test must be able to pass
+ * it in.
  */
 const castMalformedInput = <T>(input: unknown): T => input as T;
 
@@ -60,21 +62,21 @@ const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
 
-/** A minute, so two writes never land on the same instant by accident. */
+/** One minute, so two writes never get the same timestamp by accident. */
 const A_MINUTE = 60_000;
 
 /**
- * The three `project.*` kinds this slice adds to the log. They are read back
- * through the audit writer, which types its kinds as the list this build
- * emits; the cast is what lets the test name them before that list grows.
+ * The three `project.*` event kinds. `AUDIT_KINDS` already lists them, so the
+ * cast to `AuditKind` is no longer needed.
  */
 const CREATED = "project.created" as AuditKind;
 const UPDATED = "project.updated" as AuditKind;
 const DELETED = "project.deleted" as AuditKind;
 
 /**
- * The project an event row carries, whatever key the payload files it under.
- * The criterion pins that the row carries the snapshot, not how it spells it.
+ * Returns the project snapshot in an event payload, under whatever key it is
+ * stored. The tests check that the event holds the snapshot, not which key
+ * holds it.
  */
 const findSnapshot = (payload: Readonly<Record<string, unknown>>, id: string) =>
   Object.values(payload).find(
@@ -87,7 +89,7 @@ interface Diff {
   readonly new: unknown;
 }
 
-/** Every per-field `{old, new}` an update's payload holds, at any depth. */
+/** Returns every `{old, new}` pair in an update event's payload, at any depth. */
 const collectDiffs = (value: unknown, found: Array<Diff> = []): Array<Diff> => {
   if (typeof value !== "object" || value === null) return found;
   const record = value as Record<string, unknown>;
@@ -96,7 +98,7 @@ const collectDiffs = (value: unknown, found: Array<Diff> = []): Array<Diff> => {
   return found;
 };
 
-/** The stored row, read past the service: a soft delete leaves it behind. */
+/** The stored row, read directly from the table, because a soft delete keeps it. */
 interface ProjectRow {
   readonly id: Uint8Array;
   readonly name: string;
@@ -107,7 +109,7 @@ const sortNames = (projects: ReadonlyArray<{ readonly name: string }>) =>
   projects.map((project) => project.name).sort();
 
 describe("project.create", () => {
-  it("stamps one instant on both timestamps and a canonical id", async () => {
+  it("gives the project a UUIDv7 id and the same createdAt and updatedAt", async () => {
     const project = await run(
       Effect.flatMap(ProjectService, (projects) =>
         projects.create({ name: "Hercule", description: "The orchestration platform" }),
@@ -120,7 +122,7 @@ describe("project.create", () => {
     expect(project.deletedAt).toBeUndefined();
   });
 
-  it("takes a project with a name and nothing else", async () => {
+  it("creates a project with only a name", async () => {
     const project = await run(
       Effect.flatMap(ProjectService, (projects) => projects.create({ name: "Bare" })),
     );
@@ -129,7 +131,7 @@ describe("project.create", () => {
     expect(project.createdAt).toBe(project.updatedAt);
   });
 
-  it("refuses a name that is empty, over the cap, or missing", async () => {
+  it("rejects a name that is empty, too long or missing", async () => {
     const errors = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -145,7 +147,7 @@ describe("project.create", () => {
 });
 
 describe("project.update", () => {
-  it("changes the field and moves updatedAt, leaving createdAt where it was", async () => {
+  it("changes the field and updatedAt, and keeps createdAt", async () => {
     const { before, after } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -160,7 +162,7 @@ describe("project.update", () => {
     expect(after.updatedAt > before.updatedAt).toBe(true);
   });
 
-  it("answers not_found for an id nobody has", async () => {
+  it("fails with not_found for an unknown id", async () => {
     const error = await runError(
       Effect.flatMap(ProjectService, (projects) =>
         projects.update({ id: UNKNOWN_ID, name: "Renamed" }),
@@ -171,7 +173,7 @@ describe("project.update", () => {
 });
 
 describe("project.delete", () => {
-  it("hides the project from read and query, and leaves the row behind with deletedAt set", async () => {
+  it("hides the project from read and query, and keeps the row with deletedAt set", async () => {
     const { readError, listed, rows } = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -195,7 +197,7 @@ describe("project.delete", () => {
     expect(rows[0]?.deleted_at).toMatch(TIMESTAMP);
   });
 
-  it("answers not_found the second time", async () => {
+  it("fails with not_found when the project is deleted a second time", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -209,7 +211,7 @@ describe("project.delete", () => {
 });
 
 describe("projects and resources", () => {
-  it("leaves a task's projectId set when the project it names is deleted", async () => {
+  it("keeps a task's projectId when its project is deleted", async () => {
     const { project, task, rows } = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -240,7 +242,7 @@ describe("projects and resources", () => {
 });
 
 describe("the event log", () => {
-  it("writes one project.created carrying the snapshot, stamped with the caller", async () => {
+  it("writes one project.created event with the snapshot, stamped with the caller", async () => {
     const { project, entries } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -260,7 +262,7 @@ describe("the event log", () => {
     });
   });
 
-  it("writes one project.updated carrying a diff for the field that changed and no other", async () => {
+  it("writes one project.updated event with a diff for the changed field only", async () => {
     const entries = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -280,7 +282,7 @@ describe("the event log", () => {
     expect(JSON.stringify(entries[0]?.payload)).not.toContain("untouched description");
   });
 
-  it("writes one project.deleted carrying the final snapshot", async () => {
+  it("writes one project.deleted event with the final snapshot", async () => {
     const { project, entries } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -298,7 +300,7 @@ describe("the event log", () => {
     expect(snapshot?.["deletedAt"]).toMatch(TIMESTAMP);
   });
 
-  it("writes nothing when the mutation fails", async () => {
+  it("writes no event when the mutation fails", async () => {
     const { created, updated, deleted } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -320,7 +322,7 @@ describe("the event log", () => {
 });
 
 describe("project.query", () => {
-  /** Walks a listing to its end, a page at a time, and returns every name. */
+  /** Reads every page of a project list and returns the names in order. */
   const walkPages = (input: QueryInput, limit: number) =>
     Effect.gen(function* () {
       const projects = yield* ProjectService;
@@ -346,7 +348,7 @@ describe("project.query", () => {
     }
   });
 
-  it("lists alphabetically without a sort, and by the field a sort names", async () => {
+  it("sorts by name when no sort is given, and by the given field otherwise", async () => {
     const { byDefault, byCreated } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -363,7 +365,7 @@ describe("project.query", () => {
     expect(byCreated).toEqual(["Docs", "Hercule", "Atlas", "Runner", "Web"]);
   });
 
-  it("hands every row back exactly once, whatever the page size and order", async () => {
+  it("returns every project exactly once, for any page size and order", async () => {
     const walks = await run(
       Effect.gen(function* () {
         yield* five;
@@ -383,7 +385,7 @@ describe("project.query", () => {
     expect(walks.updatedDescending.sort()).toEqual(all);
   });
 
-  it("refuses an unknown sort field, and a cursor from another walk", async () => {
+  it("rejects an unknown sort field, a cursor from another sort order, and a damaged cursor", async () => {
     const errors = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -404,8 +406,8 @@ describe("project.query", () => {
   });
 });
 
-describe("what an update leaves alone", () => {
-  it("refuses a patch that names no field, and writes nothing for one that changes nothing", async () => {
+describe("updates that change nothing", () => {
+  it("rejects a patch with no field, and writes nothing for a patch that changes nothing", async () => {
     const { empty, before, after, entries } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;
@@ -425,7 +427,7 @@ describe("what an update leaves alone", () => {
     expect(entries).toEqual([]);
   });
 
-  it("takes the description off again when an update sets it to null", async () => {
+  it("removes the description when an update sets it to null", async () => {
     const { cleared, entries } = await run(
       Effect.gen(function* () {
         const projects = yield* ProjectService;

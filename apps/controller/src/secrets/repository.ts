@@ -1,23 +1,23 @@
 /**
- * The one owner-scoped secrets table.
+ * Reads and writes the secrets table, where every secret belongs to an owner.
  *
  * Every secret value - Connection credentials, plugin secrets, runner-scoped
  * secrets, provider-instance credentials, the controller's own key material -
- * is one row, encrypted on its own under the Master Key. The SQLite file stays
- * plain, so any copy of it, any backup and any promotion bundle is inert
- * without the key.
+ * is one row, encrypted on its own under the Master Key. The SQLite file itself
+ * is not encrypted, so any copy of it, any backup and any promotion bundle is
+ * useless without the key.
  *
  * Cipher: AES-256-GCM through WebCrypto, a fresh 12-byte random nonce for every
  * write, and the row's owner and name as associated data, formatted
- * `<kind>|<id>|<name>`. Two consequences worth stating:
+ * `<kind>|<id>|<name>`. This has two consequences:
  *
  * - **A rename is a re-encrypt.** Moving a value to another owner or name means
  *   {@link Secrets.set} under the new key, never an `UPDATE` of `name` alone.
  *   A row edited that way stops decrypting, which is the point: it makes a
  *   row swapped in from another owner detectable rather than silently readable.
- * - **Owner ids and names carry no `|`**, so the associated data has exactly
- *   one reading. Both calls reject the character rather than trusting their
- *   callers; plugin-supplied names reach this table.
+ * - **Owner ids and names contain no `|`**, so the associated data has exactly
+ *   one reading. `set`, `get` and `delete` reject the character rather than
+ *   trusting their callers, because names supplied by plugins reach this table.
  *
  * The associated data binds a value to its owner and name, not to a version: a
  * row rolled back to its own earlier ciphertext still decrypts. Detecting that
@@ -52,7 +52,7 @@ import {
 } from "../db";
 import { MasterKey } from "./masterKey";
 
-/** Who a secret belongs to. */
+/** The kind of owner a secret belongs to. */
 export type SecretOwnerKind = "connection" | "plugin" | "runner" | "core" | "provider-instance";
 
 /**
@@ -85,13 +85,13 @@ export interface SecretRef {
   readonly rotatedAt: string | null;
 }
 
-/** One stored secret as its owner lists it: the name, and when it was replaced. */
+/** One stored secret in its owner's list: the name, and when it was last rotated. */
 export interface SecretNameRef {
   readonly name: string;
   readonly rotatedAt: string | null;
 }
 
-/** What a listing asks for: which owner, plus the shared keyset parameters. */
+/** A listing request: the owner filters, plus the shared paging parameters. */
 export interface SecretListRequest extends PageRequest {
   readonly ownerKind: SecretOwnerKind | undefined;
   readonly ownerId: string | undefined;
@@ -129,7 +129,11 @@ const NONCE_BYTES = 12;
 const buildAssociatedData = (owner: SecretOwner, name: string): Bytes =>
   encoder.encode(`${owner.kind}|${owner.id}|${name}`);
 
-/** The associated data has exactly one reading only while nothing in it holds the separator. */
+/**
+ * Checks that neither the owner id nor the name contains `|`, the separator in
+ * the associated data, so the associated data has only one reading. Fails with
+ * `SecretNameError` otherwise.
+ */
 const rejectSeparator = (owner: SecretOwner, name: string): Effect.Effect<void, SecretNameError> =>
   Effect.gen(function* () {
     for (const [what, text] of [
@@ -163,26 +167,26 @@ export class Secrets extends Context.Service<
     ) => Effect.Effect<SecretRef, SqlError | SecretNameError>;
 
     /**
-     * The references one owner - or every owner - stores, by name. References
-     * only: nothing here decrypts, because nothing outside the repository may
-     * see a value.
+     * Returns one page of the references one owner (or every owner) stores,
+     * sorted by name. It returns references only and decrypts nothing.
      */
     readonly list: (
       request: SecretListRequest,
     ) => Effect.Effect<Page<SecretRef>, SqlError | CursorError>;
 
-    /** Removes a stored value, and answers whether there was one to remove. */
+    /** Deletes a stored value, and returns whether there was one to delete. */
     readonly delete: (
       owner: SecretOwner,
       name: string,
     ) => Effect.Effect<boolean, SqlError | SecretNameError>;
 
     /**
-     * The references these owners store, by name, grouped by owner id: what an
-     * owning record hands out as its own credential list. Many owners at once,
-     * because the caller is usually a page of records and one query is what
-     * keeps it one query. The whole list rather than a page, because its caller
-     * is a scoped view over one owner rather than a listing anyone browses.
+     * Returns the references these owners store, sorted by name and grouped by
+     * owner id. An owning record, such as a connection, returns them as its
+     * list of credentials. It takes many owners at once because the caller
+     * usually has a page of records, and one query serves the whole page. It
+     * returns every reference rather than a page, because each list is shown
+     * with its record and is not browsed on its own.
      */
     readonly refs: (
       kind: SecretOwnerKind,
@@ -190,9 +194,9 @@ export class Secrets extends Context.Service<
     ) => Effect.Effect<ReadonlyMap<string, ReadonlyArray<SecretNameRef>>, SqlError>;
 
     /**
-     * Everything one owner stores, decrypted, in one query. The only batch read
-     * that decrypts, and it exists because a plugin asks for a connection's
-     * credentials as a whole rather than field by field.
+     * Returns every value one owner stores, decrypted, from one query. This is
+     * the only batch read that decrypts. It exists because a plugin asks for a
+     * connection's credentials all at once rather than field by field.
      */
     readonly values: (
       owner: SecretOwner,
@@ -201,7 +205,7 @@ export class Secrets extends Context.Service<
       SqlError | SecretDecryptError
     >;
 
-    /** The stored value, or `None` when this owner stores nothing under this name. */
+    /** Returns the stored value, or `None` when this owner stores nothing under this name. */
     readonly get: (
       owner: SecretOwner,
       name: string,

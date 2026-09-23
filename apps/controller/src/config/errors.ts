@@ -13,11 +13,11 @@ export class ConfigValueError extends Schema.TaggedError<ConfigValueError>()("Co
 }) {}
 
 /**
- * Something in the Hercule Home could not be put where it belongs (spec 15
- * section 5). `action` is the verb the message needs: the home layout is
- * created, but the setup-url file is also written and removed, and a failure
- * that says "cannot create" about a removal sends the reader to the wrong
- * place.
+ * A file or directory in the Hercule Home could not be created, secured,
+ * written or removed (spec 15 section 5). `action` is the verb the error
+ * message uses. The home layout is created, but the setup-url file is also
+ * written and removed, and a message that says "cannot create" about a failed
+ * removal would send the reader to the wrong place.
  */
 export class HerculeHomeError extends Schema.TaggedError<HerculeHomeError>()("HerculeHomeError", {
   action: Schema.Literals(["create", "secure", "write", "remove"]),

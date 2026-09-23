@@ -49,7 +49,7 @@ describe("the controller identity", () => {
     expect(record.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
-    // Raw SPKI for an Ed25519 public key: 12 header bytes plus the 32-byte key.
+    // DER-encoded SPKI for an Ed25519 public key: 12 header bytes plus the 32-byte key.
     expect(record.publicKey).toHaveLength(44);
     expect(new Date(record.createdAt).toISOString()).toBe(record.createdAt);
   });
@@ -82,8 +82,8 @@ describe("the controller identity", () => {
           `).map((row) => row.name);
         const stored = Option.getOrThrow(yield* secrets.get(CORE_OWNER, SIGNING_KEY_SECRET));
 
-        // The stored key signs what the stored public key verifies: the two
-        // halves in the database belong to each other.
+        // A signature from the stored private key verifies with the stored
+        // public key, so the two halves in the database belong together.
         const verified = yield* Effect.promise(async () => {
           const pkcs8 = Buffer.from(Redacted.value(stored), "base64");
           const privateKey = await crypto.subtle.importKey(

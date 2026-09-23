@@ -1,13 +1,15 @@
 /**
- * The request the session's harness is parked on, if any.
+ * The request the session's harness is waiting on, if any.
  *
- * On the row rather than derived from the stream because the answer operation
- * has to validate against it - is a request open, is it this one, is this
- * decision offered - before anything crosses the wire, and because every
- * surface already refetches this row when the session changes.
+ * It is stored on the row rather than derived from the stream for two reasons:
  *
- * Nullable with no backfill: a session running when this lands is parked on
- * nothing, which is exactly what NULL says.
+ * - the operation that answers a request has to validate against it (is a
+ *   request open, is it this one, is this decision offered) before anything is
+ *   sent to the runner;
+ * - every client already refetches this row when the session changes.
+ *
+ * Nullable with no backfill: a session that is running when this migration
+ * runs is waiting on nothing, which is exactly what NULL means.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";

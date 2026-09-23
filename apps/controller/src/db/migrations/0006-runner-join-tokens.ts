@@ -1,14 +1,16 @@
 /**
  * The join tokens: one row per invitation to enlist a machine.
  *
- * Only the hash is stored. The row carries an id of its own so the mint entry
- * and the enlistment entry can name the same invitation, which the hash cannot
- * do because it never appears in the log.
+ * Only the hash is stored. The row has an id of its own so the audit entries
+ * for creating the token and for enlisting with it can refer to the same
+ * invitation. The hash cannot serve for that, because it never appears in the
+ * log.
  *
- * Spending is an update rather than a delete: `used_at IS NULL` is the
- * single-use guard, and it has to stand for as long as the token could be
- * presented again. Its timestamp is for an operator reading the table, since a
- * presenter is never told which of unminted, spent and expired its token was.
+ * Using a token is an update rather than a delete: `used_at IS NULL` is the
+ * single-use check, and the row has to stay for as long as the token could be
+ * presented again. The timestamp is for an operator reading the table, because
+ * whoever presents a token is never told whether it was unknown, already used
+ * or expired.
  *
  * The bounds are CHECK constraints because SQLite cannot add one later without
  * rebuilding the table.
@@ -28,6 +30,6 @@ export default Effect.gen(function* () {
       used_at TEXT
     )
   `;
-  // Two rows cannot share a hash: spending one would otherwise be ambiguous.
+  // Two rows cannot share a hash, or using the token would be ambiguous.
   yield* sql`CREATE UNIQUE INDEX runner_join_tokens_hash ON runner_join_tokens (token_hash)`;
 });

@@ -19,7 +19,7 @@ import { CurrentActor, type Actor } from "./actor";
 import { boot, bootWith, hashToken, buildSetupUrl, type BootOutcome } from "./bootstrap";
 import { Plugins } from "./plugins";
 
-/** Listing plugins needs a credential; a boot has none, so the read supplies one. */
+/** Listing plugins needs an actor, and a boot has none, so the test provides the user. */
 const USER: Actor = {
   _tag: "user",
   userId: "0199f0b7-0000-7000-8000-000000000000",
@@ -36,17 +36,17 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-/** Boot the way `hercule serve` does, against the temporary home and the key file. */
+/** Boots the way `hercule serve` does, against the temporary home and the key file. */
 const serve = (argv: ReadonlyArray<string> = []): Promise<BootOutcome> =>
   Effect.runPromise(boot({ argv: ["--home", home, ...argv], env: {}, masterKeyBackend: "file" }));
 
-/** Boot the way `hercule serve` does, and hand the test the error it failed with. */
+/** Boots the way `hercule serve` does, and returns the error the boot failed with. */
 const serveAndReadError = (argv: ReadonlyArray<string> = [], at: string = home) =>
   Effect.runPromise(
     boot({ argv: ["--home", at, ...argv], env: {}, masterKeyBackend: "file" }).pipe(Effect.flip),
   );
 
-/** Read the database the way an operator would: another connection, plain SQL. */
+/** Reads the database the way an operator would: from another connection, with plain SQL. */
 const query = <A>(sql: string, at: string = home): ReadonlyArray<A> => {
   const database = new Database(join(at, "data", "hercule.db"), { readonly: true });
   try {
@@ -169,7 +169,7 @@ describe("bootWith", () => {
     );
 
     expect(rows).toHaveLength(3);
-    // Nothing holds the file once the effect is done: another writer opens it.
+    // Nothing holds the file once the effect is done, so another writer can open it.
     const database = new Database(join(home, "data", "hercule.db"));
     try {
       expect(database.query("PRAGMA journal_mode").all()).toEqual([{ journal_mode: "wal" }]);
@@ -180,9 +180,9 @@ describe("bootWith", () => {
 });
 
 /**
- * A plugin contributing one provider that either starts or refuses to. Enough
- * to see what a boot does with one of each; the catalog and the lifecycle are
- * covered where they live.
+ * Builds a plugin with one provider that either starts or fails to start. That
+ * is enough to test what a boot does with one of each; the catalog and the
+ * plugin lifecycle are tested in their own modules.
  */
 const buildBootPlugin = (id: string, failure?: string): Plugin => ({
   manifest: {
@@ -249,10 +249,10 @@ describe("a boot with a plugin that will not start", () => {
       message: "the harness binary is missing",
     });
     expect(details[1]?.status).toEqual({ _tag: "active" });
-    // Registration ran before activation, so the failure cost it nothing.
+    // Registration ran before activation, so the failure did not undo it.
     expect(details[0]?.contributions.map((c) => c.id)).toEqual(["broken-provider"]);
-    // Nobody asked for this boot, so the entry says what did rather than
-    // blaming whoever logged in last.
+    // No user asked for this boot, so the entry's actor is the system rather
+    // than whoever logged in last.
     expect(
       query<{ actor: string | null }>("SELECT actor FROM events WHERE kind = 'plugin.errored'"),
     ).toEqual([{ actor: "system" }]);
@@ -260,7 +260,7 @@ describe("a boot with a plugin that will not start", () => {
 });
 
 describe("a second boot", () => {
-  it("keeps the identity and the master key, and mints a fresh token", async () => {
+  it("keeps the identity and the master key, and creates a new token", async () => {
     const first = await serve();
     const key = readFileSync(join(home, "master.key"), "utf8");
     const firstHash = readSetupState()?.token_hash;
@@ -286,12 +286,12 @@ describe("a second boot", () => {
 });
 
 describe("once setup is complete", () => {
-  it("deletes the setup URL, clears the token hash and mints no token", async () => {
+  it("deletes the setup URL, clears the token hash and creates no token", async () => {
     const first = await serve();
     const database = new Database(join(home, "data", "hercule.db"));
     try {
-      // The outstanding token is left in the row: completing setup is what
-      // clears it, and the invariant is the controller's to keep.
+      // The outstanding token is left in the row. Completing setup normally
+      // clears it, and the boot must clear it too if it did not happen.
       database.run("UPDATE setup_state SET completed_at = '2026-09-04T00:00:00.000Z'");
     } finally {
       database.close();
@@ -320,7 +320,7 @@ describe("a boot that cannot start", () => {
     expect(existsSync(join(home, "data", "hercule.db"))).toBe(false);
   });
 
-  it("mints no second master key over a database that already holds secrets", async () => {
+  it("creates no second master key for a database that already has secrets", async () => {
     await serve();
     rmSync(join(home, "master.key"));
 
@@ -332,7 +332,7 @@ describe("a boot that cannot start", () => {
     expect(existsSync(join(home, "master.key"))).toBe(false);
   });
 
-  it("names the database file when it is not a database", async () => {
+  it("includes the file name when the database file is not a database", async () => {
     await serve();
     writeFileSync(join(home, "data", "hercule.db"), "this is not a SQLite database");
     rmSync(join(home, "data", "hercule.db-wal"), { force: true });

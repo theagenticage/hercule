@@ -1,12 +1,12 @@
 /**
  * Subscription rows. This module only reads and writes them. Who may write,
- * what a target means and when a subscription may be ended are the service's
- * questions.
+ * what a target means and when a subscription may be ended are decided by the
+ * service.
  *
- * A listing is one keyset walk over `created_at` and the id, narrowed to one
- * holder, which `subscriptions_holder` serves. Only live rows are read here at
- * all: a listing says what a session is still waiting for, and the event router
- * evaluates what is still waiting.
+ * A listing pages with a keyset over `created_at` and the id, filtered to one
+ * holder, which the `subscriptions_holder` index serves. Only live rows are
+ * read here: a listing shows what a session is still waiting for, and the
+ * event router evaluates only what is still waiting.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -31,7 +31,7 @@ export interface StoredSubscription {
   readonly holder: SubscriptionHolder;
   readonly target: SubscriptionTarget;
   readonly condition: string;
-  /** What the evaluator said about the condition it could not evaluate, or null. */
+  /** The evaluator's error message for a condition it could not evaluate, or null. */
   readonly healthErrorMessage: string | null;
   /** When the evaluation error began, or null. */
   readonly healthErrorAt: string | null;
@@ -42,7 +42,7 @@ export interface StoredSubscription {
   readonly createdAt: string;
 }
 
-/** Everything a new subscription row holds; the id and the instant are written here. */
+/** The fields of a new subscription row. The repository generates the id. */
 export interface NewSubscription {
   readonly holder: SubscriptionHolder;
   readonly target: SubscriptionTarget;
@@ -52,16 +52,19 @@ export interface NewSubscription {
   readonly actor: string;
 }
 
-/** What ends one subscription. */
+/** The fields needed to end one subscription. */
 export interface SubscriptionEnd {
   readonly id: string;
   /** The instant it stopped waiting. */
   readonly at: string;
-  /** What ended it, as the row records it. */
+  /** Why it ended, as the row records it. */
   readonly reason: string;
   /** Who ended it: an actor stamp, or the system for a sweep. */
   readonly actor: string;
-  /** Only end it if this holder holds it; absent ends it whoever holds it. */
+  /**
+   * If set, ends the subscription only if this holder holds it. If absent,
+   * ends it whoever holds it.
+   */
   readonly heldBy?: SubscriptionHolder;
 }
 
@@ -69,7 +72,7 @@ export interface SubscriptionPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly direction: SortDirection;
-  /** Whose subscriptions to walk. A listing is always about one holder. */
+  /** Whose subscriptions to list. A listing always covers one holder. */
   readonly holder: SubscriptionHolder;
 }
 
@@ -126,9 +129,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Every subscription still waiting, oldest first. This is what one pass of
-     * the event router evaluates, so it is read whole rather than paged: a
-     * subscription left out of the read is an event that reaches nobody.
+     * Returns every live subscription, oldest first. One pass of the event
+     * router evaluates all of them, so the list is read whole rather than
+     * paged: a subscription left out of the read would miss the event.
      */
     listLive: (): Effect.Effect<ReadonlyArray<StoredSubscription>, SqlError> =>
       Effect.map(
@@ -139,13 +142,16 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Records that this subscription's condition could not be evaluated, and
-     * answers whether this failure began the error it is in.
+     * Records that this subscription's condition could not be evaluated.
+     * Returns true if this failure started a new error, and false if an error
+     * was already recorded.
      *
-     * Two writes rather than one: the first lands only while no evaluation
-     * error is recorded, so exactly one caller can be told it began the error,
-     * and the second refreshes the message of an error that was already
-     * standing while leaving the instant it began where it is.
+     * This takes two writes rather than one:
+     *
+     * - The first write succeeds only while no evaluation error is recorded,
+     *   so exactly one caller learns that it started the error.
+     * - The second write updates the message of an existing error and keeps
+     *   the time the error began.
      */
     recordEvaluationFailure: (
       id: string,
@@ -166,7 +172,7 @@ const make = Effect.gen(function* () {
         return false;
       }),
 
-    /** Takes the recorded evaluation error off a subscription that evaluated cleanly. */
+    /** Clears the recorded evaluation error from a subscription that evaluated cleanly. */
     clearEvaluationFailure: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE subscriptions
@@ -175,13 +181,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Records that the one wake-up this subscription produced for this event
-     * was lost, so a reader of the subscription learns why nothing arrived.
-     * An older lost wake-up is written over: the newest one is the one the
-     * holder is still waiting on.
+     * Records that the wake-up this subscription produced for this event was
+     * lost, so a reader of the subscription learns why nothing arrived. An
+     * older lost wake-up is overwritten, because the holder is still waiting
+     * on the newest one.
      *
-     * A row already ended is left alone: a subscription nobody holds any more
-     * has nobody left to tell.
+     * An ended subscription is left unchanged: nobody holds it any more, so
+     * there is nobody left to tell.
      */
     recordLostWakeUp: (id: string, eventId: number, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
@@ -191,9 +197,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Takes a lost wake-up off a subscription that has just been woken again.
-     * The fact says one event was lost; a wake-up written after it is what
-     * makes that out of date, and nothing else is.
+     * Clears the lost wake-up from a subscription that has just been woken
+     * again. The lost wake-up records that one event was lost, and only a
+     * later wake-up makes that record out of date.
      */
     clearLostWakeUp: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
@@ -203,13 +209,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Stops the subscription waiting, naming what ended it and who ended it,
-     * and answers whether there was a live subscription to end.
+     * Ends the subscription, recording why and who ended it. Returns true if
+     * there was a live subscription to end.
      *
-     * `heldBy` narrows the write to one holder's own rows. A caller that may
-     * end only what it holds passes it and reads `false` for a subscription
-     * that is another holder's, which is the same answer as for one that never
-     * existed.
+     * `heldBy` limits the write to one holder's rows. A caller that may end
+     * only its own subscriptions passes it, and gets `false` for a
+     * subscription another holder holds, the same result as for one that
+     * never existed.
      */
     end: (ending: SubscriptionEnd): Effect.Effect<boolean, SqlError> => {
       const clauses = [

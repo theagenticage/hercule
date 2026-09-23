@@ -1,19 +1,21 @@
 /**
- * Resources as the API sees them: `resource.query`, `read`, `create`, `update`
- * and `delete`.
+ * The resource operations: `resource.query`, `read`, `create`, `update` and
+ * `delete`.
  *
- * What a kind requires is decided here rather than in the schema: a repo is a
- * remote and a folder is a label, and a caller writing the wrong one gets an
- * issue naming the field instead of a union that matched nothing. A repo is
- * identified by the canonical form of its remote, and the unique index on that
- * column is what makes a second spelling of one repository a conflict.
+ * The fields each kind requires are checked here rather than in the schema: a
+ * repo needs a remote and a folder needs a label. A caller who sends the wrong
+ * field gets an error that names it, instead of a union error that matched no
+ * member. A repo is identified by the canonical form of its remote, and the
+ * unique index on that column makes a second spelling of the same repository
+ * a conflict.
  *
- * A repo's Connection has to be a GitHub one: it is what a push authenticates
- * with, and any other account would be a credential that cannot work.
+ * A repo's Connection must be a GitHub connection: a push authenticates with
+ * it, and a credential for any other account could not work.
  *
- * Delete is real, not soft: a resource is a pointer at something outside Hercule,
- * and a pointer nobody wants is gone. It is refused while a workspace stands on
- * it, because that workspace is a working copy on a machine.
+ * Delete is a hard delete, not a soft one: a resource only points at something
+ * outside Hercule, and a pointer nobody wants can simply go. The delete fails
+ * while a workspace still uses the resource, because that workspace is a
+ * checkout on a runner.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -76,21 +78,22 @@ export interface ResourcePage {
   readonly nextCursor?: string;
 }
 
-/** Oldest first: the list reads as the one the user built up. */
+/** Oldest first, so the list is in the order the user added resources. */
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
 const NO_SUCH_RESOURCE = "no such resource";
 
-/** A repo is named by the remote it is; a second name nothing reads is refused. */
-const REPO_IS_ITS_REMOTE = "a repo is named by its remote, so it takes no label";
+/** A repo is named by its remote, so a label would be a second name nothing reads. */
+const REPO_IS_ITS_REMOTE = "a repo is named by its remote, so it cannot have a label";
 
-/** What a kind that is never checked out has no use for. */
+/** Returns the error for a checkout-only field set on a kind that is never checked out. */
 const describeNoCheckout = (kind: string): string =>
-  `a ${kind} is never checked out, so it has no setup command and nothing to include`;
+  `a ${kind} is never checked out, so it cannot have a setup command or workspaceInclude`;
 
 /**
- * Which of the two checkout-only fields a non-repo was given, if either: they
- * are refused rather than stored where nothing would ever read them.
+ * Returns which of the two checkout-only fields a non-repo was given, if
+ * either. They are rejected rather than stored where nothing would ever read
+ * them.
  */
 const findRepoOnlyField = (given: {
   readonly setupCommand?: unknown;
@@ -106,7 +109,7 @@ const NOT_A_REMOTE =
   "that is not a remote Hercule can clone: write https://host/owner/repo or git@host:owner/repo";
 
 const STANDS_ON =
-  "a workspace still stands on that resource; dispose of it before removing the resource";
+  "a workspace still uses that resource; dispose of the workspace before deleting the resource (a main workspace cannot be disposed of; it stops using the resource when its runner is retired)";
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
@@ -132,7 +135,11 @@ const make = Effect.gen(function* () {
       composeResource(row, projects.get(row.id) ?? []),
     );
 
-  /** The connection a resource may name, or the issue saying why it may not. */
+  /**
+   * Checks that a resource of this kind may use this connection. Fails with a
+   * validation error if the connection does not exist, or if the resource is
+   * a repo and the connection is not a GitHub connection.
+   */
   const validateNamedConnection = (
     kind: ResourceKind,
     connectionId: string,
@@ -147,13 +154,16 @@ const make = Effect.gen(function* () {
       if (kind === "repo" && !isGithubConnection(found.value)) {
         return yield* Effect.fail(
           createValidationError([
-            { path: ["connectionId"], message: "a repo acts through a github connection" },
+            { path: ["connectionId"], message: "a repo's connection must be a GitHub connection" },
           ]),
         );
       }
     });
 
-  /** Every project named has to exist, or the link would point at nothing. */
+  /**
+   * Checks that every given project exists, so no link points at nothing.
+   * Fails with a validation error for each missing project.
+   */
   const validateNamedProjects = (
     projectIds: ReadonlyArray<string>,
   ): Effect.Effect<void, Validation | SqlError> =>
@@ -170,8 +180,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The canonical form of a remote, refusing one that names no repository and
-   * one another resource already holds.
+   * Returns the canonical form of a remote. Fails with a validation error if
+   * Hercule cannot clone the remote, and with a conflict if another resource
+   * (not `self`) already has the same canonical remote.
    */
   const canonicalizeRemoteOrFail = (
     remote: string,
@@ -232,7 +243,7 @@ const make = Effect.gen(function* () {
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         if (decoded.kind === "repo" && decoded.remote === undefined) {
           return yield* Effect.fail(
-            createValidationError([{ path: ["remote"], message: "a repo is named by its remote" }]),
+            createValidationError([{ path: ["remote"], message: "a repo needs a remote" }]),
           );
         }
         if (decoded.kind === "repo" && decoded.label !== undefined) {
@@ -244,14 +255,17 @@ const make = Effect.gen(function* () {
           if (decoded.remote !== undefined) {
             return yield* Effect.fail(
               createValidationError([
-                { path: ["remote"], message: `a ${decoded.kind} has no remote to check out` },
+                {
+                  path: ["remote"],
+                  message: `a ${decoded.kind} is never checked out, so it cannot have a remote`,
+                },
               ]),
             );
           }
           if (decoded.label === undefined) {
             return yield* Effect.fail(
               createValidationError([
-                { path: ["label"], message: `a ${decoded.kind} is named by its label` },
+                { path: ["label"], message: `a ${decoded.kind} needs a label` },
               ]),
             );
           }
@@ -265,8 +279,8 @@ const make = Effect.gen(function* () {
         if (decoded.connectionId !== undefined) {
           yield* validateNamedConnection(decoded.kind, decoded.connectionId);
         }
-        // A project named twice is the same link: what the caller asked for is
-        // the set, and the join table holds one row per pair.
+        // A project listed twice is the same link: the caller means a set, and
+        // the join table holds one row per pair.
         const projectIds = [...new Set(decoded.projectIds ?? [])];
         yield* validateNamedProjects(projectIds);
 
@@ -285,9 +299,9 @@ const make = Effect.gen(function* () {
               label: decoded.label ?? null,
               connectionId: decoded.connectionId ?? null,
               setupCommand: decoded.setupCommand ?? null,
-              // On unless it is turned off, and never on off a repo: a fresh
-              // worktree that silently lacked the files the user works with is
-              // the surprising answer, and a folder has no worktree to fill.
+              // On by default for a repo, and always off for other kinds. A new
+              // worktree that silently lacked the files the user works with
+              // would be surprising, and a folder has no worktree to fill.
               workspaceInclude: decoded.kind === "repo" && (decoded.workspaceInclude ?? true),
               at,
             });
@@ -335,7 +349,10 @@ const make = Effect.gen(function* () {
               if (patch.remote !== undefined) {
                 return yield* Effect.fail(
                   createValidationError([
-                    { path: ["remote"], message: `a ${before.kind} has no remote to check out` },
+                    {
+                      path: ["remote"],
+                      message: `a ${before.kind} is never checked out, so it cannot have a remote`,
+                    },
                   ]),
                 );
               }
@@ -377,7 +394,7 @@ const make = Effect.gen(function* () {
               payload: { resourceId: id, changed: Object.keys(patch).sort() },
               at,
             });
-            // Read back, so what the caller gets is the row that was written.
+            // Read back, so the caller gets the row as it was written.
             return yield* Effect.flatMap(readStoredResourceOrFail(id), readResourceRecord);
           }),
         );
@@ -401,7 +418,7 @@ const make = Effect.gen(function* () {
               return yield* Effect.fail(createInvalidStateError(STANDS_ON));
             }
             yield* resources.delete(id);
-            // The final snapshot, because nothing can read the row afterwards.
+            // Store a final snapshot, because the row cannot be read afterwards.
             yield* audit.append({
               kind: "resource.deleted",
               actor: USER_ACTOR,

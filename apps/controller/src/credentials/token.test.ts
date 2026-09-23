@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { hashToken, mintToken } from "./token";
 
 describe("token hashing", () => {
-  it("mints an opaque url-safe token and stores only its digest", () => {
+  it("mints a url-safe token, and hashes it to a stable hex digest", () => {
     const token = mintToken();
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(hashToken(token)).toMatch(/^[0-9a-f]{64}$/);

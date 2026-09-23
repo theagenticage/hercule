@@ -1,14 +1,13 @@
 /**
- * The resolver's memory: that it has one, and that a drop landing while a
- * lookup is in flight is not lost.
+ * Tests the resolver's cache: that it caches results, and that a cache
+ * removal is not lost when it happens while a lookup is running.
  *
- * Which rows resolve - a live session's, not an exited or queued one's, not a
- * token nobody minted - is asserted over the real HTTP server in
+ * Which rows resolve - a running session's, but not an exited or queued one's,
+ * and not an unknown token - is tested over the real HTTP server in
  * `http/session-actor.integration.test.ts`, where an agent presents the token
- * the controller actually handed its machine. What cannot be reached from there
- * is the interleaving below, so the resolver is given a SQL client that lets
- * this test act in the moment between the query answering and the answer being
- * remembered.
+ * the controller actually gave its runner. That test cannot reach the timing
+ * below, so here the resolver gets a SQL client that lets the test run code
+ * after the query returns and before the result is cached.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
@@ -19,15 +18,16 @@ import { SessionTokens, SessionTokensLayer } from "./tokens";
 const PROFILE = "0199e0e77b217000800000000000000a";
 const SESSION = "0199e0e77b217000800000000000001a";
 
-/** The same profile id in the canonical form the resolver answers with. */
+/** The same profile id in the canonical form the resolver returns. */
 const PROFILE_ID = "0199e0e7-7b21-7000-8000-00000000000a";
 
-/** What the test does the moment a query the resolver made has answered. */
+/** What the test runs right after each query the resolver makes returns. */
 let interleave: () => void = () => {};
 
 /**
- * The resolver's SQL client, with a seam after every query it runs. The apply
- * trap is the whole wrapper: everything else about the client is the real one's.
+ * The resolver's SQL client, which calls `interleave` after every query it
+ * runs. Only the `apply` trap is wrapped; the rest of the client is the real
+ * one.
  */
 const seamed = Layer.effect(SqlClient.SqlClient)(
   Effect.map(
@@ -35,8 +35,8 @@ const seamed = Layer.effect(SqlClient.SqlClient)(
     (sql) =>
       new Proxy(sql, {
         apply: (target, self, args: Parameters<typeof sql>) => {
-          // A statement is an Effect; the overloads that describe the tagged
-          // template do not say so, which is all this cast is for.
+          // A statement is an Effect, but the tagged template overloads do not
+          // type it as one. The cast only fixes that.
           const query = Reflect.apply(target, self, args) as unknown as Effect.Effect<unknown>;
           return Effect.tap(query, () =>
             Effect.sync(() => {
@@ -90,14 +90,14 @@ const run = <A, E>(body: Effect.Effect<A, E, SessionTokens | SqlClient.SqlClient
 const readGrants = (actor: Option.Option<{ readonly grants: ReadonlyArray<string> }>) =>
   Option.getOrThrow(actor).grants;
 
-describe("what the resolver remembers", () => {
-  it("answers the second call from memory, without asking the row again", async () => {
+describe("the resolver cache", () => {
+  it("returns the second call from the cache, without reading the row again", async () => {
     const { first, second } = await run(
       Effect.gen(function* () {
         const tokens = yield* SessionTokens;
         const first = yield* tokens.resolve("hash-live");
-        // The row changes underneath, and nothing has told the resolver: a
-        // second answer that differs would mean it read again.
+        // The row changes without the resolver being told, so a different
+        // second result would mean it read the row again.
         yield* narrow;
         return { first, second: yield* tokens.resolve("hash-live") };
       }),
@@ -107,14 +107,14 @@ describe("what the resolver remembers", () => {
     expect(readGrants(second)).toEqual(["task.read", "task.create"]);
   });
 
-  it("keeps nothing from a lookup that was already reading when the drop landed", async () => {
+  it("does not cache the result of a lookup that was running when the cache was cleared", async () => {
     const after = await run(
       Effect.gen(function* () {
         const tokens = yield* SessionTokens;
-        // The invalidation lands in the gap between the resolver's query
-        // answering and its answer being remembered. There is nothing to delete
-        // at that moment, so the lookup itself has to decline to keep what it
-        // read - which is the row as it stood before the edit behind the drop.
+        // The cache is cleared after the resolver's query returns and before
+        // the result is cached. There is nothing to delete at that moment, so
+        // the lookup itself must not cache what it read, which is the row as
+        // it was before the edit that caused the clearing.
         interleave = () => {
           tokens.forgetProfile(PROFILE_ID);
         };

@@ -1,17 +1,17 @@
 /**
- * The settings store: two tables, one per scope.
+ * Reads and writes settings, which are stored in two tables, one per scope:
  *
- * `settings` holds the controller's operational settings, edited in Settings >
- * System and seeded at first run. `user_settings` holds the user settings,
- * keyed by user id from day one, so a second user is a `WHERE` clause rather
- * than a table rebuild.
+ * - `settings` holds the controller's operational settings, edited in
+ *   Settings > System and seeded at first run.
+ * - `user_settings` holds the user settings, keyed by user id from the start,
+ *   so supporting a second user needs a `WHERE` clause rather than a new table.
  *
- * The keys and what they hold are declared once, in the contract
- * (`SETTING_VALUES`): the same map shapes `settings.read` on the wire and the
- * JSON in the `value` column, so a key cannot mean one thing to a caller and
- * another to a row. Values are JSON text, and every key carries an Effect
- * Schema, so a read that cannot produce the key's type is an error rather than
- * a value the caller misinterprets.
+ * The keys and their value schemas are declared once, in the contract
+ * (`SETTING_VALUES`). The same map defines the `settings.read` response and
+ * the JSON in the `value` column, so a key cannot mean one thing to a caller
+ * and another in the database. Values are stored as JSON text and decoded with
+ * the key's Effect Schema, so a stored value that does not match the schema is
+ * an error rather than a value the caller misreads.
  */
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -22,7 +22,7 @@ import { nowIso, uuidFromString } from "../db";
 /** The keys each scope defines, with the schema of the value. */
 const SETTING_SCHEMAS = SETTING_VALUES;
 
-/** A scope whose keys are declared, and so are typed on every read and write. */
+/** A scope whose keys are declared, so every read and write of it is typed. */
 export type TypedScope = keyof typeof SETTING_SCHEMAS;
 
 export type SettingKey<S extends TypedScope> = keyof (typeof SETTING_SCHEMAS)[S] & string;
@@ -31,12 +31,12 @@ export type SettingValue<S extends TypedScope, K extends SettingKey<S>> = Schema
   (typeof SETTING_SCHEMAS)[S][K]
 >;
 
-/** Everything one scope holds: the keys that are set, and nothing for the rest. */
+/** The settings of one scope. A key that is not set is absent. */
 export type ScopeSettings<S extends TypedScope> = {
   readonly [K in SettingKey<S>]?: SettingValue<S, K>;
 };
 
-/** A setting is absent, or holds a value its schema rejects. */
+/** Fails a read when a setting is not set, or holds a value its schema rejects. */
 export class SettingError extends Schema.TaggedError<SettingError>()("SettingError", {
   scope: Schema.String,
   key: Schema.String,
@@ -44,18 +44,21 @@ export class SettingError extends Schema.TaggedError<SettingError>()("SettingErr
 }) {}
 
 /**
- * The runner a placement falls back to.
+ * The key of the default runner: the runner a placement uses when nothing else
+ * chooses one.
  *
- * It lives in the controller's settings table because there is no controller
- * table to widen, but it is not one of the settings the settings API carries:
- * `controller.update` is the only writer that takes the id from a caller, so
- * the check that it names a placeable runner lives there, and `controller.read`
- * is where it is answered. `runners/` writes the key too, when the first runner
- * joins and when the named one retires, never from a value a caller supplied.
+ * It is stored in the controller's settings table because there is no other
+ * controller table to add it to, but the settings API does not expose it:
  *
- * `all` below leaves the key out by name rather than letting `decodeRows` drop
- * it as undeclared, because that path logs a warning, and a key deliberately
- * kept out of the settings API is not a downgrade leftover to complain about.
+ * - `controller.update` is the only operation that takes the id from a caller,
+ *   so it checks that the id refers to a runner that can take sessions.
+ * - `controller.read` returns it.
+ * - `runners/` also writes it, when the first runner joins and when the
+ *   default runner is retired, but never with a value from a caller.
+ *
+ * `all` below excludes the key by name rather than letting `decodeRows` skip
+ * it as undeclared, because `decodeRows` logs a warning for such keys, and
+ * this key is excluded on purpose, not left over from a downgrade.
  */
 const DEFAULT_RUNNER_ID = "defaultRunnerId";
 
@@ -65,14 +68,14 @@ const createSettingError = (message: string): SettingError =>
   new SettingError({ scope: "controller", key: DEFAULT_RUNNER_ID, message });
 
 /**
- * The stored codec for one key: its declared schema wrapped in the JSON text
- * the `value` column holds. The lookup is by string, so the caller's typed key
- * is what keeps the value type honest.
+ * Builds the codec for one key: its declared schema, wrapped to convert from
+ * and to the JSON text in the `value` column. The lookup takes a plain string,
+ * so only the caller's typed key keeps the value type correct.
  */
 const buildStoredCodec = (scope: TypedScope, key: string): Schema.Codec<unknown, string> =>
   Schema.fromJsonString((SETTING_SCHEMAS[scope] as Record<string, Schema.Codec<unknown>>)[key]!);
 
-/** One stored value, decoded to the key's declared type. */
+/** Decodes one stored value to the key's declared type. Fails with `SettingError` if it does not match. */
 const decode = (
   scope: TypedScope,
   key: string,
@@ -82,7 +85,7 @@ const decode = (
     Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
   );
 
-/** One value, encoded to the JSON text the `value` column holds. */
+/** Encodes one value as JSON text for the `value` column. Fails with `SettingError` if it does not match. */
 const encode = (
   scope: TypedScope,
   key: string,
@@ -93,15 +96,19 @@ const encode = (
   );
 
 /**
- * Every row of one scope, decoded to its key's declared type.
+ * Decodes every row of one scope to its key's declared type.
  *
- * A row this build cannot read is left out and said so in the log, rather than
- * failing the whole read over one key the caller never asked about. Two ways a
- * row gets there: a key this build does not declare, which is what a downgrade
- * leaves behind, and a value the key no longer takes, which is what narrowing a
- * key's type leaves behind (`thread.workspace` lost `none` in
- * [#72](https://github.com/theagenticage/hercule/issues/72)). Both read as unset,
- * which is what the setting meant either way, so neither needs a migration.
+ * A row this version cannot read is skipped with a warning in the log, rather
+ * than failing the whole read over one key the caller never asked about. A row
+ * cannot be read in two cases:
+ *
+ * - its key is not declared, which is what a downgrade leaves behind;
+ * - its value no longer matches the key's schema, which is what narrowing a
+ *   key's type leaves behind (`thread.workspace` lost `none` in
+ *   [#72](https://github.com/theagenticage/hercule/issues/72)).
+ *
+ * Both rows read as unset, which is what the setting meant anyway, so neither
+ * case needs a migration.
  */
 const decodeRows = <S extends TypedScope>(
   scope: S,
@@ -117,19 +124,19 @@ const decodeRows = <S extends TypedScope>(
       const value = yield* Effect.option(decode(scope, row.key, row.value));
       if (Option.isNone(value)) {
         yield* Effect.logWarning(
-          `Ignoring the ${scope} setting ${row.key}: this build does not take its stored value.`,
+          `Ignoring the ${scope} setting ${row.key}: its stored value is invalid for this version.`,
         );
         continue;
       }
       entries.push([row.key, value.value] as const);
     }
-    // The keys are the scope's own and each value came from that key's schema,
-    // which is exactly what the mapped type says; TypeScript cannot follow the
-    // loop that far.
+    // Every key belongs to the scope and every value was decoded with that
+    // key's schema, which is what the mapped type requires. TypeScript cannot
+    // infer that through the loop, so the cast is needed.
     return Object.fromEntries(entries) as ScopeSettings<S>;
   });
 
-/** The row shape both tables answer a listing with. */
+/** The columns both tables return when their rows are listed. */
 interface KeyValueRow {
   readonly key: string;
   readonly value: string;
@@ -139,7 +146,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    /** Reads one controller setting, decoded to the key's type. */
+    /** Reads one controller setting, decoded to the key's type. Fails if it is not set or invalid. */
     get: <K extends SettingKey<"controller">>(
       key: K,
     ): Effect.Effect<SettingValue<"controller", K>, SettingError | SqlError> =>
@@ -159,9 +166,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Every controller key that is set, decoded to its declared type. A key
-     * nobody has set is absent rather than defaulted, so the default lives in
-     * one place: whoever reads the key.
+     * Returns every controller setting that is set, decoded to its declared
+     * type. A key nobody has set is absent rather than defaulted, so the
+     * default lives in one place: the code that reads the key.
      */
     all: (): Effect.Effect<ScopeSettings<"controller">, SettingError | SqlError> =>
       Effect.flatMap(
@@ -172,7 +179,7 @@ const make = Effect.gen(function* () {
         (rows) => decodeRows("controller", rows),
       ),
 
-    /** The runner a placement falls back to, or null while none is chosen. */
+    /** Returns the id of the default runner, or null if none is chosen. */
     defaultRunnerId: (): Effect.Effect<string | null, SettingError | SqlError> =>
       Effect.flatMap(
         sql<KeyValueRow>`
@@ -188,7 +195,7 @@ const make = Effect.gen(function* () {
         },
       ),
 
-    /** Names the runner a placement falls back to, or takes the default off. */
+    /** Sets the default runner, or clears it when `id` is null. */
     setDefaultRunnerId: (
       id: string | null,
       at: string,
@@ -237,7 +244,7 @@ const make = Effect.gen(function* () {
         `;
       }),
 
-    /** Reads one of a user's settings, decoded to the key's type. */
+    /** Reads one of a user's settings, decoded to the key's type. Fails if it is not set or invalid. */
     getForUser: <K extends SettingKey<"user">>(
       userId: string,
       key: K,
@@ -256,7 +263,7 @@ const make = Effect.gen(function* () {
         Effect.map((value) => value as SettingValue<"user", K>),
       ),
 
-    /** Every key one user has set, decoded to its declared type. */
+    /** Returns every setting one user has set, decoded to its declared type. */
     allForUser: (userId: string): Effect.Effect<ScopeSettings<"user">, SettingError | SqlError> =>
       Effect.flatMap(
         sql<KeyValueRow>`

@@ -23,8 +23,9 @@ const USER: Actor = {
 };
 
 /**
- * Every test runs on a `TestClock`, so a test that needs a later `updatedAt`
- * moves time rather than racing the millisecond the first write landed in.
+ * Runs an effect as the user, on a `TestClock`. A test that needs a later
+ * `updatedAt` moves the clock forward, rather than hoping the next write lands
+ * in a later millisecond.
  */
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
@@ -35,7 +36,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     ),
   );
 
-/** Runs a call that is expected to fail, and hands the test its error. */
+/** Runs a call that is expected to fail, and returns its error. */
 const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
     effect.pipe(
@@ -47,8 +48,9 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   );
 
 /**
- * Input a caller can put on the wire but the types here rule out. Refusing it
- * is the service's job, so the test has to be able to hand it over.
+ * Casts input that a caller can send over the wire but the types here rule
+ * out. Rejecting such input is the service's job, so the test must be able to
+ * pass it in.
  */
 const castMalformedInput = <T>(input: unknown): T => input as T;
 
@@ -65,7 +67,7 @@ const A_MINUTE = 60_000;
 const sortTitles = (tasks: ReadonlyArray<Task>) => tasks.map((task) => task.title).sort();
 
 describe("task.create", () => {
-  it("fills in the defaults and stamps one instant on the three timestamps", async () => {
+  it("fills in the defaults and sets the three timestamps to the same time", async () => {
     const task = await run(
       Effect.flatMap(TaskService, (tasks) =>
         tasks.create({ title: "Fix the flaky migration test", description: "" }),
@@ -85,7 +87,7 @@ describe("task.create", () => {
     expect(task.deletedAt).toBeUndefined();
   });
 
-  it("refuses a title that is empty, over the cap, or missing", async () => {
+  it("rejects a title that is empty, too long, or missing", async () => {
     const errors = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -101,7 +103,7 @@ describe("task.create", () => {
     for (const error of errors) expect(error).toMatchObject({ error: { code: "validation" } });
   });
 
-  it("caps the labels a task ends up carrying, not just the ones one call names", async () => {
+  it("caps the total labels on a task, not just the labels in one call", async () => {
     const { filled, overflow } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -113,8 +115,9 @@ describe("task.create", () => {
         });
         return {
           filled: created.labels.length,
-          // Every call is under the cap and the row is at it, so what refuses
-          // this is the rule about the row rather than the one about the call.
+          // Every call is under the cap and the task is at it, so this is
+          // rejected by the rule about the task's total, not the rule about
+          // one call.
           overflow: yield* Effect.flip(
             tasks.update({ id: created.id, addLabels: [buildLabel(MAX_TASK_LABELS)] }),
           ),
@@ -162,7 +165,7 @@ describe("task.update", () => {
     expect(after.statusChangedAt > before.statusChangedAt).toBe(true);
   });
 
-  it("adds and removes labels without touching the rest, and one label twice is one label", async () => {
+  it("adds and removes labels without changing the rest, and stores a repeated label once", async () => {
     const { added, twice, removed } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -204,7 +207,7 @@ describe("task.update", () => {
     expect(task.provenance[1]).toMatchObject({ eventId: 7, actor: "user" });
   });
 
-  it("answers not_found for an id nobody has", async () => {
+  it("returns not_found for an id that does not exist", async () => {
     const error = await runError(
       Effect.flatMap(TaskService, (tasks) => tasks.update({ id: UNKNOWN_ID, title: "x" })),
     );
@@ -236,7 +239,7 @@ describe("task.update", () => {
 });
 
 describe("task.delete", () => {
-  it("hides the task from read, query and search, and stamps deletedAt on what it emits", async () => {
+  it("hides the task from read, query and search, and sets deletedAt on the event it writes", async () => {
     const { result, readError, listed, found, entries } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -264,7 +267,7 @@ describe("task.delete", () => {
     expect(snapshot.deletedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  it("answers not_found the second time", async () => {
+  it("returns not_found the second time", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -278,8 +281,9 @@ describe("task.delete", () => {
 });
 
 /**
- * The three tasks every filter test narrows. They differ in one dimension each,
- * so a filter that matched on the wrong field would return the wrong titles.
+ * The three tasks every filter test filters. Each differs from the others in
+ * one field, so a filter that matched on the wrong field would return the
+ * wrong titles.
  */
 const withThreeTasks = Effect.gen(function* () {
   const tasks = yield* TaskService;
@@ -305,7 +309,7 @@ const withThreeTasks = Effect.gen(function* () {
 });
 
 describe("task.query", () => {
-  it("matches refs, labels and status by exact identity, any-of within a field", async () => {
+  it("matches refs, labels and status exactly, and any of the values within a field", async () => {
     const { byRef, byRefs, byLabel, byStatus } = await run(
       Effect.gen(function* () {
         const tasks = yield* withThreeTasks;
@@ -323,7 +327,7 @@ describe("task.query", () => {
     expect(sortTitles(byStatus)).toEqual(["done and unlabelled", "open and labelled"]);
   });
 
-  it("ands across fields: a status plus a label needs both", async () => {
+  it("requires every field to match: a status plus a label needs both", async () => {
     const { both, neither } = await run(
       Effect.gen(function* () {
         const tasks = yield* withThreeTasks;
@@ -348,7 +352,7 @@ describe("task.query", () => {
     ]);
   });
 
-  it("matches no task for a project none of them is in", async () => {
+  it("matches no task for a project that has no tasks", async () => {
     const items = await run(
       Effect.flatMap(withThreeTasks, (tasks) =>
         Effect.map(tasks.query({ projectId: UNKNOWN_ID }), (page) => page.items),
@@ -358,7 +362,7 @@ describe("task.query", () => {
   });
 });
 
-/** Prose in the two indexed fields, and the same words where search must not look. */
+/** Text in the two indexed fields, and the same words in fields that search must ignore. */
 const withProse = Effect.gen(function* () {
   const tasks = yield* TaskService;
   yield* tasks.create({ title: "Café Naïve espresso machine", description: "grind size" });
@@ -373,7 +377,7 @@ const withProse = Effect.gen(function* () {
 });
 
 describe("full-text search", () => {
-  it("matches the title or the description, whatever the case and the diacritics", async () => {
+  it("matches the title or the description, ignoring case and diacritics", async () => {
     const items = await run(
       Effect.flatMap(withProse, (tasks) =>
         Effect.map(tasks.query({ text: "café naive" }), (page) => page.items),
@@ -382,18 +386,18 @@ describe("full-text search", () => {
     expect(sortTitles(items)).toEqual(["Café Naïve espresso machine", "espresso grinder"]);
   });
 
-  it("never reaches a label or a ref", async () => {
+  it("never matches a label or a ref", async () => {
     const items = await run(
       Effect.flatMap(withProse, (tasks) =>
         Effect.map(tasks.query({ text: "naive" }), (page) => page.items),
       ),
     );
-    // The third task carries the word only in a label and a ref, and neither its
-    // title nor its description holds it.
+    // The third task has the word only in a label and a ref, not in its title
+    // or its description.
     expect(sortTitles(items)).toEqual(["Café Naïve espresso machine", "espresso grinder"]);
   });
 
-  it("follows a retitled task: the old word stops matching and the new one starts", async () => {
+  it("follows a renamed task: the old word stops matching and the new one starts", async () => {
     const { before, after } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -405,9 +409,9 @@ describe("full-text search", () => {
         };
       }),
     );
-    // The index is external content: nothing but the update trigger takes the
-    // old terms out of it, and stale terms would answer for a row that no
-    // longer holds them.
+    // The index is an external-content table: only the update trigger removes
+    // the old terms from it, and stale terms would match a row that no longer
+    // contains them.
     expect(sortTitles(before.items)).toEqual([]);
     expect(sortTitles(after.items)).toEqual(["limnology survey"]);
   });
@@ -416,14 +420,15 @@ describe("full-text search", () => {
     const page = await run(
       Effect.flatMap(withProse, (tasks) => tasks.query({ text: 'AND OR "(' })),
     );
-    // The operators are words a search box can hold, so the call answers with a
-    // result set. Nothing here says which tasks that set holds.
+    // The operators are words someone can type in a search box, so the call
+    // returns a result set instead of failing. This test does not check which
+    // tasks are in it.
     expect(Array.isArray(page.items)).toBe(true);
   });
 });
 
 describe("provenance", () => {
-  it("refuses an entry naming none of ref, eventId and runId, on create and on update", async () => {
+  it("rejects an entry with none of ref, eventId and runId, on create and on update", async () => {
     const { onCreate, onUpdate } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -442,7 +447,7 @@ describe("provenance", () => {
     expect(onUpdate).toMatchObject({ error: { code: "validation" } });
   });
 
-  it("refuses a caller who stamps an entry with an at or an actor of their own", async () => {
+  it("rejects an entry where the caller sets its own at or actor", async () => {
     const { withAt, withActor } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -472,7 +477,7 @@ describe("provenance", () => {
     expect(withActor).toMatchObject({ error: { code: "validation" } });
   });
 
-  it("stamps at and actor itself", async () => {
+  it("sets at and actor itself", async () => {
     const task = await run(
       Effect.flatMap(TaskService, (tasks) =>
         tasks.create({ title: "t", description: "d", provenance: [{ ref: ISSUE_REF }] }),
@@ -484,7 +489,7 @@ describe("provenance", () => {
 });
 
 describe("external refs", () => {
-  it("takes the canonical form and refuses every malformation of it", async () => {
+  it("accepts the canonical form and rejects every malformed variant", async () => {
     const { accepted, errors } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -528,9 +533,9 @@ describe("external refs", () => {
 });
 
 /**
- * A clock that moves a second every time it is read. That is what a
- * transaction wait looks like from inside one operation, and it is what makes
- * two reads in one operation impossible to confuse with one.
+ * Creates a clock that moves forward one second every time it is read. This
+ * is what a wait for a transaction looks like from inside one operation, and
+ * it makes two clock reads in one operation easy to tell apart from one.
  */
 const createTickingClock = (): Clock.Clock => {
   let millis = Date.parse("2026-09-04T10:00:00.000Z");
@@ -557,7 +562,7 @@ const runTicking = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   );
 
 describe("the event log", () => {
-  it("dates an entry by the same clock read as the row it records", async () => {
+  it("dates an entry with the same clock read as the row it records", async () => {
     const { created, updated, createdEntries, updatedEntries } = await runTicking(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -572,13 +577,13 @@ describe("the event log", () => {
         };
       }),
     );
-    // The event that records a change is never dated before the change: a
-    // caller reading the log up to a task's own `createdAt` sees the entry.
+    // The event that records a change is never dated before the change, so a
+    // caller reading the log up to a task's `createdAt` sees the entry.
     expect(createdEntries[0]?.receivedAt).toBe(created.createdAt);
     expect(updatedEntries[0]?.receivedAt).toBe(updated.updatedAt);
   });
 
-  it("writes one task.created carrying the task, and nothing about the actor", async () => {
+  it("writes one task.created containing the task, and nothing about the actor in the payload", async () => {
     const { task, entries } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -593,7 +598,7 @@ describe("the event log", () => {
     expect(Object.keys(entries[0]?.payload ?? {})).toEqual(["task"]);
   });
 
-  it("writes one task.updated carrying only what changed, scalars and arrays apart", async () => {
+  it("writes one task.updated containing only what changed, with scalars and lists reported differently", async () => {
     const { task, entries } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -626,7 +631,7 @@ describe("the event log", () => {
     );
   });
 
-  it("writes one task.deleted carrying the final snapshot", async () => {
+  it("writes one task.deleted containing the final snapshot", async () => {
     const { task, entries } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -665,7 +670,7 @@ describe("the event log", () => {
   });
 });
 
-/** Seven tasks, walked two at a time, is three full pages and a short one. */
+/** Creates seven tasks. Paged two at a time, they fill three pages and a short one. */
 const withSeven = Effect.gen(function* () {
   const tasks = yield* TaskService;
   for (let index = 0; index < 7; index += 1) {
@@ -675,7 +680,7 @@ const withSeven = Effect.gen(function* () {
   return tasks;
 });
 
-/** Every title the walk hands out, page by page, until it says there is no more. */
+/** Returns every title from every page, following cursors until there is no next page. */
 const walkPages = (tasks: TaskService["Service"], input: QueryInput) =>
   Effect.gen(function* () {
     const seen: Array<string> = [];
@@ -692,7 +697,7 @@ const walkPages = (tasks: TaskService["Service"], input: QueryInput) =>
   });
 
 describe("paging", () => {
-  it("hands out every task exactly once, by keyset and by relevance alike", async () => {
+  it("returns every task exactly once, when paging by keyset and by relevance", async () => {
     const { keyset, relevance } = await run(
       Effect.gen(function* () {
         const tasks = yield* withSeven;
@@ -707,7 +712,7 @@ describe("paging", () => {
     expect(relevance.sort()).toEqual(keyset.sort());
   });
 
-  it("refuses a cursor from a search of other words", async () => {
+  it("rejects a cursor from a search with different words", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const tasks = yield* withSeven;
@@ -719,7 +724,7 @@ describe("paging", () => {
     expect(error).toMatchObject({ error: { code: "validation" } });
   });
 
-  it("refuses a search cursor replayed under another filter", async () => {
+  it("rejects a search cursor reused with a different filter", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -738,7 +743,7 @@ describe("paging", () => {
     expect(error).toMatchObject({ error: { code: "validation" } });
   });
 
-  it("refuses a search that also names a sort, naming both", async () => {
+  it("rejects a search that also has a sort, and names both fields", async () => {
     const error = await runError(
       Effect.flatMap(TaskService, (tasks) =>
         tasks.query({ text: "prose", sort: { field: "updatedAt" } }),
@@ -753,7 +758,7 @@ describe("paging", () => {
 });
 
 describe("an update that changes nothing", () => {
-  it("writes no row and no event when the task already holds the values", async () => {
+  it("writes no row and no event when the task already has the values", async () => {
     const { before, after, entries } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
@@ -798,7 +803,7 @@ describe("an update that changes nothing", () => {
 });
 
 describe("the project a task belongs to", () => {
-  it("refuses a project that is not there, and takes one that is", async () => {
+  it("rejects a project that does not exist, and accepts one that does", async () => {
     const { task, unknown, deleted } = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -849,7 +854,7 @@ describe("the project a task belongs to", () => {
 });
 
 describe("the priority order", () => {
-  it("walks urgent to low rather than alphabetically, one row at a time", async () => {
+  it("orders urgent to low rather than alphabetically, one row per page", async () => {
     const walked = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;

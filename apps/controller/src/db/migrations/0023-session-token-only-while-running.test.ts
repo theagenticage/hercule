@@ -1,7 +1,7 @@
 /**
- * What the migration that limits a token hash to running sessions does to rows
- * a database already holds: a running session keeps the hash its process
- * presents, and every other row loses a hash that was dead already.
+ * Tests what the migration that limits a token hash to running sessions does
+ * to existing rows: a running session keeps the hash its process presents, and
+ * every other row loses a hash that was already unusable.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -10,7 +10,7 @@ import { MEMORY, openDatabase } from "../client";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
-/** Everything before the migration under test. */
+/** The migrations before the one under test. */
 const BEFORE = migrations.filter(([id]) => id < 23);
 
 const at = "2026-09-01T00:00:00.000Z";
@@ -18,8 +18,8 @@ const at = "2026-09-01T00:00:00.000Z";
 const STATUSES = ["queued", "starting", "idle", "busy", "exited"] as const;
 
 /**
- * The token hash each status's row holds once the migration has run, and the
- * error a second row that presents a hash already held gets.
+ * Returns the token hash of each status's row after the migration has run,
+ * and the error from giving a second row a hash another row already has.
  */
 const seedAndMigrate = (): Promise<{
   readonly hashes: Readonly<Record<string, string | null>>;
@@ -54,7 +54,7 @@ const seedAndMigrate = (): Promise<{
     }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
   );
 
-describe("a token hash on a database written before the rule", () => {
+describe("a token hash in a database written before the rule", () => {
   it("stays on a running session and is dropped from every other one", async () => {
     expect((await seedAndMigrate()).hashes).toEqual({
       queued: null,

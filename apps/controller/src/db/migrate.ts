@@ -1,9 +1,11 @@
 /**
  * Boot-time migrations (spec 04, Migrations on boot; spec 15 section 8).
  *
- * On `hercule serve` the controller takes a `VACUUM INTO` copy of the database,
- * refuses to start if the database is newer than the binary, and applies every
- * pending migration inside one transaction.
+ * On `hercule serve` the controller:
+ *
+ * - refuses to start if the database is newer than the binary;
+ * - takes a `VACUUM INTO` copy of the database;
+ * - applies every pending migration inside one transaction.
  */
 import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
@@ -16,18 +18,18 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { migrations } from "./migrations/index";
 
-/** The Migrator's own ledger table; the highest id in it is the database's schema version. */
+/** The Migrator's table of applied migrations. Its highest id is the database's schema version. */
 const MIGRATIONS_TABLE = "effect_sql_migrations";
 
-/** Pre-migration copies are named so the daily backups sort separately (spec 15 section 8). */
+/** The file name suffix of a pre-migration copy, to tell it apart from daily backups (spec 15 section 8). */
 const PREMIGRATION_SUFFIX = "-premigration.db";
 
-/** How many pre-migration copies survive a prune (spec 04, Backups). */
+/** How many pre-migration copies a prune keeps (spec 04, Backups). */
 const KEEP_PREMIGRATION_COPIES = 3;
 
 /**
  * The database was written by a newer binary. There are no down migrations, so
- * the only honest move is to refuse to start and name both versions.
+ * the controller refuses to start, and the message includes both versions.
  */
 export class SchemaVersionError extends Data.TaggedError("SchemaVersionError")<{
   readonly databaseVersion: number;
@@ -50,7 +52,7 @@ export const databaseVersion: Effect.Effect<number, SqlError, SqlClient.SqlClien
   },
 );
 
-/** UTC, filename-safe, sorts by age: `20260904T092133084Z`. */
+/** Formats a time as a UTC, filename-safe string that sorts by age: `20260904T092133084Z`. */
 const formatTimestamp = (now: Date): string => now.toISOString().replaceAll(/[-:.]/g, "");
 
 /** Keeps the newest pre-migration copies and deletes the rest. Daily backups are untouched. */
@@ -67,10 +69,12 @@ const pruneBackups = (backupsDir: string): Effect.Effect<void, PlatformError, Fi
 
 /**
  * Copies the database into `backupsDir` and prunes the older copies, keeping
- * the newest three (spec 04, Backups). `VACUUM INTO` rather than a file copy,
- * because after an unclean shutdown the `-wal` file holds writes the `.db` file
- * does not have. It cannot run inside a transaction, so it happens before the
- * migrator opens one. Returns the path it wrote.
+ * the newest three (spec 04, Backups). Returns the path of the new copy.
+ *
+ * Uses `VACUUM INTO` rather than a file copy, because after an unclean shutdown
+ * the `-wal` file holds writes the `.db` file does not have. `VACUUM INTO`
+ * cannot run inside a transaction, so the copy is made before the migrator
+ * opens one.
  */
 export const backupBeforeMigration = (
   backupsDir: string,
@@ -81,8 +85,9 @@ export const backupBeforeMigration = (
     yield* fs.makeDirectory(backupsDir, { recursive: true });
     const now = new Date(yield* Clock.currentTimeMillis);
     const path = `${backupsDir}/${formatTimestamp(now)}${PREMIGRATION_SUFFIX}`;
-    // A path is not bindable in a VACUUM statement, so it is inlined with
-    // SQLite's own quoting. Backup paths come from the config, never from a row.
+    // A VACUUM statement cannot take the path as a bound parameter, so the path
+    // is inlined with SQLite's quoting. Backup paths come from the config,
+    // never from a row.
     yield* sql.unsafe(`VACUUM INTO '${path.replaceAll("'", "''")}'`);
     yield* pruneBackups(backupsDir);
     return path;
@@ -97,17 +102,21 @@ export const runMigrations = (
   SqlClient.SqlClient
 > => Effect.suspend(() => SqliteMigrator.run({ loader: Effect.succeed(set) }));
 
-/** The schema version a migration set carries: the highest id in it. */
+/** Returns the schema version of a migration set: the highest id in it. */
 const findHighestId = (set: ReadonlyArray<Migrator.ResolvedMigration>): number =>
   set.reduce((highest, [id]) => Math.max(highest, id), 0);
 
 /**
- * The boot sequence: refuse a database newer than this binary, copy it if it
- * holds anything worth keeping, then migrate.
+ * Runs the boot sequence: fails with a `SchemaVersionError` when the database
+ * is newer than this binary, copies the database if it holds anything worth
+ * keeping, then applies the pending migrations. Returns the migrations applied.
  *
- * The copy is skipped when the database file did not exist when it was opened -
- * a first run has nothing to lose - and when nothing is pending, which would
- * otherwise leave a copy behind on every boot.
+ * The copy is skipped in two cases:
+ *
+ * - the database file did not exist when it was opened, because a first run
+ *   has nothing to lose;
+ * - no migration is pending, because otherwise every boot would leave a copy
+ *   behind.
  *
  * `migrations` is the embedded set; a test passes a longer one to exercise a
  * pending migration against a database that already exists.

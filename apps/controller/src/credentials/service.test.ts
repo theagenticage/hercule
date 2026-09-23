@@ -19,8 +19,8 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(effect.pipe(Effect.provide(layer)));
 
 /**
- * The one user, and a call made as it: the actor is what the transport puts in
- * `CurrentActor` for a request under that user's login bearer.
+ * Creates a user and runs `body` as that user, with the actor the transport
+ * sets in `CurrentActor` for a request under the user's login bearer.
  */
 const runAsUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
   run(
@@ -53,7 +53,7 @@ describe("apiKey.create", () => {
     expect(Option.getOrThrow(result.found).id).toBe(result.minted.id);
   });
 
-  it("stamps the mint in the audit log, with the key's id and name", async () => {
+  it("audits the mint, with the key's id and name", async () => {
     const result = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
@@ -68,7 +68,7 @@ describe("apiKey.create", () => {
     expect(result.entries[0]?.payload).toEqual({ id: result.minted.id, name: "laptop" });
   });
 
-  it("refuses a caller with no credential: the key would belong to nobody", async () => {
+  it("rejects a caller with no credential, because the key would belong to nobody", async () => {
     const failure = await run(
       Effect.flip(Effect.flatMap(ApiKeys, (apiKeys) => apiKeys.create({ name: "laptop" }))),
     );
@@ -97,7 +97,7 @@ describe("apiKey.query", () => {
     expect(items.find((item) => item.name === "ci")?.revokedAt).toBeUndefined();
   });
 
-  it("pages by keyset, and refuses a cursor it did not issue", async () => {
+  it("pages by keyset, and rejects a cursor it did not issue", async () => {
     const result = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
@@ -122,7 +122,7 @@ describe("apiKey.query", () => {
 });
 
 describe("apiKey.revoke", () => {
-  it("revokes the key, stamps it, and says not_found the second time", async () => {
+  it("revokes the key, audits the revocation, and returns not_found the second time", async () => {
     const result = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;
@@ -140,7 +140,7 @@ describe("apiKey.revoke", () => {
     expect(result.entries[0]?.payload).toEqual({ id: result.minted.id });
   });
 
-  it("logs nothing when there was nothing to revoke: the transaction rolls back", async () => {
+  it("writes no audit entry when there is nothing to revoke", async () => {
     const entries = await runAsUser(
       Effect.gen(function* () {
         const apiKeys = yield* ApiKeys;

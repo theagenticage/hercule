@@ -1,22 +1,24 @@
 /**
- * The fleet's two axes, the reserved flag and a fleet-wide unique name.
+ * Splits the runner state into two columns, and adds the reserved flag and a
+ * unique name across the fleet.
  *
- * `state` held five values answering two questions that move independently:
+ * `state` held five values for two questions that change independently:
  * whether the controller can reach the machine, and where the machine stands
- * with its owner. They split into `connectivity` and `lifecycle`.
+ * with its owner. The column is split into `connectivity` and `lifecycle`.
  *
- * `max_concurrent_sessions` becomes nullable, `NULL` meaning derived from the
- * reported memory at read time. Facts first arrive at hello rather than at
- * join, so nothing can be derived at insert; every existing row is set to
- * `NULL`, and a cap that was set through the API is logged as it is discarded.
+ * `max_concurrent_sessions` becomes nullable, where `NULL` means the cap is
+ * derived from the reported memory when it is read. Facts first arrive at hello
+ * rather than at join, so nothing can be derived at insert. Every existing row
+ * is set to `NULL`, and a cap that was set through the API is logged as it is
+ * discarded.
  *
- * Names were never unique, so the index below could find a fleet holding two of
- * one name. The later rows are renamed rather than the boot refused, since a
- * duplicate name is the user's to sort out. A rename takes the last eight hex
- * digits of the row's id, which are the random ones: a UUIDv7 spends its first
- * twelve on a millisecond clock. The name it lost is logged, because nothing
- * else would say what the machine used to be called. The boot still refuses if
- * that name is taken.
+ * Names were never unique, so the fleet could have two runners with the same
+ * name when the unique index below is created. The later rows are renamed
+ * rather than failing the boot, since a duplicate name is for the user to sort
+ * out. The new name uses the last eight hex digits of the row's id, which are
+ * the random ones: a UUIDv7 uses its first twelve for a millisecond clock. The
+ * old name is logged, because nothing else would record what the machine used
+ * to be called. The boot still fails if the new name is already taken.
  *
  * The table is rebuilt rather than altered because SQLite cannot drop a CHECK
  * or relax a NOT NULL in place, and the old `state` CHECK names five values
@@ -97,10 +99,10 @@ export default Effect.gen(function* () {
   yield* sql`DROP TABLE runners`;
   yield* sql`ALTER TABLE runners_new RENAME TO runners`;
 
-  // Unique because a rename is a click away on the runner page, and two
-  // machines answering to one name is a fleet nobody can talk about. One column
-  // is enough for the keyset walk the cursor drives: a unique name is already a
-  // total order, so the id in the cursor never has to break a tie.
+  // Unique because renaming is one click on the runner page, and a fleet with
+  // two machines of the same name is hard to talk about. One column is enough
+  // for keyset paging: a unique name is already a total order, so the id in
+  // the cursor never has to break a tie.
   yield* sql`CREATE UNIQUE INDEX runners_name ON runners (name)`;
   yield* sql`CREATE UNIQUE INDEX runners_credential_hash ON runners (credential_hash)`;
 });

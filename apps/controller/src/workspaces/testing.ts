@@ -1,13 +1,13 @@
 /**
  * A fleet with workspaces on it, for the tests that drive them over the real
- * API and the real runner socket. Shared between this domain's own suites - the
- * provisioning one, the expiry sweep and the git credentials - and the
- * resources one, because all four stand up the same machine and read the same
- * records back: a second copy of what a workspace looks like on the wire is a
+ * API and the real runner socket. It is shared by this domain's own suites
+ * (provisioning, the expiry sweep and git credentials) and by the resources
+ * suite, because all four set up the same runner and read the same records
+ * back. A second copy of what a workspace looks like on the wire would be a
  * second place for the tests and the controller to drift apart.
  *
- * What varies between callers is passed in: the plugins beside the provider
- * fixture, and the sweep interval a test that watches the reaper hands over.
+ * What differs between callers is passed in: extra plugins besides the
+ * provider fixture, and the sweep interval for a test that watches the sweep.
  */
 import { expect } from "vitest";
 import type * as Duration from "effect/Duration";
@@ -17,7 +17,7 @@ import { get, post } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import { withFleet as withRunnerFleet, type Arranged, type Wire } from "../sessions/testing";
 
-/** What the one machine in these fleets reports about itself. */
+/** The runner facts the single runner in these fleets reports. */
 export const FACTS: RunnerFacts = {
   os: "darwin",
   arch: "arm64",
@@ -29,19 +29,19 @@ export const FACTS: RunnerFacts = {
   identityPort: 4939,
 };
 
-/** What its probe answers with, so a session has something to be placed against. */
+/** The models the runner's probe returns, so a session has a model to be placed against. */
 export const MODELS: ReadonlyArray<ModelDescriptor> = [
   { slug: "clever", name: "Clever", isDefault: true, options: [] },
 ];
 
 export interface WorkspaceFleetOptions {
-  /** Plugins beside the provider fixture every one of these fleets needs. */
+  /** Plugins to load in addition to the provider fixture that every one of these fleets needs. */
   readonly plugins?: ReadonlyArray<Plugin>;
-  /** The shipped ten minutes is longer than a test that watches the sweep can wait. */
+  /** Overrides the shipped ten minutes, which is longer than a test that watches the sweep can wait. */
   readonly workspaceSweepInterval?: Duration.Duration;
 }
 
-/** A controller with one enlisted, connected, logged-in machine and a provider on it. */
+/** Runs `body` against a controller with one enrolled, connected, logged-in runner and a provider on it. */
 export const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
   options: WorkspaceFleetOptions = {},
@@ -94,11 +94,11 @@ export interface WorkspaceRecord {
   readonly message?: string | null;
 }
 
-/** The error code a refusal answered with. */
+/** Reads the error code from an error response. */
 export const readErrorCode = async (response: Response): Promise<string> =>
   ((await response.json()) as { error: { code: string } }).error.code;
 
-/** A repo resource, optionally naming the Connection its token comes from. */
+/** Creates a repo resource, optionally with the Connection its token comes from, and returns its id. */
 export const createRepo = async (
   arranged: Arranged,
   remote: string,
@@ -114,7 +114,7 @@ export const createRepo = async (
   return ((await response.json()) as { id: string }).id;
 };
 
-/** A workspace the controller took the request for; the machine has yet to make it. */
+/** Calls `workspace.provision` and returns the new workspace, which the runner has not provisioned yet. */
 export const provisionWorkspaceOrFail = async (
   arranged: Arranged,
   body: unknown,

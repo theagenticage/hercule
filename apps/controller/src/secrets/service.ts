@@ -1,23 +1,24 @@
 /**
  * The `secret.*` operations.
  *
- * Everything here is a reference: an owner, a name and two timestamps. A value
- * goes in and is never read back out - not by this service, not by the API, not
- * by the CLI. The only code that decrypts is whatever
- * needs the value to do its job, through the repository, in this process.
+ * These operations work with references only: an owner, a name and two
+ * timestamps. A value is written and never read back out, not by this service,
+ * the API or the CLI. Only the code that needs a value to do its job decrypts
+ * it, through the repository, in this process.
  *
- * Two rules the transport cannot enforce, so they live here:
+ * The transport cannot enforce these two rules, so this service does:
  *
  * - **`core` is not writable.** The `core` owner holds the controller's own key
  *   material - its Ed25519 signing key is `core`/`controller.signing-key` - and
- *   overwriting it would break controller identity and, with it, every runner's
- *   trust in this controller, so this refuses it: `validation`, naming the
- *   field. It stays *readable* as a reference: hiding a row that exists would
- *   be a worse answer than showing one the API declines to change.
- * - **An owner id or a name holding `|`** would make the encryption's
- *   associated data ambiguous. The contract's schema rejects one before the
- *   payload is decoded; the repository rejects it again for the in-process
- *   caller, and that rejection is mapped to the same `validation` here.
+ *   overwriting it would break the controller's identity and, with it, every
+ *   runner's trust in this controller. So a set or delete for `core` fails
+ *   with `validation` on the `ownerKind` field. Its references are still
+ *   listed: hiding a row that exists would be worse than showing one the API
+ *   does not let you change.
+ * - **An owner id or a name containing `|`** would make the encryption's
+ *   associated data ambiguous. The contract's schema rejects it before the
+ *   payload is decoded. The repository rejects it again for in-process
+ *   callers, and this service converts that error to the same `validation`.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -47,7 +48,7 @@ import {
   type SecretRef as StoredSecret,
 } from "./repository";
 
-/** Which secrets to list, and how much of the listing to hand back. */
+/** Which secrets to list, and which page of the list to return. */
 export interface SecretQueryInput {
   readonly ownerKind?: OwnerKind;
   readonly ownerId?: string;
@@ -77,14 +78,14 @@ export interface SecretRefPage {
   readonly nextCursor?: string;
 }
 
-/** Why `core` is refused, in the words the caller reads. */
+/** The error message for a set or delete on the `core` owner. */
 const CORE_REFUSED =
   "the `core` owner holds the controller's own key material and is not writable through the API";
 
 const createCoreRefusedError = (): Validation =>
   createValidationError([{ path: ["ownerKind"], message: CORE_REFUSED }], CORE_REFUSED);
 
-/** What the wire sees: everything but the value, and no internal row id. */
+/** Converts a stored secret to the reference the API returns: no value and no internal row id. */
 const toRef = (stored: StoredSecret): SecretRef => ({
   ownerKind: stored.owner.kind,
   ownerId: stored.owner.id,
@@ -93,13 +94,13 @@ const toRef = (stored: StoredSecret): SecretRef => ({
   ...(stored.rotatedAt === null ? {} : { rotatedAt: stored.rotatedAt }),
 });
 
-/** A separator the repository refused, in the envelope's vocabulary. */
+/** Converts the repository's separator error into a `validation` error. */
 const failWithNameIssue = (error: SecretNameError): Effect.Effect<never, Validation> =>
   Effect.fail(
     createValidationError([{ path: [], message: error.message }], "the request is not valid"),
   );
 
-/** A cursor this listing did not issue, in the envelope's vocabulary. */
+/** Converts a cursor error into a `validation` error on the `cursor` field. */
 const failWithCursorIssue = (error: CursorError): Effect.Effect<never, Validation> =>
   Effect.fail(
     createValidationError(
@@ -119,7 +120,7 @@ const make = Effect.gen(function* () {
   });
 
   return {
-    /** The references a caller may see, by name, oldest name first by default. */
+    /** Returns one page of secret references, sorted by name, ascending by default. */
     query: (
       input: SecretQueryInput,
     ): Effect.Effect<SecretRefPage, Unauthenticated | Forbidden | Validation | SqlError> =>
@@ -139,12 +140,12 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.catchTag("CursorError", failWithCursorIssue)),
 
     /**
-     * Stores a value, or rotates the one already there. Which of the two it was
-     * is what the row came back with: a first write has no `rotatedAt`.
+     * Stores a value, or rotates the value already stored under that name, and
+     * returns the reference. A first write returns no `rotatedAt`.
      *
-     * The encryption happens inside the transaction. It is local CPU work
-     * through WebCrypto, not a wait on anything outside the database, which is
-     * the line the ambient-transaction rule draws.
+     * The encryption runs inside the transaction. The transaction rule allows
+     * that: it is local CPU work through WebCrypto, not a wait on anything
+     * outside the database.
      */
     set: (
       input: SecretSetInput,
@@ -161,8 +162,8 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: written.rotatedAt === null ? "secret.created" : "secret.rotated",
               actor: USER_ACTOR,
-              // The value is not here and never will be: the log is read by the
-              // Intake views and kept for 90 days.
+              // Never put the value here: the Intake views read the audit log,
+              // and it is kept for 90 days.
               payload: { ownerKind: owner.kind, ownerId: owner.id, name: input.name },
             });
             return written;
@@ -171,7 +172,7 @@ const make = Effect.gen(function* () {
         return toRef(stored);
       }).pipe(Effect.catchTag("SecretNameError", failWithNameIssue)),
 
-    /** Removes a stored value. A name nobody stored is `not_found`, not a no-op. */
+    /** Deletes a stored value. Fails with `not_found` when none exists, instead of a no-op. */
     delete: (
       input: SecretDeleteInput,
     ): Effect.Effect<

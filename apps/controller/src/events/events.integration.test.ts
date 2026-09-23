@@ -1,12 +1,12 @@
 /**
- * The two ways an event is written, over a real socket: `event.emit`, which
- * appends one manual event to the log, and `event.enrich`, which amends one
- * that is already there.
+ * Tests the two ways an event is written, over a real socket: `event.emit`,
+ * which appends one manual event to the log, and `event.enrich`, which amends
+ * an event that is already there.
  *
- * The registry is the shipped github plugin, because both operations need a
+ * The tests load the shipped github plugin, because both operations need a
  * real kind catalog: an emit is validated against the payload schema the plugin
  * declared, and the event's `system` is the bare id of the plugin that owns the
- * kind. Nothing is arranged behind the API - every event these tests read back
+ * kind. Nothing is arranged behind the API: every event these tests read back
  * is fetched through `event.read`, the way any client reads one.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -34,10 +34,10 @@ import {
   type Arranged,
 } from "../sessions/testing";
 
-/** Two, because the cases on a fleet stand a machine up and then a session. */
+/** Twice the wait deadline, because the fleet cases start a runner and then a session. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 
-/** A kind the shipped roster holds, and a payload its schema accepts. */
+/** A kind the shipped github plugin declares, and a payload its schema accepts. */
 const KIND = "github.issue.opened";
 
 const SUBJECT = {
@@ -54,13 +54,13 @@ const PAYLOAD = { subject: SUBJECT } as const;
 const REF = "github:issue:octo/repo#42";
 const SECOND_REF = "github:repo:octo/repo";
 
-/** An id shaped the way every Hercule id is, that nothing was created under. */
+/** A well-formed id that matches no record. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
 
 const emit = (base: string, token: string, body: unknown): Promise<Response> =>
   post(base, "/api/v1/events/emit", body, token);
 
-/** Emits and asserts it was taken, for the cases whose subject is something else. */
+/** Emits an event, asserts that it succeeded, and returns its id. */
 const emitEventOrFail = async (base: string, token: string, body: unknown): Promise<number> => {
   const response = await emit(base, token, body);
   expect(response.ok, await response.clone().text()).toBe(true);
@@ -87,7 +87,7 @@ const readEvent = async (base: string, token: string, id: number): Promise<Event
   return (await response.json()) as Event;
 };
 
-/** Every entry the log holds of one kind, which is how "no row" is asserted. */
+/** Returns every entry of one kind in the log, to assert that no row was written. */
 const listEventsOfKind = async (
   base: string,
   token: string,
@@ -99,9 +99,9 @@ const listEventsOfKind = async (
 };
 
 /**
- * How many events an emit has written. The log holds audit entries too - the
- * boot and the setup leave their own - so the count is of the population this
- * operation writes to, not of the table.
+ * Returns how many manual events are in the log. The log holds audit entries
+ * too, written by the boot and the setup, so the count covers only the rows an
+ * emit writes, not the whole table.
  */
 const countManualEvents = (sql: ServerHarness["sql"]): Promise<number> =>
   Effect.runPromise(
@@ -115,7 +115,7 @@ const countManualEvents = (sql: ServerHarness["sql"]): Promise<number> =>
     ),
   );
 
-/** A controller holding the kind catalog, and the user's own credential. */
+/** Runs `body` against a controller with the github plugin, using the user's credential. */
 const withEvents = (
   body: (harness: ServerHarness, token: string) => Promise<void>,
 ): Promise<void> =>
@@ -128,10 +128,10 @@ const withEvents = (
   );
 
 /**
- * The fleet the two refusal cases need: a session token is the only credential
- * whose grants are a chosen set, so it is the only way to hold a credential
- * that lacks `event.emit`. The github plugin rides along, because the call that
- * is refused must otherwise be a call that would have worked.
+ * The fleet that the two missing-grant cases need. A session token is the only
+ * credential whose grants can be chosen, so it is the only way to get a
+ * credential without `event.emit`. The github plugin is loaded too, because the
+ * rejected call must be one that would otherwise have worked.
  */
 const PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
 
@@ -165,7 +165,7 @@ const spawnLogReader = async (arranged: Arranged): Promise<string> => {
 };
 
 describe("POST /events/emit", () => {
-  it("stamps the core's own fields on the event and keeps what the caller gave", async () => {
+  it("sets the controller's own fields on the event and keeps what the caller gave", async () => {
     await withEvents(async ({ base }, token) => {
       const before = Date.now();
 
@@ -179,13 +179,13 @@ describe("POST /events/emit", () => {
       expect(eventId).toEqual(expect.any(Number));
       const event = await readEvent(base, token, eventId);
       expect(event.id).toBe(eventId);
-      // The core's own stamps: who, from where, and about what system.
+      // The fields the controller sets: who, from where, and about what system.
       expect(event.source).toBe("manual");
       expect(event.actor).toBe("user");
       expect(event.system).toBe("github");
       expect(event.url).toBeNull();
       expect(event.connectionId).toBeNull();
-      // Neither instant is an input, and one emit is one moment, so the two
+      // Neither time is an input, and both come from one clock read, so they
       // agree to within the second the request took.
       const occurred = Date.parse(event.occurredAt);
       const received = Date.parse(event.receivedAt);
@@ -201,7 +201,7 @@ describe("POST /events/emit", () => {
     });
   });
 
-  it("refuses a kind nothing registered, naming it, and writes no event", async () => {
+  it("rejects a kind that no plugin declares, names it, and writes no event", async () => {
     await withEvents(async ({ base, sql }, token) => {
       const response = await emit(base, token, {
         kind: "acme.nothing.happened",
@@ -217,7 +217,7 @@ describe("POST /events/emit", () => {
     });
   });
 
-  it("refuses a payload the kind's schema turns down, listing the paths, and writes no event", async () => {
+  it("rejects a payload that fails the kind's schema, lists the paths, and writes no event", async () => {
     await withEvents(async ({ base, sql }, token) => {
       const response = await emit(base, token, {
         kind: KIND,
@@ -234,7 +234,7 @@ describe("POST /events/emit", () => {
     });
   });
 
-  it("refuses a ref that is not an external ref, naming it, and writes no event", async () => {
+  it("rejects a ref that is not an external ref, names it, and writes no event", async () => {
     await withEvents(async ({ base, sql }, token) => {
       const response = await emit(base, token, {
         kind: KIND,
@@ -250,7 +250,7 @@ describe("POST /events/emit", () => {
     });
   });
 
-  it("refuses a connection nothing holds, naming it, and writes no event", async () => {
+  it("rejects a connection id that does not exist, names it, and writes no event", async () => {
     await withEvents(async ({ base, sql }, token) => {
       const response = await emit(base, token, {
         kind: KIND,
@@ -266,7 +266,7 @@ describe("POST /events/emit", () => {
     });
   });
 
-  it("answers the first event's id when the same dedup key comes again", async () => {
+  it("returns the first event's id when the same dedup key is sent again", async () => {
     await withEvents(async ({ base, sql }, token) => {
       const body = { kind: KIND, payload: PAYLOAD, dedupKey: "issue-42-opened" };
 
@@ -278,7 +278,7 @@ describe("POST /events/emit", () => {
     });
   });
 
-  it("mints a dedup key of its own when none is given, so two emits are two events", async () => {
+  it("generates a dedup key when none is given, so two emits are two events", async () => {
     await withEvents(async ({ base, sql }, token) => {
       const body = { kind: KIND, payload: PAYLOAD, refs: [REF] };
 
@@ -294,7 +294,7 @@ describe("POST /events/emit", () => {
     });
   });
 
-  it("refuses a credential that was never given event.emit, naming the grant", async () => {
+  it("rejects a credential without the event.emit grant, and names the grant", async () => {
     await withFleet(async (arranged) => {
       const base = arranged.harness.base;
       const token = await spawnLogReader(arranged);
@@ -311,7 +311,7 @@ describe("POST /events/emit", () => {
 });
 
 describe("POST /events/:id/enrich", () => {
-  it("overwrites the system and the url that were given, and leaves the rest as it was", async () => {
+  it("overwrites the given system and url, and leaves the rest unchanged", async () => {
     await withEvents(async ({ base }, token) => {
       const eventId = await emitEventOrFail(base, token, {
         kind: KIND,
@@ -330,7 +330,7 @@ describe("POST /events/:id/enrich", () => {
       const after = await readEvent(base, token, eventId);
       expect(after.system).toBe("sentry");
       expect(after.url).toBe("https://sentry.io/issues/123");
-      // What enrichment never touches, field for field.
+      // The fields enrichment never changes.
       expect(after.kind).toBe(before.kind);
       expect(after.source).toBe(before.source);
       expect(after.occurredAt).toBe(before.occurredAt);
@@ -340,7 +340,7 @@ describe("POST /events/:id/enrich", () => {
     });
   });
 
-  it("unions the refs, keeping the old ones and adding no duplicate", async () => {
+  it("adds the new refs to the old ones, without duplicates", async () => {
     await withEvents(async ({ base }, token) => {
       const eventId = await emitEventOrFail(base, token, {
         kind: KIND,
@@ -373,7 +373,7 @@ describe("POST /events/:id/enrich", () => {
     });
   });
 
-  it("answers not_found for an id the log does not hold", async () => {
+  it("returns not_found for an id that is not in the log", async () => {
     await withEvents(async ({ base }, token) => {
       const eventId = await emitEventOrFail(base, token, { kind: KIND, payload: PAYLOAD });
 
@@ -386,12 +386,13 @@ describe("POST /events/:id/enrich", () => {
   });
 
   /**
-   * The log holds two populations. An audit entry is the record of a mutation,
-   * and enrichment is a pipeline-event operation, so one is refused exactly as
-   * an id naming nothing is: a caller holding only `event.emit` must not learn
-   * through this route what the log holds or what a security entry says.
+   * The log holds pipeline events and audit entries. An audit entry records a
+   * mutation, and enrichment works only on pipeline events, so an audit entry
+   * fails exactly like an id that matches nothing. A caller holding only
+   * `event.emit` must not learn through this route what the log holds or what
+   * a security entry contains.
    */
-  it("answers not_found for an audit entry, and leaves the entry as it was", async () => {
+  it("returns not_found for an audit entry, and leaves the entry unchanged", async () => {
     await withEvents(async ({ base, audit }, token) => {
       const before = (await audit("setup.completed"))[0]!;
 
@@ -410,14 +411,14 @@ describe("POST /events/:id/enrich", () => {
   });
 
   /**
-   * The security entries are the population a session without `event.audit`
-   * cannot read at all, so the refusal has to hold for them by the same rule
-   * and not by luck: amending one would both rewrite what happened to the
-   * user's account and tell the caller it is there.
+   * A session without `event.audit` cannot read the security entries at all,
+   * so the same rule must reject them too, and not by luck. Amending one would
+   * rewrite what happened to the user's account and also tell the caller that
+   * the entry exists.
    */
-  it("answers not_found for a security entry too, and leaves it was", async () => {
+  it("returns not_found for a security entry too, and leaves it unchanged", async () => {
     await withEvents(async ({ base, audit }, token) => {
-      // A login that cannot succeed is what writes one of these.
+      // A failed login writes one of these entries.
       const refusedLogin = await send("POST", base, "/api/v1/auth/login", {
         body: { username: USERNAME, password: "not the password" },
       });
@@ -438,7 +439,7 @@ describe("POST /events/:id/enrich", () => {
     });
   });
 
-  it("stamps the amendment with the caller, as an audit entry beside the event", async () => {
+  it("records the caller of the amendment in an audit entry beside the event", async () => {
     await withEvents(async ({ base, sql, audit }, token) => {
       const eventId = await emitEventOrFail(base, token, {
         kind: KIND,
@@ -453,8 +454,8 @@ describe("POST /events/:id/enrich", () => {
 
       const entries = await audit("event.enriched");
       expect(entries).toHaveLength(1);
-      // The event keeps the emitter as its actor, so who amended it is read
-      // here and nowhere else.
+      // The event keeps the emitter as its actor, so the audit entry is the
+      // only place that records who amended it.
       expect(entries[0]!.actor).toBe("user");
       expect(entries[0]!.payload).toEqual({
         eventId,
@@ -464,15 +465,15 @@ describe("POST /events/:id/enrich", () => {
       // The entry names only what was amended: `system` was not given.
       expect(entries[0]!.payload["system"]).toBeUndefined();
 
-      // The entry is an audit kind, so it is not one of the events the router
-      // evaluates: the manual population still holds the one emit above.
+      // The entry is an audit kind, so the router does not evaluate it: there
+      // is still only the one manual event emitted above.
       expect(await countManualEvents(sql)).toBe(1);
       const entry = await readEvent(base, token, entries[0]!.id);
       expect(entry.source).toBe("platform");
     });
   });
 
-  it("refuses a credential that was never given event.emit, naming the grant", async () => {
+  it("rejects a credential without the event.emit grant, and names the grant", async () => {
     await withFleet(async (arranged) => {
       const base = arranged.harness.base;
       const eventId = await emitEventOrFail(base, arranged.token, { kind: KIND, payload: PAYLOAD });

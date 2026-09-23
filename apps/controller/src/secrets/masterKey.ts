@@ -73,12 +73,12 @@ type Bytes = Uint8Array<ArrayBuffer>;
 
 /** Where a master key is kept. Two implementations: the macOS keychain, and a file. */
 export interface KeyStore {
-  /** The store, as an error message names it. */
+  /** How error messages name the store. */
   readonly describe: string;
   /** The stored key, or `undefined` when this machine has none yet. */
   readonly read: Effect.Effect<Bytes | undefined, MasterKeyError>;
   /**
-   * Stores a freshly minted key, and answers with the key the store now holds.
+   * Stores a newly minted key, and returns the key the store now holds.
    *
    * Reading and minting are two steps, so two first boots of the same home can
    * both find the store empty and both mint. The store, not the caller, settles
@@ -99,7 +99,10 @@ const decodeBase64 = (encoded: string, source: string): Bytes => {
   return bytes;
 };
 
-/** The key file, mode 0600. Its mode is the whole protection, so it is checked on read. */
+/**
+ * Returns the store backed by the key file, mode 0600. The file mode is the
+ * key's only protection, so each read checks it.
+ */
 export const createFileStore = (path: string): KeyStore => {
   const read: Effect.Effect<Bytes | undefined, MasterKeyError> = Effect.try({
     try: () => {
@@ -119,7 +122,7 @@ export const createFileStore = (path: string): KeyStore => {
       }),
   });
 
-  /** The key another process wrote between this one's read and its write. */
+  /** Reads the key another process wrote between this process's read and its write. */
   const readAfterRace = Effect.flatMap(read, (bytes) =>
     bytes === undefined
       ? new MasterKeyError({
@@ -158,13 +161,13 @@ export const createFileStore = (path: string): KeyStore => {
   };
 };
 
-/** What `security` did: its exit code and stdout. Injected, so tests drive every branch. */
+/** Runs `security` and returns its exit code and stdout. Injected, so tests drive every branch. */
 export type SecurityRunner = (
   argv: ReadonlyArray<string>,
 ) => Promise<{ readonly exitCode: number; readonly stdout: string }>;
 
 /**
- * `security` as the login keychain answers it.
+ * Runs the real macOS `security` CLI.
  *
  * There is no way to hand it a password on stdin, so the key is on the command
  * line for the lifetime of the process, visible to `ps` for the same OS user.
@@ -214,10 +217,10 @@ export const createKeychainStore = (
   return {
     describe: item,
     read,
-    // No `-U`: without it `add-generic-password` refuses an item that is
-    // already there rather than replacing it, which is what makes the mint
-    // atomic between two boots. On any refusal the item another boot stored is
-    // read back, and only a keychain that still has no item is a real failure.
+    // No `-U`: without it, `add-generic-password` fails for an item that
+    // already exists rather than replacing it, which makes the mint atomic
+    // between two boots. On any failure, the item another boot stored is read
+    // back; only a keychain that still has no item is a real failure.
     write: (bytes) =>
       Effect.gen(function* () {
         const result = yield* runSecurity(
@@ -251,7 +254,7 @@ export type MasterKeyBackend = "keychain" | "file";
 /** macOS keeps the key in the login keychain; every other platform in the file. */
 export const defaultBackend: MasterKeyBackend = process.platform === "darwin" ? "keychain" : "file";
 
-/** How many secrets the database holds; 0 before the first migration has run. */
+/** Counts the secrets in the database. Returns 0 before the first migration has run. */
 const secretCount: Effect.Effect<number, SqlError, SqlClient.SqlClient> = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tables = yield* sql<{
@@ -293,8 +296,8 @@ export const masterKeyLayer = (
               `Restore the key this machine had, or start from an empty Hercule Home.`,
           });
         }
-        // The store answers with the key it holds, which is another boot's if
-        // that boot minted first; the one minted here is then never used.
+        // The store returns the key it holds, which is another boot's key if
+        // that boot minted first; the key minted here is then never used.
         bytes = yield* store.write(crypto.getRandomValues(new Uint8Array(MASTER_KEY_BYTES)));
       }
 

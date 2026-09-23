@@ -22,7 +22,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     effect.pipe(Effect.provide(layer), Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS)),
   );
 
-/** The one user, with a real hash of {@link CURRENT}, and a call made as it. */
+/** Creates the user with a real hash of {@link CURRENT}, and runs `body` as that user. */
 const runAsUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
   run(
     Effect.gen(function* () {
@@ -41,7 +41,7 @@ const runAsUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
   );
 
 describe("user.setPassword", () => {
-  it("stores the new password and stamps the change", async () => {
+  it("stores the new password and records the change", async () => {
     const result = await runAsUser(
       Effect.gen(function* () {
         const user = yield* User;
@@ -67,7 +67,7 @@ describe("user.setPassword", () => {
     expect(result.entries[0]?.payload).toEqual({});
   });
 
-  it("refuses a wrong current password, on that field, and changes nothing", async () => {
+  it("rejects a wrong current password on the current field, and changes nothing", async () => {
     const result = await runAsUser(
       Effect.gen(function* () {
         const user = yield* User;
@@ -90,7 +90,7 @@ describe("user.setPassword", () => {
     expect(result.entries).toEqual([]);
   });
 
-  it("never says a password is wrong to a caller that has no credential", async () => {
+  it("does not check the password for a caller with no credential", async () => {
     const failure = await run(
       Effect.flip(
         Effect.flatMap(User, (user) => user.setPassword({ current: CURRENT, next: NEXT })),

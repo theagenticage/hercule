@@ -1,25 +1,28 @@
 /**
- * Workspaces as the API sees them - `workspace.query` and `read` - what a spawn
- * needs one to be (`openFor`), the rows behind the two operations a user asks
- * for by name, provision and dispose, and the two things a machine says about
- * one: what came of a provisioning, and what credential it needs to get on with
- * it.
+ * The workspace service. It covers:
  *
- * This is where a working area is decided, in full: nothing outside this domain
- * knows how a multi-repo workspace is laid out, what a thread's branch is called
- * or which Connection the work in one acts through. A spawn hands over the wish
- * and the session id and gets back where the session works.
+ * - the operations `workspace.query` and `workspace.read`
+ * - the workspace a spawn asks for (`openFor`)
+ * - the rows behind the two operations a user calls by name, provision and
+ *   dispose
+ * - the two things a runner reports about a workspace: the result of
+ *   provisioning it, and the git credential it needs to do so
+ *
+ * All workspace decisions are made here. Nothing outside this domain knows how
+ * a multi-repo workspace is laid out, what a thread's branch is called, or
+ * which Connection the work in a workspace acts through. A spawn passes in
+ * what it asked for and the session id, and gets back where the session works.
  *
  * A primary is provisioned by name and never torn down: it is the repo's main
- * workspace on that machine, shared by whatever runs in it. An ephemeral one is
- * made by the spawn that asked for it and is disposed of by hand or by the
- * expiry sweep.
+ * workspace on that runner, shared by every session that runs in it. An
+ * ephemeral workspace is created by the spawn that asked for it, and is
+ * disposed of by hand or by the expiry sweep.
  *
- * Nothing here talks to a machine. A frame is handed back as a value - what to
- * make, what to take away, what a credential request is answered with - and the
- * controller daemon sends it once the rows are committed. A machine that never
- * hears about a workspace leaves it `provisioning`, which is what the sweep and
- * the user both read as a workspace that never came up.
+ * Nothing here sends anything to a runner. A frame is returned as a value -
+ * what to provision, what to dispose, the answer to a credential request - and
+ * the controller daemon sends it once the rows are committed. If a runner never
+ * receives the frame, the workspace stays `provisioning`, and both the sweep
+ * and the user treat it as a workspace that never came up.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -101,13 +104,13 @@ export interface WorkspacePage {
   readonly nextCursor?: string;
 }
 
-/** Newest first: a workspace list is read as what is standing right now. */
+/** Newest first, because a workspace list is mostly read to see what exists now. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
 
-/** How long an ephemeral workspace nothing references is kept, in hours. */
+/** How long an ephemeral workspace that no session can resume is kept, in hours. */
 const DEFAULT_ORPHAN_TTL_HOURS = 24;
 
-/** How long one nobody has worked in is kept, in days. */
+/** How long an ephemeral workspace with a resumable session is kept unused, in days. */
 const DEFAULT_IDLE_TTL_DAYS = 30;
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -118,30 +121,31 @@ const NO_SUCH_WORKSPACE = "no such workspace";
 
 const NO_SUCH_RESOURCE = "no such resource";
 
-const PRIMARY_STANDS = "a primary is never torn down";
+const PRIMARY_STANDS = "a main workspace is never torn down";
 
 const NOT_IN_PROJECT = "that repo is not filed under that project";
 
-const REPO_TWICE = "a workspace holds one working copy of a repo: name each one once";
+const REPO_TWICE = "a workspace can hold only one checkout of each repo: list each repo once";
 
-const SAME_NAME = "two of those repos are called the same thing, so they cannot sit side by side";
+const SAME_NAME =
+  "two of those repos have the same name, and each checkout's directory is named after its repo, so they cannot share a workspace";
 
 const WORKSPACE_PINS =
-  "that workspace is on another machine; a session runs where its workspace is";
+  "that workspace is on another machine, and a session must run on the machine its workspace is on";
 
-const WORKSPACE_NOT_READY = "that workspace is not ready to be worked in";
+const WORKSPACE_NOT_READY = "that workspace is not ready, so no session can start in it";
 
-/** The one rule the runner lays a multi-repo workspace out by, asked here too. */
+/** The rule the runner uses to name each directory in a multi-repo workspace, checked here too. */
 const isDirectoryName = Schema.is(Subdirectory);
 
 const describeUnnameableRepo = (name: string): string =>
-  `a repo called ${name} cannot have a directory of its own in a workspace`;
+  `${name} is not a valid directory name, so that repo cannot be checked out beside other repos in a workspace`;
 
 /**
- * The branch a thread's own worktree is made on, named after the thread by the
- * last eight characters of its id: a UUIDv7 opens with a timestamp, so two
- * threads started in the same millisecond share their first eight and would ask
- * one machine for one branch twice.
+ * Builds the name of the branch a thread's own worktree is created on, from
+ * the last eight characters of the session id. A UUIDv7 starts with a
+ * timestamp, so two threads started in the same millisecond share their first
+ * eight characters and would ask one runner for the same branch twice.
  */
 const buildThreadBranch = (sessionId: string): string => `hercule/run-${sessionId.slice(-8)}`;
 
@@ -151,15 +155,21 @@ const describeLiveSessions = (sessions: number): string =>
   `${String(sessions)} session(s) in that workspace have not exited; stop them first`;
 
 /**
- * Where a session that asked for a workspace is to work, once the rows are
- * written: the workspace it is in, the branch the machine switches the main
- * workspace to before the harness starts, the account it pushes as, and - where
- * this opened a new one - the frame that asks the machine to make it. The frame
- * is handed back rather than sent from here: it is the caller's transaction, and
- * a transaction never spans a wait on a machine.
+ * Where a session that asked for a workspace will work, once the rows are
+ * written. It holds:
  *
- * The machine is not among them: it is `machineFor`'s answer, settled before the
- * session was placed, and `openFor` is told it rather than deciding it.
+ * - the workspace the session is in
+ * - the branch the runner switches the main workspace to before the harness
+ *   starts
+ * - the Connection the session pushes through
+ * - if a new workspace was opened, the frame that asks the runner to
+ *   provision it
+ *
+ * The frame is returned rather than sent from here, because this runs in the
+ * caller's transaction, and a transaction never spans a wait on a runner.
+ *
+ * The runner is not included. `machineFor` decides it before the session is
+ * placed, and `openFor` is given it rather than deciding it.
  */
 interface Opened {
   readonly workspaceId: string | null;
@@ -168,7 +178,7 @@ interface Opened {
   readonly frame?: WorkspaceProvision;
 }
 
-/** What a machine's report did to a workspace, for whoever was waiting on it. */
+/** The status change a runner's report made to a workspace, for whoever was waiting on it. */
 interface Settled {
   readonly workspaceId: string;
   readonly moved: "ready" | "failed" | "deleted";
@@ -176,20 +186,21 @@ interface Settled {
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
-/** Why a workspace was taken away, where it was not a person asking. */
+/** Why the sweep disposed of a workspace, as opposed to a user disposing of it. */
 type Expiry = "orphan" | "idle";
 
-/** One workspace the sweep may take away, and the window it outlived. */
+/** One workspace the sweep may dispose of, and the window it outlived. */
 interface Expired {
   readonly id: string;
   readonly reason: Expiry;
 }
 
 /**
- * Whether a workspace has outlived its use, and on which window: one nothing is
- * living in, judged against the window its threads earn it. A thread that can
- * still be resumed keeps its worktree - that worktree is its work - so it
- * survives the orphan window and goes only on the long idle one.
+ * Decides whether a workspace has expired, and returns the window it outlived,
+ * or `undefined` if it has not expired. A workspace with a running session
+ * never expires. A thread that can still be resumed keeps its worktree,
+ * because that worktree holds its work, so its workspace outlives the orphan
+ * window and expires only on the longer idle window.
  */
 const decideExpiry = (
   candidate: { readonly liveSessions: number; readonly resumableSessions: number },
@@ -236,11 +247,11 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * The records a page of rows makes: their checkouts and the sessions living in
-   * them. The Connection each one acts through is the row's own column, settled
-   * when it was opened, not re-derived from its first checkout's resource: a
-   * resource that changes hands does not change what a workspace already
-   * standing was opened against.
+   * Builds the API records for a page of workspace rows, with their checkouts
+   * and the sessions running in them. The Connection comes from the row's own
+   * column, fixed when the workspace was opened, and not from its first
+   * checkout's resource: a resource moved to another Connection does not
+   * change what an existing workspace was opened with.
    */
   const readWorkspaceRecords = (
     rows: ReadonlyArray<StoredWorkspace>,
@@ -279,7 +290,10 @@ const make = Effect.gen(function* () {
       return found.value;
     });
 
-  /** The repo a checkout is made of, held to what a checkout needs of it. */
+  /**
+   * Reads the repo for a new checkout. Fails with a validation error if the
+   * resource does not exist, is not a repo, or is not filed under the project.
+   */
   const readCheckoutableRepoOrFail = (
     resourceId: string,
     projectId: string | undefined,
@@ -301,10 +315,11 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Every one of these repos is filed under the project the thread is filed
-   * under. Asked of a workspace that is joined as well as of one that is made:
-   * a thread under one project must not reach a repo that belongs to another
-   * just because a workspace holding it already stands.
+   * Checks that every one of these repos is filed under the thread's project,
+   * and fails with a validation error if one is not. The check applies to a
+   * workspace the thread joins as well as to one it creates: a thread in one
+   * project must not reach another project's repo just because a workspace
+   * holding it already exists.
    */
   const validateFiledUnderProject = (
     resourceIds: ReadonlyArray<string>,
@@ -323,24 +338,31 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Where a spawn is to work, decided and written in the caller's transaction.
+   * Decides where a spawned session works, and writes the rows in the
+   * caller's transaction. Returns an `Opened`, with the frame to send once the
+   * transaction has committed. Fails with a validation error if the requested
+   * workspace or repos cannot be used.
    *
-   * This is the whole of the workspace half of a spawn: what the wish means, the
-   * repos behind it read and held to the project, the layout a multi-repo
-   * workspace gets, the branch the thread's own worktree is made on, and the
-   * Connection the work acts through. The caller hands it a session id that does
-   * not exist yet - the branch is named after the thread - and gets back the
-   * frame to send once its transaction has committed.
+   * This is the whole workspace part of a spawn:
    *
-   * Whether a workspace named by an `existing` wish stands is not re-asked here:
-   * `machineFor` asked it before the session was placed, because which machine
-   * this runs on is that answer. What is asked here is what that read had no
-   * business asking - whether the repos in it are this project's.
+   * - what the requested workspace means
+   * - reading the repos behind it and checking they belong to the project
+   * - the layout of a multi-repo workspace
+   * - the branch the thread's own worktree is created on
+   * - the Connection the work acts through
+   *
+   * The caller passes a session id that does not exist yet, because the
+   * branch is named after the thread.
+   *
+   * For an `existing` workspace, this does not check again whether it is
+   * ready: `machineFor` checked that before the session was placed, because
+   * the workspace decides which runner the session runs on. This only checks
+   * what `machineFor` does not: whether the repos in it belong to this project.
    */
   const openFor = (input: {
-    /** What the caller asked for; absent keeps the workspace it already holds. */
+    /** The workspace the caller asked for; absent keeps the workspace the session already has. */
     readonly wish: SpawnWorkspace | undefined;
-    /** The workspace the session keeps where the wish brings none: a fork's. */
+    /** The workspace the session keeps when `wish` is absent, as a fork does. */
     readonly heldWorkspaceId: string | null;
     readonly runnerId: string;
     readonly projectId: string | undefined;
@@ -355,8 +377,8 @@ const make = Effect.gen(function* () {
         designatedConnectionId: null,
       };
 
-      // Nothing new to make: the session joins the workspace it was pointed at,
-      // or stays in the one it already holds, which is what a fork does.
+      // Nothing new to create: the session joins the workspace it named, or
+      // stays in the one it already has, which is what a fork does.
       if (wish === undefined || wish.kind === "existing") {
         const joined = wish === undefined ? input.heldWorkspaceId : wish.workspaceId;
         if (joined === null) return nothing;
@@ -369,8 +391,8 @@ const make = Effect.gen(function* () {
           );
         }
         const held = (yield* workspaces.listCheckouts([joined])).get(joined) ?? [];
-        // A workspace that stands is still a set of repos, and they have to be
-        // this project's: joining is not a way around the filing.
+        // An existing workspace's repos must still belong to this project, so
+        // joining a workspace is not a way around project filing.
         yield* validateFiledUnderProject(
           held.map((checkout) => checkout.resourceId),
           input.projectId,
@@ -413,8 +435,8 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
-      // Each working copy gets a directory of its own, named after the repo, so
-      // one repo twice and two repos of the same name are both a workspace that
+      // Each checkout gets its own directory, named after the repo. So a
+      // workspace with one repo twice, or with two repos of the same name,
       // cannot be laid out.
       const names = repos.map((repo) => extractRepoName(repo.resource.canonicalRemote));
       if (new Set(repos.map((repo) => repo.resource.id)).size !== repos.length) {
@@ -427,9 +449,10 @@ const make = Effect.gen(function* () {
           createValidationError([{ path: ["workspace", "checkouts"], message: SAME_NAME }]),
         );
       }
-      // Said here, where the user can read it, rather than left to the frame
-      // that carries the name to the runner: an unencodable frame is a defect,
-      // and the spawn would fail with nothing the user could act on.
+      // Checked here, where the user can read the error, rather than left to
+      // the frame that carries the name to the runner. A frame that fails to
+      // encode is a defect, and the spawn would fail with nothing the user
+      // could act on.
       const unusable = repos.length > 1 ? names.find((name) => !isDirectoryName(name)) : undefined;
       if (unusable !== undefined) {
         return yield* Effect.fail(
@@ -441,8 +464,8 @@ const make = Effect.gen(function* () {
       const checkouts: ReadonlyArray<OpeningCheckout> = repos.map((repo, index) => ({
         resource: repo.resource,
         form: "worktree" as const,
-        // One repo sits at the root of the workspace; several sit side by side,
-        // each under the name it is known by.
+        // A single repo is checked out at the root of the workspace; several
+        // repos sit side by side, each in a directory named after the repo.
         subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
         branch: buildThreadBranch(input.sessionId),
         ...(repo.baseBranch === undefined ? {} : { baseBranch: repo.baseBranch }),
@@ -500,19 +523,21 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The repo's own workspace on one machine, cloned fresh under that machine's
-     * own storage, written in the caller's transaction. A second one for the
-     * same pair is a conflict, because that is what "the repo's main workspace
-     * there" means.
+     * Opens a repo's main workspace on one runner, cloned fresh under that
+     * runner's own storage, and writes the rows in the caller's transaction.
+     * Returns the workspace record and the frame to send. Fails with:
      *
-     * The repo and the machine are read here rather than handed in: they are
-     * what the two ids mean, and the refusals for them are this method's. The
-     * repo is asked for first, so a payload wrong about both is answered about
-     * the repo.
+     * - `NotFound` if the resource or the runner does not exist
+     * - `InvalidState` if the resource is not a repo
+     * - `Conflict` if the repo already has a main workspace on that runner
      *
-     * The record comes back beside the frame rather than being read again
-     * afterwards: it is the rows this just wrote, and reading them a second time
-     * would answer the caller with whatever else happened meanwhile.
+     * The repo and the runner are read here rather than passed in, because
+     * this method owns the errors for them. The repo is read first, so a
+     * request with both ids wrong gets the error about the repo.
+     *
+     * The record is returned with the frame rather than read again later: it
+     * is built from the rows just written, and a second read could include
+     * changes made in the meantime.
      */
     openPrimaryFor: (input: {
       readonly resourceId: string;
@@ -528,12 +553,12 @@ const make = Effect.gen(function* () {
         const held = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(held)) {
           return yield* Effect.fail(
-            createConflictError("that repo already has a primary workspace on that machine"),
+            createConflictError("that repo already has a main workspace on that machine"),
           );
         }
         const at = yield* nowIso;
-        // A primary opened on its own is a user asking for one by name: a spawn
-        // that needs one goes through `openFor` with its own actor.
+        // This path is always a user provisioning a primary by name. A spawn
+        // that needs one goes through `openFor`, with its own actor.
         const opened = yield* openPrimary(
           { workspaces, audit },
           { resource, runnerId: input.runnerId, actor: USER_ACTOR, at },
@@ -542,10 +567,13 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The workspace a user may take away, or the refusal saying why not. A
-     * primary stands; one already gone cannot go twice; and taking the
-     * directory away from a session that is living in it would pull the floor
-     * out from under a running harness.
+     * Returns the workspace if a user may dispose of it. Fails with
+     * `NotFound` if there is no such workspace, and with `InvalidState` if:
+     *
+     * - it is a primary, which is never torn down
+     * - it is already deleted or lost
+     * - a session in it has not exited, because removing the directory would
+     *   break a running harness
      */
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
@@ -562,9 +590,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Every workspace the sweep may take away, and why: an ephemeral one on a
-     * connected machine that nothing is living in and that has outlived the
-     * window its threads earn it.
+     * Returns every workspace the sweep may dispose of, and why: each ephemeral
+     * workspace on an online runner that has no running session and has
+     * outlived its expiry window (see `decideExpiry`).
      */
     expiredCandidates: (): Effect.Effect<ReadonlyArray<Expired>, SettingError | SqlError> =>
       Effect.gen(function* () {
@@ -581,10 +609,11 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * The workspace the sweep may still take away, or nothing where it is no
-     * longer one: a pass reads every candidate up front, and a session can
-     * start in one while an earlier one is being disposed of. What a running
-     * harness is sitting in is never taken off its machine.
+     * Returns the workspace if the sweep may still dispose of it, or
+     * `undefined` if it is no longer ready or a session is running in it. A
+     * sweep reads every candidate up front, and a session can start in one
+     * while an earlier one is being disposed of. A workspace with a running
+     * harness in it is never disposed of.
      */
     sweepable: (id: string): Effect.Effect<StoredWorkspace | undefined, SqlError> =>
       Effect.gen(function* () {
@@ -595,10 +624,11 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Marks a workspace gone and hands back the frame that takes it off disk.
-     * The row is written first: a machine that never hears this leaves a
-     * directory behind, which the user can remove, where a row that said `ready`
-     * for a workspace nobody owns is one nothing would ever clean up.
+     * Marks a workspace as `deleted`, records the audit entry, and returns the
+     * frame that removes it from disk. The row is written first: if the runner
+     * never receives the frame, a directory is left behind, which the user can
+     * remove. A row left `ready` for a workspace nobody uses would never be
+     * cleaned up.
      */
     markGone: (
       workspace: StoredWorkspace,
@@ -627,15 +657,16 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Every workspace a machine still owes, as the frames that ask for them
-     * again: a frame sent to a machine that was not connected, or that
-     * restarted before it acted, would otherwise leave one provisioning for
-     * ever. The machine is expected to take a repeat of a workspace it already
-     * holds as the no-op it is.
+     * Returns a provision frame for every workspace on this runner that is
+     * still `provisioning`, so they can be sent again. Without this, a frame
+     * sent to a runner that was not connected, or that restarted before it
+     * acted, would leave the workspace provisioning forever. The runner is
+     * expected to treat a repeat frame for a workspace it already has as a
+     * no-op.
      *
-     * Every frame here is one that can be re-sent: the rows hold everything a
-     * provisioning needs, so a frame built again is the frame that was sent.
-     * What comes back is a clone or a worktree, which is what it was.
+     * Every frame here is safe to send again: the rows hold everything
+     * provisioning needs, so a rebuilt frame is the same as the frame that was
+     * sent, and asks for the same clone or worktree.
      */
     owedProvisioning: (
       runnerId: string,
@@ -651,8 +682,8 @@ const make = Effect.gen(function* () {
           for (const checkout of checkouts) {
             const resource = named.get(checkout.resourceId);
             if (resource === undefined) continue;
-            // Only a repo is ever checked out, so a row that is not one is a
-            // checkout nothing can be made of.
+            // Only a repo is ever checked out, so a checkout of any other kind
+            // of resource cannot be provisioned.
             if (resource.kind !== "repo") continue;
             plans.push({ checkout, resource });
           }
@@ -662,15 +693,15 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * What a machine made of a workspace it was asked for. A report about a
-     * workspace that is not on this machine is dropped: a machine speaks only
-     * for what was placed on it.
+     * Records a runner's report about a workspace it was asked to provision or
+     * dispose of. A report about a workspace that is not on this runner is
+     * ignored, because a runner may only report on its own workspaces.
      *
-     * What follows for the sessions waiting on it is not decided here. This
-     * answers what the report moved, or nothing where it moved nothing - a
-     * second report, or one about a workspace that came up meanwhile - and the
-     * controller daemon tells the sessions domain. That is what keeps this
-     * domain from reaching into that one.
+     * Returns the status change the report made, or `undefined` if it changed
+     * nothing, for example a repeated report or one about a workspace that
+     * became ready in the meantime. What happens to the sessions waiting on the
+     * workspace is not decided here: the controller daemon tells the sessions
+     * domain. That keeps this domain from depending on the sessions domain.
      */
     reported: (
       runnerId: string,
@@ -697,19 +728,19 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Everything on a retired machine is gone with it, whatever it held: the
-     * working areas were directories on its disk and this controller will never
-     * reach them again. Runs in the caller's transaction, which is the one that
-     * retires the machine.
+     * Marks every live workspace on a retired runner as `lost`. The workspaces
+     * were directories on its disk, and this controller will never reach them
+     * again. Runs in the caller's transaction, which is the one that retires
+     * the runner.
      */
     lostOnRunner: (runnerId: string, at: string): Effect.Effect<void, SqlError> =>
       workspaces.lostOnRunner(runnerId, at),
 
     /**
-     * Where a workspace stands, or nothing where there is no such row. The one
-     * fact about a workspace the controller daemon reads on its own: a thread
-     * cannot be picked up again in a working area that is gone, and the refusal
-     * has to name which state it was in.
+     * Returns a workspace's status, or `undefined` if there is no such
+     * workspace. This is the one fact about a workspace the controller daemon
+     * reads directly: a thread cannot be resumed in a workspace that is gone,
+     * and the error has to say which status the workspace is in.
      */
     statusOf: (workspaceId: string): Effect.Effect<WorkspaceStatus | undefined, SqlError> =>
       Effect.map(workspaces.one(workspaceId), (found) =>
@@ -717,18 +748,22 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Work happened in a workspace just now, which is what keeps the sweep from
-     * taking it away. Called by the controller daemon when a session in it
-     * starts or exits, because that is the work.
+     * Marks a workspace as used just now, which keeps the sweep from disposing
+     * of it. The controller daemon calls this when a session in the workspace
+     * starts or exits, because that is what counts as use.
      */
     touched: (workspaceId: string, at: string): Effect.Effect<void, SqlError> =>
       workspaces.touched(workspaceId, at),
 
     /**
-     * The machine a spawn that asked to join a standing workspace has to run
-     * on, read before the session is placed: a session runs where its files
-     * are. One that is still being made is refused rather than joined - the
-     * harness would be handed a directory that does not exist yet.
+     * Returns the runner a spawn must run on when it joins an existing
+     * workspace, because a session runs where its files are. The caller reads
+     * this before the session is placed. Fails with:
+     *
+     * - a validation error if the workspace does not exist, or if the spawn
+     *   asked for a different runner
+     * - `InvalidState` if the workspace is not ready, because the harness
+     *   would be given a directory that does not exist yet
      */
     machineFor: (
       workspaceId: string,
@@ -757,9 +792,10 @@ const make = Effect.gen(function* () {
     openFor,
 
     /**
-     * What a machine asking for the credential git needs is told. The answer is
-     * held nowhere: it is built for that one request and handed back to be sent
-     * on the connection the question came in on.
+     * Builds the answer to a runner's git credential request. The answer is
+     * not stored: it is built for that one request and returned, to be sent on
+     * the connection the request came in on. Never fails: an error is logged
+     * and answered as `no_connection`.
      */
     credentialAnswer: (
       runnerId: string,
@@ -767,10 +803,10 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<CredentialAnswer> =>
       Effect.catchCause(
         credentials.answer(runnerId, request),
-        // A secret that will not decrypt is this machine's master key being
-        // wrong: nothing the asker can act on, and nothing to say to it
-        // beyond that no credential is coming - but the operator has to be
-        // able to read what happened.
+        // A secret that does not decrypt means this controller's master key is
+        // wrong. The asker cannot act on that, so it is only told that no
+        // credential is coming, but the error is logged so the operator can
+        // see what happened.
         (cause) =>
           Effect.as(Effect.logError("A git credential could not be read", cause), {
             _tag: "credentialAnswer" as const,
@@ -782,15 +818,15 @@ const make = Effect.gen(function* () {
 });
 
 /**
- * Two kinds of method, and wiring one where the other belongs is a mistake
- * nothing else would catch.
+ * The workspace service has two kinds of method, and nothing else would catch
+ * a method wired up as the wrong kind.
  *
- * `query` and `read` are operations: each checks its own grant and decodes its
- * own input, and a route handler calls it directly. Everything else is a row
- * move or a frame built as a value, with no grant of its own, reached only by
- * the controller daemon, which has checked the grant for the operation it is
- * carrying out - putting one of those on a route would serve it to anyone who
- * can reach the API.
+ * - `query` and `read` are operations: each checks its own grant and decodes
+ *   its own input, and a route handler calls it directly.
+ * - Every other method updates rows or builds a frame as a value. It checks no
+ *   grant, and only the controller daemon calls it, after checking the grant
+ *   for the operation it carries out. Putting one of these on a route would
+ *   expose it to anyone who can reach the API.
  */
 export class WorkspaceService extends Context.Service<
   WorkspaceService,

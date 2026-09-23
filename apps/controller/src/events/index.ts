@@ -1,9 +1,9 @@
 /**
  * The event log: one append-only table holding pipeline events and audit
- * entries. The audit writer appends; the service answers `event.query`,
+ * entries. The audit writer appends; the service implements `event.query`,
  * `event.read` and `event.emit`, and amends a pipeline event for the
- * enrichment use case in the controller daemon. Beside them are the walks that
- * are not a public read, the cursor a durable consumer keeps its place in, and
+ * enrichment use case in the controller daemon. Beside them are the internal
+ * reads of the log, the cursor a durable consumer uses to keep its place, and
  * the catalog of event kinds a trigger can listen for, which `eventKind.query`
  * lists.
  */

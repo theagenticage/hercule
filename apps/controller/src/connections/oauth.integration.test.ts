@@ -1,15 +1,17 @@
 /**
- * The core's OAuth2 authorization-code client, end to end: the start that
- * builds an authorization URL, the callback the browser arrives at with no
- * credential, and the refresh a plugin's `credentials()` triggers.
+ * Tests the core's OAuth2 authorization-code client end to end:
+ *
+ * - the start, which builds an authorization URL;
+ * - the callback, which the browser reaches without a credential;
+ * - the refresh that a plugin's `credentials()` call triggers.
  *
  * The provider is an in-test `Bun.serve` rather than a stub inside the
- * controller: the whole subject here is what the controller puts on the wire to
- * a token endpoint, so the token endpoint is a real one that records it.
+ * controller: these tests are about what the controller sends to a token
+ * endpoint, so the token endpoint is a real server that records each request.
  *
- * The registry is test plugins for the same reason the connection routes use
- * them - a connection type is a plugin contribution - and here they also carry
- * the two things an OAuth client needs: a plugin config field `clientId` and a
+ * The registry holds test plugins, as in the connection route tests, because a
+ * connection type comes from a plugin. Here the plugins also hold the two
+ * things an OAuth client needs: a plugin config field `clientId` and a
  * plugin-owned secret `clientSecret`.
  */
 import { createHash } from "node:crypto";
@@ -25,7 +27,7 @@ import {
 } from "@hercule/plugin-host";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 
-/** A connection as the API hands it back; only the fields these tests read. */
+/** A connection as the API returns it; only the fields these tests read. */
 interface ConnectionRecord {
   readonly id: string;
   readonly type: string;
@@ -37,46 +39,46 @@ interface ConnectionRecord {
   readonly credentials: ReadonlyArray<{ readonly name: string; readonly rotatedAt?: string }>;
 }
 
-/** The error envelope every failing operation answers with. */
+/** The error envelope every failing operation returns. */
 interface ErrorBody {
   readonly error: { readonly code: string; readonly message: string };
 }
 
-/** The client credentials the plugin owns, as this test arranges them. */
+/** The client credentials the tests give the plugin. */
 const CLIENT_ID = "client-1";
 const CLIENT_SECRET = "shh-1";
 
-/** What the provider hands out, and what the type makes of it. */
+/** Access tokens the provider issues: the type accepts the `good-` ones and rejects the other. */
 const FIRST_TOKEN = "good-first";
 const REFRESHED_TOKEN = "good-refreshed";
 const UNUSABLE_TOKEN = "nope-1";
 
-/** What the OAuth type says when it turns an access token down. */
+/** The message the OAuth type's `validate` fails with when it rejects an access token. */
 const REJECTED = "that account is not one this type can act as";
 
-/** A `state` of the right shape that no start ever minted. */
+/** A well-formed `state` that no start ever created. */
 const ABSENT_STATE = "zzzz".repeat(16);
 
 const buildJsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-/** A token endpoint's answer, per grant type, as a test decides it. */
+/** The token endpoint's response for each grant type, which a test can replace. */
 type Answers = Record<string, () => Response>;
 
 interface AuthServer {
   /** The origin the type's `authorizationUrl` and `tokenUrl` are built from. */
   readonly base: string;
-  /** Every form body the token endpoint was posted, in order. */
+  /** Every form body posted to the token endpoint, in order. */
   readonly requests: ReadonlyArray<Record<string, string>>;
-  /** What the token endpoint answers next, keyed by `grant_type`. */
+  /** The token endpoint's next response, keyed by `grant_type`. */
   readonly answers: Answers;
   readonly stop: () => Promise<void>;
 }
 
 /**
- * A provider's token endpoint. It answers a standard token response by default
- * and records what it was asked, which is what the callback and refresh tests
- * assert against.
+ * Starts a provider's token endpoint. By default it returns a standard token
+ * response, and it records every request so the callback and refresh tests can
+ * assert on them.
  */
 const createAuthServer = (): AuthServer => {
   const requests: Array<Record<string, string>> = [];
@@ -117,8 +119,8 @@ const createAuthServer = (): AuthServer => {
     base: `http://127.0.0.1:${server.port}`,
     requests,
     answers,
-    // A test may close the provider to see what an unreachable one does, and
-    // the harness closes it again afterwards.
+    // A test may stop the provider to simulate an unreachable one, and the
+    // harness stops it again afterwards, so a second call does nothing.
     stop: async () => {
       if (stopped) return;
       stopped = true;
@@ -127,16 +129,16 @@ const createAuthServer = (): AuthServer => {
   };
 };
 
-/** A plugin and the activation contexts the host handed it. */
+/** A plugin and the activation contexts the host passed to it. */
 interface TestPlugin {
   readonly plugin: Plugin;
   readonly contexts: Array<ActivationContext>;
 }
 
 /**
- * One plugin owning one type. An OAuth type points at the in-test provider and
- * judges the access token it was handed; a credentials type is here only so a
- * start against the wrong kind of setup has something to be refused for.
+ * Builds a plugin that owns one connection type. An OAuth type points at the
+ * in-test provider and validates the access token it receives. A credentials
+ * type exists only so a test can start an OAuth flow for a type without one.
  */
 const buildConnectionTypePlugin = (options: {
   readonly id: string;
@@ -191,7 +193,7 @@ const buildConnectionTypePlugin = (options: {
   return { plugin, contexts };
 };
 
-/** The registry every test boots, built afresh so no context outlives its test. */
+/** Builds new plugins for each test, so no activation context outlives its test. */
 const buildPlugins = (provider: AuthServer) => ({
   oauth: buildConnectionTypePlugin({ id: "oauthy", type: "oauth-type", oauth: provider }),
   second: buildConnectionTypePlugin({ id: "second", type: "second-type", oauth: provider }),
@@ -223,7 +225,7 @@ const withOAuth = async (
   }
 };
 
-/** The origin the browser is at, which is what the redirect URI is built from. */
+/** The browser's origin, which the redirect URI is built from. */
 const ORIGIN = "http://h.test:4000";
 const REDIRECT_URI = `${ORIGIN}/oauth/callback`;
 
@@ -255,7 +257,7 @@ const startOAuth = (
     token,
   );
 
-/** Starts a setup and hands back the authorization URL it answered with. */
+/** Starts an OAuth flow and returns the authorization URL from the response. */
 const startOAuthOrFail = async (
   base: string,
   token: string,
@@ -267,7 +269,7 @@ const startOAuthOrFail = async (
   return new URL(authorizationUrl);
 };
 
-/** The callback as the browser reaches it: server root, no bearer, no redirect followed. */
+/** Calls the callback as the browser does: at the server root, with no bearer token. */
 const sendOAuthCallback = (base: string, query: Record<string, string>): Promise<Response> =>
   fetch(`${base}/oauth/callback?${new URLSearchParams(query).toString()}`, {
     redirect: "manual",
@@ -286,11 +288,11 @@ const listConnections = async (
 const readError = async (response: Response): Promise<ErrorBody["error"]> =>
   ((await response.json()) as ErrorBody).error;
 
-/** The S256 transformation the provider would apply to check the verifier. */
+/** Computes the S256 challenge, as the provider does to check the verifier. */
 const computeChallenge = (verifier: string): string =>
   createHash("sha256").update(verifier).digest("base64url");
 
-/** The runtime surface the host handed a plugin at its last activation. */
+/** Returns the `ConnectionsRuntime` the host passed to a plugin at its last activation. */
 const readConnectionsSurface = (of: TestPlugin) => {
   const ctx = of.contexts.at(-1);
   if (ctx === undefined) throw new Error("the plugin was never activated");
@@ -298,7 +300,7 @@ const readConnectionsSurface = (of: TestPlugin) => {
   return ctx.connections;
 };
 
-/** Runs one whole setup and hands back the connection it created. */
+/** Runs a whole OAuth flow and returns the connection it created. */
 const connect = async (base: string, token: string): Promise<ConnectionRecord> => {
   await setClientId(base, token, "oauthy");
   await setClientSecret(base, token, "oauthy");
@@ -315,7 +317,7 @@ const connect = async (base: string, token: string): Promise<ConnectionRecord> =
 };
 
 describe("POST /oauth/start", () => {
-  it("answers an authorization URL carrying everything the provider asks of the client", async () => {
+  it("returns an authorization URL with every parameter the provider requires", async () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
@@ -333,12 +335,12 @@ describe("POST /oauth/start", () => {
       expect(query.get("access_type")).toBe("offline");
       expect(query.get("prompt")).toBe("consent");
       expect((query.get("state") ?? "").length).toBeGreaterThanOrEqual(32);
-      // The secret half of the client's credentials is never handed to a browser.
+      // The client secret is never sent to the browser.
       expect(url.toString()).not.toContain(CLIENT_SECRET);
     });
   });
 
-  it("mints a state nobody can guess from the last one", async () => {
+  it("creates a new random state and challenge for every start", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
@@ -353,7 +355,7 @@ describe("POST /oauth/start", () => {
     });
   });
 
-  it("refuses to start when the plugin has no client id, and names the plugin", async () => {
+  it("fails to start when the plugin has no client id, and names the plugin", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientSecret(base, token, "oauthy");
 
@@ -366,7 +368,7 @@ describe("POST /oauth/start", () => {
     });
   });
 
-  it("refuses to start when the plugin has no client secret, and names the plugin", async () => {
+  it("fails to start when the plugin has no client secret, and names the plugin", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "second");
 
@@ -379,7 +381,7 @@ describe("POST /oauth/start", () => {
     });
   });
 
-  it("refuses a reconnect of a connection that is of another type", async () => {
+  it("rejects a reconnect of a connection that has another type", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       const before = await connect(base, token);
       await setClientId(base, token, "second");
@@ -395,7 +397,7 @@ describe("POST /oauth/start", () => {
     });
   });
 
-  it("refuses a type whose setup is a pasted credential", async () => {
+  it("rejects a type whose setup takes pasted credentials", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "pasted");
       await setClientSecret(base, token, "pasted");
@@ -408,7 +410,7 @@ describe("POST /oauth/start", () => {
 });
 
 describe("GET /oauth/callback", () => {
-  it("exchanges the code the standard way and creates the connection the setup described", async () => {
+  it("exchanges the code with a standard token request and creates the connection the start described", async () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
@@ -430,8 +432,8 @@ describe("GET /oauth/callback", () => {
         client_id: CLIENT_ID,
         client_secret: CLIENT_SECRET,
       });
-      // The verifier is the proof the challenge was made from: hashing it the
-      // way the provider would must land back on what the start published.
+      // The verifier proves where the challenge came from: hashing it as the
+      // provider does must give the challenge sent in the authorization URL.
       expect(computeChallenge(exchange?.["code_verifier"] ?? "")).toBe(
         url.searchParams.get("code_challenge"),
       );
@@ -447,14 +449,14 @@ describe("GET /oauth/callback", () => {
         credentials: [{ name: "oauth.tokens" }],
       });
       const text = await (await get(base, "/api/v1/connections", token)).text();
-      // The display name is derived from the token, so it says the token in the
-      // one place it may and under no other key.
+      // The display name is derived from the token, so the token may appear
+      // there and nowhere else in the body.
       expect(text.split(`acct:${FIRST_TOKEN}`).join("")).not.toContain(FIRST_TOKEN);
       expect(text).not.toContain("refresh-1");
     });
   });
 
-  it("creates nothing when the provider sends the user back refusing", async () => {
+  it("creates nothing when the user denies access at the provider", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
@@ -496,7 +498,7 @@ describe("GET /oauth/callback", () => {
     });
   });
 
-  it("spends a state once, and creates nothing the second time it is presented", async () => {
+  it("accepts a state only once, and creates nothing the second time it is presented", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
@@ -513,14 +515,14 @@ describe("GET /oauth/callback", () => {
     });
   });
 
-  it("turns a state nobody started away, and one that has run out of time", async () => {
+  it("rejects an unknown state and an expired one", async () => {
     await withOAuth(async ({ base, sql }, _registry, token) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
       const url = await startOAuthOrFail(base, token);
       const state = url.searchParams.get("state") ?? "";
-      // The setup's ten minutes cannot be waited out, so the pending row is
-      // aged instead - the only part of this a test cannot arrange from outside.
+      // A test cannot wait out the setup's ten minutes, so it edits the row's
+      // expiry directly. This is the only step the test cannot do through the API.
       await Effect.runPromise(
         Effect.orDie(
           sql`UPDATE oauth_setups SET expires_at = '2020-01-01T00:00:00.000Z' WHERE state = ${state}`,
@@ -539,7 +541,7 @@ describe("GET /oauth/callback", () => {
     });
   });
 
-  it("creates nothing when the token endpoint refuses the code", async () => {
+  it("creates nothing when the token endpoint rejects the code", async () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
@@ -559,7 +561,7 @@ describe("GET /oauth/callback", () => {
     });
   });
 
-  it("creates nothing when the type turns the account down", async () => {
+  it("creates nothing when the type rejects the account", async () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
@@ -578,7 +580,7 @@ describe("GET /oauth/callback", () => {
     });
   });
 
-  it("reconnects the connection the setup named, under its own id", async () => {
+  it("reconnects the connection the start named, and keeps its id", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       const before = await connect(base, token);
       await Effect.runPromise(
@@ -616,8 +618,9 @@ describe("GET /oauth/callback", () => {
 
 describe("the access token a plugin asks the core for", () => {
   /**
-   * An exchange whose token is not worth handing over: a second is well inside
-   * the margin the core refreshes within, so it is stale the moment it lands.
+   * Makes the code exchange return a token that expires in one second. That is
+   * well inside the refresh margin, so the token needs a refresh as soon as it
+   * is stored.
    */
   const makeTokensExpireNow = (provider: AuthServer): void => {
     provider.answers["authorization_code"] = () =>
@@ -629,7 +632,7 @@ describe("the access token a plugin asks the core for", () => {
       });
   };
 
-  it("is handed over without asking the provider again while it is still good", async () => {
+  it("is returned without calling the provider while it is still valid", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       const one = await connect(base, token);
       const asked = provider.requests.length;
@@ -643,7 +646,7 @@ describe("the access token a plugin asks the core for", () => {
     });
   });
 
-  it("is refreshed when it has run out, and the fresh one is kept", async () => {
+  it("is refreshed when it has expired, and the new one is stored", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       makeTokensExpireNow(provider);
       const one = await connect(base, token);
@@ -660,7 +663,7 @@ describe("the access token a plugin asks the core for", () => {
         client_secret: CLIENT_SECRET,
       });
 
-      // The new token set was written down, so the next caller spends nothing.
+      // The new token set was stored, so the next call does not refresh again.
       const asked = provider.requests.length;
       expect(await Effect.runPromise(surface.credentials(one.id))).toMatchObject({
         accessToken: REFRESHED_TOKEN,
@@ -669,7 +672,7 @@ describe("the access token a plugin asks the core for", () => {
     });
   });
 
-  it("is refreshed once when two callers find the same spent token at the same moment", async () => {
+  it("is refreshed only once when two callers find the same expired token at the same time", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       makeTokensExpireNow(provider);
       const one = await connect(base, token);
@@ -682,8 +685,8 @@ describe("the access token a plugin asks the core for", () => {
       );
 
       // A provider that rotates its refresh token invalidates the old one, so a
-      // second refresh with the same token would leave one caller holding a set
-      // that no longer works.
+      // second refresh with the same token would leave one caller with tokens
+      // that no longer work.
       expect(
         provider.requests.filter((form) => form["grant_type"] === "refresh_token"),
       ).toHaveLength(1);
@@ -692,12 +695,12 @@ describe("the access token a plugin asks the core for", () => {
     });
   });
 
-  it("fails, and leaves the connection alone, when the provider cannot be reached", async () => {
+  it("fails, and leaves the connection status unchanged, when the provider cannot be reached", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       makeTokensExpireNow(provider);
       const one = await connect(base, token);
-      // Nothing is listening on that port any more, which is what a name that
-      // does not resolve and a network that drops both come back as.
+      // Nothing listens on that port any more, which fails the same way as a
+      // DNS failure or a dropped network.
       await provider.stop();
 
       const failure = await Effect.runPromise(
@@ -705,13 +708,13 @@ describe("the access token a plugin asks the core for", () => {
       );
 
       expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
-      // The credential was never turned down, so there is nothing to reconnect.
+      // The provider never rejected the credential, so there is nothing to reconnect.
       const response = await get(base, `/api/v1/connections/${one.id}`, token);
       expect(await response.json()).toMatchObject({ status: "connected" });
     });
   });
 
-  it("fails, and leaves the connection needing reauthentication, when the refresh is refused", async () => {
+  it("fails, and marks the connection needs-reauth, when the provider rejects the refresh", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       makeTokensExpireNow(provider);
       const one = await connect(base, token);

@@ -15,7 +15,7 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-/** Resolve config the way `hercule serve` does, against the temporary home. */
+/** Resolves config the way `hercule serve` does, against the temporary home. */
 const load = (argv: ReadonlyArray<string> = [], env: Record<string, string | undefined> = {}) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -50,7 +50,7 @@ describe("buildEnvName", () => {
 });
 
 describe("the config layer", () => {
-  it("defaults every key and authors the config file it would have read", async () => {
+  it("uses the default for every key and writes the config file it would have read", async () => {
     const { config, home: paths } = await loadOrFail();
 
     expect(config).toEqual({
@@ -59,7 +59,7 @@ describe("the config layer", () => {
       bindPort: 4937,
       logLevel: "info",
     });
-    // Relative, so the file pins no absolute path and a home that moves keeps
+    // Relative, so the file holds no absolute path and a home that moves keeps
     // working (spec 04, Relocatable Data Root).
     expect(readFileSync(paths.configFile, "utf8")).toBe(
       [
@@ -91,7 +91,7 @@ describe("the config layer", () => {
     expect(existsSync(marker)).toBe(true);
   });
 
-  it("takes a flag over an env var over the file over the default", async () => {
+  it("prefers a flag over an env var over the file over the default", async () => {
     writeFileSync(join(home, "config.toml"), '[bind]\nhost = "10.0.0.1"\nport = 5000\n');
 
     const fromFile = await loadOrFail();
@@ -134,7 +134,7 @@ describe("the config layer", () => {
     expect(existsSync(join(home, "data"))).toBe(false);
   });
 
-  it("reports a malformed config file with its path and the parser's reason", async () => {
+  it("reports a malformed config file with its path and the parser's error", async () => {
     writeFileSync(join(home, "config.toml"), "bind.host = ?\n");
 
     const error = await loadAndReadFailure();
@@ -156,7 +156,7 @@ describe("the config layer", () => {
     expect(fromFlag.message).toContain("retention.events");
   });
 
-  it("names the source and the value it cannot use", async () => {
+  it("reports the source and the value of an invalid setting", async () => {
     const error = await loadAndReadFailure(["-c", "bind.port=nope"]);
     expect(error._tag).toBe("ConfigValueError");
     expect(error.message).toContain("-c bind.port");
@@ -178,9 +178,9 @@ describe("the config layer", () => {
     expect((await loadAndReadFailure(["-c", "data.dir="]))._tag).toBe("ConfigValueError");
   });
 
-  it("refuses a bind host that is not a host on its own", async () => {
-    // `new URL` would read this as the host `foo` with `/bar` on the end, and
-    // the setup URL would come out as one nobody can open.
+  it("rejects a bind host that is not only a host", async () => {
+    // `new URL` would parse this as the host `foo` with `/bar` on the end, and
+    // the setup URL would be one nobody can open.
     const error = await loadAndReadFailure(["-c", "bind.host=foo/bar"]);
     expect(error._tag).toBe("ConfigValueError");
     expect(error.message).toContain("bind.host");
@@ -195,7 +195,7 @@ describe("the config layer", () => {
     );
   });
 
-  it("takes the hosts hercule can actually bind", async () => {
+  it("accepts the hosts hercule can actually bind", async () => {
     for (const host of ["127.0.0.1", "0.0.0.0", "::", "::1", "localhost", "hercule.local"]) {
       const config = await Effect.runPromise(
         BootstrapConfig.pipe(
@@ -206,7 +206,7 @@ describe("the config layer", () => {
     }
   });
 
-  it("refuses an argument hercule serve does not have", async () => {
+  it("rejects an argument hercule serve does not have", async () => {
     const result = await Effect.runPromise(
       HerculeHome.pipe(Effect.provide(layer(["--home", home, "--version"], {})), Effect.result),
     );

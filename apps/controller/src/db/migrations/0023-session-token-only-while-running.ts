@@ -2,17 +2,17 @@
  * A session row holds a token hash only while a process can hold the token:
  * while the session is `starting`, `idle` or `busy`.
  *
- * The rule is a CHECK constraint so that the database refuses a write that
+ * The rule is a CHECK constraint so that the database rejects a write that
  * breaks it. Every statement that moves a session out of those three statuses
- * must clear the hash in the same write, and a future writer that forgets to
- * clear it fails at once instead of leaving a credential that the status
- * alone refuses and the unique index holds for ever.
+ * must clear the hash in the same write. A future writer that forgets to clear
+ * it fails at once, instead of leaving behind a credential that only the
+ * status check rejects and that the unique index keeps for ever.
  *
  * SQLite cannot add a CHECK to a column that already exists, so the column is
- * renamed away, added again with the constraint, and the hashes of the rows
- * that are still running are copied across. A hash on any other row was dead
- * already, and is dropped. A column check can read the whole row in SQLite,
- * as migration 0022 also uses.
+ * renamed, added again with the constraint, and the hashes of the sessions
+ * that are still running are copied across. A hash on any other row was
+ * already unusable, and is dropped. In SQLite a column check can read the
+ * whole row, which migration 0022 also relies on.
  *
  * The partial index holds only the running sessions, by runner. The sweep that
  * ends the sessions of lost runners reads exactly those rows once a minute,

@@ -1,10 +1,10 @@
 /**
- * What the Task and Project migration leaves behind, read back from
+ * Tests what the Task and Project migration creates, read back from
  * `sqlite_master` on a migrated in-memory database.
  *
- * "Applying the set twice is a no-op" is asserted once for the whole set, in
- * `db/migrate.test.ts`; this file only adds the four tables to the list it
- * checks for.
+ * "Applying the migrations twice is a no-op" is tested once for all of them,
+ * in `db/migrate.test.ts`; that test also checks for the four tables this
+ * migration adds.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -28,7 +28,7 @@ const readSchemaRows = (type: string) =>
     `;
   });
 
-/** The row a MATCH finds, counted, so nothing depends on how the index stores it. */
+/** Returns how many rows a MATCH finds, so the test does not depend on how the index stores them. */
 const countMatches = (expression: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -41,7 +41,7 @@ const countMatches = (expression: string) =>
 const TITLE = "Café Naïve reopening";
 const DESCRIPTION = "The terrace needs a permit.";
 
-/** One task row, written in plain SQL: the index is fed by triggers, not by a service. */
+/** Inserts one task row in plain SQL: triggers keep the index current, not a service. */
 const insertTask = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`
@@ -63,8 +63,8 @@ describe("the Task and Project tables", () => {
 
   it("indexes tasks and projects only over the live rows", async () => {
     const indexes = (await run(readSchemaRows("index"))).filter(
-      // An index SQLite made itself for a UNIQUE or PRIMARY KEY column has no
-      // SQL of its own and cannot carry a WHERE clause.
+      // An index SQLite created itself for a UNIQUE or PRIMARY KEY column has
+      // no SQL of its own and cannot have a WHERE clause.
       (row) => (row.tbl_name === "tasks" || row.tbl_name === "projects") && row.sql !== null,
     );
     expect(indexes.length).toBeGreaterThan(0);
@@ -75,7 +75,7 @@ describe("the Task and Project tables", () => {
     }
   });
 
-  it("serves both readings of status from an index, neither by a temp b-tree", async () => {
+  it("serves both status queries from an index, without a temporary b-tree", async () => {
     const plans = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -93,8 +93,8 @@ describe("the Task and Project tables", () => {
         };
       }),
     );
-    // A temp b-tree is the whole matching set sorted per page, which is flat in
-    // the page number: page one hundred costs what page one did.
+    // A temporary b-tree sorts the whole matching set for every page, so page
+    // one hundred costs as much as page one.
     expect(plans.sorted).toContain("SCAN tasks USING INDEX tasks_status");
     expect(plans.sorted).not.toContain("tasks_status_updated_at");
     expect(plans.sorted).not.toContain("TEMP B-TREE");
@@ -111,8 +111,8 @@ describe("the Task and Project tables", () => {
         `;
         yield* sql`INSERT INTO projects (id, name, created_at, updated_at)
                    VALUES (x'00000000000000000000000000000001', 'p', 'a', 'a')`;
-        // The link points at a resource as well as at a project, so there has
-        // to be one to point at.
+        // The link points at a resource as well as at a project, so a resource
+        // has to exist.
         yield* sql`INSERT INTO resources (id, kind, workspace_include, created_at, updated_at)
                    VALUES (x'00000000000000000000000000000002', 'folder', 0, 'a', 'a')`;
         const link = sql`INSERT INTO project_resources (project_id, resource_id)

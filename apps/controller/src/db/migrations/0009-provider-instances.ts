@@ -9,8 +9,9 @@
  * is in it, and nothing here queries inside it.
  *
  * The bounds are CHECK constraints, which SQLite cannot add later without
- * rebuilding the table. The 128 is `MAX_CONTRIBUTION_NAME_LENGTH` written out - a
- * landed migration is frozen, so raising it takes a migration of its own.
+ * rebuilding the table. The 128 is the value of `MAX_CONTRIBUTION_NAME_LENGTH`
+ * written out: a migration that has shipped never changes, so raising the limit
+ * needs a new migration.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";

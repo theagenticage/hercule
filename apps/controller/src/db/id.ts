@@ -4,14 +4,14 @@
  * Ids are minted by the controller, stored as a 16-byte `BLOB` primary key, and
  * rendered as the canonical lowercase string everywhere they leave the database.
  *
- * The Event is the one exception in the system: its id is the integer log
- * position, and it never passes through this module.
+ * The Event is the one exception: its id is its integer position in the event
+ * log, so it never uses this module.
  */
 
-/** Mints a new id as the 16 bytes that go into the column. */
+/** Creates a new id and returns it as the 16 bytes stored in the column. */
 export const mintUuid = (): Uint8Array => new Uint8Array(Bun.randomUUIDv7("buffer"));
 
-/** Renders stored bytes as the canonical lowercase string. */
+/** Converts stored bytes to the canonical lowercase string. Throws when there are not 16 bytes. */
 export const uuidToString = (bytes: Uint8Array): string => {
   if (bytes.length !== 16) {
     throw new TypeError(`A Hercule id is 16 bytes, got ${bytes.length}`);
@@ -24,16 +24,16 @@ export const uuidToString = (bytes: Uint8Array): string => {
 };
 
 /**
- * The one shape an id has: a canonical lowercase UUIDv7, the same pattern the
- * contract's `Id` puts on the wire. Anything that has to check an id before
- * `uuidFromString` sees it - a decoded cursor, say - tests against this, so
- * there is one answer to what an id is.
+ * The format of a valid id: a canonical lowercase UUIDv7, the same pattern as
+ * the contract's `Id`. Code that has to check an id before passing it to
+ * `uuidFromString`, such as cursor decoding, tests against this pattern, so
+ * every check agrees on what a valid id is.
  */
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /**
- * Parses the canonical string back into the 16 bytes the column holds. Throws
- * on anything else: every caller has already validated the id, at the contract
+ * Parses the canonical string into the 16 bytes stored in the column. Throws on
+ * any other string: every caller has already validated the id, in the contract
  * or against `UUID_PATTERN`, so a failure here is a bug rather than bad input.
  */
 export const uuidFromString = (id: string): Uint8Array => {

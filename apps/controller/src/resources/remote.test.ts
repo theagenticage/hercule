@@ -1,18 +1,18 @@
 /**
- * What a user may write as a remote, and what a repository is called.
+ * Which remotes a user may enter, and how a repository's name is derived.
  *
  * The canonical form itself is tested in `@hercule/protocol`, where it lives
- * because the runner reads remotes by the same rule. What is asked here is the
- * controller's own narrower question - whether Hercule will hand this spelling to
- * git - which has to be refused where the user can read why rather than on a
- * machine as a git argument.
+ * because the runner canonicalizes remotes by the same rule. These tests cover
+ * the controller's narrower check - whether Hercule will pass a remote to git -
+ * which must reject a bad remote where the user can read why, rather than on a
+ * runner as a git argument.
  */
 import { describe, expect, it } from "vitest";
 
 import { canonicalRemoteOf, isClonableRemote, extractRepoName } from "./remote";
 
-describe("the remotes Hercule will hand to git", () => {
-  it("takes an https URL and git's own user@host:owner/repo", () => {
+describe("isClonableRemote", () => {
+  it("accepts an https URL and git's scp-like user@host:owner/repo", () => {
     for (const remote of [
       "https://github.com/acme/web",
       "https://github.com/acme/web.git",
@@ -23,7 +23,7 @@ describe("the remotes Hercule will hand to git", () => {
     }
   });
 
-  it("refuses a local or shell-reachable spelling, and one git would read as an option", () => {
+  it("rejects local paths, other schemes, and a remote git would read as an option", () => {
     for (const remote of [
       "file:///Users/rogier/code/web",
       "ssh://git@github.com/acme/web.git",
@@ -38,19 +38,19 @@ describe("the remotes Hercule will hand to git", () => {
     }
   });
 
-  it("still canonicalises what a machine reports, which is not a spelling anyone clones", () => {
+  it("rejects the host/path form a runner reports, which still canonicalizes", () => {
     expect(isClonableRemote("github.com/acme/web")).toBe(false);
     expect(canonicalRemoteOf("github.com/acme/web")).toBe("github.com/acme/web");
   });
 
-  it("reads a file URL as the path it is, which no resource may be written with", () => {
+  it("canonicalizes a file URL to its path, but rejects it as a resource remote", () => {
     expect(canonicalRemoteOf("file:///Users/rogier/code/web")).toBe("users/rogier/code/web");
     expect(isClonableRemote("file:///Users/rogier/code/web")).toBe(false);
   });
 });
 
-describe("what a repository is called", () => {
-  it("is the last segment of its canonical remote", () => {
+describe("extractRepoName", () => {
+  it("returns the last segment of the canonical remote", () => {
     expect(extractRepoName("github.com/acme/web")).toBe("web");
     expect(extractRepoName("git.example.com/team/group/app")).toBe("app");
   });

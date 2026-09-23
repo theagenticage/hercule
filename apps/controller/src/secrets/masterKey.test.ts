@@ -24,7 +24,7 @@ const buildKeyFilePath = () => join(home, "master.key");
 const buildHomeLayer = (): Layer.Layer<HerculeHome> =>
   Layer.succeed(HerculeHome, HerculeHome.of(buildHomePaths(home, join(home, "data"))));
 
-/** Never the keychain backend: a test must not write to the developer's login keychain. */
+/** Builds the master key with the file backend: a test must not touch the developer's keychain. */
 const buildMasterKey = () =>
   Effect.runPromiseExit(
     Effect.gen(function* () {
@@ -86,14 +86,14 @@ describe("the master key file", () => {
     expect(key?.usages.sort()).toEqual(["decrypt", "encrypt"]);
   });
 
-  it("refuses a file that does not hold 32 bytes", async () => {
+  it("rejects a file that does not hold 32 bytes", async () => {
     writeFileSync(buildKeyFilePath(), Buffer.from("short").toString("base64"), { mode: 0o600 });
     const exit = await buildMasterKey();
     expect(Exit.isFailure(exit)).toBe(true);
     expect(String(exit)).toContain("32 bytes");
   });
 
-  it("refuses a key file anyone but its owner can read", async () => {
+  it("rejects a key file that anyone but its owner can read", async () => {
     await buildMasterKey();
     chmodSync(buildKeyFilePath(), 0o644);
     const exit = await buildMasterKey();
@@ -112,7 +112,7 @@ describe("the master key file", () => {
 });
 
 describe("the keychain store", () => {
-  /** A `security` that records what it was asked and answers what the test says. */
+  /** Creates a fake `security` that records each call and returns the results the test gives it. */
   const createFakeSecurityRunner = (
     answers: ReadonlyArray<{ exitCode: number; stdout: string }>,
   ) => {
@@ -127,7 +127,7 @@ describe("the keychain store", () => {
 
   const key = new Uint8Array(MASTER_KEY_BYTES).fill(7);
 
-  it("scopes the item to this home, and answers the stored key", async () => {
+  it("scopes the item to this home, and returns the stored key", async () => {
     const { run, calls } = createFakeSecurityRunner([
       { exitCode: 0, stdout: `${Buffer.from(key).toString("base64")}\n` },
     ]);
@@ -151,7 +151,7 @@ describe("the keychain store", () => {
     ).toBeUndefined();
   });
 
-  it("fails, naming the exit code, when security says anything else", async () => {
+  it("fails, with the exit code in the message, when security exits with any other code", async () => {
     const { run } = createFakeSecurityRunner([{ exitCode: 1, stdout: "" }]);
     const exit = await Effect.runPromiseExit(createKeychainStore("/Users/x/.hercule", run).read);
     expect(Exit.isFailure(exit)).toBe(true);
@@ -182,7 +182,7 @@ describe("the keychain store", () => {
     ]);
   });
 
-  it("answers the key another boot stored when the add is refused", async () => {
+  it("returns the key another boot stored when the add fails", async () => {
     const stored = new Uint8Array(MASTER_KEY_BYTES).fill(9);
     // 45: the item is already there, because another first boot won the race.
     const { run, calls } = createFakeSecurityRunner([

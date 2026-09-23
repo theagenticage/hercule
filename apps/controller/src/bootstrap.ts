@@ -1,12 +1,18 @@
 /**
- * What `hercule serve` does before it binds: the first-run and boot sequence.
+ * The first-run and boot sequence: what `hercule serve` does before it starts
+ * listening.
  *
- * On an empty home this auto-initializes with no flags and no prompts - the
- * home layout, `config.toml`, the database and its migrations, the shipped
- * defaults, the master key, the controller identity, one provider instance per
- * shipped provider plugin, and the one-time setup URL. On every later boot it is
- * the same sequence, and everything in it is idempotent, so a restart changes
- * nothing except the setup token.
+ * On an empty home it initializes everything with no flags and no prompts:
+ *
+ * - the home layout and `config.toml`;
+ * - the database and its migrations;
+ * - the shipped defaults and the master key;
+ * - the controller identity;
+ * - one provider instance per shipped provider plugin;
+ * - the one-time setup URL.
+ *
+ * Every later boot runs the same sequence. Every step is idempotent, so a
+ * restart changes nothing except the setup token.
  */
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
@@ -84,22 +90,22 @@ import { SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 import { WorkspaceService, WorkspaceServiceLayer } from "./workspaces";
 
-/** Setup tokens are minted and stored like every other Hercule token. */
+/** Setup tokens are created and stored like every other Hercule token. */
 export { hashToken };
 
-/** The two bind hosts that mean "every interface"; a URL needs a reachable one instead. */
+/** The two bind hosts that mean "every interface". A URL needs a reachable address instead. */
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
 
-/** What a boot leaves behind. `setupUrl` is absent once setup is complete. */
+/** The result of a boot. `setupUrl` is `undefined` once setup is complete. */
 export interface BootOutcome {
   readonly paths: HomePaths;
   readonly identityId: string;
   readonly setupUrl: string | undefined;
-  /** The child this boot spawned, for a boot that was asked to spawn one. */
+  /** The local runner this boot spawned, if it was asked to spawn one. */
   readonly localRunner: LocalRunner | undefined;
 }
 
-/** Everything that can stop the controller before it binds. */
+/** Every error that can stop the controller before it starts listening. */
 export type BootError =
   | ConfigError
   | DatabaseError
@@ -113,11 +119,11 @@ export type BootError =
   | LocalRunnerFailed;
 
 /**
- * Where something on this machine reaches the controller. A wildcard bind host
- * renders as loopback, because `http://0.0.0.0:4937` is not an address anything
- * can open; an IPv6 literal is bracketed. `bind.host` is checked when the config
- * is resolved, so by here it is a host and nothing else; a value `URL` will not
- * take is a defect, not a URL nobody can open.
+ * Returns the origin a process on this machine uses to reach the controller. A
+ * wildcard bind host becomes loopback, because nothing can open
+ * `http://0.0.0.0:4937`; an IPv6 literal is put in brackets. `bind.host` is
+ * validated when the config is resolved, so here it is only a host; a value
+ * `URL` cannot parse would be a bug, not a URL nobody can open.
  */
 export function buildControllerOrigin(bindHost: string, bindPort: number): string {
   const host = WILDCARD_HOSTS.has(bindHost) ? "127.0.0.1" : bindHost;
@@ -125,7 +131,7 @@ export function buildControllerOrigin(bindHost: string, bindPort: number): strin
   return `http://${authority}:${bindPort}`;
 }
 
-/** The one-time setup URL, at the address a browser on this machine can open. */
+/** Returns the one-time setup URL, at an address a browser on this machine can open. */
 export function buildSetupUrl(bindHost: string, bindPort: number, token: string): string {
   const url = new URL("/setup", buildControllerOrigin(bindHost, bindPort));
   url.searchParams.set("token", token);
@@ -133,14 +139,16 @@ export function buildSetupUrl(bindHost: string, bindPort: number, token: string)
 }
 
 /**
- * Mint a fresh setup token unless setup is already complete, and keep
- * `<home>/setup-url` in step with it.
+ * Creates a new setup token unless setup is already complete, and keeps
+ * `<home>/setup-url` in step with it. Returns the setup URL, or `undefined`
+ * once setup is complete. Fails with `HerculeHomeError` when the file cannot be
+ * written or removed.
  *
- * The token is valid until used and every boot invalidates the previous one, so
- * re-minting is restarting the unit. The file is mode 0600, the same trust
- * boundary as the master key file, and it exists only while setup is
- * incomplete: `hercule setup-url` reads it, and no unauthenticated
- * endpoint serves it.
+ * The token is valid until used, and every boot invalidates the previous one,
+ * so restarting the service is how to get a new token. The file has mode 0600,
+ * the same protection as the master key file, and exists only while setup is
+ * incomplete: `hercule setup-url` reads it, and no unauthenticated endpoint
+ * serves it.
  */
 const ensureSetupUrl = (
   paths: HomePaths,
@@ -153,8 +161,8 @@ const ensureSetupUrl = (
     }>`SELECT completed_at FROM setup_state WHERE singleton = 1`;
 
     if (rows[0]?.completed_at != null) {
-      // No token is outstanding once setup is complete, in the file or in the
-      // row: the column holds a hash only while one is.
+      // Once setup is complete no token is outstanding, so clear both the file
+      // and the row: the column holds a hash only while a token is outstanding.
       yield* withTransaction(
         sql,
         sql`UPDATE setup_state SET token_hash = NULL WHERE singleton = 1`,
@@ -180,9 +188,9 @@ const ensureSetupUrl = (
     const url = buildSetupUrl(bootstrap.bindHost, bootstrap.bindPort, token);
     yield* Effect.try({
       try: () => {
-        // `mode` applies only when the file is created, so the file the previous
-        // boot left is removed rather than chmod-ed after a moment at the
-        // default mode.
+        // `mode` applies only when the file is created, so the previous boot's
+        // file is removed first. Changing its mode afterwards would leave it
+        // briefly readable with the default mode.
         rmSync(paths.setupUrlFile, { force: true });
         writeFileSync(paths.setupUrlFile, `${url}\n`, { mode: 0o600 });
       },
@@ -191,32 +199,32 @@ const ensureSetupUrl = (
     return url;
   });
 
-/** Boot the controller: everything up to, and not including, binding. */
+/** Boots the controller: every step up to, but not including, listening. */
 export const boot = (options: BootOptions): Effect.Effect<BootOutcome, BootError> =>
   bootWith(options, Effect.succeed);
 
-/** What a boot needs from its caller: the command line, the environment, the key backend. */
+/** The inputs of a boot: the command line, the environment and the master key backend. */
 export interface BootOptions {
   readonly argv: ReadonlyArray<string>;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly masterKeyBackend?: MasterKeyBackend;
   /**
-   * How to run the runner this controller keeps beside itself, for a boot that
-   * goes on to serve. A boot with nothing after it - `hercule setup-url`, a
-   * repository test - spawns none: a second Hercule process is not what reading
-   * one value is for.
+   * How to run the local runner beside this controller, for a boot that goes
+   * on to serve. A boot with nothing after it, such as `hercule setup-url` or a
+   * repository test, spawns no runner: there is no reason to start a second
+   * Hercule process just to read one value.
    */
   readonly localRunner?: LocalRunnerOptions;
   /**
-   * The plugins to load, defaulting to the registry this binary compiled in.
-   * Overridden only by a test that drives the host with plugins of its own.
+   * The plugins to load. Defaults to the registry compiled into this binary.
+   * Only a test that runs the plugin host with its own plugins overrides it.
    */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
 
 /**
- * Every service the controller's own code reaches after the boot: the database,
- * the repositories over it, the home and the bootstrap config.
+ * Every service the controller's own code uses after the boot: the database,
+ * the repositories on it, the home and the bootstrap config.
  */
 export type ControllerServices =
   | SqlClient.SqlClient
@@ -242,16 +250,17 @@ export type ControllerServices =
   | BootstrapConfig;
 
 /**
- * Boot the controller and then keep running, with the database open.
+ * Boots the controller, then runs `use` with the database still open, and
+ * returns what `use` returns.
  *
- * `hercule serve` binds after this and stays up; `boot` is the same sequence with
- * nothing after it, which is what a test and `hercule setup-url` want. The
- * database closes when `use` finishes, so a clean exit leaves no open handle
- * behind.
+ * `hercule serve` starts listening inside `use` and stays up; `boot` is the same
+ * sequence with nothing after it, which is what a test and `hercule setup-url`
+ * need. The database closes when `use` finishes, so a clean exit leaves no open
+ * handle behind.
  *
- * `argv`, `env` and the master-key backend are arguments rather than ambient,
- * so a test drives a temporary home and the file-backed key exactly the way the
- * binary drives the real ones.
+ * `argv`, `env` and the master-key backend are arguments rather than read from
+ * the process, so a test can use a temporary home and the file-backed key
+ * exactly the way the binary uses the real ones.
  */
 export const bootWith = <A, E>(
   options: BootOptions,
@@ -260,12 +269,13 @@ export const bootWith = <A, E>(
   const sequence = Effect.gen(function* () {
     const paths = yield* HerculeHome;
     const bootstrap = yield* BootstrapConfig;
-    // Whether the file was there before the driver created it decides whether
-    // there is anything for a pre-migration copy to preserve.
+    // If the file did not exist before the driver created it, there is nothing
+    // for a pre-migration copy to preserve.
     const databaseExisted = existsSync(paths.databaseFile);
 
-    // The secrets repository is merged out rather than only provided inwards:
-    // `secret.*` is a public operation, so what runs after the boot needs it.
+    // The secrets repository is merged into the output rather than only
+    // provided to the layers above it: `secret.*` are public operations, so
+    // the code that runs after the boot needs it too.
     const repositories = Layer.mergeAll(
       controllerIdentityLayer,
       SettingsLayer,
@@ -282,10 +292,10 @@ export const bootWith = <A, E>(
     );
 
     /**
-     * The plugin host over those repositories: it reads secrets and appends to
-     * the audit log, so it is layered on top of them rather than merged beside
-     * them. It is also the catalog everything above reads a provider's
-     * definition from, which is why it stands below the fleet.
+     * The plugin host on top of those repositories: it reads secrets and
+     * appends to the audit log, so it is built on them rather than merged
+     * beside them. It is also the catalog every layer above reads a provider's
+     * definition from, which is why the fleet is built on it.
      */
     const catalog = PluginHostLayer.pipe(
       Layer.provideMerge(ConnectionTypesLayer),
@@ -295,15 +305,15 @@ export const bootWith = <A, E>(
 
     /**
      * One connection map and one probe driver per process: the socket route,
-     * the controller daemon and the sweep after a hello all act through the
-     * same `RunnerConnections`.
+     * the controller daemon and the sweep after a hello all use the same
+     * `RunnerConnections`.
      */
     const withFleet = ProviderProbesLayer.pipe(
       Layer.provideMerge(RunnerConnectionsLayer),
       Layer.provideMerge(catalog),
     );
 
-    /** The operations over the catalog and the fleet. */
+    /** The services built on the catalog and the fleet. */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
       ProviderServiceLayer,
@@ -314,29 +324,29 @@ export const bootWith = <A, E>(
 
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
-      // A row on the wire from before this boot cannot be asked whether the
-      // harness took it, so this ends it rather than a runner resending
-      // something it may already have, and says on the subscription which
-      // wake-up ended with it. After the schema, before anything is placed on
-      // a runner.
+      // There is no way to ask whether the harness received an input that was
+      // in flight before this boot. So the input is cancelled rather than
+      // resent, which could deliver it twice, and the subscription records
+      // which wake-up was lost. This runs after the migrations and before
+      // anything is placed on a runner.
       yield* cancelStrandedInputsAndReportLostWakeUps;
       yield* seed;
 
       const identity = yield* ControllerIdentity;
       const record = yield* identity.ensure;
 
-      // After the schema and the identity, because a plugin that activates may
-      // read its own state and secrets, and before the runner, because the
-      // catalog is what a session's provider is resolved through.
+      // After the migrations and the identity, because a plugin that activates
+      // may read its own state and secrets. Before the runner, because a
+      // session's provider is looked up in the catalog.
       yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? registry));
-      // After the catalog, because what a provider instance is opened for is a
+      // After the catalog, because a provider instance is created only for a
       // provider this build registered.
       yield* ensureProviderInstances;
 
       const url = yield* ensureSetupUrl(paths, bootstrap);
 
-      // Last, because the child joins over loopback as soon as it is up: it has
-      // nothing to join until the identity and the schema behind it are there.
+      // Last, because the local runner joins over loopback as soon as it is up,
+      // and it cannot join until the identity and the schema exist.
       const localRunner =
         options.localRunner === undefined
           ? undefined
@@ -351,8 +361,8 @@ export const bootWith = <A, E>(
 
     return yield* Effect.scoped(Effect.flatMap(steps, use)).pipe(
       Effect.provide(withPlugins.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
-      // A statement the database refused reads as one line naming the file; a
-      // controller that fails at boot has said nothing else yet.
+      // A failed statement becomes one line that includes the file name,
+      // because a controller that fails at boot has printed nothing else yet.
       Effect.catchTag("SqlError", (error) =>
         Effect.fail(createDatabaseError(paths.databaseFile, error)),
       ),

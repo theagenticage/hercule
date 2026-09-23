@@ -1,7 +1,7 @@
 /**
- * The disk watermark override, beside `max_concurrent_sessions` in shape: a
- * nullable column, `NULL` meaning the shipped ten gibibytes rather than a row
- * for every runner that has never touched it.
+ * The disk watermark override, stored the same way as
+ * `max_concurrent_sessions`: a nullable column, where `NULL` means the default
+ * of ten gibibytes. So a runner that never changed it needs no value.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";

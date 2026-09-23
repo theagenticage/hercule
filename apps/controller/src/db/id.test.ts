@@ -24,7 +24,7 @@ describe("Hercule ids", () => {
     expect(uuidToString(mintUuid()) < uuidToString(mintUuid())).toBe(true);
   });
 
-  it("refuses anything that is not sixteen bytes", () => {
+  it("throws when the input is not sixteen bytes", () => {
     expect(() => uuidToString(new Uint8Array(15))).toThrow(TypeError);
   });
 
@@ -38,14 +38,14 @@ describe("Hercule ids", () => {
     ["too short", "0192ce07-8c4f-7d66-afec-2482b5c9b03"],
     ["too long", "0192ce07-8c4f-7d66-afec-2482b5c9b03cc"],
     ["not hex", "0192ce07-8c4f-7d66-afec-2482b5c9b03z"],
-    // The shape the loose cursor check used to let through, which reached
-    // `uuidFromString` and threw where a validation error belonged.
+    // An older, looser cursor check let this string through. It then reached
+    // `uuidFromString` and threw, where a validation error was expected.
     ["thirty-six dashes", "-".repeat(36)],
     ["hex with the dashes moved", "0192ce078-c4f-7d66-afec-2482b5c9b03c"],
     ["not version 7", "0192ce07-8c4f-4d66-afec-2482b5c9b03c"],
     ["not an RFC variant", "0192ce07-8c4f-7d66-1fec-2482b5c9b03c"],
     ["empty", ""],
-  ])("refuses %s", (_case, id) => {
+  ])("throws on an id that is %s", (_case, id) => {
     expect(() => uuidFromString(id)).toThrow(TypeError);
   });
 });
