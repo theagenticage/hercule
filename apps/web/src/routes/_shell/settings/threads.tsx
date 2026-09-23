@@ -186,7 +186,7 @@ function Threads(): JSX.Element {
 
       <FormCard
         label="Threads · workspace"
-        fine="When set here, it applies to every project with a source. When unset, a project with one repo opens in its main workspace and a project with several repos opens in a New workspace. A project with no source always runs without a workspace."
+        fine="When set here, it applies to every project with a source. When unset, a project with one repo opens in its Main workspace and a project with several repos opens in a New workspace. A project with no source always runs without a workspace."
       >
         <Row label="Workspace">
           <SegmentedControl
