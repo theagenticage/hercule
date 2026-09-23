@@ -28,7 +28,9 @@ import { setup } from "./groups/setup";
 import { subscription } from "./groups/subscription";
 import { task } from "./groups/task";
 import { transcript } from "./groups/transcript";
+import { trigger } from "./groups/trigger";
 import { user } from "./groups/user";
+import { workflow } from "./groups/workflow";
 import { workspace } from "./groups/workspace";
 
 export const api = HttpApi.make("hercule")
@@ -46,6 +48,8 @@ export const api = HttpApi.make("hercule")
     workspace,
     event,
     subscription,
+    workflow,
+    trigger,
     runner,
     plugin,
     provider,

@@ -74,6 +74,28 @@ describe("the HttpApi declaration", () => {
     const document = OpenApi.fromApi(api);
     expect(Object.keys(document.paths).length).toBeGreaterThan(0);
   });
+
+  it("describes the definition a workflow save sends by its shape, although the transport takes any JSON value there", () => {
+    /** The part of a JSON Schema this case reads. */
+    interface SchemaPart {
+      readonly properties?: Record<string, SchemaPart>;
+      readonly required?: ReadonlyArray<string>;
+    }
+    const create = OpenApi.fromApi(api).paths["/api/v1/workflows"]?.post as
+      { requestBody: { content: Record<string, { schema: SchemaPart }> } } | undefined;
+    const definition =
+      create?.requestBody.content["application/json"]?.schema.properties?.["definition"];
+    expect(Object.keys(definition?.properties ?? {})).toEqual([
+      "name",
+      "description",
+      "inputs",
+      "triggers",
+      "steps",
+      "edges",
+      "workspace",
+    ]);
+    expect(definition?.required).toEqual(["name", "steps"]);
+  });
 });
 
 /**

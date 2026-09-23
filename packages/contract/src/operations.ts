@@ -147,6 +147,24 @@ const TABLE = {
     path: "/api/v1/subscriptions/:id",
   },
 
+  "workflow.query": { requires: "workflow.read", method: "GET", path: "/api/v1/workflows" },
+  "workflow.read": { requires: "workflow.read", method: "GET", path: "/api/v1/workflows/:id" },
+  "workflow.create": { requires: "workflow.write", method: "POST", path: "/api/v1/workflows" },
+  "workflow.update": {
+    requires: "workflow.write",
+    method: "PATCH",
+    path: "/api/v1/workflows/:id",
+  },
+  "workflow.delete": {
+    requires: "workflow.write",
+    method: "DELETE",
+    path: "/api/v1/workflows/:id",
+  },
+
+  // Every trigger belongs to a workflow and is read as part of it, so reading
+  // one needs the workflow grant; there is no trigger family.
+  "trigger.query": { requires: "workflow.read", method: "GET", path: "/api/v1/triggers" },
+
   "runner.query": { requires: "infra.read", method: "GET", path: "/api/v1/runners" },
   "runner.read": { requires: "infra.read", method: "GET", path: "/api/v1/runners/:id" },
   "runner.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/runners/:id" },

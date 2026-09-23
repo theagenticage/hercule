@@ -29,10 +29,9 @@
  * The body cap is not in that order: it is the listener's, given to Bun as
  * `maxRequestBodySize` and, for the socket, as `maxPayloadLength`, so an
  * oversize body is refused by the transport before a byte of it is read and
- * before this module runs at all. That `413` is
- * the one response the API sends outside the error envelope, and it is
- * deliberate: an enveloped answer would mean reading the body first, which is
- * the cost the cap exists to avoid.
+ * before this module runs at all. That `413` is the one response the API sends
+ * outside the error envelope, and it is deliberate: an enveloped answer would
+ * mean reading the body first, which is the cost the cap exists to avoid.
  *
  * Each request is one fiber, and `BunHttpServer` wires the request's abort
  * signal to it: a client that hangs up interrupts the fiber, and
@@ -61,13 +60,18 @@ import { withWebBundle, type WebBundle } from "./static";
  * The largest request body the controller reads, in bytes. The listener is
  * given this as `maxRequestBodySize`, so it is enforced by the transport.
  *
- * Nothing the public API takes in v1 is anywhere near a megabyte - the largest
- * is a secret value - and without a cap an unauthenticated caller can push
- * arbitrary bytes into durable storage through a failed login's audit row. The
- * cap is the listener's, so it holds for every operation and for paths no
- * operation owns, and an oversize body is refused before it is read.
+ * The largest value the public API takes is a workflow's source, at most 256K
+ * characters. As JSON, one character takes at most six bytes, because JSON
+ * writes a control character as an escape such as `\u0001`. So a source
+ * can need 1.5 MiB, and the cap is above that. Every source short enough to
+ * store then reaches the controller, and a refusal of it is an answer in the
+ * error envelope and not the bare `413` of the transport. Without a cap, an
+ * unauthenticated caller can push arbitrary bytes into durable storage through
+ * a failed login's audit row. The cap is the listener's, so it holds for every
+ * operation and for paths no operation owns, and an oversize body is refused
+ * before it is read.
  */
-export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+export const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
  * The listener options that enforce the cap, on a request body and on a socket

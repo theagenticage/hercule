@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import { hostname } from "node:os";
 import type { FetchLike } from "@hercule/client-core";
 import type { Env } from "./credentials";
+import { UsageError } from "./exit";
 
 export interface Io {
   readonly env: Env;
@@ -28,10 +29,26 @@ export interface Io {
   readonly fetch: FetchLike;
 }
 
+/**
+ * The text of the bytes read from stdin, which must be UTF-8. A byte that is
+ * not part of a UTF-8 character is refused, and not replaced: a replacement
+ * would change what the caller sent before any operation could see it. A
+ * leading byte order mark is kept, because it is part of what was sent.
+ */
+export const decodeStdin = (bytes: Uint8Array): string => {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new UsageError(
+      "stdin is not valid UTF-8 text. Convert it to UTF-8, for example with iconv, and pipe it in again.",
+    );
+  }
+};
+
 const readAllStdin = async (): Promise<string> => {
   const chunks: Array<Uint8Array> = [];
   for await (const chunk of process.stdin) chunks.push(new Uint8Array(chunk as Uint8Array));
-  return Buffer.concat(chunks).toString("utf8");
+  return decodeStdin(Buffer.concat(chunks));
 };
 
 /**

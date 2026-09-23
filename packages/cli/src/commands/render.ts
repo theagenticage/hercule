@@ -6,7 +6,7 @@
  * object becomes aligned key-value lines, and ids are shortened to the tail the
  * CLI accepts back as an argument.
  */
-import type { StructuredResult } from "@hercule/contract";
+import type { Issue, StructuredResult, Workflow, WorkflowSaved } from "@hercule/contract";
 import type { Outcome } from "./execute";
 import type { Command } from "./tree";
 
@@ -34,10 +34,21 @@ const columnsOf = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<
   return columns;
 };
 
+/**
+ * A table cell on one line. A value that spans several lines, such as a
+ * description, would break its row across the columns, so the cell shows the
+ * value's first line and " ..." to say that more follows. The space keeps the
+ * dots apart from a full stop that ends the first line.
+ */
+const keepOnOneLine = (text: string): string => {
+  const lineBreak = text.search(/[\r\n]/);
+  return lineBreak === -1 ? text : `${text.slice(0, lineBreak).trimEnd()} ...`;
+};
+
 const table = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
   if (rows.length === 0) return ["no results"];
   const columns = columnsOf(rows);
-  const body = rows.map((row) => columns.map((column) => cell(row[column])));
+  const body = rows.map((row) => columns.map((column) => keepOnOneLine(cell(row[column]))));
   const widths = columns.map((column, index) =>
     Math.max(column.length, ...body.map((row) => row[index]!.length)),
   );
@@ -164,6 +175,23 @@ const transcriptLine = (row: Record<string, unknown>): string => {
 const transcript = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
   rows.length === 0 ? ["no results"] : rows.map(transcriptLine);
 
+/**
+ * One issue as a line: its path, with the keys joined by dots, and then its
+ * message. An issue with an empty path is its message alone.
+ */
+export const describeIssue = (issue: Issue): string =>
+  issue.path.length === 0 ? issue.message : `${issue.path.join(".")}: ${issue.message}`;
+
+/**
+ * What a workflow save answers, without the source the caller has just sent:
+ * the id to read it back by, whether it is on, and one line per warning, each
+ * naming its place in the definition.
+ */
+const renderWorkflowSaved = (answer: WorkflowSaved): ReadonlyArray<string> => [
+  ...keyValues({ id: answer.workflow.id, enabled: answer.workflow.enabled }),
+  ...answer.warnings.map((warning) => `warning: ${describeIssue(warning)}`),
+];
+
 /** The lines the CLI prints for a successful command, without `--json`. */
 export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   const asLines = command.id === "transcript.read" ? transcript : table;
@@ -180,6 +208,19 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
   }
   if (typeof value === "object" && value !== null) {
     const record = value as Record<string, unknown>;
+    // A workflow's source is a document, and it is printed as it is, so what a
+    // read prints can be edited and piped back into the command that stores
+    // it. A save prints no source at all: the caller has just sent it.
+    if (command.id === "workflow.read") {
+      const { source } = value as Workflow;
+      // The CLI ends each printed line with `\n`. A source whose first line
+      // break is `\r\n` gets a `\r` before it, so the output ends with the
+      // line break the source uses, and a CRLF file comes back byte for byte.
+      return [/^[^\n]*\r\n/.test(source) ? `${source}\r` : source];
+    }
+    if (command.id === "workflow.create" || command.id === "workflow.update") {
+      return renderWorkflowSaved(value as WorkflowSaved);
+    }
     const lines = [...keyValues(record)];
     // The one teaching line this build has. A caller who has just spawned a
     // session wants to watch it. It is not pointed at a subscription on that

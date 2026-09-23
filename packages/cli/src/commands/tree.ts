@@ -210,7 +210,7 @@ const kebab = (name: string): string => name.replace(/([a-z0-9])([A-Z])/g, "$1-$
 const buildField = (
   name: string,
   ast: Ast,
-  row: FieldRow,
+  row: Exclude<FieldRow, { readonly hidden: true }>,
   carriedIn: FieldCarrier,
   schema: unknown,
 ): Field => {
@@ -227,7 +227,9 @@ const buildField = (
     kind: scalarKind(value),
     decodeShorthand: readShorthandDecoder(schema),
     repeated: element !== undefined,
-    optional: ast.context?.isOptional === true,
+    // A row may make a field the command needs although the operation does
+    // not, where the command line has no other way to give its value.
+    optional: ast.context?.isOptional === true && !("required" in row && row.required === true),
     nullable: isNullable(ast) || isNullable(value),
     choices: literalsOf(withoutNull(value)),
     holdsAnId: holdsAnId(value),
@@ -241,7 +243,8 @@ const buildField = (
  * Every field of one schema, the paging triple left out: `--limit`, `--cursor`
  * and `--sort` are handled by name everywhere and so have no row. A field the
  * table does not write is a row missing from the contract, and it is said here
- * rather than rendered as a nameless flag.
+ * rather than rendered as a nameless flag. A field whose row hides it is not
+ * on the command line at all.
  */
 const buildFields = (
   id: OperationId,
@@ -260,29 +263,25 @@ const buildFields = (
   return ast.propertySignatures
     .map((property) => [String(property.name), property.type] as const)
     .filter(([name]) => !PAGE_FIELDS.has(name))
-    .map(([name, type]) => {
+    .flatMap(([name, type]) => {
       const row = rows[name];
       if (row === undefined) throw new Error(`${id}: ${name} has no row`);
+      if ("hidden" in row) return [];
       // A bare word is a route parameter or a payload field. A query
       // parameter written as one would be parsed as a positional and then
       // sent nowhere, so the table is wrong and says so here.
       if (carriedIn === "query" && "positional" in row) {
         throw new Error(`${id}: ${name} is a query parameter and cannot be a bare word`);
       }
-      return buildField(name, type, row, carriedIn, fields?.[name]);
+      return [buildField(name, type, row, carriedIn, fields?.[name])];
     });
 };
 
 /** The payload schema hides one level deeper: a media-type map holding a codec. */
-const buildPayloadFields = (
-  id: OperationId,
-  payload: unknown,
-  rows: Record<string, FieldRow>,
-): ReadonlyArray<Field> => {
-  if (!(payload instanceof Map)) return [];
+const readPayloadSchema = (payload: unknown): unknown => {
+  if (!(payload instanceof Map)) return undefined;
   const json = payload.get("application/json") as { schemas?: ReadonlyArray<unknown> } | undefined;
-  const codec = json?.schemas?.[0] as { schema?: unknown } | undefined;
-  return buildFields(id, codec?.schema, rows, "payload");
+  return (json?.schemas?.[0] as { schema?: unknown } | undefined)?.schema;
 };
 
 const propertyNames = (ast: Ast | undefined): ReadonlyArray<string> =>
@@ -342,10 +341,24 @@ const build = (): ReadonlyArray<Command> => {
         success?: unknown;
         error?: unknown;
       };
+      const payloadSchema = readPayloadSchema(each.payload);
+      // A row that names a field the operation does not take is stale, hidden
+      // or not. It is refused here, as `buildFields` refuses a field with no
+      // row, so the table and the schemas can never disagree about the fields.
+      const taken = new Set(
+        [each.params, payloadSchema, each.query].flatMap((schema) =>
+          propertyNames((schema as { ast?: Ast } | undefined)?.ast),
+        ),
+      );
+      const stale = Object.keys(row.fields).find((name) => !taken.has(name));
+      if (stale !== undefined) {
+        throw new Error(`${id}: the row names ${stale}, which the operation does not take`);
+      }
+
       const params = new Map(
         buildFields(id, each.params, row.fields, "path").map((field) => [field.name, field]),
       );
-      const payload = buildPayloadFields(id, each.payload, row.fields);
+      const payload = buildFields(id, payloadSchema, row.fields, "payload");
       const query = buildFields(id, each.query, row.fields, "query");
       const inPath = pathParams(operation.path);
 

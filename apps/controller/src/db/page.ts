@@ -18,13 +18,15 @@
  * page whose boundary means nothing. The tag turns every such replay, including
  * the same listing walked under a different sort, into one `validation` error.
  *
- * Three cursor shapes exist, because three kinds of walk do. Two are keyset:
- * over a sort key plus a UUID, and over an integer id alone, which is what the
- * event log sorts by. The third is an offset, which relevance-ordered full-text
- * results need because a bm25 rank is not a stable key to resume from. The two
- * that carry a bare number name their kind inside the cursor, so an offset can
- * never be read back as an id: the two mean different things and the scope tag
- * alone would not always tell them apart.
+ * Four cursor shapes exist, because four kinds of walk do. Three are keyset:
+ * over a sort key plus a UUID; over a sort key plus the UUID of the record that
+ * owns the row and the row's name inside that record, which is how a trigger is
+ * named; and over an integer id alone, which is what the event log sorts by.
+ * The fourth is an offset, which relevance-ordered full-text results need
+ * because a bm25 rank is not a stable key to resume from. The two that carry a
+ * bare number name their kind inside the cursor, so an offset can never be read
+ * back as an id: the two mean different things and the scope tag alone would
+ * not always tell them apart.
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -160,6 +162,37 @@ export const decodeCursor = (
     typeof payload[1] === "string" &&
     UUID_PATTERN.test(payload[1])
       ? ([payload[0] as SortKey, payload[1]] as const)
+      : undefined,
+  );
+
+/**
+ * The cursor for a row that has no id of its own: the walk it belongs to, its
+ * sort key, the id of the record that owns it, and its name inside that record.
+ */
+export const encodeOwnedCursor = (
+  scope: CursorScope,
+  sortKey: string,
+  ownerId: string,
+  name: string,
+): string => seal(scope, [sortKey, ownerId, name]);
+
+/**
+ * The sort key, owner id and name an owned-row cursor carries, or
+ * `CursorError` if it carries none or belongs to another walk. The one walk
+ * that uses it sorts on a timestamp, so the key is text, and a key of another
+ * type is refused for the reason `decodeCursor` gives.
+ */
+export const decodeOwnedCursor = (
+  cursor: string,
+  scope: CursorScope,
+): Effect.Effect<readonly [string, string, string], CursorError> =>
+  open(cursor, scope, (payload) =>
+    payload.length === 3 &&
+    typeof payload[0] === "string" &&
+    typeof payload[1] === "string" &&
+    UUID_PATTERN.test(payload[1]) &&
+    typeof payload[2] === "string"
+      ? ([payload[0], payload[1], payload[2]] as const)
       : undefined,
   );
 

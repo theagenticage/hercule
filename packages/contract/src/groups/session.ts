@@ -120,6 +120,21 @@ export const SpawnCheckout = Schema.Struct({
 
 export type SpawnCheckout = Schema.Schema.Type<typeof SpawnCheckout>;
 
+/** A repo's main workspace. */
+export const PrimarySpawnWorkspace = Schema.Struct({
+  kind: Schema.Literal("primary"),
+  resourceId: Id,
+  /** The branch the main workspace is switched to before the harness starts. */
+  branch: Schema.optionalKey(Branch),
+});
+
+/** A new workspace with a worktree of each repo it names. */
+export const EphemeralSpawnWorkspace = Schema.Struct({
+  kind: Schema.Literal("ephemeral"),
+  /** Empty makes a scratch workspace: a directory and no checkout at all. */
+  checkouts: atMost(SpawnCheckout, MAX_SPAWN_CHECKOUTS),
+});
+
 /**
  * The workspace a thread opens in: the repo's main workspace, a fresh worktree
  * of its own, or one that already stands. A workspace is a kind and a list of
@@ -127,17 +142,8 @@ export type SpawnCheckout = Schema.Schema.Type<typeof SpawnCheckout>;
  * no checkout at all.
  */
 export const SpawnWorkspace = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literal("primary"),
-    resourceId: Id,
-    /** The branch the main workspace is switched to before the harness starts. */
-    branch: Schema.optionalKey(Branch),
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("ephemeral"),
-    /** Empty makes a scratch workspace: a directory and no checkout at all. */
-    checkouts: atMost(SpawnCheckout, MAX_SPAWN_CHECKOUTS),
-  }),
+  PrimarySpawnWorkspace,
+  EphemeralSpawnWorkspace,
   Schema.Struct({ kind: Schema.Literal("existing"), workspaceId: Id }),
 ]);
 

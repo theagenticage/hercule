@@ -2,7 +2,8 @@ import { defineConfig } from "vitest/config";
 
 /**
  * Three projects: the two React packages, everything else, and the one suite
- * that runs the release binary.
+ * that runs the release binary. A few tests are in both of the first two, as
+ * `bothEngineTests` below says.
  *
  * The first two run on different runtimes, which is why `pnpm test` invokes
  * vitest twice. The `node` project needs Bun: it reaches `bun:sqlite`,
@@ -15,13 +16,21 @@ import { defineConfig } from "vitest/config";
  * runs it, after `pnpm build:binary`. It is kept apart because a build rewrites
  * `apps/web/dist` and the generated file list underneath any controller a
  * parallel suite is running from source. Most of its suites test the packaging
- * itself and refuse to start without `./hercule`, saying so; the two that test the
- * controller's own surface rather than the packaging - `e2e/workspace.test.ts`
- * and `e2e/github-push.test.ts` - are the same program either way, so with no
- * build they run the dispatcher's source instead (`releaseBinary` in
- * `e2e/harness.ts`).
+ * itself and refuse to start without `./hercule`, saying so; the three that test the
+ * controller's own surface rather than the packaging - `e2e/workspace.test.ts`,
+ * `e2e/github-push.test.ts` and `e2e/workflows.test.ts` - are the same program
+ * either way, so with no build they run the dispatcher's source instead
+ * (`releaseBinary` in `e2e/harness.ts`).
  */
 const reactPackages = ["apps/web", "packages/ui"];
+
+/**
+ * Tests of code that runs in the controller and in the browser alike. They run
+ * in both projects, so two JavaScript engines run them: JavaScriptCore under
+ * Bun, and V8 under Node, which is also the engine of Chrome. The engines have
+ * different limits, such as how many arguments one call can take.
+ */
+const bothEngineTests = ["packages/contract/src/groups/workflow.test.ts"];
 
 const binaryTests = [
   "e2e/web.test.ts",
@@ -34,6 +43,7 @@ const binaryTests = [
   "e2e/subscription-wake.test.ts",
   "e2e/workspace.test.ts",
   "e2e/github-push.test.ts",
+  "e2e/workflows.test.ts",
   "e2e/binary-size.test.ts",
 ];
 
@@ -67,7 +77,7 @@ export default defineConfig({
           // sees the first one still mounted.
           globals: true,
           setupFiles: ["packages/ui/src/test-setup.ts"],
-          include: reactPackages.map((p) => `${p}/src/**/*.test.{ts,tsx}`),
+          include: [...reactPackages.map((p) => `${p}/src/**/*.test.{ts,tsx}`), ...bothEngineTests],
         },
       },
       {

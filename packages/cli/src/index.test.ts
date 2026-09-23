@@ -1099,3 +1099,151 @@ describe("the last line of every command's help", () => {
     }
   });
 });
+
+/**
+ * A workflow's source is a document with newlines and comments, so it travels
+ * on stdin and never in argv. A create has nothing to send without it and
+ * reads it unasked. An update reads it only when `--source-stdin` asks, so an
+ * empty pipe never blanks a stored workflow.
+ *
+ * The two directions mirror each other. Going in, the source is stdin minus
+ * exactly one final line break, `\n` or `\r\n`, which is the rule every stdin
+ * field follows. Coming out, `workflow read` prints the source and one line
+ * break after it, the one the source itself uses. So a file that ends in a
+ * line break comes back byte for byte. A file with no final line break comes
+ * back with one.
+ */
+describe("the source of a workflow through the CLI", () => {
+  const CREDENTIAL_ENV = { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" };
+  /** A file as an editor saves it: one newline at the end. */
+  const WORKFLOW_FILE = [
+    "# Files one task.",
+    "name: File a task",
+    "",
+    "steps:",
+    "  - id: file_task",
+    "    kind: action",
+    "    action: task.create",
+    "",
+  ].join("\n");
+  /** The source that file sends: the file minus its final newline. */
+  const WORKFLOW_SOURCE = WORKFLOW_FILE.slice(0, -1);
+  const WORKFLOW_ID = id("aaaaaaa1");
+
+  const buildWorkflowRecord = (source: string) => ({
+    id: WORKFLOW_ID,
+    enabled: false,
+    source,
+    createdAt: "2026-09-22T10:00:00.000Z",
+    updatedAt: "2026-09-22T10:00:00.000Z",
+  });
+
+  /** What the controller answers a save with: the stored record and the save's warnings. */
+  const SAVE_ANSWER = { workflow: buildWorkflowRecord(WORKFLOW_SOURCE), warnings: [] };
+
+  /** The bytes a terminal receives: each line the CLI writes, and the newline after it. */
+  const joinPrintedLines = (lines: ReadonlyArray<string>): string =>
+    lines.map((line) => `${line}\n`).join("");
+
+  it("sends stdin minus exactly one final newline as a create's source, with no marker asked for", async () => {
+    // The second file ends in a blank line, so one newline stays in its source.
+    for (const [stdin, source] of [
+      [WORKFLOW_FILE, WORKFLOW_SOURCE],
+      [`${WORKFLOW_FILE}\n`, WORKFLOW_FILE],
+    ] as const) {
+      const fetch = stubFetch(() => SAVE_ANSWER);
+      const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin });
+
+      expect(await main(["--home", home, "workflow", "create"], io)).toBe(0);
+      expect(fetch.calls).toHaveLength(1);
+      expect(fetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/workflows" });
+      expect(fetch.calls[0]!.body).toEqual({ source });
+    }
+  });
+
+  it("sends stdin minus exactly one final newline as an update's source when --source-stdin asks for it", async () => {
+    const fetch = stubFetch(() => SAVE_ANSWER);
+    const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: WORKFLOW_FILE });
+
+    expect(
+      await main(["--home", home, "workflow", "update", WORKFLOW_ID, "--source-stdin"], io),
+    ).toBe(0);
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "PATCH",
+      path: `/api/v1/workflows/${WORKFLOW_ID}`,
+    });
+    expect(fetch.calls[0]!.body).toEqual({ source: WORKFLOW_SOURCE });
+  });
+
+  it("reads no stdin for an update that only turns the workflow on", async () => {
+    const fetch = stubFetch(() => ({
+      ...SAVE_ANSWER,
+      workflow: { ...SAVE_ANSWER.workflow, enabled: true },
+    }));
+    const stubbed = stubIo({ env: CREDENTIAL_ENV, fetch });
+    let stdinReads = 0;
+    const io = {
+      ...stubbed,
+      stdin: () => {
+        stdinReads += 1;
+        return Promise.resolve(WORKFLOW_FILE);
+      },
+    };
+
+    expect(
+      await main(["--home", home, "workflow", "update", WORKFLOW_ID, "--enabled", "true"], io),
+    ).toBe(0);
+    expect(stdinReads).toBe(0);
+    expect(fetch.calls[0]?.body).toEqual({ enabled: true });
+  });
+
+  it("has no inline flag for the source on either command, and sends nothing", async () => {
+    for (const argv of [
+      ["workflow", "create", "--source", "name: inline"],
+      ["workflow", "update", WORKFLOW_ID, "--source", "name: inline"],
+    ]) {
+      const fetch = stubFetch(() => SAVE_ANSWER);
+      const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: WORKFLOW_FILE });
+
+      expect(await main(["--home", home, ...argv], io), argv.join(" ")).toBe(2);
+      expect(io.stderr.join("\n"), argv.join(" ")).toContain("--source-stdin");
+      expect(fetch.calls, argv.join(" ")).toEqual([]);
+    }
+  });
+
+  it("prints a read's source and exactly one newline after it, and no key-value lines", async () => {
+    // The first source ends in a newline, as one saved over HTTP from a file
+    // does; the second is what the CLI itself sent for the same file.
+    for (const source of [WORKFLOW_FILE, WORKFLOW_SOURCE]) {
+      const fetch = stubFetch(() => buildWorkflowRecord(source));
+      const io = stubIo({ env: CREDENTIAL_ENV, fetch });
+
+      expect(await main(["--home", home, "workflow", "read", WORKFLOW_ID], io)).toBe(0);
+      expect(fetch.calls[0]).toMatchObject({
+        method: "GET",
+        path: `/api/v1/workflows/${WORKFLOW_ID}`,
+      });
+      expect(joinPrintedLines(io.stdout)).toBe(`${source}\n`);
+      expect(io.stderr).toEqual([]);
+    }
+  });
+
+  it("gives back a file saved with CRLF line breaks byte for byte, through a create and a read", async () => {
+    const crlfFile = WORKFLOW_FILE.replaceAll("\n", "\r\n");
+    // The controller stores the source it is sent, and a read answers it.
+    let storedSource = "";
+    const fetch = stubFetch((request) => {
+      if (request.method !== "POST") return buildWorkflowRecord(storedSource);
+      storedSource = (request.body as { source: string }).source;
+      return { workflow: buildWorkflowRecord(storedSource), warnings: [] };
+    });
+    const createIo = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: crlfFile });
+    expect(await main(["--home", home, "workflow", "create"], createIo)).toBe(0);
+    expect(storedSource).toBe(crlfFile.slice(0, -"\r\n".length));
+
+    const readIo = stubIo({ env: CREDENTIAL_ENV, fetch });
+    expect(await main(["--home", home, "workflow", "read", WORKFLOW_ID], readIo)).toBe(0);
+    expect(joinPrintedLines(readIo.stdout)).toBe(crlfFile);
+  });
+});

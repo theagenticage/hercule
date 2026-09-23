@@ -66,6 +66,19 @@ describe("hercule login", () => {
     });
   });
 
+  it("takes a final CRLF on stdin as the line break, and not as part of the password", async () => {
+    const fetch = controller();
+    const io = stubIo({ fetch, stdin: "hunter2\r\n" });
+
+    expect(
+      await main(
+        ["--home", home, "login", "http://c.test", "--username", "rogier", "--password-stdin"],
+        io,
+      ),
+    ).toBe(0);
+    expect(fetch.calls[0]?.body).toEqual({ username: "rogier", password: "hunter2" });
+  });
+
   it("writes the credential file readable by no one else", async () => {
     const io = stubIo({ fetch: controller(), stdin: "hunter2" });
     await main(

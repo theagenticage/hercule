@@ -6,9 +6,11 @@ import {
   decodeCursor,
   decodeIdCursor,
   decodeOffsetCursor,
+  decodeOwnedCursor,
   encodeCursor,
   encodeIdCursor,
   encodeOffsetCursor,
+  encodeOwnedCursor,
   keysetOver,
   pageOf,
   type CursorScope,
@@ -157,6 +159,74 @@ describe("integer keyset cursors", () => {
     expect(await refused(decodeCursor(encodeIdCursor(EVENTS, 7), EVENTS, "string"))).toBe(
       "CursorError",
     );
+  });
+});
+
+/** Triggers are named by their workflow's id and the id their workflow's source gives them. */
+const TRIGGERS: CursorScope = { op: "trigger.query", field: "createdAt", direction: "desc" };
+const CREATED_AT = "2026-09-22T10:00:00.000Z";
+
+/** A cursor in the owned-row shape, with every part given, for the shapes it must refuse. */
+const sealOwned = (...payload: ReadonlyArray<unknown>): string =>
+  Buffer.from(JSON.stringify(["trigger.query", "createdAt", "desc", ...payload]), "utf8").toString(
+    "base64url",
+  );
+
+describe("owned-row keyset cursors", () => {
+  it("round-trips the sort key, the owner's id and the name", async () => {
+    const cursor = encodeOwnedCursor(TRIGGERS, CREATED_AT, ID, "nightly");
+    expect(await Effect.runPromise(decodeOwnedCursor(cursor, TRIGGERS))).toEqual([
+      CREATED_AT,
+      ID,
+      "nightly",
+    ]);
+  });
+
+  it("refuses another operation's cursor", async () => {
+    const cursor = encodeOwnedCursor(
+      { ...TRIGGERS, op: "workflow.query" },
+      CREATED_AT,
+      ID,
+      "nightly",
+    );
+    expect(await refused(decodeOwnedCursor(cursor, TRIGGERS))).toBe("CursorError");
+  });
+
+  it("refuses its own cursor replayed on another field or direction", async () => {
+    const cursor = encodeOwnedCursor(TRIGGERS, CREATED_AT, ID, "nightly");
+    expect(await refused(decodeOwnedCursor(cursor, { ...TRIGGERS, field: "updatedAt" }))).toBe(
+      "CursorError",
+    );
+    expect(await refused(decodeOwnedCursor(cursor, { ...TRIGGERS, direction: "asc" }))).toBe(
+      "CursorError",
+    );
+  });
+
+  it("refuses an edited cursor, and a cursor of another shape", async () => {
+    expect(
+      await refused(
+        decodeOwnedCursor(edited(encodeOwnedCursor(TRIGGERS, CREATED_AT, ID, "nightly")), TRIGGERS),
+      ),
+    ).toBe("CursorError");
+    expect(await refused(decodeOwnedCursor("not a cursor at all", TRIGGERS))).toBe("CursorError");
+    // The keyset shape with one id has no name, and a numeric key is not a timestamp.
+    expect(await refused(decodeOwnedCursor(encodeCursor(TRIGGERS, CREATED_AT, ID), TRIGGERS))).toBe(
+      "CursorError",
+    );
+    expect(await refused(decodeOwnedCursor(sealOwned(1757, ID, "nightly"), TRIGGERS))).toBe(
+      "CursorError",
+    );
+    expect(
+      await refused(decodeOwnedCursor(sealOwned(CREATED_AT, "not-an-id", "nightly"), TRIGGERS)),
+    ).toBe("CursorError");
+    expect(await refused(decodeOwnedCursor(sealOwned(CREATED_AT, ID, 7), TRIGGERS))).toBe(
+      "CursorError",
+    );
+  });
+
+  it("is refused by the keyset decoder with one id", async () => {
+    const cursor = encodeOwnedCursor(TRIGGERS, CREATED_AT, ID, "nightly");
+    expect(await refused(decodeCursor(cursor, TRIGGERS, "string"))).toBe("CursorError");
   });
 });
 

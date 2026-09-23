@@ -284,6 +284,27 @@ export {
   SubscriptionTarget,
   SubscriptionTargetFromShorthand,
 } from "./groups/subscription";
+export {
+  WORKFLOW_SORT_FIELDS,
+  WORKFLOW_UPDATE_FIELDS,
+  Workflow,
+  WorkflowCreateInput,
+  WorkflowFilter,
+  WorkflowSaved,
+  WorkflowSummary,
+  WorkflowUpdateInput,
+  decodeWorkflowDefinition,
+  parseWorkflowSource,
+  renderWorkflowSource,
+  type WorkflowDefinition,
+} from "./groups/workflow";
+export {
+  TRIGGER_SORT_FIELDS,
+  Trigger,
+  TriggerFilter,
+  TriggerKind,
+  TriggerStatus,
+} from "./groups/trigger";
 export { readShorthandDecoder } from "./shorthand";
 export {
   Delta,

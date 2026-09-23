@@ -314,12 +314,16 @@ export const parseArguments = async (
   }
 
   if (reading.length > 0) {
-    const text = await readStdin();
+    // One trailing newline is taken off, as a heredoc and an editor add one.
+    // A file saved on Windows ends its last line with `\r\n`, and that pair is
+    // the one newline too.
+    const text = (await readStdin()).replace(/\r?\n$/, "");
     if (reading.length === 1) {
       const field = reading[0]!;
-      payload[field.name] = coerce(field, text.replace(/\n$/, ""), help);
+      payload[field.name] = coerce(field, text, help);
     } else {
-      const lines = text.replace(/\n$/, "").split("\n");
+      // A `\r\n` ends a line here too, so no line keeps a `\r` of a CRLF file.
+      const lines = text.split(/\r?\n/);
       if (lines.length !== reading.length) {
         throw new UsageError(
           `stdin has ${lines.length} line(s) but ${reading.length} fields read from it: ${reading

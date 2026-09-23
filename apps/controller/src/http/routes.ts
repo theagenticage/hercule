@@ -66,6 +66,7 @@ import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { Setup, SetupLayer } from "../setup";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { User, UserLayer } from "../users";
+import { WorkflowService, WorkflowServiceLayer } from "../workflows";
 
 const API_ERRORS = [
   Unauthenticated,
@@ -288,6 +289,32 @@ const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) 
   }),
 );
 
+const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
+  Effect.gen(function* () {
+    const workflows = yield* WorkflowService;
+    return handlers
+      .handle("query", ({ query }) => operation(workflows.query(query)))
+      .handle("read", ({ params }) => operation(workflows.read(params)))
+      .handle("create", ({ payload }) => operation(workflows.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        operation(workflows.update({ id: params.id, ...payload })),
+      )
+      .handle("delete", ({ params }) => operation(workflows.delete(params)));
+  }),
+);
+
+/**
+ * A trigger is declared in its workflow's source and its row is written with
+ * the workflow, so the workflow service serves it; the group is separate
+ * because the operation is `trigger.query`.
+ */
+const triggerRoutes = HttpApiBuilder.group(api, "trigger", (handlers) =>
+  Effect.gen(function* () {
+    const workflows = yield* WorkflowService;
+    return handlers.handle("query", ({ query }) => operation(workflows.queryTriggers(query)));
+  }),
+);
+
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
@@ -491,6 +518,7 @@ export const operationLayers = Layer.mergeAll(
   ).pipe(Layer.provideMerge(LiveLayer), Layer.provideMerge(DispatchLayer)),
   ProvisioningLayer,
   SubscriptionServiceLayer,
+  WorkflowServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,
 );
@@ -513,6 +541,8 @@ export const handlerLayers = Layer.mergeAll(
   connectionRoutes,
   eventRoutes,
   subscriptionRoutes,
+  workflowRoutes,
+  triggerRoutes,
   runnerRoutes,
   pluginRoutes,
   providerRoutes,

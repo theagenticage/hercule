@@ -34,6 +34,20 @@ export default defineConfig(({ command }) => {
       babel({ presets: [reactCompilerPreset()] }),
       tailwindcss(),
     ],
+    build: {
+      rolldownOptions: {
+        treeshake: {
+          // `yaml` declares no `sideEffects` in its package, so a bundler keeps
+          // each of its module-level statements, and what they reference, in
+          // every chunk that imports it. `@hercule/contract` imports it for the
+          // one parse of a workflow's source, and the first paint imports the
+          // contract. The package defines symbols, classes and constants and
+          // changes nothing outside itself, so it is declared free of side
+          // effects here, and the parse reaches only the chunks that call it.
+          moduleSideEffects: [{ test: /[\\/]node_modules[\\/]yaml[\\/]/, sideEffects: false }],
+        },
+      },
+    },
     // In development the app is served by Vite and the API by a controller the
     // developer started themselves, so `/api` is proxied to the port `hercule
     // serve` binds by default and the app talks to one origin here as it does in

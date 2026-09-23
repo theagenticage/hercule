@@ -11,6 +11,7 @@ import { OPERATIONS } from "./operations";
  */
 interface FieldRow {
   readonly positional?: true;
+  readonly hidden?: true;
   readonly stdin?: true;
   readonly flag?: string;
   readonly help?: string;
@@ -35,12 +36,16 @@ const nouns: Record<string, { readonly summary?: string; readonly flow?: string 
 const rows = Object.entries(table);
 const visible = rows.filter(([, row]) => row.hidden !== true);
 
-/** Every field of every visible row, addressed the way a failure should read. */
+/**
+ * Every field a visible row puts on the command line, addressed the way a
+ * failure should read. A field the row hides is not on it, as a hidden row is
+ * not.
+ */
 const fields = (): ReadonlyArray<[string, string, FieldRow]> =>
   visible.flatMap(([id, row]) =>
-    Object.entries(row.fields ?? {}).map(
-      ([name, field]) => [id, name, field] as [string, string, FieldRow],
-    ),
+    Object.entries(row.fields ?? {})
+      .filter(([, field]) => field.hidden !== true)
+      .map(([name, field]) => [id, name, field] as [string, string, FieldRow]),
   );
 
 /** The `resolves` every visible field declares, keyed `<operation> <field>`. */
@@ -105,6 +110,14 @@ const COMMANDS: Record<string, string> = {
   "subscription.query": "subscription list",
   "subscription.create": "subscription create",
   "subscription.cancel": "subscription cancel",
+
+  "workflow.query": "workflow list",
+  "workflow.read": "workflow read",
+  "workflow.create": "workflow create",
+  "workflow.update": "workflow update",
+  "workflow.delete": "workflow delete",
+
+  "trigger.query": "trigger list",
 
   "runner.query": "runner list",
   "runner.read": "runner read",
@@ -193,6 +206,8 @@ const STDIN_FIELDS = [
   "input.update text",
   "plugin.configure config",
   "provider.create config",
+  "workflow.create source",
+  "workflow.update source",
 ];
 
 /** Every field whose id tail is resolved, and the listing that resolves it. */
@@ -217,6 +232,12 @@ const RESOLVES: Record<string, string> = {
 
   "workspace.read id": "workspace.query",
   "workspace.dispose id": "workspace.query",
+
+  "workflow.read id": "workflow.query",
+  "workflow.update id": "workflow.query",
+  "workflow.delete id": "workflow.query",
+
+  "trigger.query workflowId": "workflow.query",
 
   "runner.read id": "runner.query",
   "runner.update id": "runner.query",

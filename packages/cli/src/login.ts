@@ -122,7 +122,9 @@ export const login = async (
 
   let password: string;
   if (passwordStdin) {
-    password = (await io.stdin()).replace(/\n$/, "");
+    // One trailing line break is taken off, `\r\n` as well as `\n`, as for
+    // every other field read from stdin.
+    password = (await io.stdin()).replace(/\r?\n$/, "");
   } else if (io.isTty()) {
     password = await io.prompt("password: ");
   } else {

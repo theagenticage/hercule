@@ -18,7 +18,7 @@ import { Result } from "effect";
 import { parseArguments, said } from "./commands/args";
 import { execute } from "./commands/execute";
 import { commandHelp, nounHelp, rootHelp, shellExample } from "./commands/help";
-import { renderHuman } from "./commands/render";
+import { describeIssue, renderHuman } from "./commands/render";
 import { commandAt, wordsAfter, type Command } from "./commands/tree";
 import { CredentialError, resolveCredential, resolveUrl, type Env } from "./credentials";
 import { EXIT, UsageError } from "./exit";
@@ -262,8 +262,7 @@ const refusals = (error: ApiError): ReadonlyArray<string> => {
   if (!Array.isArray(issues)) return [];
   return issues.map((issue) => {
     const { path, message } = issue as { path?: ReadonlyArray<string>; message?: string };
-    const where = path === undefined || path.length === 0 ? undefined : path.join(".");
-    return where === undefined ? String(message) : `${where}: ${String(message)}`;
+    return describeIssue({ path: path ?? [], message: String(message) });
   });
 };
 

@@ -12,6 +12,8 @@ export const Id = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, {
     title: "uuidv7",
     description: "a canonical lowercase UUIDv7",
+    // A refusal says what an id looks like, and not the pattern that checks it.
+    expected: "a canonical lowercase UUIDv7",
   }),
 );
 
