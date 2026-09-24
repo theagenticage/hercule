@@ -1,10 +1,13 @@
-import type { CSSProperties, JSX } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from "react";
 import {
+  buildTimeline,
   describeStepDuration,
   describeUnstartedStep,
   formatElapsed,
-  type Timeline,
+  isRunLive,
+  type TickAlign,
 } from "@hercule/client-core";
+import type { Run } from "@hercule/contract";
 import { WORK_STATE_HUES, cn, type WorkState } from "@hercule/ui";
 import { StepCells, StepErrorLine } from "./step-parts";
 
@@ -22,10 +25,23 @@ const GRID: CSSProperties = {
   paddingInline: ROW_PADDING,
 };
 
-/** The track column's edges, for the line of now that crosses every row's track. */
+/** The track column's edges, for the line at the end of the axis that crosses every row's track. */
 const TRACK: CSSProperties = {
   left: ROW_PADDING + MARK_COLUMN + COLUMN_GAP + STEP_COLUMN + COLUMN_GAP,
   right: ROW_PADDING + DURATION_COLUMN + COLUMN_GAP,
+};
+
+/**
+ * The width of one character of a tick label: IBM Plex Mono, whose every
+ * glyph is 0.6em wide, at `text-label`, 10.5px.
+ */
+const TICK_LABEL_CHARACTER_WIDTH = 10.5 * 0.6;
+
+/** The shift that puts each end of a tick's label at the tick, by the label's alignment. */
+const TICK_LABEL_SHIFT: Readonly<Record<TickAlign, string>> = {
+  start: "",
+  center: "-translate-x-1/2",
+  end: "-translate-x-full",
 };
 
 /** Converts a fraction of the axis to a CSS length. */
@@ -42,48 +58,59 @@ const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
 /**
  * Renders the steps of a run on a shared time axis: one row per step record with a
  * bar from its start to its end, or to now while it runs, then the steps the
- * run has not reached. A vertical line marks now; it moves while the run is
- * live and stands where the run ended once it has ended.
+ * run has not reached. The axis ends at now while the run is live, and where
+ * the run ended once it has ended; a vertical line marks that end.
+ *
+ * The ticks are as close together as the axis's width lets their labels be,
+ * so the timeline measures its axis, and measures it again when it resizes.
  */
 export function StepTimeline({
-  timeline,
-  isLive,
+  run,
   now,
 }: {
-  readonly timeline: Timeline;
-  /** Whether the run is pending or running. */
-  readonly isLive: boolean;
+  readonly run: Run;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
 }): JSX.Element {
+  const axis = useRef<HTMLSpanElement>(null);
+  const [axisWidth, setAxisWidth] = useState(0);
+  // Measured before the first paint, so the ticks never show at a width they
+  // were not laid out for.
+  useLayoutEffect(() => {
+    const element = axis.current;
+    if (element === null) return;
+    setAxisWidth(element.getBoundingClientRect().width);
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry !== undefined) setAxisWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+  const timeline = buildTimeline(run, now, axisWidth / TICK_LABEL_CHARACTER_WIDTH);
+  const isLive = isRunLive(run.status);
   const { ticks } = timeline;
   return (
     <div className="rounded-card border border-line-soft bg-surface px-1.5 py-1">
       <div style={GRID} className="grid h-10 items-end pb-1.5" aria-hidden="true">
         <span />
         <span />
-        <span className="relative h-full">
-          {ticks.map((tick, index) => (
+        <span ref={axis} className="relative h-full">
+          {ticks.map((tick) => (
             <span
               key={tick.position}
               style={{ left: formatPercent(tick.position) }}
               className={cn(
                 "absolute bottom-0 font-mono text-label text-faint tabular-nums",
-                index === 0
-                  ? ""
-                  : index === ticks.length - 1
-                    ? "-translate-x-full"
-                    : "-translate-x-1/2",
+                TICK_LABEL_SHIFT[tick.align],
               )}
             >
               {tick.label}
             </span>
           ))}
           {isLive ? (
-            <span
-              style={{ left: formatPercent(timeline.now) }}
-              className="absolute top-0 -translate-x-1/2 rounded-control bg-surface px-1 font-mono text-label text-live tabular-nums"
-            >
+            <span className="absolute top-0 right-0 rounded-control bg-surface font-mono text-label whitespace-nowrap text-live tabular-nums">
               {`now ${formatElapsed(timeline.elapsedMs)}`}
             </span>
           ) : null}
@@ -107,10 +134,7 @@ export function StepTimeline({
                     ))}
                     {bar === undefined ? (
                       describeUnstartedStep(line.state) === undefined ? null : (
-                        <span
-                          style={{ left: formatPercent(timeline.now) }}
-                          className="absolute top-1/2 ml-2 -translate-y-1/2 text-fine whitespace-nowrap text-faint"
-                        >
+                        <span className="absolute top-1/2 right-0 mr-2 -translate-y-1/2 text-fine whitespace-nowrap text-faint">
                           {describeUnstartedStep(line.state)}
                         </span>
                       )
@@ -145,9 +169,8 @@ export function StepTimeline({
         </ul>
         <div aria-hidden="true" style={TRACK} className="pointer-events-none absolute inset-y-0">
           <span
-            style={{ left: formatPercent(timeline.now) }}
             className={cn(
-              "absolute inset-y-0 w-px",
+              "absolute inset-y-0 left-full w-px",
               isLive ? "bg-[color-mix(in_oklch,var(--live)_70%,transparent)]" : "bg-line",
             )}
           />

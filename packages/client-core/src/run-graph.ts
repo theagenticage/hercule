@@ -143,11 +143,22 @@ export const buildStepLines = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<
   ];
 };
 
+/**
+ * Which end of a tick's label stands at the tick. A label is centred on its
+ * tick unless centring it would reach past an end of the axis:
+ * - `start`: the label starts at its tick. The tick at 0 is aligned so.
+ * - `end`: the label ends at its tick. A tick at or near the end of the axis is
+ *   aligned so.
+ * - `center`: the label is centred on its tick.
+ */
+export type TickAlign = "start" | "center" | "end";
+
 /** A mark on the time axis. */
 export interface TimelineTick {
   /** Where the tick is, as a fraction of the axis. */
   readonly position: number;
   readonly label: string;
+  readonly align: TickAlign;
 }
 
 /** A step record's bar: where it starts and ends, as fractions of the axis. */
@@ -156,23 +167,30 @@ export interface TimelineBar {
   readonly end: number;
 }
 
+/**
+ * A run's step lines on a time axis. The axis starts when the run started and
+ * ends at now, or where the run ended.
+ */
 export interface Timeline {
-  /** The length of the axis in milliseconds. It is a whole number of ticks. */
-  readonly spanMs: number;
   readonly ticks: ReadonlyArray<TimelineTick>;
-  /** Where now is, as a fraction of the axis. For an ended run, where it ended. */
-  readonly now: number;
-  /** How long the run has run up to now, or ran, in milliseconds. */
+  /** How long the run has run up to now, or ran, in milliseconds. It is the length of the axis. */
   readonly elapsedMs: number;
   readonly lines: ReadonlyArray<{ readonly line: StepLine; readonly bar: TimelineBar | undefined }>;
 }
 
-/** The most ticks an axis has, not counting the one at 0. More would crowd the labels. */
+/**
+ * The most ticks an axis has, not counting the one at 0. A wide axis could
+ * hold more labels, but more would crowd it.
+ */
 const MAX_TICKS = 6;
+
+/** The least space between two tick labels, in characters of the labels' font. */
+const LABEL_GAP_CHARACTERS = 2;
 
 const SECOND_MS = 1000;
 const MINUTE_MS = 60 * SECOND_MS;
 const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
 
 /**
  * The distances between ticks an axis can use, shortest first: round numbers
@@ -218,37 +236,93 @@ const formatInUnits = (
 };
 
 /**
- * Returns the distance between ticks for an axis of `spanMs`: the shortest
- * step that needs at most `MAX_TICKS` ticks, or a whole number of days for a
- * run that has gone on for longer.
+ * Returns the distances between ticks that an axis `spanMs` long can use,
+ * shortest first: `TICK_STEPS`, then whole numbers of days. The last step is
+ * at least `spanMs`.
  */
-const decideTickStep = (spanMs: number): number =>
-  TICK_STEPS.find((step) => spanMs / step <= MAX_TICKS) ??
-  Math.ceil(spanMs / MAX_TICKS / (24 * HOUR_MS)) * 24 * HOUR_MS;
+const listTickSteps = (spanMs: number): ReadonlyArray<number> => [
+  ...TICK_STEPS,
+  ...Array.from({ length: Math.ceil(spanMs / DAY_MS) - 1 }, (_, index) => (index + 2) * DAY_MS),
+];
+
+/**
+ * Decides how to align a label `length` characters long whose tick is at
+ * `position` on an axis `axisWidth` characters wide: centred, unless that
+ * would reach past the start or the end of the axis.
+ */
+const decideTickAlign = (position: number, length: number, axisWidth: number): TickAlign => {
+  const centre = position * axisWidth;
+  if (centre - length / 2 < 0) return "start";
+  if (centre + length / 2 > axisWidth) return "end";
+  return "center";
+};
+
+/**
+ * Builds a tick every `step` milliseconds on an axis `spanMs` long and
+ * `axisWidth` characters wide, from 0 up to the last one inside the axis.
+ */
+const buildTicks = (step: number, spanMs: number, axisWidth: number): ReadonlyArray<TimelineTick> =>
+  Array.from({ length: Math.floor(spanMs / step) + 1 }, (_, index) => {
+    const position = (index * step) / spanMs;
+    const label = formatTickLabel(index * step);
+    return { position, label, align: decideTickAlign(position, [...label].length, axisWidth) };
+  });
+
+/**
+ * Checks that ticks `spacing` characters apart keep their labels at least
+ * `LABEL_GAP_CHARACTERS` apart, when the longest label is `longestLabel`
+ * characters long.
+ *
+ * The closest two labels can come is a centred label followed by one aligned
+ * to end at its tick at the end of the axis: half of one label and all of the
+ * other stand between the two ticks. The check assumes both are the longest
+ * label. That asks for a little more space than the labels need, but the
+ * answer does not depend on where the last tick falls. So while a run is
+ * live, its step only ever grows, and the ticks never flip back to a shorter
+ * step as the run grows.
+ */
+const areLabelsApart = (spacing: number, longestLabel: number): boolean =>
+  spacing >= 1.5 * longestLabel + LABEL_GAP_CHARACTERS;
+
+/**
+ * Builds the ticks of an axis `spanMs` long and `axisWidth` characters wide.
+ *
+ * The ticks are a round step apart: the shortest step that puts at most
+ * `MAX_TICKS` ticks inside the axis and keeps every two labels apart. When no
+ * step keeps the labels apart, because the axis is too narrow, the axis has
+ * only the tick at 0.
+ */
+const buildTimeAxis = (spanMs: number, axisWidth: number): ReadonlyArray<TimelineTick> => {
+  for (const step of listTickSteps(spanMs)) {
+    if (Math.floor(spanMs / step) > MAX_TICKS) continue;
+    const ticks = buildTicks(step, spanMs, axisWidth);
+    const longestLabel = Math.max(...ticks.map((tick) => [...tick.label].length));
+    if (areLabelsApart((step / spanMs) * axisWidth, longestLabel)) return ticks;
+  }
+  return [{ position: 0, label: formatTickLabel(0), align: "start" }];
+};
 
 /**
  * Places a run's step lines on a time axis that starts when the run started
- * and ends at now, or where the run ended. The axis is rounded up to a whole
- * number of round ticks, so it grows in steps while the run is live rather
- * than rescaling on every render.
+ * and ends at now, or where the run ended.
+ *
+ * The ticks stay at round steps, and only those inside the axis are drawn:
+ * a run of 23 seconds can have ticks at 0, 10s and 20s. They are as close
+ * together as their labels allow on an axis `axisWidthInCharacters` wide, and
+ * never closer: the labels are in a monospace font, so the caller passes the
+ * axis's width in pixels divided by the width of one character of the labels.
  */
-export const buildTimeline = (run: Run, now: number): Timeline => {
+export const buildTimeline = (run: Run, now: number, axisWidthInCharacters: number): Timeline => {
   const { startedAt, finishedAt } = readTimestamps(run);
   const origin = Date.parse(startedAt ?? run.createdAt);
   const end = finishedAt === undefined ? now : Date.parse(finishedAt);
   const elapsedMs = Math.max(0, end - origin);
   // An axis needs a length, even for a run that took no measurable time.
-  const step = decideTickStep(Math.max(1, elapsedMs));
-  const spanMs = Math.ceil(Math.max(1, elapsedMs) / step) * step;
+  const spanMs = Math.max(1, elapsedMs);
   const measureFraction = (instant: number): number =>
     Math.min(1, Math.max(0, (instant - origin) / spanMs));
   return {
-    spanMs,
-    ticks: Array.from({ length: spanMs / step + 1 }, (_, index) => ({
-      position: (index * step) / spanMs,
-      label: formatTickLabel(index * step),
-    })),
-    now: measureFraction(end),
+    ticks: buildTimeAxis(spanMs, axisWidthInCharacters),
     elapsedMs,
     lines: buildStepLines(run).map((line) => ({
       line,

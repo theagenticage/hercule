@@ -457,11 +457,13 @@ export const computeGraphLayout = (
 };
 
 /**
- * The smallest zoom used for automatic placement. A card's kind label is
- * 10.5px, the smallest size in the type scale, so a smaller zoom would render
- * it below that size.
+ * The smallest zoom used for automatic placement. A drawing a little wider
+ * than its pane is scaled down to fit, so it shows whole when it opens; a
+ * drawing that fits only below this zoom is not, because its text would be
+ * too small to read. At this zoom a card's id, 12.5px, renders at about
+ * 9.4px, and its kind label, 10.5px, at about 7.9px.
  */
-const LEGIBLE_ZOOM = 1;
+const LEGIBLE_ZOOM = 0.75;
 
 /**
  * The largest zoom for automatic placement and for "Fit to view". A small

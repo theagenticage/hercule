@@ -231,6 +231,14 @@
 }
 
 @layer base {
+  /* The page keeps room for its scrollbar even when it does not scroll. A page
+     that grows past the window, such as a run's page when its steps switch from
+     the list to the taller timeline, then gains a scrollbar without its content
+     moving sideways. Where scrollbars overlay the page, as on a Mac with a
+     trackpad, the browser keeps no room and nothing changes. */
+  html {
+    scrollbar-gutter: stable;
+  }
   body {
     background: var(--bg);
     color: var(--ink);

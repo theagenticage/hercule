@@ -66,6 +66,7 @@ export {
   type RunGraphNode,
   type StepProgress,
   type StepLine,
+  type TickAlign,
   type Timeline,
 } from "./run-graph";
 export {

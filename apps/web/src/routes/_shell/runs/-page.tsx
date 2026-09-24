@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   buildRunGraph,
   buildStepLines,
-  buildTimeline,
   isRunLive,
   queryKeys,
   type HerculeClient,
@@ -148,7 +147,7 @@ export function RunPage({
             {stepsView === "list" ? (
               <StepList lines={lines} runStatus={run.status} now={now} />
             ) : (
-              <StepTimeline timeline={buildTimeline(run, now)} isLive={isLive} now={now} />
+              <StepTimeline run={run} now={now} />
             )}
           </section>
           {/* Wide enough for a quoted id beside a name of up to ten characters, so an id input shows whole. */}

@@ -381,7 +381,7 @@ describe("computeGraphLayout", () => {
 });
 
 describe("computeDrawingViewport", () => {
-  it("scales a small drawing up to the largest zoom, and shows a large one at the legible zoom from the pane's edge", () => {
+  it("scales a small drawing up to the largest zoom, fits a wider one, and shows a large one at the legible zoom from the pane's edge", () => {
     const pane: Size = { width: 1200, height: 800 };
 
     // Three cards in a row fit the pane at the largest zoom, centred.
@@ -396,9 +396,21 @@ describe("computeDrawingViewport", () => {
     const wide: Size = { width: 1052, height: 200 };
     expect(computeDrawingViewport(pane, wide).zoom).toBeCloseTo((1200 - 2 * 16) / 1052);
 
-    // A drawing wider than the pane gets the legible zoom and starts at the
-    // pane's left edge. It is still centred vertically, where it fits.
+    // A drawing a little wider than the pane is scaled down until it fits:
+    // five step cards of a run in the 258px-high pane of a run's page.
+    const run: Size = { width: 1215, height: 52 };
+    const runPane: Size = { width: 970, height: 258 };
+    const fitted = computeDrawingViewport(runPane, run);
+    expect(fitted.zoom).toBeCloseTo((970 - 2 * 16) / 1215);
+    expect(fitted.x).toBeCloseTo(16);
+
+    // A drawing that fits only at a smaller zoom gets the legible zoom and
+    // starts at the pane's left edge. It is still centred vertically, where it fits.
     const large: Size = { width: 2000, height: 300 };
-    expect(computeDrawingViewport(pane, large)).toEqual({ x: 16, y: (800 - 300) / 2, zoom: 1 });
+    expect(computeDrawingViewport(pane, large)).toEqual({
+      x: 16,
+      y: (800 - 300 * 0.75) / 2,
+      zoom: 0.75,
+    });
   });
 });

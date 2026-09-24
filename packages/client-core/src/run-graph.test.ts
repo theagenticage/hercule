@@ -148,49 +148,159 @@ describe("buildTimeline", () => {
     startedAt: START,
     finishedAt,
   });
+  /** An axis wide enough that only the most ticks an axis has limits the step. */
+  const WIDE = 100;
 
-  it("rounds the axis up to whole round ticks and places now on it", () => {
-    const timeline = buildTimeline(run, Date.parse(START) + 43);
-    assert.strictEqual(timeline.spanMs, 50);
-    assert.deepStrictEqual(
-      timeline.ticks.map((tick) => tick.label),
-      ["0", "10ms", "20ms", "30ms", "40ms", "50ms"],
-    );
-    assert.strictEqual(timeline.now, 43 / 50);
+  it("ends the axis at now, with round ticks inside it", () => {
+    const timeline = buildTimeline(run, Date.parse(START) + 43, WIDE);
     assert.strictEqual(timeline.elapsedMs, 43);
     assert.deepStrictEqual(
+      timeline.ticks.map((tick) => tick.label),
+      ["0", "10ms", "20ms", "30ms", "40ms"],
+    );
+    assert.deepStrictEqual(
       timeline.ticks.map((tick) => tick.position),
-      [0, 0.2, 0.4, 0.6, 0.8, 1],
+      [0, 10 / 43, 20 / 43, 30 / 43, 40 / 43],
     );
   });
 
-  it("gives a run that took no measurable time an axis of one tick", () => {
-    const instant = buildTimeline(endRun(START), 0);
-    assert.strictEqual(instant.spanMs, 1);
+  it("gives a run that took no measurable time an axis of one millisecond", () => {
+    const instant = buildTimeline(endRun(START), 0, WIDE);
     assert.strictEqual(instant.elapsedMs, 0);
-    assert.strictEqual(instant.now, 0);
+    assert.deepStrictEqual(
+      instant.ticks.map((tick) => tick.label),
+      ["0", "1ms"],
+    );
   });
 
   it("draws a bar from each record's start to its end, or to now while it runs", () => {
-    const bars = buildTimeline(run, Date.parse(START) + 43).lines.map((each) => each.bar);
+    const bars = buildTimeline(run, Date.parse(START) + 43, WIDE).lines.map((each) => each.bar);
     assert.deepStrictEqual(bars, [
-      { start: 0, end: 10 / 50 },
-      { start: 12 / 50, end: 43 / 50 },
+      { start: 0, end: 10 / 43 },
+      { start: 12 / 43, end: 1 },
       undefined,
       undefined,
     ]);
   });
 
   it("ends the axis where an ended run ended, and labels seconds and minutes", () => {
-    const ended = buildTimeline(endRun(at(4_300)), Date.parse(START) + 99_000);
-    assert.strictEqual(ended.spanMs, 5_000);
-    assert.strictEqual(ended.now, 4_300 / 5_000);
+    const ended = buildTimeline(endRun(at(4_300)), Date.parse(START) + 99_000, WIDE);
     assert.strictEqual(ended.elapsedMs, 4_300);
-    assert.strictEqual(ended.ticks.at(-1)?.label, "5s");
-    const long = buildTimeline(endRun(at(150_000)), 0);
+    assert.deepStrictEqual(
+      ended.ticks.map((tick) => tick.label),
+      ["0", "1s", "2s", "3s", "4s"],
+    );
+    const long = buildTimeline(endRun(at(150_000)), 0, WIDE);
     assert.deepStrictEqual(
       long.ticks.map((tick) => tick.label),
       ["0", "30s", "1m", "1m 30s", "2m", "2m 30s"],
+    );
+  });
+
+  it("centres each label on its tick unless that would reach past an end of the axis", () => {
+    const timeline = buildTimeline(run, Date.parse(START) + 43, WIDE);
+    assert.deepStrictEqual(
+      timeline.ticks.map((tick) => tick.align),
+      ["start", "center", "center", "center", "center"],
+    );
+    // "20s" at 20 of 20.04 seconds is 0.05 characters from the end of a
+    // 24-character axis, so centring it would reach past the end.
+    const nearEnd = buildTimeline(endRun(at(20_040)), 0, 24);
+    assert.deepStrictEqual(
+      nearEnd.ticks.map((tick) => tick.align),
+      ["start", "center", "end"],
+    );
+  });
+
+  it("spaces the ticks wider on a narrow axis, so the labels do not touch", () => {
+    // A 20-second run on the axis of a 525px steps panel: 153px, or 24 characters
+    // of 10.5px IBM Plex Mono. A tick every 5 seconds would put "15s" and the
+    // "20s" that ends the axis one and a half characters apart.
+    const narrow = buildTimeline(endRun(at(20_000)), 0, 24);
+    assert.deepStrictEqual(
+      narrow.ticks.map((tick) => [tick.label, tick.position]),
+      [
+        ["0", 0],
+        ["10s", 0.5],
+        ["20s", 1],
+      ],
+    );
+    // On a wide axis the same run gets a tick every 5 seconds.
+    assert.deepStrictEqual(
+      buildTimeline(endRun(at(20_000)), 0, WIDE).ticks.map((tick) => tick.label),
+      ["0", "5s", "10s", "15s", "20s"],
+    );
+  });
+
+  it("keeps every label inside the axis and two characters from the next, at any width and length", () => {
+    const shares = { start: 0, center: 0.5, end: 1 } as const;
+    for (const elapsedMs of [
+      7, 43, 950, 4_300, 20_000, 20_040, 23_000, 95_000, 150_000, 5_400_000, 90_000_000,
+    ]) {
+      for (let width = 0; width <= 120; width += 2) {
+        const { ticks } = buildTimeline(endRun(at(elapsedMs)), 0, width);
+        const context = `${String(elapsedMs)}ms at ${String(width)}`;
+        assert.strictEqual(ticks[0]?.label, "0", context);
+        for (const tick of ticks) {
+          const length = [...tick.label].length;
+          const left = tick.position * width - length * shares[tick.align];
+          assert.isAtMost(tick.position, 1, `${tick.label} past the end, ${context}`);
+          // The lone tick at 0 of an axis too narrow for any step may be wider than the axis.
+          if (ticks.length === 1) continue;
+          assert.isAtLeast(left, -1e-9, `${tick.label} before the start, ${context}`);
+          assert.isAtMost(left + length, width + 1e-9, `${tick.label} after the end, ${context}`);
+        }
+        for (const [index, tick] of ticks.slice(1).entries()) {
+          const previous = ticks[index]!;
+          const space =
+            (tick.position - previous.position) * width -
+            [...previous.label].length * (1 - shares[previous.align]) -
+            [...tick.label].length * shares[tick.align];
+          // The tolerance absorbs floating-point rounding at an exact fit.
+          assert.isAtLeast(space, 2 - 1e-9, `${previous.label} and ${tick.label}, ${context}`);
+        }
+      }
+    }
+  });
+
+  it("ends a 23-second run's axis at 23 seconds, past its last tick", () => {
+    const timeline = buildTimeline(endRun(at(23_000)), 0, 24);
+    assert.deepStrictEqual(
+      timeline.ticks.map((tick) => [tick.label, tick.position, tick.align]),
+      [
+        ["0", 0, "start"],
+        ["10s", 10 / 23, "center"],
+        ["20s", 20 / 23, "center"],
+      ],
+    );
+  });
+
+  it("never steps back to shorter ticks while a live run grows", () => {
+    for (const width of [24, 60, 100]) {
+      let previousStep = 0;
+      for (let elapsedMs = 100; elapsedMs <= 600_000; elapsedMs += 100) {
+        const { ticks } = buildTimeline(run, Date.parse(START) + elapsedMs, width);
+        if (ticks.length < 2) continue;
+        const step = ticks[1]!.position * elapsedMs;
+        assert.isAtLeast(step, previousStep - 1e-6, `${String(elapsedMs)}ms at ${String(width)}`);
+        previousStep = step;
+      }
+    }
+  });
+
+  it("gives an axis too narrow for any step only the tick at 0", () => {
+    const cramped = buildTimeline(run, Date.parse(START) + 43, 0);
+    assert.deepStrictEqual(
+      cramped.ticks.map((tick) => tick.label),
+      ["0"],
+    );
+  });
+
+  it("steps a run of several days in whole days", () => {
+    const days = buildTimeline(endRun(at(10 * 86_400_000)), 0, WIDE);
+    assert.deepStrictEqual(
+      days.ticks.map((tick) => tick.label),
+      ["0", "48h", "96h", "144h", "192h", "240h"],
     );
   });
 });
