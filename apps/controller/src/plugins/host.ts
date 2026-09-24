@@ -1,10 +1,11 @@
 /**
- * The plugin host: what a boot makes of the compiled-in registry.
+ * The plugin host: loads the compiled-in registry at boot.
  *
  * Every manifest is read before any plugin code runs, so a plugin that cannot
- * be loaded cannot take the boot with it. Registration is pure, so the catalog
- * is rewritten whole rather than diffed, and what a boot found stays in memory:
- * `errored` is a fact about this process, and the next boot is the retry.
+ * be loaded cannot stop the boot. Registration has no side effects, so the
+ * catalog is rewritten in full rather than diffed. Each plugin's status is
+ * kept in memory only: `errored` is about this process, and the next boot
+ * tries again.
  */
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -61,9 +62,10 @@ import {
 } from "./workflow-actions";
 
 /**
- * The manifest schema accepts every capability name the system will ever have,
- * so a plugin written against a later build is refused by name here rather than
- * activated without the surface it asked for.
+ * The capabilities this build implements. The manifest schema accepts every
+ * capability name the system will ever have, so a plugin written for a later
+ * build gets the `refused` status here, with the capability named, instead of
+ * being activated without what it asked for.
  */
 const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
   "providers",
@@ -79,7 +81,7 @@ export interface LoadedPlugin {
   readonly displayName: string;
   readonly hostApi: number;
   readonly capabilities: ReadonlyArray<PluginCapability>;
-  /** Absent for a refused plugin: the schema is derived only once the manifest is accepted. */
+  /** Absent for a `refused` plugin: the schema is derived only after the manifest is accepted. */
   readonly configSchema?: JsonSchema.JsonSchema;
   readonly status: PluginStatus;
 }
@@ -87,14 +89,17 @@ export interface LoadedPlugin {
 interface Entry extends LoadedPlugin {
   readonly plugin: Plugin;
   /**
-   * The decoded copy, never the object the plugin exposes: every scope is
-   * derived from the id, and a getter could answer differently once checked.
+   * The decoded copy, never the plugin's own object: every scope is derived
+   * from the id, and a getter on the plugin's object could return a different
+   * id after it was checked.
    */
   readonly manifest: PluginManifest;
   readonly deactivate: Deactivate | undefined;
   /**
-   * A failed `register` left no contributions to run against, and a failed
-   * teardown left machinery a second `activate` would pile on. Both need a restart.
+   * Whether this process may start the plugin. False after a failed
+   * `register`, which left no contributions to run, or a failed teardown,
+   * which left running parts a second `activate` would add to. Both need a
+   * restart.
    */
   readonly startable: boolean;
 }
@@ -108,19 +113,19 @@ const toLoadedPlugin = (entry: Entry): LoadedPlugin => ({
   status: entry.status,
 });
 
-/** The extension points with a consumer; the column takes any name. */
+/** The names of the extension points registered in this file. */
 const PROVIDER = "provider";
 const CONNECTION_TYPE = "connection-type";
 
-// An excess key is refused rather than stripped: dropping a field the host does
-// not know would let an unserializable value look accepted.
+// An unknown key fails the decode rather than being stripped: dropping a field
+// the host does not know would make an unserializable value look accepted.
 const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
   errors: "all",
   onExcessProperty: "error",
 });
 
-// The serializable half of a connection type. `validate` is taken off first:
-// it is a function, and no catalog column can hold one.
+// Decodes the serializable part of a connection type. `validate` is removed
+// first: it is a function, and no catalog column can hold one.
 const decodeConnectionType = Schema.decodeUnknownEffect(ConnectionType, {
   errors: "all",
   onExcessProperty: "error",
@@ -143,8 +148,9 @@ const readCauseMessage = (cause: Cause.Cause<PluginError>): string =>
   );
 
 /**
- * A defect, not a failure: the surface a plugin programs against declares no
- * error, and the host catches it as that plugin's crash either way.
+ * Dies when `value` is empty. A defect, not a failure: the API a plugin
+ * programs against declares no error here, and the host treats either as that
+ * plugin's crash.
  */
 const assertNonEmpty = (what: string, value: string): Effect.Effect<void> =>
   value.length === 0
@@ -152,8 +158,9 @@ const assertNonEmpty = (what: string, value: string): Effect.Effect<void> =>
     : Effect.void;
 
 /**
- * The claimed id is the useful half, but it is also the field most likely to be
- * what is wrong, so a non-string id falls back to the registry position.
+ * Returns a name for a manifest in an error message: its id, or its registry
+ * position when the id is not a string. The id is the most useful name, but it
+ * is also the field most likely to be invalid.
  */
 const describeManifestName = (manifest: unknown, index: number): string => {
   const id = (manifest as { readonly id?: unknown } | null | undefined)?.id;
@@ -161,8 +168,9 @@ const describeManifestName = (manifest: unknown, index: number): string => {
 };
 
 /**
- * A compiled-in plugin whose manifest does not decode is a build mistake, so it
- * stops the boot naming what is wrong rather than being listed as refused.
+ * Decodes a plugin's manifest. Dies when it is invalid: a compiled-in plugin
+ * with an invalid manifest is a build mistake, so it stops the boot with the
+ * error, rather than being listed with the `refused` status.
  */
 const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginManifest> =>
   Schema.decodeUnknownEffect(PluginManifest, { errors: "all" })(manifest).pipe(
@@ -177,14 +185,18 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
 
 /**
  * A credential is entered per provider instance and stored under that
- * instance's own owner, so a secret-valued field has nowhere to live anywhere
- * else. Said at registration, because the form that would render it is built
- * from the schema refused here.
+ * instance as its owner, so a secret field anywhere else has nowhere to be
+ * stored. This is reported at registration, because the form that would show
+ * the field is built from the schema rejected here.
  */
 const SECRET_FIELDS_ARE_PROVIDER_ONLY =
   "a secret-valued config field is supported on a provider definition only";
 
-/** Everything decided from the manifest alone, before any plugin code runs. */
+/**
+ * Checks what can be decided from the manifest alone, before any plugin code
+ * runs. Returns the config's JSON Schema, or the reason the plugin is
+ * `refused`.
+ */
 const inspectManifest = (
   manifest: PluginManifest,
 ): Result.Result<JsonSchema.JsonSchema, PluginRefusalReason> => {
@@ -208,14 +220,15 @@ const inspectManifest = (
 };
 
 /**
- * Registration surfaces only, so a plugin cannot reach runtime machinery before
- * the catalog exists. A duplicate contribution id is caught against the
- * caller's array, not the primary key, where it would take every other
- * plugin's rows with it.
+ * Builds the registration API for one plugin, with only the capabilities its
+ * manifest asks for. It offers registration only, so a plugin cannot reach
+ * runtime services before the catalog exists. A duplicate contribution id is
+ * caught in the caller's array, not by the primary key, where the failed
+ * insert would lose every other plugin's rows too.
  *
- * A connection type is identified by the plugin's id and the word it declared,
- * joined: two plugins may each call a type `gmail` and still name two different
- * things, so no plugin can claim a word out from under another.
+ * A connection type's id joins the plugin's id and the type name it declared.
+ * Two plugins may each declare a type `gmail` and still get two different
+ * types, so no plugin can take a name from another.
  */
 const buildRegistrationHost = (
   manifest: PluginManifest,
@@ -233,8 +246,8 @@ const buildRegistrationHost = (
               const decoded = yield* decodeProvider(definition).pipe(
                 Effect.mapError(toPluginError),
               );
-              // The catalog persists the derived JSON Schema: what the plugin
-              // authored is a live Effect Schema no catalog reader can use.
+              // The catalog stores the derived JSON Schema: the plugin's Effect
+              // Schema is an object no catalog reader can use.
               const configSchema = deriveConfigJsonSchema(decoded.configSchema);
               if (Result.isFailure(configSchema)) {
                 return yield* Effect.fail(
@@ -258,9 +271,9 @@ const buildRegistrationHost = (
                 id: decoded.id,
                 definition: { ...decoded, configSchema: configSchema.success },
               });
-              // The catalog cannot carry an Effect Schema, so the definition
-              // stays here too: reading an instance's config back needs the
-              // live schema the plugin authored, not the JSON Schema it maps to.
+              // The catalog cannot hold an Effect Schema, so the definition is
+              // also kept in memory: decoding an instance's config needs the
+              // plugin's Effect Schema, not the JSON Schema derived from it.
               live.push(decoded);
             }),
         },
@@ -271,15 +284,15 @@ const buildRegistrationHost = (
         connections: {
           registerType: (contribution: ConnectionTypeContribution) =>
             Effect.gen(function* () {
-              // Everything but `validate`, which no JSON column can hold and
-              // which stays in memory here instead.
+              // Everything except `validate`, which no JSON column can hold, so
+              // it is kept in memory instead.
               const { validate, ...serializable } = contribution;
               const decoded = yield* decodeConnectionType(serializable).pipe(
                 Effect.mapError(toPluginError),
               );
-              // The identity the catalog, the stored rows and every lookup use.
-              // Nothing splits it again: the plugin a type belongs to is read
-              // from the entry registered here, never parsed back out.
+              // The id the catalog, the stored rows and every lookup use. Nothing
+              // splits it again: a type's plugin is read from the entry
+              // registered here, never parsed out of the id.
               const type = `${manifest.id}/${decoded.type}`;
               if (
                 declared.some((row) => row.extensionPoint === CONNECTION_TYPE && row.id === type)
@@ -290,8 +303,8 @@ const buildRegistrationHost = (
                   }),
                 );
               }
-              // A declared config schema reaches the catalog as the JSON Schema
-              // the generated form is built from; the live schema stays here,
+              // A config schema goes into the catalog as the JSON Schema the
+              // generated form is built from. The Effect Schema stays in memory,
               // where a connection's stored config is decoded against it.
               if (
                 decoded.configSchema !== undefined &&
@@ -324,8 +337,8 @@ const buildRegistrationHost = (
                   ...(configSchema === undefined ? {} : { configSchema: configSchema.success }),
                 },
               });
-              // The decoded copy, so what the rest of the controller reads is
-              // what the schema accepted rather than the object a plugin holds.
+              // The decoded copy, so the rest of the controller reads what the
+              // schema accepted rather than the plugin's own object.
               types.push({
                 pluginId: manifest.id,
                 contribution: { ...decoded, type, validate },
@@ -359,21 +372,22 @@ const make = Effect.gen(function* () {
   const connectionTypes = yield* ConnectionTypes;
   const audit = yield* AuditLog;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
-  // Outside `gate`, unlike everything else here: registration is pure and runs
-  // only at boot, so this is settled for the life of the process.
+  // Not guarded by `gate`, unlike everything else here: registration has no
+  // side effects and runs only at boot, so this does not change after boot.
   const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
-  /** Every event kind this boot registered, by name. Settled with the providers. */
+  /** Every event kind this boot registered, by name. Set at boot, like the providers. */
   const eventKinds = yield* Ref.make<ReadonlyMap<string, RegisteredEventKind>>(new Map());
   /**
    * Every workflow action this boot registered, built-in ones included, keyed
-   * by the qualified id a step uses. Settled with the providers.
+   * by the qualified id a step uses. Set at boot, like the providers.
    */
   const workflowActions = yield* Ref.make<ReadonlyMap<string, RegisteredWorkflowAction>>(new Map());
   /**
-   * One permit for the whole host, held across a move's reads, hooks and
-   * writes. Without it two moves interleave around the await inside a hook and
-   * the second decides on what the first already changed. A permit per plugin
-   * would not do: a move touches rows the whole host shares.
+   * One permit for the whole host, held across a lifecycle change's reads,
+   * plugin hooks and writes. Without it, two changes could interleave while
+   * one waits inside a hook, and the second would act on state the first had
+   * already changed. One permit per plugin would not be enough: a change
+   * touches rows the whole host shares.
    */
   const gate = yield* Semaphore.make(1);
 
@@ -410,14 +424,14 @@ const make = Effect.gen(function* () {
       yield* patchEntry(id, {
         status: { _tag: "errored", message },
         deactivate: undefined,
-        // What a failed teardown left behind is still running, so nothing may
-        // start the plugin again until this process is gone.
+        // Whatever a failed teardown left behind is still running, so the
+        // plugin must not start again until this process exits.
         ...(phase === "deactivate" ? { startable: false } : {}),
       });
       const at = yield* nowIso;
-      // The boot's own activation pass has no actor behind it, so the row says
-      // what caused it rather than blaming whoever logged in last. Anything
-      // else got here through a request, and is stamped with who made it.
+      // Activation during boot has no actor, so the entry is stamped with the
+      // system rather than blaming whoever logged in last. Every other call
+      // comes from a request, and is stamped with its actor.
       const actor = yield* Effect.map(CurrentActor, (who) =>
         who._tag === "none" ? SYSTEM_ACTOR : buildActorStamp(who),
       );
@@ -434,8 +448,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * A refused statement dies rather than failing: the surface a plugin programs
-   * against says these cannot fail, and a plugin cannot act on a broken database.
+   * Builds a plugin's key-value store. A failed statement dies rather than
+   * failing: the plugin API declares that these calls cannot fail, and a
+   * plugin cannot do anything useful about a broken database.
    */
   const buildKeyValueStore = (pluginId: string): KeyValueStore => ({
     get: (key) =>
@@ -450,7 +465,7 @@ const make = Effect.gen(function* () {
     list: () => Effect.orDie(repository.kvKeys(pluginId)),
   });
 
-  /** The owner is fixed here, so nothing a plugin passes can widen its scope. */
+  /** Builds a plugin's secret store. The owner is fixed here, so nothing a plugin passes can widen its scope. */
   const buildPluginSecrets = (pluginId: string): PluginSecrets => {
     const owner: SecretOwner = { kind: "plugin", id: pluginId };
     return {
@@ -473,7 +488,7 @@ const make = Effect.gen(function* () {
     };
   };
 
-  /** The runtime surfaces of the capabilities this manifest asked for, and no others. */
+  /** Builds the runtime APIs for the capabilities this manifest asks for, and no others. */
   const buildActivationContext = (
     manifest: PluginManifest,
     config: unknown,
@@ -489,8 +504,10 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Catches a typed failure, a throw before the Effect, and a crash inside one:
-   * a plugin is third-party-shaped code, and one breaking must cost only it.
+   * Runs a plugin's `register`, and returns its status: `inactive` on
+   * success, `errored` otherwise. Catches a typed failure, a throw before the
+   * Effect starts, and a crash inside it: plugin code is treated like
+   * third-party code, and one plugin breaking must affect only that plugin.
    */
   const registerPass = (
     plugin: Plugin,
@@ -511,19 +528,20 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Brings one plugin into line with what the user decided. A stored config the
-   * schema no longer accepts leaves it errored with the field named: `activate`
-   * takes a decoded config, and there is nothing honest to hand it instead.
+   * Starts or stops one plugin to match its stored state: started when it is
+   * enabled, stopped otherwise. A stored config the schema no longer accepts
+   * marks the plugin errored, naming the field: `activate` needs a decoded
+   * config, and there is no correct value to pass instead.
    */
   const refresh = (id: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       const entry = (yield* Ref.get(entries)).get(id);
       if (entry === undefined) return;
-      // Read here rather than passed in, so the plugin starts on what the
-      // database holds after the caller's own write.
+      // Read here rather than passed in, so the plugin starts with the state
+      // the database holds after the caller's write.
       const state = yield* Effect.catchTag(repository.state(id), "SchemaError", Effect.die);
       // Starting a plugin this process cannot start would run a second instance
-      // beside whatever the last one left behind.
+      // next to whatever the last one left behind.
       if (!state.enabled || !entry.startable) {
         if (entry.startable) {
           yield* patchEntry(id, { status: { _tag: "inactive" }, deactivate: undefined });
@@ -547,16 +565,17 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Answers whether the plugin is cleanly stopped: a failed deactivate leaves
-   * machinery only a restart clears, and the caller must not start over it.
+   * Stops one plugin. Returns whether it is cleanly stopped: a failed
+   * deactivate leaves running parts that only a restart clears, and the
+   * caller must not start the plugin again on top of them.
    */
   const stop = (id: string): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
       const entry = (yield* Ref.get(entries)).get(id);
       if (entry === undefined) return true;
       if (entry.deactivate === undefined) {
-        // Already stopped - unless an earlier teardown failed, in which case
-        // what it left behind is not.
+        // Already stopped, unless an earlier teardown failed and left parts
+        // running.
         if (entry.startable) yield* patchEntry(id, { status: { _tag: "inactive" } });
         return entry.startable;
       }
@@ -575,10 +594,12 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Refuse, register, write the catalog, then activate. A plugin that fails
-     * registration keeps none of what it declared, so the catalog never holds
-     * half a plugin, and activation runs here rather than in the background, so
-     * `boot` returning means the whole registry has had its chance.
+     * Loads the registry in four steps: check each manifest, register, write
+     * the catalog, then activate.
+     *
+     * A plugin that fails registration keeps none of what it declared, so the
+     * catalog never holds half a plugin. Activation runs here rather than in
+     * the background, so when `boot` returns, every plugin has been tried.
      */
     boot: (registry: ReadonlyArray<Plugin>): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -595,8 +616,9 @@ const make = Effect.gen(function* () {
         for (const [index, plugin] of registry.entries()) {
           const manifest = yield* decodeManifest(plugin.manifest, index);
           if (booted.has(manifest.id)) {
-            // Ids namespace KV keys, secrets and contributions, so two plugins
-            // sharing one share all three. The registry is compiled in.
+            // The id scopes KV keys, secrets and contributions, so two plugins
+            // with one id would share all three. The registry is compiled in,
+            // so this is a build mistake.
             return yield* Effect.die(
               new Error(`The plugin registry lists ${manifest.id} more than once.`),
             );
@@ -684,21 +706,21 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** Where a plugin stands, or `None` for an id this boot never saw. */
+    /** Returns a plugin's status, or `None` for an id this boot did not load. */
     status: (id: string): Effect.Effect<Option.Option<PluginStatus>> =>
       Effect.map(Ref.get(entries), (booted) => {
         const entry = booted.get(id);
         return entry === undefined ? Option.none() : Option.some(entry.status);
       }),
 
-    /** Every plugin the last boot loaded, in registry order. */
+    /** Returns every plugin the last boot loaded, in registry order. */
     loaded: (): Effect.Effect<ReadonlyArray<LoadedPlugin>> =>
       Effect.map(Ref.get(entries), (booted) => [...booted.values()].map(toLoadedPlugin)),
 
-    /** Every provider this boot registered, in registry order. */
+    /** Returns every provider this boot registered, in registry order. */
     providers: (): Effect.Effect<ReadonlyArray<ProviderDefinition>> => Ref.get(providers),
 
-    /** Every event kind this boot registered, by name. */
+    /** Returns every event kind this boot registered, by name. */
     eventKinds: (): Effect.Effect<ReadonlyMap<string, RegisteredEventKind>> => Ref.get(eventKinds),
 
     /**
@@ -741,11 +763,11 @@ const make = Effect.gen(function* () {
     serialized: <A, E, R>(move: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
       gate.withPermits(1)(move),
 
-    /** Whether this process can still start the plugin, or only a restart will do. */
+    /** Checks whether this process can still start the plugin, or only a restart can. */
     startable: (id: string): Effect.Effect<boolean> =>
       Effect.map(Ref.get(entries), (booted) => booted.get(id)?.startable ?? false),
 
-    /** Reads a config the way `activate` will, without starting the plugin. */
+    /** Validates a config the way `activate` decodes it, without starting the plugin. */
     validate: (id: string, config: Schema.Json): Effect.Effect<void, Validation> =>
       Effect.flatMap(Ref.get(entries), (booted) => {
         const entry = booted.get(id);
@@ -774,9 +796,10 @@ export const PluginHostLayer: Layer.Layer<
 > = Layer.effect(PluginHost)(make);
 
 /**
- * What the connections domain reads of a plugin's config, provided by the
- * domain that owns the table. The seam is declared there, so nothing in this
- * direction reaches back into it.
+ * Provides the connections domain's `PluginConfigs` service, which reads a
+ * plugin's stored config. The plugins domain owns the table, so it provides
+ * the service. The interface is declared in the connections domain, so the
+ * connections domain does not import this one.
  */
 export const PluginConfigsLayer: Layer.Layer<PluginConfigs, never, SqlClient.SqlClient> =
   Layer.effect(PluginConfigs)(

@@ -25,7 +25,7 @@ const USER: Actor = {
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(effect.pipe(Effect.provideService(CurrentActor, USER), Effect.provide(layer)));
 
-/** Runs a call that is expected to fail, and hands the test its error. */
+/** Runs a call that is expected to fail, and returns its error. */
 const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
     effect.pipe(Effect.flip, Effect.provideService(CurrentActor, USER), Effect.provide(layer)),
@@ -34,7 +34,7 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
 const READER: ReadonlyArray<Grant> = ["task.read", "run.read"];
 
 describe("profile.create", () => {
-  it("creates a profile the user owns, and stamps it", async () => {
+  it("creates a user profile and records a profile.created event", async () => {
     const { profile, entries } = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -51,7 +51,7 @@ describe("profile.create", () => {
     expect(entries[0]?.payload).toEqual({ id: profile.id, name: "reviewer" });
   });
 
-  it("refuses a patch that names no field, and stamps nothing", async () => {
+  it("rejects a patch with no field, and records no event", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -65,7 +65,7 @@ describe("profile.create", () => {
     expect(outcome.entries).toEqual([]);
   });
 
-  it("refuses a name another profile already holds", async () => {
+  it("rejects a name that another profile already has", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -76,7 +76,7 @@ describe("profile.create", () => {
     expect(error).toMatchObject({ error: { code: "conflict" } });
   });
 
-  it("writes nothing when it refuses", async () => {
+  it("records no event when it fails", async () => {
     const entries = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -91,7 +91,7 @@ describe("profile.create", () => {
 });
 
 describe("profile.query", () => {
-  it("pages by name, and the cursor picks up where the page left off", async () => {
+  it("pages by name, and the cursor continues where the page ended", async () => {
     const { first, second } = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -110,7 +110,7 @@ describe("profile.query", () => {
     expect(second.nextCursor).toBeUndefined();
   });
 
-  it("sorts the other way when asked", async () => {
+  it("sorts in descending order when asked", async () => {
     const names = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -122,7 +122,7 @@ describe("profile.query", () => {
     expect(names).toEqual(["bravo", "alpha"]);
   });
 
-  it("refuses a cursor it did not issue", async () => {
+  it("rejects a cursor it did not issue", async () => {
     const error = await runError(
       Effect.flatMap(Profiles, (profiles) => profiles.query({ cursor: "not-a-cursor" })),
     );
@@ -131,7 +131,7 @@ describe("profile.query", () => {
 });
 
 describe("profile.read", () => {
-  it("answers not_found for an id nobody has", async () => {
+  it("fails with not_found for an unknown id", async () => {
     const error = await runError(
       Effect.flatMap(Profiles, (profiles) =>
         profiles.read({ id: "0199e0e7-9999-7000-8000-000000000000" }),
@@ -142,7 +142,7 @@ describe("profile.read", () => {
 });
 
 describe("profile.update", () => {
-  it("edits a shipped profile: the three Hercule ships are editable", async () => {
+  it("edits a shipped profile, because shipped profiles are editable", async () => {
     const { updated, entries } = await run(
       Effect.gen(function* () {
         const store = yield* PermissionProfiles;
@@ -159,7 +159,7 @@ describe("profile.update", () => {
     expect(entries[0]?.payload).toEqual({ id: updated.id, name: "worker" });
   });
 
-  it("leaves what it was not asked to change", async () => {
+  it("keeps the fields the patch does not set", async () => {
     const updated = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -170,7 +170,7 @@ describe("profile.update", () => {
     expect(updated).toMatchObject({ name: "auditor", grants: READER });
   });
 
-  it("refuses a patch that names no field, and stamps nothing", async () => {
+  it("rejects a patch with no field, and records no event", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -184,7 +184,7 @@ describe("profile.update", () => {
     expect(outcome.entries).toEqual([]);
   });
 
-  it("refuses a name another profile already holds", async () => {
+  it("rejects a name that another profile already has", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const profiles = yield* Profiles;
@@ -196,7 +196,7 @@ describe("profile.update", () => {
     expect(error).toMatchObject({ error: { code: "conflict" } });
   });
 
-  it("answers not_found for an id nobody has", async () => {
+  it("fails with not_found for an unknown id", async () => {
     const error = await runError(
       Effect.flatMap(Profiles, (profiles) =>
         profiles.update({ id: "0199e0e7-9999-7000-8000-000000000000", name: "x" }),

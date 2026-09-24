@@ -1,10 +1,10 @@
 /**
- * What the lifecycle migration does to rows that were already there.
+ * Tests what the lifecycle migration does to rows that already exist.
  *
- * The repo's other migration tests read `sqlite_master` on a fully migrated
- * database, which says nothing about a rewrite: this one migrates to the schema
- * before it, writes the rows only that schema could hold, and migrates the rest
- * of the way.
+ * The other migration tests read `sqlite_master` on a fully migrated database,
+ * which cannot test how existing rows are rewritten. This test migrates to the
+ * schema before this migration, writes rows only that schema allows, and then
+ * runs the remaining migrations.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -13,7 +13,7 @@ import { MEMORY, openDatabase } from "../client";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
-/** Everything up to and including `plugins`: the schema `state` still existed in. */
+/** The migrations up to and including `plugins`: the last schema that still had `state`. */
 const BEFORE = migrations.filter(([id]) => id < 8);
 
 interface Row {
@@ -25,9 +25,9 @@ interface Row {
 }
 
 /**
- * Every column the rewrite copies rather than computes, each with a value
- * nothing else in the fleet has: a `SELECT` that transposed two of them would
- * otherwise corrupt every runner's reported state and pass.
+ * Every column the migration copies rather than computes, each with a value no
+ * other runner has. Otherwise a `SELECT` that swapped two of them would corrupt
+ * every runner's reported state and still pass.
  */
 const CARRIED = {
   labels: '["gpu","primary"]',
@@ -43,10 +43,10 @@ const CARRIED = {
 } as const;
 
 /**
- * Ids shaped the way `mintUuid` shapes them: a UUIDv7 spends its first twelve
- * hex digits on a millisecond clock, so every runner of one fleet shares them
- * and only the tail tells two apart. The duplicated pair below is given that
- * shape on purpose, because a rename reading the leading digits would pass a
+ * Ids in the same format `mintUuid` creates: a UUIDv7 uses its first twelve
+ * hex digits for a millisecond clock, so runners created close together share
+ * them and only the last digits tell two apart. The duplicated pair below has
+ * that format on purpose: a rename that used the leading digits would pass a
  * test with unrelated ids and collide in production.
  */
 const SHARED_PREFIX = "0199e0e77b21";
@@ -55,8 +55,8 @@ const buildId = (tail: string): string => `${SHARED_PREFIX}${tail}`;
 
 /**
  * One row per old `state`, then a duplicated name whose two rows differ only in
- * the random tail of their ids. `online-one` carries the sentinels the rewrite
- * has to bring across untouched.
+ * the random end of their ids. `online-one` has the marker values the
+ * migration must copy unchanged.
  */
 const SEEDED: ReadonlyArray<{
   readonly name: string;
@@ -73,8 +73,8 @@ const SEEDED: ReadonlyArray<{
 ];
 
 /**
- * `created_at` orders the two `iris` rows, so which of them keeps the name is
- * the arrangement's to decide rather than the row order's.
+ * `created_at` orders the two `iris` rows, so the test setup decides which of
+ * them keeps the name, not the order the rows were inserted in.
  */
 const migrated = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -114,8 +114,8 @@ const migrated = Effect.gen(function* () {
     WHERE type = 'index' AND tbl_name = 'runners' AND sql IS NOT NULL
     ORDER BY name
   `;
-  // The index is what holds when a service check is bypassed or wrong, so the
-  // refusal is asked of the database rather than of `runner.update`.
+  // The index still applies when a service check is bypassed or wrong, so the
+  // test writes to the database directly rather than through `runner.update`.
   const takenName = yield* Effect.exit(
     sql`UPDATE runners SET name = 'iris' WHERE name = 'online-one'`,
   );
@@ -123,15 +123,15 @@ const migrated = Effect.gen(function* () {
 }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie);
 
 describe("the rows a fleet already had", () => {
-  it("splits each old state across the two axes it was answering at once", async () => {
+  it("splits each old state into connectivity and lifecycle", async () => {
     const { rows } = await Effect.runPromise(migrated);
 
     expect(rows.map((row) => `${row.connectivity}/${row.lifecycle}`)).toEqual([
       "online/active",
       "offline/active",
       "unreachable/active",
-      // The two the old column held as a lifecycle say nothing about
-      // reachability, so they arrive as the machine not being connected.
+      // The two old values that describe the lifecycle tell us nothing about
+      // connectivity, so those runners become offline.
       "offline/draining",
       "offline/retired",
       "online/active",
@@ -146,30 +146,31 @@ describe("the rows a fleet already had", () => {
     expect(rows.map((row) => row.max_concurrent_sessions)).toEqual(SEEDED.map(() => null));
   });
 
-  it("carries every column it does not rewrite across untouched", async () => {
+  it("copies every column it does not rewrite unchanged", async () => {
     const { carried } = await Effect.runPromise(migrated);
 
-    // The rewrite copies eleven columns it never looks at, so a transposed pair
-    // in its SELECT would silently rewrite what every machine reported.
+    // The migration copies eleven columns it never looks at, so two swapped
+    // columns in its SELECT would silently corrupt what every machine reported.
     expect(carried).toEqual(CARRIED);
   });
 
   it("keeps both runners of a duplicated name, renaming the later one", async () => {
     const { rows } = await Effect.runPromise(migrated);
 
-    // The oldest row of a name keeps it untouched.
+    // The oldest row with a name keeps it unchanged.
     expect(rows.filter((row) => row.name === "iris")).toHaveLength(1);
 
-    // The loser is named from the last eight hex digits of its own id, which
-    // are random. The twelve these two ids share are a millisecond clock.
+    // The later row is renamed using the last eight hex digits of its own id,
+    // which are random. The twelve digits these two ids share are a
+    // millisecond clock.
     const renamed = rows.find((row) => row.name.startsWith("runner-"));
     expect(renamed?.name).toBe(`runner-${SEEDED[6]!.id.slice(-8)}`);
     expect(rows).toHaveLength(SEEDED.length);
   });
 });
 
-describe("the indexes the rebuilt table carries", () => {
-  it("holds a name to one runner, and keeps no index the old table had", async () => {
+describe("the indexes on the rebuilt table", () => {
+  it("allows each name on only one runner, and keeps no index from the old table", async () => {
     const { indexes, takenName } = await Effect.runPromise(migrated);
 
     expect(indexes).toEqual(["runners_credential_hash", "runners_name"]);

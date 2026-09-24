@@ -1,11 +1,12 @@
 /**
- * A secret-valued instance field reaching the machine that needs it.
+ * Tests that a provider instance's secret field reaches the runner that needs
+ * it.
  *
- * The value lives encrypted in the controller's own table and is decrypted at
- * send time, so the only place it exists in the clear is the frame that carries
- * it and the runner's memory for that one operation. Driven over the real API
- * and the real runner socket, because the frame crossing the wire is the whole
- * of what is asserted here.
+ * The value is stored encrypted in the controller's table and decrypted when
+ * a frame is built. So it exists in plain text only in that frame, and in the
+ * runner's memory for that one operation. The tests use the real API and the
+ * real runner socket, because the frames that cross the socket are what they
+ * check.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
@@ -28,7 +29,7 @@ const KEY_TITLE = "Z.ai API key";
 const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
 const KEY_VALUE = "a-paid-credential-nobody-else-holds";
 
-/** A provider whose config has one secret-valued field, the way pi's has. */
+/** A provider whose config has one secret field, like pi's. */
 const KEYED: ProviderDefinition = {
   ...buildProviderDefinition("keyed-provider", { token: "t" }),
   configSchema: Schema.Struct({
@@ -37,7 +38,7 @@ const KEYED: ProviderDefinition = {
   }),
 };
 
-/** A provider that marked nothing secret, for the frames that carry none. */
+/** A provider with no secret fields, for frames that carry no secrets. */
 const PLAIN: ProviderDefinition = buildProviderDefinition("plain-provider", { token: "t" });
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
@@ -74,7 +75,7 @@ const setKey = async (arranged: Arranged, instanceId: string, value: string): Pr
   expect(response.status, await response.clone().text()).toBe(200);
 };
 
-/** Asks the machine about one instance, and answers with the probe it sent. */
+/** Asks the controller to probe one instance, and returns the probe frame the runner received. */
 const probeNow = async (arranged: Arranged, instanceId: string): Promise<ProbeRequest> => {
   const before = listFrames<ProbeRequest>(arranged.wire, "probeRequest").length;
   const response = await send(
@@ -103,7 +104,7 @@ describe("the secrets a frame carries to a runner", () => {
     });
   });
 
-  it("carries an empty set where the key has not been entered, rather than nothing at all", async () => {
+  it("sends an empty set of secrets when the key has not been entered, rather than leaving the field out", async () => {
     await withFleet(async (arranged) => {
       const keyed = await probeNow(arranged, findInstanceId(arranged, "keyed-provider"));
       const plain = await probeNow(arranged, findInstanceId(arranged, "plain-provider"));
@@ -123,13 +124,14 @@ describe("the secrets a frame carries to a runner", () => {
 
       expect(start.sessionId).toBe(session.id);
       expect(start.secrets).toEqual({ zaiApiKey: KEY_VALUE });
-      // Never in the config: the config is stored, and this value is not.
+      // Never in the config: the config is stored in plain text, and this value
+      // must not be.
       expect(JSON.stringify(start.config)).not.toContain(KEY_VALUE);
       expect(JSON.stringify(start.spec)).not.toContain(KEY_VALUE);
     });
   });
 
-  it("starts a session on an instance with no key set carrying an empty set", async () => {
+  it("sends an empty set of secrets when starting a session on an instance with no key set", async () => {
     await withFleet(async (arranged) => {
       await spawnSessionOrFail(arranged, {
         prompt: "hello",
@@ -140,12 +142,12 @@ describe("the secrets a frame carries to a runner", () => {
       expect(start.secrets).toEqual({});
     });
   });
-  it("carries the fields the plugin declares and nothing else stored under that owner", async () => {
+  it("sends only the secret fields the plugin declares, not other secrets stored for the instance", async () => {
     await withFleet(async (arranged) => {
       const keyed = findInstanceId(arranged, "keyed-provider");
       await setKey(arranged, keyed, KEY_VALUE);
-      // Left behind by a plugin that dropped the field, or put there by hand:
-      // nobody's credential, and no business on a machine.
+      // Left behind by a plugin that dropped the field, or inserted by hand:
+      // it is nobody's credential, and must not be sent to a runner.
       const stray = await send(
         "PUT",
         arranged.harness.base,
@@ -159,13 +161,12 @@ describe("the secrets a frame carries to a runner", () => {
       expect(probe.secrets).toEqual({ zaiApiKey: KEY_VALUE });
     });
   });
-  it("fails the probe rather than sending one without a key that will not decrypt", async () => {
+  it("fails the probe when the key cannot be decrypted, rather than sending it without the key", async () => {
     await withFleet(async (arranged) => {
       const keyed = findInstanceId(arranged, "keyed-provider");
       await setKey(arranged, keyed, KEY_VALUE);
-      // A Master Key that is not the one the row was written under reads as a
-      // row that will not decrypt, which is the one way a running controller
-      // cannot arrange.
+      // Corrupt the ciphertext. That looks the same as a row written under a
+      // different Master Key, which a running controller has no way to set up.
       await Effect.runPromise(
         Effect.orDie(
           arranged.harness
@@ -187,12 +188,12 @@ describe("the secrets a frame carries to a runner", () => {
       expect(refused.error.code).toBe("invalid_state");
       expect(refused.error.message ?? "").toContain("zaiApiKey");
       expect(refused.error.message ?? "").toContain("could not be decrypted");
-      // Nothing went to the machine: a probe without the key would answer that
-      // nobody had entered one.
+      // Nothing was sent to the runner: a probe without the key would report
+      // that no key was entered.
       expect(listFrames<ProbeRequest>(arranged.wire, "probeRequest").slice(before)).toEqual([]);
     });
   });
-  it("leaves the session whose key will not decrypt queued, and starts the rest", async () => {
+  it("leaves a session whose key cannot be decrypted queued, and starts the others", async () => {
     await withFleet(async (arranged) => {
       const keyed = findInstanceId(arranged, "keyed-provider");
       await setKey(arranged, keyed, KEY_VALUE);
@@ -204,8 +205,8 @@ describe("the secrets a frame carries to a runner", () => {
       );
 
       const stuck = await spawnSessionOrFail(arranged, { prompt: "hello", instanceId: keyed });
-      // Claimed in the same walk, behind the one that cannot be read: a batch
-      // rolled back whole would take this one with it.
+      // Claimed in the same dispatch, after the session whose key cannot be
+      // read. If the whole batch rolled back, this one would not start either.
       const running = await spawnSessionOrFail(arranged, {
         prompt: "hello",
         instanceId: findInstanceId(arranged, "plain-provider"),
@@ -214,8 +215,8 @@ describe("the secrets a frame carries to a runner", () => {
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       expect(start.sessionId).toBe(running.id);
       expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(1);
-      // Still queued rather than starting: nothing was told to run it, so
-      // nothing is waiting for it to report.
+      // Still queued, not starting: the runner was never told to run it, so
+      // nothing waits for a report about it.
       const read = await send("GET", arranged.harness.base, `/api/v1/sessions/${stuck.id}`, {
         token: arranged.token,
       });

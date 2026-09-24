@@ -1,7 +1,8 @@
 /**
- * Credentials Hercule issues: login bearer tokens and API keys, both of them
- * stored as their hash alone. A session's own token is the sessions domain's:
- * it is a column on the session row, minted here and hashed with `hashToken`.
+ * The credentials the controller issues: login bearer tokens and API keys, each
+ * stored only as its hash. A session's own token belongs to the sessions
+ * domain: it is a column on the session row, minted with `mintToken` and hashed
+ * with `hashToken`.
  */
 export {
   Credentials,

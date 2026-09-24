@@ -1,10 +1,10 @@
 /**
  * Provider instances: a registered provider plus the config it runs under.
  *
- * This is the one domain that still sends frames to runners itself - logging a
- * provider in, probing a machine, installing a harness - rather than handing
- * them to the controller daemon. There is no cycle in it, so it was left where
- * it is; bringing it under the same rule is issue #209.
+ * This is the one domain that still sends frames to runners itself - to log a
+ * provider in, probe a runner, or install a harness - instead of leaving that
+ * to the controller daemon. It creates no dependency cycle, so it was left as
+ * it is; moving it under the same rule is issue #209.
  */
 export { ensureProviderInstances } from "./defaults";
 export { listUnenforcedFields } from "./enforcement";

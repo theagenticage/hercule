@@ -1,24 +1,28 @@
 /**
  * Task rows, their provenance children, and the full-text index over them.
  *
- * The store speaks the contract's `Task`: a row and its provenance entries are
- * one value everywhere above this module, because that is what a caller reads
- * and what a `task.created` event carries. Nothing here decides policy - who
- * may write, what a change means, what gets logged - it only reads and writes.
+ * This module reads and writes the contract's `Task`: a row and its provenance
+ * entries are one value everywhere above this module, because that is what a
+ * caller reads and what a `task.created` event carries. Nothing here decides
+ * policy (who may write, what a change means, what gets logged); it only reads
+ * and writes.
  *
- * Two walks answer a listing. Without a search text the walk is a keyset over
- * one sortable column plus the id, which the partial indexes on `tasks` serve.
- * With one it is the full-text index ordered by relevance, and a rank no row
- * carries cannot be resumed from, so that walk pages by offset instead.
+ * A listing pages in one of two ways:
  *
- * The two differ in what a write under the walk does to it. A keyset boundary
- * is a value, so a row inserted or deleted elsewhere in the order leaves the
- * pages already handed out alone. An offset is a count, so a matching row
- * created between two pages pushes one row across the boundary and it comes
- * back twice, and a deleted one pulls one row across and it is missed. A
- * relevance walk therefore reads each row exactly once per snapshot, not per
- * database that is still being written to; a rank is not a key to resume from
- * and there is nothing else to page it by.
+ * - Without a search text, it uses a keyset over one sortable column plus the
+ *   id, which the partial indexes on `tasks` serve.
+ * - With a search text, it uses the full-text index ordered by relevance. No
+ *   row stores its rank, so paging cannot resume from a rank and uses an
+ *   offset instead.
+ *
+ * The two behave differently when rows are written between pages. A keyset
+ * boundary is a value, so a row inserted or deleted elsewhere in the order
+ * does not affect the pages already returned. An offset is a count, so a
+ * matching row created between two pages pushes one row across the boundary
+ * and that row is returned twice, and a deleted row pulls one row across and
+ * that row is skipped. So a relevance listing returns each row exactly once
+ * only if the database does not change while it is read. A rank is not a key
+ * to resume from, and there is nothing else to page by.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -48,7 +52,10 @@ import {
   type SortKey,
 } from "../db";
 
-/** What narrows a listing. Values within a field are any-of, fields are and-ed. */
+/**
+ * The filter of a listing. A task matches a field if it has any of the
+ * field's values, and it must match every field.
+ */
 export interface TaskFilter {
   readonly refs?: ReadonlyArray<ExternalRef>;
   readonly labels?: ReadonlyArray<string>;
@@ -56,7 +63,7 @@ export interface TaskFilter {
   readonly projectId?: string;
 }
 
-/** The column a keyset walk orders by. */
+/** The column a keyset listing orders by. */
 export type TaskSortField = "updatedAt" | "createdAt" | "priority" | "status";
 
 /**
@@ -67,21 +74,21 @@ export type TaskOrder =
   | { readonly _tag: "column"; readonly field: TaskSortField; readonly direction: SortDirection }
   | { readonly _tag: "relevance"; readonly text: string };
 
-/** What a listing asks for beyond its filter. */
+/** The page size, cursor and order of a listing. */
 export interface TaskPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly order: TaskOrder;
 }
 
-/** A provenance entry as the caller hands it over, before it is stamped. */
+/** A provenance entry as the caller passes it, before `at` and `actor` are added. */
 export interface ProvenanceInput {
   readonly ref?: ExternalRef;
   readonly eventId?: number;
   readonly runId?: string;
 }
 
-/** Everything a new task row holds; the defaults are already applied. */
+/** The fields of a new task row, with the defaults already applied. */
 export interface NewTask {
   readonly title: string;
   readonly description: string;
@@ -139,7 +146,7 @@ const SORT_COLUMN: Record<TaskSortField, string> = {
   status: "tasks.status",
 };
 
-/** What each sortable column holds, so a cursor is compared as that column is. */
+/** The type of each sortable column, so a cursor value is compared the same way as the column. */
 const SORT_KEY_TYPE: Record<TaskSortField, "string" | "number"> = {
   updatedAt: "string",
   createdAt: "string",
@@ -150,7 +157,7 @@ const SORT_KEY_TYPE: Record<TaskSortField, "string" | "number"> = {
 /** The rank the priority index stores, so a cursor resumes on the same value. */
 const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 
-/** The value a row hands the next cursor, in the type its column compares as. */
+/** Returns a task's value for the sort field, to put in the next cursor, in the column's type. */
 const readSortKey = (task: Task, field: TaskSortField): SortKey => {
   switch (field) {
     case "updatedAt":
@@ -165,33 +172,39 @@ const readSortKey = (task: Task, field: TaskSortField): SortKey => {
 };
 
 /**
- * The `MATCH` expression for a caller's plain words: every token quoted, so
- * `AND`, `OR` and a stray bracket are terms rather than syntax, and joined with
- * `AND`, so a search narrows the way a search box implies. Splitting on
- * everything that is not a letter or a digit leaves no character inside a token
- * that would need escaping. `undefined` when the text holds no word at all: the
- * index holds no punctuation either, so such a search can match nothing.
+ * Builds the `MATCH` expression for a caller's plain words.
+ *
+ * - Every token is quoted, so `AND`, `OR` and a stray bracket are search terms
+ *   rather than syntax.
+ * - Tokens are joined with `AND`, so each extra word narrows the search, as a
+ *   search box suggests.
+ * - The text is split on everything that is not a letter or a digit, so no
+ *   token contains a character that needs escaping.
+ *
+ * Returns `undefined` when the text contains no word at all. The index holds
+ * no punctuation either, so such a search can match nothing.
  */
 const buildMatchExpression = (text: string): string | undefined => {
   const tokens = text.split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 0);
   return tokens.length === 0 ? undefined : tokens.map((token) => `"${token}"`).join(" AND ");
 };
 
-/**
- * The walk a cursor belongs to.
- *
- * A relevance walk resumes by counting rows rather than by comparing a key, so
- * a count from one result set means nothing in another: its scope has to name
- * everything the result set depends on, which is the terms it matched and the
- * filter it ran under. The terms are the expression rather than the text a
- * caller typed, so trimming the search box between pages keeps the walk.
- */
 const buildColumnScope = (field: TaskSortField, direction: SortDirection): CursorScope => ({
   op: "task.query",
   field,
   direction,
 });
 
+/**
+ * Builds the cursor scope of a relevance listing.
+ *
+ * A relevance listing resumes by counting rows rather than by comparing a key,
+ * so a count from one result set means nothing in another. The scope must
+ * therefore include everything the result set depends on: the terms it matched
+ * and the filter it ran under. The terms are taken from the `MATCH` expression
+ * rather than the text the caller typed, so trimming spaces in the search box
+ * between pages keeps the cursor valid.
+ */
 const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => ({
   op: "task.query",
   field: `relevance:${JSON.stringify([
@@ -207,7 +220,7 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  /** `IN` over a list, and the empty list is the condition that matches nothing. */
+  /** Builds an `IN` clause over a list. An empty list gives a clause that matches nothing. */
   const buildAnyOfClause = (column: string, values: ReadonlyArray<unknown>) =>
     values.length === 0 ? sql`1 = 0` : sql`${sql.literal(column)} IN ${sql.in(values)}`;
 
@@ -224,10 +237,11 @@ const make = Effect.gen(function* () {
     }
     if (filter.refs !== undefined) {
       clauses.push(
-        // Driven from the ref rather than from the task: a correlated EXISTS
-        // makes SQLite scan every live task and probe provenance once each,
-        // where this seeks `task_provenance_ref` first and then the few ids it
-        // names. The duplicate-signal check runs before every triage.
+        // Start from the ref rather than from the task. A correlated EXISTS
+        // makes SQLite scan every live task and look up its provenance, while
+        // this looks up `task_provenance_ref` first and then only the few ids
+        // it returns. This matters because the duplicate-signal check runs
+        // before every triage.
         sql`tasks.id IN (SELECT p.task_id FROM task_provenance p
                          WHERE ${buildAnyOfClause("p.ref", filter.refs)})`,
       );
@@ -236,9 +250,9 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * The tasks of one page with their provenance, in append order. One query for
-   * the entries of every task on the page: a query per task would put the page
-   * size into the round trip count.
+   * Returns the tasks of one page with their provenance, in append order. It
+   * reads the entries of every task on the page in one query, because a query
+   * per task would make the number of round trips grow with the page size.
    */
   const hydrate = (rows: ReadonlyArray<TaskRow>): Effect.Effect<ReadonlyArray<Task>, SqlError> =>
     rows.length === 0
@@ -303,7 +317,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    /** The task with that id, unless it has been deleted. */
+    /** Returns the task with that id, or none if it does not exist or has been deleted. */
     live: (id: string): Effect.Effect<Option.Option<Task>, SqlError> =>
       sql<TaskRow>`SELECT ${sql.literal(COLUMNS)} FROM tasks
                    WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`.pipe(
@@ -311,7 +325,7 @@ const make = Effect.gen(function* () {
         Effect.map((tasks) => Option.fromNullishOr(tasks[0])),
       ),
 
-    /** Whether a project exists and has not been deleted. */
+    /** Returns true if a project exists and has not been deleted. */
     projectExists: (id: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`SELECT id FROM projects
@@ -354,9 +368,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Applies an edit and appends provenance. Only the columns the edit names
-     * are written, which is also what keeps a change of anything but the title
-     * or the description out of the full-text index.
+     * Applies an edit and appends provenance. Only the columns in the edit are
+     * written, which also means that a change to anything other than the title
+     * or the description does not touch the full-text index.
      */
     update: (
       id: string,
@@ -388,7 +402,7 @@ const make = Effect.gen(function* () {
     softDelete: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`UPDATE tasks SET deleted_at = ${at} WHERE id = ${uuidFromString(id)}`),
 
-    /** One page of the tasks a filter matches, in the order the request asks for. */
+    /** Returns one page of the tasks that match a filter, in the requested order. */
     list: (
       filter: TaskFilter,
       request: TaskPageRequest,
@@ -410,8 +424,8 @@ const make = Effect.gen(function* () {
             ORDER BY bm25(tasks_fts), tasks.id
             LIMIT ${request.limit + 1} OFFSET ${offset}
           `;
-          // The next page resumes by counting rows rather than off the last of
-          // them, so what that row was does not come into it.
+          // The next page resumes by counting rows, not from the last row, so
+          // the cursor does not depend on that row.
           return yield* buildPage(rows, request.limit, hydrate, () =>
             encodeOffsetCursor(scope, offset + request.limit),
           );

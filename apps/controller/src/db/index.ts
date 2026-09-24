@@ -1,5 +1,5 @@
 /**
- * The controller's state store: one SQLite database, ambient transactions,
+ * The controller's database: one SQLite database, ambient transactions and
  * forward-only migrations.
  */
 export { afterCommit, AfterCommit, announce, type Change } from "./after-commit";

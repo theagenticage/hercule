@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { completeSetup, send, withServer } from "./testing";
 
-/** `settings.read` and `settings.update` over a real socket. */
+/** Tests `settings.read` and `settings.update` over a real socket. */
 const readSettings = (base: string, token: string) =>
   send("GET", base, "/api/v1/settings", { token });
 
@@ -10,7 +10,7 @@ const patchSettings = (base: string, body: unknown, token: string) =>
   send("PATCH", base, "/api/v1/settings", { body, token });
 
 describe("settings over HTTP", () => {
-  it("answers with what the boot seeded, and takes a write in both scopes", async () => {
+  it("returns the settings the boot created, and accepts a write in both scopes", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
 
@@ -39,7 +39,7 @@ describe("settings over HTTP", () => {
     });
   });
 
-  it("refuses an unknown key rather than stripping it", async () => {
+  it("rejects an unknown key rather than dropping it", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
 
@@ -54,7 +54,8 @@ describe("settings over HTTP", () => {
       expect(body.error.code).toBe("validation");
       expect(body.error.details.issues.some((issue) => issue.path.includes("nope"))).toBe(true);
 
-      // Nothing was written: the whole patch is refused, not the part it liked.
+      // Nothing was written: the whole patch is rejected, not just the
+      // invalid part.
       const state = (await (await readSettings(base, token)).json()) as {
         user: Record<string, unknown>;
       };
@@ -62,7 +63,7 @@ describe("settings over HTTP", () => {
     });
   });
 
-  it("refuses a value the key's schema rejects", async () => {
+  it("rejects a value the key's schema does not accept", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await patchSettings(base, { controller: { "backup.time": "25:00" } }, token);
@@ -93,7 +94,7 @@ describe("settings over HTTP", () => {
     });
   });
 
-  it("refuses a patch that names no setting", async () => {
+  it("rejects a patch that contains no setting", async () => {
     await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
       const response = await patchSettings(base, {}, token);
@@ -111,7 +112,7 @@ describe("settings over HTTP", () => {
     });
   });
 
-  it("stamps the write in the audit log, with the keys and not the values", async () => {
+  it("records the write in the audit log, with the keys but not the values", async () => {
     await withServer(async ({ base, audit }) => {
       const token = await completeSetup(base);
       await patchSettings(base, { user: { "thread.model": "claude-opus-5" } }, token);

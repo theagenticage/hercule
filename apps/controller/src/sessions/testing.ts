@@ -1,14 +1,15 @@
 /**
- * A fleet: one enlisted, connected, logged-in machine, for a test that spawns
- * a session and drives its transcript over the real runner socket. Shared
- * between this domain's own integration suite and the live socket's, because
- * both need the same wire and the same session - a second copy of a WebSocket
- * handshake is a second place for the two to drift apart.
+ * Test helpers for a fleet of one joined, connected, logged-in runner, for a
+ * test that spawns a session and drives its transcript over the real runner
+ * socket. This domain's integration suite and the live socket's suite share
+ * these helpers because both need the same socket and the same session. A
+ * second copy of the WebSocket handshake would be a second place for the two
+ * to drift apart.
  *
- * Each caller supplies its own plugins, facts and models: what a fleet spawns
- * sessions against is the test's own fixture, not this module's business. The
- * one exception is `withAgentFleet` at the bottom, for the suites that care
- * only that a session runs and carries a token.
+ * Each caller passes its own plugins, facts and models, because what a fleet
+ * spawns sessions against is the test's own fixture. The exception is
+ * `withAgentFleet` at the bottom, for suites that only need a session that
+ * runs and has a token.
  */
 import { expect } from "vitest";
 import * as Effect from "effect/Effect";
@@ -43,14 +44,19 @@ import {
 const SOCKET_PATH = "/api/v1/runners/socket";
 
 /**
- * How long a wait on the controller is given, and vitest's own budget set from
- * it. A give-up wait longer than the test timeout never gets to give up: vitest
- * kills the test first, and the failure names the test rather than the thing
- * that never happened. The slack is for the fleet each case stands up first.
+ * How long `waitUntil` waits for the controller. Suites set vitest's test
+ * timeout from it, with extra time for the fleet each test sets up first. A
+ * wait longer than the test timeout never gets to fail on its own: vitest
+ * kills the test first, and the failure names the test instead of the thing
+ * that never happened.
  */
 export const WAIT_DEADLINE_MS = 10_000;
 
-/** Waits for something the controller does on its own schedule, and names it. */
+/**
+ * Polls `look` until it returns a value, and returns that value. Fails after
+ * `WAIT_DEADLINE_MS` with an error that includes `what`, the thing the
+ * controller never did.
+ */
 export const waitUntil = async <A>(
   what: string,
   look: () => A | undefined | Promise<A | undefined>,
@@ -66,18 +72,18 @@ export const waitUntil = async <A>(
 
 type Answered = Delivery | { readonly message: string } | undefined;
 
-/** One machine's end of the socket, answering probes on its own. */
+/** A fake runner's end of the socket. It answers pings and probes by itself. */
 export interface Wire {
   readonly send: (message: RunnerMessage) => void;
   readonly frames: ReadonlyArray<ControllerMessage>;
   readonly close: () => void;
   /**
-   * What this machine reports an input frame did: a delivery, a refusal with a
-   * reason, or `undefined` to leave the frame unanswered, which is what a
-   * machine that has gone quiet does.
+   * Sets how this runner answers an input frame: with a delivery, with an
+   * error message, or with `undefined` to leave the frame unanswered, like a
+   * runner that has stopped responding.
    */
   readonly answering: (delivery: (frame: SessionInput) => Answered) => void;
-  /** Answers every input frame this machine has been holding back, at last. */
+  /** Answers every input frame this runner has left unanswered so far. */
   readonly release: (delivery: Delivery) => void;
 }
 
@@ -87,10 +93,10 @@ export const listFrames = <T extends ControllerMessage>(
 ): ReadonlyArray<T> => wire.frames.filter((frame): frame is T => frame._tag === tag);
 
 /**
- * Waits until this many frames of a kind have arrived. A request is answered as
- * soon as the controller has written to the socket, which is before the frame
- * has crossed it: a test that reads `wire.frames` the moment a response lands
- * is asserting on a race rather than on an ordering.
+ * Waits until at least `count` frames with this tag have arrived, and returns
+ * them. An HTTP request can return as soon as the controller has written a
+ * frame to the socket, before the frame has arrived. So a test that reads
+ * `wire.frames` right after a response would be testing a race.
  */
 export const waitForFrames = <T extends ControllerMessage>(
   wire: Wire,
@@ -102,7 +108,7 @@ export const waitForFrames = <T extends ControllerMessage>(
     return found.length >= count ? found : undefined;
   });
 
-/** Has this machine report one normalized event, on the sequence it names. */
+/** Sends one normalized event from this runner, with the given sequence number. */
 export const reportEvent = (wire: Wire, seq: number, event: ProviderEvent): void =>
   wire.send({ _tag: "sessionEvent", seq, event });
 
@@ -110,8 +116,9 @@ const decodeFrame = (raw: unknown): ControllerMessage =>
   Effect.runSync(Schema.decodeUnknownEffect(ControllerToRunner)(raw));
 
 /**
- * Opens the socket with a credential, says hello, and answers every probe with
- * a logged-in report, which is what gives the controller something to place on.
+ * Opens the socket with a runner credential, sends the hello, and answers
+ * every probe with a logged-in report, so the controller can place sessions on
+ * this runner.
  */
 const dial = (
   base: string,
@@ -189,7 +196,7 @@ const dial = (
         },
       });
     };
-    socket.onerror = () => reject(new Error("the controller refused the upgrade"));
+    socket.onerror = () => reject(new Error("the controller rejected the WebSocket upgrade"));
     setTimeout(() => reject(new Error("the controller never upgraded the connection")), 3000);
   });
 
@@ -199,7 +206,7 @@ export interface ProviderInstance {
   readonly snapshots: ReadonlyArray<unknown>;
 }
 
-/** The instances, once every one of them has been probed on this machine. */
+/** Waits until every provider instance has been probed on this runner, and returns the instances. */
 const waitForEveryInstanceProbed = async (
   base: string,
   token: string,
@@ -217,28 +224,28 @@ export interface Arranged {
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly runnerId: string;
   /**
-   * The same machine dialling in again, as one that was restarted or lost its
-   * connection does: a second socket on the credential the join handed it.
+   * Connects the same runner again, like one that restarted or lost its
+   * connection: a second socket with the credential from the join.
    */
   readonly reconnect: () => Promise<Wire>;
   /**
-   * A second machine on the same controller: joined on a token of its own,
-   * dialled, and probed, so a session can be placed on it by name. What it is
-   * for is the case that needs two machines to tell apart - what one machine
-   * reports says nothing about what another one holds.
+   * Adds a second runner to the same controller: joined with its own token,
+   * connected, and probed, so a session can be placed on it by name. It is for
+   * tests that need two separate runners, because one runner's reports do not
+   * cover another runner's sessions.
    */
   readonly enlist: () => Promise<Enlisted>;
 }
 
-/** A second machine, and the id a placement names it by. */
+/** A second runner, and the id a placement uses for it. */
 export interface Enlisted {
   readonly runnerId: string;
   readonly wire: Wire;
 }
 
 /**
- * What a fleet takes beyond what the controller itself takes: the machine that
- * dials in, and the plugins it runs, which a fleet cannot do without.
+ * The controller's server options, plus what the fleet needs: the runner's
+ * facts and models, and the plugins, which a fleet cannot do without.
  */
 export type FleetOptions = Omit<ServerOptions, "plugins"> & {
   readonly plugins: ReadonlyArray<Plugin>;
@@ -247,11 +254,12 @@ export type FleetOptions = Omit<ServerOptions, "plugins"> & {
 };
 
 /**
- * A controller with one enlisted, connected, logged-in machine on it.
+ * Runs `body` against a controller with one joined, connected, logged-in
+ * runner.
  *
- * What the fleet itself needs is taken out of the options and the rest is
- * handed to the controller as it stands, so an option the harness gains is one
- * a caller can pass through here without this file changing.
+ * The fleet's own options are taken out and the rest are passed to the
+ * controller unchanged, so a caller can use a new server option without this
+ * file changing.
  */
 export const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
@@ -266,11 +274,11 @@ export const withFleet = (
     expect(joined.status, await joined.clone().text()).toBe(201);
     const answer = (await joined.json()) as JoinAnswer;
     const wire = await dial(harness.base, answer.credential, facts, models);
-    // A real runner reports what it holds right after its hello (empty, on a
-    // fresh connection); most callers want dispatch working from the first
-    // line of their test body rather than plumbing this through themselves.
-    // A test after the gap between hello and that report uses `reconnect`,
-    // which leaves the new connection to send its own.
+    // A real runner reports its sessions right after its hello (none, on a
+    // fresh connection). Most tests want dispatch working from their first
+    // line, so this sends that report for them. A test that needs the gap
+    // between the hello and the report uses `reconnect`, which does not send
+    // one.
     wire.send({ _tag: "sessionsReport", sessions: [] });
     const wires: Array<Wire> = [wire];
     const reconnect = async (): Promise<Wire> => {
@@ -291,8 +299,8 @@ export const withFleet = (
       its.send({ _tag: "sessionsReport", sessions: [] });
       wires.push(its);
       machines += 1;
-      // One snapshot per machine per instance, so a placement onto this one
-      // has an answer to place against only once its own probes are in.
+      // There is one snapshot per runner per instance, so a session can be
+      // placed on the new runner only once its own probes are in.
       await waitUntil("probed the machine it just enlisted", async () => {
         const response = await get(harness.base, "/api/v1/providers", token);
         const all = (await response.json()) as ReadonlyArray<ProviderInstance>;
@@ -315,21 +323,21 @@ export const withFleet = (
     }
   }, server);
 
-/** The provider instance a fixture's provider was opened as, by that provider's id. */
+/** Returns the id of the provider instance created for a provider, by the provider's id. */
 export const findInstanceId = (arranged: Arranged, providerId: string): string => {
   const found = arranged.instances.find((instance) => instance.providerId === providerId);
   expect(found, providerId).toBeDefined();
   return found!.id;
 };
 
-/** Every session this controller holds, as the API hands them back. */
+/** Returns every session, as the API returns them. */
 export const listSessions = async (arranged: Arranged): Promise<ReadonlyArray<Session>> => {
   const response = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
   return ((await response.json()) as { items: ReadonlyArray<Session> }).items;
 };
 
-/** One session's inputs, oldest first, as the API hands them back. */
+/** Returns one session's inputs, oldest first, as the API returns them. */
 export const listInputs = async (arranged: Arranged, id: string): Promise<ReadonlyArray<Input>> => {
   const response = await get(
     arranged.harness.base,
@@ -350,11 +358,10 @@ export const spawnSessionOrFail = async (arranged: Arranged, body: unknown): Pro
 };
 
 /**
- * Below: the fleet a test about *what the agent inside a session may do* needs.
- * That test does not care what the session runs, only that it runs and has a
- * token, so the fixture is this module's after all - and two suites arranging
- * the same machine, the same profile lookup and the same start frame twice is
- * two places for the arrangement to drift while the assertions stay put.
+ * Below: the fleet for tests about what the agent inside a session may do.
+ * Those tests do not care what the session runs, only that it runs and has a
+ * token, so this module provides the fixture. Several suites use it, so the
+ * runner, the profile lookup and the start frame are set up in one place.
  */
 
 const AGENT_PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
@@ -372,7 +379,7 @@ const AGENT_FACTS = {
 
 const AGENT_MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: [] }];
 
-/** A fleet whose one machine can run a session on any shipped profile. */
+/** Runs `body` against a fleet whose one runner can run a session on any built-in profile. */
 export const withAgentFleet = (
   body: (arranged: Arranged) => Promise<void>,
   options: Omit<ServerOptions, "plugins"> = {},
@@ -384,10 +391,10 @@ export const withAgentFleet = (
     ...options,
   });
 
-/** The instant every event a test reports carries. */
+/** The timestamp on every event a test reports. */
 export const at = "2026-09-07T10:00:00.000Z";
 
-/** One of the profiles the controller ships, by the name it ships under. */
+/** Returns one of the controller's built-in profiles, by name. */
 export const readProfileNamed = async (arranged: Arranged, name: string): Promise<Profile> => {
   const response = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
@@ -397,7 +404,7 @@ export const readProfileNamed = async (arranged: Arranged, name: string): Promis
   return found!;
 };
 
-/** A profile of the test's own making, for a grant set no shipped one has. */
+/** Creates a profile with the given grants, for a grant set no built-in profile has. */
 export const createProfile = async (
   arranged: Arranged,
   name: string,
@@ -413,7 +420,7 @@ export const createProfile = async (
   return (await response.json()) as Profile;
 };
 
-/** The start frames the controller has sent for one session, once there are this many. */
+/** Waits until the controller has sent at least `count` start frames for a session, and returns them. */
 export const waitForStartFrames = (
   arranged: Arranged,
   sessionId: string,
@@ -432,7 +439,7 @@ export const readSession = async (arranged: Arranged, id: string): Promise<Sessi
   return (await response.json()) as Session;
 };
 
-/** Waits until the session reads back the way the caller is waiting for. */
+/** Waits until `ready` returns true for the session, and returns the session. */
 export const waitForSession = (
   arranged: Arranged,
   id: string,
@@ -444,8 +451,8 @@ export const waitForSession = (
   });
 
 /**
- * The plaintext session token off a start frame. The frame is the only place
- * the plaintext is ever seen, which is exactly what the runner reads it from.
+ * Returns the plaintext session token from a start frame. The frame is the
+ * only place the plaintext appears, and the runner reads it from there too.
  */
 export const readSessionToken = (frame: SessionStart): string => {
   const token: unknown = frame.token;
@@ -456,16 +463,16 @@ export const readSessionToken = (frame: SessionStart): string => {
   return frame.token;
 };
 
-/** A session on a profile, started, with the token its machine was handed. */
+/** A started session on a profile, with the token its runner received. */
 export interface Agent {
   readonly session: Session;
   readonly token: string;
 }
 
 /**
- * A session on a profile of its own, holding exactly these grants. The profile
- * is made for the case, because a session's grants are the only way to bound
- * what the agent inside it may do.
+ * Spawns and starts a session on a new profile with exactly these grants. The
+ * profile is created for the test, because a session's grants are the only
+ * way to limit what the agent inside it may do.
  */
 export const spawnAgentWithGrants = async (
   arranged: Arranged,

@@ -1,12 +1,12 @@
 /**
  * Git credentials, answered by the controller over the runner socket.
  *
- * A runner never holds a token: it asks per request, naming the
- * remote git is about to talk to and either the session that asked or the
- * workspace it is provisioning, and the controller answers only when that
- * remote is a checkout the asker already has. Everything here is driven as a
- * machine drives it - a `credentialRequest` on the wire, a `credentialAnswer`
- * back - because the wire is the whole of the authorization boundary.
+ * A runner never holds a token. It asks for one per request, naming the remote
+ * git is about to contact and either the session that asked or the workspace
+ * it is provisioning. The controller returns a token only when the asker
+ * already has a checkout of that remote. These tests drive the exchange the
+ * way a runner does - a `credentialRequest` on the wire, a `credentialAnswer`
+ * back - because the wire is the whole authorization boundary.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
@@ -38,7 +38,7 @@ const LOGIN = "octocat";
 const PAT = "ghp_a-token";
 const SECOND_PAT = "ghp_another-token";
 
-/** The GitHub type, with its check done here rather than against api.github.com. */
+/** The GitHub connection type, validating tokens locally rather than against api.github.com. */
 const githubPlugin: Plugin = {
   manifest: {
     id: "github",
@@ -89,7 +89,7 @@ const createConnection = async (
 };
 
 describe("the designated connection of a workspace", () => {
-  it("is the connection of its first checkout's resource, and nothing on a scratch workspace", async () => {
+  it("is the connection of its first checkout's resource, and null for a scratch workspace", async () => {
     await withCredentials(async (arranged) => {
       const github = await createConnection(arranged, { pat: PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
@@ -111,13 +111,13 @@ describe("the designated connection of a workspace", () => {
 });
 
 /**
- * D-21 F4: the Connection the work in a workspace acts through is settled when
- * it is opened and stored on the row. Re-deriving it from the first checkout's
- * resource at every read would change what a workspace already standing acts
- * through the moment the resource changed hands.
+ * The Connection that work in a workspace acts through is fixed when the
+ * workspace is opened, and stored on the row. If it were derived from the
+ * first checkout's resource at every read, an existing workspace would switch
+ * accounts as soon as its resource moved to another Connection.
  */
-describe("a workspace whose resource changes hands", () => {
-  it("keeps the Connection it was opened against, and answers credentials from it", async () => {
+describe("a workspace whose resource moves to another Connection", () => {
+  it("keeps the Connection it was opened with, and answers credentials from it", async () => {
     await withCredentials(async (arranged) => {
       const mine = await createConnection(arranged, { pat: PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", mine);
@@ -145,8 +145,8 @@ describe("a workspace whose resource changes hands", () => {
 });
 
 describe("a credential asked for by a provisioning workspace", () => {
-  // D-21 F5: the answer is the credential; the git identity rides on the start
-  // frame, once, rather than on every credential exchange.
+  // The answer carries only the credential. The git identity is sent once, on
+  // the session start frame, rather than on every credential exchange.
   it("answers with the connection's token and the login it belongs to", async () => {
     await withCredentials(async (arranged) => {
       const github = await createConnection(arranged, { pat: PAT });
@@ -196,7 +196,7 @@ describe("a credential asked for by a provisioning workspace", () => {
     });
   });
 
-  it("refuses a remote the workspace does not hold, and one no resource matches", async () => {
+  it("rejects a remote the workspace has no checkout of, and a remote that matches no resource", async () => {
     await withCredentials(async (arranged) => {
       const github = await createConnection(arranged, { pat: PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
@@ -222,7 +222,7 @@ describe("a credential asked for by a provisioning workspace", () => {
     });
   });
 
-  it("says no_connection for a repo that has none", async () => {
+  it("answers no_connection for a repo with no Connection", async () => {
     await withCredentials(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const workspace = await provisionWorkspaceOrFail(arranged, {
@@ -239,7 +239,7 @@ describe("a credential asked for by a provisioning workspace", () => {
     });
   });
 
-  it("refuses a workspace that is not on the machine asking", async () => {
+  it("rejects a workspace that is not on the runner asking", async () => {
     await withCredentials(async (arranged) => {
       const github = await createConnection(arranged, { pat: PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
@@ -260,7 +260,7 @@ describe("a credential asked for by a provisioning workspace", () => {
 });
 
 describe("a credential asked for by a session", () => {
-  it("refuses the token of a session the machine no longer holds", async () => {
+  it("rejects the token of a session the runner no longer reports", async () => {
     await withCredentials(async (arranged) => {
       const github = await createConnection(arranged, { pat: PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
@@ -278,8 +278,8 @@ describe("a credential asked for by a session", () => {
       const token = (start as unknown as Frame)["token"];
       expect(token, "the session was started with no token").toBeTruthy();
 
-      // The machine says it holds nothing: the session is over, whether or not
-      // it ever reported an exit, and the credential it held is over with it.
+      // The runner reports no sessions, so the session has ended, whether or
+      // not it ever reported an exit, and its token stops working with it.
       arranged.wire.send({ _tag: "sessionsReport", sessions: [] });
       await waitUntil("ended the session", async () => {
         const response = await get(
@@ -300,7 +300,7 @@ describe("a credential asked for by a session", () => {
     });
   });
 
-  it("refuses a token nobody was issued", async () => {
+  it("rejects a token that was never issued", async () => {
     await withCredentials(async (arranged) => {
       const github = await createConnection(arranged, { pat: PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
@@ -317,7 +317,7 @@ describe("a credential asked for by a session", () => {
 });
 
 describe("the GitHub token a session starts with", () => {
-  it("rides the start frame from the workspace's designated connection", async () => {
+  it("is sent on the start frame, from the workspace's designated connection", async () => {
     await withCredentials(async (arranged) => {
       const github = await createConnection(arranged, { pat: PAT });
       const web = await createRepo(arranged, "https://github.com/acme/web", github);
@@ -326,8 +326,8 @@ describe("the GitHub token a session starts with", () => {
         prompt: "hello",
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
-      // The session waits for its worktree, so the machine has to say the
-      // workspace stands before there is a start frame to read the token off.
+      // The session waits for its worktree, so the runner has to report the
+      // workspace ready before there is a start frame to read the token from.
       arranged.wire.send({
         _tag: "workspaceReport",
         workspaceId: String(session.workspaceId),
@@ -337,8 +337,8 @@ describe("the GitHub token a session starts with", () => {
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       expect(start.sessionId).toBe(session.id);
       expect((start as unknown as Frame)["ghToken"]).toBe(PAT);
-      // The machine commits as the account it pushes with, so the identity
-      // rides the same frame the token does.
+      // The session commits as the account it pushes with, so the identity
+      // is sent on the same frame as the token.
       expect((start as unknown as Frame)["gitIdentity"]).toEqual({
         name: LOGIN,
         email: `${LOGIN}@users.noreply.github.com`,
@@ -346,7 +346,7 @@ describe("the GitHub token a session starts with", () => {
     });
   });
 
-  it("falls back to the connection the thread setting names, and is null with neither", async () => {
+  it("falls back to the connection in the thread setting, and is null when there is neither", async () => {
     await withCredentials(async (arranged) => {
       const bare = await spawnSessionOrFail(arranged, { prompt: "hello" });
       const first = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;

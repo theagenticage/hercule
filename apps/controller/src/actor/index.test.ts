@@ -21,22 +21,25 @@ const agent: Actor = {
   grants: ["task.read", "task.create", "session.spawn"],
 };
 
-/** The grant a refusal names, or nothing where the check let the caller through. */
+/**
+ * Returns the grant in the `Forbidden` error, or `undefined` when the check let
+ * the caller through.
+ */
 const readMissingGrant = (refused: ReturnType<typeof checkGrant>): string | undefined =>
   refused?.error.details.grant;
 
 describe("buildActorStamp", () => {
-  it("is the bare word for the user: which credential it presented is not its identity", () => {
+  it("is the bare word for the user, whatever credential it presented", () => {
     expect(buildActorStamp(user)).toBe("user");
   });
 
-  it("is session:<id> for a session, which is what a reader follows back to it", () => {
+  it("is session:<id> for a session, so a reader can trace a change back to it", () => {
     expect(buildActorStamp(agent)).toBe(`session:${SESSION_ID}`);
   });
 });
 
 describe("currentStamp", () => {
-  it("stamps whoever the request resolved, so no service decides it", async () => {
+  it("returns the stamp of the actor the request resolved", async () => {
     const stamps = await Effect.runPromise(
       Effect.all([
         Effect.provideService(currentStamp, CurrentActor, user),
@@ -47,7 +50,7 @@ describe("currentStamp", () => {
     expect(stamps).toEqual(["user", `session:${SESSION_ID}`]);
   });
 
-  it("dies on an actorless caller rather than attributing the write to the user", async () => {
+  it("dies when there is no actor, rather than attributing the write to the user", async () => {
     await expect(Effect.runPromise(currentStamp)).rejects.toThrow(
       "a write reached stamping with no authenticated actor behind it",
     );
@@ -55,18 +58,18 @@ describe("currentStamp", () => {
 });
 
 describe("checkGrant", () => {
-  it("lets the user actor through every operation: parity is the ceiling", () => {
+  it("lets the user actor call every operation", () => {
     for (const operation of ALL_OPERATIONS) {
       expect(checkGrant(operation.id, user)).toBeUndefined();
     }
   });
 
-  it("checks nothing when the operation asks only that a credential resolved", () => {
+  it("checks nothing when the operation requires only a valid credential", () => {
     expect(readRequirement("apiKey.query")).toBe("credential.read");
     expect(checkGrant("auth.wsTicket", nobody)).toBeUndefined();
   });
 
-  it("names the grant an actor without parity is missing", () => {
+  it("reports the grant that a caller with no actor is missing", () => {
     expect(readMissingGrant(checkGrant("secret.set", nobody))).toBe("secret.write");
   });
 
@@ -75,10 +78,10 @@ describe("checkGrant", () => {
     expect(readMissingGrant(checkGrant("task.delete", agent))).toBe("task.delete");
   });
 
-  it("lets a session spawn, because whether a spawn is a Thread is in the payload", () => {
-    // A spawn from an Agent is every actor's to make and a Thread is the
-    // user's alone; this check runs before the payload that says which, so
-    // placement is where the two are told apart.
+  it("lets a session spawn, because only the payload shows whether a spawn is a Thread", () => {
+    // Any actor may spawn from an Agent, but only the user may start a Thread.
+    // This check runs before the payload is decoded, so placement is where the
+    // two are told apart.
     expect(checkGrant("session.spawn", agent)).toBeUndefined();
   });
 

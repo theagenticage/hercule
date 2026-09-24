@@ -1,16 +1,23 @@
 /**
- * The core's OAuth2 client: the parts of an authorization-code flow that are
- * the same for every provider, so a plugin declaring a type writes none of it.
+ * The core's OAuth2 client: the parts of the authorization-code flow that are
+ * the same for every provider, so a plugin that declares a connection type
+ * implements none of them.
  *
- * What is here is the protocol: the authorization request, what the browser
- * comes back with, what talks to a token endpoint, and what a token set is
- * worth once it is stored. The flow itself - deciding a start, spending a
- * callback, writing the connection it creates - is the connection service's,
- * and the refresh a plugin triggers is the plugin host's; both call in here.
+ * This module holds the protocol:
  *
- * Client credentials are the owning plugin's: the id is a field of its config
- * and the secret is one it owns, under fixed names. A type is one plugin's, so
- * there is exactly one pair per type and nothing to choose between.
+ * - building the authorization URL;
+ * - decoding the query the browser comes back with;
+ * - requesting tokens from the token endpoint;
+ * - storing a token set and deciding when it needs a refresh.
+ *
+ * The flow itself (starting it, handling the callback, writing the connection)
+ * is in the connection service. The refresh that a plugin's `credentials()`
+ * call triggers is in `./runtime`. Both call into this module.
+ *
+ * The client credentials belong to the plugin that owns the connection type:
+ * the client id is a field of the plugin's config, and the client secret is a
+ * secret the plugin owns, both under fixed names. Each type belongs to one
+ * plugin, so each type has exactly one client id and secret.
  */
 import { createHash } from "node:crypto";
 import * as Clock from "effect/Clock";
@@ -28,20 +35,23 @@ import { PluginConfigs } from "./plugin-configs";
 /** Where the provider sends the browser back to. Appended to the browser's origin. */
 export const CALLBACK_PATH = "/oauth/callback";
 
-/** The one secret an OAuth connection owns: its whole token set, as JSON. */
+/** The name of the only secret an OAuth connection owns: its whole token set, as JSON. */
 export const OAUTH_TOKENS = "oauth.tokens";
 
-/** Long enough to read a provider's consent screen, short enough to be worth sweeping. */
+/**
+ * How long a started flow stays valid: long enough to read a provider's consent
+ * screen, and short enough that abandoned flows are soon deleted.
+ */
 export const SETUP_LIFETIME_MS = 10 * 60 * 1000;
 
 /**
- * How a redirect flow ended, in the words the Connections screen reads. The set
- * is closed: what the user is told is one of these five and never a provider's
- * own message, which is not ours to put in a URL.
+ * How an OAuth flow ended, as the word the Connections screen receives in its
+ * URL. The user only ever sees one of these five outcomes, never the
+ * provider's own error message, which the controller does not put in a URL.
  */
 export type Outcome = "ok" | "denied" | "expired" | "exchange-failed" | "rejected";
 
-/** What the browser arrives at the callback with, straight off the query string. */
+/** The query string the browser brings to the callback. */
 const CallbackQuery = Schema.Struct({
   state: Schema.optionalKey(Schema.String),
   code: Schema.optionalKey(Schema.String),
@@ -50,11 +60,11 @@ const CallbackQuery = Schema.Struct({
 
 export const decodeCallback = Schema.decodeUnknownEffect(CallbackQuery);
 
-/** The PKCE challenge: the verifier, hashed the way the provider will hash it. */
+/** Computes the PKCE challenge for a verifier: its SHA-256 hash, base64url-encoded. */
 export const computeChallenge = (verifier: string): string =>
   createHash("sha256").update(verifier).digest("base64url");
 
-/** The authorization request, as RFC 6749 and RFC 7636 spell it. */
+/** Builds the authorization URL, with the parameters RFC 6749 and RFC 7636 define. */
 export const buildAuthorizationUrl = (
   oauth: OAuthDeclaration,
   parts: {
@@ -66,8 +76,8 @@ export const buildAuthorizationUrl = (
 ): string => {
   const url = new URL(oauth.authorizationUrl);
   const query: Record<string, string> = {
-    // The type's own extras first, so nothing it asks for can displace a
-    // parameter the protocol itself is carried by.
+    // The type's extra parameters go first, so they cannot override a
+    // parameter the protocol needs.
     ...(oauth.extraParams ?? {}),
     response_type: "code",
     client_id: parts.clientId,
@@ -86,42 +96,42 @@ const CLIENT_ID_FIELD = "clientId";
 const CLIENT_SECRET_NAME = "clientSecret";
 
 /**
- * A token is refreshed this long before it runs out, so a call that takes a
- * moment to reach the provider is not made with a token that expires on the way.
+ * A token is refreshed this long before it expires, so a call that takes a
+ * moment to reach the provider does not arrive with an expired token.
  */
 const REFRESH_MARGIN_MS = 60_000;
 
-/** What the provider gave us, as the `oauth.tokens` secret holds it. */
+/** The tokens the provider issued, as stored in the `oauth.tokens` secret. */
 export interface TokenSet {
   readonly accessToken: string;
   readonly refreshToken?: string;
   readonly expiresAt?: string;
 }
 
-/** The client credentials the plugin that owns a type holds. */
+/** The OAuth client credentials of the plugin that owns a connection type. */
 export interface OAuthClient {
   readonly clientId: string;
   readonly clientSecret: string;
 }
 
 /**
- * The token endpoint answered, and said no. The credential it was asked about
- * is the thing that is wrong.
+ * The token endpoint returned a status other than 200. The code or refresh
+ * token that was sent is treated as the problem.
  */
 export class TokenRefused extends Schema.TaggedError<TokenRefused>()("TokenRefused", {
   message: Schema.String,
 }) {}
 
 /**
- * The token endpoint was not reached, or answered something unreadable. It says
- * nothing about the credential: a name that did not resolve and a network that
- * dropped are the provider's weather, not the user's to reauthorise.
+ * The token endpoint could not be reached, or its response had no access
+ * token. This error says nothing about the credential: a DNS failure or a
+ * dropped network is not something the user can fix by reconnecting.
  */
 export class TokenUnreachable extends Schema.TaggedError<TokenUnreachable>()("TokenUnreachable", {
   message: Schema.String,
 }) {}
 
-/** The standard token response. Anything else the provider adds is not ours to read. */
+/** The standard token response. Any other fields the provider adds are ignored. */
 const TokenResponse = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.optionalKey(Schema.String),
@@ -139,19 +149,23 @@ const failTokenUnreachable = (message: string): Effect.Effect<never, TokenUnreac
 /** The redirect URI the provider will send the browser back to, for this origin. */
 export const buildRedirectUri = (origin: string): string => `${origin}${CALLBACK_PATH}`;
 
-/** Written by this module alone, so a token set that does not parse is a broken database. */
+/**
+ * Parses a stored token set. Only this module writes token sets, so one that
+ * does not parse means the database is broken.
+ */
 export const parseTokens = (stored: string): TokenSet => JSON.parse(stored) as TokenSet;
 
 export const serializeTokens = (tokens: TokenSet): string => JSON.stringify(tokens);
 
-/** Whether this token is too close to running out to be worth handing over. */
+/** Checks whether the access token expires within the refresh margin, and so needs a refresh. */
 export const isStale = (tokens: TokenSet, nowMillis: number): boolean =>
   tokens.expiresAt !== undefined && Date.parse(tokens.expiresAt) - nowMillis <= REFRESH_MARGIN_MS;
 
 /**
- * Reads the client credentials a plugin holds, or nothing when the user has not
- * set both. Built once and read at each call rather than at registration: the
- * user sets them in Settings long after the plugin declared its type.
+ * Returns a function that reads a plugin's OAuth client credentials. The
+ * function returns `None` when the user has not set both the client id and the
+ * client secret. It reads them on every call rather than once at registration,
+ * because the user sets them in Settings after the plugin has declared its type.
  */
 export const oauthClients: Effect.Effect<
   (pluginId: string) => Effect.Effect<Option.Option<OAuthClient>, SqlError>,
@@ -175,9 +189,13 @@ export const oauthClients: Effect.Effect<
 });
 
 /**
- * One form-encoded token request, as both grants make it. The answer's
- * `expires_in` is turned into an instant here, because that is the only moment
- * it can be read against.
+ * Sends a form-encoded request to the token endpoint, as both grant types do,
+ * and returns the token set.
+ *
+ * Fails with `TokenRefused` when the status is not 200, and with
+ * `TokenUnreachable` when the endpoint cannot be reached or returns no access
+ * token. `expires_in` is converted to a timestamp here, because it counts from
+ * the moment of the response.
  */
 const requestTokens = (
   tokenUrl: string,
@@ -189,11 +207,11 @@ const requestTokens = (
       acceptJson: true,
     });
     if (response.status !== 200) {
-      return yield* failTokenRefused(`the token endpoint answered ${String(response.status)}`);
+      return yield* failTokenRefused(`the token endpoint returned HTTP ${String(response.status)}`);
     }
     const body = yield* decodeTokenResponse(yield* response.json).pipe(
       Effect.catchTag("SchemaError", () =>
-        failTokenUnreachable("the token endpoint answered no access token"),
+        failTokenUnreachable("the token endpoint's response has no access token"),
       ),
     );
     const millis = yield* Clock.currentTimeMillis;
@@ -210,7 +228,7 @@ const requestTokens = (
     ),
   );
 
-/** Spends the code the provider sent the browser back with, proving the PKCE verifier. */
+/** Exchanges the authorization code for a token set, sending the PKCE verifier as proof. */
 export const exchangeCode = (request: {
   readonly tokenUrl: string;
   readonly client: OAuthClient;
@@ -228,9 +246,8 @@ export const exchangeCode = (request: {
   });
 
 /**
- * Trades the refresh token for a fresh access token. A provider that answers
- * without a new refresh token means the old one still stands, so the caller
- * keeps it.
+ * Exchanges the refresh token for a new token set. When the response has no
+ * new refresh token, the old one is still valid, and the caller keeps it.
  */
 export const refreshAccess = (request: {
   readonly tokenUrl: string;

@@ -1,14 +1,17 @@
 /**
- * The one consumer of everything the fleet publishes: what a machine says about
- * the sessions it holds, what it made of a working area, the git credentials it
- * asks for, and every change that may have left it room for work.
+ * The only consumer of what the fleet reports:
  *
- * Two queues, two fibers. Session traffic is its own, so a session's events are
- * applied in the order the machine numbered them; the rest of the fleet's
- * reports must not wait behind them. What either fiber forks - a flush, a
- * dispatch - waits on a machine and so is never done inline. Each item absorbs
- * its own failure: one report that will not write must not stop the traffic of
- * every other machine.
+ * - the sessions a runner holds, and what happens in them;
+ * - the result of provisioning a workspace;
+ * - the git credentials a runner asks for;
+ * - every change that may have given a runner room for more work.
+ *
+ * There are two queues, each read by its own fiber. Session traffic has its
+ * own queue, so a session's events are applied in the order the runner
+ * numbered them, and the rest of the fleet's reports do not wait behind them.
+ * Work that waits on a runner, such as a flush or a dispatch, is forked and
+ * never done inline. A failure in one item is logged and dropped, so one
+ * report that fails to write does not stop the traffic of every other runner.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -36,17 +39,17 @@ const make = Effect.gen(function* () {
     switch (traffic._tag) {
       case "workspaceReported":
         return Effect.gen(function* () {
-          // The two domains meet here and nowhere else: what a machine made of
-          // a working area is the workspaces domain's to record, and what it
-          // means for the sessions waiting on it is the sessions domain's. One
-          // write set, so a working area that could not be made and the
-          // sessions it strands move together or not at all.
+          // This is the only place the two domains meet. The workspaces domain
+          // records the runner's report, and the sessions domain decides what
+          // it means for the sessions waiting on the workspace. Both writes
+          // are one transaction, so a failed workspace and the sessions it
+          // strands are updated together or not at all.
           const settled = yield* withTransaction(
             sql,
             Effect.gen(function* () {
               const settled = yield* workspaces.reported(traffic.runnerId, traffic.report);
-              // A working area that could not be made ends the sessions waiting
-              // on it, with the machine's own words.
+              // A workspace that failed to provision ends the sessions waiting
+              // on it, with the runner's error message as the reason.
               if (settled?.moved === "failed") {
                 yield* sessions.endForWorkspace(
                   settled.workspaceId,
@@ -56,29 +59,29 @@ const make = Effect.gen(function* () {
               return settled;
             }),
           );
-          // After the commit, and forked: a working area that came up releases
-          // the sessions waiting on it, and that reaches the machine.
+          // A workspace that became ready lets its waiting sessions start. The
+          // dispatch sends frames to the runner, so it runs after the commit,
+          // on its own fiber.
           if (settled?.moved === "ready") {
             yield* forkAndAbsorbFailures(
-              "A ready working area could not be dispatched",
+              "Dispatching sessions to a ready workspace failed",
               dispatch(traffic.runnerId),
             );
           }
         });
       case "credentialRequested":
-        // The answer is good for this one request, so it goes straight back on
-        // the connection that asked and is written down nowhere.
+        // The credential is valid for this one request only, so it is sent
+        // straight back on the connection that asked, and never stored.
         return Effect.flatMap(
           workspaces.credentialAnswer(traffic.runnerId, traffic.request),
           (answer) => Effect.asVoid(connections.tell(traffic.runnerId, answer)),
         );
       case "placementsChanged":
-        // Forked, like the dispatch a ready working area sets off: starting
-        // what a machine now has room for is a transaction and a credential
-        // read per session, and the rest of the fleet must not wait behind one
-        // machine's.
+        // Forked, like the dispatch for a ready workspace: filling a runner's
+        // free room takes a transaction and a credential read per session, and
+        // the rest of the fleet must not wait behind one runner.
         return forkAndAbsorbFailures(
-          "A freed slot could not be dispatched",
+          "Dispatching to a freed slot failed",
           dispatch(traffic.runnerId),
         );
     }
@@ -88,50 +91,52 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (traffic.frame._tag === "sessionsReport") {
         const ended = yield* sessions.bound(traffic.runnerId, traffic.frame.sessions);
-        // Once that write set is durable and not before: a `Map` does not roll
-        // back, so a runner is not dispatchable on a report that never landed.
+        // Mark the runner only after the write is committed. The mark lives in
+        // a `Map`, which does not roll back, so a report that failed to write
+        // must not make the runner dispatchable.
         yield* connections.markSessionsReported(traffic.runnerId, traffic.connection);
-        // A process the controller has already ended runs on without a token,
-        // and it blocks a resume of the same session on that runner. Nothing
-        // else stops it, so the runner is told to.
+        // A process for a session the controller has already ended keeps
+        // running without a token, and it blocks a resume of that session on
+        // the runner. Nothing else would stop it, so the runner is told to.
         for (const id of ended) {
           yield* connections.tell(traffic.runnerId, sessions.stopping(id));
         }
         yield* forkAndAbsorbFailures(
-          "A runner's report could not be dispatched",
+          "Dispatching after a runner's sessions report failed",
           dispatch(traffic.runnerId),
         );
         return;
       }
       const { seq, event } = traffic.frame;
-      // The fold reads and taps but writes nothing, so it stays outside: a
-      // delta reaches a watching browser whether or not the write lands.
+      // The fold reads and publishes but writes nothing, so it runs outside
+      // the transaction. A browser watching the session gets the delta
+      // whether or not the write succeeds.
       const report = yield* sessions.foldReport(traffic.runnerId, seq, event);
       if (report === undefined) return;
       const applied = yield* withTransaction(
         sql,
         Effect.gen(function* () {
           const applied = yield* sessions.applyReport(traffic.runnerId, event, report);
-          // In the session's own write set: a session starting or ending is
-          // work in the working area it runs in, which is what keeps that area
-          // from expiring under it, and the two facts are one commit.
+          // Same transaction as the session's write. A session starting or
+          // ending counts as activity in its workspace, which keeps the
+          // workspace from expiring while in use.
           if (applied.worked !== undefined) {
             yield* workspaces.touched(applied.worked.workspaceId, applied.worked.at);
           }
           return applied;
         }),
       );
-      // A session that has gone idle can take what is queued for it; one that
-      // has exited has left its machine a slot free.
+      // A session that went idle can take its queued input. A session that
+      // exited has freed a slot on its runner.
       if (applied.moved === "idle") {
         yield* forkAndAbsorbFailures(
-          "A session's queued input could not be sent",
+          "Sending a session's queued input failed",
           flush(event.sessionId),
         );
       }
       if (applied.moved === "exited") {
         yield* forkAndAbsorbFailures(
-          "A freed slot could not be dispatched",
+          "Dispatching to a freed slot failed",
           dispatch(traffic.runnerId),
         );
       }
@@ -139,11 +144,11 @@ const make = Effect.gen(function* () {
 
   return {
     driving: Stream.runForEach(connections.fleetTraffic, (traffic) =>
-      absorbFailures("A runner's report could not be applied", applyFleetTraffic(traffic)),
+      absorbFailures("Applying a runner's report failed", applyFleetTraffic(traffic)),
     ),
 
     ingesting: Stream.runForEach(connections.sessionTraffic, (traffic) =>
-      absorbFailures("A session report could not be recorded", ingestSessionTraffic(traffic)),
+      absorbFailures("Recording a session report failed", ingestSessionTraffic(traffic)),
     ),
   };
 });

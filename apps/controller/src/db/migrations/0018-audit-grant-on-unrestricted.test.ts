@@ -1,11 +1,15 @@
 /**
- * What the audit-grant migration does to profiles a database already holds.
+ * Tests what the audit-grant migration does to profiles that already exist.
  *
- * Seeding cannot do this: it is insert-if-absent, so an installed
- * `unrestricted` would keep the grant list it was seeded with and quietly stop
- * being parity with the user. The cases below are the states a database arrives
- * in: the shipped profile without the grant, a profile that already holds it,
- * the profiles meant to lack it, and a custom profile the user gave that name.
+ * Seeding cannot do this: it inserts a profile only if it is absent, so an
+ * installed `unrestricted` would keep the grants it was seeded with and quietly
+ * stop matching what the user can do. The tests cover the states a database
+ * can be in:
+ *
+ * - the shipped profile without the grant;
+ * - a profile that already has it;
+ * - the profiles meant to lack it;
+ * - a custom profile the user gave that name.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -14,7 +18,7 @@ import { MEMORY, openDatabase } from "../client";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
-/** Everything before the migration under test. */
+/** The migrations before the one under test. */
 const BEFORE = migrations.filter(([id]) => id < 18);
 
 const at = "2026-09-01T00:00:00.000Z";
@@ -30,7 +34,7 @@ interface Read {
   readonly updatedAt: string;
 }
 
-/** The profiles as they stand once the migration has run over them. */
+/** Returns the profiles after the migration has run. */
 const seedAndMigrate = (seeded: ReadonlyArray<Seeded>): Promise<ReadonlyMap<string, Read>> =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -59,16 +63,16 @@ const seedAndMigrate = (seeded: ReadonlyArray<Seeded>): Promise<ReadonlyMap<stri
     }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
   );
 
-/** The profiles an older build seeded, written as that build wrote them. */
+/** The profiles an older build seeded, written the way that build wrote them. */
 const SHIPPED: ReadonlyArray<Seeded> = [
   { name: "unrestricted", grants: ["task.read", "event.read", "credential.write"], shipped: true },
-  // Already holding it: a user who added the grant by hand before upgrading.
+  // Already has the grant: a user added it by hand before upgrading.
   { name: "auditor", grants: ["event.read", "event.audit"], shipped: false },
   { name: "worker", grants: ["task.read", "event.read"], shipped: true },
 ];
 
 describe("event.audit on a database that was seeded before it existed", () => {
-  it("gives it to unrestricted, keeping the rest of its grants, and says when", async () => {
+  it("adds it to unrestricted, keeps the other grants, and updates updated_at", async () => {
     const profiles = await seedAndMigrate(SHIPPED);
 
     expect(profiles.get("unrestricted")?.grants).toEqual([
@@ -77,11 +81,11 @@ describe("event.audit on a database that was seeded before it existed", () => {
       "credential.write",
       "event.audit",
     ]);
-    // The row changed, so it stops claiming it was last touched at first run.
+    // The row changed, so its updated_at is no longer the first-run time.
     expect(profiles.get("unrestricted")?.updatedAt).not.toBe(at);
   });
 
-  it("leaves a profile that already holds it alone", async () => {
+  it("leaves a profile that already has it unchanged", async () => {
     const profiles = await seedAndMigrate(SHIPPED);
 
     expect(profiles.get("auditor")).toEqual({
@@ -90,7 +94,7 @@ describe("event.audit on a database that was seeded before it existed", () => {
     });
   });
 
-  it("gives it to no other profile", async () => {
+  it("adds it to no other profile", async () => {
     const profiles = await seedAndMigrate(SHIPPED);
 
     expect(profiles.get("worker")).toEqual({
@@ -99,10 +103,10 @@ describe("event.audit on a database that was seeded before it existed", () => {
     });
   });
 
-  it("leaves a custom profile of that name alone, however the shipped one was renamed", async () => {
-    // A name is unique, so the user who wants their own `unrestricted` has
-    // renamed the shipped one first. Widening a profile they wrote themselves
-    // is not this migration's to do.
+  it("leaves a custom profile with that name unchanged when the shipped one was renamed", async () => {
+    // Names are unique, so a user who wants their own `unrestricted` has
+    // renamed the shipped one first. This migration must not widen a profile
+    // the user wrote themselves.
     const profiles = await seedAndMigrate([
       { name: "everything", grants: ["task.read"], shipped: true },
       { name: "unrestricted", grants: ["task.read"], shipped: false },

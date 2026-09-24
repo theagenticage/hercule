@@ -1,28 +1,28 @@
 /**
- * The web bundle, served from the same origin and the same port as the API.
+ * Serves the web bundle from the same origin and port as the API.
  *
  * The bundle is `vite build`'s output, embedded in the binary file by file
- * (`./bundle.ts`, generated). Nothing here reads a directory: a compiled binary
- * has no `dist/` on disk, so every file the bundle holds is named up front and
- * reached through `Bun.file`, which is the one reader that understands the
+ * (`./bundle.ts`, generated). Nothing here reads a directory: a compiled
+ * binary has no `dist/` on disk, so every file in the bundle is listed up
+ * front and read through `Bun.file`, the only reader that understands the
  * embedded filesystem.
  *
- * Serving is transport, not an operation: it touches no service, stamps no
- * actor, and writes nothing. It is expressed as a wrapper around the API
- * application rather than a route of its own, so **the router still decides
- * what is an API request**. Only a request the router matched nothing for can
- * reach the bundle, which is what keeps `//api/v1/secrets` an API request
- * rather than a deep link.
+ * Serving files is transport, not an operation: it uses no service, records
+ * no actor, and writes nothing. It wraps the API application rather than
+ * being a route of its own, so **the router still decides what is an API
+ * request**. Only a request the router matched no route for can reach the
+ * bundle, which keeps `//api/v1/secrets` an API request rather than a deep
+ * link.
  *
- * Two rules shape the rest:
+ * Two more rules apply:
  *
- * - A path under the API prefix is never the bundle's, so an unknown operation
- *   keeps the JSON error envelope instead of being answered with HTML.
- * - A path under `/assets/` is a fingerprinted file or nothing. Falling back to
- *   `index.html` there would answer a stale chunk request with a page.
+ * - A path under the API prefix is never served from the bundle, so an unknown
+ *   operation gets the JSON error envelope instead of HTML.
+ * - A path under `/assets/` is a fingerprinted file or a 404. Falling back to
+ *   `index.html` there would answer a request for a stale chunk with a page.
  *
  * Every other `GET` is a deep link and gets `index.html`; the router in the
- * browser takes it from there.
+ * browser handles it from there.
  */
 import type * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -33,11 +33,11 @@ import { API_PREFIX } from "@hercule/contract";
 import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hercule/protocol";
 
 /**
- * The built web app: where its `index.html` is, and where every file it can
- * ask for is, by the path a browser asks for it under.
+ * The built web app: the location of its `index.html`, and of every file it
+ * can request, keyed by the URL path the browser uses.
  *
- * The values are filesystem paths - `$bunfs/...` in a compiled binary, an
- * ordinary path when the controller runs from source.
+ * The values are filesystem paths: `$bunfs/...` in a compiled binary, or a
+ * normal path when the controller runs from source.
  */
 export interface WebBundle {
   readonly index: string;
@@ -45,15 +45,15 @@ export interface WebBundle {
 }
 
 /**
- * The ports the app may ask on the reader's own machine: the ones a runner's
- * identity listener will settle for, and no others.
+ * The loopback origins the app may connect to on the user's own machine: the
+ * ports a runner's identity listener may use, and no others.
  *
- * Named one by one rather than as `127.0.0.1:*`, because a wildcard port would
- * let anything that runs in this page speak to every service on the reader's
- * machine, and the whole reason this policy exists is that such a script has to
- * be assumed. Ten ports is not one request: the directive can name a host and a
- * port and nothing finer, so what it grants is any method and any path on those
- * ten, where the app itself makes one `GET /identity`.
+ * They are listed one by one rather than as `127.0.0.1:*`, because a wildcard
+ * port would let any script running in this page talk to every service on the
+ * user's machine, and this policy exists because such a script must be
+ * assumed. The directive can only name a host and a port, so it allows any
+ * method and any path on these ten ports, even though the app itself only
+ * makes one `GET /identity`.
  */
 const IDENTITY_PORTS = Array.from(
   { length: IDENTITY_PORT_COUNT },
@@ -61,17 +61,18 @@ const IDENTITY_PORTS = Array.from(
 ).join(" ");
 
 /**
- * What the browser is allowed to load and where it may talk to.
+ * The Content Security Policy: what the browser may load, and where it may
+ * connect.
  *
- * The bearer token lives in `localStorage` and agent-authored text is rendered
- * all over the app, so a script that runs can read the credential. The
- * load-bearing directive against that is `script-src 'self'` with no inline
- * script, because it is what keeps such a script from running: a policy has no
- * say over where a page navigates, so a script that does run can still carry
- * the token away in an address bar. What the directives below remove is every
- * quiet channel - a fetch, an image, a font, a frame - and the only addresses
- * off this origin left open are the loopback ports above, where the fleet asks
- * each runner which machine the browser is sitting on.
+ * The bearer token is stored in `localStorage`, and agent-written text is
+ * rendered all over the app, so any script that runs could read the token.
+ * The key protection is `script-src 'self'` with no inline scripts, because it
+ * stops such a script from running. A policy cannot control where a page
+ * navigates, so a script that did run could still send the token away in the
+ * address bar. The other directives close every silent channel (a fetch, an
+ * image, a font, a frame). The only addresses outside this origin left open
+ * are the loopback ports above, where the app asks each runner whether it is
+ * on the browser's machine.
  */
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -90,19 +91,19 @@ export const CONTENT_SECURITY_POLICY = [
   "form-action 'self'",
 ].join("; ");
 
-/** Fingerprinted files: the name changes when the content does, so they never expire. */
+/** The cache header for fingerprinted files: the name changes when the content does, so they never expire. */
 const IMMUTABLE = "public, max-age=31536000, immutable";
 
-/** Everything else, `index.html` above all: revalidate on every load. */
+/** The cache header for every other file, above all `index.html`: revalidate on every load. */
 const REVALIDATE = "no-cache";
 
 /** Where Vite puts the fingerprinted files. */
 const ASSETS = "/assets/";
 
-/** Anything under the API prefix, however it is spelled; the router matches case-insensitively. */
+/** Matches any path under the API prefix, in any letter case, because the router matches case-insensitively. */
 const API_PATH = new RegExp(`^/+${API_PREFIX.slice(1)}(/|$)`, "i");
 
-/** What the bundle can contain. Anything else is served as bytes. */
+/** The content type of each file extension the bundle can contain. Anything else is served as bytes. */
 const CONTENT_TYPE: Readonly<Record<string, string>> = {
   css: "text/css; charset=utf-8",
   html: "text/html; charset=utf-8",
@@ -119,18 +120,18 @@ const detectContentType = (path: string): string =>
   CONTENT_TYPE[path.slice(path.lastIndexOf(".") + 1).toLowerCase()] ?? "application/octet-stream";
 
 /**
- * The path a request asks for, without the query or the fragment.
+ * Returns a request's path without the query or the fragment.
  *
- * Sliced rather than parsed: `new URL("//api/v1/x", base)` reads the leading
- * `//` as an authority and hands back `/x`, which would turn an API path into a
- * deep link.
+ * It slices the string rather than parsing a URL: `new URL("//api/v1/x",
+ * base)` reads the leading `//` as a host and returns `/x`, which would turn
+ * an API path into a deep link.
  */
 const stripQueryAndFragment = (url: string): string => {
   const end = url.search(/[?#]/);
   return end === -1 ? url : url.slice(0, end);
 };
 
-/** Whether the router matched nothing, which is the only way the bundle is reached. */
+/** Checks whether the router matched no route, the only case in which the bundle is used. */
 const isRouteNotFound = (cause: Cause.Cause<unknown>): boolean =>
   cause.reasons.some((reason) => {
     if (reason._tag === "Interrupt") return false;
@@ -147,14 +148,14 @@ const buildFileResponse = (
     headers: {
       "cache-control": cacheControl,
       "content-security-policy": CONTENT_SECURITY_POLICY,
-      // The type above is the one the browser must use. Anything the table
-      // does not name is served as bytes, and bytes must not be sniffed into
-      // a script.
+      // The browser must use the content type above. A file with an unknown
+      // extension is served as bytes, and the browser must not guess that
+      // it is a script.
       "x-content-type-options": "nosniff",
     },
   });
 
-/** What the bundle answers this request with, or nothing when it owns none of it. */
+/** Returns the bundle's response for a request, or `undefined` when the bundle does not serve it. */
 const findBundleResponse = (
   bundle: WebBundle,
   request: HttpServerRequest.HttpServerRequest,
@@ -169,11 +170,12 @@ const findBundleResponse = (
 };
 
 /**
- * Answers what the API routes did not with the web bundle, leaving every
- * request the bundle does not own to fail on as it did before.
+ * Wraps `app` so that a request no API route matched is served from the web
+ * bundle. A request the bundle does not serve fails as before.
  *
- * With no bundle - the controller run from a checkout that has not been built -
- * nothing changes: every non-API path is a 404 in the error envelope.
+ * With no bundle, such as when the controller runs from a checkout that has
+ * not been built, nothing changes: every non-API path is a 404 in the error
+ * envelope.
  */
 export const withWebBundle =
   (bundle: WebBundle | undefined) =>

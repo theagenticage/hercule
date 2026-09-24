@@ -1,10 +1,10 @@
 /**
- * The event pipeline's tick, running: what one pass reads, how far it walks,
- * and what it writes for the routes that matched.
+ * Tests the event pipeline's tick: what a pass reads, how far the cursor
+ * moves, and what it writes for the routes that matched.
  *
- * The pipeline is never called by hand. Its interval is shrunk to a few
- * milliseconds and each case waits for what a tick did, which is the same loop
- * `hercule serve` forks.
+ * Tests never call the pipeline directly. Its interval is shortened to a few
+ * milliseconds, in the same loop `hercule serve` starts, and each test waits
+ * for the tick's result.
  */
 import { describe, expect, it, vi } from "vitest";
 import { createProfile, at, waitUntil, WAIT_DEADLINE_MS } from "../sessions/testing";
@@ -25,11 +25,11 @@ import {
   withPipeline,
 } from "./testing";
 
-/** A fleet, three sessions and several ticks fit inside this. */
+/** Long enough for a fleet, three sessions and several ticks. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });
 
 describe("the event pipeline's tick", () => {
-  it("writes one matched input for a matched subscription, and walks its cursor past the event", async () => {
+  it("writes one matched input for a matched subscription, and moves its cursor past the event", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribeAgent(arranged, agent, REF);
@@ -45,31 +45,31 @@ describe("the event pipeline's tick", () => {
       expect(rows[0]!.source).toBe("subscription");
       expect(rows[0]!.event_id).toBe(eventId);
       expect(rows[0]!.session).toBe(agent.session.id.replaceAll("-", ""));
-      // The text is pinned in `routing/render-event-input.test.ts`; what
-      // matters here is that the row carries the rendering, not the envelope.
+      // `routing/render-event-input.test.ts` tests the exact text. This test
+      // only checks that the row holds the rendered text, not the raw event.
       expect(rows[0]!.text).toContain(KIND);
       expect(rows[0]!.text).toContain("The lid does not close");
       expect(rows[0]!.text).toContain("```json");
 
-      // The cursor ends at the event, which is the end of the log: it is read
-      // against the head rather than against the id alone, so an entry
-      // appended by anything else in the meantime is not read as a defect.
+      // The cursor ends at the end of the log. It is compared with the newest
+      // event id rather than with this event's id, so an event appended by
+      // something else in the meantime does not fail the test.
       const position = await waitUntilCaughtUp(arranged.harness);
       expect(position).toBeGreaterThanOrEqual(eventId);
     });
   });
 
-  it("walks a burst wider than one batch to the end of the log, rather than one batch a tick", async () => {
+  it("reads a burst larger than one batch to the end of the log in one tick, not one batch per tick", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "burst-holder");
       const subscriptionId = await subscribeAgent(arranged, agent, REF);
       await waitUntilCaughtUp(arranged.harness);
 
-      // Two and a half batches, appended in one statement so the router finds
-      // them all waiting rather than a few per pass as they arrive. They are
-      // written to the table because `event.emit` is one call per event, and
-      // the router would walk the early ones while the later ones were still
-      // being posted.
+      // Two and a half batches, inserted in one statement so the router finds
+      // them all at once, not a few per pass as they arrive. They are written
+      // straight to the table because `event.emit` takes one call per event,
+      // and the router would read the early ones while the later ones were
+      // still being posted.
       await runEffect(
         arranged.harness.sql`
           INSERT INTO events
@@ -95,7 +95,7 @@ describe("the event pipeline's tick", () => {
     });
   });
 
-  it("writes nothing a second time, however often the cursor is rewound over the same events", async () => {
+  it("writes nothing twice, however often the cursor is moved back over the same events", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribeAgent(arranged, agent, REF);
@@ -103,8 +103,8 @@ describe("the event pipeline's tick", () => {
       await waitForMatchedInputRows(arranged.harness, subscriptionId, (found) => found.length >= 1);
       const settled = await waitUntilCaughtUp(arranged.harness);
 
-      // The crash between the commit of the matched inputs and the advance of
-      // the cursor, three times over.
+      // Simulates a crash between writing the matched inputs and moving the
+      // cursor, three times.
       for (let pass = 0; pass < 3; pass++) {
         await runEffect(
           arranged.harness.sql`UPDATE event_cursors SET position = ${eventId - 1}
@@ -123,12 +123,12 @@ describe("the event pipeline's tick", () => {
     });
   });
 
-  it("writes no matched input for an audit entry, whatever a subscription's condition says, and passes it", async () => {
+  it("writes no matched input for an audit entry, whatever the condition, and moves the cursor past it", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribeAgent(arranged, agent, REF);
-      // A condition that admits everything, so a row that is not written is
-      // the population's doing and not the condition's.
+      // A condition that matches everything, so a missing row is caused by the
+      // kind of event, not by the condition.
       await storeCondition(arranged.harness, subscriptionId, "true");
 
       // Creating a profile appends `profile.created`, which is an audit entry.
@@ -140,14 +140,14 @@ describe("the event pipeline's tick", () => {
       );
       const entryId = entries[0]!.id;
 
-      await waitUntil("walked past the audit entry", async () => {
+      await waitUntil("moved its cursor past the audit entry", async () => {
         const seen = await readCursorAndHead(arranged.harness);
         return seen.position !== null && seen.position >= entryId ? seen.position : undefined;
       });
       expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
 
       // The same subscription does get a row for a pipeline event, so the
-      // silence above is about the population and not about a dead router.
+      // missing row above is caused by the kind of event, not a stopped router.
       const eventId = await emitManualEvent(arranged, [REF], "The lid does not close");
       const rows = await waitForMatchedInputRows(
         arranged.harness,

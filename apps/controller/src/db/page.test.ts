@@ -20,7 +20,7 @@ const KEYS: CursorScope = { op: "apiKey.query", field: "createdAt", direction: "
 const NAMES: CursorScope = { op: "secret.query", field: "name", direction: "asc" };
 const ID = "0192ce07-8c4f-7d66-afec-2482b5c9b03c";
 
-/** The decode's failure message, or `null` when it succeeded. */
+/** Returns the decode's failure message, or `null` when the decode succeeded. */
 const readDecodeFailure = (
   cursor: string,
   scope: CursorScope,
@@ -54,24 +54,24 @@ describe("keyset cursors", () => {
     ).toEqual([2, ID]);
   });
 
-  it("refuses another listing's cursor", async () => {
+  it("rejects another operation's cursor", async () => {
     const cursor = encodeCursor(NAMES, "controller.signing-key", ID);
     expect(await readDecodeFailure(cursor, { ...KEYS, direction: "asc" })).toMatch(
       /not one this listing/,
     );
   });
 
-  it("refuses its own cursor replayed under the other direction", async () => {
+  it("rejects its own cursor used with the other direction", async () => {
     const cursor = encodeCursor(KEYS, "2026-09-04T09:21:33.084Z", ID);
     expect(await readDecodeFailure(cursor, { ...KEYS, direction: "asc" })).toMatch(
       /different sort order/,
     );
   });
 
-  it("refuses a cursor whose walk ordered on something else, and does not call that a direction", async () => {
-    // `field` carries what a walk's order depends on and not only a column
-    // name, so a mismatch there is a different listing rather than a different
-    // direction, and the caller is not sent looking at `--sort`.
+  it("rejects a cursor for another sort field, without calling it a different direction", async () => {
+    // `field` holds whatever the order depends on, not only a column name, so
+    // a mismatch there means a different list rather than a different
+    // direction. The message must not send the caller to check `--sort`.
     const cursor = encodeCursor(KEYS, "2026-09-04T09:21:33.084Z", ID);
     expect(await readDecodeFailure(cursor, { ...KEYS, field: "name" })).toMatch(
       /different listing/,
@@ -94,32 +94,32 @@ describe("keyset cursors", () => {
       ).toString("base64url"),
     ],
     [
-      // A sort key is whatever the ordered column holds, and this column holds
-      // text: a boolean is not a value it ever had.
+      // A sort key has the type of its column, and this column holds text, so
+      // a boolean can never be a valid key.
       "a sort key that is not what the column holds",
       Buffer.from(JSON.stringify(["apiKey.query", "createdAt", "desc", true, ID]), "utf8").toString(
         "base64url",
       ),
     ],
     [
-      // SQLite orders every number below every string, so a number compared
+      // SQLite sorts every number below every string, so a number compared
       // against a text column makes the boundary always true or always false:
-      // the walk restarts or ends, and neither is a page.
+      // the list restarts or ends instead of returning the next page.
       "a numeric sort key where the column holds text",
       Buffer.from(JSON.stringify(["apiKey.query", "createdAt", "desc", 1757, ID]), "utf8").toString(
         "base64url",
       ),
     ],
-  ])("refuses %s", async (_case, cursor) => {
+  ])("rejects a cursor: %s", async (_case, cursor) => {
     expect(await readDecodeFailure(cursor, KEYS)).toMatch(/not one this listing/);
   });
 });
 
-/** The event log walks integer ids; a relevance walk over tasks counts rows. */
+/** The event log is sorted by integer id; a relevance search over tasks counts rows. */
 const EVENTS: CursorScope = { op: "event.query", field: "id", direction: "desc" };
 const RELEVANCE: CursorScope = { op: "task.query", field: "relevance", direction: "asc" };
 
-/** The tag of the failure, or `null` when the decode succeeded. */
+/** Returns the tag of the failure, or `null` when the decode succeeded. */
 const readFailureTag = <A>(
   effect: Effect.Effect<A, { readonly _tag: string }>,
 ): Promise<string | null> =>
@@ -139,12 +139,12 @@ describe("integer keyset cursors", () => {
     expect(await Effect.runPromise(decodeIdCursor(cursor, EVENTS))).toBe(4210);
   });
 
-  it("refuses another operation's cursor", async () => {
+  it("rejects another operation's cursor", async () => {
     const cursor = encodeIdCursor({ ...EVENTS, op: "task.query" }, 7);
     expect(await readFailureTag(decodeIdCursor(cursor, EVENTS))).toBe("CursorError");
   });
 
-  it("refuses its own cursor replayed on another field or direction", async () => {
+  it("rejects its own cursor used with another field or direction", async () => {
     const cursor = encodeIdCursor(EVENTS, 7);
     expect(await readFailureTag(decodeIdCursor(cursor, { ...EVENTS, field: "createdAt" }))).toBe(
       "CursorError",
@@ -154,14 +154,14 @@ describe("integer keyset cursors", () => {
     );
   });
 
-  it("refuses an edited cursor", async () => {
+  it("rejects an edited cursor", async () => {
     expect(
       await readFailureTag(decodeIdCursor(flipCursorDirection(encodeIdCursor(EVENTS, 7)), EVENTS)),
     ).toBe("CursorError");
     expect(await readFailureTag(decodeIdCursor("not a cursor at all", EVENTS))).toBe("CursorError");
   });
 
-  it("refuses a UUID keyset cursor, and hands its own to no other decoder", async () => {
+  it("rejects a UUID keyset cursor, and the UUID keyset decoder rejects its cursor", async () => {
     const uuid = encodeCursor(EVENTS, "2026-09-04T09:21:33.084Z", ID);
     expect(await readFailureTag(decodeIdCursor(uuid, EVENTS))).toBe("CursorError");
     expect(await readFailureTag(decodeCursor(encodeIdCursor(EVENTS, 7), EVENTS, "string"))).toBe(
@@ -255,12 +255,12 @@ describe("offset cursors", () => {
     ).toBe(0);
   });
 
-  it("refuses another operation's cursor", async () => {
+  it("rejects another operation's cursor", async () => {
     const cursor = encodeOffsetCursor({ ...RELEVANCE, op: "event.query" }, 40);
     expect(await readFailureTag(decodeOffsetCursor(cursor, RELEVANCE))).toBe("CursorError");
   });
 
-  it("refuses its own cursor replayed on another field or direction", async () => {
+  it("rejects its own cursor used with another field or direction", async () => {
     const cursor = encodeOffsetCursor(RELEVANCE, 40);
     expect(
       await readFailureTag(decodeOffsetCursor(cursor, { ...RELEVANCE, field: "updatedAt" })),
@@ -270,7 +270,7 @@ describe("offset cursors", () => {
     ).toBe("CursorError");
   });
 
-  it("refuses an edited cursor", async () => {
+  it("rejects an edited cursor", async () => {
     const cursor = encodeOffsetCursor({ ...RELEVANCE, direction: "desc" }, 40);
     expect(
       await readFailureTag(
@@ -282,16 +282,16 @@ describe("offset cursors", () => {
     );
   });
 
-  it("refuses a UUID keyset cursor", async () => {
+  it("rejects a UUID keyset cursor", async () => {
     const uuid = encodeCursor(RELEVANCE, "2026-09-04T09:21:33.084Z", ID);
     expect(await readFailureTag(decodeOffsetCursor(uuid, RELEVANCE))).toBe("CursorError");
   });
 });
 
 /**
- * The walk itself, against a real table: the fragments and the page decision
- * are what every listing is now made of, so they are tested once here rather
- * than through each of them.
+ * Paging through a real table. Every list operation is built from these SQL
+ * fragments and `buildPage`, so they are tested once here rather than through
+ * each operation.
  */
 const LETTERS = ["a", "b", "c", "d", "e"] as const;
 
@@ -305,7 +305,7 @@ const seed = Effect.gen(function* () {
   return sql;
 });
 
-/** Every row a keyset walk of that page size reaches, plus how many pages it took. */
+/** Returns every row that paging with this page size reads, plus how many pages it took. */
 const walkAll = (direction: "asc" | "desc", limit: number) =>
   Effect.gen(function* () {
     const sql = yield* seed;
@@ -330,15 +330,15 @@ const walkAll = (direction: "asc" | "desc", limit: number) =>
     return { names, pages };
   }).pipe(Effect.provide(TestDatabase), Effect.runPromise);
 
-describe("the keyset walk", () => {
+describe("keyset paging", () => {
   it("reads every row exactly once, in the direction it was given", async () => {
     expect(await walkAll("asc", 2)).toEqual({ names: ["a", "b", "c", "d", "e"], pages: 3 });
     expect(await walkAll("desc", 2)).toEqual({ names: ["e", "d", "c", "b", "a"], pages: 3 });
   });
 
   it("issues no cursor when the last page is exactly full", async () => {
-    // Five rows at a page of five: the sixth row the walk asked for is not
-    // there, so there is no next page and no cursor promising one.
+    // Five rows with a page size of five: the sixth row the query asked for is
+    // not there, so there is no next page and no cursor.
     expect(await walkAll("asc", 5)).toEqual({ names: ["a", "b", "c", "d", "e"], pages: 1 });
   });
 });

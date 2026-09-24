@@ -1,17 +1,18 @@
 /**
- * `event.audit` on the shipped `unrestricted` profile of a database that
- * already has one.
+ * Adds `event.audit` to the shipped `unrestricted` profile in a database that
+ * already has that profile.
  *
- * Seeding is insert-if-absent, so a profile that was seeded by an earlier build
- * never gains a grant added later. `unrestricted` is the one profile whose
- * whole meaning is parity with the user, and a new verb that never reaches it
- * would quietly make it narrower than the user it mirrors.
+ * Seeding inserts a profile only if it is absent, so a profile seeded by an
+ * earlier build never gains a grant added later. `unrestricted` is the one
+ * profile meant to match everything the user can do, and a new verb missing
+ * from it would quietly make it narrower than the user.
  *
- * Only that profile, and only if it does not already hold the grant: the two
- * agent profiles are meant to lack it, and a profile the user edited keeps
- * every other choice they made in it. `shipped = 1` is what picks it out: a
- * user who renamed the shipped profile and called a custom one `unrestricted`
- * would otherwise have the custom one widened behind their back.
+ * Only that profile changes, and only if it does not already have the grant:
+ * the two agent profiles are meant to lack it, and a profile the user edited
+ * keeps every other choice they made. The migration selects the profile by
+ * `shipped = 1`. Otherwise, if a user renamed the shipped profile and called a
+ * custom one `unrestricted`, the custom one would be widened without them
+ * knowing.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";

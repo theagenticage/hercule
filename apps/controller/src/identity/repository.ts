@@ -2,16 +2,16 @@
  * The controller's persistent identity: an id plus key material, created at
  * install and carried through a promotion.
  *
- * Identity is logical, not an address. Runners verify it wherever the
- * controller appears, which is what makes a "controller moved to X"
- * announcement unspoofable and lets a promoted controller resume the same
- * runner sessions.
+ * The identity is not an address. Runners verify it at whatever address the
+ * controller appears, which makes a "controller moved to X" announcement
+ * impossible to spoof and lets a promoted controller resume the same runner
+ * sessions.
  *
  * The keypair is Ed25519: small signatures, no parameter choices to get wrong,
- * and already in Bun's WebCrypto. The public key sits in the singleton
- * `controller_identity` row as raw SPKI bytes; the private key is a secrets row
- * under the `core` owner, encrypted under the Master Key
- * like every other secret, so a stolen database file yields nothing.
+ * and already in Bun's WebCrypto. The public key is stored in the singleton
+ * `controller_identity` row as DER-encoded SPKI bytes. The private key is a
+ * secrets row under the `core` owner, encrypted under the Master Key like every
+ * other secret, so a stolen database file does not reveal it.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -26,22 +26,22 @@ import { CORE_OWNER, Secrets, type SecretNameError } from "../secrets";
 /** The `core`-owned secret holding the controller's Ed25519 private key, PKCS#8 as base64. */
 export const SIGNING_KEY_SECRET = "controller.signing-key";
 
-/** What the controller tells a runner about itself. Never the private key. */
+/** The identity the controller sends a runner. It never includes the private key. */
 export interface ControllerIdentityRecord {
   readonly id: string;
-  /** The Ed25519 public key, raw SPKI bytes. */
+  /** The Ed25519 public key, as DER-encoded SPKI bytes. */
   readonly publicKey: Uint8Array<ArrayBuffer>;
   readonly createdAt: string;
 }
 
-/** The algorithm the identity keypair is made, signed and verified under. */
+/** The algorithm used to generate the identity keypair and to sign and verify with it. */
 const ED25519 = { name: "Ed25519" } as const;
 
 /**
- * The bytes base64 stands for, in the buffer WebCrypto's types ask for: a
- * `Buffer` is backed by a pool it shares, which is a `SharedArrayBuffer` as far
- * as the DOM types are concerned. Exported because the socket decodes the nonce
- * it hands to `sign` the same way.
+ * Decodes base64 into bytes backed by a plain `ArrayBuffer`, the type
+ * WebCrypto's signatures require. A `Buffer` is backed by a shared pool, which
+ * the DOM types treat as a `SharedArrayBuffer`. Exported because the socket
+ * decodes the nonce it passes to `sign` the same way.
  */
 export const decodeBase64Bytes = (encoded: string): Uint8Array<ArrayBuffer> => {
   const decoded = Buffer.from(encoded, "base64");
@@ -51,8 +51,9 @@ export const decodeBase64Bytes = (encoded: string): Uint8Array<ArrayBuffer> => {
 };
 
 /**
- * Ed25519 is not in the DOM's `generateKey` overloads, which resolve to a
- * single `CryptoKey`; every Ed25519 generation returns a pair.
+ * Generates an Ed25519 keypair. The cast is needed because the DOM's
+ * `generateKey` overloads do not include Ed25519 and resolve to a single
+ * `CryptoKey`, but Ed25519 generation always returns a pair.
  */
 const generateSigningKeyPair = Effect.promise(
   () =>
@@ -67,14 +68,14 @@ export class ControllerIdentity extends Context.Service<
   ControllerIdentity,
   {
     /**
-     * The identity, creating it on first run. Idempotent: every later boot
+     * Returns the identity, creating it on first run. Every later boot
      * finds the same id and the same key.
      */
     readonly ensure: Effect.Effect<ControllerIdentityRecord, SqlError | SecretNameError>;
 
     /**
-     * The identity as it stands, without creating one. `None` only before the
-     * first boot has run: every caller after that has one.
+     * Returns the identity without creating one. Returns `None` only before
+     * the first boot has run.
      */
     readonly read: Effect.Effect<Option.Option<ControllerIdentityRecord>, SqlError>;
 
@@ -101,13 +102,13 @@ export const controllerIdentityLayer: Layer.Layer<
 
     const signingKey = Effect.gen(function* () {
       const stored = yield* secrets.get(CORE_OWNER, SIGNING_KEY_SECRET).pipe(
-        // A value this build cannot decrypt is the same situation as one that
-        // is not there: there is no key to sign with either way.
+        // A value this build cannot decrypt is treated like a missing value:
+        // either way there is no key to sign with.
         Effect.catchTag("SecretDecryptError", () => Effect.succeedNone),
       );
-      // `ensure` writes the key with the identity row in one transaction and
-      // the boot runs it before anything binds, so a controller with an
-      // identity and no key it can read is a home somebody assembled by hand.
+      // `ensure` writes the key with the identity row in one transaction, and
+      // the boot runs it before the controller listens. So an identity without
+      // a readable key means somebody assembled the home by hand.
       if (Option.isNone(stored)) {
         return yield* Effect.die("the controller's signing key cannot be read");
       }

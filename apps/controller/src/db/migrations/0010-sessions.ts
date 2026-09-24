@@ -2,24 +2,25 @@
  * Sessions and their normalized streams.
  *
  * Nothing here is a foreign key. A session is history: it must outlive the
- * provider instance it named, the runner row it ran on and the permission
- * profile it copied, and neither cascade (which would delete the history) nor
- * restrict (which would make a provider instance undeletable for ever) is what
- * a record of what happened wants.
+ * provider instance it used, the runner row it ran on and the permission
+ * profile it copied. Neither cascade (which would delete the history) nor
+ * restrict (which would make a provider instance impossible to delete) suits a
+ * record of what happened.
  *
- * `spec` holds the controller-authored `SessionSpec` byte for byte, as the
- * encoded JSON string that went out on the wire, because that string is what
- * the runner was told and a re-encode is not necessarily the same bytes.
+ * `spec` holds the `SessionSpec` the controller wrote, byte for byte, as the
+ * encoded JSON string sent to the runner. That string is exactly what the
+ * runner received, and encoding it again does not always give the same bytes.
  *
- * The stream is keyed by `(session_id, position)`, the per-session monotonic
- * position of spec 04, and carries the runner's own sequence number under a
- * unique index so an insert is idempotent on it: a replayed frame hits the
- * index rather than appending a second copy. A coalesced `content.delta` row
- * carries the sequence of the last delta folded into it.
+ * The stream is keyed by `(session_id, position)`, the per-session position
+ * that only increases (spec 04). It also stores the runner's own sequence
+ * number under a unique index, so inserting the same frame twice is a no-op: a
+ * replayed frame hits the index rather than adding a second copy. A merged
+ * `content.delta` row stores the sequence number of the last delta merged into
+ * it.
  *
  * The bounds are CHECK constraints, which SQLite cannot add later without
- * rebuilding the table, so the status axis is written out; a landed migration
- * is frozen and widening it takes a migration of its own.
+ * rebuilding the table, so the status values are written out. A migration that
+ * has shipped never changes, so adding a status needs a new migration.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -49,8 +50,8 @@ export default Effect.gen(function* () {
       last_activity_at TEXT NOT NULL
     )
   `;
-  // The one listing this build serves: newest first, filtered by status or by
-  // runner, both of which are selective enough to leave to the scan.
+  // The only session list so far: newest first, filtered by status or by
+  // runner. Both filters are selective enough to apply during the scan.
   yield* sql`CREATE INDEX sessions_created ON sessions (created_at DESC, id DESC)`;
   yield* sql`
     CREATE TABLE session_stream (

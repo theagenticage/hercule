@@ -1,10 +1,10 @@
 /**
- * The session routing table, running: the sweep of subscriptions nobody holds
- * any more, and what a condition that cannot be evaluated does to the
- * subscription it belongs to.
+ * Tests the session routing table: the sweep that ends subscriptions whose
+ * holder is gone, and what a condition that fails to evaluate does to its
+ * subscription.
  *
- * Everything here goes through the whole pipeline, because a match is only a
- * match when the row it wrote reaches the session that was waiting for it.
+ * Every test goes through the whole pipeline, because a match only counts
+ * when the row it wrote reaches the session waiting for it.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration } from "effect";
@@ -40,11 +40,11 @@ import {
   type Notified,
 } from "../testing";
 
-/** A fleet, three sessions and several ticks fit inside this. */
+/** Long enough for a fleet, three sessions and several ticks. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });
 
 describe("the session routing table's sweep", () => {
-  it("ends only the subscription whose holder is past resuming, and matches for the other two", async () => {
+  it("ends only the subscription whose holder cannot be resumed, and matches for the other two", async () => {
     await withPipeline(async (arranged) => {
       const idle = await spawnSubscriber(arranged, "idle-holder");
       const resumable = await spawnSubscriber(arranged, "resumable-holder");
@@ -65,18 +65,19 @@ describe("the session routing table's sweep", () => {
       });
       expect(ended.ended_reason, "the reason names the holder that ended").toMatch(/session/i);
       expect(ended.ended_reason).toContain(gone.session.id);
-      // Nobody asked for this end, so the stamp is the system's own.
+      // No user or session asked for this end, so the system is the actor.
       expect(ended.ended_actor).toBe("system");
 
-      // A restart changes nothing: a subscription does not end because a
-      // process exited.
+      // A process that exited but can be resumed does not end its
+      // subscription.
       await arranged.harness.reboot();
 
       await emitManualEvent(arranged, [REF], "after the sweep");
 
       expect((await readSubscriptionRow(arranged.harness, live))!.ended_at).toBeNull();
       expect((await readSubscriptionRow(arranged.harness, sleeping))!.ended_at).toBeNull();
-      // The idle holder is woken, and the resumable one is told to start again.
+      // The idle holder is woken, and the runner is told to restart the
+      // resumable one.
       await waitForFrameCarrying(arranged, "after the sweep");
       await waitForMatchedInputRows(arranged.harness, live, (rows) => rows.length >= 1);
       await waitForMatchedInputRows(arranged.harness, sleeping, (rows) => rows.length >= 1);
@@ -85,15 +86,15 @@ describe("the session routing table's sweep", () => {
     });
   });
 
-  it("calls off an input still waiting for the holder it can no longer reach, with the same reason", async () => {
+  it("cancels an input still waiting for a holder that has ended, with the same reason", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "resumable-holder");
       const subscriptionId = await subscribeAgent(arranged, agent, REF);
       await exitSession(arranged, agent, 2);
       expect((await readSession(arranged, agent.session.id)).resumable).toBe(true);
 
-      // A row a match wrote and nothing has delivered yet: what a crash
-      // between the matched input's commit and its delivery leaves behind.
+      // A matched input that was never delivered, as a crash between its
+      // commit and its delivery would leave behind.
       const eventId = await emitManualEvent(arranged, [REF], "never delivered");
       await runEffect(
         arranged.harness.sql`
@@ -106,7 +107,7 @@ describe("the session routing table's sweep", () => {
              unhex(replace(${subscriptionId}, '-', '')), ${eventId + 1000})`,
       );
 
-      // The machine is retired, so the transcript can no longer be picked up
+      // The runner is retired, so the transcript can no longer be resumed,
       // and the holder has ended for good.
       await runEffect(
         arranged.harness.sql`UPDATE runners SET lifecycle = 'retired'
@@ -129,7 +130,7 @@ describe("the session routing table's sweep", () => {
 });
 
 describe("a condition the router cannot evaluate", () => {
-  it("reports it once per error, keeps the subscription live, and goes quiet again when it is clean", async () => {
+  it("is reported once per error, keeps the subscription live, and is cleared by a clean evaluation", async () => {
     const calls: Array<Notified> = [];
     await withPipeline(
       async (arranged) => {
@@ -147,7 +148,8 @@ describe("a condition the router cannot evaluate", () => {
         expect(failed.message ?? "").not.toBe("");
         expect(failed.at ?? "").not.toBe("");
 
-        // A second failing evaluation refreshes the message and says nothing.
+        // A second failed evaluation updates the message and sends no
+        // notification.
         const second = await emitManualEvent(arranged, [REF], "the second failure");
         await waitUntil("walked past the second event", async () => {
           const seen = await readCursorAndHead(arranged.harness);
@@ -157,13 +159,14 @@ describe("a condition the router cannot evaluate", () => {
         expect(calls.filter((call) => call.subscriptionId === subscriptionId)).toHaveLength(1);
         expect(calls[0]!.message).toBe(failed.message);
 
-        // A clean evaluation returns the health to ok, and says nothing.
+        // A clean evaluation sets the health back to ok, and sends no
+        // notification.
         await storeCondition(arranged.harness, subscriptionId, "true");
         await emitManualEvent(arranged, [REF], "the clean one");
         await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "ok");
         expect(calls.filter((call) => call.subscriptionId === subscriptionId)).toHaveLength(1);
 
-        // The next failure is a new error, and is reported again.
+        // The next failure is a new error, and is notified again.
         await storeCondition(arranged.harness, subscriptionId, UNRESOLVABLE);
         await emitManualEvent(arranged, [REF], "the new error");
         await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "error");
@@ -178,7 +181,7 @@ describe("a condition the router cannot evaluate", () => {
     );
   });
 
-  it("is a no-match for that subscription alone: every other one is still evaluated and delivered", async () => {
+  it("counts as no match for that subscription only, and every other one is still evaluated and delivered", async () => {
     await withPipeline(async (arranged) => {
       const broken = await spawnSubscriber(arranged, "broken-holder");
       const sound = await spawnSubscriber(arranged, "sound-holder");
@@ -202,7 +205,7 @@ describe("a condition the router cannot evaluate", () => {
     });
   });
 
-  it("is a no-match when it reads the original payload, which the context does not carry", async () => {
+  it("counts as no match when it reads the raw payload, which the context leaves out", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "raw-reader");
       const subscriptionId = await subscribeAgent(arranged, agent, REF);
@@ -210,9 +213,9 @@ describe("a condition the router cannot evaluate", () => {
 
       const eventId = await emitManualEvent(arranged, [REF], "not for a reader of raw");
 
-      // Reading `raw` fails; it does not answer that there is none. A context
-      // carrying the field would make this condition a plain false, and the
-      // subscription's health would stay ok.
+      // Reading `raw` fails, rather than returning null. If the context had
+      // the field, this condition would simply be false, and the health
+      // would stay ok.
       const health = await waitForHealth(
         arranged,
         agent,
@@ -225,7 +228,7 @@ describe("a condition the router cannot evaluate", () => {
     });
   });
 
-  it("treats an evaluation over the wall-clock budget as a no-match, and says so on the subscription", async () => {
+  it("treats an evaluation over the time budget as no match, and records the error on the subscription", async () => {
     await withPipeline(
       async (arranged) => {
         const agent = await spawnSubscriber(arranged, "subscribers");
@@ -243,11 +246,11 @@ describe("a condition the router cannot evaluate", () => {
         expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
         expect(await waitUntilCaughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
       },
-      // Every evaluation on this controller is over budget, which is the only
-      // lever there is: the evaluator offers no timeout and no fuel. A budget
-      // of zero is the one that holds whatever the clock does, because an
-      // evaluation that reaches its budget is over it; a budget a real
-      // evaluation can stay under would leave nothing to report.
+      // With a budget of zero, every evaluation on this controller is over
+      // budget. That is the only way to force it, because the evaluator has
+      // no timeout or step limit. Zero works whatever the clock does, because
+      // an evaluation that reaches its budget counts as over it. Any budget a
+      // real evaluation could stay under would leave nothing to report.
       { expressionBudget: Duration.zero },
     );
   });

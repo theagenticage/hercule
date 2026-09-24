@@ -31,14 +31,18 @@ export const BOOTSTRAP_KEYS = ["data.dir", "bind.host", "bind.port", "log.level"
 
 export type BootstrapKey = (typeof BOOTSTRAP_KEYS)[number];
 
-/** The env form of a bootstrap key: uppercase, dots to underscores, `HERCULE_` prefix. */
+/**
+ * Returns the env var name for a bootstrap key: uppercase, dots to
+ * underscores, and a `HERCULE_` prefix.
+ */
 export function buildEnvName(key: BootstrapKey): string {
   return `HERCULE_${key.toUpperCase().replaceAll(".", "_")}`;
 }
 
 /**
- * The values a first run writes into `config.toml`, TOML-typed. `data.dir` is
- * relative on purpose: the file must not pin the home it was written in.
+ * The values a first run writes into `config.toml`, with their TOML types.
+ * `data.dir` is relative on purpose: the file must not be tied to the home it
+ * was written in.
  */
 export const DEFAULTS: Record<BootstrapKey, TomlScalar> = {
   "data.dir": "data",
@@ -48,14 +52,14 @@ export const DEFAULTS: Record<BootstrapKey, TomlScalar> = {
 };
 
 /**
- * A bind host is a whole host and nothing else: no scheme, no port, no path, no
- * user. `URL` is lenient enough to read `foo/bar` as the host `foo` with a path
- * on the end, which would quietly turn the setup URL into one nobody can open,
- * so what it made of the value is checked against what it was given.
+ * Checks that a bind host is only a host: no scheme, no port, no path, no user.
+ * `URL` is lenient enough to parse `foo/bar` as the host `foo` with a path on
+ * the end, which would quietly produce a setup URL nobody can open. So the
+ * check parses the value and verifies that nothing but the host was set.
  *
- * The check is structural rather than an equality on the hostname, because
- * `URL` also canonicalizes: it reads `127.1` as `127.0.0.1` and `0:0:0:0:0:0:0:1`
- * as `[::1]`, and both of those are hosts Hercule can bind.
+ * The check does not compare the parsed hostname with the input, because `URL`
+ * also canonicalizes: it parses `127.1` as `127.0.0.1` and `0:0:0:0:0:0:0:1` as
+ * `[::1]`, and both of those are hosts Hercule can bind.
  */
 const isBindHost = (host: string): boolean => {
   const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
@@ -75,7 +79,7 @@ const isBindHost = (host: string): boolean => {
   }
 };
 
-/** The schema of each key's value, applied to the string the sources agreed on. */
+/** The schema of each key's value, applied to the string chosen from the sources. */
 const SCHEMAS = {
   "data.dir": Schema.NonEmptyString,
   "bind.host": Schema.NonEmptyString.check(
@@ -100,9 +104,11 @@ const isBootstrapKey = (key: string): key is BootstrapKey =>
 const keyList = BOOTSTRAP_KEYS.join(", ");
 
 /**
- * Read `config.toml`, writing it with the four keys at their defaults when it is
- * absent: a first run leaves behind the file it would have read (spec 15
- * sections 6 and 7). Returns the keys the file sets, as strings.
+ * Reads `config.toml`, first writing it with the four keys at their defaults
+ * when it is absent, so a first run leaves behind the file it would have read
+ * (spec 15 sections 6 and 7). Returns the keys the file sets, as strings.
+ * Fails with `ConfigFileError` when the file cannot be written, read or parsed,
+ * or holds an unknown key.
  */
 export const loadConfigFile = Effect.fn("loadConfigFile")(function* (configFile: string) {
   const createConfigFileError = (message: string) =>
@@ -137,10 +143,15 @@ export const loadConfigFile = Effect.fn("loadConfigFile")(function* (configFile:
 });
 
 /**
- * Decide every bootstrap key: flag beats env beats file beats default (spec 15
- * section 6), then validate. A `-c` override of anything but a bootstrap key is
- * an error, never a silently ignored flag, and a value that will not do names
- * the source that set it.
+ * Chooses the value of every bootstrap key, then validates it, and returns the
+ * `BootstrapConfig`. A `-c` flag beats an environment variable, which beats the
+ * file, which beats the default (spec 15 section 6).
+ *
+ * Fails with `ConfigValueError` when:
+ *
+ * - a `-c` flag sets anything other than a bootstrap key, rather than silently
+ *   ignoring the flag;
+ * - a value is invalid, and the error message includes the source that set it.
  */
 export const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
   readonly overrides: ReadonlyArray<readonly [key: string, value: string]>;
@@ -158,7 +169,7 @@ export const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
     flags[key] = value;
   }
 
-  /** Where a key's value came from, so an unusable one names its source. */
+  /** Returns a key's value and its source, so an error about the value can include the source. */
   const chooseValue = (key: BootstrapKey): { readonly value: string; readonly source: string } => {
     const flag = flags[key];
     if (flag !== undefined) return { value: flag, source: `-c ${key}` };

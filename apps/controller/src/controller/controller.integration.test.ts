@@ -1,6 +1,6 @@
 /**
- * `controller.read` and `controller.update` over a real socket: the default
- * runner, which is the one thing a caller may write about the controller.
+ * Tests `controller.read` and `controller.update` over a real socket, for the
+ * default runner, which is the one field a caller may change.
  */
 import { describe, expect, it } from "vitest";
 import type { Runner } from "@hercule/contract";
@@ -26,7 +26,7 @@ const updateController = (base: string, token: string, body: unknown): Promise<R
   send("PATCH", base, "/api/v1/controller", { body, token });
 
 describe("the controller's default runner", () => {
-  it("is null until one is named, and is the runner named afterwards", async () => {
+  it("is null until one is set, and is the chosen runner afterwards", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner: Runner = await harness.insertRunner({ name: "iris" });
@@ -51,7 +51,7 @@ describe("the controller's default runner", () => {
     });
   });
 
-  it("refuses a key it does not declare", async () => {
+  it("rejects a field it does not declare", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner: Runner = await harness.insertRunner({ name: "iris" });
@@ -66,7 +66,7 @@ describe("the controller's default runner", () => {
     });
   });
 
-  it("refuses a runner nobody has, and leaves the setting where it was", async () => {
+  it("rejects an unknown runner, and leaves the setting unchanged", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner: Runner = await harness.insertRunner({ name: "iris" });
@@ -82,7 +82,7 @@ describe("the controller's default runner", () => {
     });
   });
 
-  it("takes the default off again, and records each change once", async () => {
+  it("clears the default again, and records each change once", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner: Runner = await harness.insertRunner({ name: "iris" });
@@ -90,7 +90,7 @@ describe("the controller's default runner", () => {
       expect(
         (await updateController(harness.base, token, { defaultRunnerId: runner.id })).status,
       ).toBe(200);
-      // Naming the same runner again is not a change.
+      // Choosing the same runner again is not a change.
       expect(
         (await updateController(harness.base, token, { defaultRunnerId: runner.id })).status,
       ).toBe(200);
@@ -105,7 +105,7 @@ describe("the controller's default runner", () => {
     });
   });
 
-  it("keeps the default runner out of the settings the settings API carries", async () => {
+  it("keeps the default runner out of the settings API", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner: Runner = await harness.insertRunner({ name: "iris" });
@@ -120,7 +120,7 @@ describe("the controller's default runner", () => {
     });
   });
 
-  it("refuses a reserved runner and a retired one, and leaves the setting where it was", async () => {
+  it("rejects a reserved runner and a retired one, and leaves the setting unchanged", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const open: Runner = await harness.insertRunner({ name: "iris" });
@@ -130,8 +130,8 @@ describe("the controller's default runner", () => {
         (await updateController(harness.base, token, { defaultRunnerId: open.id })).status,
       ).toBe(200);
 
-      // The default is where work with nothing to say about placement lands,
-      // which is exactly what neither of these two takes.
+      // Work with no placement preference runs on the default runner, and
+      // neither of these two runners accepts such work.
       for (const runner of [personal, gone]) {
         const response = await updateController(harness.base, token, {
           defaultRunnerId: runner.id,
@@ -143,7 +143,7 @@ describe("the controller's default runner", () => {
     });
   });
 
-  it("changes nothing when the patch names no field", async () => {
+  it("changes nothing when the patch has no fields", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner: Runner = await harness.insertRunner({ name: "iris" });

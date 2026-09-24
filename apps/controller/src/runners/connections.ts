@@ -1,12 +1,14 @@
 /**
- * What holding a connection does to a runner row. Not an operation and not on
- * `RunnerService`: no grant reaches it, and every row is stamped `system`.
+ * The controller's live connections to runners, and what they do to runner
+ * rows. This is not an operation and not on `RunnerService`: it checks no
+ * grant, and every audit entry is stamped `system`.
  *
- * The one state it keeps is which connection each runner is reachable through. A
- * machine can dial again before the connection it lost has finished unwinding,
- * so without it the loser's parting `unreachable` would land on top of the new
- * connection's `online`. The map dies with the process, which is what
- * `strandedByTheLastRun` corrects before the listener binds.
+ * The only state kept here is which connection each runner is reachable
+ * through. A runner can connect again before its old connection has finished
+ * closing. Without the map, the old connection's final `unreachable` would
+ * overwrite the new connection's `online`. The map is lost when the process
+ * stops, which `strandedByTheLastRun` corrects before the server starts
+ * listening.
  */
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -56,10 +58,10 @@ export type Departure = "offline" | "unreachable";
 
 export const DISPLACED_CLOSE_REASON = "this runner opened another connection";
 
-/** Long enough for a machine to run its probe, short enough to answer a click. */
+/** Long enough for a runner to collect its facts, short enough to answer a button click. */
 const RUNNER_FACTS_DEADLINE: Duration.Duration = Duration.seconds(10);
 
-/** Tests hand over a deadline they can wait out. */
+/** How long `refreshedFacts` waits for a report. Tests pass a shorter deadline they can wait for. */
 export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
   "hercule/controller/runners/RunnerFactsDeadline",
   { defaultValue: (): Duration.Duration => RUNNER_FACTS_DEADLINE },
@@ -68,12 +70,12 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
 export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | SessionInput;
 
 /**
- * What a machine said about the sessions it is hosting, and which machine said
- * it. The connections carry it no further: what a session event means is the
- * session domain's, and the connections knowing that would put the fleet above
- * it rather than under it. The connection rides along so the session domain
- * can mark it caught up on its own authority, the same way every other write
- * keyed by connection identity here does.
+ * A frame a runner sent about the sessions it hosts, and which runner sent it.
+ * The connections do not interpret it: the sessions domain decides what a
+ * session event means, and if this domain knew that, the runners domain would
+ * sit above sessions instead of below. The connection is included so the
+ * consumer can mark it as caught up, keyed by connection like every other
+ * write here.
  */
 export interface SessionTraffic {
   readonly runnerId: string;
@@ -82,12 +84,11 @@ export interface SessionTraffic {
 }
 
 /**
- * What the layer above acts on: a machine reporting something that is not about
- * a session, and the runners domain changing something that frees a machine for
- * work. The connections carry none of it further - what any of it means is
- * decided above this domain, in the controller daemon. One queue, so a
- * machine's reports are handed on in the order they arrived in; what this
- * domain changes itself joins them as it happens.
+ * Events the controller daemon acts on: a runner reporting something that is
+ * not about a session, or this domain changing something that may free a
+ * runner for work. This domain does not interpret them; the controller daemon
+ * does. They share one queue, so a runner's reports are passed on in the order
+ * they arrived, and changes made by this domain join the queue as they happen.
  */
 export type FleetTraffic =
   | {
@@ -102,21 +103,21 @@ export type FleetTraffic =
     }
   | { readonly _tag: "placementsChanged"; readonly runnerId: string };
 
-/** What came back for one of those, correlated by the request's own id. */
+/** A runner's answer to a `Request`, matched to it by the request's id. */
 export type Answer =
   ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult | SessionInputResult;
 
 /**
- * The facts report carries no request id: the protocol has one frame for it and
- * a machine sends one report, so it waits under a key no request id can be. The
- * empty string is that key, because a `RequestId` holds at least one character
- * - a spelled-out word would be one a runner could send a report under.
+ * The key callers of `refreshedFacts` wait under. The facts report has no
+ * request id, so it needs a key that no request id can be. The empty string
+ * works, because a `RequestId` has at least one character. A word would not
+ * work, because a runner could send an answer with that word as its id.
  */
 const FACTS_KEY = "";
 
 /**
- * How many arrivals a driver that has not subscribed yet still sees. One is
- * enough for the boot window; a handful covers a fleet that all dials at once.
+ * How many recent arrivals a late subscriber still receives. One is enough for
+ * the boot window; a handful covers a fleet that connects all at once.
  */
 const ARRIVALS_REPLAY = 16;
 
@@ -128,19 +129,19 @@ const FACTS_REPORTED: FactsReported = { _tag: "factsReported" };
 
 type Reported = Answer | FactsReported;
 
-/** How this service reaches back to a connection that is holding a runner. */
+/** The callbacks this service uses to reach a runner's open connection. */
 export interface Connected {
   /**
    * Asks the connection to close with a code and a reason. Only the connection
-   * can write to its own socket, and a runner holds one, not as many as it
-   * opens.
+   * can write to its own socket, and a runner has one current connection,
+   * however many times it connects.
    */
   readonly close: (code: number, reason: string) => void;
   /** Sends the runner a request for its facts. Answered by `reportedFacts`. */
   readonly askForFacts: Effect.Effect<void>;
   /**
-   * Writes one frame. A request is answered through `reportedAnswer` under the
-   * same id; everything else is told, not asked.
+   * Writes one frame. The answer to a request arrives through
+   * `reportedAnswer` with the same id; other frames get no answer.
    */
   readonly ask: (frame: ControllerToRunner) => Effect.Effect<void>;
 }
@@ -148,17 +149,17 @@ export interface Connected {
 interface Reachable extends Connected {
   readonly connection: Connection;
   /**
-   * Who is waiting for what, keyed by the id the request went out under. Held
-   * per connection, so the connection ending ends every wait on it and a report
-   * under an id nobody issued wakes nothing. A key holds every caller waiting
-   * on it, because one machine sends one report however many asked for it.
+   * The callers waiting for an answer, keyed by request id. It is kept per
+   * connection, so closing the connection ends every wait on it, and an answer
+   * with an id nobody sent wakes nobody. One key can have several callers,
+   * because a runner sends one report however many callers asked for it.
    */
   readonly pending: Map<string, Set<Deferred.Deferred<Option.Option<Reported>>>>;
   /**
-   * Whether this connection's own `sessionsReport` has been applied yet. A
-   * fresh connection starts without one: what it holds is unknown until it
-   * says so, and until then a session started here is one the controller
-   * cannot yet account for.
+   * Whether this connection's `sessionsReport` has been applied yet. A new
+   * connection starts with `false`: its sessions are unknown until it reports
+   * them, and until then the controller cannot account for a session started
+   * on it.
    */
   reported: boolean;
 }
@@ -169,25 +170,26 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   const reachable = new Map<string, Reachable>();
-  // Unbounded, so a machine's hello is never held up by whoever is listening.
-  // It replays, because the driver subscribes on a forked fiber while the
-  // listener is already binding: without the replay a machine that dialled in
-  // that window would go unswept until the tick, an hour later.
+  // Unbounded, so a runner's hello never waits for a slow subscriber. It
+  // replays recent arrivals, because the subscriber starts on a forked fiber
+  // while the server is already starting to listen. Without the replay, a
+  // runner that connected in that window would not be probed until the hourly
+  // tick.
   const arrivals = yield* PubSub.unbounded<string>({ replay: ARRIVALS_REPLAY });
-  // A queue rather than a pub/sub, because exactly one consumer reads it and a
-  // queue built with the layer holds what arrives before that consumer has
-  // attached. Order is the guarantee that matters: the session domain applies
-  // events in the sequence the runner numbered them.
+  // A queue rather than a pub/sub, because exactly one consumer reads it, and a
+  // queue built with the layer keeps what arrives before that consumer starts.
+  // Order is what matters: the sessions domain applies events in the order the
+  // runner numbered them.
   const sessions = yield* Queue.unbounded<SessionTraffic>();
-  // A second queue rather than a second tag on the first: what a machine says
-  // about its sessions is applied by one consumer in sequence, and holding a
-  // workspace report behind a transcript backlog would keep a session waiting
-  // for a working area that is already there.
+  // A second queue rather than a second tag on the first: session frames are
+  // applied by one consumer in order, and a workspace report stuck behind a
+  // transcript backlog would keep a session waiting for a workspace that is
+  // already ready.
   const fleet = yield* Queue.unbounded<FleetTraffic>();
 
   /**
-   * Nothing more is coming over this connection, so everybody waiting on it is
-   * told now rather than at their own deadline.
+   * Ends every wait on a connection that will send nothing more, so the
+   * callers get `none` now rather than at their own deadline.
    */
   const abandon = (held: Reachable | undefined): void => {
     for (const waiting of held?.pending.values() ?? []) {
@@ -197,9 +199,9 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Wakes everybody waiting under this key. A key nobody is waiting on is
-   * dropped: an id the controller never issued, or a second report under one it
-   * did.
+   * Wakes every caller waiting under this key. A report for a key nobody is
+   * waiting on is dropped: an id the controller never sent, or a second report
+   * for one it did.
    */
   const wakeWaiters = (held: Reachable, key: string, reported: Reported): void => {
     const waiting = held.pending.get(key);
@@ -209,9 +211,9 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Hands one item to whoever is above this domain, unless the connection it
-   * came over has been replaced: yesterday's machine must not be acted on as
-   * if it were today's.
+   * Adds one item to the fleet queue, unless the connection it came from has
+   * been replaced: a report from an old connection must not be acted on as if
+   * it came from the current one.
    */
   const publish = (id: string, connection: Connection, item: FleetTraffic): Effect.Effect<void> =>
     Effect.suspend(() =>
@@ -221,12 +223,12 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Sends one thing and waits for what comes back under `key`. `none` when
-   * there is no connection, it ended, or nothing came back in time - the caller
-   * reports all three the same way: the machine did not say.
+   * Sends a frame and waits for the report under `key`. Returns `none` when
+   * the runner has no connection, the connection ended, or nothing came back
+   * in time. Callers report all three the same way: the runner did not answer.
    *
-   * Giving up is this caller's alone: the frame is still out there, so whoever
-   * else is waiting under the same key is still answered when it comes back.
+   * A timeout ends only this caller's wait: the frame may still be answered,
+   * and other callers waiting under the same key still get that answer.
    */
   const askAndAwaitReport = (
     id: string,
@@ -247,23 +249,24 @@ const make = Effect.gen(function* () {
           const answer = yield* Effect.timeoutOption(Deferred.await(mine), deadline);
           return Option.getOrElse(answer, () => Option.none<Reported>());
         }),
-        // Nobody else is listening for this one, and leaving it behind would
-        // keep the map growing for the life of the connection.
+        // Remove this caller's entry: nothing else will, and leaving it would
+        // grow the map for the life of the connection.
         Effect.sync(() => {
           waiting.delete(mine);
-          // Only if this set is still the one under the key: a report wakes
+          // Only if this set is still the one under the key. A report wakes
           // callers by removing the key first, so a caller that arrives under
-          // the same key while the woken ones unwind has installed a new set,
-          // and that one is not this finalizer's to drop.
+          // the same key meanwhile has created a new set, and this finalizer
+          // must not delete it.
           if (waiting.size === 0 && held.pending.get(key) === waiting) held.pending.delete(key);
         }),
       );
     });
 
   /**
-   * A move to where the runner already is is not a move, and writes no row.
-   * Only connectivity is written here: where the runner stands with its owner
-   * is the user's, and a drain outlives the socket that was dropped under it.
+   * Sets the runner's connectivity, and records an audit entry when it
+   * changed. Setting the current value writes nothing. Only connectivity is
+   * written here: the lifecycle belongs to the user, and a drain outlasts a
+   * dropped socket.
    */
   const changeConnectivity = (id: string, connectivity: RunnerConnectivity, at: string) =>
     Effect.gen(function* () {
@@ -278,18 +281,20 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    /** Only the hash was ever stored, which is all a lookup needs. */
+    /** Returns the id of the runner this credential belongs to. Only the hash is stored, and the lookup needs only that. */
     admits: (credential: string): Effect.Effect<Option.Option<string>, SqlError> =>
       runners.byCredential(hashToken(credential)),
 
-    /** Asked only about a credential already refused, to say why it was. */
+    /** Checks whether a rejected credential belonged to a retired runner, so the error can say so. */
     wasRetired: (credential: string): Effect.Effect<boolean, SqlError> =>
       runners.wasRetired(hashToken(credential)),
 
     /**
-     * The map is written after the transaction commits, because a `Map` does not
-     * roll back: a hello that failed to write would otherwise point the runner
-     * at a connection that never came online.
+     * Records a runner's hello, marks it online, and makes this connection the
+     * runner's current one, closing any previous connection. The map is
+     * updated after the transaction commits, because a `Map` does not roll
+     * back: a failed write would otherwise leave the map pointing at a
+     * connection that never came online.
      */
     greeted: (
       id: string,
@@ -304,38 +309,39 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             yield* runners.recordHello(id, hello, at);
             yield* changeConnectivity(id, "online", at);
-            // The hello rewrites version, capabilities and facts whether or not
-            // the state moved, so the row can change with nothing in the log.
+            // The hello rewrites the version, capabilities and facts whether or
+            // not the connectivity changed, so the row can change without an
+            // audit entry. Announce it either way.
             yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
           }),
         );
         const previous = reachable.get(id);
         reachable.set(id, { connection, ...connected, pending: new Map(), reported: false });
         if (previous !== undefined) {
-          // Nothing more is coming over the connection being displaced, and the
-          // entry that would have carried its answer is no longer the one here.
+          // The replaced connection will send nothing more, and its map entry
+          // is gone, so its waiting callers are released now.
           abandon(previous);
           previous.close(GOING_AWAY_CLOSE_CODE, DISPLACED_CLOSE_REASON);
         }
       }),
 
     /**
-     * Says a machine is in, once the controller's own hello has gone out: the
-     * runner drops anything that reaches it before that, so an arrival
-     * announced any earlier is one whose first request is thrown away.
+     * Announces that a runner has connected, after the controller's hello was
+     * sent. The runner drops every frame that arrives before that hello, so an
+     * earlier announcement could get its first request dropped.
      */
     arrived: (id: string): Effect.Effect<void> => PubSub.publish(arrivals, id).pipe(Effect.asVoid),
 
     /**
-     * Every machine that has just said hello. What to do about an arrival is
-     * not this service's business, so whoever has an opinion listens here.
+     * A stream of the ids of runners that have just connected. This service
+     * does not decide what to do about an arrival; subscribers do.
      */
     arrivals: Stream.fromPubSub(arrivals),
 
     /**
-     * Ends the connection a runner is holding, if it is holding one. Retiring
-     * revokes the credential, so a live socket outlives the row's meaning by
-     * exactly as long as it takes to say so.
+     * Closes the runner's connection, if it has one, with the "retired" close
+     * code. Retiring revokes the credential, so this closes the live socket as
+     * soon as the retirement is committed.
      */
     hangUp: (id: string): Effect.Effect<void> =>
       Effect.sync(() => {
@@ -344,14 +350,15 @@ const make = Effect.gen(function* () {
 
     /**
      * Asks the runner to report its facts now and waits for the report, which
-     * lands through `reportedFacts`. False when the runner is holding no
-     * connection, when it ended first, or when nothing came back in time.
+     * arrives through `reportedFacts`. Returns `false` when the runner has no
+     * connection, the connection ended first, or nothing came back in time.
      */
     refreshedFacts: (id: string): Effect.Effect<boolean> =>
       Effect.gen(function* () {
         const deadline = yield* RunnerFactsDeadline;
-        // Every call asks: another caller's wait is no evidence a frame is
-        // still in flight, and skipping the ask would leave the button inert.
+        // Every call sends a request: another caller's wait does not prove a
+        // request is still in flight, and skipping it could make the button
+        // do nothing.
         const answer = yield* askAndAwaitReport(
           id,
           FACTS_KEY,
@@ -361,6 +368,11 @@ const make = Effect.gen(function* () {
         return Option.isSome(answer);
       }),
 
+    /**
+     * Sends a request to the runner and waits for its answer, up to
+     * `deadline`. Returns `none` when the runner has no connection, the
+     * connection ended, or no answer came in time.
+     */
     asked: (
       id: string,
       request: Request,
@@ -368,14 +380,15 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Option.Option<Answer>> =>
       Effect.map(
         askAndAwaitReport(id, request.requestId, (held) => held.ask(request), deadline),
-        // The facts report answers its own key and no request id, so nothing
-        // but an answer can come back under this one.
+        // The facts report uses its own key, never a request id, so only an
+        // answer can arrive under this key.
         Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
       ),
 
     /**
-     * Dropped under an id nobody issued, or on a replaced connection: either
-     * would let a machine write a row it was not asked to.
+     * Passes a runner's answer to the callers waiting for it. An answer with
+     * an id nobody sent, or from a replaced connection, is dropped: either
+     * would let a runner write something it was not asked for.
      */
     reportedAnswer: (id: string, connection: Connection, answer: Answer): Effect.Effect<void> =>
       Effect.sync(() => {
@@ -385,18 +398,18 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Sends one frame to a runner, with nothing to wait for. False when the
-     * machine is holding no connection, which is what a caller reports as a
-     * session it could not place.
-     */
-    /**
-     * Whether this machine is holding a connection this moment. For a caller
-     * deciding whether to start work that only a connected machine can
-     * finish; a caller that simply has a frame to send uses `tell`, which
-     * answers the same question by trying.
+     * Checks whether this runner has an open connection right now. For a
+     * caller deciding whether to start work only a connected runner can
+     * finish. A caller that just has a frame to send uses `tell`, which finds
+     * out by trying.
      */
     holdsConnection: (id: string): Effect.Effect<boolean> => Effect.sync(() => reachable.has(id)),
 
+    /**
+     * Sends one frame to a runner, without waiting for an answer. Returns
+     * `false` when the runner has no connection, which a caller reports as a
+     * session it could not place.
+     */
     tell: (id: string, frame: ControllerToRunner): Effect.Effect<boolean> =>
       Effect.suspend(() => {
         const held = reachable.get(id);
@@ -405,8 +418,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Dropped on a replaced connection: yesterday's machine must not write over
-     * the session state today's is reporting.
+     * Adds a runner's session frame to the session queue. A frame from a
+     * replaced connection is dropped: an old connection must not overwrite the
+     * session state the current one reports.
      */
     reportedSession: (
       id: string,
@@ -419,12 +433,12 @@ const make = Effect.gen(function* () {
           : Effect.void,
       ),
 
-    /** Everything the fleet has said about its sessions, in arrival order. */
+    /** A stream of every session frame runners sent, in arrival order. */
     sessionTraffic: Stream.fromQueue(sessions),
 
     /**
-     * What a machine made of a working area. What that means for the workspace
-     * row, and for the sessions waiting on it, is decided above this domain.
+     * Publishes a runner's workspace report. The controller daemon decides
+     * what it means for the workspace row and for the sessions waiting on it.
      */
     reportedWorkspace: (
       id: string,
@@ -434,8 +448,9 @@ const make = Effect.gen(function* () {
       publish(id, connection, { _tag: "workspaceReported", runnerId: id, report }),
 
     /**
-     * A machine asking for the credential git needs. The answer is a frame back
-     * to it, which is why the question is published rather than answered here.
+     * Publishes a runner's request for the credential git needs. The answer
+     * is a frame back to the runner, which the controller daemon sends, so the
+     * request is published rather than answered here.
      */
     requestedCredential: (
       id: string,
@@ -445,28 +460,27 @@ const make = Effect.gen(function* () {
       publish(id, connection, { _tag: "credentialRequested", runnerId: id, request }),
 
     /**
-     * This machine may have room for work it had none for a moment ago: its
-     * cap was raised or a drain was lifted. Whether anything is waiting for
-     * that room is not the fleet's to know.
+     * Publishes that this runner may now have room for work, for example
+     * because its cap was raised or it was undrained. This domain does not
+     * know whether any session is waiting for that room.
      */
     placementsChanged: (id: string): Effect.Effect<void> =>
       Effect.asVoid(Queue.offer(fleet, { _tag: "placementsChanged", runnerId: id })),
 
-    /** Everything the fleet reports or changes that another domain acts on. */
+    /** A stream of every fleet event another domain acts on. */
     fleetTraffic: Stream.fromQueue(fleet),
 
     /**
-     * Whether this runner's current connection has applied a sessions report
-     * yet. False for a runner holding no connection at all, same as any other
-     * fact this map has no entry for.
+     * Checks whether this runner's current connection has had a sessions
+     * report applied yet. Returns `false` for a runner with no connection.
      */
     hasReportedSessions: (id: string): Effect.Effect<boolean> =>
       Effect.sync(() => reachable.get(id)?.reported ?? false),
 
     /**
-     * Marks this connection caught up, once its sessions report has been
-     * applied. Dropped on a replaced connection: a report that landed for
-     * yesterday's connection says nothing about whether today's has caught up.
+     * Marks this connection as caught up, once its sessions report has been
+     * applied. Ignored for a replaced connection: a report from an old
+     * connection says nothing about whether the current one has caught up.
      */
     markSessionsReported: (id: string, connection: Connection): Effect.Effect<void> =>
       Effect.sync(() => {
@@ -474,11 +488,18 @@ const make = Effect.gen(function* () {
         if (held?.connection === connection) held.reported = true;
       }),
 
-    /** An answer on a replaced connection is still that machine saying it is there. */
+    /**
+     * Records a pong as the runner's last-seen time. A pong on a replaced
+     * connection still counts, because it still shows the runner is up.
+     */
     answered: (id: string): Effect.Effect<void, SqlError> =>
       Effect.flatMap(nowIso, (at) => runners.touch(id, at)),
 
-    /** A report on a replaced connection would put yesterday's machine over today's. */
+    /**
+     * Stores a runner's facts report and wakes the callers of
+     * `refreshedFacts`. A report from a replaced connection is ignored, so an
+     * old connection cannot overwrite the current one's facts.
+     */
     reportedFacts: (
       id: string,
       connection: Connection,
@@ -490,21 +511,25 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             if (reachable.get(id)?.connection !== connection) return false;
             yield* runners.recordFacts(id, facts, yield* nowIso);
-            // No audit row: what a machine has installed is not an event anyone
-            // reads back, so the fleet's watchers are told here instead.
+            // No audit entry: what a runner has installed is not an event anyone
+            // reads back, so clients watching the fleet are notified instead.
             yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
             return true;
           }),
         );
-        // After the commit, so a caller woken by this reads the facts it waited
-        // for rather than the ones they replaced. Still this connection's, in
-        // case the runner reconnected in between: the new connection's waiters
-        // are waiting on the new machine, and it has not spoken yet.
+        // After the commit, so a woken caller reads the new facts rather than
+        // the old ones. The connection is checked again in case the runner
+        // reconnected in between: callers on the new connection are waiting
+        // for its own report, which has not arrived yet.
         const held = recorded ? reachable.get(id) : undefined;
         if (held?.connection === connection) wakeWaiters(held, FACTS_KEY, FACTS_REPORTED);
       }),
 
-    /** Only the crossing is recorded, because that is the part placement acts on. */
+    /**
+     * Stores a runner's watermark report. An audit entry is written only when
+     * the runner starts or stops accepting placements, because that is what
+     * placement acts on.
+     */
     reportedWatermark: (
       id: string,
       connection: Connection,
@@ -527,18 +552,19 @@ const make = Effect.gen(function* () {
             });
           }),
         );
-        // After the write, so whoever acts on the room this machine has reads
-        // the disk it just reported rather than the one it replaced. A report
-        // that crossed nothing still says the machine is there with that disk,
-        // which is what placement reads.
+        // After the write, so whoever acts on this runner's room reads the disk
+        // space it just reported rather than the old value. A report that did
+        // not cross the watermark is still published, because placement reads
+        // the latest disk space.
         yield* publish(id, connection, { _tag: "placementsChanged", runnerId: id });
       }),
 
     /**
-     * Which departure it was is the connection's to say, because only it heard
-     * the announcement or failed to. The ownership test sits inside the
-     * transaction because acquiring it is a wait, and the runner's next
-     * connection could come online in that gap.
+     * Records that a connection ended: removes it from the map and sets the
+     * runner `offline` or `unreachable`. The connection passes the departure,
+     * because only it knows whether a `goodbye` arrived. The ownership check is
+     * inside the transaction, because starting a transaction can wait, and the
+     * runner's next connection could come online in that gap.
      */
     ended: (
       id: string,
@@ -556,9 +582,9 @@ const make = Effect.gen(function* () {
               yield* changeConnectivity(id, departure, yield* nowIso);
             }),
           ),
-          // Nothing is coming over a connection that has gone, whether or not
-          // the row could be moved off online, so everybody waiting on this one
-          // is told now rather than at their own deadline.
+          // The connection has closed, whether or not the row could be moved
+          // off online, so everyone waiting on it is released now rather than
+          // at their own deadline.
           Effect.sync(() => {
             if (held?.connection !== connection) return;
             abandon(held);
@@ -567,9 +593,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * No connection survives the process that held it, and the only thing that
-     * moves a runner off `online` is the connection that put it there. Without
-     * this, a controller killed rather than drained shows a ready fleet for ever.
+     * Marks every runner still `online` as `unreachable`, at boot. No
+     * connection survives the process that held it, and only a connection
+     * moves its runner off `online`. Without this, a controller that was
+     * killed rather than shut down would show the fleet as online forever.
      */
     strandedByTheLastRun: withTransaction(
       sql,

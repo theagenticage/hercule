@@ -1,11 +1,13 @@
 /**
- * The Agent over HTTP: the named, reusable configuration a session is spawned
- * from, driven through the real API with a real machine on the real runner
- * socket.
+ * Tests the Agent over HTTP: the named, reusable configuration a session is
+ * spawned from. The tests use the real API, with a real machine on the real
+ * runner socket.
  *
- * A machine is needed because two of the assertions need one. `unenforced` is
- * read from the instance's provider definition. And a delete must be refused
- * while a session that names the agent still runs.
+ * A machine is needed for two of the assertions:
+ *
+ * - `unenforced` is read from the instance's provider definition.
+ * - A delete must be rejected while a session spawned from the agent still
+ *   runs.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
@@ -32,10 +34,10 @@ import {
 /** A provider that enforces a tool restriction natively, as Claude Code does. */
 const CLAUDE: ProviderDefinition = buildProviderDefinition("claude-provider", { token: "t" });
 
-/** The same, as pi does. */
+/** A provider that enforces a tool restriction natively, as pi does. */
 const PI: ProviderDefinition = buildProviderDefinition("pi-provider", { token: "t" });
 
-/** The one that stores a tool restriction and enforces nothing, as Codex does. */
+/** A provider that stores a tool restriction but enforces none, as Codex does. */
 const CODEX: ProviderDefinition = {
   ...buildProviderDefinition("codex-provider", { token: "t" }),
   declared: {
@@ -65,15 +67,15 @@ const MODELS: ReadonlyArray<ModelDescriptor> = [
 ];
 
 /**
- * Three, because the longest case here waits for the fleet to be probed, then
- * for a session to start, and then for it to exit.
+ * Three times the wait deadline, because the longest case here waits for the
+ * fleet to be probed, then for a session to start, and then for it to exit.
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   sharedWithFleet(body, { plugins: buildPlugins(), facts: FACTS, models: MODELS });
 
-/** An id shaped the way every Hercule id is, that nothing holds. */
+/** A well-formed id that matches no record. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
 
 const findInstanceId = (arranged: Arranged, providerId: string): string => {
@@ -82,11 +84,11 @@ const findInstanceId = (arranged: Arranged, providerId: string): string => {
   return found!.id;
 };
 
-/** One refusal, as the code it carries, the grant it names, and its whole text. */
+/** An error response: its code, the grant it names, and its full text. */
 interface Refusal {
   readonly code: string;
   readonly grant?: string;
-  /** Everything the error said, for asserting which field or entry it named. */
+  /** The full response body, for asserting which field or entry the error names. */
   readonly text: string;
 }
 
@@ -119,7 +121,7 @@ const updateAgent = (
 ): Promise<Response> =>
   send("PATCH", arranged.harness.base, `/api/v1/agents/${id}`, { body: fields, token });
 
-/** An agent, created the way every case here creates one: the four required fields. */
+/** Creates an agent with the four required fields, as every case here does. */
 const createAgentForInstance = async (
   arranged: Arranged,
   instanceId: string,
@@ -155,7 +157,7 @@ const listSessions = async (arranged: Arranged, query: string): Promise<Readonly
   return ((await response.json()) as { items: ReadonlyArray<Session> }).items;
 };
 
-/** A session spawned from an agent, driven to the status the case is about. */
+/** Spawns a session from an agent and returns it. */
 const spawnSessionFor = async (arranged: Arranged, agentId: string): Promise<Session> =>
   spawnSessionOrFail(arranged, { agentId, prompt: "assess this" });
 
@@ -199,7 +201,7 @@ const driveSessionToExited = async (
 };
 
 describe("the agent over its five operations", () => {
-  it("is created with the defaults a background identity gets, reads and lists the same way, takes an update, and is gone after a delete", async () => {
+  it("is created with the defaults for a background agent, reads and lists the same way, accepts an update, and is gone after a delete", async () => {
     await withFleet(async (arranged) => {
       const instanceId = findInstanceId(arranged, "claude-provider");
       const profile = await readProfileNamed(arranged, "unrestricted");
@@ -230,8 +232,8 @@ describe("the agent over its five operations", () => {
       });
       expect(patched.status, await patched.clone().text()).toBe(200);
       const updated = (await patched.json()) as AgentRecord;
-      // The call takes two fields and the record holds one selection. The
-      // choices belong to the model named beside them.
+      // The call takes two fields and the record stores one selection. The
+      // options belong to the model sent with them.
       expect(updated.model).toEqual({ model: "fast", options: { effort: "high" } });
       expect(updated.disallowedTools).toEqual(["edit"]);
       expect(updated.accessMode).toBe("auto");
@@ -256,9 +258,13 @@ describe("the agent over its five operations", () => {
   });
 
   it.each([
-    { what: "an instance nobody holds", fields: { instanceId: NOBODY }, names: "instanceId" },
     {
-      what: "a profile nobody holds",
+      what: "an instance that does not exist",
+      fields: { instanceId: NOBODY },
+      names: "instanceId",
+    },
+    {
+      what: "a profile that does not exist",
       fields: { permissionProfileId: NOBODY },
       names: "permissionProfileId",
     },
@@ -268,11 +274,11 @@ describe("the agent over its five operations", () => {
       names: "browse",
     },
     {
-      what: "options with no model beside them",
+      what: "options without a model",
       fields: { options: { effort: "high" } },
       names: "options",
     },
-  ])("refuses a create naming $what, saying which", async ({ fields, names }) => {
+  ])("rejects a create with $what, and names the field", async ({ fields, names }) => {
     await withFleet(async (arranged) => {
       const profile = await readProfileNamed(arranged, "unrestricted");
       const response = await createAgent(arranged, {
@@ -290,9 +296,13 @@ describe("the agent over its five operations", () => {
   });
 
   it.each([
-    { what: "an instance nobody holds", fields: { instanceId: NOBODY }, names: "instanceId" },
     {
-      what: "a profile nobody holds",
+      what: "an instance that does not exist",
+      fields: { instanceId: NOBODY },
+      names: "instanceId",
+    },
+    {
+      what: "a profile that does not exist",
       fields: { permissionProfileId: NOBODY },
       names: "permissionProfileId",
     },
@@ -302,11 +312,11 @@ describe("the agent over its five operations", () => {
       names: "browse",
     },
     {
-      what: "options with no model beside them",
+      what: "options without a model",
       fields: { options: { effort: "high" } },
       names: "options",
     },
-  ])("refuses an update naming $what, saying which", async ({ fields, names }) => {
+  ])("rejects an update with $what, and names the field", async ({ fields, names }) => {
     await withFleet(async (arranged) => {
       const agent = await createAgentForInstance(
         arranged,
@@ -319,7 +329,7 @@ describe("the agent over its five operations", () => {
     });
   });
 
-  it("refuses every call by an actor the profile never gave the grant to, naming it", async () => {
+  it("rejects every call by an actor whose profile lacks the grant, and names the grant", async () => {
     await withFleet(async (arranged) => {
       const instanceId = findInstanceId(arranged, "claude-provider");
       const agent = await createAgentForInstance(arranged, instanceId);
@@ -370,7 +380,7 @@ describe("the agent over its five operations", () => {
   });
 });
 
-describe("what a provider says it will not enforce", () => {
+describe("what a provider declares it will not enforce", () => {
   it.each([
     {
       what: "a Codex instance with a restriction",
@@ -396,21 +406,24 @@ describe("what a provider says it will not enforce", () => {
       tools: ["edit"],
       unenforced: [],
     },
-  ])("says so on $what, at create and at read", async ({ provider, tools, unenforced }) => {
-    await withFleet(async (arranged) => {
-      const created = await createAgentForInstance(arranged, findInstanceId(arranged, provider), {
-        disallowedTools: tools,
-      });
+  ])(
+    "reports unenforced for $what, at create and at read",
+    async ({ provider, tools, unenforced }) => {
+      await withFleet(async (arranged) => {
+        const created = await createAgentForInstance(arranged, findInstanceId(arranged, provider), {
+          disallowedTools: tools,
+        });
 
-      expect(created.unenforced).toEqual(unenforced);
-      expect((await readAgent(arranged, created.id)).unenforced).toEqual(unenforced);
-    });
-  });
+        expect(created.unenforced).toEqual(unenforced);
+        expect((await readAgent(arranged, created.id)).unenforced).toEqual(unenforced);
+      });
+    },
+  );
 });
 
 describe("deleting an agent a session still points at", () => {
   it.each(["starting", "idle", "busy"])(
-    "is refused while a session is %s, naming the session",
+    "is rejected while a session is %s, and names the session",
     async (status) => {
       await withFleet(async (arranged) => {
         const agent = await createAgentForInstance(
@@ -462,7 +475,7 @@ describe("deleting an agent a session still points at", () => {
 });
 
 describe("listing sessions by what spawned them", () => {
-  it("answers one agent's sessions by its id, and only the threads for a thread listing", async () => {
+  it("returns one agent's sessions by its id, and only the threads for a thread listing", async () => {
     await withFleet(async (arranged) => {
       const instanceId = findInstanceId(arranged, "claude-provider");
       const mine = await createAgentForInstance(arranged, instanceId);
@@ -483,7 +496,7 @@ describe("listing sessions by what spawned them", () => {
     });
   });
 
-  it("refuses a listing that names an agent and asks for threads at once", async () => {
+  it("rejects a listing that names an agent and also asks for threads", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAgentForInstance(
         arranged,
@@ -505,7 +518,7 @@ describe("listing sessions by what spawned them", () => {
 });
 
 describe("the permission profile an agent spawns under", () => {
-  it("refuses to delete a profile an agent names, saying which agent", async () => {
+  it("rejects deleting a profile that an agent names, and names the agent", async () => {
     await withFleet(async (arranged) => {
       const profile = await createProfile(arranged, "assessors", ["session.read"]);
       const agent = await createAgentForInstance(
@@ -542,7 +555,7 @@ describe("the permission profile an agent spawns under", () => {
    * The delete above prevents this state through the API, so the test removes
    * the profile row directly, the way a hand-edited database would.
    */
-  it("refuses a spawn from an agent whose profile is gone", async () => {
+  it("rejects a spawn from an agent whose profile was deleted", async () => {
     await withFleet(async (arranged) => {
       const profile = await createProfile(arranged, "doomed", ["session.read"]);
       const agent = await createAgentForInstance(

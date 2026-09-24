@@ -1,10 +1,10 @@
 /**
- * Placing a thread: the user's settings decide what it runs, the fleet decides
- * where, and the working area it asked for is made before it can start.
+ * Tests placing a session: the user's settings or the Agent decide what it
+ * runs, placement decides which runner, and the requested workspace is
+ * provisioned before the session can start.
  *
- * Driven over the real API and the real runner socket, because one of the
- * things asserted here is only visible there: what crosses the wire to the
- * machine.
+ * The tests use the real API and the real runner socket, because some checks
+ * are only visible there: the frames sent to the runner.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
@@ -33,13 +33,13 @@ import {
 } from "../sessions/testing";
 import { listFramesTagged, readWorkspace, createRepo } from "../workspaces/testing";
 
-/** Everything native, and not the instance the thread defaults will name. */
+/** A provider that supports everything natively, and is not the thread default. */
 const ALPHA: ProviderDefinition = buildProviderDefinition("alpha-provider", { token: "t" });
 
-/** The instance the thread defaults name. */
+/** The provider the tests set as the thread default. */
 const BETA: ProviderDefinition = buildProviderDefinition("beta-provider", { token: "t" });
 
-/** The one that stores a tool restriction and enforces none of it, as Codex does. */
+/** A provider that stores a tool restriction but does not enforce it, like Codex. */
 const GAMMA: ProviderDefinition = {
   ...buildProviderDefinition("gamma-provider", { token: "t" }),
   declared: {
@@ -64,13 +64,13 @@ const FACTS: RunnerFacts = {
 };
 
 /**
- * `clever` is what a machine offers by default, so `fast` can only come from a
- * setting or an Agent, and `swift` only from the call that spawns the session.
+ * `clever` is the runner's default model. So in these tests `fast` can only
+ * come from a setting or an Agent, and `swift` only from the spawn call.
  */
 const MODELS: ReadonlyArray<ModelDescriptor> = [
   { slug: "clever", name: "Clever", isDefault: true, options: [] },
-  // The one model with a choice of its own, so that options have a model to
-  // belong to and a call naming another model has choices to leave behind.
+  // The only model with an option, so tests can check that options stay with
+  // their model when a call picks another model.
   {
     slug: "fast",
     name: "Fast",
@@ -95,7 +95,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   sharedWithFleet(body, { plugins: buildPlugins(), facts: FACTS, models: MODELS });
 
-/** The user's thread defaults, written the way the settings screen writes them. */
+/** Sets the user's thread defaults through the settings API, as the settings screen does. */
 const setThreadDefaults = async (
   arranged: Arranged,
   values: Record<string, unknown>,
@@ -107,7 +107,7 @@ const setThreadDefaults = async (
   expect(response.status, await response.clone().text()).toBe(200);
 };
 
-/** The spec document the session was stored with, read off its row. */
+/** Reads the spec stored on the session's row. */
 const readStoredSpec = async (arranged: Arranged, id: string): Promise<Record<string, unknown>> => {
   const [row] = await Effect.runPromise(
     Effect.orDie(
@@ -119,10 +119,10 @@ const readStoredSpec = async (arranged: Arranged, id: string): Promise<Record<st
   return JSON.parse(row!.spec) as Record<string, unknown>;
 };
 
-/** The workspace frame the machine was told to act on, once it is on the wire. */
+/** Waits for the first workspace provision frame sent to the runner, and returns it. */
 const waitForProvisionFrame = (arranged: Arranged): Promise<Record<string, unknown>> =>
   waitUntil(
-    "told the machine to make the working area",
+    "told the runner to provision the workspace",
     () => listFramesTagged(arranged.wire, "workspaceProvision")[0],
   );
 
@@ -157,7 +157,7 @@ describe("placeSession", () => {
     });
   });
 
-  it("puts the session on the runner it placed, in the workspace it opened, with the prompt as its first input", async () => {
+  it("places the session on the chosen runner, in the new workspace, with the prompt as its first input", async () => {
     await withFleet(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
 
@@ -189,7 +189,7 @@ describe("placeSession", () => {
   });
 });
 
-/** One refusal, as the code it carries and everything it said. */
+/** Parses an error response into its code and its full body text. */
 const parseRefusal = async (
   response: Response,
 ): Promise<{ readonly code: string; readonly text: string }> => {
@@ -198,7 +198,7 @@ const parseRefusal = async (
   return { code: body.error.code, text };
 };
 
-/** An agent of the test's own making, through the API that makes one. */
+/** Creates an agent through the API. */
 const createAgent = async (
   arranged: Arranged,
   fields: Record<string, unknown>,
@@ -208,7 +208,7 @@ const createAgent = async (
   return (await response.json()) as { readonly id: string };
 };
 
-/** The spec the machine was told to start, off the frame that carried it. */
+/** Waits for the session's start frame and returns the spec it carries. */
 const readStartedSpec = async (
   arranged: Arranged,
   sessionId: string,
@@ -217,7 +217,7 @@ const readStartedSpec = async (
   return { ...frame!.spec };
 };
 
-/** A schema inside the subset the lint accepts. */
+/** A schema inside the supported subset, which the lint accepts. */
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -226,7 +226,7 @@ const SCHEMA = {
 };
 
 describe("placeSession from an Agent", () => {
-  /** The agent every case here starts from: every field the copy has to carry. */
+  /** Creates the agent the tests start from, with every field that has to be copied to the session. */
   const createAssessor = async (
     arranged: Arranged,
     fields: Record<string, unknown> = {},
@@ -246,7 +246,7 @@ describe("placeSession from an Agent", () => {
     return { id: agent.id, profileId: profile.id, instanceId };
   };
 
-  it("copies the agent's every value onto the session and onto the frame the machine is told", async () => {
+  it("copies every value of the agent onto the session and onto the start frame", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
 
@@ -270,7 +270,7 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("opens on the call's model with none of the agent's options, which were its model's", async () => {
+  it("uses the call's model without the agent's options, which belong to the agent's model", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, { model: "fast", options: { effort: "high" } });
 
@@ -280,14 +280,14 @@ describe("placeSession from an Agent", () => {
         model: "swift",
       });
 
-      // A choice belongs to the model that offered it: carrying `effort` onto
-      // a model that never declared it would run the session on a value
-      // nobody put there.
+      // An option belongs to the model that offers it. Keeping `effort` for a
+      // model that does not declare it would run the session with a value
+      // nobody chose for that model.
       expect(session.modelSelection).toEqual({ model: "swift", options: {} });
     });
   });
 
-  it("lets the values the spawning call names beat the agent's", async () => {
+  it("lets values in the spawn call override the agent's", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
 
@@ -303,11 +303,11 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("falls back to the instance's default model and to full-access where the agent names neither", async () => {
+  it("falls back to the instance's default model and to full-access when the agent sets neither", async () => {
     await withFleet(async (arranged) => {
-      // Set, and not to be read: an Agent answers what the thread defaults
-      // answer for a Thread, so reaching them here would run the agent's
-      // session under a value nobody put on the agent.
+      // Set, but must not be used: an Agent replaces the thread defaults, so
+      // using them here would run the agent's session with a value nobody
+      // set on the agent.
       await setThreadDefaults(arranged, { "thread.model": "fast" });
       const bare = await createAgent(arranged, {
         name: `bare-${crypto.randomUUID()}`,
@@ -350,7 +350,7 @@ describe("placeSession from an Agent", () => {
     },
   );
 
-  it("answers not_found for an agent nobody holds", async () => {
+  it("fails with not_found for an agent that does not exist", async () => {
     await withFleet(async (arranged) => {
       const response = await spawnSession(arranged, {
         agentId: "0199e0e7-9999-7000-8000-000000000000",
@@ -362,7 +362,7 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("lets a session holding session.spawn spawn from an agent bounded by no more than itself", async () => {
+  it("lets a session with session.spawn spawn from an agent whose grants are no wider than its own", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await createProfile(arranged, "narrow", ["session.read"])).id,
@@ -384,7 +384,7 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("refuses that same session an agent whose profile grants more than its own", async () => {
+  it("forbids that session to spawn from an agent whose profile grants more than its own", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await readProfileNamed(arranged, "unrestricted")).id,
@@ -410,7 +410,7 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("refuses that same session an access mode more permissive than the agent's own", async () => {
+  it("forbids that session to ask for an access mode more permissive than the agent's", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await createProfile(arranged, "narrow-3", ["session.read"])).id,
@@ -430,13 +430,13 @@ describe("placeSession from an Agent", () => {
       expect(response.status, await response.clone().text()).toBe(403);
       const refused = await parseRefusal(response);
       expect(refused.code).toBe("forbidden");
-      // The grant rule lets this agent through - its profile is narrower than
-      // the spawner's - so the refusal has to be the mode's own.
+      // The grant rule allows this agent, because its profile is narrower than
+      // the spawner's. So the error must come from the access mode rule.
       expect(refused.text).toContain("access mode");
     });
   });
 
-  it("lets that same session take the mode down from the agent's own", async () => {
+  it("lets that session ask for a less permissive access mode than the agent's", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
         permissionProfileId: (await createProfile(arranged, "narrow-4", ["session.read"])).id,
@@ -454,15 +454,15 @@ describe("placeSession from an Agent", () => {
       );
 
       expect(response.status, await response.clone().text()).toBe(200);
-      // The agent runs on auto-accept-edits; a spawner may hand its worker
-      // less of the machine than that, never more.
+      // The agent runs on auto-accept-edits. A spawner may give its worker less
+      // access than that, never more.
       expect(((await response.json()) as { requestedAccessMode: string }).requestedAccessMode).toBe(
         "approval-required",
       );
     });
   });
 
-  it("leaves a running session and the spec its machine was told untouched when the agent is edited", async () => {
+  it("leaves a running session and its start spec unchanged when the agent is edited", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
       const session = await spawnSessionOrFail(arranged, {
@@ -492,7 +492,7 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("says on the session which of its spec the provider will not act on", async () => {
+  it("lists on the session the spec fields the provider does not enforce", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
         instanceId: findInstanceId(arranged, "gamma-provider"),
@@ -509,7 +509,7 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("carries a schema inside the subset onto the frame byte for byte", async () => {
+  it("sends a schema inside the subset on the start frame unchanged", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
 
@@ -523,7 +523,7 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("refuses a schema outside the subset, saying what it broke, and spawns nothing", async () => {
+  it("rejects a schema outside the subset, says which rule it breaks, and spawns nothing", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
 
@@ -550,11 +550,11 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("refuses a schema past the bound before anything is written", async () => {
+  it("rejects a schema over the size limit before anything is written", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged);
-      // Inside the subset in every other way: what is refused is its size, and
-      // it is refused where a schema is decoded rather than where it is linted.
+      // Valid in every other way, so the error is about its size. The size is
+      // checked when the input is decoded, before the lint runs.
       const keys = Array.from({ length: 2_000 }, (_, index) => `field-${String(index)}`);
       const properties = Object.fromEntries(keys.map((key) => [key, { type: "string" }]));
 

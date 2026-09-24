@@ -1,8 +1,8 @@
 /**
- * Enrichment's second look: a ref added after the router walked past an event
- * makes that one event reach the route that was waiting for it.
+ * Tests that enrichment routes an event again: a ref added after the router
+ * read an event makes that event reach the route that was waiting for it.
  *
- * The second look writes rows and sends nothing, so each case waits for the
+ * Routing again writes rows but sends nothing, so each test waits for the
  * tick that delivers them, as it would for any other match.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -27,15 +27,15 @@ import {
 } from "./testing";
 
 /**
- * Longer than any case here runs, so the pipeline never ticks: what the case
- * then sees is the enrichment's own second look and nothing else.
+ * Longer than any test here runs, so the pipeline never ticks, and the test
+ * sees only what the enrichment itself did.
  */
 const NO_TICK = Duration.hours(1);
 
-/** A fleet, three sessions and several ticks fit inside this. */
+/** Long enough for a fleet, three sessions and several ticks. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });
 
-describe("enrichment's second look", () => {
+describe("routing an event again after enrichment", () => {
   it("writes a row for the subscription the added ref now matches, and for nothing else", async () => {
     await withPipeline(async (arranged) => {
       const first = await spawnSubscriber(arranged, "first-holder");
@@ -65,14 +65,14 @@ describe("enrichment's second look", () => {
       );
       expect(rows).toHaveLength(1);
       expect(rows[0]!.event_id).toBe(eventId);
-      // The row reads the amended envelope, not the one that was stored when
-      // the event first arrived.
+      // The row's text comes from the amended event, not from the event as it
+      // was first stored.
       expect(rows[0]!.text).toContain("https://github.com/o/r/pull/88");
       // The subscription that already matched gets nothing a second time.
       expect(await readMatchedInputRows(arranged.harness, early)).toHaveLength(1);
-      // The second look is not a step through the log, so the cursor is never
-      // put back to read the event again. It does move on: the audit entry the
-      // enrichment stamped is one more entry for the next pass to walk past.
+      // Routing again is not a step through the log, so the cursor is never
+      // moved back. It can move forward: the enrichment's audit entry is one
+      // more event for the next pass to read.
       expect((await readCursorAndHead(arranged.harness)).position).toBeGreaterThanOrEqual(before);
 
       // An enrichment that adds nothing writes nothing.
@@ -89,14 +89,14 @@ describe("enrichment's second look", () => {
     });
   });
 
-  it("gets the row it wrote to an idle session, on the pass after the enrichment", async () => {
+  it("delivers the new row to an idle session on the tick after the enrichment", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "late-holder");
       const eventId = await emitManualEvent(arranged, [REF], "enriched into a match");
       await waitUntilCaughtUp(arranged.harness);
 
-      // The subscription waits for a ref the event does not carry yet, so the
-      // pass that walked past the event matched nothing.
+      // The subscription waits for a ref the event does not have yet, so the
+      // pass that read the event matched nothing.
       const subscriptionId = await subscribeAgent(arranged, agent, OTHER_REF);
       expect((await readSession(arranged, agent.session.id)).status).toBe("idle");
 
@@ -108,8 +108,8 @@ describe("enrichment's second look", () => {
       );
       expect(response.status, await response.clone().text()).toBe(200);
 
-      // Nothing was sent on the request's own fiber: the frame crosses the
-      // socket because a later tick of the pipeline sent it.
+      // Nothing was sent on the request's fiber: a later tick of the pipeline
+      // sends the frame.
       const frame = await waitForFrameCarrying(arranged, "enriched into a match");
       expect(frame.sessionId).toBe(agent.session.id);
       const rows = await waitForMatchedInputRows(
@@ -129,9 +129,9 @@ describe("enrichment's second look", () => {
         await exitSession(arranged, holder, 1);
         expect((await readSession(arranged, holder.session.id)).resumable).toBe(false);
 
-        // The ref this subscription waits for is added to the event. The
-        // second look prepares the table as a pass does, sweep and all, so the
-        // claim nobody is left to answer is ended rather than answered.
+        // The ref this subscription waits for is added to the event. Routing
+        // again prepares the table as a pass does, including the sweep, so the
+        // subscription without a holder is ended instead of matched.
         const response = await post(
           arranged.harness.base,
           `/api/v1/events/${String(eventId)}/enrich`,

@@ -1,21 +1,25 @@
 /**
- * What a matched event reads like when it arrives as a session's input.
+ * Tests the text a matched event is rendered as when it becomes a session
+ * input.
  *
- * The text is the only part of a delivery a person or an agent ever reads, so
- * it is pinned on its own, away from the fleet: one line that says what
- * happened, and the payload underneath it as JSON the agent can act on without
- * another call.
+ * The text is the only part of a delivery a person or an agent reads, so it
+ * is tested on its own, without a fleet: one line that describes the event,
+ * then the payload as JSON the agent can act on without another call.
  *
- * Three envelopes, because the payload is loose by design: a kind whose payload
- * names a subject and a URL, a kind whose payload names neither, and a kind
- * whose payload is empty. A renderer that reads a missing field as the word
- * "undefined" writes that word into an agent's turn.
+ * The payload has no fixed schema, so there are three cases:
+ *
+ * - a payload with a subject, and an event with a URL;
+ * - a payload with neither;
+ * - an empty payload.
+ *
+ * A renderer that turned a missing field into "undefined" would write that
+ * word into an agent's turn.
  */
 import { describe, expect, it } from "vitest";
 import type { Event } from "@hercule/contract";
 import { renderEventInput } from "./render-event-input";
 
-/** An envelope with the core's own fields already stamped. */
+/** Builds an event with the fields the core sets already filled in. */
 const buildEvent = (fields: Partial<Event>): Event => ({
   id: 41,
   source: "manual",
@@ -35,7 +39,7 @@ const buildEvent = (fields: Partial<Event>): Event => ({
 
 const readFirstLine = (text: string): string => text.split("\n")[0]!;
 
-/** The payload the text carries, read back out of its fenced JSON block. */
+/** Parses the payload back out of the text's fenced JSON block. */
 const readFencedPayload = (text: string): unknown => {
   const fence = /```json\n([\s\S]*?)\n```/.exec(text);
   expect(fence, `no fenced JSON block in:\n${text}`).not.toBeNull();
@@ -43,7 +47,7 @@ const readFencedPayload = (text: string): unknown => {
 };
 
 describe("renderEventInput", () => {
-  it("names the kind, the subject's title and the URL on one line, and carries the payload", () => {
+  it("writes the kind, the subject's title and the URL on one line, followed by the payload", () => {
     const payload = {
       subject: {
         repo: "o/r",
@@ -64,19 +68,18 @@ describe("renderEventInput", () => {
     expect(readFencedPayload(text)).toEqual(payload);
   });
 
-  it("names the kind alone when the payload has no subject and the event has no URL", () => {
+  it("writes only the kind when the payload has no subject and the event has no URL", () => {
     const payload = { reason: "mention" };
     const text = renderEventInput(buildEvent({ kind: "github.notification", url: null, payload }));
 
     const line = readFirstLine(text);
     expect(line).toContain("github.notification");
-    // A field that is not there is left out, rather than written out as the
-    // word a template produces for a missing value.
+    // A missing field is left out, not written as "undefined".
     expect(line).not.toMatch(/undefined|null/);
     expect(readFencedPayload(text)).toEqual(payload);
   });
 
-  it("still carries an empty payload, as an empty JSON object", () => {
+  it("still includes an empty payload, as an empty JSON object", () => {
     const text = renderEventInput(buildEvent({ kind: "github.pr.closed", url: null, payload: {} }));
 
     expect(readFirstLine(text)).toContain("github.pr.closed");

@@ -1,13 +1,15 @@
 /**
- * Resources over the real API: what a repo resource's canonical remote is, what
- * makes a second one a conflict, what a folder and a mailbox may say, and what
- * a resource holds up - its own deletion while a workspace stands on it, and
- * the deletion of the Connection it names.
+ * Resources over the real API:
  *
- * Everything here goes through `POST/GET/PATCH/DELETE
- * /api/v1/resources` and `DELETE /api/v1/connections/{id}`; the fleet is here
- * because one criterion - a resource a workspace stands on - cannot be arranged
- * without a machine to provision that workspace on.
+ * - how a repo's remote is canonicalized, and when a second repo conflicts
+ * - which fields a folder and a mailbox may have
+ * - what a resource blocks: its own deletion while a workspace uses it, and
+ *   the deletion of its Connection
+ *
+ * Everything here goes through `POST/GET/PATCH/DELETE /api/v1/resources` and
+ * `DELETE /api/v1/connections/{id}`. The tests need a fleet because a
+ * resource used by a workspace cannot be set up without a runner to provision
+ * that workspace on.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
@@ -22,16 +24,16 @@ import type { AuditKind } from "../events";
 import { waitUntil, type Arranged } from "../sessions/testing";
 import { readErrorCode, withFleet } from "../workspaces/testing";
 
-/** The account the GitHub type names, which is what a login is read off. */
+/** The login the local GitHub type returns for `PAT`. */
 const LOGIN = "octocat";
 
 const PAT = "ghp_a-token";
 
 /**
- * The GitHub connection type, locally. The shipped plugin's `validate` asks
- * `api.github.com` who the token belongs to, which no test may do; the word it
- * declares and the qualified id the host mints from it are the shipped ones, so
- * what a request names here is what a request names in production.
+ * A local GitHub connection type. The shipped plugin's `validate` asks
+ * `api.github.com` who the token belongs to, which no test may do. The type
+ * name and the qualified id the host builds from it are the same as the
+ * shipped ones, so requests here use the same ids as in production.
  */
 const githubPlugin: Plugin = {
   manifest: {
@@ -54,7 +56,7 @@ const githubPlugin: Plugin = {
   activate: () => Effect.succeed(Effect.void),
 };
 
-/** A connection type that is not GitHub, which a repo resource may not name. */
+/** A connection type that is not GitHub, which a repo resource may not use. */
 const otherPlugin: Plugin = {
   manifest: {
     id: "mailer",
@@ -76,7 +78,7 @@ const otherPlugin: Plugin = {
 const withResources = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   withFleet(body, { plugins: [githubPlugin, otherPlugin] });
 
-/** A resource as the API hands it back; only the fields asserted here are read. */
+/** A resource as the API returns it; only the fields these tests assert on are listed. */
 interface ResourceRecord {
   readonly id: string;
   readonly kind: string;
@@ -90,10 +92,10 @@ interface ResourceRecord {
 }
 
 /**
- * A create answered the way this controller answers a create. The two shipped
- * spellings differ (a connection answers 201, a task 200), and which one a
- * resource takes is not in the criterion, so either is accepted and the body is
- * what is asserted.
+ * Checks that a create succeeded, and returns the created resource. Other
+ * create operations differ (a connection returns 201, a task 200), and the
+ * spec does not say which one a resource returns, so either status is accepted
+ * and the tests assert on the body.
  */
 const parseCreatedResource = async (response: Response): Promise<ResourceRecord> => {
   expect([200, 201], await response.clone().text()).toContain(response.status);
@@ -152,32 +154,32 @@ const createConnection = async (
   return ((await response.json()) as { id: string }).id;
 };
 
-/** What the audit log holds under a kind this feature adds. */
+/** Reads the audit rows of one kind. */
 const readAuditRows = (arranged: Arranged, kind: string) =>
   arranged.harness.audit(kind as AuditKind);
 
 describe("resource.create", () => {
-  it("canonicalises a repo's remote to host/owner/repo, however it was spelled", async () => {
+  it("canonicalizes a repo's remote to host/owner/repo, however it was written", async () => {
     await withResources(async (arranged) => {
       const https = await createRepo(arranged, { remote: "https://GitHub.com/acme/web" });
       expect(https.kind).toBe("repo");
       expect(https.remote).toBe("https://GitHub.com/acme/web");
       expect(https.canonicalRemote).toBe("github.com/acme/web");
 
-      // The same repo, spelled as ssh with the case the owner writes it in and
-      // the `.git` suffix: one repository, one canonical remote.
+      // The same repo, written in scp-like form, with different case and a
+      // `.git` suffix: one repository, one canonical remote.
       const conflict = await createResource(arranged, {
         kind: "repo",
         remote: "git@github.com:Acme/Web.git",
       });
       expect(await readErrorCode(conflict)).toBe("conflict");
 
-      // And nothing was created by the refused call.
+      // The rejected call created nothing.
       expect((await queryResources(arranged)).map((one) => one.id)).toEqual([https.id]);
     });
   });
 
-  it("refuses a repo whose connection is not a GitHub one", async () => {
+  it("rejects a repo whose connection is not a GitHub connection", async () => {
     await withResources(async (arranged) => {
       const mailbox = await createConnection(arranged, "mailer/mailbox", { token: "t" });
       const refused = await createResource(arranged, {
@@ -193,7 +195,7 @@ describe("resource.create", () => {
     });
   });
 
-  it("takes a folder and a mailbox with a label and no remote", async () => {
+  it("accepts a folder and a mailbox with a label and no remote", async () => {
     await withResources(async (arranged) => {
       const mailbox = await createConnection(arranged, "mailer/mailbox", { token: "t" });
 
@@ -216,8 +218,8 @@ describe("resource.create", () => {
       expect(inbox.label).toBe("Work mail");
       expect(inbox.connectionId).toBe(mailbox);
       expect(inbox.remote ?? null).toBeNull();
-      // D-21 F7: neither is ever checked out, so neither carries the two fields
-      // that only mean something in a checkout.
+      // Neither is ever checked out, so neither has the two fields that only
+      // apply to a checkout.
       expect(folder.setupCommand ?? null).toBeNull();
       expect(folder.workspaceInclude).toBe(false);
       expect(inbox.workspaceInclude).toBe(false);
@@ -225,12 +227,16 @@ describe("resource.create", () => {
   });
 
   /**
-   * D-21 F7: the per-kind fields are honest. A repo is named by its remote, so a
-   * label on one is a second name nothing reads; a folder and a mailbox are
-   * never checked out, so a setup command and an include flag are rules for a
-   * checkout that can never exist. Both are refused rather than stored.
+   * Each kind accepts only the fields that mean something for it:
+   *
+   * - A repo is named by its remote, so a label would be a second name that
+   *   nothing reads.
+   * - A folder and a mailbox are never checked out, so a setup command and
+   *   the include flag would apply to a checkout that can never exist.
+   *
+   * Both are rejected rather than stored.
    */
-  it("refuses a label on a repo and the checkout fields off one", async () => {
+  it("rejects a label on a repo, and the checkout fields on any other kind", async () => {
     await withResources(async (arranged) => {
       const labelled = await createResource(arranged, {
         kind: "repo",
@@ -252,7 +258,7 @@ describe("resource.create", () => {
     });
   });
 
-  it("refuses the same on an update", async () => {
+  it("rejects the same fields on an update", async () => {
     await withResources(async (arranged) => {
       const web = await createRepo(arranged);
       const folder = await parseCreatedResource(
@@ -264,8 +270,8 @@ describe("resource.create", () => {
 
       const included = await patchResource(arranged, folder.id, { workspaceInclude: true });
       expect(included.status, await included.clone().text()).toBe(400);
-      // Clearing a label a repo never had is not a second name: it is a no-op
-      // the caller may write.
+      // Clearing a label a repo never had adds no second name, so it is an
+      // allowed no-op.
       const cleared = await patchResource(arranged, web.id, { label: null });
       expect(cleared.status, await cleared.clone().text()).toBe(200);
     });
@@ -283,7 +289,7 @@ describe("resource.create", () => {
 });
 
 describe("resource.query and resource.read", () => {
-  it("filters by kind and by project, and reads one back whole", async () => {
+  it("filters by kind and by project, and reads one resource with all its fields", async () => {
     await withResources(async (arranged) => {
       const hercule = await createProject(arranged, "Hercule");
       const web = await createRepo(arranged, {
@@ -321,7 +327,7 @@ describe("resource.query and resource.read", () => {
 });
 
 describe("resource.update", () => {
-  it("changes the remote, re-canonicalises it, and refuses one that collides", async () => {
+  it("changes the remote, canonicalizes it again, and rejects a remote another repo has", async () => {
     await withResources(async (arranged) => {
       const web = await createRepo(arranged, { remote: "https://github.com/acme/web" });
       const api = await createRepo(arranged, { remote: "https://github.com/acme/api" });
@@ -336,7 +342,7 @@ describe("resource.update", () => {
         remote: "https://github.com/acme/web.git",
       });
       expect(await readErrorCode(collides)).toBe("conflict");
-      // The refused change left the canonical remote where it was.
+      // The rejected change left the canonical remote unchanged.
       expect((await readResource(arranged, api.id)).canonicalRemote).toBe("github.com/acme/api");
       expect((await readResource(arranged, web.id)).canonicalRemote).toBe("github.com/acme/web");
     });
@@ -363,8 +369,8 @@ describe("resource.update", () => {
         setupCommand: "pnpm install",
         workspaceInclude: true,
       });
-      // The join rows follow the list it was given: the old project no longer
-      // finds it, the new one does.
+      // The join rows match the new list: filtering by the old project no
+      // longer finds the resource, and filtering by the new one does.
       expect(read.projectIds).toEqual([side]);
       expect(await queryResources(arranged, `?projectId=${hercule}`)).toEqual([]);
       expect((await queryResources(arranged, `?projectId=${side}`)).map((one) => one.id)).toEqual([
@@ -408,7 +414,7 @@ describe("resource.delete", () => {
     });
   });
 
-  it("refuses while a workspace stands on it, and allows it once that workspace is gone", async () => {
+  it("fails while a workspace uses the resource, and succeeds once that workspace is gone", async () => {
     await withResources(async (arranged) => {
       const web = await createRepo(arranged);
       const provisioned = await post(
@@ -428,8 +434,8 @@ describe("resource.delete", () => {
       expect(await readErrorCode(refused)).toBe("invalid_state");
       expect((await queryResources(arranged)).map((one) => one.id)).toEqual([web.id]);
 
-      // A retired machine loses its workspaces, which is the one way a primary
-      // reaches a terminal status.
+      // Retiring a runner marks its workspaces lost, which is the only way a
+      // primary reaches a final status.
       const retired = await send(
         "POST",
         arranged.harness.base,
@@ -459,7 +465,7 @@ describe("resource.delete", () => {
 });
 
 describe("connection.delete", () => {
-  it("is refused while a resource names the connection, and goes through once none does", async () => {
+  it("fails while a resource uses the connection, and succeeds once none does", async () => {
     await withResources(async (arranged) => {
       const github = await createConnection(arranged, "github/github", { pat: PAT });
       const web = await createRepo(arranged, { connectionId: github });

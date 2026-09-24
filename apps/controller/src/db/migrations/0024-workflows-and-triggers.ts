@@ -5,7 +5,7 @@
  * `source` is the YAML the author wrote. Only saving new YAML changes it.
  * `definition` is the parsed YAML, stored as JSON. It is parsed again from
  * `source` on every write and never written on its own, so the two cannot
- * disagree. Listings read a workflow's name and description from
+ * disagree. The list operations read a workflow's name and description from
  * `definition`. `enabled` belongs to the row and is not part of the YAML.
  *
  * A trigger row copies the trigger's fields from the workflow's YAML, so the
@@ -40,7 +40,7 @@ export default Effect.gen(function* () {
       updated_at TEXT NOT NULL
     )
   `;
-  // Serves the workflow listing, which puts the most recently updated first.
+  // Serves the workflow list, which puts the most recently updated first.
   yield* sql`CREATE INDEX workflows_updated ON workflows (updated_at, id)`;
 
   yield* sql`
@@ -60,8 +60,8 @@ export default Effect.gen(function* () {
       CHECK ((kind = 'start') = (status IS NOT NULL))
     )
   `;
-  // Serves the listing of triggers across all workflows, newest first. The
-  // primary key serves the listing of one workflow's triggers, and the cascade
+  // Serves the list of triggers across all workflows, newest first. The
+  // primary key serves the list of one workflow's triggers, and the cascade
   // delete.
   yield* sql`CREATE INDEX triggers_created ON triggers (created_at, workflow_id, trigger_id)`;
 });

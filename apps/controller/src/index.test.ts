@@ -4,7 +4,7 @@ import { HerculeHomeError } from "./config";
 import { explain, STILL_STOPPING, untilStopped } from "./index";
 
 describe("explain", () => {
-  it("says what Hercule was doing to the path, not always creating it", () => {
+  it("says what Hercule was doing to the path, which is not always creating it", () => {
     const path = "/home/x/.hercule/setup-url";
     const cause = new Error("EACCES: permission denied");
     expect(explain(new HerculeHomeError({ action: "create", path, cause }))).toContain(
@@ -27,16 +27,16 @@ describe("explain", () => {
 
 describe("the stop request", () => {
   /**
-   * The signals are emitted rather than sent. `process.emit` runs the same
-   * listeners `process.kill` would; sending a real SIGTERM to the test runner
-   * would take the runner down with it if the handler ever came off early,
-   * which is precisely the failure this is about.
+   * Emits a signal rather than sending it. `process.emit` runs the same
+   * listeners `process.kill` would. Sending a real SIGTERM would kill the test
+   * runner if the handler were ever removed too early, which is exactly the bug
+   * these tests look for.
    */
   const sendSignal = (name: "SIGINT" | "SIGTERM"): void => {
     process.emit(name);
   };
 
-  it("stops on the first signal, and answers every later one instead of dying", async () => {
+  it("stops on the first signal, and handles every later one instead of dying", async () => {
     const said: Array<string> = [];
     const log = console.log;
     console.log = (line: unknown) => said.push(String(line));
@@ -51,8 +51,8 @@ describe("the stop request", () => {
             sendSignal("SIGTERM");
             yield* stopped;
 
-            // The drain is under way. Both signals still land on Hercule - the
-            // handlers are still installed - and neither of them stops it
+            // The drain is under way. Both signals still reach Hercule's
+            // handlers, which are still installed, and neither signal stops it
             // again.
             sendSignal("SIGTERM");
             sendSignal("SIGINT");
@@ -65,8 +65,8 @@ describe("the stop request", () => {
     }
 
     expect(said.filter((line) => line === STILL_STOPPING)).toHaveLength(2);
-    // And the handlers came off with the scope, so a second boot in one
-    // process starts from nothing.
+    // The handlers were removed when the scope closed, so a second boot in the
+    // same process starts clean.
     expect(process.listenerCount("SIGTERM") + process.listenerCount("SIGINT")).toBe(before);
   });
 });

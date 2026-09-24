@@ -1,18 +1,21 @@
 /**
- * The delivery of the inputs a session holds: every queued input nothing has
- * sent yet to the session it was stored for, whoever wrote it.
+ * The delivery of queued inputs: sends every queued input that has not been
+ * sent yet to its session, whoever wrote it.
  *
- * It reads the rows rather than remembering what anything just wrote, so a row
- * that outlived the attempt to deliver it - a controller killed between the
- * commit and the send, a machine that refused the frame, a session that was
- * busy and whose transition to idle was missed - is picked up by the next tick
- * instead of waiting for ever. A match is not special here: an input a person
- * typed is owed to its session in the same way.
+ * It reads the rows instead of remembering what was just written. So an input
+ * whose delivery attempt failed is picked up by the next tick instead of
+ * waiting forever. For example:
  *
- * One fiber per session: a delivery waits on a machine, and a machine that is
- * slow to answer must not hold up the sessions behind it or the next tick. The
- * fibers are children of the pipeline's own driver, which lives as long as the
- * controller does.
+ * - the controller was killed between the commit and the send;
+ * - the runner rejected the frame;
+ * - the session was busy, and its change to idle was missed.
+ *
+ * Inputs from a subscription match and inputs a person typed are delivered in
+ * the same way.
+ *
+ * Each session gets its own fiber, because a delivery waits on a runner, and a
+ * slow runner must not hold up other sessions or the next tick. The fibers are
+ * children of the pipeline's driver, which lives as long as the controller.
  */
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -32,7 +35,7 @@ export const queuedInputDelivery: Effect.Effect<Delivery, never, SessionService 
         Effect.gen(function* () {
           for (const sessionId of yield* sessions.listSessionsAwaitingInput()) {
             yield* forkAndAbsorbFailures(
-              "A session could not be given what it was waiting for",
+              "Delivering queued input to a session failed",
               live.deliverQueuedInput(sessionId),
             );
           }

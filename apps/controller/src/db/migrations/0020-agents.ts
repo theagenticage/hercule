@@ -1,11 +1,11 @@
 /**
  * Agents, and the agent a session was spawned from.
  *
- * No column here is a foreign key, for the reason migration 0010 gives: a
- * session is history, and it must outlive the agent, the provider instance and
- * the permission profile it copied its values from. `sessions.agent_id` is
- * nullable because null is a Thread, which is a session nobody configured and
- * a person drives by hand.
+ * No column here is a foreign key, for the reason explained in migration 0010:
+ * a session is history, and it must outlive the agent, the provider instance
+ * and the permission profile it copied its values from. `sessions.agent_id` is
+ * nullable because a null value means a Thread: a session nobody configured,
+ * which a person drives by hand.
  *
  * `model_selection` holds the `{ model, options }` pair as JSON, or null for
  * an agent that runs on whatever its instance offers by default.
@@ -33,11 +33,12 @@ export default Effect.gen(function* () {
       updated_at TEXT NOT NULL
     )
   `;
-  // The one listing: newest first, as sessions are listed.
+  // The only list: newest first, the same order as the session list.
   yield* sql`CREATE INDEX agents_created ON agents (created_at DESC, id DESC)`;
 
   yield* sql`ALTER TABLE sessions ADD COLUMN agent_id BLOB`;
-  // Two reads use this index: a listing of one agent's sessions, and the read
-  // a delete makes to find out whether a session it spawned still runs.
+  // Two reads use this index: the list of one agent's sessions, and the check
+  // a delete makes to find out whether a session spawned from the agent is
+  // still running.
   yield* sql`CREATE INDEX sessions_agent ON sessions (agent_id) WHERE agent_id IS NOT NULL`;
 });

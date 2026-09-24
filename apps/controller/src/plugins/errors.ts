@@ -1,10 +1,11 @@
 /**
- * What a plugin is told when something it registered is refused.
+ * Builds the error messages a plugin gets when something it registered is
+ * invalid.
  *
- * Every refusal a plugin author reads is built here, so the published maximum
- * length holds for all of them and one bad field reads the same wherever it was
- * declared. A leaf: it knows the message shapes and nothing about the host or
- * the catalog.
+ * Every such message is built here, so all of them stay within the published
+ * maximum length, and an invalid field is described the same way wherever it
+ * was declared. This is a leaf module: it knows the message formats and
+ * nothing about the host or the catalog.
  */
 import type * as Schema from "effect/Schema";
 import { PluginError } from "@hercule/plugin-host";
@@ -28,10 +29,10 @@ export const truncateMessage = (message: string): string =>
     ? message
     : truncateText(message, MAX_PLUGIN_MESSAGE_LENGTH - 3);
 
-/** Every issue a decode found, as one line naming the field each one is about. */
+/** Formats every issue a decode found as one line, naming the field of each issue. */
 export const describeFieldIssues = (error: Schema.SchemaError): string =>
   truncateMessage(listDecodeIssues(error).map(formatIssue).join("; "));
 
-/** The same, as the failure the registration surfaces declare. */
+/** Converts a decode error to the `PluginError` that registration fails with. */
 export const toPluginError = (error: Schema.SchemaError): PluginError =>
   new PluginError({ message: describeFieldIssues(error) });

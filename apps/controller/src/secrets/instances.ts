@@ -1,10 +1,10 @@
 /**
- * The credentials of one provider instance, in the clear, for the frame that
- * carries them to the machine that needs them.
+ * Decrypts the credentials of one provider instance, for the frame that sends
+ * them to the runner that needs them.
  *
- * The only place a provider instance's secrets are decrypted. They are read as
- * a frame is built and never stored anywhere else: plaintext lives in this
- * process for the length of that build, and then on the wire.
+ * This is the only place a provider instance's secrets are decrypted. They are
+ * read while a frame is built and never stored anywhere else: the plaintext
+ * exists in this process only while the frame is built, and then on the wire.
  */
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
@@ -13,14 +13,15 @@ import { listSecretFields, type ProviderDefinition } from "@hercule/plugin-host"
 import { buildProviderInstanceOwner, Secrets, type SecretDecryptError } from "./repository";
 
 /**
- * Only the fields the provider declares travel: a row left under this owner by
- * a plugin that has since dropped the field, or written there by hand, is
- * nobody's credential and has no business on a machine. A provider this build
- * no longer carries declares nothing, so nothing of the instance's travels.
+ * Returns the instance's secrets, decrypted, keyed by field name. Only the
+ * secret fields the provider declares are returned: a row left by a plugin
+ * that has since dropped the field, or written by hand, is not a credential
+ * and must not be sent to a runner. When this build no longer has the
+ * provider, nothing is returned.
  *
- * A read that fails takes its caller with it. A probe or a session that went on
- * without the key would report itself as not logged in, which reads as the user
- * never having entered one.
+ * Fails when a secret cannot be read or decrypted, and the caller fails with
+ * it. A probe or a session that went ahead without the key would report that
+ * it is not logged in, which would look as if the user never entered one.
  */
 export const readInstanceSecrets = (
   secrets: Secrets["Service"],

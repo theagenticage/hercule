@@ -1,10 +1,10 @@
 /**
- * The `oauth_setups` table: redirect flows that have left for the provider and
- * not come back yet.
+ * Reads and writes the `oauth_setups` table: OAuth flows where the browser has
+ * gone to the provider and not come back yet.
  *
- * Rows are resolved by `state` alone, because that is the only thing the
- * provider hands back, and consumed rather than marked: a state that has been
- * presented once is gone, so the second presentation cannot buy anything.
+ * A row is looked up by `state` alone, because that is the only value the
+ * provider sends back. A row is deleted when it is used, not marked as used, so
+ * a `state` presented a second time finds nothing.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -16,7 +16,7 @@ import { uuidFromString, uuidToString } from "../db";
 /** A pending setup, with its JSON columns read. */
 export interface StoredSetup {
   readonly state: string;
-  /** The qualified type, which names the plugin that owns the flow as well. */
+  /** The qualified connection type, which also identifies the plugin that owns the flow. */
   readonly type: string;
   /** Set when the flow reconnects a connection that already exists. */
   readonly connectionId: string | undefined;
@@ -27,7 +27,7 @@ export interface StoredSetup {
   readonly codeVerifier: string;
 }
 
-/** Everything a started flow writes down. */
+/** Everything a new flow stores. */
 export interface NewSetup extends StoredSetup {
   readonly expiresAt: string;
   readonly at: string;
@@ -46,7 +46,10 @@ interface SetupRow {
 
 const COLUMNS = "state, type, connection_id, label, labels, config, origin, code_verifier";
 
-/** Written by this repository alone, so a column that does not parse is a broken database. */
+/**
+ * Parses a JSON column. Only this repository writes these columns, so a column
+ * that does not parse means the database is broken.
+ */
 const parseJson = <A>(text: string): A => JSON.parse(text) as A;
 
 const toSetup = (row: SetupRow): StoredSetup => ({
@@ -77,8 +80,8 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Takes the row this state names, if it is still good for one. The delete
-     * runs whether or not the row had run out of time: either way it is spent.
+     * Returns the setup for this `state` if it has not expired, and deletes the
+     * row either way, so a `state` can be used only once.
      */
     consume: (state: string, at: string): Effect.Effect<Option.Option<StoredSetup>, SqlError> =>
       Effect.gen(function* () {
@@ -90,7 +93,10 @@ const make = Effect.gen(function* () {
         return Option.fromNullishOr(rows[0]).pipe(Option.map(toSetup));
       }),
 
-    /** Rows nobody came back for. Swept on each start rather than on a timer. */
+    /**
+     * Deletes the expired rows: flows the user never came back from. Called on
+     * each new start rather than on a timer.
+     */
     sweep: (at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM oauth_setups WHERE expires_at <= ${at}`),
   };

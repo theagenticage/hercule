@@ -1,6 +1,6 @@
 /**
- * The registry is fixture plugins, so the listing carries the definitions
- * written here rather than whatever providers the binary compiles in.
+ * The registry holds only fixture plugins, so the listing returns the
+ * definitions written here rather than the providers compiled into the binary.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Schema } from "effect";
@@ -46,7 +46,7 @@ interface ProviderInstance {
   readonly config: Record<string, unknown>;
   readonly snapshots: ReadonlyArray<unknown>;
   readonly declared?: Record<string, unknown>;
-  /** What the provider's plugin marked secret, and whether each one is set. */
+  /** The fields the provider's plugin marked secret, and whether each one is set. */
   readonly secretFields?: ReadonlyArray<{
     readonly name: string;
     readonly title: string;
@@ -55,7 +55,7 @@ interface ProviderInstance {
   }>;
 }
 
-/** An id that is well-formed and belongs to nobody. */
+/** A valid id that belongs to no instance. */
 const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
 
 const listInstances = async (
@@ -203,7 +203,7 @@ describe("the writes on /providers", () => {
       });
       expect(filterByProvider(await listInstances(base, token), "alpha-provider")).toHaveLength(2);
 
-      // Two rows precede this one: the boot opened an instance per provider.
+      // Two rows come before this one: the boot created an instance per provider.
       expect((await readProviderAudit(sql)).at(-1)).toEqual({
         kind: "provider.created",
         actor: "user",
@@ -211,7 +211,7 @@ describe("the writes on /providers", () => {
     });
   });
 
-  it("refuses a config the provider's schema rejects, naming the field, and changes nothing", async () => {
+  it("rejects a config that fails the provider's schema, names the field, and changes nothing", async () => {
     await withProviders(async ({ base, sql }) => {
       const token = await completeSetup(base);
       const before = await listInstances(base, token);
@@ -246,7 +246,7 @@ describe("the writes on /providers", () => {
     });
   });
 
-  it("refuses a create for a provider no plugin registered", async () => {
+  it("rejects a create for a provider no plugin registered", async () => {
     await withProviders(async ({ base }) => {
       const token = await completeSetup(base);
 
@@ -284,7 +284,7 @@ describe("the writes on /providers", () => {
     });
   });
 
-  it("refuses a second account on a provider that holds one", async () => {
+  it("rejects a second account on a provider that supports only one", async () => {
     await withServer(
       async ({ base }) => {
         const token = await completeSetup(base);
@@ -307,7 +307,7 @@ describe("the writes on /providers", () => {
     );
   });
 
-  it("deletes the instance, and reads not_found afterwards", async () => {
+  it("deletes the instance, and a read afterwards fails with not_found", async () => {
     await withProviders(async ({ base, sql }) => {
       const token = await completeSetup(base);
       const [alpha] = filterByProvider(await listInstances(base, token), "alpha-provider");
@@ -315,8 +315,8 @@ describe("the writes on /providers", () => {
       const deleted = await del(base, `/api/v1/providers/${alpha!.id}`, token);
       expect(deleted.status, await deleted.clone().text()).toBe(200);
 
-      // The log is kept for months, and an instance's config is where a
-      // provider's secrets go.
+      // No config in the payload: the log is kept for months, and an
+      // instance's config may hold sensitive values.
       expect(await readLastProviderPayload(sql)).toEqual({
         instanceId: alpha!.id,
         providerId: "alpha-provider",
@@ -338,12 +338,12 @@ describe("the writes on /providers", () => {
   });
 });
 
-describe("what a live subscriber is told about a provider instance", () => {
-  it("names the instance once per write, whichever of the three it was", async () => {
+describe("live messages about a provider instance", () => {
+  it("sends one invalidate message with the instance id per create, update and delete", async () => {
     await withProviders(async (harness) => {
       const token = await completeSetup(harness.base);
-      // The boot opened an instance per provider, and that announcement is
-      // still in flight when the listener comes up.
+      // The boot created an instance per provider, and that announcement may
+      // still be in flight when the listener starts.
       await waitForLiveToSettle();
       const ticket = await fetchTicket(harness.base, token);
 
@@ -399,13 +399,13 @@ describe("what a live subscriber is told about a provider instance", () => {
 });
 
 /**
- * A secret-valued config field. The value never travels through the instance:
- * it is set through `secret.set` and lives in the secrets table, and an
- * instance only ever says whether one is there. Everything else the UI needs to
- * ask for it - the label, the sentence under it - is the plugin's own words,
- * carried out beside the flag.
+ * A secret-valued config field. The value is never part of the instance: it
+ * is set through `secret.set` and stored in the secrets table, and an instance
+ * only shows whether a value is set. Everything else the UI needs to ask for
+ * it - the label and the description under it - comes from the plugin, and is
+ * returned beside the `set` flag.
  */
-describe("what an instance says about its secret-valued fields", () => {
+describe("the secretFields of an instance", () => {
   const KEY_TITLE = "Z.ai API key";
   const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
   const KEY_VALUE = "a-paid-credential-nobody-else-holds";
@@ -432,7 +432,7 @@ describe("what an instance says about its secret-valued fields", () => {
       token,
     });
 
-  it("names the field in the plugin's words and says it is not set yet", async () => {
+  it("lists the field with the plugin's title and description, and set: false", async () => {
     await withKeyed(async ({ base }) => {
       const token = await completeSetup(base);
       const [keyed] = filterByProvider(await listInstances(base, token), "keyed-provider");
@@ -443,14 +443,14 @@ describe("what an instance says about its secret-valued fields", () => {
       expect((await readInstance(base, token, keyed!.id)).secretFields).toEqual(
         keyed!.secretFields,
       );
-      // A provider that marked nothing secret says so rather than saying nothing.
+      // A provider with no secret fields returns an empty list, not a missing key.
       expect(
         filterByProvider(await listInstances(base, token), "alpha-provider")[0]?.secretFields,
       ).toEqual([]);
     });
   });
 
-  it("says the key is set once it is, and never hands the value back", async () => {
+  it("shows set: true once the key is stored, and never returns the value", async () => {
     await withKeyed(async ({ base }) => {
       const token = await completeSetup(base);
       const [keyed] = filterByProvider(await listInstances(base, token), "keyed-provider");
@@ -472,7 +472,7 @@ describe("what an instance says about its secret-valued fields", () => {
     });
   });
 
-  it("refuses a secret-marked field written into the config, naming it, and stores nothing", async () => {
+  it("rejects a secret field written into the config, names it, and stores nothing", async () => {
     await withKeyed(async ({ base }) => {
       const token = await completeSetup(base);
       const [keyed] = filterByProvider(await listInstances(base, token), "keyed-provider");
@@ -486,7 +486,7 @@ describe("what an instance says about its secret-valued fields", () => {
 
       expect(rejected.error.code).toBe("validation");
       expect(JSON.stringify(rejected.error)).toContain("zaiApiKey");
-      // The rejection must not be the place the value gets written down.
+      // The error must not contain the value either.
       expect(JSON.stringify(rejected.error)).not.toContain(KEY_VALUE);
 
       const after = await readInstance(base, token, keyed!.id);
@@ -496,7 +496,8 @@ describe("what an instance says about its secret-valued fields", () => {
       ]);
     });
   });
-  it("takes the stored credential with it when the instance is deleted", async () => {
+
+  it("deletes the stored credential when the instance is deleted", async () => {
     await withKeyed(async ({ base }) => {
       const token = await completeSetup(base);
       const [keyed] = filterByProvider(await listInstances(base, token), "keyed-provider");
@@ -506,8 +507,8 @@ describe("what an instance says about its secret-valued fields", () => {
       const removed = await del(base, `/api/v1/providers/${keyed!.id}`, token);
 
       expect(removed.status, await removed.clone().text()).toBe(200);
-      // A credential outliving its owner would be inherited by whatever is
-      // given that id next.
+      // A credential that outlived its owner would be inherited by whatever
+      // is given that id next.
       const left = await get(
         base,
         `/api/v1/secrets?ownerKind=provider-instance&ownerId=${keyed!.id}`,

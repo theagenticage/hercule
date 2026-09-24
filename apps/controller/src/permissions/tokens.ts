@@ -1,23 +1,27 @@
 /**
- * Session tokens, resolved: the enforcement path from the credential an agent
- * presents to the grants its permission profile holds.
+ * Resolves session tokens: from the credential an agent presents to the
+ * grants of its permission profile.
  *
- * One indexed lookup on the hashed token answers the whole question, because
- * the session row carries both the profile it copied at spawn and the status
- * that says whether anything is running to hold the credential. The three
- * statuses that resolve are the ones with a process behind them: a session that
- * has exited is gone, and a queued one - including a resumed session waiting to
- * be placed again - has no process yet, so nothing may act as either.
+ * One indexed lookup on the hashed token is enough, because the session row
+ * holds both the profile it copied at spawn and the status that shows whether
+ * a process is running to use the credential. Only the three statuses with a
+ * process behind them resolve. A session that has exited is gone, and a queued
+ * one - including a resumed session waiting to be placed again - has no
+ * process yet, so nothing may act as either.
  *
- * That lookup runs on every call an agent makes, so its answer is held per
- * token hash. What the cache can go stale against is the two things that are
- * not the row's own status - the grants, which `profile.update` rewrites, and
- * the session's life, which a move to `exited` ends - so both drop what they
- * invalidate the moment they happen, and nothing is held on a timer.
+ * The lookup runs on every call an agent makes, so its result is cached per
+ * token hash. The cache can go stale in two ways:
  *
- * A drop that lands while a lookup is in flight has nothing to delete yet, so
- * the drop is counted and a lookup that started before the count moved does not
- * write its answer: what it read may be the row the drop was about.
+ * - `profile.update` rewrites the grants;
+ * - the session moves to `exited`.
+ *
+ * Both events remove the affected entries from the cache as soon as they
+ * happen, so no entry needs a timeout.
+ *
+ * A removal that happens while a lookup is running has nothing to delete yet.
+ * So every removal increments a counter, and a lookup that started before the
+ * counter changed does not cache its result, because the row it read may be
+ * the one the removal was about.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -43,7 +47,7 @@ const make = Effect.gen(function* () {
 
   const held = new Map<string, SessionActor>();
 
-  /** How many times anything has been dropped. See the note above. */
+  /** How many times cache entries have been removed. See the top of this file. */
   let dropped = 0;
 
   const dropHeldActors = (holds: (actor: SessionActor) => boolean): void => {
@@ -53,11 +57,11 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * The session behind a presented token, or `None` where no live session
-     * holds it. A profile row that does not decode is a defect rather than an
-     * unauthenticated answer: the grants were written by `profile.update`
-     * through the same codec, so an undecodable one is a schema that moved
-     * underneath a stored row, not something the caller did.
+     * Returns the session actor for a token hash, or `None` if no running
+     * session has that token. A profile row whose grants do not decode is a
+     * defect, not an authentication failure: `profile.update` wrote the grants
+     * with the same schema, so a decode failure means the schema changed under
+     * a stored row, not that the caller did something wrong.
      */
     resolve: (tokenHash: string): Effect.Effect<Option.Option<SessionActor>, SqlError> =>
       Effect.gen(function* () {
@@ -82,21 +86,21 @@ const make = Effect.gen(function* () {
         return Option.some(actor);
       }),
 
-    /** Forgets what these sessions' tokens resolved to: they have ended. */
+    /** Removes the cached actors of these sessions, because they have ended. */
     forgetSessions: (sessionIds: ReadonlyArray<string>): void => {
       if (sessionIds.length === 0) return;
       const ended = new Set(sessionIds);
       dropHeldActors((actor) => ended.has(actor.sessionId));
     },
 
-    /** Forgets every session on this profile: its grants have been rewritten. */
+    /** Removes the cached actors of every session on this profile, because its grants changed. */
     forgetProfile: (profileId: string): void => {
       dropHeldActors((actor) => actor.profileId === profileId);
     },
   };
 });
 
-/** The session-token resolver: token hash to session actor, with its cache. */
+/** The session-token resolver: maps a token hash to a session actor, with a cache. */
 export class SessionTokens extends Context.Service<SessionTokens, Effect.Success<typeof make>>()(
   "hercule/controller/permissions/SessionTokens",
 ) {}

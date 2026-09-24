@@ -132,10 +132,10 @@ describe("AuditLog", () => {
 });
 
 describe("the security kinds", () => {
-  it("is exactly the kinds behind event.audit today", () => {
+  it("contains exactly the kinds that need event.audit today", () => {
     // Written out rather than derived, so adding an audit kind under one of the
-    // security prefixes - or a kind that belongs behind the grant and does not
-    // carry one of them - fails here and is decided rather than assumed.
+    // security prefixes, or a kind that belongs behind the grant without one of
+    // those prefixes, fails here and forces a deliberate decision.
     expect(SECURITY_KINDS).toEqual([
       "auth.login.succeeded",
       "auth.login.failed",

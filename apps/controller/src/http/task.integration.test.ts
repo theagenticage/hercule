@@ -1,9 +1,9 @@
 /**
- * `GET /tasks` over a real socket: the order a listing comes back in, and the
- * way it pages.
+ * Tests `GET /tasks` over a real socket: the order of a listing, and how it
+ * pages.
  *
- * Both orders are exercised through the wire and nothing else: a request says
- * `sort` or it says `text`, and what comes back is the whole evidence.
+ * Both orders are tested through the API only: a request sets `sort` or
+ * `text`, and the tests check only the response.
  */
 import { describe, expect, it } from "vitest";
 import type { Task } from "@hercule/contract";
@@ -32,11 +32,11 @@ const createTask = async (
 
 const listTitles = (page: TaskPage): ReadonlyArray<string> => page.items.map((task) => task.title);
 
-/** Enough of a pause that the next write lands in a later millisecond. */
+/** Waits long enough that the next write gets a later millisecond. */
 const waitForNextMillisecond = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 10));
 
-/** Walks a listing to its end, collecting every id it hands out. */
+/** Pages through a listing to its end, and returns every id it returned. */
 const walkPages = async (
   base: string,
   token: string,
@@ -59,7 +59,7 @@ const walkPages = async (
 };
 
 describe("the order of a task listing", () => {
-  it("defaults to updatedAt desc, and honours an explicit sort", async () => {
+  it("defaults to updatedAt desc, and follows an explicit sort", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const first = await createTask(base, token, { title: "first" });
@@ -70,8 +70,8 @@ describe("the order of a task listing", () => {
 
       expect(listTitles(await listTasks(base, token))).toEqual(["third", "second", "first"]);
 
-      // Touching the oldest task moves it to the head of the default order,
-      // which nothing but `updatedAt desc` would do.
+      // Editing the oldest task moves it to the top of the default order,
+      // which only `updatedAt desc` would do.
       await waitForNextMillisecond();
       const touched = await send("PATCH", base, `/api/v1/tasks/${first.id}`, {
         body: { description: "touched" },
@@ -80,8 +80,8 @@ describe("the order of a task listing", () => {
       expect(touched.status).toBe(200);
       expect(listTitles(await listTasks(base, token))).toEqual(["first", "third", "second"]);
 
-      // `createdAt` is unmoved by that edit, so ascending creation order still
-      // reads the way the tasks were written.
+      // The edit does not change `createdAt`, so ascending creation order is
+      // still the order the tasks were written in.
       expect(listTitles(await listTasks(base, token, "?sort=createdAt:asc"))).toEqual([
         "first",
         "second",
@@ -95,7 +95,7 @@ describe("the order of a task listing", () => {
     });
   });
 
-  it("refuses a sort field the operation does not declare", async () => {
+  it("rejects a sort field the operation does not declare", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const response = await get(base, "/api/v1/tasks?sort=deletedAt", token);
@@ -104,7 +104,7 @@ describe("the order of a task listing", () => {
     });
   });
 
-  it("refuses a search that also names a sort, naming both", async () => {
+  it("rejects a search that also sets a sort, and names both fields", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, { title: "a searchable task" });
@@ -122,7 +122,7 @@ describe("the order of a task listing", () => {
       expect(paths).toContain("sort");
       expect(paths).toContain("text");
 
-      // The search alone is fine; only the pair is refused.
+      // The search alone is fine; only the combination is rejected.
       const alone = await listTasks(base, token, "?text=searchable");
       expect(listTitles(alone)).toEqual(["a searchable task"]);
     });
@@ -131,8 +131,8 @@ describe("the order of a task listing", () => {
   it("orders a search by relevance rather than by updatedAt", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
-      // Written first, so `updatedAt desc` would put it last. It is the
-      // strongest match: short, and holding the word four times.
+      // Written first, so `updatedAt desc` would put it last. It is the best
+      // match: short, and containing the word four times.
       await createTask(base, token, { title: "widget", description: "widget widget widget" });
       await waitForNextMillisecond();
       for (const name of ["second", "third"]) {
@@ -149,14 +149,14 @@ describe("the order of a task listing", () => {
       expect(relevance.items).toHaveLength(3);
       expect(relevance.items[0]?.title).toBe("widget");
 
-      // Which is not the order the same three come back in with no search.
+      // That is not the order the same three come back in without a search.
       expect(listTitles(await listTasks(base, token))[0]).not.toBe("widget");
     });
   });
 });
 
 describe("paging a task listing", () => {
-  it("walks seven rows at limit 2, returning each exactly once, with and without text", async () => {
+  it("pages through seven rows at limit 2, returning each exactly once, with and without text", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const created: Array<string> = [];
@@ -179,7 +179,7 @@ describe("paging a task listing", () => {
     });
   });
 
-  it("pages by keyset without a search: a row written mid-walk repeats nothing", async () => {
+  it("pages by keyset without a search, so a row written while paging repeats nothing", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       const created: Array<string> = [];
@@ -189,9 +189,9 @@ describe("paging a task listing", () => {
         await waitForNextMillisecond();
       }
 
-      // A task written after the first page is at the head of `updatedAt desc`,
-      // which an offset walk would answer by serving a row it already handed
-      // out. A keyset walk resumes from the boundary and never does.
+      // A task written after the first page goes to the top of
+      // `updatedAt desc`, so offset paging would return a row it had already
+      // returned. Keyset paging continues from the boundary and never does.
       let intruder = "";
       const seen = await walkPages(base, token, "?", 2, async () => {
         await waitForNextMillisecond();

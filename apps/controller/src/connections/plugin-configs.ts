@@ -1,9 +1,11 @@
 /**
- * A plugin's stored config, as the domain that owns the plugins table reads it.
+ * Reads a plugin's stored config. The plugins domain owns the plugins table and
+ * provides this service.
  *
- * A service rather than a call into that domain, because the plugin host reads
- * this domain: everything between the two points one way, and the one column
- * wanted here - the client id the user configured - comes back through here.
+ * It is a service rather than a direct import of the plugins domain, because
+ * the plugins domain already imports this one, and imports between the two must
+ * point one way. The only value the connections domain reads through it is the
+ * OAuth client id the user configured.
  */
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";

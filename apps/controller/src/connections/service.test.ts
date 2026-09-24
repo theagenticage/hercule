@@ -1,10 +1,9 @@
 /**
- * The grant check the connection service runs inside its own methods.
+ * Tests the grant check the connection service runs inside its own methods.
  *
- * The transport gates a request before the payload is decoded, but an
- * in-process caller never passes it, so the check is asserted where it is
- * enforced: the real service over a real database, with nobody provided as the
- * current actor.
+ * The HTTP transport checks the grant before it decodes the payload, but an
+ * in-process caller never goes through the transport. So the test calls the
+ * real service over a real database directly, with no current actor provided.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +25,7 @@ afterEach(() => {
   homes = [];
 });
 
-/** The real service over the real repositories, a `:memory:` database and a key file. */
+/** Builds the real service over the real repositories, a `:memory:` database and a key file. */
 const buildStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-connection-service-"));
   homes.push(home);
@@ -43,7 +42,7 @@ const buildStack = () => {
 };
 
 describe("the grant check", () => {
-  it("runs before anything else, for the in-process caller the transport never gated", async () => {
+  it("runs first, for an in-process caller that never went through the HTTP transport", async () => {
     const failure = await Effect.runPromise(
       Effect.flatMap(ConnectionService, (connection) => Effect.flip(connection.query({}))).pipe(
         Effect.provide(buildStack()),

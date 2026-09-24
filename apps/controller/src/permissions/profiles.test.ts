@@ -10,7 +10,7 @@ const layer = PermissionProfilesLayer.pipe(Layer.provideMerge(TestDatabase));
 const run = <A, E>(effect: Effect.Effect<A, E, PermissionProfiles | SqlClient.SqlClient>) =>
   Effect.runPromise(effect.pipe(Effect.provide(layer)));
 
-/** Runs an effect that is expected to fail, and hands the test its error. */
+/** Runs an effect that is expected to fail, and returns its error. */
 const runError = <A, E>(effect: Effect.Effect<A, E, PermissionProfiles | SqlClient.SqlClient>) =>
   Effect.runPromise(effect.pipe(Effect.flip, Effect.provide(layer)));
 
@@ -31,14 +31,14 @@ describe("PermissionProfiles", () => {
     expect(profile.createdAt).toBe(profile.updatedAt);
   });
 
-  it("answers None for a name nobody created", async () => {
+  it("returns None for a name no profile has", async () => {
     const found = await run(
       Effect.flatMap(PermissionProfiles, (profiles) => profiles.getByName("nobody")),
     );
     expect(Option.isNone(found)).toBe(true);
   });
 
-  it("leaves an existing profile alone rather than writing a second one", async () => {
+  it("keeps an existing profile unchanged rather than writing a second one", async () => {
     const { profile, rows } = await run(
       Effect.gen(function* () {
         const profiles = yield* PermissionProfiles;
@@ -55,7 +55,7 @@ describe("PermissionProfiles", () => {
     expect(Option.getOrThrow(profile).grants).toEqual(["task.read"]);
   });
 
-  it("refuses a grant outside the vocabulary", async () => {
+  it("rejects an unknown grant", async () => {
     const error = await runError(
       Effect.flatMap(PermissionProfiles, (profiles) =>
         profiles.ensureShipped("broken", ["task.explode" as Grant]),

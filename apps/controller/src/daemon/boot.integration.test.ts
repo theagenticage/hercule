@@ -1,11 +1,11 @@
 /**
- * The boot step over the sessions and the subscriptions: what a restart does
- * to an input that was on the wire, and what it says about the wake-up that
- * was on it.
+ * Tests the boot step that cancels inputs a restart interrupted mid-delivery,
+ * and records the lost wake-up on the subscription.
  *
- * A wake-up cancelled here is lost for good - the pair of subscription and
- * event may be written only once - so the case reads the subscription back
- * through the operation a holder calls, which is where a holder would find out.
+ * A wake-up cancelled at boot is lost for good, because each pair of
+ * subscription and event can be written only once. So the tests read the
+ * subscription through the API a holder calls, which is where a holder would
+ * find out.
  */
 import { describe, expect, it, vi } from "vitest";
 import { del, type ServerHarness } from "../http/testing";
@@ -29,20 +29,20 @@ import {
   type ReadSubscription,
 } from "./testing";
 
-/** A fleet, a session and a reboot fit inside this. */
+/** Long enough for a fleet, a session and a reboot. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 20_000 });
 
 /**
- * The ids of the rows the cases write by hand. Canonical v7, because that is
- * the only shape the store reads back.
+ * The ids of the input rows the tests insert directly. They must be UUID v7,
+ * because the store reads back only v7 ids.
  */
 const WAKE_UP_INPUT_ID = "0199f0b7-0000-7000-8000-000000000001";
 const TYPED_INPUT_ID = "0199f0b7-0000-7000-8000-000000000002";
 
-/** The position of an event that is named by the row and by nothing else. */
+/** An event id that only the inserted row refers to. */
 const EVENT_ID = 4242;
 
-/** One input row, read back the way only the table can answer it. */
+/** One input row, read straight from the table because no operation returns these fields. */
 interface InputRow {
   readonly status: string;
   readonly sent_at: string | null;
@@ -59,7 +59,11 @@ const readInputRow = async (harness: ServerHarness, id: string): Promise<InputRo
   return rows[0]!;
 };
 
-/** A subscription whose one wake-up a restart cancelled, and its holder. */
+/**
+ * Creates a subscription, inserts one of its inputs as sent but unanswered,
+ * and reboots the controller. Returns the holder and the subscription once
+ * the subscription shows the lost wake-up.
+ */
 const withALostWakeUp = async (
   arranged: Arranged,
   name: string,
@@ -72,8 +76,8 @@ const withALostWakeUp = async (
   const subscriptionId = await subscribeAgent(arranged, agent, REF);
   expect((await readSubscription(arranged, agent, subscriptionId)).lostWakeUp).toBeNull();
 
-  // A row that went out and was never answered: the machine may or may not
-  // have taken it, and the controller stopped before it found out.
+  // A row that was sent and never answered: the runner may or may not have
+  // taken it, and the controller stopped before it found out.
   await runEffect(
     arranged.harness.sql`
       INSERT INTO session_inputs
@@ -98,18 +102,18 @@ const withALostWakeUp = async (
   return { agent, subscriptionId, subscription };
 };
 
-/** Waits until the router has walked past this entry, whatever it did with it. */
+/** Waits until the router's cursor has passed this event, whether or not it matched. */
 const waitForCursorPast = (arranged: Arranged, eventId: number): Promise<number> =>
-  waitUntil("walked past the event", async () => {
+  waitUntil("moved its cursor past the event", async () => {
     const seen = await readCursorAndHead(arranged.harness);
     return seen.position !== null && seen.position >= eventId ? seen.position : undefined;
   });
 
-describe("an input a restart caught on the wire", () => {
-  it("is cancelled, and the wake-up lost with it is shown on its subscription", async () => {
+describe("an input that was being delivered when the controller restarted", () => {
+  it("is cancelled, and the lost wake-up is shown on its subscription", async () => {
     await withPipeline(async (arranged) => {
-      // A row a person typed was on the wire too. It names no subscription, so
-      // it is cancelled like any other and says nothing about a wake-up.
+      // A row a person typed was also being delivered. It has no subscription,
+      // so it is cancelled like any other and records no lost wake-up.
       const agent = await spawnSubscriber(arranged, "typist");
       await runEffect(
         arranged.harness.sql`
@@ -130,14 +134,14 @@ describe("an input a restart caught on the wire", () => {
         expect(row.reason ?? "", id).toContain("restarted");
       }
 
-      // The lost wake-up is its own fact: it names the event nothing will
-      // deliver again, and the condition itself is still evaluable.
+      // The lost wake-up is recorded on its own: it holds the event that will
+      // never be delivered, and the condition's health stays ok.
       expect(lost.subscription.lostWakeUp!.at).not.toBe("");
       expect(lost.subscription.health).toEqual({ state: "ok" });
 
       // An event this subscription does not wait for evaluates cleanly and
-      // leaves the lost wake-up where it is. It is about one event that is
-      // gone, which no later evaluation can say anything about.
+      // leaves the lost wake-up in place. The record is about one lost event,
+      // and evaluating other events does not change that.
       await waitForCursorPast(
         arranged,
         await emitManualEvent(arranged, [OTHER_REF], "for somebody else"),
@@ -146,8 +150,8 @@ describe("an input a restart caught on the wire", () => {
         lost.subscription,
       );
 
-      // A wake-up that does arrive is what makes it out of date, and it takes
-      // nothing else with it.
+      // A wake-up that does arrive clears the record, and changes nothing
+      // else.
       await emitManualEvent(arranged, [REF], "the next one");
       const woken = await waitForSubscription(
         arranged,
@@ -159,14 +163,14 @@ describe("an input a restart caught on the wire", () => {
     });
   });
 
-  it("keeps the lost wake-up beside an evaluation error: neither fact hides the other", async () => {
+  it("keeps the lost wake-up next to an evaluation error, and clears each one on its own", async () => {
     const calls: Array<Notified> = [];
     await withPipeline(
       async (arranged) => {
         const lost = await withALostWakeUp(arranged, "wake-up-holder");
 
-        // A condition that cannot be evaluated is the second fact, and it is
-        // written where the first one is not.
+        // A condition that fails to evaluate is recorded in the health, a
+        // separate field from the lost wake-up.
         await storeCondition(arranged.harness, lost.subscriptionId, UNRESOLVABLE);
         await emitManualEvent(arranged, [REF], "cannot be evaluated");
         const failed = await waitForSubscription(
@@ -181,9 +185,9 @@ describe("an input a restart caught on the wire", () => {
           calls.some((call) => call.subscriptionId === lost.subscriptionId) ? calls : undefined,
         );
 
-        // The condition works again and matches, which ends both facts: the
-        // clean evaluation ends the first and the wake-up written ends the
-        // second.
+        // The condition works again and matches, which clears both: the clean
+        // evaluation clears the health error, and the new wake-up clears the
+        // lost wake-up.
         await storeCondition(arranged.harness, lost.subscriptionId, "true");
         await emitManualEvent(arranged, [REF], "the next one");
         const repaired = await waitForSubscription(
@@ -198,7 +202,7 @@ describe("an input a restart caught on the wire", () => {
     );
   });
 
-  it("says nothing on a subscription that has ended: there is no holder left to tell", async () => {
+  it("records no lost wake-up on an ended subscription, because it has no holder left", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "gone-holder");
       const subscriptionId = await subscribeAgent(arranged, agent, REF);

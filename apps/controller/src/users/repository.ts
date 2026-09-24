@@ -1,13 +1,13 @@
 /**
- * The user: username, password hash, timestamps.
+ * Reads and writes the user row: username, password hash and timestamps.
  *
  * v1 has exactly one user, created by `setup.complete` and never removed. The
- * table is keyed all the same, and nothing here assumes there is only one, so
- * the second user is a row rather than a migration.
+ * table still has an id key, and nothing here assumes there is only one user,
+ * so a second user needs a new row rather than a migration.
  *
- * The hash this stores is opaque to the repository. Producing and checking it
- * is `./password.ts`, so the cost parameters live in one place and no caller
- * can store a password by accident.
+ * The repository treats the password hash as an opaque string. `./password.ts`
+ * produces and checks it, so the cost parameters live in one place and no
+ * caller can store a plaintext password by accident.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -17,7 +17,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { mintUuid, nowIso, uuidFromString, uuidToString } from "../db";
 
-/** A user row. The password hash comes with it: verifying is one read. */
+/** A user row. It includes the password hash, so verifying a password takes one read. */
 export interface UserRecord {
   readonly id: string;
   readonly username: string;
@@ -47,10 +47,10 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Creates a user. `username` is unique in the schema, so a name already
-     * taken is a constraint failure; the caller decides what to do about it,
-     * inside the transaction that read the name (there is one writer, so a
-     * check and an insert in one transaction cannot race).
+     * Creates a user and returns it. `username` is unique in the schema, so a
+     * taken name fails with a constraint error. The caller should check the
+     * name first, inside the same transaction as the insert. SQLite has one
+     * writer, so the check and the insert cannot race.
      */
     create: (username: string, passwordHash: string): Effect.Effect<UserRecord, SqlError> =>
       Effect.gen(function* () {
@@ -63,14 +63,14 @@ const make = Effect.gen(function* () {
         return { id: uuidToString(id), username, passwordHash, createdAt: at, updatedAt: at };
       }),
 
-    /** The user with this username, if there is one. What login reads. */
+    /** Returns the user with this username, if there is one. Login uses this. */
     findByUsername: (username: string): Effect.Effect<Option.Option<UserRecord>, SqlError> =>
       sql<UserRow>`
         SELECT id, username, password_hash, created_at, updated_at
         FROM users WHERE username = ${username}
       `.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toUser)))),
 
-    /** The user this id names, if there is one. What a presented credential resolves through. */
+    /** Returns the user with this id, if there is one. Credential checks use this. */
     findById: (id: string): Effect.Effect<Option.Option<UserRecord>, SqlError> =>
       sql<UserRow>`
         SELECT id, username, password_hash, created_at, updated_at
@@ -78,8 +78,8 @@ const make = Effect.gen(function* () {
       `.pipe(Effect.map((rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toUser)))),
 
     /**
-     * Replaces a user's password hash. Revoking the credentials issued under
-     * the old password is the caller's call, not this one's.
+     * Replaces a user's password hash. It does not revoke the credentials
+     * issued under the old password; that is the caller's decision.
      */
     setPasswordHash: (id: string, passwordHash: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {

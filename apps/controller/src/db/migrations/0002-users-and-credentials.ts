@@ -1,6 +1,6 @@
 /**
- * The user and the credentials that speak for them: the user row, login bearer
- * tokens, and API keys.
+ * The user and the credentials that authenticate them: the user row, login
+ * bearer tokens, and API keys.
  *
  * Three things this migration keeps from 0001: 16-byte `BLOB` UUIDv7 primary
  * keys, ISO-8601 UTC timestamps with millisecond precision as `TEXT`, and no
@@ -10,9 +10,9 @@
  *
  * - **A credential is stored only as a hash.** Every token Hercule issues is
  *   opaque and 256 bits of randomness, so the hash is SHA-256 hex and lookup is
- *   one indexed equality. The password is the other case
- *   and is stored as an argon2id PHC string, which carries its own parameters
- *   so raising them later leaves old hashes readable.
+ *   one indexed equality. The password is the exception: it is stored as an
+ *   argon2id PHC string, which includes its own parameters, so raising them
+ *   later leaves old hashes readable.
  * - **A credential is revoked, never deleted.** `revoked_at` keeps the row, so
  *   a token that was revoked cannot be re-issued by chance and the audit trail
  *   keeps its subject.
@@ -21,10 +21,10 @@
  * by `user_id` from day one, so a second user is a `WHERE` clause rather than a
  * migration.
  *
- * It also carries two things that belong to 0001's tables. The secrets listing
- * had no index for its own sort key, and the user settings store had no user
- * column at all. 0001 has shipped in development databases and would not
- * re-run, so both are settled here.
+ * It also fixes two things that belong to 0001's tables. The secrets list had
+ * no index for its own sort key, and the user settings store had no user
+ * column at all. 0001 has already run on development databases and would not
+ * run again, so both are fixed here.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -45,11 +45,11 @@ export default Effect.gen(function* () {
     )
   `;
 
-  // Password login hands back one of these. The lifetime is 30 days rolling:
-  // every authenticated use pushes `expires_at` out, so `expires_at` is the
-  // whole expiry rule and no separate idle column exists. `token_hash` is
-  // UNIQUE, which is also the index the request path looks through - a second
-  // index on the same column would be dead weight.
+  // Password login returns one of these. The lifetime is 30 days rolling:
+  // every authenticated use moves `expires_at` later, so `expires_at` is the
+  // whole expiry rule and there is no separate idle column. `token_hash` is
+  // UNIQUE, which also creates the index each request looks up by, so a second
+  // index on the same column would be useless.
   yield* sql`
     CREATE TABLE login_tokens (
       id BLOB PRIMARY KEY NOT NULL,
@@ -76,14 +76,14 @@ export default Effect.gen(function* () {
       revoked_at TEXT
     )
   `;
-  // The listing is one user's keys in created order, paged by keyset on
+  // The list is one user's keys in creation order, paged by keyset on
   // `(created_at, id)`, which is exactly this index.
   yield* sql`CREATE INDEX api_keys_user_created ON api_keys (user_id, created_at, id)`;
 
-  // Not a credentials table, but the same omission: the unfiltered secrets
-  // listing pages by keyset on `(name, id)` and 0001 gave it only
-  // `(owner_kind, owner_id, name)`, so the default call - the one the CLI and
-  // the web app make - was a full scan plus a temp b-tree for the ORDER BY.
+  // Not a credentials table, but the same kind of gap: the unfiltered secrets
+  // list pages by keyset on `(name, id)`, and 0001 created only an index on
+  // `(owner_kind, owner_id, name)`. So the default call, the one the CLI and
+  // the web app make, was a full scan plus a temporary b-tree for the ORDER BY.
   yield* sql`CREATE INDEX secrets_name ON secrets (name, id)`;
 
   // The user settings store. Keyed by user id from day one, so a second user is

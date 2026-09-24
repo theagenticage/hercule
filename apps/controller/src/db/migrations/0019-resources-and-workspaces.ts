@@ -2,13 +2,13 @@
  * Resources, the working areas they are checked out into, and the checkouts
  * themselves.
  *
- * A repo is identified by its canonical remote, so that column carries the
- * unique index: two spellings of one repository are one row, and the check is
- * the database's rather than a read the service could race.
+ * A repo is identified by its canonical remote, so that column has the unique
+ * index: two spellings of one repository are one row, and the database does
+ * the check rather than a read in the service, which could race.
  *
- * No path is stored anywhere here, and none is taken: where a working copy sits
- * is the machine's own business, and a primary is always a Hercule-managed clone
- * under that machine's storage.
+ * No path is stored here or accepted as input: where a working copy is on disk
+ * is up to the machine, and a primary is always a Hercule-managed clone in that
+ * machine's storage.
  *
  * `project_resources` is rebuilt rather than altered: SQLite cannot add a
  * foreign key to a table that already exists, and the table it replaces could
@@ -50,8 +50,8 @@ export default Effect.gen(function* () {
     CREATE UNIQUE INDEX resources_canonical_remote ON resources (canonical_remote)
     WHERE canonical_remote IS NOT NULL
   `;
-  // What `connection.delete` reads to find out whether anything still acts
-  // through the connection it was asked to remove.
+  // `connection.delete` reads this to find out whether anything still uses the
+  // connection it was asked to remove.
   yield* sql`CREATE INDEX resources_connection ON resources (connection_id)`;
 
   yield* sql`DROP TABLE project_resources`;
@@ -109,14 +109,13 @@ export default Effect.gen(function* () {
   yield* sql`CREATE INDEX checkouts_workspace ON checkouts (workspace_id, position)`;
   yield* sql`CREATE INDEX checkouts_resource ON checkouts (resource_id)`;
 
-  // Not foreign keys, for the reason the sessions table has none: a session is
-  // history and outlives the project it was filed under and the connection it
-  // acted through.
+  // Not foreign keys, for the same reason the sessions table has none: a
+  // session is history and outlives its project and the connection it used.
   yield* sql`ALTER TABLE sessions ADD COLUMN project_id BLOB`;
-  // What the machine switches the main workspace to before the harness starts,
-  // and the GitHub account this session pushes as. Both are settled when the
-  // session is spawned and read again when it is dispatched, which can be a
-  // controller restart later.
+  // The branch the machine checks out in the main workspace before the harness
+  // starts, and the GitHub account this session pushes as. Both are decided
+  // when the session is spawned and read again when it is dispatched, which
+  // can happen after a controller restart.
   yield* sql`ALTER TABLE sessions ADD COLUMN checkout_branch TEXT`;
   yield* sql`ALTER TABLE sessions ADD COLUMN github_connection_id BLOB`;
 });

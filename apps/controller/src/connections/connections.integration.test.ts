@@ -1,13 +1,14 @@
 /**
- * The connection routes over a real socket, and the runtime surface a plugin is
- * activated with, driven through the same controller a request meets.
+ * Tests the connection routes over a real socket, and the `ConnectionsRuntime`
+ * a plugin is activated with, through the same controller that serves requests.
  *
- * The registry is a pair of test plugins rather than the shipped one: a
- * connection type is a plugin contribution, so what these tests need is a type
- * whose `validate` answers on demand and a second plugin to be kept out of.
+ * The registry holds test plugins rather than the shipped one: a connection
+ * type comes from a plugin, and these tests need a type whose `validate`
+ * accepts or rejects on demand, plus other plugins whose connections must stay
+ * out of reach.
  *
- * The claim every create makes is the one a leak would break: the token that
- * went in is searched for in every response body.
+ * The tests that create a connection search every response body for the token
+ * that went in, so a leak of the token fails them.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -30,7 +31,7 @@ import {
   type ServerHarness,
 } from "../http/testing";
 
-/** A connection as the API hands it back. */
+/** A connection as the API returns it. */
 interface ConnectionRecord {
   readonly id: string;
   readonly type: string;
@@ -45,7 +46,7 @@ interface ConnectionRecord {
   readonly updatedAt: string;
 }
 
-/** The error envelope, as every failing operation answers with it. */
+/** The error envelope every failing operation returns. */
 interface ErrorBody {
   readonly error: {
     readonly code: string;
@@ -54,7 +55,7 @@ interface ErrorBody {
   };
 }
 
-/** What the test type says when it turns a token down, in its own words. */
+/** The message the test type's `validate` fails with when it rejects a token. */
 const REJECTED = "that token is not one this account knows";
 
 /** The tokens the test type accepts, and one it does not. */
@@ -62,22 +63,23 @@ const GOOD = "good-1";
 const ROTATED = "good-2";
 const BAD = "nope-1";
 
-/** An id of the right shape that nothing was ever created under. */
+/** A valid id that no record was ever created with. */
 const ABSENT = "0198e4b0-0000-7000-8000-0000000000ff";
 
-/** A plugin and the activation contexts the host handed it. */
+/** A plugin and the activation contexts the host passed to it. */
 interface TestPlugin {
   readonly plugin: Plugin;
   readonly contexts: Array<ActivationContext>;
 }
 
 /**
- * One plugin owning one connection type. `validate` accepts a `good-` token and
- * names the account after it, which is the whole of what the routes need from a
- * type: a yes, a no, and a display name that came from outside.
+ * Builds a plugin that owns one connection type. `validate` accepts a token
+ * that starts with `good-` and derives the account's display name from it.
+ * That is all the routes need from a type: an accept, a reject, and a display
+ * name that comes from the type.
  *
- * `type` is the bare word the plugin declares. What every request below names
- * is the qualified `<pluginId>/<word>` the host mints from it.
+ * `type` is the bare word the plugin declares. Every request below uses the
+ * qualified `<pluginId>/<word>` the host builds from it.
  */
 const buildConnectionPlugin = (options: {
   readonly id: string;
@@ -131,7 +133,7 @@ const buildConnectionPlugin = (options: {
   return { plugin, contexts };
 };
 
-/** The registry every test boots, built afresh so no context outlives its test. */
+/** Builds new plugins for each test, so no activation context outlives its test. */
 const buildPlugins = () => ({
   main: buildConnectionPlugin({ id: "main", type: "main-type" }),
   other: buildConnectionPlugin({ id: "other", type: "other-type" }),
@@ -161,7 +163,7 @@ const withConnections = (
 const createConnection = (base: string, token: string, body: unknown): Promise<Response> =>
   post(base, "/api/v1/connections", body, token);
 
-/** Creates and asserts it worked, for the tests whose subject is something else. */
+/** Creates a connection and asserts that it worked, for tests that are about something else. */
 const createConnectionOrFail = async (
   base: string,
   token: string,
@@ -190,7 +192,7 @@ const readConnection = async (
 const readError = async (response: Response): Promise<ErrorBody["error"]> =>
   ((await response.json()) as ErrorBody).error;
 
-/** The runtime surface the host handed a plugin at its last activation. */
+/** Returns the `ConnectionsRuntime` the host passed to a plugin at its last activation. */
 const readConnectionsSurface = (of: TestPlugin) => {
   const ctx = of.contexts.at(-1);
   if (ctx === undefined) throw new Error("the plugin was never activated");
@@ -199,7 +201,7 @@ const readConnectionsSurface = (of: TestPlugin) => {
 };
 
 describe("POST /connections", () => {
-  it("creates a connected connection from the type's own verdict, and puts no value on the wire", async () => {
+  it("creates a connected connection once the type accepts the token, and returns no credential value", async () => {
     await withConnections(async ({ base, audit, sql }, _registry, token) => {
       const response = await createConnection(base, token, {
         type: "main/main-type",
@@ -224,8 +226,8 @@ describe("POST /connections", () => {
       expect(record.id).toEqual(expect.any(String));
       expect(record.createdAt).toEqual(expect.any(String));
       expect(record.updatedAt).toEqual(expect.any(String));
-      // The display name is derived from the token, so the body says the token
-      // in the one place it may: nowhere else, under no other key.
+      // The display name is derived from the token, so the token may appear
+      // there and nowhere else in the body.
       expect(text.split(`acct:${GOOD}`).join("")).not.toContain(GOOD);
 
       const rows = await Effect.runPromise(
@@ -244,7 +246,7 @@ describe("POST /connections", () => {
     });
   });
 
-  it("hands back the type's own message at the field, and writes nothing, when the token is turned down", async () => {
+  it("returns the type's message at the field, and writes nothing, when the type rejects the token", async () => {
     await withConnections(async ({ base, sql }, _registry, token) => {
       const response = await createConnection(base, token, {
         type: "main/main-type",
@@ -269,7 +271,7 @@ describe("POST /connections", () => {
     });
   });
 
-  it("refuses an unknown type, a missing declared field and an empty topic list", async () => {
+  it("rejects an unknown type, a missing declared field and an empty topic list", async () => {
     await withConnections(async ({ base }, _registry, token) => {
       const bodies = [
         { type: "nobody-type", label: "work", labels: ["Code"], credentials: { token: GOOD } },
@@ -284,7 +286,7 @@ describe("POST /connections", () => {
     });
   });
 
-  it("refuses a type whose setup is an OAuth flow, and says where to start one", async () => {
+  it("rejects a type whose setup is an OAuth flow, and says to start the OAuth flow instead", async () => {
     await withConnections(async ({ base }, _registry, token) => {
       const error = await readError(
         await createConnection(base, token, {
@@ -302,7 +304,7 @@ describe("POST /connections", () => {
 });
 
 describe("GET /connections", () => {
-  it("filters by type and by status, and reads one back with references and no values", async () => {
+  it("filters by type and by status, and reads one connection back with credential names but no values", async () => {
     await withConnections(async ({ base }, registry, token) => {
       const mine = await createConnectionOrFail(base, token, { type: "main/main-type" });
       const theirs = await createConnectionOrFail(base, token, {
@@ -332,10 +334,10 @@ describe("GET /connections", () => {
     });
   });
 
-  it("answers not_found for an id nobody created", async () => {
+  it("returns not_found for an id that does not exist", async () => {
     await withConnections(async ({ base }, _registry, token) => {
-      // One connection first, so a 404 from a route that does not exist yet
-      // cannot pass for a 404 about this id.
+      // Create one connection first, so a 404 from a missing route cannot be
+      // mistaken for a 404 about this id.
       await createConnectionOrFail(base, token, { type: "main/main-type" });
 
       const response = await get(base, `/api/v1/connections/${ABSENT}`, token);
@@ -354,7 +356,7 @@ describe("PATCH /connections/:id", () => {
     body: unknown,
   ): Promise<Response> => send("PATCH", base, `/api/v1/connections/${id}`, { body, token });
 
-  it("changes what the user chose and leaves the account, the status and the credentials alone", async () => {
+  it("updates the label and topics, and leaves the account, status and credentials unchanged", async () => {
     await withConnections(async ({ base }, _registry, token) => {
       const before = await createConnectionOrFail(base, token, { type: "main/main-type" });
 
@@ -378,7 +380,7 @@ describe("PATCH /connections/:id", () => {
     });
   });
 
-  it("refuses an empty topic list and a config the type's schema turns down", async () => {
+  it("rejects an empty topic list and a config that does not match the type's schema", async () => {
     await withConnections(async ({ base }, _registry, token) => {
       const one = await createConnectionOrFail(base, token, {
         type: "configured/configured-type",
@@ -401,11 +403,11 @@ describe("PATCH /connections/:id", () => {
     });
   });
 
-  it("answers invalid_state for a row whose type no plugin in this build defines", async () => {
+  it("returns invalid_state for a connection whose type no plugin in this build defines", async () => {
     await withConnections(async ({ base, sql }, _registry, token) => {
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
-      // A build that dropped the plugin that defined the type, arranged the one
-      // way a running controller cannot reach: the row outlives the catalog.
+      // Simulate a build that dropped the plugin defining the type. A running
+      // controller cannot get into this state, so the row is edited directly.
       await Effect.runPromise(
         sql`UPDATE connections SET type = 'gone-type' WHERE type = 'main/main-type'`.pipe(
           Effect.orDie,
@@ -419,7 +421,7 @@ describe("PATCH /connections/:id", () => {
     });
   });
 
-  it("accepts an empty config, and nothing else, for a type that declared no schema", async () => {
+  it("accepts only an empty config for a type with no config schema", async () => {
     await withConnections(async ({ base }, _registry, token) => {
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
 
@@ -441,7 +443,7 @@ describe("POST /connections/:id/credentials", () => {
   ): Promise<Response> =>
     post(base, `/api/v1/connections/${id}/credentials`, { credentials }, token);
 
-  it("puts a connection that needed reauthenticating back to connected, under its own id", async () => {
+  it("sets a connection that needed reauthentication back to connected, and keeps its id", async () => {
     await withConnections(async ({ base }, registry, token) => {
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
       await Effect.runPromise(
@@ -462,7 +464,7 @@ describe("POST /connections/:id/credentials", () => {
     });
   });
 
-  it("leaves everything as it was when the type turns the new token down", async () => {
+  it("leaves the connection unchanged when the type rejects the new token", async () => {
     await withConnections(async ({ base }, registry, token) => {
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
       await Effect.runPromise(
@@ -484,7 +486,7 @@ describe("POST /connections/:id/credentials", () => {
 });
 
 describe("DELETE /connections/:id", () => {
-  it("takes the connection and every secret it owned with it", async () => {
+  it("deletes the connection and every secret it owned", async () => {
     await withConnections(async ({ base, audit }, _registry, token) => {
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
       const second = await send("PUT", base, `/api/v1/secrets/connection/${one.id}/extra`, {
@@ -511,7 +513,7 @@ describe("DELETE /connections/:id", () => {
   });
 });
 
-describe("the connections surface a plugin is activated with", () => {
+describe("the ConnectionsRuntime a plugin is activated with", () => {
   it("lists the plugin's own connections, without credentials", async () => {
     await withConnections(async ({ base }, registry, token) => {
       const mine = await createConnectionOrFail(base, token, { type: "main/main-type" });
@@ -532,7 +534,7 @@ describe("the connections surface a plugin is activated with", () => {
     });
   });
 
-  it("decodes the credentials of its own connection, and reports a status the API reads back", async () => {
+  it("returns the credentials of its own connection, and reports a status the API then returns", async () => {
     await withConnections(async ({ base }, registry, token) => {
       const mine = await createConnectionOrFail(base, token, { type: "main/main-type" });
       const surface = readConnectionsSurface(registry.main);
@@ -547,7 +549,7 @@ describe("the connections surface a plugin is activated with", () => {
     });
   });
 
-  it("refuses another plugin's connection, whichever way it is reached for", async () => {
+  it("rejects another plugin's connection, for both credentials and report", async () => {
     await withConnections(async ({ base }, registry, token) => {
       const theirs = await createConnectionOrFail(base, token, { type: "other/other-type" });
       const surface = readConnectionsSurface(registry.main);
@@ -563,15 +565,15 @@ describe("the connections surface a plugin is activated with", () => {
   });
 });
 
-describe("two plugins declaring one word", () => {
-  /** A plugin as `GET /plugins` hands it back; only what this test reads. */
+describe("two plugins declaring the same type word", () => {
+  /** A plugin as `GET /plugins` returns it; only the fields this test reads. */
   interface PluginRow {
     readonly id: string;
     readonly status: { readonly _tag: string; readonly message?: string };
     readonly contributions: ReadonlyArray<{ readonly id: string }>;
   }
 
-  it("gives each its own qualified type, and keeps the other's connections out of its reach", async () => {
+  it("gives each plugin its own qualified type, and keeps each plugin's connections out of the other's reach", async () => {
     const first = buildConnectionPlugin({ id: "first", type: "gmail" });
     const second = buildConnectionPlugin({ id: "second", type: "gmail" });
 
@@ -602,7 +604,7 @@ describe("two plugins declaring one word", () => {
     );
   });
 
-  it("refuses a word holding the separator, so a qualified type always has one reading", async () => {
+  it("rejects a type word containing the / separator, so a qualified type has only one reading", async () => {
     const sneaky = buildConnectionPlugin({ id: "sneaky", type: "other/gmail" });
 
     await withServer(

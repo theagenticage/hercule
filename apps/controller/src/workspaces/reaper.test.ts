@@ -1,17 +1,21 @@
 /**
  * The workspace expiry sweep.
  *
- * The controller decides, the machine deletes. An
- * ephemeral workspace nothing is using any more goes after the orphan window;
- * one whose threads can still be resumed is its thread's work, so it survives
- * the orphan window and goes only on the long idle one. A primary never goes,
- * and neither does anything on a machine that is not there to be told.
+ * The controller decides what to dispose of, and the runner deletes it:
  *
- * The sweep's interval is handed over by the test, the way the ping and probe
- * intervals are: the shipped ten minutes is longer than a test can wait, and a
- * real Bun listener cannot be driven by a `TestClock`. The two windows are
- * crossed by ageing the rows rather than by waiting them out, since the
- * shortest either setting admits is an hour.
+ * - An ephemeral workspace nothing uses any more is disposed of after the
+ *   orphan window.
+ * - A workspace whose thread can still be resumed holds that thread's work,
+ *   so it outlives the orphan window and is disposed of only after the longer
+ *   idle window.
+ * - A primary is never disposed of, and neither is any workspace on a runner
+ *   that is offline.
+ *
+ * The test passes in the sweep interval, as it does the ping and probe
+ * intervals: the shipped ten minutes is longer than a test can wait, and a
+ * real Bun listener cannot be driven by a `TestClock`. The tests cross the two
+ * windows by ageing the rows rather than by waiting, since the shortest value
+ * either setting allows is an hour.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
@@ -34,13 +38,13 @@ import {
   type WorkspaceRecord,
 } from "./testing";
 
-/** A sweep a test can wait out, in place of the shipped ten minutes. */
+/** A sweep interval short enough for a test to wait for, instead of the shipped ten minutes. */
 const SWEEP = Duration.millis(50);
 
 const withSweep = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   withFleet(body, { workspaceSweepInterval: SWEEP });
 
-/** Says the workspace is made, so the session waiting on it can be dispatched. */
+/** Reports the workspace ready, so the session waiting on it can be dispatched. */
 const makeReady = async (arranged: Arranged, id: string): Promise<WorkspaceRecord> => {
   const workspace = await readWorkspace(arranged, id);
   arranged.wire.send({
@@ -62,7 +66,10 @@ const makeReady = async (arranged: Arranged, id: string): Promise<WorkspaceRecor
 
 const at = "2026-09-16T10:00:00.000Z";
 
-/** A thread in a worktree of its own, started and idle on the machine. */
+/**
+ * Spawns a thread in a worktree of its own, and waits until it is started and
+ * idle on the runner.
+ */
 const spawnThreadIn = async (
   arranged: Arranged,
   resourceId: string,
@@ -112,7 +119,7 @@ const endUnresumable = async (arranged: Arranged, session: Session): Promise<voi
   });
 };
 
-/** Ends the thread in a way the next input resumes in place. */
+/** Ends the thread so that the next input resumes it in place. */
 const endResumable = async (arranged: Arranged, session: Session): Promise<void> => {
   arranged.wire.send({
     _tag: "sessionsReport",
@@ -154,7 +161,7 @@ const endResumable = async (arranged: Arranged, session: Session): Promise<void>
 const hoursAgo = (hours: number): string =>
   new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
-/** Puts a workspace's clock back, which is how a window is crossed here. */
+/** Moves a workspace's timestamps back by `hours`, which is how these tests cross a window. */
 const ageWorkspace = (arranged: Arranged, id: string, hours: number): Promise<unknown> =>
   Effect.runPromise(
     Effect.orDie(
@@ -166,20 +173,21 @@ const ageWorkspace = (arranged: Arranged, id: string, hours: number): Promise<un
   );
 
 /**
- * Gives the sweep six turns, so "left alone" means left alone rather than "not
- * swept yet". A pass reads its candidates in one query and disposes of what it
- * finds before it sleeps again, so one turn is enough to act and the other five
- * are the margin a loaded machine needs: a workspace still standing after six
- * intervals is one the sweep decided to keep.
+ * Waits for six sweep intervals, so "left alone" means the sweep kept the
+ * workspace, not that it has not run yet. A sweep reads its candidates in one
+ * query and disposes of them before it sleeps again, so one interval is enough
+ * to act, and the other five are a margin for a loaded machine. A workspace
+ * that still exists after six intervals is one the sweep decided to keep.
  */
 const waitForSeveralSweeps = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, Duration.toMillis(SWEEP) * 6));
 
 /**
- * A workspace the same sweep pass must take away: ended with nothing to resume
- * and aged past the orphan window. A negative case waits for this one to go
- * rather than for a stretch of wall clock, so "left alone" is a decision the
- * sweep took in that pass and not a pass that never ran.
+ * Creates a workspace that the same sweep must dispose of: its thread ended
+ * with nothing to resume, and it is aged past the orphan window. Returns its
+ * id. A negative test waits for this workspace to be disposed of rather than
+ * for a stretch of wall-clock time, so "left alone" is a decision the sweep
+ * made in that pass, not a pass that never ran.
  */
 const createDecoy = async (
   arranged: Arranged,
@@ -200,10 +208,10 @@ const waitForDisposed = (arranged: Arranged, id: string): Promise<WorkspaceRecor
   });
 
 /**
- * The workspaces the machine has been told to delete, once this many frames
- * have crossed the socket. The sweep flips the row in its transaction and sends
- * the frame after it commits, so a test that reads the wire the moment the row
- * reads `deleted` is asserting on a race rather than on an ordering.
+ * Waits until at least `count` dispose frames were sent to the runner, and
+ * returns their workspace ids. The sweep updates the row in its transaction
+ * and sends the frame after the commit, so a test that reads the wire as soon
+ * as the row is `deleted` would be asserting on a race.
  */
 const waitForDisposeFrames = (arranged: Arranged, count: number): Promise<ReadonlyArray<unknown>> =>
   waitUntil(`sent ${String(count)} workspaceDispose frames`, () => {
@@ -214,7 +222,7 @@ const waitForDisposeFrames = (arranged: Arranged, count: number): Promise<Readon
   });
 
 describe("the workspace expiry sweep", () => {
-  it("disposes an orphaned ephemeral past the orphan window, and leaves a young one", async () => {
+  it("disposes of an orphaned ephemeral workspace past the orphan window, and leaves a newer one", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const old = await spawnThreadIn(arranged, web, 1);
@@ -225,7 +233,7 @@ describe("the workspace expiry sweep", () => {
       await endUnresumable(arranged, young);
       const youngWorkspace = String(young.workspaceId);
 
-      // The default orphan window is a day; only one of them is older.
+      // The default orphan window is a day; only one of the two is older.
       await ageWorkspace(arranged, oldWorkspace, 25);
 
       const gone = await waitForDisposed(arranged, oldWorkspace);
@@ -233,7 +241,8 @@ describe("the workspace expiry sweep", () => {
       expect(await waitForDisposeFrames(arranged, 1)).toEqual([oldWorkspace]);
       expect((await readWorkspace(arranged, youngWorkspace)).status).not.toBe("deleted");
 
-      // Nobody asked for this one to go, so the log says who did and why.
+      // No user disposed of this workspace, so the audit entry records the
+      // system as the actor, and the reason.
       const log = (await (
         await get(arranged.harness.base, "/api/v1/events", arranged.token)
       ).json()) as {
@@ -254,14 +263,14 @@ describe("the workspace expiry sweep", () => {
     });
   });
 
-  it("keeps a resumable thread's workspace past the orphan window and takes it on the idle one", async () => {
+  it("keeps a resumable thread's workspace past the orphan window, and disposes of it after the idle window", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnThreadIn(arranged, web, 1);
       await endResumable(arranged, session);
       const workspaceId = String(session.workspaceId);
 
-      // Well past a day, well short of thirty.
+      // Past one day, but well short of thirty.
       await ageWorkspace(arranged, workspaceId, 25);
       await waitForSeveralSweeps();
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");
@@ -273,7 +282,7 @@ describe("the workspace expiry sweep", () => {
     });
   });
 
-  it("leaves a workspace a session is still living in, however old the row says it is", async () => {
+  it("leaves a workspace with a running session, however old its row is", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnThreadIn(arranged, web, 1);
@@ -282,7 +291,7 @@ describe("the workspace expiry sweep", () => {
       await ageWorkspace(arranged, workspaceId, 90 * 24);
       const taken = await createDecoy(arranged, web, 2);
 
-      // The pass that took the decoy is the pass that saw this one and kept it.
+      // The pass that disposed of the decoy also saw this workspace and kept it.
       await waitForDisposed(arranged, taken);
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");
       expect(await waitForDisposeFrames(arranged, 1)).toEqual([taken]);
@@ -301,14 +310,14 @@ describe("the workspace expiry sweep", () => {
       await ageWorkspace(arranged, primary.id, 90 * 24);
       const taken = await createDecoy(arranged, web, 1);
 
-      // The pass that took the decoy is the pass that saw the primary and kept it.
+      // The pass that disposed of the decoy also saw the primary and kept it.
       await waitForDisposed(arranged, taken);
       expect((await readWorkspace(arranged, primary.id)).status).toBe("ready");
       expect(await waitForDisposeFrames(arranged, 1)).toEqual([taken]);
     });
   });
 
-  it("waits for a machine that is not there rather than disposing behind its back", async () => {
+  it("waits for an offline runner to come back before disposing of its workspace", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnThreadIn(arranged, web, 1);
@@ -317,7 +326,7 @@ describe("the workspace expiry sweep", () => {
       await ageWorkspace(arranged, workspaceId, 90 * 24);
 
       arranged.wire.close();
-      await waitUntil("saw the machine go", async () => {
+      await waitUntil("saw the runner go offline", async () => {
         const response = await get(
           arranged.harness.base,
           `/api/v1/runners/${arranged.runnerId}`,
@@ -330,7 +339,7 @@ describe("the workspace expiry sweep", () => {
 
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");
 
-      // And it goes on the first sweep after the machine comes back.
+      // The first sweep after the runner reconnects disposes of it.
       await arranged.reconnect();
       await waitForDisposed(arranged, workspaceId);
     });
@@ -365,9 +374,9 @@ describe("the workspace expiry sweep", () => {
       });
 
       await ageWorkspace(arranged, workspaceId, 1);
-      // Read back, as after the first ageing: waiting for a wall-clock
-      // threshold instead would be satisfied by the value the start wrote, and
-      // the case would pass without the exit having marked anything.
+      // Read the aged value back, as after the first ageing. Waiting for a
+      // wall-clock threshold instead would be satisfied by the value the start
+      // wrote, and the test would pass even if the exit marked nothing.
       const before = await readWorkspace(arranged, workspaceId);
       expect(before.lastUsedAt).not.toBe(started.lastUsedAt);
       await endUnresumable(arranged, session);
@@ -380,16 +389,15 @@ describe("the workspace expiry sweep", () => {
   });
 });
 
-/** The shipped defaults, as the criterion names them, so a change to one is deliberate. */
 describe("the windows the sweep reads", () => {
-  it("takes its windows from the settings the user may raise", async () => {
+  it("takes its windows from the controller settings, which a user can change", async () => {
     await withSweep(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnThreadIn(arranged, web, 1);
       await endUnresumable(arranged, session);
       const workspaceId = String(session.workspaceId);
 
-      // Two hours old: past nothing, until the window is turned down to one.
+      // Two hours old: inside the default window, until the window is lowered to one hour.
       await ageWorkspace(arranged, workspaceId, 2);
       await waitForSeveralSweeps();
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");

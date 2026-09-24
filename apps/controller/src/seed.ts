@@ -2,15 +2,15 @@
  * What a fresh database gets at first run: the three shipped permission
  * profiles and the controller-scope settings defaults.
  *
- * Seeding is idempotent and runs on every boot, so a database that predates a
- * new default gains it. It is insert-if-absent throughout: a shipped profile
- * the user has edited and a setting the user has changed both survive
- * untouched, because the alternative is a silent revert on restart.
+ * Seeding is idempotent and runs on every boot, so a database created before
+ * a new default gains it. It only inserts what is absent: a shipped profile the
+ * user has edited and a setting the user has changed both stay unchanged,
+ * because otherwise a restart would silently revert them.
  *
- * The consequence, and it is deliberate: a shipped profile is frozen at the
- * boot that first seeded it. The three shipped profiles are editable, so a
- * later Hercule that adds a grant to one of them cannot write it over the user's
- * version; that upgrade is a migration, not a seed.
+ * As a deliberate consequence, a shipped profile stays as the boot that first
+ * seeded it wrote it. The three shipped profiles are editable, so a later
+ * Hercule that adds a grant to one of them cannot overwrite the user's
+ * version; adding the grant takes a migration, not a seed.
  */
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
@@ -78,7 +78,7 @@ export const SHIPPED_PROFILES: ReadonlyArray<{
       "event.read",
     ],
   },
-  // User parity: everything the user can do, withholding nothing.
+  // Everything the user can do, with nothing withheld.
   { name: "unrestricted", grants: ALL_GRANTS },
 ];
 

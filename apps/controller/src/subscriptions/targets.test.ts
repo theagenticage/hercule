@@ -1,13 +1,16 @@
 /**
- * What a Subscription Target expands into.
+ * Tests what a Subscription Target expands into.
  *
- * A target is the only thing a caller names; the event router evaluates the CEL
- * source this expansion produces. The `ref` expansion is pinned exactly,
- * because the web app and the spec both quote it. The other three are asserted
- * on what a reader can check without re-writing the expansion here: the source
- * names the thing the target names, and the source is one the evaluator
- * accepts - an expansion that does not compile is a subscription that can
- * never match and never says why.
+ * A caller gives only a target; the event router evaluates the CEL source that
+ * this expansion produces. The `ref` expansion is checked exactly, because the
+ * web app and the spec both quote it. The other three are checked on what a
+ * reader can verify without rewriting the expansion here:
+ *
+ * - the source contains the id the target names
+ * - the evaluator accepts the source
+ *
+ * An expansion that does not compile would be a subscription that can never
+ * match, with no error to explain why.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
@@ -15,12 +18,12 @@ import type { SubscriptionTarget } from "@hercule/contract";
 import { validateExpression } from "../expressions";
 import { expandTarget } from "./targets";
 
-/** Whether the evaluator accepts a source, as `subscription.create` asks it. */
+/** Returns true if the evaluator accepts a source, validated as `subscription.create` does. */
 const isAccepted = (source: string): boolean =>
   Exit.isSuccess(Effect.runSyncExit(validateExpression(source, "event")));
 
 describe("expandTarget", () => {
-  it("expands a ref target into the membership test the spec pins", () => {
+  it("expands a ref target into the membership test the spec gives", () => {
     const target: SubscriptionTarget = { kind: "ref", ref: "github:pr:o/r#87" };
     expect(expandTarget(target)).toBe('"github:pr:o/r#87" in event.refs');
   });
@@ -58,12 +61,11 @@ describe("expandTarget", () => {
 });
 
 /**
- * Added beside the criterion's own cases: the request expansion names the kind
- * the security document pins for a decision, and a kind nobody emits would
- * make the whole target silently dead.
+ * The request expansion must use the event kind the security spec gives for a
+ * decision. With a kind nobody emits, the target would silently never match.
  */
 describe("the request expansion", () => {
-  it("waits on the decision kind the security document names", () => {
+  it("waits on the decision kind the security spec gives", () => {
     expect(expandTarget({ kind: "request", requestId: "pr_7" })).toContain('"permission.decided"');
   });
 });

@@ -1,8 +1,8 @@
 /**
- * The registry a release ships, as the rest of the system meets it after a boot.
- * The declared values are written out in full rather than derived from one
- * another: every affordance the UI offers is read off them, so one changing by
- * accident has to fail here.
+ * Tests the registry a release ships, as the rest of the system sees it after
+ * a boot. The expected values are written out in full rather than derived from
+ * each other: the UI builds every control from them, so an accidental change
+ * to one must fail here.
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -10,11 +10,11 @@ import type { PluginDetail } from "@hercule/contract";
 import { PluginHost, Plugins, registry } from "./index";
 import { asUser, buildPluginStack } from "./testing";
 
-/** Every call runs on a stack of its own, as the user a request would arrive as. */
+/** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
 const run = <A, E>(body: Effect.Effect<A, E, Plugins | PluginHost>) =>
   Effect.runPromise(body.pipe(Effect.provide(buildPluginStack()), asUser));
 
-/** What the derivation makes of a config schema with no settings in it. */
+/** The JSON Schema derived from a config schema with no settings. */
 const NO_SETTINGS = {
   type: "object",
   properties: {},
@@ -22,13 +22,13 @@ const NO_SETTINGS = {
   additionalProperties: false,
 };
 
-/** What pi says the Z.ai key is, in the plugin's own words. */
+/** The description pi's plugin gives the Z.ai key. */
 const ZAI_KEY_DESCRIPTION =
   "From your Z.ai Coding Plan subscription. It is stored on the controller and " +
   "sent to whichever machine runs a thread, so it is entered once and works on " +
   "every machine.";
 
-/** Written out rather than derived: a copy of the wrong base is the mistake this catches. */
+/** Written out rather than derived, because copying from the wrong base is the mistake this catches. */
 const SHIPPED = [
   {
     id: "claude-code",
@@ -90,8 +90,8 @@ const SHIPPED = [
       displayName: "pi",
       binaryName: "pi",
       supportsMultipleInstances: true,
-      // The one provider with a setting: the Z.ai key, which is entered in a
-      // masked form and stored outside the config it is declared in.
+      // The only provider with a setting: the Z.ai key, which is entered in a
+      // masked field and stored outside the config it is declared in.
       configSchema: {
         type: "object",
         properties: {
@@ -102,8 +102,8 @@ const SHIPPED = [
             "x-secret": true,
           },
         },
-        // Not required: a secret-valued field's value lives in the secrets
-        // table, so a stored config is complete without it.
+        // Not required: a secret field's value is stored in the secrets table,
+        // so a stored config is complete without it.
         required: [],
         additionalProperties: false,
       },

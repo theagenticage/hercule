@@ -10,8 +10,8 @@ import { BootstrapConfig, loadConfigFile, resolveConfig } from "./bootstrap";
 import type { ConfigError } from "./errors";
 import { createDirectory, createLayout, HerculeHome } from "./home";
 
-// The pure home pieces live in `@hercule/home`, which the CLI and the runner link
-// too; a controller module reaches them through here.
+// The pure home functions live in `@hercule/home`, which the CLI and the runner
+// link too; a controller module imports them from here.
 export {
   locateConfigFile,
   DATABASE_FILE_NAME,
@@ -29,17 +29,19 @@ export * from "./errors";
 export * from "./home";
 export { formatToml, parseToml } from "./toml";
 
-/** What `hercule serve` accepts; it takes no arguments of its own. */
+/** The usage line of `hercule serve`, which takes no arguments of its own. */
 const USAGE = "usage: hercule serve [--home <dir>] [-c key=value]";
 
 /**
- * Resolve the Hercule Home and the bootstrap config, and create the home layout.
+ * Resolves the Hercule Home and the bootstrap config, creates the home layout,
+ * and returns a layer that provides both. Fails with a `ConfigError`.
  *
- * Step 1 of first run (spec 15 section 7) and the first thing every controller
- * boot does. `argv` and `env` are passed in rather than read off the process,
- * so a test drives a temporary home exactly the way the binary drives the real
- * one. Nothing here touches the database: the runner resolves its home through
- * the same code, and the runner links no controller state (spec 15 section 3).
+ * This is step 1 of first run (spec 15 section 7) and the first thing every
+ * controller boot does. `argv` and `env` are passed in rather than read from
+ * the process, so a test can use a temporary home exactly the way the binary
+ * uses the real one. Nothing here touches the database, because the home
+ * functions are shared with the runner, which links no controller state (spec
+ * 15 section 3).
  */
 export const layer = (
   argv: ReadonlyArray<string>,
@@ -48,7 +50,7 @@ export const layer = (
   Layer.unwrap(
     Effect.gen(function* () {
       const options = yield* Effect.fromResult(parseGlobalOptions(argv));
-      // Everything the global options did not claim is an argument `hercule
+      // Anything the global options did not consume is an argument `hercule
       // serve` does not have. Booting anyway would silently ignore it.
       const unknown = options.rest[0];
       if (unknown !== undefined) {

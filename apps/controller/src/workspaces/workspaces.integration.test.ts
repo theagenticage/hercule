@@ -1,11 +1,11 @@
 /**
  * Workspaces over the real API and the real runner socket: what provisioning a
- * primary writes and what it tells the machine, what the machine's report does
- * to it, what a listing says about it, and how one is torn down or lost.
+ * primary writes and sends to the runner, how a runner's report changes it,
+ * what a listing returns, and how a workspace is disposed of or lost.
  *
- * The frames are read off the wire as the objects they
- * are on it, by the field names the SPEC gives them, so a controller that sends
- * a differently shaped `workspaceProvision` fails here rather than on a machine.
+ * The frames are read off the wire as plain objects, by the field names the
+ * spec gives them, so a controller that sends a differently shaped
+ * `workspaceProvision` fails here rather than on a runner.
  */
 import { describe, expect, it } from "vitest";
 import { del, get, post, send } from "../http/testing";
@@ -53,7 +53,7 @@ const readCheckoutId = (checkout: CheckoutRecord): string => {
   return String(id);
 };
 
-/** Ends a thread, which is what frees the workspace it was living in. */
+/** Stops a thread, which frees the workspace it was running in. */
 const stopSession = async (arranged: Arranged, id: string): Promise<void> => {
   const response = await send("POST", arranged.harness.base, `/api/v1/sessions/${id}/stop`, {
     token: arranged.token,
@@ -61,11 +61,11 @@ const stopSession = async (arranged: Arranged, id: string): Promise<void> => {
   expect(response.status, await response.clone().text()).toBe(200);
 };
 
-/** An id of the right shape that nothing was ever created under. */
+/** A valid id that no record was ever created with. */
 const ABSENT = "0198e4b0-0000-7000-8000-0000000000ff";
 
 describe("workspace.provision", () => {
-  it("writes a provisioning primary with one clone checkout and tells the machine to make it", async () => {
+  it("writes a provisioning primary with one clone checkout, and sends the runner a provision frame", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
 
@@ -94,15 +94,14 @@ describe("workspace.provision", () => {
         resourceId: web,
         remote: "https://github.com/acme/web",
       });
-      // D-20a: no path crosses the wire at all. Where the clone goes is the
-      // machine's own business.
+      // No path is sent at all. The runner decides where the clone goes.
       expect(checkouts[0]?.["path"] ?? null).toBeNull();
     });
   });
 
-  // D-20a: adopting a folder in place is not built, so the payload takes no
-  // path and one offered is refused rather than quietly ignored.
-  it("refuses a path: a main workspace is always Hercule's own clone", async () => {
+  // Adopting an existing folder is not supported, so the request has no path
+  // field, and a request with one is rejected rather than silently ignored.
+  it("rejects a path, because a main workspace is always Hercule's own clone", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const refused = await provisionWorkspace(arranged, {
@@ -114,7 +113,7 @@ describe("workspace.provision", () => {
     });
   });
 
-  it("refuses a second primary of the same repo on the same machine", async () => {
+  it("rejects a second primary of the same repo on the same runner", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       await provisionWorkspaceOrFail(arranged, { resourceId: web, runnerId: arranged.runnerId });
@@ -128,7 +127,7 @@ describe("workspace.provision", () => {
     });
   });
 
-  it("refuses a folder or a mailbox, and a machine it does not know", async () => {
+  it("rejects a resource that is not a repo, and an unknown runner", async () => {
     await withWorkspaces(async (arranged) => {
       const folder = await post(
         arranged.harness.base,
@@ -154,8 +153,8 @@ describe("workspace.provision", () => {
   });
 });
 
-describe("a primary the machine could not make", () => {
-  it("is stood down and replaced by the next provision, rather than standing in its way", async () => {
+describe("a primary the runner failed to provision", () => {
+  it("is marked deleted and replaced by the next provision, rather than blocking it", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const first = await provisionWorkspaceOrFail(arranged, {
@@ -179,8 +178,8 @@ describe("a primary the machine could not make", () => {
       expect(second.status).toBe("provisioning");
       await waitForFrameTagged(arranged.wire, "workspaceProvision", 1);
 
-      // The one that failed is kept as the record of an attempt, not as a
-      // workspace: it is gone, and it no longer holds the repo's place.
+      // The failed primary is kept as a record of the attempt, not as a
+      // workspace: it is deleted, and no longer blocks a new primary.
       const stood = await readWorkspace(arranged, first.id);
       expect(stood.status).toBe("deleted");
       expect(stood.disposedAt).not.toBeNull();
@@ -189,14 +188,14 @@ describe("a primary the machine could not make", () => {
   });
 });
 
-describe("the machine's report", () => {
+describe("the runner's workspace report", () => {
   /**
-   * A primary is re-reported after every session that runs in it, and that
-   * second report is the only thing that says what the agent left the checkout
-   * on. It moves no status - the workspace was already `ready` - so what it
-   * changes is the checkouts and nothing else.
+   * A primary is reported again after every session that runs in it, and that
+   * report is the only way to learn which branch the agent left the checkout
+   * on. The workspace is already `ready`, so the status does not change; only
+   * the checkouts do.
    */
-  it("records the branches a re-report brings for a workspace that is already ready", async () => {
+  it("records the branches from a repeated report for a workspace that is already ready", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const workspace = await provisionWorkspaceOrFail(arranged, {
@@ -212,8 +211,8 @@ describe("the machine's report", () => {
       } as never);
       await waitForWorkspace(arranged, workspace.id, (one) => one.status === "ready");
 
-      // What the machine says after a session in it: the agent made a branch and
-      // left the checkout on it.
+      // The report the runner sends after a session in the workspace: the
+      // agent created a branch and left the checkout on it.
       arranged.wire.send({
         _tag: "workspaceReport",
         workspaceId: workspace.id,
@@ -242,11 +241,11 @@ describe("the machine's report", () => {
   });
 
   /**
-   * D-21 F13: a report about a workspace that is gone writes nothing. Its
-   * directory is not there, so there are no branches to record, and a stale
-   * report must not overwrite what a live one recorded.
+   * A report about a workspace that is gone writes nothing. Its directory no
+   * longer exists, so there are no branches to record, and a stale report must
+   * not overwrite what an earlier report recorded.
    */
-  it("writes no checkouts when it says ready about a workspace that has gone", async () => {
+  it("writes no checkouts when it reports ready for a workspace that is deleted", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnSessionOrFail(arranged, {
@@ -263,9 +262,9 @@ describe("the machine's report", () => {
       } as never);
       await waitForWorkspace(arranged, workspaceId, (one) => one.status === "deleted");
 
-      // A second workspace whose own report follows the stale one: frames are
-      // handled in the order they arrive, so its readiness is what says the
-      // stale one has been through.
+      // A second workspace whose report is sent after the stale one. Frames
+      // are handled in the order they arrive, so once the second workspace is
+      // ready, the stale report has been handled.
       const next = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
@@ -288,13 +287,13 @@ describe("the machine's report", () => {
 
       const after = await readWorkspace(arranged, workspaceId);
       expect(after.status).toBe("deleted");
-      // Still what it was opened with, not what the stale report said.
+      // Still the branch it was opened with, not the one in the stale report.
       expect(after.checkouts[0]?.branch).toBe(opened.branch);
       expect(after.checkouts[0]?.branches ?? []).toEqual([]);
     });
   });
 
-  it("changes nothing when it says a workspace failed that has already come up", async () => {
+  it("changes nothing when it reports failed for a workspace that is already ready", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnSessionOrFail(arranged, {
@@ -310,8 +309,8 @@ describe("the machine's report", () => {
       } as never);
       await waitForWorkspace(arranged, workspaceId, (one) => one.status === "ready");
 
-      // A report that arrives late, or twice, is about a workspace that has
-      // moved on: it must not take the sessions living in it down with it.
+      // A report that arrives late, or twice, is about a workspace whose status
+      // has already changed. It must not fail the sessions running in it.
       arranged.wire.send({
         _tag: "workspaceReport",
         workspaceId,
@@ -368,7 +367,7 @@ describe("the machine's report", () => {
     });
   });
 
-  it("keeps the message a failed report carried", async () => {
+  it("stores the message from a failed report", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const workspace = await provisionWorkspaceOrFail(arranged, {
@@ -395,7 +394,7 @@ describe("the machine's report", () => {
 });
 
 describe("workspace.query and workspace.read", () => {
-  it("answers with what a workspace holds, and filters by machine, repo, project, kind and status", async () => {
+  it("returns a workspace's checkouts and fields, and filters by runner, repo, project, kind and status", async () => {
     await withWorkspaces(async (arranged) => {
       const hercule = await post(
         arranged.harness.base,
@@ -432,7 +431,7 @@ describe("workspace.query and workspace.read", () => {
       expect(read.status).toBe("provisioning");
       expect(read.disposedAt).toBeNull();
       expect(read.sessionIds).toEqual([]);
-      expect("lastUsedAt" in read, "the record says nothing about last use").toBe(true);
+      expect("lastUsedAt" in read, "the record has no lastUsedAt field").toBe(true);
 
       expect((await queryWorkspaces(arranged, `?resourceId=${web}`)).map((one) => one.id)).toEqual([
         primary.id,
@@ -453,7 +452,7 @@ describe("workspace.query and workspace.read", () => {
     });
   });
 
-  it("names the sessions in a workspace that have not exited", async () => {
+  it("lists the sessions in a workspace that have not exited", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnSessionOrFail(arranged, {
@@ -473,12 +472,12 @@ describe("workspace.query and workspace.read", () => {
   });
 });
 
-describe("a machine that was not connected", () => {
-  it("is told about the workspace it owes as soon as it dials in again", async () => {
+describe("a runner that was not connected", () => {
+  it("is sent the pending provision frame as soon as it reconnects", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       arranged.wire.close();
-      await waitUntil("saw the machine go", async () => {
+      await waitUntil("saw the runner go offline", async () => {
         const response = await get(
           arranged.harness.base,
           `/api/v1/runners/${arranged.runnerId}`,
@@ -488,9 +487,9 @@ describe("a machine that was not connected", () => {
         return runner.connectivity === "online" ? undefined : runner;
       });
 
-      // D-20a: every frame the rows can rebuild is one that can be re-sent, so
-      // provisioning while the machine is away is taken and queued rather than
-      // refused.
+      // The rows hold everything needed to rebuild the frame, so it can be sent
+      // again later. Provisioning while the runner is offline is accepted and
+      // sent on reconnect, rather than rejected.
       const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
@@ -506,7 +505,7 @@ describe("a machine that was not connected", () => {
 });
 
 describe("workspace.dispose", () => {
-  it("tells the machine to tear an ephemeral down and marks it deleted", async () => {
+  it("sends the runner a dispose frame for an ephemeral workspace, and marks it deleted", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnSessionOrFail(arranged, {
@@ -514,8 +513,8 @@ describe("workspace.dispose", () => {
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
       const workspaceId = String(session.workspaceId);
-      // A workspace somebody is working in is not torn down under them, so the
-      // thread that asked for it ends before it is disposed of.
+      // A workspace with a running session cannot be disposed of, so the
+      // thread that asked for it is stopped first.
       await stopSession(arranged, session.id);
 
       const response = await del(
@@ -532,7 +531,7 @@ describe("workspace.dispose", () => {
       expect(gone.status).toBe("deleted");
       expect(gone.disposedAt).not.toBeNull();
 
-      // A second dispose has nothing left to do and says so.
+      // A second dispose has nothing left to do, and fails with invalid_state.
       const again = await del(
         arranged.harness.base,
         `/api/v1/workspaces/${workspaceId}`,
@@ -542,7 +541,7 @@ describe("workspace.dispose", () => {
     });
   });
 
-  it("refuses while a session is still living in it, naming how many", async () => {
+  it("fails while a session is still running in it, and gives the number of sessions", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnSessionOrFail(arranged, {
@@ -563,7 +562,7 @@ describe("workspace.dispose", () => {
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");
       expect(listFramesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
 
-      // Once the thread is over, the directory is nobody's.
+      // Once the thread is stopped, nothing uses the directory any more.
       const stopped = await send(
         "POST",
         arranged.harness.base,
@@ -601,7 +600,7 @@ describe("workspace.dispose", () => {
 });
 
 describe("runner.retire", () => {
-  it("loses every workspace on the machine that had not already ended", async () => {
+  it("marks every workspace on the runner as lost, except one already deleted", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const api = await createRepo(arranged, "https://github.com/acme/api");
@@ -632,7 +631,7 @@ describe("runner.retire", () => {
 
       const lost = await waitForWorkspace(arranged, primary.id, (one) => one.status === "lost");
       expect(lost.status).toBe("lost");
-      // The one that was already gone is left as it was.
+      // The workspace that was already deleted stays deleted.
       expect((await readWorkspace(arranged, ephemeral)).status).toBe("deleted");
     });
   });

@@ -1,20 +1,20 @@
 /**
- * What a rolled-back mutation announces: nothing.
+ * Tests that a rolled-back mutation publishes nothing.
  *
- * An invalidation is a claim that a record changed, and a client that hears one
- * refetches. So the claim has to be made after the write is durable, never
- * before: a transaction that rolls back has changed nothing, however far it
- * got, and a subscriber told otherwise would refetch a task that was never
- * written and, worse, would have been told a lie the log itself does not hold.
+ * An invalidation tells a client that a record changed, and the client
+ * refetches. So it must be sent only after the write is committed. A
+ * transaction that rolls back has changed nothing, however far it got, and a
+ * subscriber told otherwise would refetch a task that was never written, and
+ * would see something the log does not hold.
  *
- * The case that matters is the one that gets furthest: a mutation whose audit
+ * The important case is the one that gets furthest: a mutation whose audit
  * row is already written when the transaction fails. Transactions are ambient
- * and nest, so an outer `withTransaction` around `task.create` is exactly that
- * mutation with a failure bolted after it - the task row and the `task.created`
- * audit row are both written, and both are rolled back.
+ * and nest, so wrapping `task.create` in an outer `withTransaction` that then
+ * fails gives exactly that: the task row and the `task.created` audit row are
+ * both written, and both are rolled back.
  *
- * This is the one thing about publishing a wire test cannot show, because no
- * HTTP route fails after its audit row: the seam is reached here instead.
+ * An HTTP test cannot show this, because no route fails after writing its
+ * audit row, so this test calls the service directly.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Queue } from "effect";
@@ -47,15 +47,15 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps | Scope.Scope>): Promise<A> 
     Effect.scoped(effect).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(layer)),
   );
 
-/** What the failing transaction fails with. Nothing reads it; it only aborts. */
+/** The error the failing transaction fails with. Nothing reads it; it only aborts. */
 class Rollback {
   readonly _tag = "Rollback";
 }
 
 /**
- * Everything a subscription has been handed, given a moment to arrive: the
- * publish happens after the commit, so a read in the same turn as the write
- * would be measuring the race rather than the behaviour.
+ * Waits briefly for messages, then returns everything the subscription has
+ * received. The publish happens after the commit, so reading right after the
+ * write would test the timing, not the behaviour.
  */
 const takeSettledMessages = (queue: LiveQueue): Effect.Effect<ReadonlyArray<LiveMessage>> =>
   Effect.gen(function* () {
@@ -68,7 +68,7 @@ const takeSettledMessages = (queue: LiveQueue): Effect.Effect<ReadonlyArray<Live
   });
 
 describe("publishing after a commit", () => {
-  it("says nothing for a transaction that rolled back after its audit row was written", async () => {
+  it("publishes nothing for a transaction that rolled back after its audit row was written", async () => {
     const held = await run(
       Effect.gen(function* () {
         const topics = yield* LiveTopics;
@@ -93,7 +93,7 @@ describe("publishing after a commit", () => {
     expect(held).toEqual([]);
   });
 
-  it("says nothing for an inner write set that rolled back inside one that did not", async () => {
+  it("publishes nothing for an inner transaction that rolled back inside one that committed", async () => {
     const [held, kept] = await run(
       Effect.gen(function* () {
         const topics = yield* LiveTopics;
@@ -104,8 +104,8 @@ describe("publishing after a commit", () => {
         const task = yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // A savepoint that is rolled back and gone on with: the outer
-            // transaction commits, and only what it kept is announced.
+            // A savepoint is rolled back and the outer transaction continues
+            // and commits. Only what it kept is published.
             yield* Effect.ignore(
               withTransaction(
                 sql,
@@ -126,7 +126,7 @@ describe("publishing after a commit", () => {
     expect(held).toEqual([{ _tag: "invalidate", ids: [kept], kind: "created" }]);
   });
 
-  it("announces the same mutation when its transaction commits", async () => {
+  it("publishes the same mutation when its transaction commits", async () => {
     const [held, id] = await run(
       Effect.gen(function* () {
         const topics = yield* LiveTopics;

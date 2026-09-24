@@ -1,9 +1,10 @@
 /**
- * The controller's listener, end to end over a real socket: the order the gates
- * run in, the envelope on every failure, and the operations a request reaches.
+ * Tests the controller's listener end to end over a real socket: the order the
+ * checks run in, the envelope on every failure, and which operations a request
+ * reaches.
  *
- * The stack, the temporary home and the request helpers are `./testing.ts`,
- * which is the same one every other transport test drives.
+ * The test server, temporary home and request helpers come from
+ * `./testing.ts`, like every other transport test.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -19,7 +20,7 @@ import {
 import { MAX_REQUEST_BODY_BYTES } from "./server";
 
 describe("before setup completes", () => {
-  it("answers setup.read unauthenticated, so the web app knows where to route", async () => {
+  it("serves setup.read without a credential, so the web app knows where to route", async () => {
     await withServer(async ({ base }) => {
       const response = await fetch(`${base}/api/v1/setup`);
       expect(response.status).toBe(200);
@@ -27,7 +28,7 @@ describe("before setup completes", () => {
     });
   });
 
-  it("answers every other operation 401, credential or not", async () => {
+  it("returns 401 for every other operation, with or without a credential", async () => {
     await withServer(async ({ base }) => {
       const anonymous = await fetch(`${base}/api/v1/settings`);
       const withBearer = await fetch(`${base}/api/v1/settings`, {
@@ -40,7 +41,7 @@ describe("before setup completes", () => {
     });
   });
 
-  it("answers login 401 as well: there is no user to log in as yet", async () => {
+  it("returns 401 for login too, because there is no user to log in as yet", async () => {
     await withServer(async ({ base }) => {
       const response = await post(base, "/api/v1/auth/login", {
         username: USERNAME,
@@ -50,7 +51,7 @@ describe("before setup completes", () => {
     });
   });
 
-  it("refuses setup.complete without the setup token, and with the wrong one", async () => {
+  it("rejects setup.complete without the setup token, and with the wrong one", async () => {
     await withServer(async ({ base }) => {
       const input = { username: USERNAME, password: PASSWORD, timezone: "Europe/Amsterdam" };
       expect((await post(base, "/api/v1/setup/complete", input)).status).toBe(401);
@@ -60,7 +61,7 @@ describe("before setup completes", () => {
 });
 
 describe("setup, login and logout", () => {
-  it("completes setup once, and says so afterwards", async () => {
+  it("completes setup once, and reports it as complete afterwards", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       expect(token).not.toBe("");
@@ -73,12 +74,13 @@ describe("setup, login and logout", () => {
         { username: "someone", password: PASSWORD, timezone: "UTC" },
         SETUP_TOKEN,
       );
-      // The token is spent, so the gate answers before the state does.
+      // The token is used up, so the credential check fails before the setup
+      // state is checked.
       expect(again.status).toBe(401);
     });
   });
 
-  it("logs in with the password and logs out again, and the token dies with it", async () => {
+  it("logs in with the password and logs out again, which invalidates the token", async () => {
     await withServer(async ({ base }) => {
       await completeSetup(base);
 
@@ -97,7 +99,7 @@ describe("setup, login and logout", () => {
     });
   });
 
-  it("answers a wrong password 401 without saying which half was wrong", async () => {
+  it("returns 401 for a wrong password without saying whether the username or the password was wrong", async () => {
     await withServer(async ({ base }) => {
       await completeSetup(base);
       const response = await post(base, "/api/v1/auth/login", {
@@ -112,7 +114,7 @@ describe("setup, login and logout", () => {
 });
 
 describe("the order of the checks", () => {
-  it("answers 401 before 400: a malformed body under no credential is unauthenticated", async () => {
+  it("checks the credential before the body: a malformed body without a credential gets 401", async () => {
     await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
 
@@ -129,7 +131,7 @@ describe("the order of the checks", () => {
     });
   });
 
-  it("answers a path no operation owns with the envelope, not an empty body", async () => {
+  it("returns the envelope, not an empty body, for a path no operation owns", async () => {
     await withServer(async ({ base }) => {
       const response = await fetch(`${base}/`);
       expect(response.status).toBe(404);
@@ -155,7 +157,7 @@ describe("API keys over the wire", () => {
       expect(page.items[0]).toMatchObject({ id: key.id, name: "laptop" });
       expect(JSON.stringify(page)).not.toContain(key.token);
 
-      // The key authenticates in its own right, without the login bearer.
+      // The key authenticates on its own, without the login token.
       expect((await get(base, "/api/v1/api-keys", key.token)).status).toBe(200);
 
       const revoked = await del(base, `/api/v1/api-keys/${key.id}`, bearer);
@@ -174,7 +176,7 @@ describe("API keys over the wire", () => {
     });
   });
 
-  it("refuses an id that is not a canonical uuid before it looks for a key", async () => {
+  it("rejects an id that is not a canonical UUID before looking for a key", async () => {
     await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
       const response = await del(base, "/api/v1/api-keys/not-an-id", bearer);
@@ -185,7 +187,7 @@ describe("API keys over the wire", () => {
 });
 
 describe("changing the password over the wire", () => {
-  it("takes the new password afterwards and refuses the old one", async () => {
+  it("accepts the new password afterwards and rejects the old one", async () => {
     await withServer(async ({ base, audit }) => {
       const bearer = await completeSetup(base);
       const next = "an entirely different passphrase";
@@ -212,8 +214,8 @@ describe("changing the password over the wire", () => {
       const fresh = await post(base, "/api/v1/auth/login", { username: USERNAME, password: next });
       expect(fresh.status).toBe(200);
 
-      // The credentials issued under the old password still work: a rotation
-      // is not a compromise, so nothing is revoked.
+      // The credentials issued under the old password still work: changing a
+      // password does not mean it was compromised, so nothing is revoked.
       expect((await get(base, "/api/v1/api-keys", bearer)).status).toBe(200);
 
       expect(await audit("user.passwordChanged")).toMatchObject([{ actor: "user", payload: {} }]);
@@ -238,7 +240,7 @@ describe("stopping", () => {
   });
 });
 
-describe("the pre-setup gate decides on the operation, not on the path", () => {
+describe("the pre-setup gate checks the operation, not the raw path", () => {
   it("gates a path the router matches case-insensitively", async () => {
     await withServer(async ({ base, audit }) => {
       const response = await post(base, "/API/v1/AUTH/LOGIN", {
@@ -269,7 +271,7 @@ describe("the pre-setup gate decides on the operation, not on the path", () => {
     });
   });
 
-  it("answers a path no operation owns 404, before setup as after it", async () => {
+  it("returns 404 for a path no operation owns, both before and after setup", async () => {
     await withServer(async ({ base }) => {
       const before = await get(base, "/api/v1/nothing-here");
       expect(before.status).toBe(404);
@@ -281,13 +283,13 @@ describe("the pre-setup gate decides on the operation, not on the path", () => {
   });
 });
 
-describe("the body cap", () => {
+describe("the body size limit", () => {
   /**
-   * The cap is the listener's, so the refusal is the transport's bare `413` -
-   * the one response outside the error envelope - and it lands before the body
-   * is read, which is why nothing reaches the audit log.
+   * The limit belongs to the listener, so the error is the transport's bare
+   * `413`, the only response outside the error envelope. It happens before the
+   * body is read, which is why nothing reaches the audit log.
    */
-  it("refuses a body larger than the cap with a 413, without storing it", async () => {
+  it("rejects a body over the limit with a 413, without storing it", async () => {
     await withServer(async ({ base, audit }) => {
       const username = "x".repeat(MAX_REQUEST_BODY_BYTES + 1);
       const response = await post(base, "/api/v1/auth/login", { username, password: PASSWORD });
@@ -299,7 +301,7 @@ describe("the body cap", () => {
 });
 
 describe("a body that is not JSON", () => {
-  it("answers in the envelope rather than a bare 415", async () => {
+  it("gets an error in the envelope rather than a bare 415", async () => {
     await withServer(async ({ base }) => {
       await completeSetup(base);
       const response = await fetch(`${base}/api/v1/auth/login`, {
@@ -314,7 +316,7 @@ describe("a body that is not JSON", () => {
   });
 });
 
-describe("stamping a credential's use", () => {
+describe("recording a credential's use", () => {
   it("writes once for a burst of requests, not once per request", async () => {
     await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);

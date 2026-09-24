@@ -1,12 +1,13 @@
 /**
- * Sessions: one provider-backed conversation, and the stream it leaves behind.
+ * Sessions: one conversation with a provider, and the stream of events it
+ * leaves behind.
  *
- * The rows, their lifecycle, the inputs waiting on them and the frames a
- * machine is told about them are this domain's; when a frame goes out, and
- * over which connection, is not. `SessionService` carries the read operations
- * and the stored-input operations a request reaches directly, beside the
- * frames and the row moves the controller daemon calls as it sequences what a
- * machine is told.
+ * This domain owns the session rows, their lifecycle, the inputs waiting on
+ * them, and the frames sent to a runner about them. It does not decide when a
+ * frame is sent or over which connection; the controller daemon does.
+ * `SessionService` holds the read operations and the stored-input operations
+ * that a request calls directly. It also builds the frames and makes the
+ * status changes that the controller daemon calls while it talks to a runner.
  */
 export { type LostWakeUp, type StoredInput } from "./inputs";
 export { buildContinuingSpec, buildTimeouts, validateOptions } from "./options";

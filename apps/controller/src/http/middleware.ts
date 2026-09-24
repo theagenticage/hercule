@@ -1,24 +1,25 @@
 /**
- * The two credential gates, implemented.
+ * Implements the contract's two credential middlewares.
  *
- * `Authenticated` resolves the bearer token to an actor and then runs the
- * static grant check for the operation, both before the derived route decodes
- * anything. That order is the point: a caller without the grant gets 403 rather
- * than 400 on a malformed body. A handler-side check cannot deliver that,
- * because the route decodes the body first. The check in the service method
- * stays as well; it is what binds in-process callers.
+ * `Authenticated` resolves the bearer token to an actor, then runs the
+ * operation's static grant check, both before the derived route decodes
+ * anything. That order matters: a caller without the grant gets 403 rather
+ * than 400 for a malformed body. A check in the handler could not do that,
+ * because the route decodes the body first. The service method still checks
+ * the grant too, so in-process callers are checked as well.
  *
- * The required grant is a static per-operation fact, so this is not operation
- * logic living in a handler: the middleware reads the contract's operation
- * table by joining the group and endpoint identifiers with a dot, which is the
- * operation id exactly, and one contract test keeps the join honest.
+ * The required grant is fixed per operation, so this is not operation logic
+ * in a handler. The middleware looks the operation up in the contract's
+ * operation table by joining the group and endpoint identifiers with a dot,
+ * which gives exactly the operation id. A contract test checks that the join
+ * matches.
  *
  * `SetupToken` accepts the one-time setup token and nothing else.
  *
- * A repository failure inside a gate is a defect rather than a failure: the
- * middleware's declared errors are the two the contract names, and a database
- * that will not answer is not something the caller can act on. The envelope
- * wrapper turns it into a logged 500.
+ * A repository failure inside a middleware is a defect rather than a failure:
+ * the middleware can only fail with the errors the contract declares for it,
+ * and a database error is nothing the caller can act on. The envelope turns
+ * the defect into a logged 500.
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -38,17 +39,17 @@ import { Credentials, hashToken } from "../credentials";
 import { SessionTokens } from "../permissions";
 import { Setup } from "../setup";
 
-/** The operation a request is for: the group and endpoint identifiers, joined. */
+/** Builds the operation id of a request by joining the group and endpoint identifiers. */
 export const buildOperationId = (options: {
   readonly group: HttpApiGroup.Top;
   readonly endpoint: HttpApiEndpoint.Top;
 }): string => `${options.group.identifier}.${options.endpoint.identifier}`;
 
 /**
- * The operation a route is, as the contract's table names it. An endpoint the
- * table does not name cannot happen - the contract test asserts the declaration
- * and the table are one-to-one - so it is a defect rather than an error with a
- * response.
+ * Checks that `id` is an operation in the contract's table, and returns it
+ * typed. Dies otherwise: a contract test checks that the API declaration and
+ * the table match one to one, so an unknown id is a bug, not an error to
+ * return to the caller.
  */
 const parseOperationId = (id: string): Effect.Effect<OperationId> =>
   isOperationId(id)
@@ -56,15 +57,15 @@ const parseOperationId = (id: string): Effect.Effect<OperationId> =>
     : Effect.die(`no operation named ${id} in the contract's table`);
 
 /**
- * The live credential behind a presented token, whichever kind it is, with its
- * use recorded: a login bearer's 30-day window rolls forward and an API key's
- * `last_used_at` is stamped. The repository decides whether that use is worth
- * a write; on a busy connection most are not.
+ * Resolves a token to its actor, whatever kind of credential it is, or
+ * returns `none`. Records the use: a login token's 30-day window moves
+ * forward, and an API key's `last_used_at` is updated. The repository decides
+ * whether a use is worth a write; on a busy connection most are not.
  *
- * A session's own token is tried first, because it is the one that is cached:
- * an agent - the chatty population, calling on every tool use - costs one
- * cached lookup rather than two indexed misses ahead of it, while a user pays
- * one cache miss before the lookup a human is waiting on.
+ * Session tokens are tried first, because they are cached. Agents call the
+ * API on every tool use, so they cost one cached lookup instead of two
+ * database misses first. A user pays one cache miss, which a person does not
+ * notice.
  */
 const resolveActor = (
   credentials: Credentials["Service"],
@@ -100,7 +101,7 @@ const resolveActor = (
     return Option.none();
   }).pipe(Effect.orDie);
 
-/** Any credential of any kind, plus the operation's static grant check. */
+/** Accepts a credential of any kind, then runs the operation's static grant check. */
 export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials | SessionTokens> =
   Layer.effect(Authenticated)(
     Effect.gen(function* () {
@@ -126,7 +127,7 @@ export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials |
     }),
   );
 
-/** The one-time setup token, matched against the hash the boot wrote. */
+/** Accepts only the one-time setup token, compared with the hash written at boot. */
 export const SetupTokenLayer: Layer.Layer<SetupToken, never, Setup> = Layer.effect(SetupToken)(
   Effect.gen(function* () {
     const setup = yield* Setup;

@@ -1,12 +1,14 @@
 /**
- * Starting what a machine has room for: the oldest queued sessions of a runner
- * that is online, active, above its watermark and not yet full, claimed as one
- * write set and then told to the machine.
+ * Starts as many queued sessions on a runner as it has room for.
  *
- * Everything that can give a machine room - a session ending, a workspace
- * coming up, a watermark crossed, a cap raised, a drain lifted, a new
- * connection - comes back through here, so there is one place that decides what
- * starts next and one frame that starts it.
+ * A runner has room when it is online, active, above its disk watermark and
+ * below its session cap. Its oldest queued sessions are claimed in one
+ * transaction, and then the runner is sent a frame to start each one.
+ *
+ * Everything that can give a runner room comes back through here: a session
+ * ending, a workspace becoming ready, a watermark crossed, a cap raised, a
+ * drain lifted, or a new connection. So one place decides what starts next,
+ * and one frame starts it.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -34,9 +36,9 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Moves this runner's oldest queued sessions to `starting`, as many as its
-     * cap and its disk watermark allow, and tells the machine to start each. A
-     * start the machine does not take goes back to the queue, for the next
-     * thing that changes this runner's capacity to try again.
+     * cap and its disk watermark allow, and sends the runner a frame to start
+     * each one. If a frame cannot be sent, the session goes back to the queue,
+     * and the next change to this runner's capacity tries again.
      */
     dispatch: (runnerId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -47,12 +49,12 @@ const make = Effect.gen(function* () {
             if (Option.isNone(found)) return [];
             const runner = found.value;
             if (runner.connectivity !== "online" || runner.lifecycle !== "active") return [];
-            // Online says the socket is up, not that this connection has said
-            // what it holds yet: a start sent before its report lands would be
-            // one this report itself then reads as exited.
+            // Online means the socket is up, not that the runner has reported
+            // its sessions yet. A start sent before that report arrives would
+            // be missing from the report, so the report would mark it exited.
             if (!(yield* connections.hasReportedSessions(runnerId))) return [];
             const watermark = runner.watermark;
-            // A watermark nobody has reported yet is not a machine that said no.
+            // No watermark reported yet does not mean the disk is full.
             if (watermark !== null && watermark.diskFreeBytes < runner.diskWatermarkBytes) {
               return [];
             }
@@ -67,8 +69,8 @@ const make = Effect.gen(function* () {
             });
           }),
         );
-        // After the commit, because a transaction never spans a wait on a
-        // machine, and a machine is never told about a row that may roll back.
+        // Send after the commit: a transaction never waits on a runner, and a
+        // runner must never be told about a row that could still roll back.
         for (const { sessionId, frame } of ready) {
           if (!(yield* connections.tell(runnerId, frame))) yield* sessions.requeue(sessionId);
         }

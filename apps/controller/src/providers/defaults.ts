@@ -1,8 +1,8 @@
 /**
- * Seeds one instance per registered provider, so a fresh install can offer
- * "Log in to Claude Code" before the user has met the instance concept.
- * Idempotent per provider rather than "seed an empty table", so a provider
- * added in a later release still gets its default.
+ * Creates one instance for each registered provider that has none, so a fresh
+ * install can offer "Log in to Claude Code" before the user knows about
+ * instances. The check is per provider, not "is the table empty", so a
+ * provider added in a later release still gets its default instance.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -23,7 +23,7 @@ export const ensureProviderInstances: Effect.Effect<
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
   const registered = yield* host.providers();
-  // A map, so two plugins contributing one provider still leave it one instance.
+  // A map, so two plugins that register the same provider still get one instance.
   const missing = new Map(registered.map((definition) => [definition.id, definition]));
   for (const providerId of yield* instances.providersWithInstance()) missing.delete(providerId);
   if (missing.size === 0) return;

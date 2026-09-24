@@ -1,11 +1,11 @@
 /**
- * The controller, over a real socket, for tests. The repositories are the real
- * ones; nothing here is mocked.
+ * Test helpers that run the controller over a real socket. The repositories
+ * are the real ones; nothing is mocked.
  *
- * Everything a request passes through in production is in this stack - the
- * envelope, the pre-setup gate, the derived routes, both credential gates and
- * every service. Only the database (`:memory:`), the master key (a file in a
- * temporary home) and the port (ephemeral) differ.
+ * Everything a request passes through in production is in this stack: the
+ * envelope, the pre-setup gate, the derived routes, both credential
+ * middlewares and every service. Only the database (`:memory:`), the master
+ * key (a file in a temporary home) and the port (ephemeral) differ.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -83,22 +83,22 @@ import { operationLayers } from "./routes";
 import { bodyLimits, serve } from "./server";
 import type { WebBundle } from "./static";
 
-/** The setup token the harness seeds, and the password `completeSetup` uses. */
+/** The setup token the test server starts with, and the password `completeSetup` sets. */
 export const SETUP_TOKEN = "a-setup-token";
 export const PASSWORD = "correct horse battery staple";
 export const USERNAME = "rogier";
 
 /**
- * Every service the routes resolve, over one `:memory:` database. The plugin
- * host is built here rather than beside the operation layers because the boot
- * and the routes must share one: the status a request reads is held by the same
- * object the boot's activation pass wrote it into.
+ * Every service the routes use, on one `:memory:` database. The plugin host is
+ * built here rather than with the operation layers, because the boot and the
+ * routes must share one instance: a request must read the status the boot's
+ * activation wrote.
  */
 const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifier>) =>
-  // The routes' own layer holds the controller daemon, which reaches the
-  // session and workspace services and the plugin host, so it is provided this
-  // block's output rather than merely merged beside it, the way the real boot's
-  // operation layers reach what `withPlugins` built.
+  // The routes' layer includes the controller daemon, which uses the session
+  // and workspace services and the plugin host. So this block's output is
+  // provided to it rather than merged next to it, just as the real boot
+  // provides what `withPlugins` built to the operation layers.
   operationLayers.pipe(
     Layer.provide(notifier),
     Layer.provideMerge(
@@ -112,8 +112,8 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
       ),
     ),
     // One connection map and one probe driver: the socket route and every
-    // service must act through the same `RunnerConnections`. The catalog is
-    // below the probe driver, which reads a provider's definition off it.
+    // service must use the same `RunnerConnections`. The catalog is provided
+    // to the probe driver, which reads provider definitions from it.
     Layer.provideMerge(
       ProviderProbesLayer.pipe(
         Layer.provideMerge(RunnerConnectionsLayer),
@@ -142,7 +142,7 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
 
-/** An address a fetch can use; the server binds an ephemeral port on loopback. */
+/** Returns an address `fetch` can use; the server binds an ephemeral port on loopback. */
 export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
   const address = server.address;
   if (address._tag !== "TcpAddress") throw new Error("expected a TCP address");
@@ -153,9 +153,9 @@ export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
 export type AuditReader = (kind: AuditKind) => Promise<ReadonlyArray<AuditRow>>;
 
 /**
- * Arranges a runner row. No operation enlists a runner - joining does, over the
- * runner protocol - so a test that needs a fleet writes one through the same
- * repository the join will.
+ * Inserts a runner row. No operation adds a runner (a runner joins over the
+ * runner protocol), so a test that needs a fleet writes one through the same
+ * repository the join uses.
  */
 export type RunnerArranger = (fields: {
   readonly name: string;
@@ -163,26 +163,27 @@ export type RunnerArranger = (fields: {
   readonly lifecycle?: RunnerLifecycle;
   readonly reserved?: boolean;
   readonly labels?: ReadonlyArray<string>;
-  /** An override; absent leaves the cap derived from what the machine reports. */
+  /** A session cap override. When absent, the cap is derived from what the runner reports. */
   readonly maxConcurrentSessions?: number;
 }) => Promise<Runner>;
 
 /**
- * Mints a join token. `runner.createJoinToken` is how a person gets one, but it
- * needs a credential, and the join is reachable before anybody has one - the
- * controller's own first boot mints for its child through this same repository.
+ * Mints a join token. A person gets one through `runner.createJoinToken`, but
+ * that needs a credential, and a runner can join before anyone has one. The
+ * controller's first boot mints a token for its local runner through this
+ * same repository.
  */
 export type JoinTokenArranger = () => Promise<string>;
 
 /**
- * Runs the boot's idempotent steps again, which is what a restart does to a
- * database already being served.
+ * Runs the boot's idempotent steps again, as a restart does on a database
+ * already in use.
  */
 export type RebootArranger = () => Promise<void>;
 
 /**
- * The services are inferred rather than listed, so a step added to the boot
- * cannot leave a stale list behind.
+ * The services the boot steps need. The type is inferred rather than listed,
+ * so a step added to the boot cannot leave a stale list behind.
  */
 const makeRepeatable = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -192,12 +193,12 @@ const makeRepeatable = <A, E, R>(
     (services) => () => Effect.runPromiseWith(services)(Effect.orDie(effect)),
   );
 
-/** Reads back what the controller is holding for the clients on its live socket. */
+/** Reads the subscriptions the controller holds for clients on its live socket. */
 export interface LiveReader {
   readonly subscriberCount: (topic: LiveTopic) => Promise<number>;
 }
 
-/** What a test is handed: the running controller, and the ways to read it back. */
+/** What a test receives: the running controller, and helpers to inspect it. */
 export interface ServerHarness {
   /** An address a fetch can use. */
   readonly base: string;
@@ -209,55 +210,55 @@ export interface ServerHarness {
   readonly reboot: RebootArranger;
 }
 
-/** What a test may vary about the controller it is handed. */
+/** The options a test can set on the controller it runs. */
 export interface ServerOptions {
   readonly bundle?: WebBundle;
   /**
-   * How often the controller pings a runner it holds a socket with, and how
-   * long it lets one stay silent. The shipped values are counted in tens of
-   * seconds, which no test can wait for, and a real Bun listener cannot be
-   * driven by a `TestClock` - so a test about liveness hands over its own.
+   * How often the controller pings a connected runner, and how long a runner
+   * may stay silent. The defaults are tens of seconds, which no test can wait
+   * for, and a real Bun listener cannot use a `TestClock`, so a test about
+   * liveness sets its own.
    */
   readonly pings?: RunnerPings;
   /**
-   * How long the controller waits for a runner to answer a request for its
-   * facts. The shipped ten seconds is longer than a test can wait.
+   * How long the controller waits for a runner to reply to a request for its
+   * facts. The default of ten seconds is longer than a test can wait.
    */
   readonly factsDeadline?: Duration.Duration;
-  /** The shipped fifteen seconds and hour are both longer than a test can wait. */
+  /** The default fifteen seconds and one hour are both longer than a test can wait. */
   readonly probeDeadline?: Duration.Duration;
   readonly probeInterval?: Duration.Duration;
   readonly loginDeadline?: Duration.Duration;
-  /** How long a delivered input waits for the machine to say what it did with it. */
+  /** How long a delivered input waits for the runner to report what it did with it. */
   readonly inputDeadline?: Duration.Duration;
-  /** The shipped ten minutes is longer than a test that watches it can wait. */
+  /** The default ten minutes is longer than a test can wait. */
   readonly workspaceSweepInterval?: Duration.Duration;
-  /** The shipped second is longer than a test that waits out several ticks can wait. */
+  /** The default second is too long for a test that waits several ticks. */
   readonly eventRoutingInterval?: Duration.Duration;
-  /** The shipped minute is longer than a test that watches the sweep can wait. */
+  /** The default minute is longer than a test can wait. */
   readonly lostRunnerSweepInterval?: Duration.Duration;
   /**
-   * How long one evaluation of a condition may run before the wrapper reports
-   * it. A test that wants every evaluation reported hands over a budget no
-   * evaluation can stay under: the evaluator offers no other lever.
+   * How long one evaluation of a condition may run before it is reported as
+   * over budget. A test that wants every evaluation reported sets a budget no
+   * evaluation can stay under, because the evaluator has no other option for
+   * this.
    */
   readonly expressionBudget?: Duration.Duration;
   /**
-   * Where the report of a condition that cannot be evaluated goes. The
-   * shipped one goes nowhere, which nothing can read.
+   * Where notifications of evaluation errors go. The default notifier does
+   * nothing, so a test that checks notifications passes its own.
    */
   readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
-  /** The shipped registry is compiled in, so a test hands over its own. */
+  /** The plugin registry. The real one is compiled in, so a test passes its own. */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
 
 /**
- * Runs the real controller application over a real socket for the length of
- * `body`, in a temporary home that is removed afterwards.
+ * Runs the real controller application over a real socket while `body` runs,
+ * in a temporary home that is removed afterwards.
  *
- * With no `bundle` the controller serves the API alone, which is what a
- * checkout that was never built does. With no `pings` the shipped intervals
- * apply.
+ * Without `bundle`, the controller serves only the API, like a checkout that
+ * was never built. Without `pings`, the default intervals apply.
  */
 export const withServer = (
   body: (harness: ServerHarness) => Promise<void>,
@@ -273,8 +274,9 @@ export const withServer = (
         const sql = yield* SqlClient.SqlClient;
         yield* sql`INSERT INTO setup_state (singleton, token_hash, completed_at)
                    VALUES (1, ${hashToken(SETUP_TOKEN)}, NULL)`;
-        // The boot's steps in the boot's order, so a request sees what a real
-        // controller has. Held as one effect because reboot runs them again.
+        // The boot's steps, in the boot's order, so a request sees what a real
+        // controller would have. Kept as one effect because `reboot` runs them
+        // again.
         const bootSteps = Effect.gen(function* () {
           yield* cancelStrandedInputsAndReportLostWakeUps;
           yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
@@ -300,20 +302,20 @@ export const withServer = (
         provideIfSet(ExpressionBudget, options.expressionBudget);
         yield* listening;
         const base = yield* baseUrl;
-        // The log this database holds, read the way anything else reads it: a
-        // request's audit row is asserted through the service that wrote it.
+        // Reads the audit log through the service that wrote it, like any other
+        // reader.
         const log = yield* AuditLog;
         const audit: AuditReader = (kind) => Effect.runPromise(Effect.orDie(log.listByKind(kind)));
-        // The live subscriptions this controller is holding, read through the
-        // service that holds them: a test asserts what the running server has,
-        // not what it can infer from the wire.
+        // Reads the controller's live subscriptions through the service that
+        // holds them, so a test checks what the running server has, not what it
+        // can infer from the wire.
         const topics = yield* LiveTopics;
         const live: LiveReader = {
           subscriberCount: (topic) => Effect.runPromise(topics.subscriberCount(topic)),
         };
         const repository = yield* runnerRepository;
-        // The cap is not something a row is inserted with, so an arranged
-        // override is written the way the API writes one.
+        // A runner row is not inserted with a cap override, so the override is
+        // written the way the API writes one.
         const insertRunner: RunnerArranger = (fields) =>
           Effect.runPromise(
             Effect.orDie(
@@ -349,9 +351,9 @@ export const withServer = (
     ).pipe(
       Effect.provide(
         buildServices(home, options.evaluationErrorNotifier ?? EvaluationErrorNotifierLayer).pipe(
-          // The same listener `hercule serve` builds, body cap included: the cap
-          // is the transport's, so a harness without it would test a different
-          // server from the one that ships.
+          // The same listener `hercule serve` builds, including the body size
+          // limit. The limit is enforced by the transport, so without it the
+          // tests would run a different server from the one that ships.
           Layer.provideMerge(
             BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...bodyLimits }),
           ),
@@ -363,12 +365,13 @@ export const withServer = (
 };
 
 /**
- * A request with a JSON body, and optionally a bearer token.
+ * Sends a request with a JSON body, and optionally a bearer token.
  *
  * Every request closes its connection. Node's `fetch` keeps a connection alive
- * after a request whose body ran past about 64 KB, and the server's graceful
- * stop then waits some ten seconds for that idle socket, which is long enough
- * to time a test out in the scope close rather than in the assertion.
+ * after a request whose body is larger than about 64 KB, and the server's
+ * graceful stop then waits about ten seconds for that idle socket. That is
+ * long enough for the test to time out while closing its scope rather than
+ * in an assertion.
  */
 export const send = (
   method: string,
@@ -390,7 +393,7 @@ export const send = (
         }),
   });
 
-/** The body every refusal the envelope writes has. */
+/** The body of every error response the envelope writes. */
 interface ErrorBody {
   readonly error: {
     readonly code: string;
@@ -402,22 +405,22 @@ interface ErrorBody {
   };
 }
 
-/** One refusal, read out of the envelope the API writes it in. */
+/** One error, read from the envelope of an error response. */
 export interface Refusal {
   readonly code: string;
   readonly message: string;
-  /** The grant a `forbidden` names; absent on every other refusal. */
+  /** The grant a `forbidden` error names; absent on every other error. */
   readonly grant?: string;
-  /** The path of each issue a `validation` lists, in the order it listed them. */
+  /** The path of each issue in a `validation` error, in order. */
   readonly issues: ReadonlyArray<ReadonlyArray<string>>;
-  /** The whole body, for an assertion message that has to show what was said. */
+  /** The whole body, for assertion messages that need to show it. */
   readonly text: string;
 }
 
 /**
- * What a response refused, and what it said. The body is read once and parsed
- * here, so a caller may ask about the code, the grant and the issue paths
- * without juggling clones of a stream that can only be read once.
+ * Reads the error from an error response. The body is read and parsed once
+ * here, so a caller can check the code, the grant and the issue paths without
+ * cloning a stream that can only be read once.
  */
 export const readErrorBody = async (response: Response): Promise<Refusal> => {
   const text = await response.text();
@@ -431,15 +434,15 @@ export const readErrorBody = async (response: Response): Promise<Refusal> => {
   };
 };
 
-/** A GET with a bearer token. */
+/** Sends a GET with a bearer token. */
 export const get = (base: string, path: string, token?: string): Promise<Response> =>
   send("GET", base, path, token === undefined ? {} : { token });
 
-/** A DELETE with a bearer token. */
+/** Sends a DELETE with a bearer token. */
 export const del = (base: string, path: string, token?: string): Promise<Response> =>
   send("DELETE", base, path, token === undefined ? {} : { token });
 
-/** A POST with a JSON body, the shape most of these tests need. */
+/** Sends a POST with a JSON body, which most of these tests need. */
 export const post = (
   base: string,
   path: string,
@@ -448,7 +451,7 @@ export const post = (
 ): Promise<Response> =>
   send("POST", base, path, { body, ...(token === undefined ? {} : { token }) });
 
-/** Finishes first run and answers with the bearer token setup handed back. */
+/** Completes first-run setup and returns the bearer token setup returned. */
 export const completeSetup = async (base: string): Promise<string> => {
   const response = await send("POST", base, "/api/v1/setup/complete", {
     body: { username: USERNAME, password: PASSWORD, timezone: "Europe/Amsterdam" },
@@ -459,13 +462,14 @@ export const completeSetup = async (base: string): Promise<string> => {
 };
 
 /**
- * A real WebSocket against the real listener with the contract group's own RPC
- * client, because the whole point of the socket is the wire. It lives beside
- * `withServer` because every domain observes its pushes through this.
+ * Live socket helpers: a real WebSocket to the real listener, with the
+ * contract's own RPC client, because the socket is tested on the wire. They
+ * sit next to `withServer` because every domain checks its pushes through
+ * them.
  */
 export type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof live>, RpcClientError>;
 
-/** The socket sits at `/ws` on the same authority the API is served from. */
+/** Returns the socket URL: `/ws` on the same host and port as the API. */
 export const buildSocketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}/ws`;
 
 export const buildLiveConnection = (base: string) =>
@@ -474,7 +478,7 @@ export const buildLiveConnection = (base: string) =>
     Layer.provide(RpcSerialization.layerJson),
   );
 
-/** Opens one connection for the length of `body`, over the JSON framing a browser uses. */
+/** Opens one connection while `body` runs, with the JSON serialization a browser uses. */
 export const onSocket = (
   base: string,
   body: (client: LiveClient) => Effect.Effect<void, unknown, Scope.Scope>,
@@ -488,7 +492,7 @@ export const onSocket = (
     ).pipe(Effect.orDie),
   );
 
-/** A ticket, fetched the way a client fetches one: over HTTP, before dialling. */
+/** Fetches a ticket the way a client does: over HTTP, before connecting. */
 export const fetchTicket = async (base: string, token: string): Promise<string> => {
   const response = await post(base, "/api/v1/auth/ws-ticket", {}, token);
   expect(response.status).toBe(200);
@@ -496,14 +500,14 @@ export const fetchTicket = async (base: string, token: string): Promise<string> 
 };
 
 /**
- * Waits out the window record changes are collected in, so what a subscription
- * opened after this sees is caused by what the test does next and not by
- * whatever the boot or the setup left in flight.
+ * Waits for the window in which record changes are collected to pass. So what
+ * a subscription opened afterwards receives is caused by the test's next
+ * steps, not by anything the boot or the setup left in flight.
  */
 export const waitForLiveToSettle = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 2 * COALESCE_WINDOW_MS));
 
-/** Waits up to `ms` for something to become true, and answers whether it did. */
+/** Waits up to `ms` for `ready` to return true, and returns whether it did. */
 export const waitWithin = async (ms: number, ready: () => boolean): Promise<boolean> => {
   const deadline = Date.now() + ms;
   while (!ready() && Date.now() < deadline) {
@@ -513,10 +517,10 @@ export const waitWithin = async (ms: number, ready: () => boolean): Promise<bool
 };
 
 /**
- * Asserts the controller holds exactly this many subscriptions to a topic,
- * giving it time to get there. A subscription is taken out and torn down
- * asynchronously, so a count read in the same turn as the call would be
- * measuring the race rather than the behaviour.
+ * Asserts that the controller holds exactly this many subscriptions to a
+ * topic, waiting for the count to settle. Subscriptions open and close
+ * asynchronously, so reading the count right after the call would test the
+ * timing, not the behaviour.
  */
 export const expectHeld = async (
   reader: LiveReader,
@@ -531,16 +535,16 @@ export const expectHeld = async (
   expect(seen, topic).toBe(expected);
 };
 
-/** What one subscription has pushed so far, collected as it arrives. */
+/** The messages one subscription has received so far, collected as they arrive. */
 export interface Collected {
   readonly received: ReadonlyArray<LiveMessage>;
   readonly fiber: Fiber.Fiber<void, unknown>;
 }
 
 /**
- * Holds a subscription open and keeps everything it pushes, in order. The
- * assertions are made against the array afterwards, so a test says what the
- * subscriber ended up seeing rather than when each frame landed.
+ * Holds a subscription open and keeps every message it receives, in order.
+ * The test asserts on the array afterwards, so it checks what the subscriber
+ * received rather than when each frame arrived.
  */
 export const collectMessages = (
   client: LiveClient,

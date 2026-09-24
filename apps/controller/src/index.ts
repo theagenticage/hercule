@@ -1,16 +1,22 @@
 /**
  * The controller role: the always-on brain behind `hercule serve`.
  *
- * Boot (`./bootstrap.ts`), say where things are, bind, and stay up until the
- * unit is stopped. SIGINT and SIGTERM both mean the same thing: stop accepting,
- * let the requests already in flight finish, close the database, exit 0. A
- * connection that is meant to stay open, such as a client watching a Live
- * Topic, would hold that drain for ever, so the drain has a deadline and says
- * when it reaches one.
+ * Boots (`./bootstrap.ts`), prints where things are, starts listening, and
+ * stays up until the service is stopped. SIGINT and SIGTERM both mean the same
+ * thing:
  *
- * The listener forks what runs on its own beside it - the controller daemon's
- * drivers and the provider probes - so a scheduler still to come adds a step
- * there rather than changing this shape.
+ * - stop accepting connections;
+ * - let the requests already in flight finish;
+ * - close the database;
+ * - exit with code 0.
+ *
+ * A connection that is meant to stay open, such as a client watching a Live
+ * Topic, would keep that drain waiting for ever, so the drain has a deadline
+ * and prints a message when it reaches it.
+ *
+ * The listener forks the work that runs in the background beside it (the
+ * controller daemon's drivers and the provider probes), so a future scheduler
+ * adds a step there rather than changing this structure.
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
@@ -26,10 +32,11 @@ export { boot, bootWith, hashToken, buildSetupUrl } from "./bootstrap";
 export type { BootError, BootOptions, BootOutcome, ControllerServices } from "./bootstrap";
 
 /**
- * One clear line per failure, on stderr. No stack, no Effect internals.
+ * Returns one clear line describing a boot failure, for stderr. No stack, no
+ * Effect internals.
  *
- * Exported so the wording is testable on its own: it is the only thing a
- * failing `hercule serve` ever shows.
+ * Exported so the wording can be tested on its own: it is the only thing a
+ * failing `hercule serve` ever prints.
  */
 export function explain(error: BootError): string {
   switch (error._tag) {
@@ -45,11 +52,11 @@ export function explain(error: BootError): string {
 }
 
 /**
- * What the operator reads once the controller is up.
+ * Prints what the operator needs to know once the controller is up.
  *
- * The setup URL is a URL only where there is a web app to open it in. A build
- * that embeds none serves the API alone, so the same address would answer 404;
- * what that operator needs is the command that builds one.
+ * The setup URL is only useful when there is a web app to open it in. A build
+ * that embeds no web app serves only the API, so the same address would return
+ * 404; that operator needs the command that builds the web app instead.
  */
 export function report(outcome: BootOutcome, webApp: boolean): void {
   const { paths, setupUrl } = outcome;
@@ -68,34 +75,34 @@ export function report(outcome: BootOutcome, webApp: boolean): void {
   console.log(`It is also in ${paths.setupUrlFile}, and \`hercule setup-url\` prints it.`);
 }
 
-/** What a second signal during the drain prints, instead of killing the process. */
+/** The message a second signal during the drain prints, instead of killing the process. */
 export const STILL_STOPPING = "Still stopping Hercule; the requests in flight are finishing.";
 
-/** What the drain prints when it gives up waiting for the connections still open. */
+/** The message the drain prints when it stops waiting for the connections still open. */
 export const STILL_OPEN = "Connections were still open; Hercule stopped anyway.";
 
 /**
  * How long the drain waits before the process stops regardless.
  *
- * A client watching a Live Topic holds its socket open for as long as its tab
- * is, and the listener's drain waits for every open connection, so a controller
- * anybody is watching would otherwise never finish stopping. Cutting it short
- * costs nothing that was not already lost: every committed write is durable
- * before the signal arrives, and a request in flight has these ten seconds to
- * answer.
+ * A client watching a Live Topic keeps its socket open for as long as its tab
+ * is open, and the listener's drain waits for every open connection, so a
+ * controller anybody is watching would otherwise never finish stopping.
+ * Stopping early loses nothing: every committed write is already durable, and
+ * a request in flight has these ten seconds to finish.
  */
 const DRAIN_DEADLINE_MS = 10_000;
 
 /**
- * The stop request, as something the boot can wait on.
+ * Installs the SIGINT and SIGTERM handlers, and returns an effect that
+ * completes when the first of those signals arrives.
  *
- * Both signals mean the same thing, and the handlers stay installed for the
- * whole shutdown - `process.on`, not `process.once`, and they come off only
+ * Both signals mean the same thing. The handlers stay installed for the whole
+ * shutdown: they use `process.on`, not `process.once`, and are removed only
  * when the scope that installed them closes, which is after the listener has
- * drained and the database is closed. A second SIGTERM would otherwise reach
- * Bun's default disposition and kill the process mid-drain, dropping the
+ * drained and the database is closed. Otherwise a second SIGTERM would reach
+ * Bun's default handler and kill the process during the drain, dropping the
  * requests in flight and leaving a dirty write-ahead log behind. Every signal
- * after the first says so and is ignored.
+ * after the first prints a message and is otherwise ignored.
  *
  * Scoped, so a test can run this more than once in one process.
  */
@@ -130,9 +137,10 @@ export const untilStopped: Effect.Effect<
 ).pipe(Effect.map(({ stopped }) => stopped.await));
 
 /**
- * Everything after the boot: bind, report, and hold the listener open until the
- * process is asked to stop. The scope closes on the way out, which stops the
- * server and, once this returns, closes the database.
+ * Runs everything after the boot: starts listening, prints the report, and
+ * keeps the listener open until the process is asked to stop. The scope closes
+ * on the way out, which stops the server; the database closes after this
+ * returns.
  */
 const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
   Effect.gen(function* () {
@@ -147,22 +155,22 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
 
     yield* stopped;
     console.log("Stopping Hercule.");
-    // Before the listener goes: the child says goodbye over the socket it holds
-    // with this controller, and a controller that had already stopped listening
-    // would read that departure as a machine that vanished.
+    // Before the listener stops: the local runner says goodbye over its socket
+    // to this controller, and a controller that had already stopped listening
+    // would treat that as a machine that disappeared.
     if (outcome.localRunner !== undefined) yield* outcome.localRunner.stop;
   }).pipe(
     Effect.provide(operationLayers),
-    // Where the report of a condition that cannot be evaluated goes. The
-    // list above leaves it to whoever assembles the controller, so a test can
-    // hand over a listener of its own.
+    // Where errors from conditions that cannot be evaluated are reported.
+    // `operationLayers` leaves this to whoever assembles the controller, so a
+    // test can provide its own listener.
     Effect.provide(EvaluationErrorNotifierLayer),
   );
 
 export async function run(argv: readonly string[]): Promise<void> {
-  // The signal handlers are installed outside the boot and come off only once
+  // The signal handlers are installed outside the boot and removed only once
   // the database is closed, so every signal that arrives during the shutdown
-  // still lands on Hercule rather than on Bun's default disposition.
+  // still reaches Hercule's handler rather than Bun's default one.
   const program = Effect.scoped(
     Effect.flatMap(untilStopped, (stopped) =>
       bootWith({ argv, env: process.env, localRunner: LOCAL_RUNNER }, (outcome) =>
@@ -185,7 +193,7 @@ export async function run(argv: readonly string[]): Promise<void> {
   );
 
   const outcome = await Effect.runPromise(program.pipe(Effect.result)).catch((defect: unknown) => {
-    // A defect is a bug, not a boot failure; it still has to read as one line.
+    // A defect is a bug, not a boot failure, but it is still printed as one line.
     console.error(`hercule: ${String(defect)}`);
     process.exitCode = 1;
     return undefined;

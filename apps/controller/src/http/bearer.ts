@@ -1,11 +1,11 @@
 /**
- * Reading a bearer credential off a request, for the routes that are not
- * derived from the contract's HttpApi declaration and so get none of its
- * security handling: the join exchange and the runner socket.
+ * Reads a bearer token from a request. Used by the routes that are not derived
+ * from the contract's HttpApi declaration, and so get none of its security
+ * handling: the join exchange and the runner socket.
  */
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
-/** The bearer token a request presents, or nothing when it presents none. */
+/** Returns the request's bearer token, or `undefined` when it has none. */
 export const readBearerToken = (
   request: HttpServerRequest.HttpServerRequest,
 ): string | undefined => {

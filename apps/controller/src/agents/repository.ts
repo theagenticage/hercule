@@ -1,11 +1,11 @@
 /**
  * Agent rows. This module only reads and writes them. It decides no policy: who
- * may write, what a value means and whether a delete is allowed are the
- * service's questions.
+ * may write, what a value means and whether a delete is allowed are decided by
+ * the service.
  *
- * A listing is one walk: a keyset over `created_at` and the id, which the index
- * on `agents` serves. The permission profile narrows that walk; there is no
- * search, so a second walk is not necessary.
+ * A listing pages with a keyset over `created_at` and the id, which the index
+ * on `agents` serves. The permission profile filters the listing. There is no
+ * search, so no second paging strategy is needed.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -26,10 +26,13 @@ import {
   type Page,
 } from "../db";
 
-/** An agent as it is stored; `unenforced` is derived at read and is not here. */
+/** An agent as it is stored. `unenforced` is computed on every read and is not stored. */
 export interface StoredAgent {
   readonly id: string;
-  /** The provider behind its instance, read for what that provider will not enforce; `null` once the instance is gone. */
+  /**
+   * The provider behind its instance, used to work out what that provider will
+   * not enforce; `null` once the instance is gone.
+   */
   readonly providerId: string | null;
   readonly name: string;
   readonly systemPrompt: string;
@@ -43,23 +46,23 @@ export interface StoredAgent {
 }
 
 /**
- * Everything a new agent row holds. Derived from the stored agent so the two
- * cannot drift: the id and the two timestamps are written here rather than
- * given, and the provider is known because the instance was just read.
+ * The fields of a new agent row. Derived from the stored agent so the two
+ * cannot drift apart: the repository generates the id and sets both
+ * timestamps, and the provider is known because the instance was just read.
  */
 export interface NewAgent extends Omit<
   StoredAgent,
   "id" | "providerId" | "createdAt" | "updatedAt"
 > {
   readonly providerId: string;
-  /** The instant the row is created; it is its `createdAt` and its `updatedAt`. */
+  /** The time the row is created, used as both its `createdAt` and its `updatedAt`. */
   readonly at: string;
 }
 
 /**
  * The columns an edit may set. An absent column is left as it was. Derived from
- * the stored agent for the same reason: a column added there is a column an
- * edit may set, unless it is the id, the provider or a timestamp.
+ * the stored agent for the same reason: a column added there becomes a column
+ * an edit may set, unless it is the id, the provider or a timestamp.
  */
 export type AgentEdit = Partial<Omit<StoredAgent, "id" | "providerId" | "createdAt" | "updatedAt">>;
 
@@ -88,8 +91,8 @@ interface AgentRow {
 const COLUMNS =
   "id, name, system_prompt, instance_id, permission_profile_id, access_mode, " +
   "model_selection, disallowed_tools, created_at, updated_at, " +
-  // Which provider is behind the instance, which is what says whether that
-  // provider will act on the tool families below.
+  // The provider behind the instance, which determines whether the agent's
+  // disallowed tools are enforced.
   "(SELECT provider_id FROM provider_instances WHERE id = agents.instance_id) AS provider_id";
 
 const toAgent = (row: AgentRow): StoredAgent => ({

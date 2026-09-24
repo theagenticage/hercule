@@ -1,9 +1,9 @@
 /**
- * The rows behind a session's inputs. Session-owned state, so it lives beside
- * the session's own repository rather than in a domain of its own.
+ * The repository for a session's inputs. Inputs belong to a session, so this
+ * lives beside the session repository rather than in a domain of its own.
  *
- * Nothing here decides whether an input is sent or held: that is the service's,
- * and the queue is only ever "the rows still `queued`".
+ * Nothing here decides whether an input is sent or held; the service does.
+ * The queue is simply the rows whose status is still `queued`.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -34,9 +34,9 @@ export interface StoredInput {
   readonly delivery: Delivery | null;
   readonly createdAt: string;
   readonly deliveredAt: string | null;
-  /** Set while the row is out on the wire and unanswered; null otherwise. */
+  /** Set while the input has been sent to the runner and not yet answered; null otherwise. */
   readonly sentAt: string | null;
-  /** Why a delivery did not go through, on a row still queued or ended by one; null otherwise. */
+  /** Why a delivery failed, on a row still queued or cancelled because of it; null otherwise. */
   readonly reason: string | null;
 }
 
@@ -47,20 +47,20 @@ export interface NewInput {
   readonly text: string;
   readonly at: string;
   /**
-   * Set to claim the row inside this same insert, for an input reaching an
-   * idle session: there is no separate claim to lose a race to, because
-   * nothing else can see the row before this transaction commits.
+   * Set to claim the row in the same insert, for an input sent to an idle
+   * session. No separate claim can lose a race, because nothing else can see
+   * the row before this transaction commits.
    */
   readonly sentAt?: string;
 }
 
-/** A wake-up that was sent, never acknowledged, and cannot be written again. */
+/** A wake-up that was sent, never acknowledged, and cannot be stored again. */
 export interface LostWakeUp {
   readonly subscriptionId: string;
   readonly eventId: number;
 }
 
-/** An input a subscription's match produced, and the two things it came from. */
+/** An input created by a subscription match, with the subscription and event it came from. */
 export interface NewMatchedInput {
   readonly sessionId: string;
   readonly subscriptionId: string;
@@ -110,9 +110,9 @@ const toInput = (row: InputRow): StoredInput => ({
 });
 
 /**
- * The walk is per session, so the session is part of the scope the cursor
- * belongs to: without it one session's cursor would silently hide rows on
- * another's list.
+ * Builds the cursor scope for one session's input list. The list is per
+ * session, so the session id is part of the scope. Without it, a cursor from
+ * one session's list would silently skip rows on another session's list.
  */
 const buildCursorScope = (sessionId: string, direction: SortDirection): CursorScope => ({
   op: "input.query",
@@ -149,14 +149,14 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Stores the input one match produced, or nothing where the same
-     * subscription and event already have a row.
+     * Stores the input created by one match. Returns `none` and writes nothing
+     * when the same subscription and event already have a row.
      *
-     * A consumer of the event log that committed its rows and stopped before
-     * it recorded how far it had read reads those events again, so the unique
-     * pair - not the caller - is what keeps one fact to one matched input. The row
-     * is never claimed inside the insert: the session is told about it only
-     * after the write is durable.
+     * An event log consumer that committed its rows but stopped before saving
+     * how far it had read will read those events again. So the unique
+     * (subscription, event) pair, not the caller, guarantees one input per
+     * match. The row is never claimed in the insert: the input is sent to the
+     * session only after the write is durable.
      */
     insertMatched: (input: NewMatchedInput): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.gen(function* () {
@@ -188,9 +188,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Ends every row still waiting for one subscription, with the reason the
-     * subscription itself ended, and answers the sessions whose rows moved. A
-     * row on the wire is left alone, for the reason `cancelQueued` gives.
+     * Cancels every input from one subscription that is still waiting, with
+     * the reason the subscription ended. Returns the ids of the sessions whose
+     * inputs were cancelled. An input already sent is left alone, for the
+     * reason given on `cancelQueued`.
      */
     cancelQueuedForSubscription: (
       subscriptionId: string,
@@ -207,17 +208,20 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The sessions holding a queued input that has not gone out yet, whatever
-     * wrote it. The rows say what is owed, so nothing has to be remembered
-     * across a restart: a row a controller stopped on between the commit and
-     * the send, and a row whose session went idle without the controller
-     * seeing the transition, are both picked up by the next caller. Who wrote
-     * the row makes no difference to that, so a person's typed input is
-     * answered here as well as a match's.
+     * Returns the ids of the sessions that have a queued input not yet sent,
+     * whoever created it. The rows record what still has to be sent, so
+     * nothing needs to be remembered across a restart. The next caller picks
+     * up both of these:
      *
-     * A session that already has a row on the wire is left out. The runner
-     * takes one input per turn boundary, so a second row sent before the turn
-     * the first one opened has started is a row the runner has to hold.
+     * - a row the controller stopped on between the commit and the send;
+     * - a row whose session went idle without the controller noticing.
+     *
+     * This holds for a person's typed input as well as for a match's.
+     *
+     * A session that already has an input sent and unanswered is left out.
+     * The runner takes one input per turn boundary, so a second input sent
+     * before the first one's turn has started would have to be held by the
+     * runner.
      */
     listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
@@ -234,12 +238,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Whether a row this session holds is out on the wire and unanswered.
+     * Checks whether this session has an input that was sent and not yet
+     * answered.
      *
-     * The runner takes one input per turn boundary. A second row sent before
-     * the turn the first row opened has started is a row the runner has to
-     * hold, so a caller with a row still out sends nothing more until the
-     * runner has reported what that row did.
+     * The runner takes one input per turn boundary. A second input sent before
+     * the first one's turn has started would have to be held by the runner, so
+     * a caller with an input still out sends nothing more until the runner
+     * reports what happened to it.
      */
     holdsInputOnTheWire: (sessionId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -252,7 +257,7 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Scoped by the session, so an id belonging to another one is simply not here. */
+    /** Returns one input of a session. An input id that belongs to another session returns `none`. */
     one: (sessionId: string, id: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
         sql<InputRow>`
@@ -288,7 +293,7 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** What a flush sends next: the oldest row still waiting, if any. */
+    /** Returns the oldest input still waiting to be sent, which is the next one a flush sends. */
     oldestWaiting: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
         sql<InputRow>`
@@ -300,12 +305,11 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Marks a row on the wire, the moment before its frame goes out to the
-     * machine, and hands back the row as this claim actually found it - never
-     * a snapshot taken before it, which a rewrite landing in between could
-     * have already changed. `none` when it was already on the wire, already
-     * answered, or already called off - the only outcome a second claimant
-     * racing the same row can get.
+     * Marks an input as sent, just before its frame goes out to the runner.
+     * Returns the row as the update found it, not a copy read earlier, which
+     * an edit in between could have changed. Returns `none` when the input was
+     * already sent, already answered, or already cancelled. A second caller
+     * racing to claim the same input always gets `none`.
      */
     claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.map(
@@ -318,8 +322,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Records what the runner said this input did. Only a row still `queued`
-     * moves: a caller may have cancelled it while the frame was in flight.
+     * Records the delivery the runner reported for this input. Only a row
+     * still `queued` changes, because a caller may have cancelled it while the
+     * frame was in flight.
      */
     delivered: (id: string, delivery: Delivery, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -329,9 +334,9 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Puts a row a delivery could not finish back to waiting, with the reason
-     * on it: the next transition to idle or a hand steer tries again, and the
-     * reason is what a caller sees until one of them does.
+     * Puts an input whose delivery failed back to waiting, and stores the
+     * reason. The next time the session goes idle, or a user steers by hand,
+     * the input is sent again. Until then, a caller sees the reason.
      */
     requeue: (id: string, reason: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -352,9 +357,9 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Ends a row whose session is gone by the time an answer for it arrives:
-     * nothing waits on a harness that has exited, and the reason is kept so a
-     * caller reading the row's history can see why it never went through.
+     * Cancels an input whose session exited before the runner answered for it.
+     * Nothing waits on a harness that has exited. The reason is stored so a
+     * caller reading the input later can see why it was never delivered.
      */
     cancelWithReason: (id: string, reason: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -363,9 +368,9 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Nothing waits on a harness that is gone. A row on the wire is left
-     * alone: the machine has its text, and recording it as called off would
-     * be the one thing this store must never say.
+     * Cancels every input of a session that is still waiting, because nothing
+     * waits on a harness that has exited. An input already sent is left alone:
+     * the runner has its text, so recording it as cancelled would be wrong.
      */
     cancelQueued: (sessionId: string, reason?: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -374,14 +379,15 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Ends every row a restart caught on the wire: whether the harness took it
-     * before the connection dropped is unknown, so it is neither delivered nor
-     * resent - resending risks the message reaching the harness twice.
+     * Cancels every input that was sent but unanswered when the controller
+     * restarted. Nobody knows whether the harness received it before the
+     * connection dropped, so it is neither marked delivered nor sent again:
+     * sending it again could deliver the message twice.
      *
-     * It answers the wake-ups that ended with those rows. A row a match wrote
-     * names the subscription and the event it came from, and the pair can
-     * never be written again, so the caller has to be able to say on which
-     * subscription a wake-up was lost.
+     * Returns the wake-ups lost with those inputs. An input created by a match
+     * stores the subscription and event it came from, and that pair can never
+     * be stored again, so the caller needs to know which subscription lost a
+     * wake-up.
      */
     cancelStranded: (reason: string): Effect.Effect<ReadonlyArray<LostWakeUp>, SqlError> =>
       Effect.map(

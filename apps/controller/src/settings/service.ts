@@ -1,13 +1,14 @@
 /**
- * `settings.read` and `settings.update`.
+ * The operations `settings.read` and `settings.update`.
  *
- * Two scopes, one closed key set each, declared once in the contract. A key
- * that is not set is absent from the answer rather than defaulted: the default
- * lives with whoever reads the key, so nothing here has to know what one is.
+ * There are two scopes, each with a fixed set of keys declared once in the
+ * contract. A key that is not set is absent from the response rather than
+ * given a default: the default lives in the code that reads the key, so
+ * nothing here needs to know it.
  *
- * An unknown key is refused by the payload schema before this runs
- * (`closedStruct` in the contract says how), which is why a patch that reaches
- * this method holds only keys the store declares.
+ * The payload schema rejects an unknown key before `update` runs (see
+ * `closedStruct` in the contract), so a patch that reaches `update` holds only
+ * declared keys.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -29,16 +30,16 @@ import { withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError, type TypedScope } from "./repository";
 
-/** One key a patch writes, named by its scope: what the audit entry records. */
+/** One key a patch writes, with its scope. The audit entry records a list of these. */
 interface WrittenKey {
   readonly scope: TypedScope;
   readonly key: string;
 }
 
-/** The one key whose value names another record, which has to be the right one. */
+/** The only key whose value is the id of another record, so it must be checked. */
 const THREAD_GITHUB = "thread.githubConnectionId";
 
-const NOT_GITHUB = "that connection is not a github one";
+const NOT_GITHUB = "that connection is not a GitHub connection";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -47,9 +48,11 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
 
   /**
-   * A thread with no checkout of its own pushes as this account, so a key
-   * naming something that is not a GitHub connection would be a setting that
-   * can only fail later, on a machine.
+   * Checks that `thread.githubConnectionId`, when the patch sets it, is the id
+   * of a GitHub connection. Fails with a validation error otherwise.
+   *
+   * A thread with no checkout of its own pushes as this account, so any other
+   * id would be a setting that only fails later, on a runner.
    */
   const validateGithubConnection = (
     patch: SettingsPatch,
@@ -71,10 +74,11 @@ const make = Effect.gen(function* () {
     Effect.all({ controller: settings.all(), user: settings.allForUser(userId) });
 
   /**
-   * Writes one key of a patch. The value came through the key's own schema at
-   * the transport, and the store re-encodes it through the same declaration, so
-   * the casts are a shape TypeScript cannot follow across an iteration rather
-   * than a claim about the value.
+   * `settings.set` and `settings.setForUser`, with the key typed as a plain
+   * string. The transport already decoded each value with its key's schema,
+   * and the store encodes it again with the same schema. So the casts only
+   * work around types that TypeScript cannot follow through a loop over keys;
+   * they do not skip any check of the value.
    */
   const setController = settings.set as (
     key: string,
@@ -102,23 +106,22 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    /** Everything that is set: the controller's settings, and the caller's own. */
+    /** Returns every setting that is set: the controller's settings and the caller's own. */
     read: (): Effect.Effect<SettingsState, Unauthenticated | Forbidden | SettingError | SqlError> =>
       Effect.flatMap(requireUserActor("settings.read"), (actor) => readSettingsState(actor.userId)),
 
     /**
-     * Writes the keys the patch names and leaves every other key alone, then
-     * answers with the whole state: one call is enough to write and to see what
-     * the store now holds.
+     * Writes the keys in the patch and leaves every other key unchanged, then
+     * returns all settings, so one call both writes and shows the result.
      *
-     * The audit entry names the keys and not their values. A setting is not a
-     * secret, but the event log is read by the Intake views and kept for at
-     * least 90 days, and what a reader needs from it is that these keys changed
-     * and who changed them.
+     * The audit entry lists the keys but not their values. A setting is not a
+     * secret, but the Intake views read the event log and it is kept for at
+     * least 90 days, and a reader only needs to know which keys changed and who
+     * changed them.
      *
-     * A patch that names no key is `validation`. It would otherwise answer 200
-     * and write an audit row recording a change that did not happen, and the
-     * operation that reads the state without writing is `settings.read`.
+     * A patch with no key fails with a validation error. Otherwise it would
+     * succeed and write an audit entry for a change that did not happen. To
+     * read the settings without writing, use `settings.read`.
      */
     update: (
       patch: SettingsPatch,
@@ -139,8 +142,9 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Inside the transaction that writes: a connection deleted between
-            // the check and the write would leave a setting naming nothing.
+            // Check inside the transaction that writes: a connection deleted
+            // between the check and the write would leave the setting pointing
+            // at nothing.
             yield* validateGithubConnection(patch);
             const written = [
               ...(patch.controller === undefined

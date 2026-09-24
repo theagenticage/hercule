@@ -1,18 +1,21 @@
 /**
- * The `connection.*` operations: one external account, as the user set it up.
+ * The `connection.*` operations. A connection is one external account, as the
+ * user set it up.
  *
- * A connection is core-owned and its type is a plugin contribution, so every
- * write here asks the type two things the core cannot answer itself - whether a
- * config is one it accepts, and whether these credentials work and which
- * account they name.
+ * The core owns the connection and a plugin provides its type, so every write
+ * here asks the type two questions the core cannot answer itself:
  *
- * `validate` is a call to the external service. It runs before the transaction
- * and never inside one: a write that waits on the network holds the database
- * for as long as GitHub takes to answer. The cost is that a connection is
- * written only after the account is known, which is what the record says.
+ * - is this config valid for the type?
+ * - do these credentials work, and which account do they belong to?
  *
- * Credentials go into the one secrets table under owner `connection/<id>`. What
- * comes back out is references: a name and, once it has been replaced, when.
+ * `validate` calls the external service. It runs before the transaction and
+ * never inside one: a transaction that waited on the network would hold the
+ * database for as long as the service takes to respond. As a result, a
+ * connection is written only once its account is known.
+ *
+ * Credentials are stored in the secrets table under the owner
+ * `connection/<id>`. The API returns only references to them: each name, and
+ * when the value was last replaced.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -73,7 +76,7 @@ import {
 import { ConnectionTypes, type RegisteredConnectionType } from "./runtime";
 import { oauthSetupRepository } from "./setups";
 
-/** What listing takes: which connections, how many, in what order. */
+/** The input of `connection.query`: filters, page size and sort order. */
 const QueryInput = Schema.Struct({
   type: Schema.optionalKey(Schema.String),
   status: Schema.optionalKey(ConnectionStatus),
@@ -106,7 +109,7 @@ export interface ConnectionPage {
   readonly nextCursor?: string;
 }
 
-/** Oldest first: the Connections screen reads as the list the user built up. */
+/** Oldest first, so the Connections screen lists connections in the order the user added them. */
 const DEFAULT_SORT: { field: ConnectionSortField; direction: SortDirection } = {
   field: "createdAt",
   direction: "asc",
@@ -115,12 +118,12 @@ const DEFAULT_SORT: { field: ConnectionSortField; direction: SortDirection } = {
 const NO_SUCH_CONNECTION = "no such connection";
 
 const NAMED_BY_RESOURCE =
-  "a resource still acts through that connection; point it elsewhere before removing it";
+  "a resource still acts through this connection; point the resource at another connection before deleting this one";
 
-/** A type as the host registered it: the catalog half, plus its `validate`. */
+/** A connection type as the host registered it: the catalog entry, plus its `validate` function. */
 type Contribution = RegisteredConnectionType["contribution"];
 
-/** The credential fields a type declares, which is what a setup asks for. */
+/** Returns the names of the credential fields a type's setup asks for. */
 const listCredentialFields = (contribution: Contribution): ReadonlyArray<string> =>
   contribution.setup.flatMap((step) =>
     step.kind === "credentials" ? step.fields.map((field) => field.name) : [],
@@ -131,7 +134,7 @@ const isOAuthFlow = (contribution: Contribution): boolean =>
 
 const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
 
-/** A flow that ended before it made a connection, carrying what to say about it. */
+/** Fails an OAuth callback with the outcome to show the user. */
 const failWithOutcome = (outcome: Outcome): Effect.Effect<never, Outcome> => Effect.fail(outcome);
 
 const make = Effect.gen(function* () {
@@ -145,7 +148,7 @@ const make = Effect.gen(function* () {
 
   const buildSecretOwner = (id: string): SecretOwner => ({ kind: "connection", id });
 
-  /** The type a request names, or the `validation` a caller can act on. */
+  /** Returns the registered connection type with this name, or fails with `validation`. */
   const readTypeOrFail = (type: string): Effect.Effect<RegisteredConnectionType, Validation> =>
     Effect.flatMap(
       types.named(type),
@@ -161,9 +164,10 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * The type a stored connection names. A row's type was registered when the
-   * row was written, so a build that no longer defines it is the build's to fix
-   * and nothing the caller can correct by sending something else.
+   * Returns the registered type of a stored connection. Fails with
+   * `invalid_state` when no plugin in this build defines the type: it was
+   * registered when the row was written, so the build has changed, and the
+   * caller cannot fix that by sending a different request.
    */
   const readStoredTypeOrFail = (
     row: StoredConnection,
@@ -182,9 +186,9 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * The type's own verdict on a config. A type that declared no schema takes
-   * the empty config and nothing else: anything put in it would be config
-   * nothing ever reads.
+   * Validates a config against the type's config schema, and fails with
+   * `validation` when it does not match. A type with no config schema accepts
+   * only the empty config, because nothing would ever read any other value.
    */
   const readConfig = (
     contribution: Contribution,
@@ -213,8 +217,9 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Exactly the fields the type declared, and nothing else: a name it does not
-   * know would be stored as a secret nothing ever reads back.
+   * Checks that the credentials have exactly the fields the type declares, and
+   * returns them. Fails with `validation` for a missing field or an unknown
+   * one: an unknown field would be stored as a secret that nothing ever reads.
    */
   const readCredentials = (
     contribution: Contribution,
@@ -238,10 +243,11 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Asks the type whether these credentials work. A refusal is shown at the
-   * first credential field: it is about the credentials as a whole, and a form
-   * needs somewhere to put the message. A type with no field to put it under -
-   * a redirect flow - is refused at the group itself.
+   * Asks the type whether these credentials work, and returns the account's
+   * display name. When they do not work, fails with `validation` at the first
+   * credential field: the error is about the credentials as a whole, but a form
+   * needs a field to show the message under. A type with no credential fields,
+   * such as an OAuth type, gets the error at `credentials` itself.
    */
   const validateCredentials = (
     contribution: Contribution,
@@ -263,7 +269,7 @@ const make = Effect.gen(function* () {
       },
     );
 
-  /** A connection as the wire sees it: the row, plus what it owns in `secrets`. */
+  /** Builds a connection as the API returns it: the row, plus references to its secrets. */
   const buildConnectionRecord = (
     row: StoredConnection,
     refs: ReadonlyArray<SecretNameRef>,
@@ -304,9 +310,9 @@ const make = Effect.gen(function* () {
     Effect.flatMap(readStoredConnectionOrFail(id), readConnectionRecord);
 
   /**
-   * Writes each pasted value under the connection's own owner scope. A field
-   * name is the plugin's own and a connection id is a UUID, so neither can hold
-   * the separator the secrets repository refuses.
+   * Stores each credential value as a secret owned by the connection. Field
+   * names were checked for the `|` separator when the plugin declared them, and
+   * a connection id is a UUID, so the secrets repository never rejects them.
    */
   const writeSecrets = (
     id: string,
@@ -319,9 +325,9 @@ const make = Effect.gen(function* () {
     ).pipe(Effect.catchTag("SecretNameError", Effect.die));
 
   /**
-   * The callback, as far as it gets. Every way it can end short of a connection
-   * is a typed failure carrying the word the user is told, so the path through
-   * here reads as the one thing that has to happen.
+   * Handles the OAuth callback, and returns `ok` once the connection is
+   * written. Every way the flow can end early is a failure carrying the outcome
+   * to show the user, so the code below reads as the successful path.
    */
   const finishOAuthCallback = (query: unknown): Effect.Effect<Outcome, Outcome> =>
     Effect.gen(function* () {
@@ -330,13 +336,13 @@ const make = Effect.gen(function* () {
       );
       if (params.state === undefined) return yield* failWithOutcome("expired");
       const at = yield* nowIso;
-      // Spent in its own transaction, before anything waits on the provider: a
-      // state presented twice must find nothing the second time.
+      // Consume the setup in its own transaction, before anything waits on the
+      // provider, so a state presented twice finds nothing the second time.
       const pending = yield* Effect.orDie(withTransaction(sql, setups.consume(params.state, at)));
       if (Option.isNone(pending)) return yield* failWithOutcome("expired");
       const setup = pending.value;
-      // The provider sent the user back with a refusal instead of a code, or
-      // with neither: either way there is nothing here to spend.
+      // The provider sent the user back with an error instead of a code, or
+      // with neither: either way there is no code to exchange.
       if (params.error !== undefined || params.code === undefined) {
         return yield* failWithOutcome("denied");
       }
@@ -347,9 +353,9 @@ const make = Effect.gen(function* () {
         registered === undefined
           ? Option.none()
           : yield* Effect.orDie(findOAuthClient(registered.pluginId));
-      // A build that no longer declares the type, or a plugin whose credentials
-      // were cleared while the user was at the provider: the code cannot be
-      // spent in either, which is what the word says.
+      // The build no longer declares the type, or the plugin's client
+      // credentials were cleared while the user was at the provider. Either way
+      // the code cannot be exchanged.
       if (registered === undefined || oauth === undefined || Option.isNone(client)) {
         return yield* failWithOutcome("exchange-failed");
       }
@@ -377,11 +383,12 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const now = yield* nowIso;
-            // A reconnect keeps its id, so whatever points at this connection
-            // stays attached; only the account and the tokens are replaced.
+            // A reconnect keeps the connection's id, so anything that refers to
+            // it stays attached; only the account and the tokens are replaced.
             const reconnected = setup.connectionId;
-            // Deleted while the user was at the provider: read inside the
-            // transaction, so nothing is written under an id that is gone.
+            // The connection may have been deleted while the user was at the
+            // provider. Check inside the transaction, so nothing is written
+            // under an id that no longer exists.
             if (reconnected !== undefined && Option.isNone(yield* connections.one(reconnected))) {
               return false;
             }
@@ -410,8 +417,9 @@ const make = Effect.gen(function* () {
             yield* writeSecrets(id, credentials);
             yield* audit.append({
               kind: reconnected === undefined ? "connection.created" : "connection.credentialsSet",
-              // The setup was started by a request the user made; the browser
-              // simply carries it back, with no credential to present.
+              // The user started this setup with an authenticated request. The
+              // browser comes back without a credential, but the actor is still
+              // the user.
               actor: USER_ACTOR,
               payload: {
                 connectionId: id,
@@ -431,7 +439,7 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    /** One page of connections, narrowed by type and by status. */
+    /** Returns one page of connections, optionally filtered by type and by status. */
     query: (
       input: QueryInput,
     ): Effect.Effect<ConnectionPage, Unauthenticated | Forbidden | Validation | SqlError> =>
@@ -477,9 +485,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Sets up a connection from credentials the user pasted. An OAuth-flow type
-     * has no credentials to paste, so it is refused here and started through
-     * the OAuth route instead.
+     * Creates a connection from credentials the user pasted, once the type has
+     * validated them. Fails with `validation` for an OAuth type, which has no
+     * credentials to paste: that type is set up with `connection.startOAuth`.
      */
     create: (
       input: ConnectionCreateInput,
@@ -514,8 +522,8 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "connection.created",
               actor: yield* currentStamp,
-              // Names only: the log is read by the Intake views and kept for
-              // 90 days, and these names are what a value is stored under.
+              // Credential names only, never values: the Intake views read the
+              // audit log, and it is kept for 90 days.
               payload: {
                 connectionId: row.id,
                 pluginId,
@@ -530,7 +538,7 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** Changes what the user chose. The account and the status are not that. */
+    /** Updates what the user chose: the label, topics and config. Not the account or status. */
     update: (
       input: UpdateInput,
     ): Effect.Effect<
@@ -566,9 +574,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Replaces the credentials of a connection that is already there, which is
-     * what reconnecting one that needs reauthenticating does. The id is kept,
-     * so whatever points at this connection stays attached.
+     * Replaces the credentials of an existing connection. This is how the user
+     * reconnects a connection that needs reauthentication. The id stays the
+     * same, so anything that refers to the connection stays attached.
      */
     setCredentials: (
       input: CredentialsInput,
@@ -616,9 +624,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Starts a redirect flow: writes down everything the callback will need and
-     * answers where to send the browser. Nothing exists as a connection yet - a
-     * flow the user abandons leaves a row that the next start sweeps away.
+     * Starts an OAuth flow: stores everything the callback will need, and
+     * returns the authorization URL to send the browser to. No connection
+     * exists yet. A flow the user abandons leaves a setup row, which a later
+     * start deletes once it has expired.
      */
     startOAuth: (
       input: ConnectionOAuthStartInput,
@@ -632,11 +641,11 @@ const make = Effect.gen(function* () {
         const { pluginId, contribution } = yield* readTypeOrFail(decoded.type);
         const oauth = contribution.oauth;
         if (oauth === undefined) {
-          const message = `the type ${decoded.type} is not set up through a redirect flow`;
+          const message = `the type ${decoded.type} is not set up through an OAuth flow: create it with connection.create`;
           return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
-        // A reconnect keeps what the user already chose, so the start needs
-        // neither a label nor a topic to go with it.
+        // A reconnect keeps the label, topics and config the connection already
+        // has, so the start does not need them.
         const existing =
           decoded.connectionId === undefined
             ? undefined
@@ -646,15 +655,15 @@ const make = Effect.gen(function* () {
             createValidationError([{ path: ["connectionId"], message: NO_SUCH_CONNECTION }]),
           );
         }
-        // Reconnecting replaces one connection's tokens, so the flow has to be
-        // the one it was set up through: another type's tokens would be written
-        // under an account they say nothing about.
+        // A reconnect replaces the connection's tokens, so it must use the
+        // connection's own type: tokens from another type's provider would not
+        // belong to this connection's account.
         if (existing !== undefined && existing.type !== decoded.type) {
           return yield* Effect.fail(
             createValidationError([
               {
                 path: ["connectionId"],
-                message: `that connection is of the type ${existing.type}`,
+                message: `that connection has the type ${existing.type}, not ${decoded.type}`,
               },
             ]),
           );
@@ -674,7 +683,7 @@ const make = Effect.gen(function* () {
         if (Option.isNone(client)) {
           return yield* Effect.fail(
             createInvalidStateError(
-              `the plugin ${pluginId} holds no OAuth client credentials: set its clientId ` +
+              `the plugin ${pluginId} has no OAuth client credentials: set its clientId ` +
                 `config field and its clientSecret secret before connecting`,
             ),
           );
@@ -712,13 +721,13 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Finishes the flow the browser came back from, and answers where to send
-     * it. Everything it can say is one of five words: the provider's own error
-     * text is not the user's to read off a URL.
+     * Finishes the OAuth flow the browser came back from, and returns the path
+     * to redirect the browser to. The path carries one of the five `Outcome`
+     * words, never the provider's own error text.
      *
-     * The exchange and the type's `validate` are calls to the provider, so they
-     * run outside the transaction; the pending row is spent before either, so a
-     * code presented twice buys nothing the second time.
+     * The code exchange and the type's `validate` call the provider, so they run
+     * outside any transaction. The setup row is deleted before either runs, so a
+     * state presented twice does nothing the second time.
      */
     completeOAuth: (query: unknown): Effect.Effect<string> =>
       Effect.map(
@@ -727,9 +736,10 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Removes the connection and every secret it owned, in one transaction.
-     * A connection a resource still acts through is refused: taking it away
-     * would leave that repo with a credential that no longer exists.
+     * Deletes the connection and every secret it owns, in one transaction.
+     * Fails with `invalid_state` while a resource still acts through the
+     * connection, because deleting it would leave that resource with
+     * credentials that no longer exist.
      */
     delete: (
       input: Identified,
@@ -744,9 +754,9 @@ const make = Effect.gen(function* () {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Inside the transaction that deletes: a resource pointed at this
-            // connection between the check and the delete would be left naming
-            // a connection that is gone.
+            // Check inside the delete's transaction. Otherwise a resource pointed
+            // at this connection between the check and the delete would refer to
+            // a connection that no longer exists.
             if (yield* connections.namedByResource(id)) {
               return yield* Effect.fail(createInvalidStateError(NAMED_BY_RESOURCE));
             }

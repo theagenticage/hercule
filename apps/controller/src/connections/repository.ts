@@ -1,6 +1,7 @@
 /**
- * The `connections` table. Rows only: the credential references live in
- * `secrets` and are composed in by whoever hands a connection out.
+ * Reads and writes the `connections` table. It handles rows only: credentials
+ * live in the `secrets` table, and the caller that returns a connection adds
+ * their references.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -23,10 +24,10 @@ import {
   type PageRequest,
 } from "../db";
 
-/** One spelling of the shipped GitHub type, which the contract owns. */
+/** The type of the GitHub connection that ships with Hercule. The contract defines it. */
 export { GITHUB_CONNECTION_TYPE };
 
-/** Whether this connection is the GitHub account a repo may act through. */
+/** Checks whether this connection has the GitHub type, the type a repo resource acts through. */
 export const isGithubConnection = (connection: StoredConnection): boolean =>
   connection.type === GITHUB_CONNECTION_TYPE;
 
@@ -56,21 +57,21 @@ export interface NewConnection {
   readonly at: string;
 }
 
-/** The columns an edit may set. An absent one is left as it was. */
+/** The columns an update may set. An absent field is left unchanged. */
 export interface ConnectionEdit {
   readonly label?: string;
   readonly labels?: ReadonlyArray<string>;
   readonly config?: Record<string, Schema.Json>;
   readonly displayName?: string;
   readonly status?: ConnectionStatus;
-  /** `null` clears the detail, which is what going back to `connected` does. */
+  /** `null` clears the detail, as when the status goes back to `connected`. */
   readonly statusDetail?: string | null;
 }
 
-/** The column a keyset walk orders by. */
+/** The field a connection listing is sorted by. */
 export type ConnectionSortField = "createdAt" | "label";
 
-/** What a listing asks for: which connections, and the keyset parameters. */
+/** A listing request: the filters, the sort field and the paging parameters. */
 export interface ConnectionListRequest extends PageRequest {
   readonly type: string | undefined;
   readonly status: ConnectionStatus | undefined;
@@ -107,8 +108,9 @@ const buildCursorScope = (field: ConnectionSortField, direction: SortDirection):
 });
 
 /**
- * The JSON columns are written by this repository alone, so a column that does
- * not parse is a broken database rather than something a caller can act on.
+ * Parses a JSON column. Only this repository writes the JSON columns, so a
+ * column that does not parse means the database is broken, not an error a
+ * caller can act on.
  */
 const parseJson = <A>(text: string): A => JSON.parse(text) as A;
 
@@ -159,9 +161,9 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Whether a resource still acts through this connection, which is what
-     * makes a delete refusable. The question is asked here rather than of the
-     * resources domain so the two do not import each other.
+     * Checks whether any resource still acts through this connection. If one
+     * does, the connection cannot be deleted. The query is here rather than in
+     * the resources domain, so the two domains do not import each other.
      */
     namedByResource: (id: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -199,7 +201,7 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** Applies an edit. Only the columns the edit names are written. */
+    /** Applies an update and sets `updated_at`. Only the columns the update sets are written. */
     update: (id: string, edit: ConnectionEdit, at: string): Effect.Effect<void, SqlError> => {
       const sets = [sql`updated_at = ${at}`];
       if (edit.label !== undefined) sets.push(sql`label = ${edit.label}`);
@@ -217,7 +219,7 @@ const make = Effect.gen(function* () {
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM connections WHERE id = ${uuidFromString(id)}`),
 
-    /** Every connection one plugin owns, oldest first. The runtime surface's view. */
+    /** Lists every connection one plugin owns, oldest first, for its `ConnectionsRuntime`. */
     ofPlugin: (pluginId: string): Effect.Effect<ReadonlyArray<StoredConnection>, SqlError> =>
       Effect.map(
         sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
@@ -257,5 +259,5 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** Everything the connection service and the plugin host read and write. */
+/** The connection repository, used by the connection service, `./runtime` and other domains. */
 export const connectionRepository = make;

@@ -1,14 +1,17 @@
 /**
- * Judges a reported harness version against this build's floor. The floor is
- * the CLI version the compiled SDK was built against: both the least a machine
- * may run and the most anyone has tested. It moves only when the dependency
- * does, which is why the verdict is computed at read time rather than stored
- * with the snapshot.
+ * Compares a reported harness version against this build's floor. The floor is
+ * the CLI version the compiled SDK was built against: both the oldest version
+ * a runner may run and the newest anyone has tested. It changes only when the
+ * dependency does, which is why the verdict is computed at read time rather
+ * than stored with the snapshot.
  */
 import type { VersionVerdict } from "@hercule/contract";
 import { CLAUDE_CODE_VERSION, CODEX_VERSION, PI_VERSION } from "@hercule/home/version";
 
-/** The providers this build pins a version to. The rest are read but not judged. */
+/**
+ * The providers this build pins a version for. Other providers' versions are
+ * recorded but not compared.
+ */
 const FLOORS: ReadonlyMap<string, string> = new Map([
   ["claude-code", CLAUDE_CODE_VERSION],
   ["codex", CODEX_VERSION],
@@ -18,7 +21,11 @@ const FLOORS: ReadonlyMap<string, string> = new Map([
 export const findVersionFloor = (providerId: string): string | null =>
   FLOORS.get(providerId) ?? null;
 
-/** The leading numeric components, so 10 sorts after 9 rather than before it. */
+/**
+ * Parses the first three dot-separated components of a version as numbers, so
+ * 10 sorts after 9 rather than before it. Returns `undefined` if there are not
+ * three numeric components.
+ */
 const parseVersionParts = (version: string): ReadonlyArray<number> | undefined => {
   const parts = version.split(".", 3).map((part) => Number.parseInt(part, 10));
   return parts.length === 3 && parts.every(Number.isInteger) ? parts : undefined;
@@ -31,8 +38,8 @@ export const computeVersionVerdict = (
   if (harnessVersion === null || floor === null) return "unknown";
   const running = parseVersionParts(harnessVersion);
   const least = parseVersionParts(floor);
-  // An unparseable version on either side compares to nothing, same as none
-  // reported.
+  // A version that cannot be parsed, on either side, is treated the same as
+  // no version.
   if (running === undefined || least === undefined) return "unknown";
   for (const [index, part] of running.entries()) {
     const against = least[index]!;

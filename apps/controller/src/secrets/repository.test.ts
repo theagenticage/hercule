@@ -20,14 +20,14 @@ const TOKEN = "ghp_a-real-looking-token";
 
 let homes: Array<string> = [];
 
-/** A master key file in its own temporary home; a second home is a different key. */
+/** Builds a new temporary home with its own master key file, so each home has a different key. */
 const buildHomeLayer = (): Layer.Layer<HerculeHome> => {
   const home = mkdtempSync(join(tmpdir(), "hercule-secrets-"));
   homes.push(home);
   return Layer.succeed(HerculeHome, HerculeHome.of(buildHomePaths(home, join(home, "data"))));
 };
 
-/** The real repository over a `:memory:` database with the real migrations. */
+/** Builds the real repository over a `:memory:` database with the real migrations. */
 const buildStack = (home: Layer.Layer<HerculeHome> = buildHomeLayer()) =>
   secretsLayer.pipe(
     Layer.provide(masterKeyLayer("file").pipe(Layer.provide(home))),
@@ -44,10 +44,10 @@ const runExit = <A, E>(
   layer = buildStack(),
 ) => Effect.runPromiseExit(effect.pipe(Effect.provide(layer)));
 
-/** What a log line or a template literal would print for a value. */
+/** Returns what a log line or a template literal would print for a value. */
 const printValue = (value: { readonly toString: () => string }): string => value.toString();
 
-/** The typed error a failed exit carries, so a test asserts on the tag, not on prose. */
+/** Returns the typed error of a failed exit, so a test asserts on the tag, not the message. */
 const findFailure = <E>(exit: Exit.Exit<unknown, E>): E | undefined =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
 
@@ -153,7 +153,7 @@ describe("secrets", () => {
     expect(Redacted.value(Option.getOrThrow(theirs))).toBe("core");
   });
 
-  it("refuses a name that would make the associated data ambiguous, on write and on read", async () => {
+  it("rejects a name that would make the associated data ambiguous, on write and on read", async () => {
     const written = await runExit(
       Effect.flatMap(Secrets, (secrets) =>
         secrets.set(CONNECTION, "oauth|token", Redacted.make(TOKEN)),
@@ -167,7 +167,7 @@ describe("secrets", () => {
     expect(findFailure(read)?._tag).toBe("SecretNameError");
   });
 
-  it("fails to decrypt a row whose owner or name was edited behind its back", async () => {
+  it("fails to decrypt a row whose owner or name was edited directly in the database", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const secrets = yield* Secrets;

@@ -1,10 +1,12 @@
 /**
- * The runner the controller runs beside itself, so every Hercule is a fleet of at
- * least one without anybody enlisting a machine by hand.
+ * The local runner: a runner the controller starts as a child process, so
+ * every Hercule has a fleet of at least one runner without anybody joining a
+ * machine by hand.
  *
- * The child is a fleet member like any other: nothing records that it is local,
- * and all this module knows is what it said on stdout. Its token travels on
- * stdin, the one channel neither in `ps` nor inherited by what the child starts.
+ * The child is a fleet member like any other: nothing records that it is
+ * local, and this module knows only what it printed on stdout. Its join token
+ * is sent on stdin, the one channel that neither shows in `ps` nor is inherited
+ * by the processes the child starts.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -22,17 +24,19 @@ import { AuditLog } from "../events";
 import { JoinTokens } from "./join-tokens";
 
 /**
- * Spawn, never fork: a forked Hercule would share this process's database handle
- * and its signal handlers.
+ * The command that starts the local runner. It is spawned, never forked: a
+ * forked Hercule would share this process's database handle and signal
+ * handlers.
  */
 export const LOCAL_RUNNER_COMMAND: ReadonlyArray<string> = [process.execPath, "runner", "--local"];
 
-/** Bun's own marker for an entry script that lives inside a compiled binary. */
+/** The path prefix Bun uses for an entry script inside a compiled binary. */
 const EMBEDDED = "/$bunfs/";
 
 /**
- * For a Hercule that has not been compiled, whose executable is Bun rather than
- * Hercule. Without this, `hercule serve` from a checkout has no local runner.
+ * Builds the spawn command. When Hercule is not compiled, the executable is Bun
+ * rather than Hercule, so the entry script must be passed too. Without this,
+ * `hercule serve` from a checkout has no local runner.
  */
 const buildSpawnCommand = (): ReadonlyArray<string> =>
   Bun.main.startsWith(EMBEDDED)
@@ -44,22 +48,23 @@ export const LOCAL_RUNNER_BACKOFF = {
   cap: Duration.seconds(30),
 } as const;
 
-/** The listener's drain takes the same ten seconds, because it is the same shutdown. */
+/** How long a stop waits for the child. The server's drain also takes ten seconds, because it is the same shutdown. */
 export const LOCAL_RUNNER_STOP_DEADLINE: Duration.Duration = Duration.seconds(10);
 
 /**
- * Long enough for a cold start on a loaded machine, short enough that a wedged
- * child is not what the boot waits on: nothing binds until the handshake is over.
+ * How long the boot waits for the child's first line. Long enough for a cold
+ * start on a busy machine, short enough that a stuck child does not hold up the
+ * boot: the server does not listen until the handshake is over.
  */
 const HANDSHAKE_DEADLINE: Duration.Duration = Duration.seconds(30);
 
-/** How many deaths inside the window make a loop rather than a bad afternoon. */
+/** How many exits within `CRASH_LOOP_WINDOW` count as a crash loop rather than bad luck. */
 export const CRASH_LOOP_LIMIT = 3;
 
 export const CRASH_LOOP_WINDOW: Duration.Duration = Duration.minutes(5);
 
 export interface LocalRunnerOptions {
-  /** Injected: the shipped command is this binary, which under a test is the runner. */
+  /** Passed in, because the default command runs this binary, which under a test is the test runner. */
   readonly command: ReadonlyArray<string>;
   readonly backoff: { readonly first: Duration.Duration; readonly cap: Duration.Duration };
   readonly stopDeadline: Duration.Duration;
@@ -74,8 +79,9 @@ export const LOCAL_RUNNER: LocalRunnerOptions = {
 };
 
 /**
- * Optional: a controller providing none logs instead, and the durable record is
- * the audit row either way. Reaching a person belongs to notifications.
+ * An optional listener for crash-loop alerts. Without one, the controller logs
+ * a warning instead; the audit entry is written either way. Notifying a person
+ * is the notifications domain's job.
  */
 export interface RunnerAlertListener {
   readonly crashLooping: (
@@ -94,16 +100,21 @@ export class LocalRunnerFailed extends Schema.TaggedError<LocalRunnerFailed>()(
 ) {}
 
 export interface LocalRunner {
-  /** Held here and nowhere else: no column in the fleet says which member is local. */
+  /** Returns the local runner's id. It is kept only here: no column says which runner is local. */
   readonly runnerId: () => string | undefined;
-  /** Saying it twice changes nothing. */
+  /** Stops the local runner. Calling it twice has the same effect as once. */
   readonly stop: Effect.Effect<void>;
 }
 
 const decodeAnnouncement = Schema.decodeUnknownEffect(LocalAnnouncement);
 const encodeEnrolment = Schema.encodeUnknownSync(LocalEnrolment);
 
-/** Its own function because a supervisor on the wall clock cannot skip five minutes. */
+/**
+ * Creates a counter of child exits. `record` returns the number of exits in
+ * the window once it reaches `limit`, at most once per window, and `undefined`
+ * otherwise. It is a separate function so tests can pass their own times,
+ * because a supervisor on the real clock cannot skip five minutes.
+ */
 export const createCrashCounter = (
   limit: number,
   windowMs: number,
@@ -115,7 +126,7 @@ export const createCrashCounter = (
       deaths.push(at);
       while (deaths[0] !== undefined && at - deaths[0] > windowMs) deaths.shift();
       if (deaths.length < limit) return undefined;
-      // One story rather than one per death, and a passed window is a new story.
+      // Report once per window, not once per exit; after the window passes, a new report is allowed.
       if (reportedAt !== undefined && at - reportedAt <= windowMs) return undefined;
       reportedAt = at;
       return deaths.length;
@@ -124,8 +135,10 @@ export const createCrashCounter = (
 };
 
 /**
- * The pipe is read whether or not anyone wants a line off it: a child whose
- * stdout filled up would block on its next log line.
+ * Returns the child's first stdout line, or `undefined` if the output ends
+ * first. The rest of the output is copied to this process's stdout. The pipe
+ * is read to the end either way, because a child whose stdout buffer fills up
+ * would block on its next log line.
  */
 const readAnnouncement = (stdout: ReadableStream<Uint8Array>): Promise<string | undefined> => {
   let resolveAnnouncement: (line: string | undefined) => void = () => undefined;
@@ -151,8 +164,8 @@ const readAnnouncement = (stdout: ReadableStream<Uint8Array>): Promise<string | 
         process.stdout.write(head.slice(newline + 1));
       }
     } catch (cause) {
-      // A broken pipe is a child that is gone; waiting the handshake deadline
-      // out for it would hold the boot for half a minute.
+      // A broken pipe means the child is gone. Waiting for the handshake
+      // deadline would hold up the boot for half a minute.
       process.stderr.write(`hercule: the local runner's output ended: ${String(cause)}\n`);
     }
     if (!heard) resolveAnnouncement(undefined);
@@ -161,8 +174,10 @@ const readAnnouncement = (stdout: ReadableStream<Uint8Array>): Promise<string | 
 };
 
 /**
- * The first child is started here, so a handshake that cannot be completed stops
- * the boot rather than leaving a controller beside a child nothing understands.
+ * Starts the local runner and supervises it, restarting it when it exits.
+ * Fails with `LocalRunnerFailed` when the first child's announcement cannot be
+ * read. The first child is started here, so a failed handshake stops the boot
+ * rather than leaving the controller next to a child it cannot understand.
  */
 export const startLocalRunner = (
   options: LocalRunnerOptions,
@@ -181,8 +196,9 @@ export const startLocalRunner = (
     const loop = createCrashCounter(CRASH_LOOP_LIMIT, Duration.toMillis(CRASH_LOOP_WINDOW));
 
     /**
-     * The drain's deadline calls `process.exit`, which runs no finalizer, and an
-     * orphan would hold a credential and go on dialing nobody.
+     * Kills the child when the process exits. The drain's deadline calls
+     * `process.exit`, which runs no finalizer, and an orphaned child would keep
+     * its credential and keep trying to connect to a controller that is gone.
      */
     const killOrphan = (): void => {
       child?.kill("SIGKILL");
@@ -193,8 +209,9 @@ export const startLocalRunner = (
         stdin: "pipe",
         stdout: "pipe",
         stderr: "inherit",
-        // The controller's home is not always the default one. Never the token:
-        // everything this child starts would inherit it.
+        // The controller's home is not always the default one. The token is
+        // never put in the environment: every process the child starts would
+        // inherit it.
         env: { ...process.env, HERCULE_HOME: home },
       });
       child = spawned;
@@ -203,12 +220,12 @@ export const startLocalRunner = (
         Effect.promise(() => readAnnouncement(spawned.stdout)),
         Effect.as(Effect.sleep(options.handshakeDeadline), undefined),
       );
-      // A child that said nothing died, or is wedged saying nothing; killing it
-      // makes the two one death the supervisor answers. The boot goes on either
-      // way, rather than holding the whole API hostage to a runner.
+      // A child that printed nothing either died or is stuck. Killing it turns
+      // both cases into one exit, which the supervisor handles. The boot goes
+      // on either way, rather than making the whole API wait for a runner.
       if (line === undefined) {
         spawned.kill("SIGKILL");
-        yield* Effect.logWarning("The local runner started without saying who it is.");
+        yield* Effect.logWarning("The local runner started but did not print its announcement.");
         return spawned;
       }
       const said = yield* Effect.mapError(
@@ -218,11 +235,11 @@ export const startLocalRunner = (
         ),
         () =>
           new LocalRunnerFailed({
-            message: `the local runner opened with ${JSON.stringify(line)}, which is not something this build understands`,
+            message: `the local runner's first line was ${JSON.stringify(line)}, which this build cannot read`,
           }),
       );
 
-      // A write to a child that has gone is that child's death, not a failure here.
+      // A failed write means the child has exited, which the supervisor handles; it is not a failure here.
       const writeEnrolment = (enrolment?: string): Effect.Effect<void> =>
         Effect.ignore(
           Effect.tryPromise(async () => {
@@ -233,12 +250,12 @@ export const startLocalRunner = (
 
       if ("runnerId" in said) {
         announced = said.runnerId;
-        // A pipe left open is a child that goes on waiting for an enrolment.
+        // Close the pipe, or the child keeps waiting for an enrolment.
         yield* writeEnrolment();
         return spawned;
       }
-      // The token is good for one enlistment and for an hour, and this child is
-      // the only thing that ever sees it.
+      // The token is valid for one join and for an hour, and only this child
+      // ever sees it.
       const invitation = yield* joinTokens.create(yield* nowIso);
       yield* writeEnrolment(
         `${JSON.stringify(encodeEnrolment({ controllerUrl, token: invitation.token }))}\n`,
@@ -285,11 +302,12 @@ export const startLocalRunner = (
           if (stopping) return;
           held = yield* Effect.catchCause(start, (cause) =>
             Effect.gen(function* () {
-              // No more use than one that exited, and the boot is long past being
-              // able to hear about it.
+              // A child that failed to start is no more useful than one that
+              // exited, and the boot is long over, so it cannot be reported
+              // there.
               yield* Effect.logWarning("The local runner could not be started.", cause);
               child?.kill("SIGKILL");
-              // Nothing new to wait on, so the loop waits the dead one out again.
+              // There is no new child, so the loop waits on the old one, which has already exited.
               return held;
             }),
           );
@@ -297,9 +315,10 @@ export const startLocalRunner = (
       });
 
     /**
-     * Cached, so the drain and the scope that closes behind it are one stop: the
-     * second caller waits the first out rather than walking past a child still
-     * inside its grace period.
+     * Stops the child: SIGTERM, then SIGKILL after the stop deadline. It is
+     * cached, so the drain and the scope that closes after it share one stop:
+     * the second caller waits for the first instead of returning while the
+     * child is still in its grace period.
      */
     const stop = yield* Effect.cached(
       Effect.gen(function* () {
@@ -320,10 +339,9 @@ export const startLocalRunner = (
       }),
     );
 
-    // Registered before anything is spawned, because a handshake that fails is
-    // one of the ways a child comes to exist without a supervisor: however this
-    // controller ends - the drain, a failure further in, a test that finished -
-    // the child goes with it.
+    // Registered before anything is spawned, because a failed handshake leaves
+    // a child with no supervisor. However this controller ends (the drain, a
+    // later failure, a finished test), the child is stopped with it.
     process.on("exit", killOrphan);
     yield* Effect.addFinalizer(() =>
       Effect.andThen(

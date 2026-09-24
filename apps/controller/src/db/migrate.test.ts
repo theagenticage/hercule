@@ -13,8 +13,8 @@ import { binaryVersion, migrations } from "./migrations/index";
 import { TestDatabase } from "./testing";
 
 /**
- * The tables the migration set creates: the boot set, then the user and
- * credentials, then tasks and projects.
+ * Tables the migrations must create: the boot tables, then users and
+ * credentials, then tasks and projects, then resources.
  */
 const TABLES = [
   "secrets",
@@ -96,7 +96,7 @@ describe("migrations", () => {
     expect(version).toBe(binaryVersion);
   });
 
-  it("refuses a database newer than the binary, naming both versions", async () => {
+  it("fails on a database newer than the binary, and reports both versions", async () => {
     const exit = await runExit(
       databaseFile,
       Effect.gen(function* () {
@@ -112,7 +112,7 @@ describe("migrations", () => {
     expect(message).toContain(`version ${binaryVersion}`);
   });
 
-  it("hands tests a migrated in-memory database", async () => {
+  it("gives tests a migrated in-memory database", async () => {
     const found = await Effect.runPromise(tableNames.pipe(Effect.provide(TestDatabase)));
     for (const table of TABLES) expect(found).toContain(table);
   });
@@ -123,10 +123,10 @@ describe("migrations", () => {
   });
 
   it("copies an existing database before it applies a pending migration", async () => {
-    // One migration past the embedded set, as a later Hercule would carry it: the
-    // composed path is "the file was already there and something is pending",
-    // which the embedded set alone cannot exercise, since it is all applied at
-    // once on a first run.
+    // One migration beyond the embedded set, as a later Hercule release would
+    // add. This tests the case "the file already existed and a migration is
+    // pending", which the embedded set alone cannot reach, because a first run
+    // applies all of it at once.
     const pendingId = binaryVersion + 1;
     const withSecond = [
       ...migrations,
@@ -275,11 +275,11 @@ describe("ambient transactions", () => {
 });
 
 /**
- * What the resources migration has to leave behind.
+ * Tests what the resources migration must create.
  *
- * The set is asserted through the same migrated in-memory database every
- * controller test runs on, so a database that came up without these is a
- * failure here rather than a failure everywhere.
+ * The checks run against the same migrated in-memory database every controller
+ * test uses, so a missing table or key fails here, in one place, rather than
+ * across the whole suite.
  */
 describe("resources, workspaces and checkouts", () => {
   const listColumns = (table: string) =>
@@ -291,7 +291,7 @@ describe("resources, workspaces and checkouts", () => {
       return rows.map((row) => row.name);
     });
 
-  /** Every foreign key in the database, as the table it leaves and the one it points at. */
+  /** Every foreign key in the database, as the table it is on and the table it points at. */
   const foreignKeys = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const tables = yield* sql<{
@@ -310,7 +310,7 @@ describe("resources, workspaces and checkouts", () => {
     return found;
   });
 
-  it("carries a migration past the eighteen that were there before", () => {
+  it("has more migrations than the eighteen that came before it", () => {
     expect(binaryVersion).toBeGreaterThanOrEqual(19);
   });
 
@@ -336,8 +336,8 @@ describe("resources, workspaces and checkouts", () => {
 
   it("gives the project-to-resource join the foreign key it never had", async () => {
     const keys = await Effect.runPromise(foreignKeys.pipe(Effect.provide(TestDatabase)));
-    // The table may have been replaced rather than altered, so what is asserted
-    // is the path: some join row points at a project and at a resource.
+    // The table may have been replaced rather than altered, so the test checks
+    // only that some table points at both a project and a resource.
     const joins = keys.filter((key) => key.column === "resource_id" && key.to === "resources");
     expect(joins.length, "no table points its resource_id at resources").toBeGreaterThan(0);
     const owners = new Set(joins.map((key) => key.from));

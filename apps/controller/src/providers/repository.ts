@@ -1,6 +1,6 @@
 /**
- * Provider instance rows and their snapshots. A handful of rows per install, so
- * listings read the whole table.
+ * Provider instance rows and their snapshots. An install has only a handful of
+ * rows, so listings read the whole table.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -10,7 +10,10 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { ModelDescriptor, type ProbeResult } from "@hercule/protocol";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 
-/** An instance as it is stored: the definition's half is composed at read. */
+/**
+ * An instance as it is stored. The fields from the provider definition are
+ * added when it is read.
+ */
 export interface StoredInstance {
   readonly id: string;
   readonly providerId: string;
@@ -27,7 +30,7 @@ export interface NewInstance {
   readonly at: string;
 }
 
-/** The columns an edit may set. An absent one is left as it was. */
+/** The columns an update may set. An absent field leaves its column unchanged. */
 export interface InstanceEdit {
   readonly name?: string;
   readonly config?: Schema.Json;
@@ -44,7 +47,10 @@ interface InstanceRow {
 
 const INSTANCE_COLUMNS = "id, provider_id, name, config, created_at, updated_at";
 
-/** The config column is decoded rather than parsed, so a bad row is a typed failure. */
+/**
+ * Decodes the config column with a schema rather than `JSON.parse`, so a bad
+ * row fails with a typed error.
+ */
 const decodeConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
 const toInstance = (row: InstanceRow): Effect.Effect<StoredInstance, Schema.SchemaError> =>
@@ -87,7 +93,7 @@ const decodeModels = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(ModelDescriptor)),
 );
 
-/** Null column becomes an absent key: the wire shape has no nulls in it. */
+/** Converts a null column to an absent key, because the wire schema has no nulls. */
 const toProbeAuth = (row: SnapshotRow): ProbeResult["auth"] => ({
   status: row.auth_status as ProbeResult["auth"]["status"],
   ...(row.auth_identity === null ? {} : { identity: row.auth_identity }),
@@ -110,7 +116,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    /** Every instance, ordered so a listing reads the same twice. */
+    /** Returns every instance, in a stable order so two listings match. */
     list: (): Effect.Effect<ReadonlyArray<StoredInstance>, SqlError | Schema.SchemaError> =>
       Effect.flatMap(
         sql<InstanceRow>`
@@ -170,7 +176,7 @@ const make = Effect.gen(function* () {
       );
     },
 
-    /** Removes the instance. Its snapshots go with it, by foreign key. */
+    /** Deletes the instance. Its snapshots are deleted with it, by the foreign key. */
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM provider_instances WHERE id = ${uuidFromString(id)}`),
 
@@ -195,7 +201,10 @@ const make = Effect.gen(function* () {
         (rows) => Effect.forEach(rows, toSnapshot),
       ),
 
-    /** A snapshot is a cache of one machine's last answer, not a history. */
+    /**
+     * Stores a runner's probe result for an instance, replacing the previous
+     * one. A snapshot caches the last probe result, and keeps no history.
+     */
     recordSnapshot: (
       instanceId: string,
       runnerId: string,

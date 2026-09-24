@@ -32,7 +32,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      // The boot writes this row; a unit test that does not boot writes it too.
+      // The boot writes this row, so a unit test that does not boot writes it itself.
       yield* sql`INSERT INTO setup_state (singleton, token_hash, completed_at)
                  VALUES (1, ${hashToken(TOKEN)}, NULL)`;
       return yield* effect;
@@ -76,7 +76,7 @@ describe("setup.read", () => {
 });
 
 describe("the setup token", () => {
-  it("matches the one the boot minted, and nothing else", async () => {
+  it("matches the token the boot created, and nothing else", async () => {
     const matches = await run(
       Effect.gen(function* () {
         const setup = yield* Setup;
@@ -121,7 +121,7 @@ describe("setup.complete", () => {
     ).resolves.toBe(true);
   });
 
-  it("returns a bearer token that resolves: the caller is logged in", async () => {
+  it("returns a working bearer token, so the caller is logged in", async () => {
     const resolved = await run(
       Effect.gen(function* () {
         const credentials = yield* Credentials;
@@ -166,7 +166,7 @@ describe("setup.complete", () => {
     expect(existsSync(join(home, "setup-url"))).toBe(false);
   });
 
-  it("refuses a second time with invalid_state, and writes nothing", async () => {
+  it("fails a second time with invalid_state, and writes nothing", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         yield* complete;

@@ -1,16 +1,16 @@
 /**
- * Git credentials, as the controller answers them.
+ * Git credentials, as the controller hands them out to runners.
  *
- * A machine holds no token. It asks per request, naming the remote git is about
- * to talk to and who is asking - a session by the token it was started with, or
- * the machine itself while it is provisioning a workspace - and the answer is
- * good for that request alone.
+ * A runner holds no token. It asks for one per request, and the request names
+ * the remote git is about to contact and who is asking: a session, identified
+ * by the token it was started with, or the runner itself while it provisions a
+ * workspace. The credential is valid for that request alone.
  *
- * The rule is one sentence: the remote has to canonicalise to a resource the
- * asker already has a checkout of. Everything else is `unauthorized`, including
- * a remote no resource matches, because saying which of the two it was would
- * tell a caller what this controller holds. `no_connection` is the one case
- * where the asker is entitled to an answer and there is none to give: the
+ * The rule is simple: the remote must canonicalize to a resource the asker
+ * already has a checkout of. Everything else gets `unauthorized`, including a
+ * remote that matches no resource, because telling the two cases apart would
+ * reveal which resources this controller holds. `no_connection` is the one
+ * case where the asker is entitled to a credential but there is none: the
  * resource is theirs and no account is attached to it.
  */
 import * as Cause from "effect/Cause";
@@ -31,9 +31,10 @@ import { Secrets, type SecretDecryptError, type SecretNameError } from "../secre
 const PAT = "pat";
 
 /**
- * Who an account commits as: its login, and the address GitHub gives an account
- * that keeps its mail private. The machine is told this once, at session start;
- * a credential exchange carries the credential and nothing else.
+ * Builds the git identity an account commits as: its login, and the noreply
+ * address GitHub gives an account that keeps its email private. The runner
+ * receives the identity once, at session start; a credential exchange carries
+ * the credential and nothing else.
  */
 export const buildGitIdentity = (
   login: string,
@@ -42,7 +43,7 @@ export const buildGitIdentity = (
   email: `${login}@users.noreply.github.com`,
 });
 
-/** The git identity and the token a Connection stands for. */
+/** The token a Connection holds and the login it belongs to. */
 export interface GitCredential {
   readonly token: string;
   readonly login: string;
@@ -57,9 +58,10 @@ const make = Effect.gen(function* () {
   const sessionTokens = yield* SessionTokens;
 
   /**
-   * The GitHub token a Connection holds, and the login it belongs to. `none`
-   * where the connection is gone, is not a GitHub one, or holds no token: each
-   * is a connection that cannot authenticate a push.
+   * Returns the GitHub token a Connection holds, and the login it belongs to.
+   * Returns `none` if the connection is gone, is not a GitHub connection, or
+   * holds no token, because none of those can authenticate a push. Fails if
+   * the database or the secret store fails.
    */
   const findCredential = (
     connectionId: string,
@@ -75,14 +77,15 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The workspace the asker holds a checkout of this canonical remote in, and
-   * the Connection that workspace was opened against. `none` means the asker
-   * does not hold it - or is not who it says it is, which reads the same from
-   * here.
+   * Looks for a workspace in which the asker has a checkout of this canonical
+   * remote, and returns the Connection that workspace was opened with. Returns
+   * `none` if the asker has no such checkout, or is not who it claims to be;
+   * this function cannot tell the two apart.
    *
-   * The Connection is the workspace's own column rather than the resource's:
-   * what a workspace acts through is settled when it is opened, and a resource
-   * that changes hands afterwards does not change what is already running.
+   * The Connection is read from the workspace, not from the resource. A
+   * workspace's Connection is fixed when it is opened, so a resource that is
+   * moved to another Connection afterwards does not change work already
+   * running.
    */
   const findHeldResource = (
     runnerId: string,
@@ -106,11 +109,11 @@ const make = Effect.gen(function* () {
         }));
       }
 
-      // Who the asker is, is the session-token resolver's answer and not a
-      // predicate of its own: one lookup says whether a live session holds this
-      // token and which session it is, and the token is dead the moment that
-      // session stops running. What is left to ask here is only whether that
-      // session's workspace is a checkout of this remote.
+      // The session-token resolver decides who the asker is, rather than a
+      // separate SQL condition here. One lookup finds whether a live session
+      // holds this token and which session it is, and the token stops working
+      // as soon as that session stops running. The query below only checks
+      // whether that session's workspace has a checkout of this remote.
       const actor = yield* sessionTokens.resolve(hashToken(request.sessionToken));
       if (Option.isNone(actor)) return Option.none();
       const rows = yield* sql<{ readonly connection_id: Uint8Array | null }>`
@@ -132,17 +135,18 @@ const make = Effect.gen(function* () {
     findCredential,
 
     /**
-     * The GitHub account a session starts with: the token it pushes with and
-     * the identity it commits as. A connection that will not read is logged and
-     * left out - a session starting without `GH_TOKEN` is better than one that
-     * does not start.
+     * Returns the GitHub account a session starts with: the token it pushes
+     * with and the login it commits as. Returns `undefined` if the connection
+     * has no usable token. A connection that cannot be read is logged and
+     * treated the same way, because a session that starts without `GH_TOKEN`
+     * is better than one that does not start.
      */
     githubAccountOf: (connectionId: string): Effect.Effect<GitCredential | undefined> =>
       Effect.map(
         Effect.catchCause(findCredential(connectionId), (cause) =>
-          // An interruption is not an unreadable connection: a cause carrying
-          // one is passed on rather than logged away, so a caller waiting on
-          // this read learns it was stopped instead of reading the answer as
+          // An interruption is not an unreadable connection. A cause that
+          // contains one is passed on rather than logged, so a caller waiting
+          // on this read learns it was interrupted instead of seeing
           // "no account".
           Cause.hasInterrupts(cause)
             ? Effect.interrupt
@@ -154,7 +158,11 @@ const make = Effect.gen(function* () {
         Option.getOrUndefined,
       ),
 
-    /** What goes back on the wire for one request. */
+    /**
+     * Builds the answer frame for one credential request: the token and
+     * username, or `unauthorized` or `no_connection` as explained at the top of
+     * this file. Fails if the database or the secret store fails.
+     */
     answer: (
       runnerId: string,
       request: CredentialRequest,
@@ -182,5 +190,5 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** How a git credential is resolved, for the wire and for a session's env. */
+/** Looks up git credentials, for a runner's credential requests and for a session's environment. */
 export const gitCredentials = make;

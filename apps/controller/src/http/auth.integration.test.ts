@@ -1,24 +1,27 @@
 /**
- * `POST /auth/ws-ticket` over a real socket: the one credential Hercule hands out
- * that is not a token.
+ * Tests `POST /auth/ws-ticket` over a real socket: the only credential Hercule
+ * issues that is not a token.
  *
- * A browser cannot set a header on a WebSocket handshake, so the live socket is
- * authenticated by a short-lived string the caller fetches over HTTP first.
- * That makes three things worth holding the controller to here, and they are
- * the only things this file claims: any credential the API already accepts can
- * fetch one, no two calls hand out the same string, and the string is long
- * enough to be unguessable. Whether the ticket is then good exactly once, and
- * for five minutes, is the socket's business and lives beside the socket.
+ * A browser cannot set a header on a WebSocket handshake, so the live socket
+ * is authenticated with a short-lived ticket the caller fetches over HTTP
+ * first. This file checks three things, and only these:
  *
- * The stack, the temporary home and the request helpers are `./testing.ts`,
- * the same ones every other transport test drives.
+ * - any credential the API accepts can fetch a ticket;
+ * - no two calls return the same ticket;
+ * - the ticket is long enough to be unguessable.
+ *
+ * That a ticket works exactly once, and for five minutes, is tested with the
+ * socket.
+ *
+ * The test server, temporary home and request helpers come from
+ * `./testing.ts`, like every other transport test.
  */
 import { describe, expect, it } from "vitest";
 import { completeSetup, del, get, post, withServer } from "./testing";
 
 /**
- * 32 random bytes rendered base64url. Anything shorter than this is fewer than
- * 32 bytes of randomness, whatever the alphabet.
+ * The length of 32 random bytes in base64url. Anything shorter holds fewer
+ * than 32 bytes of randomness, whatever the alphabet.
  */
 const MINIMUM_TICKET_LENGTH = 43;
 
@@ -31,7 +34,7 @@ const fetchTicket = async (base: string, token: string): Promise<string> => {
 };
 
 describe("fetching a ticket for the live socket", () => {
-  it("hands the login bearer a fresh, long ticket every time it asks", async () => {
+  it("returns a new, long ticket to a login token on every call", async () => {
     await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
 
@@ -44,12 +47,12 @@ describe("fetching a ticket for the live socket", () => {
       for (const ticket of tickets) {
         expect(ticket.length).toBeGreaterThanOrEqual(MINIMUM_TICKET_LENGTH);
       }
-      // Three asks, three different strings: nothing is reused or cached.
+      // Three calls, three different tickets: nothing is reused or cached.
       expect(new Set(tickets).size).toBe(3);
     });
   });
 
-  it("answers an API key too, because every credential reaches the same socket", async () => {
+  it("returns a ticket to an API key too, because every credential can use the socket", async () => {
     await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
       const minted = await post(base, "/api/v1/api-keys", { name: "laptop" }, bearer);
@@ -62,7 +65,7 @@ describe("fetching a ticket for the live socket", () => {
     });
   });
 
-  it("refuses a caller with no credential, and one whose credential is dead", async () => {
+  it("rejects a caller with no credential, and one whose credential was revoked", async () => {
     await withServer(async ({ base }) => {
       const bearer = await completeSetup(base);
 
@@ -80,8 +83,8 @@ describe("fetching a ticket for the live socket", () => {
       expect(after.status).toBe(401);
       expect(await after.json()).toMatchObject({ error: { code: "unauthenticated" } });
 
-      // The bearer that revoked the key still works, so the 401 above is the
-      // dead credential and not the operation refusing everybody.
+      // The token that revoked the key still works, so the 401 above is caused
+      // by the revoked key, not by the operation rejecting everyone.
       expect((await get(base, "/api/v1/api-keys", bearer)).status).toBe(200);
     });
   });

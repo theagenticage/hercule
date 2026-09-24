@@ -20,7 +20,7 @@ const layer = AuthLayer.pipe(
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(effect.pipe(Effect.provide(layer)));
 
-/** Every test starts with the one user, hashed at the reduced test cost. */
+/** Every test starts with one user, whose password is hashed at the reduced test cost. */
 const withUser = Effect.gen(function* () {
   const users = yield* Users;
   return yield* users.create("rogier", yield* hashPassword(PASSWORD, TEST_PASSWORD_PARAMS));
@@ -33,7 +33,7 @@ const buildLoginActor = (tokenHash: string): Actor => ({
 });
 
 describe("auth.login", () => {
-  it("hands back a bearer token that resolves, expiring 30 days out", async () => {
+  it("returns a working bearer token that expires in 30 days", async () => {
     const result = await run(
       Effect.gen(function* () {
         const auth = yield* Auth;
@@ -51,7 +51,7 @@ describe("auth.login", () => {
     expect(lifetime).toBeLessThanOrEqual(30 * 24 * 60 * 60 * 1000);
   });
 
-  it("says the same thing about a wrong password and a username nobody has", async () => {
+  it("returns the same error for a wrong password and for an unknown username", async () => {
     const [wrongPassword, noSuchUser] = await run(
       Effect.gen(function* () {
         const auth = yield* Auth;
@@ -67,7 +67,7 @@ describe("auth.login", () => {
     expect(JSON.stringify(noSuchUser)).toEqual(JSON.stringify(wrongPassword));
   });
 
-  it("stamps the failed attempt with no actor, because nobody was authenticated", async () => {
+  it("records the failed attempt with no actor, because nobody was authenticated", async () => {
     const rows = await run(
       Effect.gen(function* () {
         const auth = yield* Auth;
@@ -84,13 +84,13 @@ describe("auth.login", () => {
     expect(rows.map((row) => row.actor)).not.toContain("user");
   });
 
-  it("still answers a wrong password 401 when the attempt cannot be logged", async () => {
+  it("still returns 401 for a wrong password when the attempt cannot be recorded", async () => {
     const error = await run(
       Effect.gen(function* () {
         const auth = yield* Auth;
         const sql = yield* SqlClient.SqlClient;
         yield* withUser;
-        // The one store the failed-login path writes to, taken away under it.
+        // Drop the only table the failed-login path writes to.
         yield* sql`DROP TABLE events`;
         return yield* Effect.flip(auth.login({ username: "rogier", password: "guess" }));
       }),
@@ -99,9 +99,9 @@ describe("auth.login", () => {
     expect(error).toMatchObject({ error: { code: "unauthenticated" } });
   });
 
-  it("verifies a password even when the username does not exist, so login is no oracle", async () => {
-    // The absent-user path runs argon2id at production cost; a lookup that
-    // short-circuited would answer in well under a millisecond.
+  it("verifies a password even when the username does not exist, so timing does not reveal which usernames exist", async () => {
+    // For an unknown username, login runs argon2id at production cost; a
+    // lookup that returned early would respond in well under a millisecond.
     const started = performance.now();
     await run(
       Effect.gen(function* () {
@@ -132,7 +132,7 @@ describe("auth.logout", () => {
     expect(Option.isNone(resolved)).toBe(true);
   });
 
-  it("refuses an API key: revoking one of those is apiKey.revoke", async () => {
+  it("rejects an API key, which is revoked with apiKey.revoke", async () => {
     const failure = await run(
       Effect.gen(function* () {
         const auth = yield* Auth;

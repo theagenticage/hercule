@@ -1,12 +1,12 @@
 /**
  * Workspace rows and the checkouts inside them. Nothing here decides policy:
- * what may be provisioned, what may be torn down and what has expired are the
- * service's.
+ * the service decides what may be provisioned, what may be torn down and what
+ * has expired.
  *
- * What is asked of the sessions table from here - which sessions are living in
- * a workspace, and which could still be picked up in one - are facts about the
- * workspace: they are what the sweep decides on. Nothing else about a session is
- * read, and this domain imports nothing from that one.
+ * This module reads the sessions table for two facts about a workspace: which
+ * sessions are running in it, and which could still be resumed in it. The
+ * sweep decides on those two facts. Nothing else about a session is read, and
+ * this domain imports nothing from the sessions domain.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -37,7 +37,7 @@ export interface StoredWorkspace {
   readonly runnerId: string;
   readonly kind: WorkspaceKind;
   readonly status: WorkspaceStatus;
-  /** The Connection the work in it acts through, settled when it was opened. */
+  /** The Connection that work in the workspace acts through, fixed when it was opened. */
   readonly designatedConnectionId: string | null;
   readonly message: string | null;
   readonly createdAt: string;
@@ -57,7 +57,7 @@ export interface StoredCheckout {
   readonly defaultBranch: string | null;
 }
 
-/** One working copy to write beside a new workspace. */
+/** One checkout to insert with a new workspace. */
 export interface NewCheckout {
   readonly resourceId: string;
   readonly form: CheckoutForm;
@@ -76,18 +76,18 @@ export interface WorkspacePageRequest {
   readonly status: WorkspaceStatus | undefined;
 }
 
-/** What one checkout turned out to be, as the machine reported it. */
+/** The state of one checkout, as the runner reported it. */
 export interface CheckoutState {
   readonly checkoutId: string;
-  /** What the machine said is checked out; null where it could not read one. */
+  /** The branch the runner reported as checked out; null if it could not read one. */
   readonly branch: string | null;
   readonly branches: ReadonlyArray<string>;
   readonly defaultBranch: string | null;
 }
 
 /**
- * One ephemeral workspace the sweep is looking at: how many sessions are living
- * in it, how many could still be resumed into it, and when it was last used.
+ * One ephemeral workspace the sweep considers: how many sessions are running
+ * in it, how many could still be resumed in it, and when it was last used.
  */
 export interface SweepCandidate {
   readonly id: string;
@@ -98,30 +98,34 @@ export interface SweepCandidate {
 }
 
 /**
- * Whether the working area a session row names is one it can be placed into, as
- * one SQL expression over a row of `sessions` under the alias given. A session
- * with no workspace at all is placed anywhere; one whose workspace is still
- * being made, or is gone, is not.
+ * Builds a SQL expression, over a row of `sessions` under the given alias,
+ * that is true when the session's workspace is ready for it. A session with no
+ * workspace is always ready; a session whose workspace is still provisioning,
+ * or is gone, is not.
  *
- * Exported because the sessions domain asks it twice - a queued session waits
- * for it before it is dispatched, and an exited one cannot be resumed without it
- * - and three spellings of "the workspace stands" would be three answers.
+ * It is exported because the sessions domain needs it twice: a queued session
+ * waits for it before it is dispatched, and an exited session cannot be
+ * resumed without it. Separate copies of the condition could drift apart.
  */
 export const buildReadyClause = (alias: string): string =>
   `(${alias}.workspace_id IS NULL OR EXISTS (SELECT 1 FROM workspaces ` +
   `WHERE workspaces.id = ${alias}.workspace_id AND workspaces.status = 'ready'))`;
 
 /**
- * Whether a session can be picked up again, as one SQL expression over a row of
- * `sessions` under the alias given. Three things have to hold: the process is
- * gone, the provider-native transcript is still there, and the machine and the
- * working area it was in are both still there to open it in.
+ * Builds a SQL expression, over a row of `sessions` under the given alias,
+ * that is true when the session can be resumed. All of these must hold:
  *
- * It lives here rather than in the sessions domain because the sweep below is
- * written in it - a thread that can still be picked up keeps its worktree, so
- * its workspace expires on the long window rather than the short one - and the
- * sessions listing reads the same one to answer `resumable`. One owner, and the
- * only owner both can import without the two domains importing each other.
+ * - the session has exited
+ * - its provider-native transcript is known
+ * - its runner is not retired
+ * - its workspace is ready (see `buildReadyClause`)
+ *
+ * It lives here rather than in the sessions domain because the sweep below
+ * uses it: a thread that can still be resumed keeps its worktree, so its
+ * workspace expires on the long window rather than the short one. The sessions
+ * repository uses the same expression, for example to compute `resumable`.
+ * Here is the only place both domains can import it from without importing
+ * each other.
  */
 export const buildResumableClause = (alias: string): string =>
   `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
@@ -129,12 +133,13 @@ export const buildResumableClause = (alias: string): string =>
   `AND runners.lifecycle <> 'retired') ` +
   `AND ${buildReadyClause(alias)}`;
 
-/** The statuses a workspace can still leave: everything else is where it ends. */
+/** The statuses a workspace can still leave. Every other status is final. */
 const LIVE_STATUSES = "('provisioning', 'ready', 'failed')";
 
 /**
- * What makes a repo's checkout on a machine taken. A primary that could not be
- * made holds nothing, so it does not stand in the way of making another.
+ * The statuses in which a primary blocks another primary of the same repo on
+ * the same runner. A primary that failed to provision holds nothing, so it
+ * does not block a new one.
  */
 const PRIMARY_STANDING = "('provisioning', 'ready')";
 
@@ -330,9 +335,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The primary of this resource on this machine that is standing or on its
-     * way: what makes a second one a conflict, and what a thread asking for the
-     * main workspace is given.
+     * Returns the primary of this resource on this runner that is ready or
+     * still provisioning, or `none`. A second primary conflicts with this one,
+     * and a thread that asks for the main workspace is given this one.
      */
     primaryOn: (
       resourceId: string,
@@ -350,7 +355,7 @@ const make = Effect.gen(function* () {
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toWorkspace),
       ),
 
-    /** Every workspace this machine has been asked for and not yet reported on. */
+    /** Returns every workspace this runner was asked to provision and has not yet reported on. */
     provisioningOn: (runnerId: string): Effect.Effect<ReadonlyArray<StoredWorkspace>, SqlError> =>
       Effect.map(
         sql<WorkspaceRow>`
@@ -362,9 +367,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Stands a failed primary of this resource down, so a fresh one can be made
-     * in its place. The row stays, `deleted`: what was attempted and what the
-     * machine said about it is a record, not a workspace.
+     * Marks a failed primary of this resource as `deleted`, so a new one can
+     * replace it. The row is kept as a record of the attempt and of what the
+     * runner reported about it.
      */
     supersedeFailedPrimary: (
       resourceId: string,
@@ -379,17 +384,22 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * The machine's report: the workspace stands, and this is what is in it.
+     * Records the runner's report that a workspace is ready, with the state of
+     * its checkouts. Returns whether the status changed.
      *
-     * Two separate things, because the machine says this more than once. The
-     * status moves only out of `provisioning`, and that transition is what the
-     * answer reports - it is what releases the sessions waiting on the
-     * workspace, and a second report must not release them twice. The checkouts
-     * are written whenever the workspace is `ready`, transition or not: a
-     * primary is re-reported after every session that ran in it, and that report
-     * is the only thing that tells the branch listing what the agent left it on.
-     * A workspace that is `deleted`, `lost` or `failed` takes neither: its
-     * directory is gone or was never made, so there are no branches to record.
+     * The status and the checkouts are written separately, because the runner
+     * sends this report more than once:
+     *
+     * - The status changes only from `provisioning` to `ready`, and the return
+     *   value reports that change. The change releases the sessions waiting on
+     *   the workspace, and a second report must not release them twice.
+     * - The checkouts are written whenever the workspace is `ready`, whether
+     *   the status changed or not. A primary is reported again after every
+     *   session that ran in it, and that report is the only way the branch
+     *   listing learns which branch the agent left it on.
+     * - A workspace that is `deleted`, `lost` or `failed` gets neither: its
+     *   directory is gone or was never created, so there are no branches to
+     *   record.
      */
     markReady: (
       id: string,
@@ -397,8 +407,8 @@ const make = Effect.gen(function* () {
       at: string,
     ): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
-        // `last_used_at` is left alone: it counts work done in the workspace,
-        // which is a session starting or ending, not the machine reporting.
+        // `last_used_at` is left alone: it tracks work done in the workspace,
+        // which is a session starting or ending, not the runner reporting.
         const moved = yield* sql<{ readonly id: Uint8Array }>`
           UPDATE workspaces SET status = 'ready', provisioned_at = ${at}, message = NULL
           WHERE id = ${uuidFromString(id)} AND status = 'provisioning'
@@ -422,9 +432,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Answers whether it moved the workspace. A report that arrives twice, or
-     * about a workspace that came up in the meantime, moves nothing - and
-     * nothing must follow from it either.
+     * Marks a provisioning workspace as `failed`, and returns whether the
+     * status changed. A report that arrives twice, or that is about a
+     * workspace that became ready in the meantime, changes nothing, and the
+     * caller must then do nothing either.
      */
     markFailed: (
       id: string,
@@ -440,7 +451,10 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Answers whether it moved the workspace, for the same reason as above. */
+    /**
+     * Marks a live workspace as `deleted`, and returns whether the status
+     * changed, for the same reason as `markFailed`.
+     */
     markDisposed: (id: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
@@ -451,7 +465,7 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Everything on a retired machine is gone with it, whatever it held. */
+    /** Marks every live workspace on a retired runner as `lost`, because they are gone with it. */
     lostOnRunner: (runnerId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE workspaces SET status = 'lost', disposed_at = ${at}
@@ -459,16 +473,16 @@ const make = Effect.gen(function* () {
           AND status IN ${sql.literal(LIVE_STATUSES)}
       `),
 
-    /** Marks a workspace as worked in just now, which is what keeps it alive. */
+    /** Marks a workspace as used just now, which keeps the sweep from expiring it. */
     touched: (workspaceId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE workspaces SET last_used_at = ${at} WHERE id = ${uuidFromString(workspaceId)}
       `),
 
     /**
-     * Every ephemeral workspace the sweep could act on: one that stands, on a
-     * machine that is there to be told. What each is worth keeping is the
-     * service's to decide from the counts.
+     * Returns every ephemeral workspace the sweep could act on: each one that
+     * is ready, on a runner that is online to receive the dispose frame. The
+     * service decides from the counts which ones to keep.
      */
     sweepCandidates: (): Effect.Effect<ReadonlyArray<SweepCandidate>, SqlError> =>
       Effect.map(

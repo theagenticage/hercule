@@ -1,20 +1,20 @@
 /**
- * First run, finished: `setup.read` and `setup.complete`.
+ * Completes first run: `setup.read` and `setup.complete`.
  *
- * Until setup completes these two operations are the only ones the controller
- * answers; everything else is 401, which the gate in `../http` enforces. The
- * boot minted a single-use token and wrote it to `<home>/setup-url`; completing
- * setup consumes it.
+ * Until setup completes, these two operations are the only ones the controller
+ * serves; everything else returns 401, which the gate in `../http` enforces.
+ * The boot created a single-use token and wrote it to `<home>/setup-url`;
+ * completing setup uses it up.
  *
- * The write is one transaction: the completion stamp, the token's removal, the
- * user, the timezone and the login token the caller is handed back go in
- * together or not at all, so a controller that dies mid-setup comes back with
- * the setup URL still valid rather than with a user nobody can log in as, or
- * with a finished setup and no way in.
+ * The write is one transaction. The completion timestamp, the token's removal,
+ * the user, the timezone and the login token returned to the caller are
+ * written together or not at all. So a controller that dies during setup
+ * restarts with the setup URL still valid, rather than with a user nobody can
+ * log in as, or with a finished setup and no way in.
  *
- * Claiming the completion stamp is also what makes the token single use.
- * Everything that decides happens inside that one transaction, so concurrent
- * calls carrying the same token produce one user rather than one each.
+ * Setting the completion timestamp is also what makes the token single use.
+ * Every check happens inside that one transaction, so concurrent calls with
+ * the same token create one user rather than one each.
  *
  * Two things setup does not do here: the default assistant, which has no table
  * yet, and the onboarding steps beyond the timezone, which are the web app's.
@@ -34,7 +34,7 @@ import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
 import { hashPassword, PasswordCost, Users } from "../users";
 
-/** What `setup.complete` carries beyond the password. */
+/** The input of `setup.complete`. */
 export interface CompleteInput {
   readonly username: string;
   readonly password: string;
@@ -58,13 +58,13 @@ const make = Effect.gen(function* () {
   );
 
   return {
-    /** Whether first run is done, so the web app knows to route to `/setup`. */
+    /** Returns whether first run is done, so the web app knows whether to route to `/setup`. */
     state: (): Effect.Effect<{ readonly complete: boolean }, SqlError> =>
       Effect.map(row, (state) => ({ complete: state?.completed_at != null })),
 
     /**
-     * Whether this is the outstanding setup token. Only its hash was stored, so
-     * a copy of the database hands nobody a working token.
+     * Checks whether a token is the outstanding setup token. Only its hash is
+     * stored, so a copy of the database gives nobody a working token.
      */
     matchesToken: (token: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -73,9 +73,10 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Creates the user, finishes onboarding and returns a bearer token: the
-     * caller is logged in when this returns. The setup
-     * token is verified by the transport gate before this runs.
+     * Creates the user, finishes onboarding and returns a bearer token, so the
+     * caller is logged in when this returns. Fails with `InvalidState` when
+     * setup is already complete. The transport gate verifies the setup token
+     * before this runs.
      */
     complete: (
       input: CompleteInput,
@@ -90,10 +91,10 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            // The claim is the guard: whoever's UPDATE changes the row finishes
-            // setup and everyone else is told it is already done. Reading the
-            // flag first and writing afterwards would let two callers holding
-            // the same token both pass.
+            // The UPDATE is the check: the caller whose UPDATE changes the row
+            // finishes setup, and every other caller gets "already set up".
+            // Reading the flag first and writing afterwards would let two
+            // callers with the same token both pass.
             yield* sql`
               UPDATE setup_state SET completed_at = ${at}, token_hash = NULL
               WHERE singleton = 1 AND completed_at IS NULL
@@ -111,15 +112,15 @@ const make = Effect.gen(function* () {
               payload: { username: input.username },
             });
             // Inside the transaction because the caller is logged in when this
-            // returns: a token that cannot be stored is a setup that did not
-            // happen, not a finished setup with nothing to answer with.
+            // returns: if the token cannot be stored, setup did not happen,
+            // rather than finishing with no token to return.
             yield* credentials.issueLoginToken(user.id, hashToken(token));
           }),
         );
 
-        // The file exists only while setup is incomplete.
-        // Setup is done either way, so a file that will not go is a line in the
-        // log rather than a failed response.
+        // The file exists only while setup is incomplete. Setup is done either
+        // way, so a file that cannot be removed is logged as a warning rather
+        // than failing the response.
         yield* Effect.try(() => rmSync(paths.setupUrlFile, { force: true })).pipe(
           Effect.tapError((cause) =>
             Effect.logWarning(`Cannot remove ${paths.setupUrlFile}`, cause),

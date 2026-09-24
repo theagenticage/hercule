@@ -1,11 +1,12 @@
 /**
- * Asks runners what each provider instance can do, and stores the answers.
+ * Asks runners what each provider instance can do, and stores the results.
  *
- * Probing is controller-driven: the config lives here, so a runner cannot start
- * one. Requests carry an id because several are in flight on one connection.
+ * The controller starts every probe, because the config lives here and a
+ * runner does not have it. Requests carry an id because several can be in
+ * flight on one connection.
  *
- * A sweep gathers facts rather than performing an operation: no grant reaches
- * it, and every row it writes is the system's.
+ * A sweep gathers facts rather than performing an operation: it checks no
+ * grant, and the system is the actor for every row it writes.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -25,20 +26,20 @@ import { providerRepository, type StoredInstance } from "./repository";
 import { findVersionFloor, computeVersionVerdict } from "./version";
 
 /**
- * The runner's own 15s probe budget plus the round trip, so its "did not
- * answer" is stored rather than cut off here.
+ * The runner's own 15s probe timeout plus the round trip, so the runner's
+ * "did not answer" result is stored rather than cut off by this deadline.
  */
 const PROBE_DEADLINE: Duration.Duration = Duration.seconds(20);
 
-/** Tests hand over a deadline they can wait out. */
+/** Lets tests set a deadline short enough to wait for. */
 export const ProviderProbeDeadline = Context.Reference<Duration.Duration>(
   "hercule/controller/providers/ProviderProbeDeadline",
   { defaultValue: (): Duration.Duration => PROBE_DEADLINE },
 );
 
 /**
- * A login can expire and a harness be upgraded outside Hercule, so an older
- * snapshot is a guess.
+ * A login can expire and a harness can be upgraded outside Hercule, so a
+ * snapshot older than this is unreliable.
  */
 const PROBE_INTERVAL: Duration.Duration = Duration.hours(1);
 
@@ -58,7 +59,9 @@ const make = Effect.gen(function* () {
   const host = yield* PluginHost;
 
   /**
-   * A late report is dropped rather than stored: nobody is correlating that
+   * Probes one instance on one runner, stores the snapshot, and returns it.
+   * Returns `none` if the runner does not answer before the deadline. A late
+   * report is dropped rather than stored, because nothing is waiting for that
    * request any more.
    */
   const probeOne = (
@@ -75,7 +78,7 @@ const make = Effect.gen(function* () {
           providerId: instance.providerId,
           config: instance.config,
           // Decrypted here, at send time: the probe runs the harness's own auth
-          // check, which is only worth anything with the credential in hand.
+          // check, which is only meaningful with the credential.
           secrets: yield* readInstanceSecrets(
             secrets,
             yield* host.providers(),
@@ -92,8 +95,8 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const at = yield* nowIso;
           yield* instances.recordSnapshot(instance.id, runnerId, result, at);
-          // No audit row: what a machine has is not an event anyone reads back,
-          // so the instance's watchers are told here instead.
+          // No audit row: a probe result is not an event anyone reads back, so
+          // the instance's live subscribers are notified instead.
           yield* announce({ _tag: "record", topic: "provider", id: instance.id, kind: "updated" });
           return Option.some({
             runnerId,
@@ -111,8 +114,9 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Each pair absorbs its own failure: one instance deleted mid-sweep must not
-   * discard the rest of the fleet's snapshots.
+   * Probes every instance on every given runner, concurrently. Each probe logs
+   * its own failure, so one instance deleted mid-sweep does not discard the
+   * rest of the fleet's snapshots.
    */
   const sweep = (
     runnerIds: ReadonlyArray<string>,
@@ -127,7 +131,11 @@ const make = Effect.gen(function* () {
       { concurrency: "unbounded", discard: true },
     );
 
-  /** Nobody is waiting on a sweep, so a listing that will not answer is logged. */
+  /**
+   * Logs the error of a sweep that fails to start, for example because the
+   * instance list cannot be read. Nothing is waiting on the sweep, so the log
+   * is the only place the error can go.
+   */
   const logSweepFailure = (swept: Effect.Effect<void, StoreError>): Effect.Effect<void> =>
     Effect.catchCause(swept, (cause) =>
       Effect.logError("A provider sweep could not be started", cause),
@@ -152,8 +160,9 @@ const make = Effect.gen(function* () {
     sweepRunner,
 
     /**
-     * The config is what a probe runs under, so an edit stales every machine's
-     * snapshot at once.
+     * Probes one instance on every connected runner. A probe runs under the
+     * instance's config, so a config change makes every runner's snapshot
+     * stale at once.
      */
     sweepInstance: (instanceId: string): Effect.Effect<void> =>
       logSweepFailure(
@@ -166,8 +175,8 @@ const make = Effect.gen(function* () {
 
     driving: Effect.all(
       [
-        // Forked, because a machine that answers slowly must not hold up the
-        // next machine's sweep.
+        // Forked, because a runner that answers slowly must not hold up the
+        // next runner's sweep.
         Stream.runForEach(connections.arrivals, (runnerId) =>
           Effect.forkChild(sweepRunner(runnerId)),
         ),
@@ -190,7 +199,7 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** What asks the fleet about provider instances and keeps what it says. */
+/** The service that probes the fleet for provider instances and stores the snapshots. */
 export class ProviderProbes extends Context.Service<ProviderProbes, Effect.Success<typeof make>>()(
   "hercule/controller/providers/ProviderProbes",
 ) {}

@@ -156,7 +156,7 @@ describe("api keys", () => {
     expect(listed.items[0]?.revokedAt).not.toBeNull();
   });
 
-  it("will not revoke another user's key", async () => {
+  it("does not revoke another user's key", async () => {
     const [revoked, stillLive] = await run(
       Effect.gen(function* () {
         const users = yield* Users;
@@ -235,7 +235,7 @@ describe("api keys", () => {
     expect(names).toEqual(["one", "two", "three"]);
   });
 
-  it("refuses a cursor it did not issue", async () => {
+  it("rejects a cursor it did not issue", async () => {
     const error = await runError(
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;

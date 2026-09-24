@@ -1,10 +1,10 @@
 /**
- * The runner operations over a real HTTP server: what a listing and a row
- * carry, what a patch, a join, a lifecycle move and a join token do on the
- * wire, and what an anonymous caller gets.
+ * Tests for the runner operations over a real HTTP server: the fields a list
+ * and a single runner return, what an update, a join, a lifecycle change and
+ * a join token do over HTTP, and what an anonymous caller gets.
  *
- * Rows nothing here enlists are arranged through the harness's `insertRunner`,
- * which goes through the real repository.
+ * Runners that do not join in a test are created with the harness's
+ * `insertRunner`, which uses the real repository.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -30,7 +30,7 @@ interface RunnerPage {
   readonly nextCursor?: string;
 }
 
-/** An id that is well-formed and belongs to nobody. */
+/** A valid id that matches no runner. */
 const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
 
 const listRunners = async (base: string, token: string, query = ""): Promise<RunnerPage> => {
@@ -48,7 +48,7 @@ const readRunner = async (base: string, token: string, id: string): Promise<Runn
 const patchRunner = (base: string, token: string, id: string, body: unknown): Promise<Response> =>
   send("PATCH", base, `/api/v1/runners/${id}`, { body, token });
 
-/** A lifecycle move, the way the runner page's buttons make one. */
+/** Sends a lifecycle change, the way the runner page's buttons do. */
 const moveRunner = (
   base: string,
   token: string,
@@ -60,7 +60,7 @@ const moveRunner = (
 const listRunnerNames = (page: RunnerPage): ReadonlyArray<string> =>
   page.items.map((runner) => runner.name).sort();
 
-/** What a machine is handed when it joins. */
+/** The response a runner gets when it joins. */
 interface JoinAnswer {
   readonly runnerId: string;
   readonly credential: string;
@@ -69,7 +69,7 @@ interface JoinAnswer {
   readonly name: string;
 }
 
-/** Every row of a table, whatever columns it turns out to have. */
+/** Reads every row of a table, whatever its columns are. */
 const readAllRows = (
   sql: ServerHarness["sql"],
   table: string,
@@ -79,11 +79,11 @@ const readAllRows = (
   );
 
 /**
- * The join tokens as the database holds them.
+ * Reads the join token rows as the database stores them.
  *
- * The table is found through the schema rather than named here, so what is
- * asserted is what the database really stores and not what this file guessed
- * it would be called.
+ * The table is found through the schema rather than named here, so the test
+ * checks what the database really stores, not what this file guessed the table
+ * is called.
  */
 const readJoinTokenRows = async (
   sql: ServerHarness["sql"],
@@ -103,10 +103,10 @@ const readJoinTokenRows = async (
 };
 
 /**
- * Ages the token with this id by two hours, because nothing over the wire can
- * wait an hour. Both instants move together, so what the row describes is a
- * token minted two hours ago and expired one hour ago rather than one that
- * expired before it was minted, which the table's own CHECK refuses.
+ * Moves the token's timestamps two hours back, because a test cannot wait an
+ * hour. Both timestamps move together, so the row describes a token created
+ * two hours ago that expired one hour ago. A token that expired before it was
+ * created would fail the table's CHECK constraint.
  */
 const expireJoinToken = async (sql: ServerHarness["sql"], id: string): Promise<void> => {
   const TWO_HOURS = 2 * 60 * 60 * 1000;
@@ -130,7 +130,7 @@ const expireJoinToken = async (sql: ServerHarness["sql"], id: string): Promise<v
   );
 };
 
-/** Mints a join token the way the fleet's "Add machine" spot does. */
+/** Creates a join token the way the fleet page's "Add machine" dialog does. */
 const mintJoinToken = async (
   base: string,
   token: string,
@@ -147,9 +147,9 @@ interface ListedJoinToken {
 }
 
 /**
- * The outstanding tokens, as the fleet's "Add machine" spot reads them. A whole
- * outstanding set is one answer: a token lives an hour and a fleet is enlisted
- * one machine at a time, so there is no page to turn.
+ * Lists the join tokens that can still be spent, as the "Add machine" dialog
+ * reads them. The list is not paged: a token lasts an hour and runners join
+ * one at a time, so the list is always short.
  */
 const listJoinTokens = async (
   base: string,
@@ -162,21 +162,21 @@ const listJoinTokens = async (
   return body as ReadonlyArray<ListedJoinToken>;
 };
 
-/** Takes a minted token back, the way the Revoke beside it does. */
+/** Revokes a join token, the way the Revoke button next to it does. */
 const revokeJoinToken = (base: string, token: string, id: string): Promise<Response> =>
   del(base, `/api/v1/runners/join-tokens/${id}`, token);
 
 /**
- * The ids of the tokens minted so far, oldest first. A mint answers with the
- * token and its expiry but not its id, and the id is what a revoke names; the
- * trail the mint writes is where a caller with a credential can find it.
+ * Returns the ids of the join tokens created so far, oldest first. Creating a
+ * token returns the token and its expiry but not its id, and revoking needs
+ * the id; the audit entry for the creation is where a caller can find it.
  */
 const readMintedIds = async (harness: ServerHarness): Promise<ReadonlyArray<string>> =>
   (await harness.audit("runner.joinToken.minted")).map(
     (entry) => entry.payload["joinTokenId"] as string,
   );
 
-/** The join exchange, as a machine holding a join token makes it. */
+/** Sends a join request, as a runner holding a join token does. */
 const joinWith = (base: string, bearer: string, body: unknown): Promise<Response> =>
   send("POST", base, "/api/v1/runners/join", { body, token: bearer });
 
@@ -205,7 +205,7 @@ const insertThreeRunners = async (harness: ServerHarness) => ({
 });
 
 describe("GET /runners", () => {
-  it("hands back every runner in a page envelope, carrying the fields the fleet reads", async () => {
+  it("returns every runner in a page, with the fields the fleet page reads", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const { online } = await insertThreeRunners(harness);
@@ -243,7 +243,7 @@ describe("GET /runners", () => {
     });
   });
 
-  it("filters by either axis and by label", async () => {
+  it("filters by connectivity, by lifecycle and by label", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       await insertThreeRunners(harness);
@@ -270,7 +270,7 @@ describe("GET /runners", () => {
     });
   });
 
-  it("pages by name, in the direction the sort asks for", async () => {
+  it("pages by name, in the requested sort direction", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       await insertThreeRunners(harness);
@@ -296,7 +296,7 @@ describe("GET /runners", () => {
       expect(rest.items.map((runner) => runner.name)).toEqual(["vega"]);
       expect(rest.nextCursor).toBeUndefined();
 
-      // A cursor issued walking one way says nothing about the other.
+      // A cursor from one sort direction is not valid for the other.
       const crossed = await get(
         harness.base,
         `/api/v1/runners?sort=name:desc&cursor=${encodeURIComponent(first.nextCursor!)}`,
@@ -307,12 +307,12 @@ describe("GET /runners", () => {
     });
   });
 
-  it("refuses a connectivity or a lifecycle that is not one of its own", async () => {
+  it("rejects a connectivity or lifecycle value that belongs to the other field", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       await insertThreeRunners(harness);
 
-      // Each axis takes its own three values: `draining` is not a connectivity
+      // Each field has its own three values: `draining` is not a connectivity,
       // and `unreachable` is not a lifecycle.
       for (const query of ["?connectivity=asleep", "?connectivity=draining", "?lifecycle=online"]) {
         const response = await get(harness.base, `/api/v1/runners${query}`, token);
@@ -324,7 +324,7 @@ describe("GET /runners", () => {
 });
 
 describe("GET /runners/{id}", () => {
-  it("carries the listing's fields plus the negotiated capabilities and protocol version", async () => {
+  it("returns the list's fields plus the negotiated capabilities and protocol version", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const { online } = await insertThreeRunners(harness);
@@ -357,13 +357,13 @@ describe("GET /runners/{id}", () => {
     });
   });
 
-  it("reads a reported document this build cannot make sense of as absent", async () => {
+  it("returns a reported value this build cannot decode as null", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const { online, offline } = await insertThreeRunners(harness);
-      // A row written by a build that reported something else. The column holds
-      // what a runner sent, so a fleet listing has to survive one of them
-      // rather than answering with nothing at all.
+      // A row written by a build that reported a different shape. The column
+      // holds what a runner sent, so the fleet list has to survive such a row
+      // rather than fail as a whole.
       await Effect.runPromise(
         Effect.orDie(
           harness.sql`UPDATE runners
@@ -384,7 +384,7 @@ describe("GET /runners/{id}", () => {
     });
   });
 
-  it("answers not_found for an id nobody has, and validation for one that is not an id", async () => {
+  it("returns not_found for an id that matches no runner, and validation for a string that is not an id", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
 
@@ -400,7 +400,7 @@ describe("GET /runners/{id}", () => {
 });
 
 describe("PATCH /runners/{id}", () => {
-  it("changes only the field the patch names, and answers with the updated row", async () => {
+  it("changes only the field the patch names, and returns the updated runner", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({
@@ -441,7 +441,7 @@ describe("PATCH /runners/{id}", () => {
         maxConcurrentSessions: 8,
       });
 
-      // What the wire says is what the row is.
+      // The response matches the stored row.
       expect(await readRunner(harness.base, token, runner.id)).toMatchObject({
         name: "iris-2",
         labels: ["cpu", "arm"],
@@ -451,7 +451,7 @@ describe("PATCH /runners/{id}", () => {
     });
   });
 
-  it("writes one audit row per update, stamped with the user", async () => {
+  it("writes one audit entry per update, stamped with the user", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris" });
@@ -466,7 +466,7 @@ describe("PATCH /runners/{id}", () => {
     });
   });
 
-  it("writes nothing when the patch asks for the values the runner already holds", async () => {
+  it("writes nothing when the patch sends the values the runner already has", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({
@@ -486,7 +486,7 @@ describe("PATCH /runners/{id}", () => {
     });
   });
 
-  it("refuses a patch that names no field", async () => {
+  it("rejects a patch with no fields", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris" });
@@ -498,7 +498,7 @@ describe("PATCH /runners/{id}", () => {
     });
   });
 
-  it("refuses an empty name, a session cap below one, a disk watermark below one, and a label that is not a string", async () => {
+  it("rejects an empty name, a session cap below one, a disk watermark below one, and a label that is not a string", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris", labels: ["gpu"] });
@@ -521,13 +521,13 @@ describe("PATCH /runners/{id}", () => {
     });
   });
 
-  it("refuses a patch that names facts, state or the watermark", async () => {
+  it("rejects a patch that sets facts, state or the watermark", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris", connectivity: "online" });
 
-      // Each one rides beside a field the patch may set, so the refusal is the
-      // unknown key and not the empty patch.
+      // Each one is sent next to a field the patch may set, so the error is for
+      // the unknown key, not for an empty patch.
       for (const body of [
         { name: "iris-2", facts: { os: "linux" } },
         { name: "iris-2", connectivity: "unreachable" },
@@ -549,7 +549,7 @@ describe("PATCH /runners/{id}", () => {
 });
 
 describe("the infra routes with no credential", () => {
-  it("answers 401 to every one of them", async () => {
+  it("all return 401", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris" });
@@ -569,14 +569,14 @@ describe("the infra routes with no credential", () => {
         expect(await response.json()).toMatchObject({ error: { code: "unauthenticated" } });
       }
 
-      // Nothing an anonymous request sent changed anything.
+      // No anonymous request changed anything.
       expect(await readRunner(harness.base, token, runner.id)).toMatchObject({ name: "iris" });
     });
   });
 });
 
 describe("POST /runners/join-tokens", () => {
-  it("mints a fresh single-use token, good for an hour, that the database never holds", async () => {
+  it("creates a new single-use token, valid for an hour, that the database never stores", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const before = Date.now();
@@ -607,14 +607,14 @@ describe("POST /runners/join-tokens", () => {
     });
   });
 
-  it("clears out the tokens that can no longer be spent", async () => {
+  it("deletes the tokens that can no longer be spent", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const stale = await mintJoinToken(harness.base, token);
       await expireJoinToken(harness.sql, (await readMintedIds(harness))[0]!);
 
-      // The "Add machine" spot mints one every time it is opened, so without
-      // this the table would grow with the number of times somebody looked.
+      // The "Add machine" dialog creates a token every time it opens, so
+      // without this the table would grow every time somebody opened it.
       const fresh = await mintJoinToken(harness.base, token);
       const { rows } = await readJoinTokenRows(harness.sql);
       expect(rows).toHaveLength(1);
@@ -626,7 +626,7 @@ describe("POST /runners/join-tokens", () => {
 });
 
 describe("POST /runners/join", () => {
-  it("enlists a machine, hands it a credential, and stores only the credential's hash", async () => {
+  it("joins a runner, returns a credential, and stores only the credential's hash", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const minted = await mintJoinToken(harness.base, token);
@@ -659,8 +659,8 @@ describe("POST /runners/join", () => {
       expect(answer.controllerIdentityId).toBe(controller.id);
       expect(answer.controllerPublicKey).toBe(controller.publicKey);
 
-      // Nothing has dialled, so the fleet knows both where the machine stands
-      // with the user (`active`) and that it is not reachable (`offline`).
+      // The runner has not connected yet, so it is `active` (its lifecycle)
+      // and `offline` (its connectivity).
       const row = await readRunner(harness.base, token, answer.runnerId);
       expect(row).toMatchObject({
         id: answer.runnerId,
@@ -681,7 +681,7 @@ describe("POST /runners/join", () => {
     });
   });
 
-  it("refuses a second use of the same token, and enlists nothing", async () => {
+  it("rejects a second use of the same token, and joins nothing", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const minted = await mintJoinToken(harness.base, token);
@@ -695,7 +695,7 @@ describe("POST /runners/join", () => {
     });
   });
 
-  it("refuses a token older than an hour, and enlists nothing", async () => {
+  it("rejects a token older than an hour, and joins nothing", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const minted = await mintJoinToken(harness.base, token);
@@ -707,7 +707,7 @@ describe("POST /runners/join", () => {
     });
   });
 
-  it("enlists a second machine under a name of its own", async () => {
+  it("joins a second runner under a different name", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const first = JSON.parse(
@@ -726,7 +726,7 @@ describe("POST /runners/join", () => {
     });
   });
 
-  it("makes the first machine the default runner and leaves the choice alone after that", async () => {
+  it("makes the first runner the default runner, and does not change the default after that", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const readDefaultRunnerId = async (): Promise<string | null> =>
@@ -742,16 +742,16 @@ describe("POST /runners/join", () => {
       ) as JoinAnswer;
       expect(await readDefaultRunnerId()).toBe(first.runnerId);
 
-      // A second machine does not take a default the fleet already has, which
-      // is the same rule whether the first was chosen or fell into it.
+      // A second runner does not replace an existing default, whether a person
+      // chose it or the first join set it.
       const second = JSON.parse(
         await (await join(harness.base, (await mintJoinToken(harness.base, token)).token)).text(),
       ) as JoinAnswer;
       expect(second.runnerId).not.toBe(first.runnerId);
       expect(await readDefaultRunnerId()).toBe(first.runnerId);
 
-      // Nor one a person deliberately took off: an empty default is an answer,
-      // not an absence waiting to be filled in by whoever turns up next.
+      // Nor does it set one a person deliberately cleared: an empty default is
+      // a choice, not a gap for the next runner to fill.
       await send("PATCH", harness.base, "/api/v1/controller", {
         body: { defaultRunnerId: null },
         token,
@@ -759,13 +759,13 @@ describe("POST /runners/join", () => {
       await join(harness.base, (await mintJoinToken(harness.base, token)).token);
       expect(await readDefaultRunnerId()).toBeNull();
 
-      // The log says which enlistment took the default and which did not; it is
-      // the only writer of that setting with nobody behind it.
+      // The event log shows which join set the default and which did not. A
+      // join is the only change to that setting no user asked for.
       const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
         items: ReadonlyArray<{ kind: string; payload: Record<string, unknown> }>;
       };
-      // The log reads newest first; these are the three enlistments in the
-      // order they happened.
+      // The log is newest first; these are the three joins in the order they
+      // happened.
       const joined = log.items.filter((entry) => entry.kind === "runner.joined").reverse();
       expect(joined.map((entry) => entry.payload["becameDefaultRunner"])).toEqual([
         true,
@@ -785,7 +785,7 @@ describe("POST /runners/join", () => {
     });
   });
 
-  it("records the enlistment as the system's own doing", async () => {
+  it("records the join with the system as the actor", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const minted = await mintJoinToken(harness.base, token);
@@ -793,8 +793,8 @@ describe("POST /runners/join", () => {
         await (await join(harness.base, minted.token)).text(),
       ) as JoinAnswer;
 
-      // Read back over the wire, because a `system` stamp the event schema
-      // cannot encode would fail the whole page rather than the row.
+      // Read back over HTTP, because a `system` actor the event schema cannot
+      // encode would fail the whole page, not just the row.
       const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
         items: ReadonlyArray<{
           kind: string;
@@ -810,8 +810,8 @@ describe("POST /runners/join", () => {
       const mintedRow = log.items.find((entry) => entry.kind === "runner.joinToken.minted");
       expect(mintedRow).toBeDefined();
       expect(mintedRow!.actor).toBe("user");
-      // The two entries name the same invitation, which is what makes the log
-      // able to say which mint let which machine in.
+      // Both entries name the same join token id, which lets the log show
+      // which token let which runner join.
       expect(mintedRow!.payload["joinTokenId"]).toBe(joined!.payload["joinTokenId"]);
       for (const entry of log.items) {
         expect(JSON.stringify(entry.payload)).not.toContain(minted.token);
@@ -819,13 +819,13 @@ describe("POST /runners/join", () => {
     });
   });
 
-  it("refuses an unknown token and a user credential, and enlists nothing", async () => {
+  it("rejects an unknown token and a user credential, and joins nothing", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       await mintJoinToken(harness.base, token);
 
-      // A user's own credential is not a join token: the two populations are
-      // separate, and a bearer that opens the API must not enlist a machine.
+      // A user's credential is not a join token: the two are separate, and a
+      // credential that opens the API must not join a runner.
       for (const bearer of ["a-token-nobody-minted", token, SETUP_TOKEN]) {
         const response = await join(harness.base, bearer);
         expect(response.status, bearer).toBe(401);
@@ -835,7 +835,7 @@ describe("POST /runners/join", () => {
   });
 });
 
-describe("a machine that joins as a personal one", () => {
+describe("a runner that joins as a personal runner", () => {
   it("is reserved when its join says so, and is not when it does not", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
@@ -866,13 +866,13 @@ describe("a machine that joins as a personal one", () => {
     });
   });
 
-  it("is never made the fleet default, even when it is the first machine to join", async () => {
+  it("is never made the fleet default, even when it is the first runner to join", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
 
-      // The default is where work with nothing to say about placement lands,
-      // which is the one thing a reserved runner never takes: an empty fleet is
-      // no reason to write the pair the rules elsewhere refuse to reach.
+      // The default runner gets work that names no runner, which a reserved
+      // runner must never get. An empty fleet is no reason to create a
+      // reserved default, which the other rules forbid.
       const first = await enlist(harness.base, (await mintJoinToken(harness.base, token)).token, {
         reserved: true,
       });
@@ -885,12 +885,12 @@ describe("a machine that joins as a personal one", () => {
     });
   });
 
-  it("refuses a join body that is not one this build understands", async () => {
+  it("rejects a join body with an unknown key", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
 
-      // A misspelled key would otherwise enlist a shared machine while its
-      // owner believes they asked for a personal one.
+      // Otherwise a misspelled key would join a shared runner while its owner
+      // believes they asked for a personal one.
       for (const body of ["", "not json", { reserved: "yes" }, { reservd: true }]) {
         const minted = await mintJoinToken(harness.base, token);
         const response = await send("POST", harness.base, "/api/v1/runners/join", {
@@ -906,7 +906,7 @@ describe("a machine that joins as a personal one", () => {
 });
 
 describe("PATCH /runners/{id}: reserved", () => {
-  it("flips reserved and records the change", async () => {
+  it("toggles reserved and records the change", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris" });
@@ -925,13 +925,13 @@ describe("PATCH /runners/{id}: reserved", () => {
 });
 
 describe("how many sessions a runner will take", () => {
-  it("derives one per 2 GiB with a floor of 1, until somebody says otherwise", async () => {
+  it("computes one per 2 GiB with a minimum of 1, until the owner sets a cap", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris" });
 
-      // Nothing has said how big the machine is, so the fleet claims the least
-      // it can rather than nothing at all.
+      // The runner has not reported its memory, so the cap is the minimum, not
+      // zero.
       expect((await readRunner(harness.base, token, runner.id)).maxConcurrentSessions).toBe(1);
 
       const capped = await patchRunner(harness.base, token, runner.id, {
@@ -945,15 +945,14 @@ describe("how many sessions a runner will take", () => {
 });
 
 describe("POST /runners/{id}/drain and /runners/{id}/undrain", () => {
-  it("takes a runner out of service and puts it back, recording each move", async () => {
+  it("takes a runner out of service and puts it back, recording each change", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris", connectivity: "online" });
 
       const drained = await moveRunner(harness.base, token, runner.id, "drain");
       expect(drained.status, await drained.clone().text()).toBe(200);
-      // Where the runner stands with its owner moved; whether the controller can
-      // see it did not.
+      // The lifecycle changed; the connectivity did not.
       expect(await drained.json()).toMatchObject({
         id: runner.id,
         lifecycle: "draining",
@@ -969,7 +968,7 @@ describe("POST /runners/{id}/drain and /runners/{id}/undrain", () => {
       expect(drainedRows[0]?.actor).toBe("user");
       expect(drainedRows[0]?.payload).toMatchObject({ runnerId: runner.id });
 
-      // A drain is a decision, not a door that locks behind you.
+      // A drain can be undone.
       const undrained = await moveRunner(harness.base, token, runner.id, "undrain");
       expect(undrained.status, await undrained.clone().text()).toBe(200);
       expect(await undrained.json()).toMatchObject({ id: runner.id, lifecycle: "active" });
@@ -986,11 +985,11 @@ describe("POST /runners/{id}/drain and /runners/{id}/undrain", () => {
 });
 
 describe("POST /runners/{id}/retire", () => {
-  it("retires a runner the controller can still account for, drained or not", async () => {
+  it("retires a runner whose sessions the controller can account for, drained or not", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
-      // A runner that is connected, and one that announced it was going: both
-      // have had their say about the sessions they were running.
+      // A connected runner, and one that sent a goodbye: both have reported on
+      // the sessions they were running.
       const online = await harness.insertRunner({ name: "iris", connectivity: "online" });
       const offline = await harness.insertRunner({
         name: "atlas",
@@ -1007,7 +1006,7 @@ describe("POST /runners/{id}/retire", () => {
     });
   });
 
-  it("will not retire a runner it cannot reach until it is told to force it", async () => {
+  it("does not retire an unreachable runner unless forced", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const active = await harness.insertRunner({ name: "iris", connectivity: "unreachable" });
@@ -1020,8 +1019,8 @@ describe("POST /runners/{id}/retire", () => {
       for (const runner of [active, draining]) {
         const refused = await moveRunner(harness.base, token, runner.id, "retire");
         expect(refused.status, runner.name).toBe(409);
-        // A machine that is not answering cannot say its sessions have finished,
-        // so the refusal names the reachability rather than the sessions.
+        // An unreachable runner cannot report that its sessions have finished,
+        // so the error mentions reachability rather than sessions.
         const body = (await refused.json()) as { error: { code: string; message: string } };
         expect(body.error.code).toBe("invalid_state");
         expect(body.error.message).toContain("unreachable");
@@ -1045,7 +1044,7 @@ describe("POST /runners/{id}/retire", () => {
 });
 
 describe("what retiring a runner leaves behind", () => {
-  it("keeps the row, records the retirement, and gives up the fleet default it held", async () => {
+  it("keeps the row, records the retirement, and clears the fleet default if it was the default", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const chosen = await harness.insertRunner({ name: "iris" });
@@ -1060,15 +1059,15 @@ describe("what retiring a runner leaves behind", () => {
           }
         ).defaultRunnerId;
 
-      // A runner that is not the default takes nothing with it.
+      // Retiring a runner that is not the default leaves the default alone.
       expect((await moveRunner(harness.base, token, other.id, "retire")).status).toBe(200);
       expect(await readDefaultRunnerId()).toBe(chosen.id);
 
       expect((await moveRunner(harness.base, token, chosen.id, "retire")).status).toBe(200);
-      // An empty default is the honest answer: nothing else is promoted into it.
+      // The default is left empty: no other runner is promoted to it.
       expect(await readDefaultRunnerId()).toBeNull();
 
-      // Nothing is deleted: the row and everything that will hang off it stay.
+      // Nothing is deleted: the row and everything linked to it stay.
       expect(await readRunner(harness.base, token, chosen.id)).toMatchObject({
         id: chosen.id,
         name: "iris",
@@ -1076,8 +1075,8 @@ describe("what retiring a runner leaves behind", () => {
       });
       expect(listRunnerNames(await listRunners(harness.base, token))).toEqual(["atlas", "iris"]);
 
-      // The trail says the fleet lost its default, which is the part of a
-      // retirement nothing else records.
+      // The audit entry records that the fleet lost its default, which nothing
+      // else records.
       const entries = await harness.audit("runner.retired");
       expect(entries.map((entry) => entry.payload["lostDefaultRunner"])).toEqual([false, true]);
     });
@@ -1085,13 +1084,13 @@ describe("what retiring a runner leaves behind", () => {
 });
 
 describe("GET /runners/join-tokens", () => {
-  it("lists the tokens that can still be spent, and nothing anybody could join with", async () => {
+  it("lists the tokens that can still be spent, without any token value", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
 
-      // All three are minted before either of the first two is put out of use:
-      // a mint sweeps the expired rows away, so ageing one out first would
-      // leave the listing right for the wrong reason.
+      // All three are created before the first two are made unusable: creating
+      // a token deletes expired rows, so expiring one first would make the
+      // list correct for the wrong reason.
       const spent = await mintJoinToken(harness.base, token);
       const stale = await mintJoinToken(harness.base, token);
       const live = await mintJoinToken(harness.base, token);
@@ -1100,8 +1099,8 @@ describe("GET /runners/join-tokens", () => {
       expect((await join(harness.base, spent.token)).status).toBe(201);
       await expireJoinToken(harness.sql, staleId!);
 
-      // A token that has been used and one that ran out are both worthless to
-      // whoever holds them, so neither is something the fleet still offers.
+      // A used token and an expired one are both useless to whoever holds them,
+      // so neither is listed.
       const items = await listJoinTokens(harness.base, token);
       expect(items.map((item) => item.id)).toEqual([liveId]);
       const only = items[0]!;
@@ -1109,8 +1108,8 @@ describe("GET /runners/join-tokens", () => {
       expect(Number.isNaN(Date.parse(only.createdAt)), only.createdAt).toBe(false);
       expect(Date.parse(only.expiresAt)).toBe(Date.parse(live.expiresAt));
 
-      // Whoever reads this listing can mint a token of their own; what they
-      // must not be handed is the one somebody is carrying to another machine.
+      // Whoever reads this list can create a token of their own; they must not
+      // get the token somebody is taking to another machine.
       const body = JSON.stringify(items);
       for (const minted of [spent, stale, live]) {
         expect(body).not.toContain(minted.token);
@@ -1121,7 +1120,7 @@ describe("GET /runners/join-tokens", () => {
 });
 
 describe("DELETE /runners/join-tokens/{id}", () => {
-  it("takes an outstanding token back, and no machine can join with it after", async () => {
+  it("revokes an open token, and no runner can join with it afterwards", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const revoked = await mintJoinToken(harness.base, token);
@@ -1131,8 +1130,8 @@ describe("DELETE /runners/join-tokens/{id}", () => {
       const response = await revokeJoinToken(harness.base, token, revokedId!);
       expect(response.status, await response.clone().text()).toBe(200);
 
-      // The token was pasted into a chat window an hour too early: the point of
-      // revoking it is that the machine reading it is turned away.
+      // The token was pasted into a chat window by mistake: revoking it means a
+      // runner using it is rejected.
       expect((await join(harness.base, revoked.token)).status).toBe(401);
       expect(await countRunners(harness.base, token)).toBe(0);
       expect((await listJoinTokens(harness.base, token)).map((one) => one.id)).toEqual([otherId]);
@@ -1145,12 +1144,12 @@ describe("DELETE /runners/join-tokens/{id}", () => {
       );
       expect(JSON.stringify(entries[0]?.payload)).not.toContain(revoked.token);
 
-      // Revoking one token is not revoking the fleet's outstanding invitations.
+      // Revoking one token leaves the other open tokens alone.
       expect((await join(harness.base, other.token)).status).toBe(201);
     });
   });
 
-  it("has nothing to take back for an id that is unknown, spent or expired", async () => {
+  it("returns not_found for an id that is unknown, spent or expired", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const spent = await mintJoinToken(harness.base, token);
@@ -1158,8 +1157,8 @@ describe("DELETE /runners/join-tokens/{id}", () => {
       const live = await mintJoinToken(harness.base, token);
       const [spentId, staleId, liveId] = await readMintedIds(harness);
 
-      // Minted first, put out of use after, for the same reason as above: the
-      // third mint's sweep would have taken an already-expired row with it.
+      // Created first and made unusable afterwards, for the same reason as
+      // above: creating the third token would delete an already-expired row.
       expect((await join(harness.base, spent.token)).status).toBe(201);
       await expireJoinToken(harness.sql, staleId!);
 
@@ -1170,8 +1169,8 @@ describe("DELETE /runners/join-tokens/{id}", () => {
       }
       expect(await harness.audit("runner.joinToken.revoked")).toHaveLength(0);
 
-      // The one token that was still outstanding was left alone, and can be
-      // taken back.
+      // The one token that was still open was left alone, and can still be
+      // revoked.
       expect((await listJoinTokens(harness.base, token)).map((one) => one.id)).toEqual([liveId]);
       expect((await revokeJoinToken(harness.base, token, liveId!)).status).toBe(200);
       expect((await join(harness.base, live.token)).status).toBe(401);
@@ -1181,14 +1180,14 @@ describe("DELETE /runners/join-tokens/{id}", () => {
 
 const GIB = 1024 * 1024 * 1024;
 
-describe("the disk a runner is admitted against", () => {
-  it("holds ten gibibytes until the owner says otherwise, and answers with what holds", async () => {
+describe("the disk watermark placement checks a runner against", () => {
+  it("is ten gibibytes until the owner sets one, and the API returns the value in effect", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris", connectivity: "online" });
 
-      // Nobody has set one, so the row reads the shipped floor rather than
-      // nothing at all.
+      // Nobody has set one, so the runner returns the default rather than
+      // nothing.
       expect((await readRunner(harness.base, token, runner.id)).diskWatermarkBytes).toBe(10 * GIB);
 
       const set = await patchRunner(harness.base, token, runner.id, {
@@ -1198,8 +1197,8 @@ describe("the disk a runner is admitted against", () => {
       expect(await set.json()).toMatchObject({ diskWatermarkBytes: 2 * GIB });
       expect((await readRunner(harness.base, token, runner.id)).diskWatermarkBytes).toBe(2 * GIB);
 
-      // A machine that has reported its disk: 4 GiB free, which is above the
-      // 2 GiB watermark just set, so it reads as accepting.
+      // A runner that has reported its disk: 4 GiB free, which is above the
+      // 2 GiB watermark just set, so it is accepting placements.
       await Effect.runPromise(
         Effect.orDie(
           harness.sql`UPDATE runners SET watermark = ${JSON.stringify({
@@ -1210,8 +1209,8 @@ describe("the disk a runner is admitted against", () => {
       );
       const before = await harness.audit("runner.placementsChanged");
 
-      // Raising the watermark past the disk it already reported is the same
-      // crossing a report would make, and it is recorded the same way.
+      // Raising the watermark above the free disk it already reported is the
+      // same change a report would cause, and it is recorded the same way.
       const raised = await patchRunner(harness.base, token, runner.id, {
         diskWatermarkBytes: 8 * GIB,
       });
@@ -1227,10 +1226,10 @@ describe("the disk a runner is admitted against", () => {
 });
 
 /**
- * Retiring a runner that still holds sessions. This needs a real machine on the
- * real socket, so it stands up the shared fleet rather than an inserted row:
- * what retire has to account for is sessions, and sessions only exist where
- * something can be told to start them.
+ * Retiring a runner that still has sessions. This needs a real runner on the
+ * real socket, so these tests use the shared fleet rather than an inserted
+ * row: retiring has to handle sessions, and sessions exist only where a runner
+ * can receive a start frame.
  */
 const FLEET_FACTS: RunnerFacts = {
   os: "darwin",
@@ -1244,8 +1243,9 @@ const FLEET_FACTS: RunnerFacts = {
 };
 
 /**
- * What a case that stands up a fleet is given: the shared waits are the fleet's
- * own, and a wait that outlasts the budget never gets to name what never came.
+ * The timeout for a test that sets up a fleet. It covers the fleet's shared
+ * waits; a wait that outlasts the test timeout never gets to report what it
+ * was waiting for.
  */
 const FLEET_BUDGET_MS = WAIT_DEADLINE_MS * 3 + 10_000;
 
@@ -1278,7 +1278,7 @@ const spawnSession = async (arranged: Arranged, prompt: string): Promise<Session
   return (await response.json()) as Session;
 };
 
-/** A session the machine has confirmed it is running. */
+/** Spawns a session and waits until the runner has reported it started. */
 const spawnRunningSession = async (arranged: Arranged): Promise<Session> => {
   const session = await spawnSession(arranged, "hello");
   await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
@@ -1301,9 +1301,9 @@ const setSessionCap = async (arranged: Arranged, cap: number): Promise<void> => 
   expect(response.status, await response.clone().text()).toBe(200);
 };
 
-describe("retiring a runner that still holds sessions", () => {
+describe("retiring a runner that still has sessions", () => {
   it(
-    "refuses while one is running, and forced ends the running and the queued alike",
+    "is rejected while one is running, and when forced ends both running and queued sessions",
     async () => {
       await withFleet(async (arranged) => {
         await setSessionCap(arranged, 1);
@@ -1342,7 +1342,7 @@ describe("retiring a runner that still holds sessions", () => {
           });
           expect(ended.status).toBe("exited");
         }
-        // The running one had a harness to tell; the queued one never did.
+        // The running session had a harness to stop; the queued one never did.
         await waitUntil("sent a sessionStop", () =>
           listFrames<SessionStopFrame>(arranged.wire, "sessionStop").length > 0 ? true : undefined,
         );
@@ -1352,7 +1352,7 @@ describe("retiring a runner that still holds sessions", () => {
           ),
         ).toEqual([live.id]);
 
-        // One row per session the retirement ended, naming why.
+        // One audit entry per session the retirement ended, with the reason.
         const stopped = await arranged.harness.audit("session.stopped");
         expect(stopped.map((row) => row.payload["sessionId"]).sort()).toEqual(
           [live.id, waiting.id].sort(),
@@ -1367,11 +1367,11 @@ describe("retiring a runner that still holds sessions", () => {
   );
 
   it(
-    "retires without being forced when everything it holds is only queued",
+    "retires without force when all its sessions are only queued",
     async () => {
       await withFleet(async (arranged) => {
-        // Under the shipped watermark, so the placement lands on the runner and
-        // waits there instead of starting.
+        // Below the default watermark, so the session is placed on the runner
+        // and waits there instead of starting.
         arranged.wire.send({
           _tag: "watermarkReport",
           watermark: { diskFreeBytes: 4 * GIB, availableMemoryBytes: 16 * GIB },

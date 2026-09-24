@@ -1,14 +1,14 @@
 /**
- * The log's rows, and the ways of walking it that are not a public read.
+ * The log's rows, and the internal reads of the log.
  *
- * `event.query` pages the log for a caller; the live socket follows it from a
- * position; the event router walks the pipeline events past its cursor. All of them
- * answer with the same `Event`, built here from the same columns, so a record
- * pushed over the socket and the same record fetched over HTTP are the same
- * document field for field.
+ * `event.query` pages through the log for a caller; the live socket follows it
+ * from a position; the event router reads the pipeline events after its
+ * cursor. All of them return the same `Event`, built here from the same
+ * columns, so a record pushed over the socket and the same record fetched over
+ * HTTP are identical, field for field.
  *
  * The position a durable consumer has read to is kept here too, because it is
- * a position in this log: a consumer that spelled the walk itself would be a
+ * a position in this log. A consumer that wrote its own query would be a
  * second reader of the events table outside the domain that owns it.
  */
 import * as Effect from "effect/Effect";
@@ -58,14 +58,14 @@ export const toEvent = (row: EventRow): Event => ({
   actor: row.actor,
 });
 
-/** The position of the newest entry, or zero for a log nothing has written to. */
+/** Returns the position of the newest entry, or zero if the log is empty. */
 export const readLogHead = (sql: SqlClient.SqlClient): Effect.Effect<number, SqlError> =>
   Effect.map(
     sql<{ readonly head: number | null }>`SELECT MAX(id) AS head FROM events`,
     (rows) => rows[0]?.head ?? 0,
   );
 
-/** The next entries after a position, oldest first, at most `limit` of them. */
+/** Returns at most `limit` entries after a position, oldest first. */
 export const readEventsAfter = (
   sql: SqlClient.SqlClient,
   after: number,
@@ -80,13 +80,13 @@ export const readEventsAfter = (
   );
 
 /**
- * The next pipeline events after a position, oldest first, at most `limit` of
- * them.
+ * Returns at most `limit` pipeline events after a position, oldest first.
  *
- * One table holds two populations and only one of them is matched, so the
- * audit entries are left out by the query rather than by the caller: a walk
- * that read them and then dropped them would read a log full of audit entries
- * one batch at a time and make no progress.
+ * One table holds both pipeline events and audit entries, and only pipeline
+ * events are matched. So the query leaves out the audit entries, not the
+ * caller. A caller that read them and then dropped them could read a batch
+ * made only of audit entries, and on a log full of them it would make almost
+ * no progress per batch.
  */
 export const readPipelineEventsAfter = (
   sql: SqlClient.SqlClient,
@@ -102,8 +102,8 @@ export const readPipelineEventsAfter = (
   );
 
 /**
- * One pipeline event by its position, or none. An audit entry answers none:
- * an entry about what Hercule itself did is not a fact anything waits for.
+ * Returns the pipeline event at a position, or none. Returns none for an audit
+ * entry too, because an entry about what Hercule itself did is never routed.
  */
 export const readPipelineEvent = (
   sql: SqlClient.SqlClient,
@@ -118,13 +118,13 @@ export const readPipelineEvent = (
   );
 
 /**
- * The position this consumer has read to, creating its cursor at the start of
- * the log the first time it asks. Ids count from one, so a consumer that has
- * never run reads everything the log holds.
+ * Returns the position this consumer has read to. The first time a consumer
+ * calls this, it creates the consumer's cursor at position zero. Ids start at
+ * one, so a new consumer reads everything in the log.
  *
- * The row is written only when it is absent, rather than on every read: a
- * consumer reads its position on every pass, and an upsert would be a write
- * on every one of them.
+ * The row is written only when it is missing, not on every read: a consumer
+ * reads its position on every pass, and an upsert would add a write to every
+ * pass.
  */
 export const readConsumerPosition = (
   sql: SqlClient.SqlClient,

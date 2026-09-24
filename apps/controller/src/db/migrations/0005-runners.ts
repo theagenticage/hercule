@@ -1,9 +1,10 @@
 /**
  * The fleet: one row per runner the controller has enlisted.
  *
- * What the runner reports is nullable, because none of it exists before it first
- * connects. `facts` and `watermark` are JSON documents because nothing queries
- * inside them, and columns would mean a migration per new reported field.
+ * The columns the runner reports are nullable, because they have no value
+ * before the runner first connects. `facts` and `watermark` are JSON documents
+ * because nothing queries inside them, and columns would mean a migration per
+ * new reported field.
  *
  * Only the credential's hash is here, and its index is unique because two
  * runners sharing one would make the socket upgrade ambiguous.
@@ -11,8 +12,8 @@
  * The contract's bounds are repeated as CHECK constraints because SQLite cannot
  * add one later without rebuilding the table.
  *
- * A retired runner keeps its row: its sessions still name it, and re-enlisting
- * writes a new row rather than reviving this one.
+ * A retired runner keeps its row: its sessions still refer to it, and
+ * re-enlisting writes a new row rather than reviving the old one.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -40,7 +41,7 @@ export default Effect.gen(function* () {
       updated_at TEXT NOT NULL
     )
   `;
-  // A keyset walk resumes on the `(name, id)` pair the cursor carries.
+  // Keyset paging resumes after the `(name, id)` pair the cursor holds.
   yield* sql`CREATE INDEX runners_name ON runners (name, id)`;
   yield* sql`CREATE UNIQUE INDEX runners_credential_hash ON runners (credential_hash)`;
 });

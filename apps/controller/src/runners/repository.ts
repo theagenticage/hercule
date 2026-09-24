@@ -1,7 +1,8 @@
 /**
- * Runner rows; nothing here decides policy. A listing is one keyset walk over
- * `runners_name`, and neither filter is indexed because a fleet is a few dozen
- * machines. The reported columns hold JSON, since nothing queries inside them.
+ * The repository for runner rows; nothing here decides policy. A list is one
+ * keyset query over the `runners_name` index. The filters are not indexed,
+ * because a fleet has at most a few dozen runners. The columns a runner reports
+ * hold JSON, because nothing queries inside them.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -56,7 +57,7 @@ export interface RunnerHelloRecord {
   readonly facts: RunnerFacts;
 }
 
-/** An absent column is left as it was. */
+/** The runner fields to change. A field that is `undefined` is left as it was. */
 export interface RunnerEdit {
   readonly name?: string;
   readonly labels?: ReadonlyArray<string>;
@@ -94,14 +95,15 @@ const BYTES_PER_SESSION = 2 * 1024 ** 3;
 const DEFAULT_DISK_WATERMARK_BYTES = 10 * 1024 ** 3;
 
 /**
- * The cap the fleet answers with. A machine that has not reported yet is taken
- * for the smallest one there is rather than for no capacity at all.
+ * Returns the session cap the API reports: the owner's override, or one
+ * session per 2 GiB of memory. A runner that has not reported its facts yet
+ * gets a cap of one, rather than no capacity at all.
  */
 const computeEffectiveCap = (override: number | null, facts: RunnerFacts | null): number =>
   override ??
   (facts === null ? 1 : Math.max(1, Math.floor(facts.totalMemoryBytes / BYTES_PER_SESSION)));
 
-/** The watermark dispatch admits placements against. */
+/** Returns the disk watermark dispatch checks placements against: the owner's override, or the default. */
 const computeEffectiveWatermark = (override: number | null): number =>
   override ?? DEFAULT_DISK_WATERMARK_BYTES;
 
@@ -112,9 +114,9 @@ const buildCursorScope = (direction: SortDirection): CursorScope => ({
 });
 
 /**
- * A document this build cannot read comes back as absent rather than failing the
- * page it is on: one row written by another version must not take a whole fleet
- * listing with it.
+ * Builds a decoder for one JSON column. A value this build cannot decode is
+ * returned as `null`, with a warning in the log, rather than failing the whole
+ * page: one row written by another version must not break the fleet list.
  */
 const buildDocumentDecoder = <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
@@ -128,7 +130,7 @@ const buildDocumentDecoder = <S extends Schema.ConstraintDecoder<unknown>>(
     return Effect.as(
       Effect.logWarning(
         `Runner ${id}: its ${what} were written by a build this one cannot read, ` +
-          `and are answered as though the runner had never reported them.`,
+          `so they are returned as though the runner had never reported them.`,
       ),
       null,
     );
@@ -172,11 +174,11 @@ const toDetail = (row: RunnerRow): Effect.Effect<RunnerDetail> =>
   });
 
 /**
- * A machine that can be told something now: connected, and not retired or
- * draining. Exported as a fragment because the workspace sweep asks the same
- * question of the machine a workspace sits on - a workspace is never disposed
- * of behind a machine's back - and two spellings of "online" would be two
- * different answers.
+ * Builds the SQL condition for a runner that can receive frames now: connected,
+ * and not retired or draining. It is exported as a fragment because the
+ * workspace sweep checks the same thing for a workspace's runner (a workspace
+ * is never disposed of behind its runner's back), and two definitions of
+ * "online" could disagree.
  */
 export const buildOnlineClause = (alias: string): string =>
   `${alias}.connectivity = 'online' AND ${alias}.lifecycle = 'active'`;
@@ -195,7 +197,7 @@ const make = Effect.gen(function* () {
             : Effect.map(toDetail(rows[0]), Option.some),
       ),
 
-    /** A `retired` runner's credential is revoked, so it resolves to nothing. */
+    /** Returns the id of the runner with this credential hash. A `retired` runner's credential is revoked, so it returns `none`. */
     byCredential: (credentialHash: string): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
@@ -206,8 +208,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Asked only once a credential has been refused, so a runner can be told
-     * its machine was retired rather than that nobody knows it.
+     * Checks whether this credential belonged to a retired runner. It is called
+     * only after a credential was rejected, so the runner can be told it was
+     * retired rather than that it is unknown.
      */
     wasRetired: (credentialHash: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -225,13 +228,14 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The machines a placement with nothing to say about where it goes may
-     * land on: online, active, and not reserved.
+     * Returns the runners a placement that names no runner may choose: online,
+     * active, and not reserved.
      *
-     * Reserved is what makes it a fallback rather than a listing (CONTEXT.md,
-     * Reserved: placement fallback never chooses one). The disk watermark is
-     * not checked here: selection picks the machine, and dispatch decides
-     * when a session placed on it actually starts.
+     * Leaving out reserved runners is what makes this the fallback list rather
+     * than a plain list (see Reserved in CONTEXT.md: the placement fallback
+     * never chooses a reserved runner). The disk watermark is not checked
+     * here: placement picks the runner, and dispatch decides when a session
+     * placed on it actually starts.
      */
     placeable: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(
@@ -242,7 +246,7 @@ const make = Effect.gen(function* () {
         (rows) => new Set(rows.map((row) => uuidToString(row.id))),
       ),
 
-    /** So a joining machine can be given a free one. */
+    /** Returns every runner name, so a joining runner can get a free one. */
     names: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(
         sql<{ readonly name: string }>`SELECT name FROM runners`,
@@ -250,10 +254,10 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Answered from the row it wrote, so there is one reader of a runner and
-     * not two. The session cap is not among the columns it writes: facts first
-     * arrive at hello, so a new row has nothing to derive one from and leaves
-     * it to be derived at read time.
+     * Stores a new runner and returns it, built from the row the insert
+     * returned, so there is one way to read a runner and not two. The session
+     * cap is not written: facts first arrive with the hello, so a new row has
+     * nothing to compute a cap from, and the cap is computed on read.
      */
     insert: (runner: NewRunner): Effect.Effect<RunnerDetail, SqlError> =>
       Effect.flatMap(
@@ -286,7 +290,10 @@ const make = Effect.gen(function* () {
       );
     },
 
-    /** Connectivity is `setConnectivity`'s, so one statement decides whether the row moved. */
+    /**
+     * Stores what a runner's hello reported. Connectivity is left to
+     * `setConnectivity`, so one statement decides whether it changed.
+     */
     recordHello: (
       id: string,
       hello: RunnerHelloRecord,
@@ -303,7 +310,7 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(id)}
       `),
 
-    /** The report is the whole of it: only the latest reading is worth anything. */
+    /** Replaces the runner's facts with the latest report; older reports are not kept. */
     recordFacts: (id: string, facts: RunnerFacts, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
         sql`UPDATE runners SET facts = ${JSON.stringify(facts)}, updated_at = ${at}
@@ -311,11 +318,12 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * The reading is refreshed every time, but only the crossing against the
-     * effective watermark is acted on. The old reading goes through the same
-     * tolerant decode the API answers with, so an unreadable column does not
-     * take the connection down. A machine nobody has heard from is taken to be
-     * accepting work.
+     * Stores the runner's latest watermark report. Returns whether the runner
+     * now accepts work (enough free disk for the effective watermark), and
+     * whether that changed since the last report; only a change is acted on.
+     * The old report is decoded the same tolerant way as for the API, so an
+     * unreadable column does not break the connection. A runner with no
+     * earlier report counts as accepting work.
      */
     recordWatermark: (
       id: string,
@@ -344,7 +352,7 @@ const make = Effect.gen(function* () {
             WHERE id = ${uuidFromString(id)}`,
       ),
 
-    /** Answers whether it moved, so nothing records a change that did not happen. */
+    /** Sets the runner's connectivity. Returns whether it changed, so nothing records a change that did not happen. */
     setConnectivity: (
       id: string,
       connectivity: RunnerConnectivity,
@@ -359,7 +367,7 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Where a runner stands with its owner; the socket never writes this. */
+    /** Sets the runner's lifecycle (active, draining, retired). Only the owner changes it; the socket never does. */
     setLifecycle: (
       id: string,
       lifecycle: RunnerLifecycle,
@@ -370,7 +378,7 @@ const make = Effect.gen(function* () {
             WHERE id = ${uuidFromString(id)}`,
       ),
 
-    /** Starting, idle or busy: what a runner is actually holding right now. */
+    /** Counts the runner's sessions that are `starting`, `idle` or `busy`: the ones it is running now. */
     runningSessions: (id: string): Effect.Effect<number, SqlError> =>
       Effect.map(
         sql<{ readonly n: number }>`

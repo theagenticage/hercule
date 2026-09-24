@@ -1,10 +1,10 @@
 /**
- * Enlisting a machine that presented a join token.
+ * Joins a runner that presented a join token.
  *
- * Not an operation and not on `RunnerService`: no grant reaches it, because a
- * machine holding a join token is not a user. It presents the token itself,
- * which is why the method takes it as an argument, and the row it writes is
- * stamped `system` because a runner is never an actor.
+ * This is not an operation and not on `RunnerService`, and it checks no grant,
+ * because a runner holding a join token is not a user. The runner presents the
+ * token itself, which is why the method takes it as an argument. The audit
+ * entry is stamped `system`, because a runner is never an actor.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -25,10 +25,13 @@ import { pickName } from "./names";
 import { runnerRepository } from "./repository";
 
 /**
- * Never says which of unminted, spent and expired it was: the presenter has the
- * same nothing to do in all three, and the difference is a probe.
+ * The message does not say which case applies (never created, revoked, already
+ * used, or expired). The caller has to do the same thing in every case, and
+ * telling them apart would help someone probing for valid tokens.
  */
-const NO_JOIN = "that is not a join token";
+const NO_JOIN =
+  "that join token is not valid: it was never created, was revoked, was already used, or has expired. " +
+  "Create a new join token and try again";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -40,13 +43,17 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * One transaction spends the token and writes the row, so a token cannot be
-     * spent by an enlistment that fails, and two machines racing with the same
-     * token cannot both be enlisted. The runner is `offline` because joining is
+     * Spends the join token and stores the new runner, and returns the
+     * runner's id, name and credential. Fails with `Unauthenticated` when the
+     * token is not valid.
+     *
+     * One transaction spends the token and writes the row, so a join that
+     * fails does not use up the token, and two runners racing with the same
+     * token cannot both join. The runner starts `offline`, because joining is
      * not connecting.
      *
-     * `reserved` is taken here rather than patched afterwards so a machine the
-     * owner called personal is never, for an instant, one the fleet may place on.
+     * `reserved` is set here rather than updated afterwards, so a runner the
+     * owner marked as personal is never, even briefly, available for placement.
      */
     join: (
       token: string,
@@ -62,8 +69,8 @@ const make = Effect.gen(function* () {
           }
           const controller = yield* identity.read;
           if (Option.isNone(controller)) {
-            // The boot creates the identity before anything binds, so this is a
-            // bug rather than a state to answer.
+            // The boot creates the identity before the server starts, so a
+            // missing identity is a bug, not a state to handle.
             return yield* Effect.die("the controller has no identity row");
           }
           const credential = mintToken();
@@ -78,10 +85,11 @@ const make = Effect.gen(function* () {
             credentialHash: hashToken(credential),
             at,
           });
-          // Only the first, and never a reserved one: a default a person set and
-          // one they cleared are both choices, and the next machine to join may
-          // take neither. The entry below records it, since this is the one
-          // writer no user asked for.
+          // Only the first runner becomes the default, and never a reserved
+          // one. A default a person set, or one they cleared, is their choice,
+          // and a joining runner must not override either. The audit entry
+          // below records it, because this is the one change to the default
+          // that no user asked for.
           const tookTheDefault =
             !reserved && fleet.size === 0 && (yield* settings.defaultRunnerId()) === null;
           if (tookTheDefault) yield* settings.setDefaultRunnerId(enlisted.id, at);

@@ -1,6 +1,5 @@
 /**
- * Subscriptions as the API sees them: `subscription.create`, `query` and
- * `cancel`.
+ * The subscription operations: `subscription.create`, `query` and `cancel`.
  *
  * A subscription is held by the session that registered it. The holder is
  * taken from the credential and never from the payload, so an agent cannot
@@ -8,12 +7,12 @@
  * nobody's session - cannot register one at all.
  *
  * What is stored is the target as it was written and the condition it expands
- * into. The condition is checked before it is stored, because a condition the
- * evaluator refuses is a subscription that could never match and would say so
- * only from inside the event router, long after the caller had gone.
+ * into. The condition is validated before it is stored. A condition the
+ * evaluator rejects could never match, and the error would otherwise appear
+ * only inside the event router, long after the caller has gone.
  *
- * A listing answers live subscriptions only: it is read to see what a session
- * is still waiting for, and to find the id to cancel.
+ * `subscription.query` returns live subscriptions only: it is used to see what
+ * a session is still waiting for, and to find the id to cancel.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -67,25 +66,26 @@ interface SubscriptionPage {
   readonly nextCursor?: string;
 }
 
-/** Newest first, as every other listing of what has been set up is read. */
+/** Newest first, like the other listings. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
 
-/** What ends a subscription the holder asked to end. */
+/** The end reason of a subscription that its holder cancelled. */
 const CANCELLED = "cancelled";
 
 /**
- * Why a subscription ended with the session that held it. The session is named
- * because a holder reading the row has several sessions and needs to know
- * which one this claim belonged to.
+ * Returns the end reason for a subscription whose holding session has exited
+ * for good. The session is named because a reader of the row may have several
+ * sessions and needs to know which one held this subscription.
  *
- * It ends the inputs that subscription produced as well as the subscription
- * itself, so both rows carry one sentence and a reader never has to join them.
+ * The same reason also cancels the undelivered inputs that the subscription
+ * produced, so both rows carry the same sentence and a reader never has to
+ * join them.
  */
 export const buildHolderEndedReason = (sessionId: string): string =>
   `session ${sessionId}, which held this subscription, has exited and its transcript ` +
   `cannot be picked up again`;
 
-/** Why a target this version cannot wait on is refused, one message per kind. */
+/** The reason each target kind that this version cannot wait on is rejected. */
 const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref">, string> = {
   run: "no runs exist yet, so there is no run to wait on; wait on an External Ref instead",
   session:
@@ -97,33 +97,34 @@ const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref">, s
 };
 
 /**
- * Why a credential that is nobody's session cannot register one, and why a
- * user credential listing subscriptions has to say whose.
+ * The messages for two errors: a user credential registering a subscription,
+ * and a user credential listing subscriptions without naming a holder.
  *
- * Each is two sentences and not one: the refusal carries a line of its own and
- * a line on the field, and a reader shown the same sentence twice reads it
- * twice to find out what is different about it.
+ * Each error has two different sentences: a summary, and a message on the
+ * `holder` field. A reader shown the same sentence twice would read it twice
+ * to find out what is different.
  */
 const NEEDS_A_SESSION = "a subscription needs a session holder";
 
 const NEEDS_A_SESSION_REPAIR =
-  "a subscription is held by the session that registers it, and a user credential is no session; " +
+  "a subscription is held by the session that registers it, and a user credential is not a session; " +
   "call this with a session token";
 
 const NEEDS_A_HOLDER = "a subscription listing needs a holder";
 
 const NEEDS_A_HOLDER_REPAIR =
-  "a user credential holds no subscriptions of its own; name whose to list, as holder=session:<id>";
+  "a user credential has no subscriptions of its own; " +
+  "name the holder whose subscriptions to list, as holder=session:<id>";
 
 const NO_SUCH_SUBSCRIPTION = "no live subscription has that id";
 
-/** How a stored row reads as health: no evaluation error recorded is `ok`. */
+/** Returns the subscription's health: `ok` unless an evaluation error is recorded. */
 const readHealth = (stored: StoredSubscription): SubscriptionHealth =>
   stored.healthErrorMessage === null || stored.healthErrorAt === null
     ? { state: "ok" }
     : { state: "error", message: stored.healthErrorMessage, at: stored.healthErrorAt };
 
-/** The wake-up a restart cancelled, or null where none stands. */
+/** Returns the wake-up that a restart cancelled, or null if there is none. */
 const readLostWakeUp = (stored: StoredSubscription): Subscription["lostWakeUp"] =>
   stored.lostWakeUpEventId === null || stored.lostWakeUpAt === null
     ? null
@@ -139,7 +140,7 @@ const composeRecord = (stored: StoredSubscription): Subscription => ({
   createdAt: stored.createdAt,
 });
 
-/** How every call here can fail before it reaches what it was asked to do. */
+/** The errors every operation here can fail with before it does its work. */
 type CommonError = Unauthenticated | Forbidden | Validation | SqlError;
 
 const make = Effect.gen(function* () {
@@ -147,7 +148,11 @@ const make = Effect.gen(function* () {
   const subscriptions = yield* subscriptionRepository;
 
   return {
-    /** Registers what this session waits on, and answers which subscription that is. */
+    /**
+     * Registers a subscription for the calling session and returns its id.
+     * Fails with `Validation` if the caller is not a session, and with
+     * `InvalidState` for a target kind this version cannot wait on.
+     */
     create: (
       input: SubscriptionCreateInput,
     ): Effect.Effect<{ readonly subscriptionId: string }, CommonError | InvalidState> =>
@@ -166,12 +171,13 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createInvalidStateError(ABSENT_TARGET_REASON[target.kind]));
         }
         const condition = expandTarget(target);
-        // A condition the evaluator refuses could never match, and the caller
-        // is the only one who can still choose another target. No expansion
-        // this version can produce is refused: every id it writes goes in as a
-        // quoted string literal, so nothing a caller writes can reach the
-        // grammar. The check stands for the sources a trigger stores later,
-        // which are written by hand.
+        // A condition the evaluator rejects could never match, and only the
+        // caller can still choose another target. No expansion this version
+        // produces is rejected: every id goes in as a quoted string literal, so
+        // nothing a caller writes can change the expression's syntax. The
+        // check stays as a safety net: if a change to `expandTarget` ever
+        // produced an invalid expression, the caller would get an error here
+        // instead of a subscription that silently never matches.
         yield* Effect.mapError(validateExpression(condition, "event"), (failure) =>
           createInvalidStateError(failure.message),
         );
@@ -192,9 +198,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * One page of a holder's live subscriptions. A session that names no
-     * holder reads its own; a session that names another holder reads that
-     * one, because a grant bounds an operation and not a row in v1.
+     * Returns one page of a holder's live subscriptions. A session that names
+     * no holder gets its own. A session that names another holder gets that
+     * holder's, because in v1 a grant covers an operation, not single rows.
+     * Fails with `Validation` if a user credential names no holder.
      */
     query: (input: QueryInput): Effect.Effect<SubscriptionPage, CommonError> =>
       Effect.gen(function* () {
@@ -231,14 +238,18 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Stops one subscription waiting.
+     * Cancels one live subscription.
      *
-     * A session ends its own subscriptions and no others: a claim belongs to
-     * the session that made it, and another session's is not its to end. The
-     * user ends any. Three cases answer alike - no such id, a subscription
-     * already ended, and one another session holds - so a caller learns
-     * nothing about what it may not reach, and each answer leaves it with
-     * nothing left to do.
+     * A session can cancel only its own subscriptions, because a subscription
+     * belongs to the session that registered it. The user can cancel any.
+     * These three cases fail with the same `NotFound` error:
+     *
+     * - the id does not exist
+     * - the subscription has already ended
+     * - another session holds the subscription
+     *
+     * So a caller learns nothing about what it may not reach, and in each case
+     * there is nothing left for it to cancel.
      */
     cancel: (input: Identified): Effect.Effect<Record<string, never>, CommonError | NotFound> =>
       Effect.gen(function* () {

@@ -1,7 +1,7 @@
 /**
- * The database layer tests run against: `:memory:` with the production
- * migration set applied (spec 04, Repository interfaces). There are no mock
- * repositories, and migration drift is caught by every test run.
+ * The database layer that tests run against: an in-memory database with the
+ * production migrations applied (spec 04, Repository interfaces). There are no
+ * mock repositories, so every test run also checks the migrations.
  */
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";

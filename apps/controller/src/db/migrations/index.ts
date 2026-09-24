@@ -60,5 +60,5 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [24, "workflows-and-triggers", Effect.succeed(workflowsAndTriggers)],
 ];
 
-/** The schema version this binary carries: the highest embedded migration id. */
+/** The schema version of this binary: the highest embedded migration id. */
 export const binaryVersion: number = migrations.reduce((highest, [id]) => Math.max(highest, id), 0);

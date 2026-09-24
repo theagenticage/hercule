@@ -1,10 +1,10 @@
 /**
- * Resource rows and the project links beside them. Nothing here decides policy:
- * what a kind requires, what a canonical remote is and who may write are the
- * service's.
+ * Resource rows and their project links. Nothing here decides policy: the
+ * service decides what each kind requires, what a canonical remote is, and who
+ * may write.
  *
- * The project links are read in one query for a whole page rather than per row,
- * so a listing stays two statements however many resources it hands back.
+ * The project links are read in one query for a whole page rather than per
+ * row, so a listing takes two statements however many resources it returns.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -24,7 +24,7 @@ import {
   type Page,
 } from "../db";
 
-/** What every resource row holds, whatever kind it is. */
+/** The fields every resource row has, whatever its kind. */
 interface ResourceFields {
   readonly id: string;
   readonly label: string | null;
@@ -36,9 +36,9 @@ interface ResourceFields {
 }
 
 /**
- * A repo: the one kind that is checked out, and the one that has a remote. The
- * table says so too, so nothing reading a repo has to stand in for a remote it
- * should have had.
+ * A repo: the only kind that is checked out, and the only kind with a remote.
+ * The table enforces this too, so code reading a repo never has to handle a
+ * missing remote.
  */
 export interface StoredRepo extends ResourceFields {
   readonly kind: "repo";
@@ -57,19 +57,19 @@ export interface StoredRecordResource extends ResourceFields {
 export type StoredResource = StoredRepo | StoredRecordResource;
 
 /**
- * Whether this resource is one a working copy is made from. Only a repo is: a
- * folder and a mailbox are records of something outside Hercule. Every door that
- * checks something out asks this one question and refuses with the one sentence
- * below, in whatever error its own shape calls for.
+ * Checks whether a checkout can be made from this resource. Only a repo
+ * qualifies: a folder and a mailbox are records of something outside Hercule.
+ * Every operation that checks something out uses this check, and fails with
+ * the `NOT_CHECKED_OUT` message below, in whichever error type it returns.
  */
 export const isCheckedOut = (resource: StoredResource): resource is StoredRepo =>
   resource.kind === "repo";
 
 /**
- * What a caller is told when it points an operation that checks something out
- * at a resource that is not a repo. Here rather than in the contract: it is a
- * refusal this controller makes, not a shape the API declares, and the CLI
- * restates it as the gloss beside the flag.
+ * The error message for an operation that checks out a resource that is not a
+ * repo. It lives here rather than in the contract because it is an error this
+ * controller returns, not a schema the API declares. The CLI help repeats the
+ * same text for the `invalid_state` error.
  */
 export const NOT_CHECKED_OUT = "only a repo is checked out; a folder and a mailbox are records";
 
@@ -84,7 +84,7 @@ export interface NewResource {
   readonly at: string;
 }
 
-/** The columns an edit may set. An absent one is left as it was. */
+/** The columns an update may set. An absent field leaves its column unchanged. */
 export interface ResourceEdit {
   readonly remote?: string;
   readonly canonicalRemote?: string;
@@ -135,7 +135,7 @@ const toResource = (row: ResourceRow): StoredResource => {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-  // The table's own CHECK is what makes these two non-null on a repo.
+  // The table's CHECK constraint guarantees these two are non-null on a repo.
   return row.kind === "repo"
     ? { ...fields, kind: "repo", remote: row.remote!, canonicalRemote: row.canonical_remote! }
     : {
@@ -146,7 +146,7 @@ const toResource = (row: ResourceRow): StoredResource => {
       };
 };
 
-/** The record as the API hands it out: the row plus the projects it is under. */
+/** Builds the API record from the row and the projects it is filed under. */
 export const composeResource = (
   row: StoredResource,
   projectIds: ReadonlyArray<string>,
@@ -165,7 +165,7 @@ const make = Effect.gen(function* () {
   return {
     one,
 
-    /** These resources, by id: what a page of workspaces reads in one query. */
+    /** Returns these resources keyed by id, in one query, as a page of workspaces needs. */
     byIds: (
       ids: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyMap<string, StoredResource>, SqlError> =>
@@ -179,7 +179,7 @@ const make = Effect.gen(function* () {
             (rows) => new Map(rows.map((row) => [uuidToString(row.id), toResource(row)])),
           ),
 
-    /** The resource this remote names, whichever way it was spelled. */
+    /** Returns the resource with this canonical remote, however the remote was written. */
     byCanonicalRemote: (
       canonicalRemote: string,
     ): Effect.Effect<Option.Option<StoredResource>, SqlError> =>
@@ -201,8 +201,8 @@ const make = Effect.gen(function* () {
                   ${resource.setupCommand}, ${resource.workspaceInclude ? 1 : 0},
                   ${resource.at}, ${resource.at})
         `;
-        // Read back through the same mapper a select goes through, so an
-        // inserted repo is the same shape a read one is.
+        // Built through the same mapper a SELECT uses, so an inserted repo has
+        // the same shape as one that is read.
         return toResource({
           id,
           kind: resource.kind,
@@ -240,9 +240,10 @@ const make = Effect.gen(function* () {
     },
 
     /**
-     * Removes the resource, its project links, and the checkouts that named it.
-     * Those checkouts belong to workspaces that are already gone: the service
-     * refuses the delete while any workspace on it still stands.
+     * Deletes the resource, its project links, and its checkouts. Those
+     * checkouts belong to workspaces that are already deleted or lost: the
+     * service rejects the delete while a workspace that is neither deleted
+     * nor lost has a checkout of the resource.
      */
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -252,7 +253,7 @@ const make = Effect.gen(function* () {
         yield* sql`DELETE FROM resources WHERE id = ${key}`;
       }),
 
-    /** The projects these resources are filed under, by resource id. */
+    /** Returns the projects each of these resources is filed under, keyed by resource id. */
     projectsOf: (
       ids: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
@@ -276,7 +277,7 @@ const make = Effect.gen(function* () {
             },
           ),
 
-    /** Replaces the projects this resource is filed under with the ones named. */
+    /** Replaces the projects this resource is filed under with the given ones. */
     setProjects: (id: string, projectIds: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(id);
@@ -291,9 +292,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Whether a workspace still stands on this resource: one whose status is
-     * neither `deleted` nor `lost`. The question is the resource's own - may it
-     * be removed - so it is asked here rather than of another domain.
+     * Checks whether any workspace with a checkout of this resource is neither
+     * `deleted` nor `lost`. The check decides whether the resource may be
+     * deleted, so it belongs to this domain rather than the workspaces domain.
      */
     standsOn: (id: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -306,7 +307,10 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** The projects that exist among the ones named, so a link points somewhere. */
+    /**
+     * Returns the given project ids that exist and are not deleted, so a link
+     * never points at nothing.
+     */
     liveProjects: (
       projectIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>

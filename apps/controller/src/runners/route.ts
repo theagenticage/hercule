@@ -1,11 +1,12 @@
 /**
- * The join exchange. Outside the derived operation table because the caller is
- * not a user: a machine holding a join token has no credential, no grant and no
- * profile, and the token buys it exactly this one call.
+ * The HTTP route for joining a runner. It is not in the derived operation
+ * table, because the caller is not a user: a runner holding a join token has no
+ * credential, no grant and no profile, and the token allows exactly this one
+ * call.
  *
- * Outside the pre-setup gate too, because the controller's own runner joins at
- * first boot before anybody has set Hercule up. Nothing is opened by that: with no
- * minted token there is nothing to present.
+ * It is also outside the pre-setup gate, because the controller's own runner
+ * joins at first boot, before anybody has set Hercule up. That opens nothing:
+ * without a created join token there is nothing to present.
  */
 import * as Effect from "effect/Effect";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
@@ -26,24 +27,25 @@ import { RunnerJoin } from "./join";
 
 const JOIN_PATH = "/api/v1/runners/join";
 
-const NO_TOKEN = "a join needs a join token as a bearer credential";
+const NO_TOKEN = "joining needs a join token as the bearer credential";
 
-const NO_BODY = "a join takes a JSON body";
+const NO_BODY = "the join request needs a JSON body";
 
 /**
- * A key nobody declared is an error rather than a dropped field, so a
- * misspelled `reserved` cannot enlist a shared machine while its owner believes
- * they asked for a personal one. It is set here rather than in the schema
- * because `closedStruct`, which does this for the derived payloads, lives in
- * `@hercule/contract`, and `@hercule/protocol` cannot reach it: the runner links
- * the protocol, and the contract pulls in the plugin host the runner's graph
- * must never touch.
+ * Makes an unknown key an error rather than a dropped field, so a misspelled
+ * `reserved` cannot join a shared runner while its owner believes they asked
+ * for a personal one. It is set here rather than in the schema because
+ * `closedStruct`, which does this for the derived payloads, lives in
+ * `@hercule/contract`, and `@hercule/protocol` cannot import it: the runner
+ * imports the protocol, and the contract pulls in the plugin host, which the
+ * runner's import graph must never reach.
  */
 const CLOSED = { onExcessProperty: "error" } as const;
 
 /**
- * Decoded here rather than by a derived route, because this one is not derived:
- * the caller holds a join token and no credential.
+ * Decodes the join request body. It is decoded here, not by a derived route,
+ * because this route is not derived: the caller holds a join token and no
+ * credential.
  */
 const requestIn = Effect.mapError(HttpServerRequest.schemaBodyJson(JoinRequest, CLOSED), (error) =>
   error._tag === "SchemaError"
@@ -51,7 +53,7 @@ const requestIn = Effect.mapError(HttpServerRequest.schemaBodyJson(JoinRequest, 
     : createValidationError([{ path: [], message: NO_BODY }]),
 );
 
-/** `201`: the answer is a runner that did not exist before the request. */
+/** Returns `201`, because the response is a runner that did not exist before the request. */
 export const RunnerJoinRouteLayer = HttpRouter.add("POST", JOIN_PATH, (request) =>
   Effect.gen(function* () {
     const enlist = yield* RunnerJoin;
@@ -65,7 +67,7 @@ export const RunnerJoinRouteLayer = HttpRouter.add("POST", JOIN_PATH, (request) 
         error instanceof Unauthenticated || error instanceof Validation
           ? Effect.succeed(buildErrorResponse(error))
           : Effect.as(
-              Effect.logError("A machine presenting a join token could not be enlisted", error),
+              Effect.logError("A runner presenting a join token could not join", error),
               buildErrorResponse(createInternalError("something went wrong")),
             ),
       ),

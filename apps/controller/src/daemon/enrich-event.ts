@@ -1,12 +1,11 @@
 /**
- * Enrichment: amending what an event is about, and giving the router one more
- * look at that one event.
+ * Enrichment: adds details to an event that is already in the log, then
+ * routes that event again.
  *
- * It is here rather than in the events domain because of what it owes the
- * router: amending an event gives the router one more look at it, and what
- * that look writes are rows in another domain. A write across domains comes
- * from above, so the whole of it sits in this layer. The amendment itself is
- * the events domain's own write, made through its service.
+ * This lives in the daemon rather than in the events domain because routing
+ * the event again can write rows in other domains, and a write across domains
+ * belongs to the layer above them. The change to the event itself is still
+ * made by the events domain, through its service.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -32,7 +31,7 @@ import { EvaluationErrorNotifier } from "../subscriptions";
 import { EventRouter } from "./event-router";
 import { buildRoutingTables } from "./routing";
 
-/** One event named by its position in the log, and what is to be amended on it. */
+/** The id of an event in the log, and the fields to add to it. */
 const EnrichInput = Schema.Struct({ id: EventId, ...EventEnrichInput.fields });
 
 type EnrichInput = Schema.Schema.Type<typeof EnrichInput>;
@@ -48,18 +47,20 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Amends what an event is about, and hands the router the amended event.
+     * Adds the given fields to an event, then routes the amended event again.
+     * Returns the amended event. Fails if the caller lacks the grant, the
+     * input is invalid, or the event does not exist.
      *
-     * The amendment and that second look are one transaction, so two
-     * enrichments of one event cannot each drop the other's refs, and a look
-     * that writes cannot be separated from the write it read. What the look
-     * writes reaches its destination on the pipeline's next tick.
+     * The amendment and the second routing run in one transaction. That way,
+     * two enrichments of the same event cannot overwrite each other's refs,
+     * and the routing always sees the amendment it follows. Rows the routing
+     * writes are delivered on the pipeline's next tick.
      */
     enrichEvent: (
       input: EnrichInput,
     ): Effect.Effect<Event, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
-        // Amending the log is writing to it, which is the grant an emit needs.
+        // Amending an event writes to the log, so it needs the same grant as an emit.
         yield* requireGrant("event.enrich");
         const decoded = yield* Effect.mapError(decodeEnrich(input), createDecodeValidationError);
         const actor = yield* currentStamp;
@@ -68,11 +69,11 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const amended = yield* events.amend(decoded);
-            // The stamp for an amendment is an audit entry and not a column on
-            // the event: the event's own actor is whoever emitted it, and it
-            // stays that, or the log would forget where the event came from.
-            // An event may be amended many times, and each amendment is its own
-            // fact with its own author, which one column could not hold either.
+            // The actor of an amendment goes in an audit entry, not in a column
+            // on the event. The event's own actor is whoever emitted it, and it
+            // must stay that way, or the log would lose where the event came
+            // from. An event can also be amended many times, each time by a
+            // different actor, which one column could not hold.
             yield* audit.append({
               kind: "event.enriched",
               actor,
@@ -84,10 +85,10 @@ const make = Effect.gen(function* () {
               },
             });
             // A ref added here may be what a route has been waiting for, so the
-            // router looks at this one event again. The rows that look writes
-            // are delivered by the next tick, within one interval: this call
-            // runs on a request's own fiber, which is gone the moment the
-            // answer is written, and a delivery started on it would be cut off
+            // router routes this event again. The rows it writes are delivered
+            // by the next tick, within one interval. They are not delivered
+            // here because this call runs on the request's fiber, which ends as
+            // soon as the response is written, and would cut a delivery off
             // half way.
             return { amended, reports: yield* router.rerouteEvent(decoded.id, routingTables) };
           }),

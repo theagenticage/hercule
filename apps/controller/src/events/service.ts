@@ -1,24 +1,23 @@
 /**
  * The event log's own operations: `event.query` and `event.read`, which read
  * it, `event.emit`, which appends one manual event to it, and `amend`, which
- * rewrites what one of those manual events is about for the enrichment use
- * case above this domain.
+ * rewrites what one pipeline event is about, for the enrichment use case in
+ * the controller daemon.
  *
- * One table holds two populations and this reader mostly tells them apart by
- * nothing: a `task.created` row and a `github.issue.opened` row come back from
- * the same unfiltered call, differing only in their `kind`. The log is also the
- * audit log, and the reason to open it is usually to read what happened around
- * something, so there is one grant to read it with.
+ * One table holds both pipeline events and audit entries, and this reader
+ * mostly treats them the same: a `task.created` row and a `github.issue.opened`
+ * row come back from the same unfiltered call, and differ only in their `kind`.
+ * The log is also the audit log, and people usually open it to see what
+ * happened around something, so one grant reads both.
  *
  * The exception is the security entries - what happened to a secret, a
  * credential or the user's account. A session reads those only if its
  * permission profile holds `event.audit` as well; without it they are not in
- * the page and not readable by id. The user has parity and reads the log whole.
+ * the page and not readable by id. The user has parity and reads the whole log.
  *
- * The walk is a keyset over the id, which is the log's position and its only
- * sortable field. `since` and `until` bound `received_at`: that is the log's
- * own axis, the one the id runs monotonically with, so a time window and the
- * order the page comes back in never disagree.
+ * Paging uses a keyset over the id, which is the log's position and its only
+ * sortable field. `since` and `until` filter on `received_at`, which increases
+ * with the id, so a time window never conflicts with the order of the page.
  *
  * Audit entries are not written here. The audit writer appends those, one row
  * per mutation, inside that mutation's transaction.
@@ -68,7 +67,7 @@ import { AUDIT_KINDS, SECURITY_KINDS } from "./audit-log";
 import { EventKindCatalog } from "./catalog";
 import { EVENT_COLUMNS, toEvent, type EventRow } from "./log";
 
-/** What narrows and pages a reading of the log. */
+/** The filters and paging options of `event.query`. */
 const QueryInput = Schema.Struct({
   connectionId: Schema.optionalKey(Id),
   kind: Schema.optionalKey(bounded(1, MAX_EVENT_KIND_LENGTH)),
@@ -106,22 +105,23 @@ export interface EventPage {
 const DEFAULT_DIRECTION: SortDirection = "desc";
 
 /**
- * Whether the security entries are hidden from this actor. The user has parity
- * and reads the log whole; anyone else reads them only by holding
- * `event.audit`, so an actor kind added later is withheld from them until someone
- * decides it should not be.
+ * Returns true if the security entries are hidden from this actor. The user
+ * has parity and reads the whole log. Any other actor reads them only if it
+ * holds `event.audit`, so an actor kind added later cannot read them until
+ * someone decides it should.
  */
 const shouldHideSecurityEntries = (actor: Actor): boolean =>
   actor._tag !== "user" && !(actor._tag === "session" && actor.grants.includes("event.audit"));
 
 /**
- * A payload read against the schema its kind declared. Every issue is reported
- * at once, so a caller fixes the whole payload in one retry, and a key the
- * schema does not name is refused rather than dropped: the JSON Schema the
- * catalog publishes says no other key is allowed, and a payload stored with a
- * key the schema turned down would make that published shape a lie. A kind
- * grows by its plugin widening the schema, and the catalog is rewritten at
- * every boot.
+ * Decodes a payload against the schema its kind declared. Fails with a
+ * `SchemaError` that lists every issue at once, so a caller can fix the whole
+ * payload in one retry.
+ *
+ * A key the schema does not name is rejected rather than dropped. The JSON
+ * Schema the catalog publishes allows no other keys, so storing a payload with
+ * such a key would make the published schema wrong. A plugin adds a key by
+ * widening its schema, and the catalog is rewritten at every boot.
  */
 const decodeAgainstKind = (
   schema: Schema.Top,
@@ -133,9 +133,9 @@ const decodeAgainstKind = (
   })(payload);
 
 /**
- * What the payload's own issues read as on the request. They are rooted under
- * the field they came from, so an issue about a payload key can never be read
- * as one about `kind` or `refs`.
+ * Converts the payload's schema errors into a `Validation` error. Each issue's
+ * path starts with `payload`, so an issue about a payload key can never be
+ * mistaken for one about `kind` or `refs`.
  */
 const createPayloadValidationError = (error: Schema.SchemaError): Validation =>
   createValidationError(
@@ -143,17 +143,17 @@ const createPayloadValidationError = (error: Schema.SchemaError): Validation =>
   );
 
 /**
- * The external system an event of this kind is about: the id of the plugin
- * that declared the kind. Every kind name begins with its plugin's id and a
- * dot, which the plugin host refuses a registration without, so the prefix is
- * the owner and nothing has to be looked up a second time.
+ * Returns the external system an event of this kind is about: the id of the
+ * plugin that declared the kind. Every kind name starts with its plugin's id
+ * and a dot, and the plugin host rejects a registration without that prefix.
+ * So the prefix names the plugin, and no second lookup is needed.
  */
 const readSystemFromKind = (kind: string): string => kind.slice(0, kind.indexOf("."));
 
-/** The audit kinds, as one lookup: the population enrichment may not touch. */
+/** The audit kinds, as a set. Enrichment may not amend an audit entry. */
 const AUDIT_KIND_NAMES: ReadonlySet<string> = new Set(AUDIT_KINDS);
 
-/** The refs an event held and the refs being added, each one once, oldest first. */
+/** Returns the event's refs followed by the added refs, with each ref once. */
 const mergeRefs = (
   held: ReadonlyArray<string>,
   added: ReadonlyArray<string>,
@@ -172,7 +172,11 @@ const make = Effect.gen(function* () {
   const catalog = yield* EventKindCatalog;
 
   return {
-    /** One page of the log, newest first unless the caller says otherwise. */
+    /**
+     * Returns one page of the log, newest first unless the caller sets another
+     * sort direction. Fails with `Validation` for invalid input or a cursor
+     * from another listing.
+     */
     query: (
       input: QueryInput,
     ): Effect.Effect<EventPage, Unauthenticated | Forbidden | Validation | SqlError> =>
@@ -201,14 +205,14 @@ const make = Effect.gen(function* () {
         if (decoded.kind !== undefined) where.push(sql`kind = ${decoded.kind}`);
         if (decoded.since !== undefined) where.push(sql`received_at >= ${decoded.since}`);
         if (decoded.until !== undefined) where.push(sql`received_at <= ${decoded.until}`);
-        // Hidden in the query rather than dropped from the page that comes
-        // back, so a page stays as full as it was asked for and the cursor at
-        // its end still points at the next unread row.
+        // Filtered in the query rather than dropped from the returned page, so
+        // the page is as full as requested and the cursor at its end still
+        // points at the next unread row.
         if (shouldHideSecurityEntries(actor)) {
           where.push(sql`kind NOT IN ${sql.in(SECURITY_KINDS)}`);
         }
-        // The log's id is its order, so the walk needs no second column to
-        // break a tie on: the id is the whole key.
+        // The log's id is its order, so paging needs no second column to break
+        // a tie: the id is the whole key.
         const { keyset, order } = buildKeyset(
           sql,
           ["id"],
@@ -233,16 +237,19 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** One entry by its position in the log. */
+    /**
+     * Returns one entry by its position in the log. Fails with `NotFound` if
+     * there is no such entry, or if the caller may not see it.
+     */
     read: (
       input: Identified,
     ): Effect.Effect<Event, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("event.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        // An entry this caller may not see answers as an entry that is not
-        // there: a hidden row and an id past the head of the log are one
-        // answer, so the log's contents cannot be probed by id.
+        // An entry this caller may not see fails as if it did not exist: a
+        // hidden row and an id past the head of the log get the same error, so
+        // the log's contents cannot be probed by id.
         const hidden = shouldHideSecurityEntries(actor)
           ? sql`AND kind NOT IN ${sql.in(SECURITY_KINDS)}`
           : sql``;
@@ -256,9 +263,16 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Appends one synthetic event. The caller says what happened and what it is
-     * about; the core says where it came from, who posted it and when, so
-     * nothing a caller can write makes a manual event look ingested.
+     * Appends one manual event and returns its id. The caller gives what
+     * happened and what it is about. The controller sets where it came from,
+     * who posted it and when, so a caller cannot make a manual event look
+     * ingested.
+     *
+     * If the caller already posted the same `dedupKey` through the same
+     * Connection, returns the id of that earlier event and writes nothing.
+     * Fails with `Validation` if no plugin declares the kind or the payload
+     * does not match the kind's schema, and with `NotFound` if the Connection
+     * does not exist.
      */
     emit: (
       input: EventEmitInput,
@@ -270,8 +284,8 @@ const make = Effect.gen(function* () {
         yield* requireGrant("event.emit");
         const decoded = yield* Effect.mapError(decodeEmit(input), createDecodeValidationError);
 
-        // A kind nobody declared has no schema to read the payload against, so
-        // there is nothing to write.
+        // A kind that no plugin declares has no schema to check the payload
+        // against, so the event is rejected.
         const payloadSchema = yield* Effect.flatMap(
           catalog.readPayloadSchema(decoded.kind),
           Option.match({
@@ -291,27 +305,26 @@ const make = Effect.gen(function* () {
 
         const actor = yield* currentStamp;
         const at = yield* nowIso;
-        // One post is one moment, so the instant it happened and the instant
-        // the log took it are the same read of the clock.
+        // A manual event happens when it is posted, so `occurred_at` and
+        // `received_at` use the same clock read.
         const connectionId =
           decoded.connectionId === undefined ? null : uuidFromString(decoded.connectionId);
-        // Without a key of the caller's own, every post is its own fact: two
+        // Without a key from the caller, every post is a separate event: two
         // identical posts are two things that happened, not one repeated.
         const dedupKey = decoded.dedupKey ?? crypto.randomUUID();
-        // Each ref once, as `amend` stores them: a caller that wrote one twice
-        // meant one identity, and the stored list is what a later reader
-        // compares against.
+        // Store each ref once, as `amend` does: a caller that wrote a ref twice
+        // meant one thing, and later readers compare against the stored list.
         const refs = JSON.stringify([...new Set(decoded.refs ?? [])]);
 
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // The Connection an event is stamped with is what every later
-            // reader follows back to the account it came through, so an id
-            // naming no row is refused rather than written. The connections
-            // domain appends audit entries to this log and so depends on it;
-            // the row is read sideways here instead of through that domain,
-            // which would close the cycle.
+            // Later readers follow an event's Connection back to the account
+            // the event came through, so an id that matches no Connection is
+            // rejected rather than written. The connections domain appends
+            // audit entries to this log and so depends on it. Reading the row
+            // through that domain would create a cycle, so this query reads
+            // the table directly.
             if (connectionId !== null) {
               const known = yield* sql<{ readonly id: Uint8Array }>`
                 SELECT id FROM connections WHERE id = ${connectionId}
@@ -334,9 +347,9 @@ const make = Effect.gen(function* () {
             `;
             const appended = written[0];
             if (appended === undefined) {
-              // The unique index turned the insert away, which means this
-              // caller has posted this key through this Connection before. The
-              // event it wrote then is the answer.
+              // The unique index blocked the insert, which means this caller
+              // has posted this key through this Connection before. Return the
+              // id of the event from that earlier post.
               const existing = yield* sql<{ readonly id: number }>`
                 SELECT id FROM events
                 WHERE ifnull(connection_id, x'') = ifnull(${connectionId}, x'')
@@ -344,8 +357,8 @@ const make = Effect.gen(function* () {
               `;
               return { eventId: existing[0]!.id };
             }
-            // The log is a Live Topic of its own, so a row appended to it is
-            // news the log grew.
+            // The log is a Live Topic of its own, so every appended row is
+            // announced.
             yield* announce({ _tag: "event" });
             return { eventId: appended.id };
           }),
@@ -353,17 +366,18 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Amends what one event is about. What is named is overwritten and what is
-     * left out stays as it was; refs are only added to, so nothing that has
-     * already matched on a ref can stop matching on it.
+     * Amends what one event is about and returns the amended event. Fields in
+     * the input are overwritten and omitted fields stay as they were. Refs are
+     * only added, so an event that has already matched on a ref never stops
+     * matching on it.
      *
-     * Only a pipeline event can be amended. An audit entry is the log's other
-     * population: it is the record of a mutation, nothing may rewrite it, and
-     * an id naming one answers exactly as an id naming nothing does, so the
-     * log's contents cannot be probed through this operation either.
+     * Only a pipeline event can be amended. An audit entry records a mutation,
+     * and nothing may rewrite it. The id of an audit entry fails with
+     * `NotFound`, exactly like an id that matches nothing, so the log's
+     * contents cannot be probed through this operation either.
      *
-     * The caller opens the transaction, because the read and the write have to
-     * be one and the caller has more to put inside it.
+     * The caller opens the transaction, because the read and the write must be
+     * in one transaction and the caller has more to put inside it.
      */
     amend: (input: Amendment): Effect.Effect<Event, NotFound | SqlError> =>
       Effect.gen(function* () {
@@ -386,14 +400,14 @@ const make = Effect.gen(function* () {
           WHERE id = ${input.id}
         `;
         // Nothing is announced: the live `event` topic is append-only, so an
-        // amended event is not news the log grew, and a live view goes on
-        // showing the old system, url and refs until it is loaded again.
+        // amended event is not a new row, and a live view keeps showing the old
+        // system, url and refs until it is loaded again.
         return { ...held, system, url, refs };
       }),
   };
 });
 
-/** The event log's reader. */
+/** The event log's operations: query, read, emit and amend. */
 export class EventService extends Context.Service<EventService, Effect.Success<typeof make>>()(
   "hercule/controller/events/EventService",
 ) {}

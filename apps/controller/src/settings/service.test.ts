@@ -30,7 +30,7 @@ const USER: Actor = {
   credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
 };
 
-/** The row the user settings foreign key points at; the boot writes it at setup. */
+/** Inserts the user row that the `user_settings` foreign key needs. Setup writes it at runtime. */
 const addUser = Effect.flatMap(
   SqlClient.SqlClient,
   (sql) => sql`
@@ -47,12 +47,12 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     ),
   );
 
-/** Runs a call made by nobody: an in-process caller with no credential. */
+/** Runs a call with no actor, like an in-process caller, and returns its error. */
 const runAnonymous = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   Effect.runPromise(Effect.andThen(addUser, effect).pipe(Effect.flip, Effect.provide(layer)));
 
 describe("settings.read", () => {
-  it("answers with the keys that are set, and nothing for the rest", async () => {
+  it("returns the keys that are set, and leaves out the rest", async () => {
     const state = await run(
       Effect.gen(function* () {
         const store = yield* Settings;
@@ -67,12 +67,12 @@ describe("settings.read", () => {
     });
   });
 
-  it("answers with two empty scopes on a store nobody has written", async () => {
+  it("returns two empty scopes when no setting has been written", async () => {
     const state = await run(Effect.flatMap(SettingsOperations, (settings) => settings.read()));
     expect(state).toEqual({ controller: {}, user: {} });
   });
 
-  it("refuses a caller with no credential, before reading anything", async () => {
+  it("rejects a caller with no credential", async () => {
     const error = await runAnonymous(
       Effect.flatMap(SettingsOperations, (settings) => settings.read()),
     );
@@ -83,7 +83,7 @@ describe("settings.read", () => {
 });
 
 describe("settings.update", () => {
-  it("writes the keys it names, leaves the rest alone, and answers with the whole state", async () => {
+  it("writes the keys in the patch, keeps the other keys, and returns all settings", async () => {
     const state = await run(
       Effect.gen(function* () {
         const settings = yield* SettingsOperations;
@@ -110,7 +110,7 @@ describe("settings.update", () => {
     expect(state.user).toEqual({ timezone: "Europe/Amsterdam" });
   });
 
-  it("stamps the keys it wrote, and never their values", async () => {
+  it("records the written keys in the audit entry, but not their values", async () => {
     const entries = await run(
       Effect.gen(function* () {
         const settings = yield* SettingsOperations;
@@ -133,7 +133,7 @@ describe("settings.update", () => {
     expect(JSON.stringify(entries[0]?.payload)).not.toContain("03:30");
   });
 
-  it("refuses a patch that names no key, and writes no audit row", async () => {
+  it("rejects a patch with no key, and writes no audit entry", async () => {
     const error = await run(
       Effect.gen(function* () {
         const settings = yield* SettingsOperations;
@@ -146,7 +146,7 @@ describe("settings.update", () => {
     expect(error).toMatchObject({ error: { code: "validation" } });
   });
 
-  it("refuses a patch whose scopes are empty objects", async () => {
+  it("rejects a patch whose scopes are empty objects", async () => {
     const error = await run(
       Effect.flatMap(SettingsOperations, (settings) =>
         Effect.flip(settings.update({ controller: {}, user: {} })),
@@ -180,7 +180,7 @@ describe("settings.update", () => {
     expect(state.user).toEqual({ "ui.threadRows": "plain" });
   });
 
-  it("refuses a thread row density outside the two the shell offers", async () => {
+  it("rejects a thread row density that is not one of the two the shell offers", async () => {
     const error = await run(
       Effect.flatMap(SettingsOperations, (settings) =>
         Effect.flip(settings.update({ user: { "ui.threadRows": "rich" } as never })),
@@ -208,9 +208,9 @@ describe("settings.update", () => {
     });
   });
 
-  it("refuses a session timeout that is zero or not a whole number of minutes", async () => {
-    // A session may not be given no time at all, and a fraction of a minute is
-    // not something the wire's milliseconds can be derived from honestly.
+  it("rejects a session timeout that is zero, negative or not a whole number of minutes", async () => {
+    // A timeout of zero would give a session no time at all, and a fraction of
+    // a minute does not convert cleanly to the milliseconds the API uses.
     for (const key of [
       "session.inactivityTimeoutMinutes",
       "session.absoluteTimeoutMinutes",
@@ -230,7 +230,7 @@ describe("settings.update", () => {
     }
   });
 
-  it("writes nothing when the caller may not write", async () => {
+  it("writes nothing when the caller is not allowed to write", async () => {
     const error = await runAnonymous(
       Effect.flatMap(SettingsOperations, (settings) =>
         settings.update({ user: { timezone: "UTC" } }),
@@ -243,16 +243,15 @@ describe("settings.update", () => {
   });
 });
 
-/**
- * The keys a thread's workspace and the expiry sweep read.
- *
- * These go over the wire rather than through the service, because the closed
- * key set and the values each key admits are the contract's, and a value the
- * schema refuses is a `validation` refusal a caller can act on.
+/*
+ * The tests below cover the keys that thread workspaces and the expiry sweep
+ * read. They call the HTTP API rather than the service, because the contract
+ * defines the set of keys and the values each key accepts, and an invalid
+ * value must reach the caller as a `validation` error.
  */
 const PAT = "ghp_a-token";
 
-/** GitHub as a connection type, checked here rather than against api.github.com. */
+/** A GitHub connection type that checks the token locally instead of calling api.github.com. */
 const githubPlugin: Plugin = {
   manifest: {
     id: "github",
@@ -337,10 +336,10 @@ const connect = async (
 };
 
 describe("the thread workspace default", () => {
-  // D-21 R3: two values, not three. `none` could never be read back as itself -
-  // a project with repos never offers it and one without has nothing else - so
-  // it always meant unset, which is what absent already means.
-  it("takes each of the two a thread may open in, and reads it back", async () => {
+  // There are two values, not three. `none` was removed because it always
+  // meant the same as unset: a project with repositories never offers it, and
+  // a project without them has no other choice.
+  it("accepts both workspace values and reads each one back", async () => {
     await withSettings(async (base, token) => {
       for (const value of ["primary", "ephemeral"]) {
         const response = await patchSettings(base, token, { user: { "thread.workspace": value } });
@@ -350,18 +349,18 @@ describe("the thread workspace default", () => {
     });
   });
 
-  it("is absent until it is written, so the default lives in one place", async () => {
+  it("is absent until it is written, so the default lives in the code that reads it", async () => {
     await withSettings(async (base, token) => {
       expect((await readSettings(base, token)).user["thread.workspace"]).toBeUndefined();
     });
   });
 
   /**
-   * D-21 R3: narrowing a key's type must not brick the settings screen for
-   * whoever had the old value. A row this build cannot read is left out, which
-   * is what unset already meant here.
+   * Narrowing a key's type must not break the settings screen for a user who
+   * has the old value stored. A row this version cannot read is left out,
+   * which here means the same as unset.
    */
-  it("reads a stored value this build no longer takes as unset", async () => {
+  it("reads a stored value that is no longer valid as unset", async () => {
     await withSettings(async (base, token, harness) => {
       await Effect.runPromise(
         Effect.orDie(
@@ -374,7 +373,7 @@ describe("the thread workspace default", () => {
     });
   });
 
-  it("refuses a value that is not one of the two, `none` among them", async () => {
+  it("rejects any other value, including `none`", async () => {
     await withSettings(async (base, token) => {
       for (const value of ["worktree", "none"]) {
         const response = await patchSettings(base, token, { user: { "thread.workspace": value } });
@@ -386,7 +385,7 @@ describe("the thread workspace default", () => {
 });
 
 describe("the GitHub connection threads use", () => {
-  it("takes a github connection and takes it back off again", async () => {
+  it("sets a GitHub connection and clears it again", async () => {
     await withSettings(async (base, token) => {
       const github = await connect(base, token, "github/github", { pat: PAT });
 
@@ -404,7 +403,7 @@ describe("the GitHub connection threads use", () => {
     });
   });
 
-  it("refuses a connection that is not a github one", async () => {
+  it("rejects a connection that is not a GitHub connection", async () => {
     await withSettings(async (base, token) => {
       const mailbox = await connect(base, token, "mailer/mailbox", { token: "t" });
       const response = await patchSettings(base, token, {
@@ -417,7 +416,7 @@ describe("the GitHub connection threads use", () => {
 });
 
 describe("the workspace expiry windows", () => {
-  it("takes whole positive numbers of hours and days", async () => {
+  it("accepts positive whole numbers of hours and days", async () => {
     await withSettings(async (base, token) => {
       const response = await patchSettings(base, token, {
         controller: { "workspace.orphanTtlHours": 6, "workspace.idleTtlDays": 90 },
@@ -430,7 +429,7 @@ describe("the workspace expiry windows", () => {
     });
   });
 
-  it("refuses zero, a negative window and a fraction of one", async () => {
+  it("rejects zero, a negative window and a fractional window", async () => {
     await withSettings(async (base, token) => {
       for (const key of ["workspace.orphanTtlHours", "workspace.idleTtlDays"]) {
         for (const value of [0, -1, 1.5]) {

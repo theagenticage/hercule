@@ -1,25 +1,27 @@
 /**
- * The runner socket against the real controller: who is let in, what the two
- * ends say to each other first, and what the liveness check does to the row.
+ * Tests for the runner socket against the real controller: who may connect,
+ * the hello exchange, and what the liveness check does to the runner row.
  *
- * This drives a real WebSocket against a real listener, because the whole point
- * of the socket is the wire. The credential is a real one, handed back by a real
- * join, and the frames are the published catalogue's, decoded rather than eyed:
- * a controller that answers something `@hercule/protocol` cannot read is a
- * controller no runner can talk to.
+ * The tests use a real WebSocket against a real server, because the socket is
+ * about what goes over the wire. The credential is a real one from a real
+ * join, and the frames are decoded with the protocol schema: a controller that
+ * sends something `@hercule/protocol` cannot read is one no runner can talk
+ * to.
  *
- * Three things are asserted here and nothing else is. A machine gets in with the
- * credential its join handed it and with nothing else, and a refused upgrade
- * costs no socket. The hello settles compatibility - one version is refused, and
- * every other kind of skew is not - and leaves the row saying what the runner
- * said about itself, stamped on nobody's behalf but the system's. And the row
- * then follows the connection: a pong keeps it, silence loses it, an announced
- * departure reads differently from a vanished one, and a new hello brings it
- * back from either.
+ * What the tests check:
  *
- * The shipped 15 and 60 seconds are asserted as the exported constants; the
- * behaviour is asserted with values of tens of milliseconds handed to the
- * harness, because a real Bun listener cannot be driven by a `TestClock`.
+ * - A runner connects with the credential its join returned, and with nothing
+ *   else. A rejected upgrade opens no socket.
+ * - The hello checks compatibility: a different protocol version is rejected,
+ *   and every other difference is not. The row then stores what the runner
+ *   reported, with the system as the actor.
+ * - The row then follows the connection: a pong keeps it online, silence marks
+ *   it unreachable, a goodbye reads differently from a vanished runner, and a
+ *   new hello brings it back from either.
+ *
+ * The default 15 and 60 seconds are checked as the exported constants. The
+ * behaviour is tested with intervals of tens of milliseconds passed to the
+ * harness, because a real Bun server cannot run on a `TestClock`.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,20 +48,19 @@ import type { RunnerDetail } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { registry } from "../plugins";
 import { completeSetup, get, send, withServer, type ServerHarness } from "../http/testing";
-// The two shipped durations are read off the domain's own exports rather than
-// imported by name, so a file that is otherwise about the wire still reports
-// each behaviour's failure separately when the constants are not there yet.
+// The two default durations are imported from the socket module, so the test
+// checks the values the controller actually uses.
 import { RUNNER_PING_INTERVAL, RUNNER_SILENCE_LIMIT } from "./socket";
 
-/** Where a runner dials, on the same authority the API is served from. */
+/** The path a runner connects to, on the same host and port as the API. */
 const SOCKET_PATH = "/api/v1/runners/socket";
 
 const buildSocketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}${SOCKET_PATH}`;
 
-/** Standard base64, which is how the catalogue carries bytes. */
+/** Encodes bytes as standard base64, which is how the protocol sends bytes. */
 const encodeBase64 = (raw: Uint8Array): string => Buffer.from(raw).toString("base64");
 
-/** The bytes standard base64 stands for, in a buffer WebCrypto will take. */
+/** Decodes standard base64 into a buffer WebCrypto accepts. */
 const decodeBase64Bytes = (encoded: string): Uint8Array<ArrayBuffer> => {
   const decoded = Buffer.from(encoded, "base64");
   const out = new Uint8Array(decoded.byteLength);
@@ -67,10 +68,10 @@ const decodeBase64Bytes = (encoded: string): Uint8Array<ArrayBuffer> => {
   return out;
 };
 
-/** A fresh nonce, the way a runner makes one. */
+/** Creates a new nonce, the way a runner does. */
 const mintNonce = (): string => encodeBase64(crypto.getRandomValues(new Uint8Array(16)));
 
-/** What a runner in these tests says about the machine it is on. */
+/** The facts a runner in these tests reports about its machine. */
 const FACTS: RunnerFacts = {
   os: "darwin",
   arch: "arm64",
@@ -92,8 +93,9 @@ const decodeFrame = (raw: unknown): ControllerMessage =>
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * The controller probes on its own schedule, so a wait says what it is waiting
- * for rather than how long, and names what never happened when it runs out.
+ * Polls `look` until it returns a value, and returns it. The controller works
+ * on its own schedule, so a wait names what it is waiting for rather than how
+ * long, and the error names what never happened.
  */
 const waitUntil = async <A>(
   what: string,
@@ -108,7 +110,7 @@ const waitUntil = async <A>(
   throw new Error(`the controller never ${what}`);
 };
 
-/** One runner's end of the socket, driven frame by frame. */
+/** A fake runner's end of the socket, driven frame by frame. */
 interface Wire {
   readonly send: (message: RunnerMessage) => void;
   /** The next frame the controller sent that this test has not taken yet. */
@@ -133,8 +135,9 @@ const waitForFrame = <T extends ControllerMessage>(
 ): Promise<T> => waitUntil(`sent a ${tag}`, () => listFrames<T>(wire, tag)[index]);
 
 /**
- * Opens the socket with a credential, as a runner does: the credential rides
- * the upgrade request, so a connection that opens has already been let in.
+ * Opens the socket with a credential, as a runner does. The credential is sent
+ * with the upgrade request, so a connection that opens has already been
+ * accepted.
  */
 const dial = (base: string, credential: string): Promise<Wire> =>
   new Promise((resolve, reject) => {
@@ -152,7 +155,7 @@ const dial = (base: string, credential: string): Promise<Wire> =>
       ending = { code: event.code, reason: event.reason };
     };
     socket.onerror = () => {
-      // A refused upgrade shows up here; the close handler records the reason.
+      // A rejected upgrade shows up here; the close handler records the reason.
     };
     socket.onopen = () => {
       resolve({
@@ -195,8 +198,8 @@ const dial = (base: string, credential: string): Promise<Wire> =>
   });
 
 /**
- * Whether the listener upgrades at all for an `Authorization` header, without
- * caring what happens afterwards.
+ * Checks whether the server upgrades the connection for an `Authorization`
+ * header, ignoring what happens afterwards.
  */
 const tryDial = (base: string, authorization?: string): Promise<"open" | "refused" | "hung"> =>
   new Promise((resolve) => {
@@ -213,8 +216,8 @@ const tryDial = (base: string, authorization?: string): Promise<"open" | "refuse
   });
 
 /**
- * The upgrade request as plain HTTP, so a refusal can be read as the status and
- * the envelope it really is rather than as a socket that did not open.
+ * Sends the upgrade request as plain HTTP, so a rejection can be read as its
+ * status and error body rather than as a socket that did not open.
  */
 const requestUpgrade = (base: string, authorization?: string): Promise<Response> =>
   fetch(`${base}${SOCKET_PATH}`, {
@@ -227,7 +230,7 @@ const requestUpgrade = (base: string, authorization?: string): Promise<Response>
     },
   });
 
-/** A runner's opening frame, in this build's version unless a test says otherwise. */
+/** Builds a runner's hello frame, with this build's version unless a test overrides it. */
 const buildHello = (overrides: Partial<RunnerHello> = {}): RunnerHello => ({
   _tag: "runnerHello",
   protocolVersion: PROTOCOL_VERSION,
@@ -238,7 +241,7 @@ const buildHello = (overrides: Partial<RunnerHello> = {}): RunnerHello => ({
   ...overrides,
 });
 
-/** Enlists a machine the way one enlists: a minted token, spent on the join. */
+/** Joins a runner the normal way: a new join token, spent on the join. */
 const enlist = async (harness: ServerHarness): Promise<JoinAnswer> => {
   const response = await send("POST", harness.base, "/api/v1/runners/join", {
     body: {},
@@ -248,7 +251,7 @@ const enlist = async (harness: ServerHarness): Promise<JoinAnswer> => {
   return (await response.json()) as JoinAnswer;
 };
 
-/** The row as the fleet reads it. */
+/** Reads the runner as the fleet page does. */
 const readRunner = async (base: string, token: string, id: string): Promise<RunnerDetail> => {
   const response = await get(base, `/api/v1/runners/${id}`, token);
   expect(response.status, await response.clone().text()).toBe(200);
@@ -271,7 +274,7 @@ const ROW_POLL_ATTEMPTS = 300;
  */
 const FOUR_ROW_WAITS_TIMEOUT_MS = ROW_POLL_INTERVAL_MS * ROW_POLL_ATTEMPTS * 4 + 10_000;
 
-/** The row once it says what the test is waiting for, or as it stubbornly is. */
+/** Polls the runner until `ready` returns true, and returns it; after the last attempt, returns it as it is. */
 const waitForRunner = async (
   base: string,
   token: string,
@@ -286,7 +289,7 @@ const waitForRunner = async (
   return row;
 };
 
-/** Whether the controller's signature over the given bytes is really its own. */
+/** Checks that the signature in the controller's hello is valid for the given bytes and its public key. */
 const verifySignature = async (
   hello: ControllerHello,
   payload: Uint8Array<ArrayBuffer>,
@@ -306,7 +309,7 @@ const verifySignature = async (
   );
 };
 
-/** Opens a connection and greets the controller on it, answering as a runner does. */
+/** Opens a connection, sends a hello, and returns the controller's hello in reply. */
 const greet = async (
   base: string,
   credential: string,
@@ -324,31 +327,31 @@ const greet = async (
   return { wire, sent, answer: answer as ControllerHello };
 };
 
-/** The states the log says the runner passed through, oldest first. */
+/** Returns the connectivity states the audit log recorded for the runner, oldest first. */
 const readStateTransitions = async (harness: ServerHarness): Promise<ReadonlyArray<unknown>> =>
   (await harness.audit("runner.stateChanged")).map((entry) => entry.payload["state"]);
 
-/** How the controller closes: a frame it refused, and a connection it is done with. */
+/** The close codes the controller uses: for a rejected frame, and for a connection it is done with. */
 const PROTOCOL_ERROR = 1002;
 const GOING_AWAY = 1001;
 
-/** An interval a test can wait out, with a silence limit it will not trip. */
+/** A short ping interval a test can wait for, with a silence limit it will not reach. */
 const FAST = { interval: Duration.millis(40), silence: Duration.seconds(30) };
 
 describe("opening the runner socket", () => {
-  it("upgrades a machine holding the credential its join handed it", async () => {
+  it("upgrades a runner using the credential its join returned", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
 
       const wire = await dial(harness.base, joined.credential);
-      // The upgrade is the whole of the admission: nothing is said on the
-      // socket until the runner says the first thing.
+      // The upgrade is the whole admission: the controller sends nothing on
+      // the socket until the runner sends its hello.
       expect(wire.frames).toEqual([]);
       wire.close();
     });
   });
 
-  it("refuses every credential that is not a live runner's, and opens no socket", async () => {
+  it("rejects every credential that is not an active runner's, and opens no socket", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -369,8 +372,8 @@ describe("opening the runner socket", () => {
         expect(await tryDial(harness.base, header), what).toBe("refused");
       }
 
-      // A revoked runner is a retired one: its credential stops opening the
-      // socket the moment the row is terminal.
+      // A retired runner's credential is revoked: it stops opening the socket
+      // as soon as the row is retired.
       const live = await tryDial(harness.base, `Bearer ${joined.credential}`);
       expect(live, "the credential opened the socket before the runner was retired").toBe("open");
       await Effect.runPromise(
@@ -385,7 +388,7 @@ describe("opening the runner socket", () => {
 });
 
 describe("the hello exchange", () => {
-  it("answers with a signature over the runner's nonce and brings the row online", async () => {
+  it("replies with a signature over the runner's nonce and marks the runner online", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -395,15 +398,15 @@ describe("the hello exchange", () => {
       });
 
       expect(answer.protocolVersion).toBe(PROTOCOL_VERSION);
-      // The identity a runner pins is the one its join handed it, byte for byte.
+      // The identity in the hello matches, byte for byte, the one the join returned and the runner pins.
       expect(answer.identityId).toBe(joined.controllerIdentityId);
       expect(answer.publicKey).toBe(joined.controllerPublicKey);
       expect(answer.nonce).toBe(sent.nonce);
       expect(await verifySignature(answer, encodeChallengeBytes(joined.runnerId, sent.nonce))).toBe(
         true,
       );
-      // Over the nonce alone the same signature is good on any connection, so a
-      // peer holding any runner's credential could relay it to this one.
+      // A signature over the nonce alone would be valid on any connection, so
+      // a peer holding any runner's credential could relay it to this one.
       expect(await verifySignature(answer, decodeBase64Bytes(sent.nonce))).toBe(false);
 
       const row = await waitForRunner(
@@ -419,15 +422,15 @@ describe("the hello exchange", () => {
       expect(row.lastSeenAt).not.toBeNull();
       expect(Number.isNaN(Date.parse(String(row.lastSeenAt)))).toBe(false);
 
-      // Negotiated means both said it: nothing is stored that only one end
-      // claimed.
+      // A negotiated capability is one both sides offered: nothing is stored
+      // that only one side offered.
       expect(row.negotiatedCapabilities).not.toBeNull();
       for (const capability of row.negotiatedCapabilities ?? []) {
         expect(sent.capabilities, "the runner did not offer it").toContain(capability);
         expect(answer.capabilities, "the controller did not offer it").toContain(capability);
       }
 
-      // Nobody holding a credential asked for this: a runner is never an actor.
+      // No user or session asked for this, and a runner is never an actor.
       const entries = await harness.audit("runner.stateChanged");
       expect(entries).toHaveLength(1);
       expect(entries[0]?.actor).toBe("system");
@@ -437,7 +440,7 @@ describe("the hello exchange", () => {
     });
   });
 
-  it("brings a runner on another binary version online all the same", async () => {
+  it("brings a runner with a different binary version online anyway", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -453,14 +456,14 @@ describe("the hello exchange", () => {
         (one) => one.connectivity === "online",
       );
       expect(row.connectivity).toBe("online");
-      // Stored, so the fleet can show the skew: warn, never block.
+      // Stored, so the fleet page can show the difference: warn, never block.
       expect(row.version).toBe("0.0.0-from-another-build");
 
       wire.close();
     });
   });
 
-  it("closes a hello in a version it does not speak, saying why, and leaves the row alone", async () => {
+  it("closes the connection on a hello with another protocol version, with a reason, and leaves the row unchanged", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -469,8 +472,8 @@ describe("the hello exchange", () => {
       wire.send(buildHello({ protocolVersion: PROTOCOL_VERSION + 1 }));
 
       const ending = await wire.closed();
-      expect(ending.reason, "a refused hello is a close with a reason").not.toBe("");
-      // A refusal is a close, not a message: the catalogue has no error member.
+      expect(ending.reason, "a rejected hello is a close with a reason").not.toBe("");
+      // A rejection is a close, not a message: the protocol has no error frame.
       expect(wire.frames).toEqual([]);
 
       const row = await readRunner(harness.base, token, joined.runnerId);
@@ -481,14 +484,14 @@ describe("the hello exchange", () => {
     });
   });
 
-  it("names the version when a runner sends a hello it cannot even decode", async () => {
+  it("reports a version mismatch when a runner sends a hello it cannot decode", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dial(harness.base, joined.credential);
 
-      // What a later build's hello looks like from here: a version this
-      // controller does not speak, in a shape whose required fields it does not
-      // have. It must read as a version it cannot speak, not as gibberish.
+      // What a newer build's hello looks like to this controller: another
+      // version, without the fields this build requires. It must be reported as
+      // a version mismatch, not as an unreadable frame.
       wire.send({
         _tag: "runnerHello",
         protocolVersion: PROTOCOL_VERSION + 1,
@@ -503,7 +506,7 @@ describe("the hello exchange", () => {
 });
 
 describe("what a connection leaves behind", () => {
-  it("stops believing in a runner it hung up on itself", async () => {
+  it("marks a runner unreachable when the controller closed its connection", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -520,17 +523,15 @@ describe("what a connection leaves behind", () => {
           ).connectivity,
         ).toBe("online");
 
-        // A frame this build cannot read: what a newer runner sending a member
-        // this catalogue does not carry looks like from here.
+        // A frame this build cannot read, like a newer runner sending a frame
+        // type this protocol version does not have.
         wire.send({ _tag: "nonsense" } as unknown as RunnerMessage);
         const ending = await wire.closed();
-        expect(ending.code, "the frame was refused, not the connection retired").toBe(
-          PROTOCOL_ERROR,
-        );
+        expect(ending.code, "the frame was rejected, not the runner retired").toBe(PROTOCOL_ERROR);
         expect(ending.reason).not.toBe("");
 
-        // The controller closed it, so nobody announced anything: the runner is
-        // as gone as one that vanished.
+        // The controller closed it, so no goodbye was sent: the runner counts as
+        // gone, like one that vanished.
         const row = await waitForRunner(
           harness.base,
           token,
@@ -544,22 +545,22 @@ describe("what a connection leaves behind", () => {
     );
   });
 
-  it("takes one hello per connection and no more, however they arrive", async () => {
+  it("accepts only one hello per connection, however they arrive", async () => {
     await withServer(
       async (harness) => {
         const joined = await enlist(harness);
         const wire = await dial(harness.base, joined.credential);
 
-        // Both in one go, without waiting for an answer to the first. The
-        // transport hands each frame to its own fiber, so a controller that
-        // looked at the two in parallel would sign twice, write the row twice
-        // and answer twice for a frame anybody holding the credential can send
-        // as often as they like.
+        // Both at once, without waiting for an answer to the first. The
+        // transport gives each frame its own fiber, so a controller that
+        // handled the two in parallel would sign twice, write the row twice and
+        // answer twice, for a frame anyone holding the credential can send as
+        // often as they like.
         wire.send(buildHello());
         wire.send(buildHello());
 
         const ending = await wire.closed();
-        expect(ending.code, "the second hello was refused").toBe(PROTOCOL_ERROR);
+        expect(ending.code, "the second hello was rejected").toBe(PROTOCOL_ERROR);
         expect(ending.reason).not.toBe("");
         expect(wire.frames.filter((frame) => frame._tag === "controllerHello")).toHaveLength(1);
         expect(await readStateTransitions(harness)).toEqual(["online", "unreachable"]);
@@ -568,7 +569,7 @@ describe("what a connection leaves behind", () => {
     );
   });
 
-  it("hangs up the older connection when a runner dials again, and keeps it online", async () => {
+  it("closes the older connection when a runner connects again, and keeps the runner online", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -587,14 +588,14 @@ describe("what a connection leaves behind", () => {
         ).toBe("online");
 
         const newer = await greet(harness.base, joined.credential);
-        // The runner holds one connection; the one it replaced is let go, and
-        // let go rather than refused: it did nothing wrong.
+        // A runner has one connection. The replaced one is closed with "going
+        // away" rather than as an error, because it did nothing wrong.
         const ending = await older.wire.closed();
         expect(ending.code).toBe(GOING_AWAY);
         expect(ending.reason).not.toBe("");
 
-        // And the older connection's parting word does not land on the row the
-        // newer one is holding.
+        // The older connection's final status write does not overwrite the row
+        // the newer connection now owns.
         await delay(150);
         const row = await readRunner(harness.base, token, joined.runnerId);
         expect(row.connectivity).toBe("online");
@@ -608,12 +609,12 @@ describe("what a connection leaves behind", () => {
 });
 
 describe("the liveness check", () => {
-  it("pings every 15 seconds and gives up on 60 seconds of silence", () => {
+  it("pings every 15 seconds and marks a runner unreachable after 60 seconds of silence", () => {
     expect(Duration.toMillis(RUNNER_PING_INTERVAL)).toBe(15_000);
     expect(Duration.toMillis(RUNNER_SILENCE_LIMIT)).toBe(60_000);
   });
 
-  it("pings on the interval, and every pong advances what the row last saw", async () => {
+  it("pings on the interval, and every pong updates the runner's last-seen time", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -628,8 +629,7 @@ describe("the liveness check", () => {
         );
         expect(first.lastSeenAt).not.toBeNull();
 
-        // Four intervals' worth of pings, each answered the way a runner
-        // answers one.
+        // Four pings, each answered the way a runner answers one.
         for (let beat = 0; beat < 4; beat++) {
           const ping = await wire.next();
           expect(ping._tag, JSON.stringify(ping)).toBe("ping");
@@ -645,7 +645,7 @@ describe("the liveness check", () => {
         expect(Date.parse(String(later.lastSeenAt))).toBeGreaterThan(
           Date.parse(String(first.lastSeenAt)),
         );
-        // Answering kept it where it was.
+        // Answering kept it online.
         expect(later.connectivity).toBe("online");
 
         wire.close();
@@ -654,16 +654,15 @@ describe("the liveness check", () => {
     );
   });
 
-  it("keeps a runner that answers, for longer than silence would have cost it", async () => {
+  it("keeps a runner that answers online, for longer than the silence limit", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
-        // Ten intervals, five silence limits' worth of time: a runner that
-        // answers is a runner the controller goes on believing in, and nothing
-        // but a pong is what says so.
+        // Ten intervals, which is five silence limits: a runner that answers
+        // stays online, and only a pong counts as an answer.
         for (let beat = 0; beat < 10; beat++) {
           const ping = await wire.next();
           expect(ping._tag, JSON.stringify(ping)).toBe("ping");
@@ -681,7 +680,7 @@ describe("the liveness check", () => {
     );
   });
 
-  it("loses a runner that stops answering, stamped on nobody's behalf", async () => {
+  it("marks a runner that stops answering unreachable, with the system as the actor", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -699,8 +698,8 @@ describe("the liveness check", () => {
           ).connectivity,
         ).toBe("online");
 
-        // The socket stays up and the runner says nothing on it, which is the
-        // case a transport-level ping would have hidden.
+        // The socket stays open but the runner sends nothing, which a
+        // WebSocket-level ping would have hidden.
         const row = await waitForRunner(
           harness.base,
           token,
@@ -719,7 +718,7 @@ describe("the liveness check", () => {
     );
   });
 
-  it("reads an announced departure as offline and a vanished one as unreachable", async () => {
+  it("marks a runner that sent a goodbye offline, and one that vanished unreachable", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -749,11 +748,11 @@ describe("the liveness check", () => {
             )
           ).connectivity,
         ).toBe("offline");
-        // It never passed through `unreachable` on the way: the departure was
-        // announced, so there was no silence to interpret.
+        // It never went through `unreachable`: the runner sent a goodbye, so
+        // there was no silence to interpret.
         expect(await readStateTransitions(harness)).toEqual(["online", "offline"]);
 
-        // A new hello takes it back out of `offline`.
+        // A new hello brings it back from `offline`.
         const back = await greet(harness.base, joined.credential);
         expect(
           (
@@ -766,7 +765,7 @@ describe("the liveness check", () => {
           ).connectivity,
         ).toBe("online");
 
-        // And a connection that just goes away is not a departure.
+        // A connection that just closes, without a goodbye, is not a planned departure.
         back.wire.close();
         expect(
           (
@@ -779,7 +778,7 @@ describe("the liveness check", () => {
           ).connectivity,
         ).toBe("unreachable");
 
-        // A new hello takes it back out of `unreachable` too.
+        // A new hello brings it back from `unreachable` too.
         const again = await greet(harness.base, joined.credential);
         expect(
           (
@@ -799,8 +798,8 @@ describe("the liveness check", () => {
           "unreachable",
           "online",
         ]);
-        // Five moves on the one axis a connection owns, and none on the other:
-        // where a runner stands with its owner is not the socket's to say.
+        // Five connectivity changes, and no lifecycle change: the lifecycle
+        // belongs to the owner, not the socket.
         expect((await readRunner(harness.base, token, joined.runnerId)).lifecycle).toBe("active");
         const entries = await harness.audit("runner.stateChanged");
         for (const entry of entries) expect(entry.actor).toBe("system");
@@ -813,14 +812,14 @@ describe("the liveness check", () => {
 });
 
 describe("what a runner reports about its machine", () => {
-  /** A watermark as a runner sends one, with the disk the test wants. */
+  /** Builds a watermark report, with the free disk the test wants. */
   const buildResourceReport = (diskFreeBytes: number) => ({
     diskFreeBytes,
     availableMemoryBytes: 16 * 1024 * 1024 * 1024,
   });
 
   it(
-    "stores the watermark a runner reports and hands it back on the row",
+    "stores the watermark a runner reports and returns it on the runner",
     async () => {
       await withServer(
         async (harness) => {
@@ -838,8 +837,8 @@ describe("what a runner reports about its machine", () => {
           // disk space yet.
           expect(online.watermark).toBeNull();
 
-          // Above the shipped ten-gibibyte watermark, so this reading is a
-          // machine still accepting work.
+          // Above the default ten-gibibyte watermark, so the runner is still
+          // accepting work.
           wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
           const stored = await waitForRunner(
             harness.base,
@@ -850,13 +849,13 @@ describe("what a runner reports about its machine", () => {
           expect(stored.watermark).toEqual(buildResourceReport(200 * GIB));
 
           const before = await harness.audit("runner.placementsChanged");
-          // A machine nobody had heard from is taken to be accepting work, so a
-          // first reading of a healthy disk is not news about it.
+          // A runner with no earlier report counts as accepting work, so a
+          // first report with plenty of disk changes nothing.
           expect(before).toHaveLength(0);
 
-          // The same reading again, then a different disk that means the same
-          // thing for placement. Waiting for the second one to land is what
-          // proves the first was seen and deliberately left no row.
+          // The same report again, then a different amount of disk that means
+          // the same for placement. Waiting for the second one to be stored
+          // proves the first was handled and deliberately wrote no audit entry.
           wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
           wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(150 * GIB) });
           const again = await waitForRunner(
@@ -871,9 +870,8 @@ describe("what a runner reports about its machine", () => {
             "nothing about placement changed",
           ).toHaveLength(before.length);
 
-          // The disk filled up, below the shipped watermark: this one is a
-          // change of what the fleet may do with the machine, and that is what
-          // gets recorded.
+          // The disk filled up, below the default watermark. This changes what
+          // placement may do with the runner, so it is recorded.
           wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(4 * GIB) });
           const short = await waitForRunner(
             harness.base,
@@ -886,15 +884,15 @@ describe("what a runner reports about its machine", () => {
           const after = await harness.audit("runner.placementsChanged");
           expect(after).toHaveLength(before.length + 1);
           const flip = after[after.length - 1];
-          // Nobody holding a credential asked for this: a runner is never an actor.
+          // No user or session asked for this, and a runner is never an actor.
           expect(flip?.actor).toBe("system");
           expect(flip?.payload).toMatchObject({
             runnerId: joined.runnerId,
             acceptingPlacements: false,
           });
 
-          // And a `system` stamp the event schema cannot encode would fail the
-          // whole page rather than the row, so it is read back over the wire too.
+          // A `system` actor the event schema cannot encode would fail the
+          // whole page, not just the row, so it is also read back over HTTP.
           const log = (await (await get(harness.base, "/api/v1/events", token)).json()) as {
             items: ReadonlyArray<{
               kind: string;
@@ -915,7 +913,7 @@ describe("what a runner reports about its machine", () => {
     FOUR_ROW_WAITS_TIMEOUT_MS,
   );
 
-  it("records a machine that comes back with no room left", async () => {
+  it("records a runner whose first report shows no room left", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -928,9 +926,9 @@ describe("what a runner reports about its machine", () => {
           (one) => one.connectivity === "online",
         );
 
-        // Its very first reading, and the disk is full. Nothing had been heard
-        // about this machine before, but a machine that cannot take work is
-        // news whether or not anything was.
+        // Its first report, and the disk is full. There was no earlier report,
+        // but a runner that cannot take work is a change worth recording
+        // either way.
         wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(4 * GIB) });
         await waitForRunner(harness.base, token, joined.runnerId, (one) => one.watermark !== null);
 
@@ -960,7 +958,7 @@ describe("what a runner reports about its machine", () => {
         );
         expect(online.facts).toEqual(FACTS);
 
-        // The machine gained a `gh` while the connection was up.
+        // The machine got `gh` installed while the connection was open.
         const grown: RunnerFacts = {
           ...FACTS,
           toolchains: [
@@ -976,8 +974,8 @@ describe("what a runner reports about its machine", () => {
           joined.runnerId,
           (one) => one.facts?.toolchains.length === 2,
         );
-        // The whole report replaces the whole column: only the latest reading
-        // is worth anything, so nothing is merged.
+        // The report replaces the whole column: only the latest report
+        // matters, so nothing is merged.
         expect(changed.facts).toEqual(grown);
 
         wire.close();
@@ -986,13 +984,13 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
-  it("caps sessions at one per 2 GiB until somebody overrides it", async () => {
+  it("caps sessions at one per 2 GiB until the owner sets a cap", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
-        // A cap can only be derived once the machine has said how big it is,
-        // and it says that in its hello.
+        // The cap can only be computed once the runner has reported its
+        // memory, which it does in its hello.
         const { wire } = await greet(harness.base, joined.credential, {
           facts: { ...FACTS, totalMemoryBytes: 16 * GIB },
         });
@@ -1005,7 +1003,7 @@ describe("what a runner reports about its machine", () => {
         );
         expect(sixteen.maxConcurrentSessions).toBe(8);
 
-        // A machine too small for even one 2 GiB session still takes one.
+        // A machine too small for even one 2 GiB session still gets a cap of one.
         wire.send({ _tag: "factsReport", facts: { ...FACTS, totalMemoryBytes: 3 * GIB } });
         const small = await waitForRunner(
           harness.base,
@@ -1021,8 +1019,8 @@ describe("what a runner reports about its machine", () => {
         });
         expect(capped.status, await capped.clone().text()).toBe(200);
 
-        // What the user said stands: the machine reporting a different size is
-        // not a reason to throw the answer away.
+        // The owner's cap stays: a report with a different memory size does
+        // not override it.
         wire.send({ _tag: "factsReport", facts: { ...FACTS, totalMemoryBytes: 64 * GIB } });
         const overridden = await waitForRunner(
           harness.base,
@@ -1038,7 +1036,7 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
-  it("keeps the row readable when the stored watermark is one it cannot read", async () => {
+  it("keeps the runner readable when its stored watermark cannot be decoded", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -1051,9 +1049,9 @@ describe("what a runner reports about its machine", () => {
           (one) => one.connectivity === "online",
         );
 
-        // A column written by a build that said something else. The read side
-        // answers it as absent; the write side must not choke on it, or this
-        // runner would lose its socket a minute after every hello, forever.
+        // A column written by a build with a different shape. Reads return it
+        // as null, and writes must not fail on it either, or this runner would
+        // lose its socket a minute after every hello, forever.
         await Effect.runPromise(
           Effect.orDie(
             harness.sql`UPDATE runners SET watermark = 'not json at all'
@@ -1077,14 +1075,14 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
-  it("stores nothing a connection that has not said who it is reports", async () => {
+  it("stores nothing a connection reports before its hello", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
-        // A credential is proof that a machine was enlisted, not that this
-        // connection is that machine speaking the protocol. Until the hello
-        // lands there is nothing to attach a report to.
+        // A credential proves a runner joined, not that this connection is
+        // that runner speaking the protocol. Until the hello arrives, a report
+        // is ignored.
         const wire = await dial(harness.base, joined.credential);
 
         wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(4 * GIB) });
@@ -1102,13 +1100,13 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
-  it("gives a connection that never says hello nothing, and lets go of it", async () => {
+  it("ignores pongs from a connection that never sends a hello, and closes it", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
         // A credential, a socket, and no hello. It answers every ping, which is
-        // the one way a connection can look alive without ever joining.
+        // the only way a connection could look alive without a hello.
         const wire = await dial(harness.base, joined.credential);
         const answering = setInterval(() => {
           wire.send({ _tag: "pong" });
@@ -1119,8 +1117,8 @@ describe("what a runner reports about its machine", () => {
 
         expect(ended.code).toBe(1001);
         const row = await readRunner(harness.base, token, joined.runnerId);
-        // Nothing about this machine was ever heard, so nothing about the row
-        // may say it was: "last seen a moment ago" is what places work.
+        // The runner never sent a hello, so the row must not show it as seen:
+        // placement relies on "last seen a moment ago".
         expect(row.lastSeenAt).toBeNull();
         expect(row.connectivity).toBe("offline");
       },
@@ -1128,7 +1126,7 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
-  it("keeps its hands off what the row last saw; only a pong touches that", async () => {
+  it("does not update the last-seen time on a report; only a pong does", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -1143,7 +1141,7 @@ describe("what a runner reports about its machine", () => {
         );
         expect(online.lastSeenAt).not.toBeNull();
 
-        // Long enough that a report which touched the timestamp would show it.
+        // Long enough that a report which updated the timestamp would show it.
         await delay(50);
         wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
         wire.send({ _tag: "factsReport", facts: { ...FACTS, docker: true } });
@@ -1156,8 +1154,9 @@ describe("what a runner reports about its machine", () => {
         );
         expect(reported.watermark, "the report never landed").not.toBeNull();
         expect(reported.facts?.docker, "the report never landed").toBe(true);
-        // Liveness is the heartbeat's to say. A machine can report a disk while
-        // being unable to answer a ping, and the row must read that as silence.
+        // Only the ping and pong decide liveness. A runner could send reports
+        // while unable to answer a ping, and the row must treat that as
+        // silence.
         expect(reported.lastSeenAt).toBe(online.lastSeenAt);
         expect(reported.connectivity).toBe("online");
 
@@ -1169,10 +1168,10 @@ describe("what a runner reports about its machine", () => {
 });
 
 describe("what the controller stopping does to its local runner", () => {
-  /** The dispatcher, run from source: `hercule` before it is compiled. */
+  /** The `hercule` entry point, run from source instead of the compiled binary. */
   const HERCULE = `${import.meta.dirname}/../../../../packages/hercule/src/main.ts`;
 
-  it("leaves the row offline when the child is asked to stop, never unreachable", async () => {
+  it("marks the runner offline, never unreachable, when the child is asked to stop", async () => {
     const home = mkdtempSync(join(tmpdir(), "hercule-local-child-"));
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
@@ -1187,8 +1186,8 @@ describe("what the controller stopping does to its local runner", () => {
       })();
 
       try {
-        // The handshake the controller does: it reads the child's first line
-        // and answers on its stdin, exactly as the boot step does.
+        // The controller's handshake: it reads the child's first line and
+        // answers on its stdin, exactly as the boot step does.
         for (let waited = 0; waited < 15_000 && said === ""; waited += 20) await delay(20);
         expect(said).toBe('{"join":true}\n');
         void child.stdin.write(
@@ -1196,7 +1195,7 @@ describe("what the controller stopping does to its local runner", () => {
         );
         await child.stdin.end();
 
-        // It joins, dials, and the fleet reads it as a machine ready for work.
+        // It joins and connects, and the fleet shows it as online and ready for work.
         let listed = await (await get(harness.base, "/api/v1/runners", token)).json();
         for (let waited = 0; waited < 20_000; waited += 50) {
           listed = await (await get(harness.base, "/api/v1/runners", token)).json();
@@ -1209,8 +1208,8 @@ describe("what the controller stopping does to its local runner", () => {
         const runnerId = items[0]!.id;
         expect(items[0]!.connectivity).toBe("online");
 
-        // What the drain does: the child is asked to stop, and it announces
-        // that it is going rather than simply vanishing.
+        // What the drain does: the child is asked to stop, and it sends a
+        // goodbye rather than just vanishing.
         child.kill("SIGTERM");
         expect(await child.exited).toBe(0);
 
@@ -1221,7 +1220,7 @@ describe("what the controller stopping does to its local runner", () => {
           (one) => one.connectivity === "offline",
         );
         expect(row.connectivity).toBe("offline");
-        // Never through `unreachable`: a runner that says goodbye was not lost.
+        // Never `unreachable`: a runner that sends a goodbye was not lost.
         expect(await readStateTransitions(harness)).toEqual(["online", "offline"]);
       } finally {
         child.kill("SIGKILL");
@@ -1231,14 +1230,14 @@ describe("what the controller stopping does to its local runner", () => {
   }, 60_000);
 });
 
-describe("retiring a runner the controller is holding a connection with", () => {
-  /** How the controller ends a connection it will not have back. */
+describe("retiring a runner with an open connection", () => {
+  /** The close code for a connection the controller will not accept again. */
   const POLICY_VIOLATION = 1008;
 
   const retireRunner = (base: string, token: string, id: string): Promise<Response> =>
     send("POST", base, `/api/v1/runners/${id}/retire`, { body: {}, token });
 
-  it("closes the live connection saying the runner was retired", async () => {
+  it("closes the open connection with the reason that the runner was retired", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -1257,15 +1256,15 @@ describe("retiring a runner the controller is holding a connection with", () => 
       const response = await retireRunner(harness.base, token, joined.runnerId);
       expect(response.status, await response.clone().text()).toBe(200);
 
-      // Retire revokes a credential, so the machine still holding it has to be
-      // told on the connection it already has, not only at the next dial.
+      // Retiring revokes the credential, so the runner has to be told on its
+      // open connection, not only when it next connects.
       const ending = await wire.closed();
       expect(ending.code).toBe(POLICY_VIOLATION);
       expect(ending.reason).toBe("RETIRED");
     });
   });
 
-  it("refuses the retired credential at the upgrade, and says which refusal it is", async () => {
+  it("rejects the retired credential at the upgrade, and says it was retired", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -1276,8 +1275,8 @@ describe("retiring a runner the controller is holding a connection with", () => 
       expect(revoked.status).toBe(401);
       const refusal = (await revoked.json()) as { error: { code: string; message: string } };
       expect(refusal.error.code).toBe("unauthenticated");
-      // The machine is holding a credential that was real: it needs to be sent
-      // to `join`, not left retrying a credential it thinks is merely unknown.
+      // The runner holds a credential that was valid. It needs to be told to
+      // `join` again, not left retrying a credential it thinks is unknown.
       expect(refusal.error.message).toContain("retired");
       expect(await tryDial(harness.base, `Bearer ${joined.credential}`)).toBe("refused");
 
@@ -1291,30 +1290,30 @@ describe("retiring a runner the controller is holding a connection with", () => 
 });
 
 describe("refreshing a runner's facts on demand", () => {
-  // The shipped deadline is ten seconds, which no test can wait out, so these
-  // servers are handed their own - the way `pings` is handed over.
+  // The default deadline is ten seconds, too long for a test, so these servers
+  // get a shorter one, the same way `pings` is passed in.
   const FACTS_DEADLINE = Duration.millis(200);
 
   const refreshFacts = (base: string, token: string, id: string): Promise<Response> =>
     send("POST", base, `/api/v1/runners/${id}/refresh-facts`, { body: {}, token });
 
   /**
-   * Takes the next frame and says it is the request for facts. The frame was
-   * decoded against the published catalogue on its way in, so what is left to
-   * assert is which member of it the controller sent.
+   * Takes the next frame and checks that it is a facts request. The frame was
+   * already decoded with the protocol schema, so only its type is left to
+   * check.
    */
   const expectFactsRequest = async (wire: Wire): Promise<void> => {
     const frame = await wire.next();
     expect(frame._tag, JSON.stringify(frame)).toBe("factsRequest");
   };
 
-  /** The machine gained a `gh` since it said hello. */
+  /** The facts after `gh` was installed on the machine since its hello. */
   const GROWN: RunnerFacts = {
     ...FACTS,
     toolchains: [...FACTS.toolchains, { name: "gh", version: "2.99.0", path: "/usr/local/bin/gh" }],
   };
 
-  it("asks the online runner and answers with the row carrying what it reported", async () => {
+  it("asks the online runner, and returns the runner with the facts it reported", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -1327,16 +1326,16 @@ describe("refreshing a runner's facts on demand", () => {
           (one) => one.connectivity === "online",
         );
 
-        // The operation is in flight while the runner answers: the request goes
-        // out on the connection the controller is already holding.
+        // The operation is still running while the runner answers: the request
+        // is sent on the connection the controller already has.
         const pending = refreshFacts(harness.base, token, joined.runnerId);
         await expectFactsRequest(wire);
         wire.send({ _tag: "factsReport", facts: GROWN });
 
         const response = await pending;
         expect(response.status, await response.clone().text()).toBe(200);
-        // What comes back is the runner as the report left it, not the runner
-        // as it was when the button was pressed.
+        // The response is the runner after the report, not the runner as it
+        // was when the button was pressed.
         const answered = (await response.json()) as RunnerDetail;
         expect(answered.id).toBe(joined.runnerId);
         expect(answered.facts).toEqual(GROWN);
@@ -1347,7 +1346,7 @@ describe("refreshing a runner's facts on demand", () => {
     });
   });
 
-  it("answers a report that says nothing new, rather than waiting for a change", async () => {
+  it("returns on a report with nothing new, rather than waiting for a change", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -1362,8 +1361,8 @@ describe("refreshing a runner's facts on demand", () => {
 
         const pending = refreshFacts(harness.base, token, joined.runnerId);
         await expectFactsRequest(wire);
-        // The very facts the hello carried. A controller waiting for the row to
-        // change would wait for ever on the machine nothing happened to, which
+        // The same facts the hello had. A controller that waited for the row to
+        // change would wait forever on a machine where nothing changed, which
         // is most machines most of the time.
         wire.send({ _tag: "factsReport", facts: FACTS });
 
@@ -1376,7 +1375,7 @@ describe("refreshing a runner's facts on demand", () => {
     });
   });
 
-  it("is not answered by a probe report a runner spells the facts key into", async () => {
+  it("is not answered by a probe report whose request id guesses the facts key", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -1392,10 +1391,9 @@ describe("refreshing a runner's facts on demand", () => {
 
           const pending = refreshFacts(harness.base, token, joined.runnerId);
           await expectFactsRequest(wire);
-          // A request id the controller never issued, spelling out what the
-          // facts wait might plausibly be keyed under. It wakes nothing, so the
-          // caller runs out its deadline: a runner does not get to answer a
-          // question it was not asked.
+          // A request id the controller never sent, guessing what the facts
+          // wait might be keyed under. It wakes nothing, so the caller reaches
+          // its deadline: a runner cannot answer a question it was not asked.
           wire.send({
             _tag: "probeReport",
             requestId: "facts",
@@ -1412,13 +1410,12 @@ describe("refreshing a runner's facts on demand", () => {
     );
   });
 
-  it("refuses a runner that is not online, and sends that connection nothing", async () => {
+  it("rejects a runner that is not online, and sends that connection nothing", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      // A credential and a socket, and no hello: a connection exists, and the
-      // machine on the other end is not a runner the controller can ask
-      // anything of.
+      // A credential and a socket, but no hello: a connection exists, but the
+      // other end is not yet a runner the controller can ask anything.
       const wire = await dial(harness.base, joined.credential);
       try {
         expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe(
@@ -1428,8 +1425,8 @@ describe("refreshing a runner's facts on demand", () => {
         const response = await refreshFacts(harness.base, token, joined.runnerId);
         expect(response.status, await response.clone().text()).toBe(409);
         expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
-        // Nothing was asked of it: a request sent down a connection that has
-        // not said who it is would be answered by whoever holds the credential.
+        // Nothing was sent to it: a request on a connection that has not sent
+        // a hello would be answered by whoever holds the credential.
         expect(wire.frames).toEqual([]);
       } finally {
         wire.close();
@@ -1437,7 +1434,7 @@ describe("refreshing a runner's facts on demand", () => {
     });
   });
 
-  it("answers two callers waiting at once with the one report they share", async () => {
+  it("answers two callers waiting at once with the same report", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -1450,8 +1447,8 @@ describe("refreshing a runner's facts on demand", () => {
           (one) => one.connectivity === "online",
         );
 
-        // Two presses of the same button. Neither may be told the machine went
-        // quiet because the other one was listening.
+        // Two presses of the same button. Neither may be told the runner did
+        // not answer just because the other caller got the report.
         const both = [
           refreshFacts(harness.base, token, joined.runnerId),
           refreshFacts(harness.base, token, joined.runnerId),
@@ -1469,7 +1466,7 @@ describe("refreshing a runner's facts on demand", () => {
     });
   });
 
-  it("answers a caller still waiting when the report lands after another gave up", async () => {
+  it("answers a caller still waiting when the report arrives after another caller timed out", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -1485,8 +1482,8 @@ describe("refreshing a runner's facts on demand", () => {
 
           const early = refreshFacts(harness.base, token, joined.runnerId);
           await expectFactsRequest(wire);
-          // Long enough that the second caller still has time in hand when the
-          // first has run out of it.
+          // Long enough that the second caller still has time left when the
+          // first times out.
           await delay(700);
           const late = refreshFacts(harness.base, token, joined.runnerId);
           expect((await early).status).toBe(409);
@@ -1495,8 +1492,8 @@ describe("refreshing a runner's facts on demand", () => {
           const answered = await late;
           expect(answered.status, await answered.clone().text()).toBe(200);
           expect(((await answered.json()) as RunnerDetail).facts).toEqual(GROWN);
-          // Giving up did not take the wait with it: the second caller joined
-          // the wait the first left behind and was answered by the report.
+          // The first caller's timeout did not remove the wait: the second
+          // caller shared it and got the report.
           expect(wire.frames.filter((frame) => frame._tag === "factsRequest")).toHaveLength(2);
         } finally {
           wire.close();
@@ -1506,7 +1503,7 @@ describe("refreshing a runner's facts on demand", () => {
     );
   });
 
-  it("asks again after a request nobody answered, and the next report lands", async () => {
+  it("sends a new request after one that was never answered, and the next report arrives", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -1520,14 +1517,14 @@ describe("refreshing a runner's facts on demand", () => {
             (one) => one.connectivity === "online",
           );
 
-          // The machine says nothing to the first request, and the caller runs
-          // out of time with no report ever arriving.
+          // The runner does not answer the first request, and the caller times
+          // out with no report.
           const abandoned = await refreshFacts(harness.base, token, joined.runnerId);
           expect(abandoned.status).toBe(409);
           await expectFactsRequest(wire);
 
-          // Pressing the button again has to reach the machine. A request the
-          // machine never answered is not one still in flight.
+          // Pressing the button again has to reach the runner. A request the
+          // runner never answered is not still in flight.
           const again = refreshFacts(harness.base, token, joined.runnerId);
           await expectFactsRequest(wire);
           wire.send({ _tag: "factsReport", facts: GROWN });
@@ -1544,7 +1541,7 @@ describe("refreshing a runner's facts on demand", () => {
     );
   });
 
-  it("gives up on a runner that never reports, saying how long it waited", async () => {
+  it("fails for a runner that never reports, and says how long it waited", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -1559,18 +1556,18 @@ describe("refreshing a runner's facts on demand", () => {
           );
 
           const pending = refreshFacts(harness.base, token, joined.runnerId);
-          // The frame goes out, and the runner says nothing back.
+          // The frame is sent, and the runner sends nothing back.
           await expectFactsRequest(wire);
 
           const response = await pending;
           expect(response.status, await response.clone().text()).toBe(409);
           const refusal = (await response.json()) as { error: { code: string; message: string } };
           expect(refusal.error.code).toBe("invalid_state");
-          // The refusal says how long the controller waited, so a slow machine
-          // reads differently from a broken one, and it says the deadline this
-          // server is running with rather than the shipped one.
+          // The error message says how long the controller waited, so a slow
+          // runner looks different from a broken one. It uses this server's
+          // deadline, not the default.
           expect(refusal.error.message).toContain(Duration.format(FACTS_DEADLINE));
-          // A machine that did not answer said nothing about itself either.
+          // A runner that did not answer did not update its facts either.
           expect((await readRunner(harness.base, token, joined.runnerId)).facts).toEqual(FACTS);
         } finally {
           wire.close();
@@ -1582,10 +1579,10 @@ describe("refreshing a runner's facts on demand", () => {
 });
 
 /**
- * Against the shipped registry, so "one request per instance" is about the
- * three providers the binary really ships. The probe deadline and interval are
- * handed over like the ping interval: a real Bun listener cannot be driven by a
- * `TestClock`.
+ * Runs `body` against a server with the real plugin registry, so "one request
+ * per instance" covers the three providers the binary really includes. The
+ * probe deadline and interval are passed in like the ping interval, because a
+ * real Bun server cannot run on a `TestClock`.
  */
 const withRegistry = (
   body: (harness: ServerHarness) => Promise<void>,
@@ -1662,22 +1659,22 @@ describe("probing a runner's provider instances", () => {
   const patchInstance = (base: string, token: string, id: string, body: unknown) =>
     send("PATCH", base, `/api/v1/providers/${id}`, { body, token });
 
-  /** Short enough that a test can wait it out. */
+  /** A probe deadline short enough for a test to wait for. */
   const PROBE_DEADLINE = Duration.millis(200);
 
-  it("asks the runner about every instance as soon as it has said hello, and keeps what it answers", async () => {
+  it("probes every instance as soon as the runner sends its hello, and stores the answers", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const all = await listInstances(harness.base, token);
-      // The three shipped providers, each with the instance the boot opened.
+      // The three built-in providers, each with the instance the boot created.
       expect(all.map((one) => one.providerId).sort()).toEqual(["claude-code", "codex", "pi"]);
 
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const asked = await waitForProbeRequests(wire, all.length);
-        // One request per instance, routed on the instance id and never on the
-        // provider id: one provider can hold several accounts.
+        // One request per instance, keyed by instance id, never provider id:
+        // one provider can have several accounts.
         expect([...asked].map((request) => request.instanceId).sort()).toEqual(
           [...all].map((one) => one.id).sort(),
         );
@@ -1705,8 +1702,8 @@ describe("probing a runner's provider instances", () => {
         expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
         expect(snapshot.models.map((model) => model.slug)).toEqual(["default"]);
 
-        // A provider this runner build cannot drive is a snapshot too: the row
-        // reads why instead of staying blank for ever.
+        // A provider this runner build has no adapter for still gets a
+        // snapshot, which shows why, instead of staying blank forever.
         const codex = await findInstanceFor(harness.base, token, "codex");
         const refused = await readSnapshot(harness.base, token, codex.id, joined.runnerId);
         expect(refused.auth.status).toBe("error");
@@ -1717,7 +1714,7 @@ describe("probing a runner's provider instances", () => {
     });
   });
 
-  it("asks every online runner again when an instance's config changed", async () => {
+  it("probes every online runner again when an instance's config changes", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const first = await enlist(harness);
@@ -1737,8 +1734,8 @@ describe("probing a runner's provider instances", () => {
         });
         expect(patched.status, await patched.clone().text()).toBe(200);
 
-        // The config is what the probe runs under, so every snapshot of it is
-        // now stale.
+        // The probe runs with the config, so every snapshot of the instance is
+        // now out of date.
         await waitForProbeRequests(one.wire, before[0]! + 1);
         await waitForProbeRequests(two.wire, before[1]! + 1);
         for (const wire of [one.wire, two.wire]) {
@@ -1751,7 +1748,7 @@ describe("probing a runner's provider instances", () => {
     });
   });
 
-  it("asks on demand and answers with the snapshot the report left behind", async () => {
+  it("probes on demand and returns the snapshot from the report", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -1783,12 +1780,12 @@ describe("probing a runner's provider instances", () => {
     });
   });
 
-  it("refuses to probe a runner that is not online, and sends that connection nothing", async () => {
+  it("rejects probing a runner that is not online, and sends that connection nothing", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const claude = await findInstanceFor(harness.base, token, "claude-code");
-      // A socket with no hello: nothing has said it is a runner yet.
+      // A socket with no hello: it has not identified itself as a runner yet.
       const wire = await dial(harness.base, joined.credential);
       try {
         const response = await probeNow(harness.base, token, joined.runnerId, claude.id);
@@ -1801,7 +1798,7 @@ describe("probing a runner's provider instances", () => {
     });
   });
 
-  it("gives up on a runner that never answers a probe, saying how long it waited", async () => {
+  it("fails for a runner that never answers a probe, and says how long it waited", async () => {
     await withRegistry(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -1836,7 +1833,7 @@ describe("probing a runner's provider instances", () => {
         const asked = await waitForProbeRequests(wire, 3);
         const mine = asked.find((request) => request.instanceId === claude.id)!;
 
-        // A request id this controller never issued. Storing it would let a
+        // A request id this controller never sent. Storing it would let a
         // runner write any instance's snapshot at any time.
         wire.send({
           _tag: "probeReport",
@@ -1844,8 +1841,8 @@ describe("probing a runner's provider instances", () => {
           instanceId: claude.id,
           result: buildProbeResult("0.0.0-unasked"),
         });
-        // Then the real answer, so the test waits for something rather than
-        // for a while.
+        // Then the real answer, so the test waits for an event rather than for
+        // a fixed time.
         wire.send({
           _tag: "probeReport",
           requestId: mine.requestId,
@@ -1897,7 +1894,7 @@ describe("probing a runner's provider instances", () => {
     });
   });
 
-  it("asks every instance of every online runner again on the interval", async () => {
+  it("probes every instance of every online runner again on the interval", async () => {
     const INTERVAL = Duration.millis(150);
     await withRegistry(
       async (harness) => {
@@ -1906,8 +1903,8 @@ describe("probing a runner's provider instances", () => {
         const all = await listInstances(harness.base, token);
         const { wire } = await greet(harness.base, joined.credential);
         try {
-          // The hello's round, then the tick's: the whole set again, not just
-          // whichever instance somebody last looked at.
+          // The probes after the hello, then the tick's: every instance again,
+          // not just the one somebody last looked at.
           await waitForProbeRequests(wire, all.length * 2);
           const second = listProbeRequests(wire).slice(all.length, all.length * 2);
           expect([...second].map((request) => request.instanceId).sort()).toEqual(
@@ -1944,7 +1941,7 @@ describe("installing a harness on a runner", () => {
   const installHarness = (base: string, token: string, id: string, providerId: string) =>
     send("POST", base, `/api/v1/runners/${id}/install-harness`, { body: { providerId }, token });
 
-  it("runs the installer, takes the machine's word for what it now has, and probes it", async () => {
+  it("runs the installer, stores the facts the runner then reports, and probes the harness", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -1968,8 +1965,8 @@ describe("installing a harness on a runner", () => {
         const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
         const request = await waitForFrame<InstallRequest>(wire, "installRequest");
         expect(request.providerId).toBe("claude-code");
-        // The runner reports what the machine now has, then says the install
-        // finished: the row must not answer with the machine as it was.
+        // The runner reports its new facts, then reports that the install
+        // finished: the response must not show the machine as it was before.
         wire.send({ _tag: "factsReport", facts: INSTALLED });
         wire.send({ _tag: "installResult", requestId: request.requestId, ok: true });
 
@@ -1978,7 +1975,7 @@ describe("installing a harness on a runner", () => {
         const row = (await response.json()) as RunnerDetail;
         expect(row.facts?.providers).toEqual(INSTALLED.providers);
 
-        // A harness that was just installed has never been asked anything.
+        // A harness that was just installed has never been probed.
         await waitUntil("probed after the install", () => listProbeRequests(wire)[before]);
         expect(
           listProbeRequests(wire)
@@ -1991,7 +1988,7 @@ describe("installing a harness on a runner", () => {
     });
   });
 
-  it("says what the installer said when it failed, and leaves the machine as it was", async () => {
+  it("returns the installer's error message when it failed, and leaves the facts unchanged", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2017,8 +2014,8 @@ describe("installing a harness on a runner", () => {
         expect(response.status, await response.clone().text()).toBe(409);
         const refusal = (await response.json()) as { error: { code: string; message: string } };
         expect(refusal.error.code).toBe("invalid_state");
-        // The installer's own words: "the install failed" is not something an
-        // operator can act on.
+        // The installer's own message: "the install failed" is not something
+        // an operator can act on.
         expect(refusal.error.message).toContain("could not download the manifest");
         expect((await readRunner(harness.base, token, joined.runnerId)).facts).toEqual(BARE);
       } finally {
@@ -2027,7 +2024,7 @@ describe("installing a harness on a runner", () => {
     });
   });
 
-  it("refuses a harness this runner build has no adapter for, before asking the machine", async () => {
+  it("rejects a harness this runner build has no adapter for, before asking the runner", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2043,7 +2040,7 @@ describe("installing a harness on a runner", () => {
         const response = await installHarness(harness.base, token, joined.runnerId, "codex");
         expect(response.status, await response.clone().text()).toBe(400);
         expect(await response.json()).toMatchObject({ error: { code: "validation" } });
-        // The runner already said which adapters its build has.
+        // The runner's hello already listed the adapters its build has.
         expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
       } finally {
         wire.close();
@@ -2051,7 +2048,7 @@ describe("installing a harness on a runner", () => {
     });
   });
 
-  it("refuses to install on a runner that is not online", async () => {
+  it("rejects installing on a runner that is not online", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2069,8 +2066,9 @@ describe("installing a harness on a runner", () => {
 });
 
 /**
- * Nothing about a login is stored - the code is only good for the live child's
- * URL - so these tests drive the wire and the refusals, not a record.
+ * Nothing about a login is stored (the code is only valid for the running
+ * login's URL), so these tests check the frames and the errors, not a stored
+ * record.
  */
 describe("logging a runner's provider instance in", () => {
   const startLogin = (base: string, token: string, instanceId: string, runnerId: string) =>
@@ -2097,10 +2095,10 @@ describe("logging a runner's provider instance in", () => {
 
   const DEVICE_URL = "https://auth.openai.com/codex/device";
 
-  /** A deadline a test can wait out. */
+  /** A login deadline short enough for a test to wait for. */
   const LOGIN_DEADLINE = Duration.millis(200);
 
-  it("asks the machine to start a login and answers with the URL it printed", async () => {
+  it("asks the runner to start a login and returns the URL it printed", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2109,8 +2107,8 @@ describe("logging a runner's provider instance in", () => {
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
         const request = await waitForFrame<LoginStart>(wire, "loginStart");
-        // Routed on the instance, because the config directory the credential
-        // lands in is the instance's own.
+        // Keyed by instance, because the credential is stored in the
+        // instance's own config directory.
         expect(request.instanceId).toBe(claude.id);
         expect(request.providerId).toBe("claude-code");
         wire.send({ _tag: "loginUrl", requestId: request.requestId, url: AUTHORIZE_URL });
@@ -2124,7 +2122,7 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
-  it("carries the one-time code back when the machine printed one instead of prompting", async () => {
+  it("returns the one-time code when the runner printed one instead of prompting", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2133,8 +2131,8 @@ describe("logging a runner's provider instance in", () => {
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
         const request = await waitForFrame<LoginStart>(wire, "loginStart");
-        // A device login shows the user a code to type in the browser; there is
-        // nothing for them to paste back here.
+        // A device login shows the user a code to type in the browser; there
+        // is nothing for them to paste back here.
         wire.send({
           _tag: "loginUrl",
           requestId: request.requestId,
@@ -2151,7 +2149,7 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
-  it("says what the machine said when no URL came back", async () => {
+  it("returns the runner's error message when no URL came back", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2170,8 +2168,8 @@ describe("logging a runner's provider instance in", () => {
         expect(response.status, await response.clone().text()).toBe(409);
         const refusal = (await response.json()) as { error: { code: string; message: string } };
         expect(refusal.error.code).toBe("invalid_state");
-        // The vendor's own words: a login that failed for a reason the user can
-        // act on must not read as Hercule being broken.
+        // The vendor's own message: a login that failed for a reason the user
+        // can act on must not look like Hercule being broken.
         expect(refusal.error.message).toContain("could not reach platform.claude.com");
       } finally {
         wire.close();
@@ -2179,7 +2177,7 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
-  it("gives up on a machine that never answers, saying how long it waited", async () => {
+  it("fails for a runner that never answers, and says how long it waited", async () => {
     await withRegistry(
       async (harness) => {
         const token = await completeSetup(harness.base);
@@ -2202,7 +2200,7 @@ describe("logging a runner's provider instance in", () => {
     );
   });
 
-  it("refuses a provider this runner build has no adapter for, before asking the machine", async () => {
+  it("rejects a provider this runner build has no adapter for, before asking the runner", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2219,7 +2217,7 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
-  it("refuses to log in on a runner that is not online, and sends that connection nothing", async () => {
+  it("rejects a login on a runner that is not online, and sends that connection nothing", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2236,7 +2234,7 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
-  it("hands the pasted code to the machine and answers with the snapshot it left behind", async () => {
+  it("sends the pasted code to the runner and returns the new snapshot", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2258,8 +2256,8 @@ describe("logging a runner's provider instance in", () => {
         expect(sent.code).toBe("the-pasted-code");
         wire.send({ _tag: "loginResult", requestId: sent.requestId, ok: true });
 
-        // A harness that has just been logged in has never been asked who it is
-        // holding, so the answer is a fresh snapshot rather than the stale one.
+        // A harness that was just logged in has not been probed for its
+        // account yet, so the response is a new snapshot, not the old one.
         const probe = await waitForProbe(wire, claude.id, before);
         wire.send({
           _tag: "probeReport",
@@ -2274,8 +2272,8 @@ describe("logging a runner's provider instance in", () => {
         expect(snapshot.runnerId).toBe(joined.runnerId);
         expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
 
-        // The code and the URL are good for one exchange and are never
-        // written down.
+        // The code and the URL are valid for one exchange and are never
+        // stored.
         const logged = await harness.audit("provider.loggedIn");
         expect(logged).toHaveLength(1);
         expect(logged[0]?.payload).toEqual({ instanceId: claude.id, runnerId: joined.runnerId });
@@ -2287,7 +2285,7 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
-  it("hands back what the CLI said about a bad code, and takes another", async () => {
+  it("returns the CLI's error message for a bad code, and accepts another", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -2312,8 +2310,8 @@ describe("logging a runner's provider instance in", () => {
         });
 
         const response = await refused;
-        // A refusal the user can act on by pasting again, not a state the
-        // exchange cannot recover from.
+        // An error the user can fix by pasting again, not a state the login
+        // cannot recover from.
         expect(response.status, await response.clone().text()).toBe(400);
         const refusal = (await response.json()) as { error: { code: string; message: string } };
         expect(refusal.error.code).toBe("validation");
@@ -2341,7 +2339,7 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
-  it("refuses a code when no login is in progress", async () => {
+  it("rejects a code when no login is in progress", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);

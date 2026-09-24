@@ -1,14 +1,16 @@
 /**
- * The event pipeline's clock.
+ * The loop that runs the event pipeline on an interval.
  *
- * One tick is the whole of it: the router walks the log past its cursor and
- * every routing table writes what its routes matched, and then every delivery
- * reads the rows it owns and acts on the ones that can act now. Routing and
- * delivery are two steps rather than one call chain, because a routing table
- * writes inside a transaction and a delivery waits on a machine outside it.
+ * Each tick has two steps:
  *
- * What the tick walks is `routing/index.ts`: the routing tables the router is
- * handed, and the deliveries that read what those tables write.
+ * 1. The router reads the log after its cursor, and every routing table writes
+ *    a row for each route that matched.
+ * 2. Every delivery reads its rows and sends the ones that can be sent now.
+ *
+ * These are two steps rather than one call chain, because a routing table
+ * writes inside a transaction, while a delivery waits on a runner outside it.
+ *
+ * The routing tables and deliveries are listed in `routing/index.ts`.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -22,10 +24,10 @@ import { EventRouter } from "./event-router";
 import { Live } from "./live";
 import { buildDeliveries, buildRoutingTables } from "./routing";
 
-/** How often the pipeline looks for entries the router has not read. */
+/** How often the pipeline looks for events the router has not read. */
 const EVENT_ROUTING_INTERVAL: Duration.Duration = Duration.seconds(1);
 
-/** Tests hand over an interval they can wait out. */
+/** The tick interval. Tests override it with a shorter one. */
 export const EventRoutingInterval = Context.Reference<Duration.Duration>(
   "hercule/controller/daemon/EventRoutingInterval",
   { defaultValue: (): Duration.Duration => EVENT_ROUTING_INTERVAL },
@@ -38,30 +40,30 @@ const make = Effect.gen(function* () {
 
   const tick = Effect.gen(function* () {
     yield* router.routeNewEvents(routingTables);
-    // One delivery that cannot read its rows must not hold back the next one:
-    // they own different rows and neither waits for the other.
+    // A delivery that fails must not hold back the next one: they own
+    // different rows and do not depend on each other.
     for (const delivery of deliveries) {
-      yield* absorbFailures(`The delivery of ${delivery.name} failed`, delivery.deliverWaiting());
+      yield* absorbFailures(`Delivering ${delivery.name} failed`, delivery.deliverWaiting());
     }
   });
 
   return {
     /**
-     * What the pipeline does on its own, on its own interval. A tick that
-     * fails is logged and the next one runs, because one bad tick must not
-     * stop the pipeline every later matched input rides on.
+     * Runs a tick every interval, forever. A tick that fails is logged and
+     * the next one runs, because one bad tick must not stop the pipeline that
+     * every later matched input depends on.
      */
     driving: Effect.gen(function* () {
       const interval = yield* EventRoutingInterval;
       while (true) {
         yield* Effect.sleep(interval);
-        yield* absorbFailures("One tick of the event pipeline failed", tick);
+        yield* absorbFailures("Running a tick of the event pipeline failed", tick);
       }
     }),
   };
 });
 
-/** The clock the event pipeline runs on. */
+/** The loop that runs the event pipeline. */
 export class Pipeline extends Context.Service<Pipeline, Effect.Success<typeof make>>()(
   "hercule/controller/daemon/Pipeline",
 ) {}

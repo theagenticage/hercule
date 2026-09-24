@@ -1,10 +1,10 @@
 /**
- * Project rows. Nothing here decides policy - who may write, what a change
- * means, what gets logged - it only reads and writes.
+ * Reads and writes project rows. Nothing here decides policy - who may write,
+ * what a change means, what gets logged.
  *
- * One walk answers a listing: a keyset over one sortable column plus the id,
- * which the partial indexes on `projects` serve. There is no search and no
- * filter, so there is no second walk.
+ * A list is one keyset query over one sortable column plus the id, which the
+ * partial indexes on `projects` cover. There is no search and no filter, so no
+ * other query is needed.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -24,10 +24,10 @@ import {
   type Page,
 } from "../db";
 
-/** The column a keyset walk orders by. */
+/** The column a project list is sorted by. */
 export type ProjectSortField = "name" | "createdAt" | "updatedAt";
 
-/** What a listing asks for. */
+/** The page size, cursor and sort order of a project list. */
 export interface ProjectPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
@@ -42,7 +42,7 @@ export interface NewProject {
   readonly at: string;
 }
 
-/** The columns an edit may set. An absent one is left as it was. */
+/** The columns an edit may set. A column that is absent is left unchanged. */
 export interface ProjectEdit {
   readonly name?: string;
   readonly description?: string | null;
@@ -95,7 +95,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    /** The project with that id, unless it has been deleted. */
+    /** Returns the project with that id, or `None` if there is none or it has been deleted. */
     live: (id: string): Effect.Effect<Option.Option<Project>, SqlError> =>
       Effect.map(
         sql<ProjectRow>`SELECT ${sql.literal(COLUMNS)} FROM projects
@@ -103,7 +103,7 @@ const make = Effect.gen(function* () {
         (rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toProject)),
       ),
 
-    /** Writes a new project. */
+    /** Inserts a new project and returns it. */
     insert: (project: NewProject): Effect.Effect<Project, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
@@ -121,7 +121,7 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** Applies an edit. Only the columns the edit names are written. */
+    /** Applies an edit. Only the columns set in the edit are written, plus `updated_at`. */
     update: (id: string, edit: ProjectEdit, at: string): Effect.Effect<void, SqlError> => {
       const sets = [sql`updated_at = ${at}`];
       if (edit.name !== undefined) sets.push(sql`name = ${edit.name}`);
@@ -133,12 +133,15 @@ const make = Effect.gen(function* () {
 
     /**
      * Marks the project deleted. The row stays, and so does every task and
-     * every resource link that names it.
+     * every resource link that refers to it.
      */
     softDelete: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`UPDATE projects SET deleted_at = ${at} WHERE id = ${uuidFromString(id)}`),
 
-    /** One page of the live projects, in the order the request asks for. */
+    /**
+     * Returns one page of the projects that are not deleted, in the requested
+     * order. Fails with a `CursorError` if the cursor is invalid.
+     */
     list: (request: ProjectPageRequest): Effect.Effect<Page<Project>, CursorError | SqlError> =>
       Effect.gen(function* () {
         const scope = buildCursorScope(request.field, request.direction);
@@ -167,5 +170,5 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** Everything the project service reads and writes. */
+/** The repository for project rows, used by the project service. */
 export const projectRepository = make;

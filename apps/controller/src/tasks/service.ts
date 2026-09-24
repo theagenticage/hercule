@@ -1,6 +1,5 @@
 /**
- * Tasks as the API sees them: `task.query`, `read`, `create`, `update` and
- * `delete`.
+ * The task operations: `task.query`, `read`, `create`, `update` and `delete`.
  *
  * Every mutation writes one event in the same transaction as the row it
  * describes, so the log never claims a change that was rolled back and never
@@ -9,9 +8,9 @@
  *
  * Input is decoded against the contract's own schemas rather than trusted. A
  * request has already been decoded by the transport, but a built-in workflow
- * action calls these methods directly, and the title cap, the External Ref
- * grammar and the rule that a provenance entry names something are the same
- * rules whichever way the call arrived.
+ * action calls these methods directly. The same rules apply whichever way the
+ * call arrives: the title length cap, the External Ref syntax, and the rule
+ * that a provenance entry must reference something.
  *
  * Delete is soft: `deletedAt` is set and everything that reads a task stops
  * seeing it. There is no include-deleted option.
@@ -47,7 +46,7 @@ import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../
 import { AuditLog } from "../events";
 import { taskRepository, type TaskOrder } from "./repository";
 
-/** What listing takes: the filter, and how much of it in what order. */
+/** The input of `task.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
   ...TaskFilter.fields,
   ...buildPageInputFields(TASK_SORT_FIELDS),
@@ -56,7 +55,7 @@ const QueryInput = Schema.Struct({
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
 /**
- * What identifies one task: the id, and what an edit does to it. Decoding
+ * The input of `task.update`: the task's id and the fields to change. Decoding
  * fails when the edit sets no field. The check is the same one the request
  * schema uses, so both reject the same edits.
  */
@@ -81,13 +80,16 @@ export interface TaskPage {
   readonly nextCursor?: string;
 }
 
-/** What an update reports for a field that holds one value. */
+/** How a `task.updated` event reports a change to a field with a single value. */
 interface ScalarChange {
   readonly old: unknown;
   readonly new: unknown;
 }
 
-/** What it reports for a field that holds several. Provenance never loses one. */
+/**
+ * How a `task.updated` event reports a change to a list field. Provenance
+ * entries are never removed.
+ */
 interface ListChange {
   readonly added: ReadonlyArray<unknown>;
   readonly removed: ReadonlyArray<unknown>;
@@ -102,15 +104,17 @@ const NO_SUCH_PROJECT = "no such project";
 /** The scalar fields an edit may change, in the order an event reports them. */
 const SCALARS = ["title", "description", "status", "priority"] as const;
 
-/** A value carried twice is carried once. */
+/** Returns the values with duplicates removed, keeping the first of each. */
 const removeDuplicates = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
 
 /**
- * How a listing is ordered.
+ * Returns how a listing is ordered: by relevance for a full-text search,
+ * otherwise by the requested column or the default. Fails with `Validation` if
+ * the request has both a search and a sort.
  *
- * Relevance is not a column, so a search cannot also be sorted: honouring both
- * would mean two paging strategies chosen per request, and ignoring the sort
- * would answer in an order nobody asked for without saying so.
+ * Relevance is not a column, so a search cannot also be sorted. Supporting
+ * both would need two paging strategies chosen per request, and ignoring the
+ * sort would silently return an order nobody asked for.
  */
 const chooseOrder = (
   text: QueryInput["text"],
@@ -143,7 +147,10 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  /** A project a task points at has to be one that is there to point at. */
+  /**
+   * Checks that the project a task points at exists. Fails with `NotFound` if
+   * it does not. Does nothing for an absent or null id.
+   */
   const ensureProjectExists = (
     id: string | null | undefined,
   ): Effect.Effect<void, NotFound | SqlError> =>
@@ -154,7 +161,7 @@ const make = Effect.gen(function* () {
         );
 
   return {
-    /** One page of the tasks a filter matches. */
+    /** Returns one page of the tasks that match a filter. */
     query: (
       input: QueryInput,
     ): Effect.Effect<TaskPage, Unauthenticated | Forbidden | Validation | SqlError> =>
@@ -172,7 +179,10 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    /** One task by id, provenance included. A deleted task is not one. */
+    /**
+     * Returns one task by id, including its provenance. Fails with `NotFound`
+     * if the task does not exist or has been deleted.
+     */
     read: (
       input: Identified,
     ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
@@ -182,7 +192,7 @@ const make = Effect.gen(function* () {
         return yield* readLiveTaskOrFail(id);
       }),
 
-    /** Writes down a piece of intent. */
+    /** Creates a task and returns it. Fails with `NotFound` if the project does not exist. */
     create: (
       input: TaskCreateInput,
     ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
@@ -221,14 +231,14 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Changes a task and says what changed.
+     * Updates a task and returns it as stored. The `task.updated` event lists
+     * what changed.
      *
-     * A patch that sets no field fails to decode with a `Validation` error,
-     * and a patch that asks for the values the task already holds writes
-     * nothing at all:
-     * either would move `updatedAt` and stamp a `task.updated` row describing
-     * nothing, and a workflow triggering on that event would wake for no
-     * change.
+     * A patch that sets no field fails to decode with a `Validation` error, and
+     * a patch that asks for the values the task already has writes nothing.
+     * Otherwise either one would move `updatedAt` and write a `task.updated`
+     * event that describes no change, and a workflow triggered by that event
+     * would run for nothing.
      */
     update: (
       input: UpdateInput,
@@ -262,9 +272,9 @@ const make = Effect.gen(function* () {
               edit["projectId"] = patch.projectId;
             }
 
-            // A label named on both sides is added and removed in one call,
-            // which leaves the task carrying it: reporting it as removed would
-            // fire every workflow watching for that label to come off.
+            // A label in both lists is added and removed in one call, so the
+            // task keeps it. Reporting it as removed would trigger every
+            // workflow that watches for that label being removed.
             const adding = removeDuplicates(patch.addLabels ?? []);
             const removed = removeDuplicates(patch.removeLabels ?? []).filter(
               (label) => !adding.includes(label) && before.labels.includes(label),
@@ -272,9 +282,9 @@ const make = Effect.gen(function* () {
             const kept = before.labels.filter((label) => !removed.includes(label));
             const added = adding.filter((label) => !kept.includes(label));
             if (added.length > 0 || removed.length > 0) {
-              // One call is bounded by the contract; the row is bounded here,
-              // because labels are added a few at a time and the cap is on
-              // what the task ends up carrying, not on what one edit named.
+              // The contract limits the labels in one call; the total is
+              // checked here, because labels are added a few at a time and the
+              // cap applies to the task's final labels, not to one edit.
               if (kept.length + added.length > MAX_TASK_LABELS) {
                 return yield* Effect.fail(
                   createValidationError([
@@ -299,8 +309,8 @@ const make = Effect.gen(function* () {
               changes["provenance"] = { added: entries, removed: [] };
             }
 
-            // Nothing to change is not a change: the task is handed back as it
-            // is, with no row written and no event claiming one.
+            // If nothing changes, the task is returned as it is, with no row
+            // written and no event recorded.
             if (Object.keys(changes).length === 0) return before;
 
             yield* tasks.update(id, edit, appended, at, actor);
@@ -311,16 +321,17 @@ const make = Effect.gen(function* () {
               payload: { taskId: id, changes },
               at,
             });
-            // Read back rather than merge in memory: what the caller gets is
-            // then the row that was written, whatever the edit touched.
+            // Read back rather than merged in memory, so the caller gets the
+            // row that was written, whatever the edit changed.
             return yield* readLiveTaskOrFail(id);
           }),
         );
       }),
 
     /**
-     * Retires a task that should never have existed. The row stays, so the log
-     * and the runs that reference it keep pointing at something.
+     * Soft-deletes a task. The row stays, so the log and the runs that
+     * reference the task still point at something. Fails with `NotFound` if
+     * the task does not exist or is already deleted.
      */
     delete: (
       input: Identified,
@@ -338,7 +349,8 @@ const make = Effect.gen(function* () {
             const actor = yield* currentStamp;
             const task = yield* readLiveTaskOrFail(id);
             yield* tasks.softDelete(id, at);
-            // The final snapshot, because nothing can read the row afterwards.
+            // The event holds a final snapshot, because nothing can read the
+            // row afterwards.
             yield* audit.append({
               kind: "task.deleted",
               actor,

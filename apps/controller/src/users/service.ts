@@ -1,16 +1,15 @@
 /**
- * `user.setPassword`: the one operation that changes the password.
+ * The operation `user.setPassword`, the only way to change the password.
  *
- * The current password is verified even though the caller already holds a
+ * The current password is verified even though the caller already has a
  * credential. A bearer token left in a terminal, a browser or a credential file
- * is enough to read Hercule; it is deliberately not enough to take the account
- * over.
+ * is enough to read Hercule's data, but on purpose it is not enough to take
+ * over the account.
  *
- * Credentials issued under the old password survive the change. A password
- * change is usually hygiene rather than a compromise: logging the user out of
- * every device because they rotated a password is a surprise, and the
- * credential they do want gone is revoked by name (`apiKey.revoke`) or by
- * logging out.
+ * Credentials issued under the old password stay valid after the change. A
+ * password change is usually routine, not a response to a compromise, and
+ * logging the user out of every device would be a surprise. A credential the
+ * user wants gone can be revoked by name (`apiKey.revoke`) or by logging out.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -30,7 +29,7 @@ import { AuditLog } from "../events";
 import { hashPassword, PasswordCost, verifyPassword } from "./password";
 import { Users } from "./repository";
 
-/** What a password change carries. Neither value is held beyond the call. */
+/** The input of a password change. Neither value is kept after the call. */
 export interface SetPasswordInput {
   readonly current: string;
   readonly next: string;
@@ -44,10 +43,10 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Verifies the current password and stores the new one. A wrong current
-     * password is `validation` on that field, not `unauthenticated`: the caller
-     * is authenticated, and one wrong input in a request is what `validation`
-     * is for.
+     * Verifies the current password and stores the new one. Returns an empty
+     * object. A wrong current password fails with a validation error on the
+     * `current` field, not `unauthenticated`: the caller is authenticated, and
+     * one wrong field in a request is what `validation` is for.
      */
     setPassword: (
       input: SetPasswordInput,
@@ -56,8 +55,8 @@ const make = Effect.gen(function* () {
         const actor = yield* requireUserActor("user.setPassword");
         const user = yield* users.findById(actor.userId);
         if (Option.isNone(user)) {
-          // The credential resolved through this row a moment ago, so its
-          // absence is not a state the caller can be in.
+          // The caller's credential was just resolved through this row, so the
+          // row cannot be missing.
           return yield* Effect.die(`the actor's user ${actor.userId} does not exist`);
         }
 
@@ -70,8 +69,8 @@ const make = Effect.gen(function* () {
           );
         }
 
-        // Hashing takes tens of milliseconds and SQLite has one writer, so it
-        // happens before the transaction opens, never inside it.
+        // Hashing takes tens of milliseconds and SQLite has one writer, so hash
+        // before the transaction opens, not inside it.
         const passwordHash = yield* hashPassword(input.next, cost);
         return yield* withTransaction(
           sql,

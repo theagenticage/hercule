@@ -1,8 +1,13 @@
 /**
- * The register pass of `PluginHost.boot`, seen through `Plugins.query` and
- * `Plugins.read`: what the catalog holds after a boot, what a second boot on
- * the same database does to it, and what a plugin that cannot be loaded or
- * whose `register` fails leaves behind. Nothing is mocked.
+ * Tests the registration pass of `PluginHost.boot`, through `Plugins.query`
+ * and `Plugins.read`:
+ *
+ * - what the catalog holds after a boot;
+ * - what a second boot on the same database changes;
+ * - what a plugin that cannot be loaded, or whose `register` fails, leaves
+ *   behind.
+ *
+ * Nothing is mocked.
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Option, Schema } from "effect";
@@ -27,7 +32,7 @@ import {
   buildProviderDefinition,
 } from "./testing";
 
-/** Every call runs on a stack of its own, as the user a request would arrive as. */
+/** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
 const run = <A, E>(body: Effect.Effect<A, E, Plugins | PluginHost | SqlClient.SqlClient>) =>
   Effect.runPromise(body.pipe(Effect.provide(buildPluginStack()), asUser));
 
@@ -122,7 +127,7 @@ describe("a second PluginHost.boot on the same database", () => {
 });
 
 describe("a plugin built against another host API version", () => {
-  it("is refused with the two versions, never registered, and has no contributions", async () => {
+  it("gets the refused status with both versions, is never registered, and has no contributions", async () => {
     const future = createPluginFixture({ id: "future", hostApi: HOST_API + 1 });
 
     const { status, detail } = await run(
@@ -150,7 +155,7 @@ describe("a plugin built against another host API version", () => {
 });
 
 describe("a plugin the host cannot load", () => {
-  it("is refused for an unimplemented capability and for an unrenderable config schema", async () => {
+  it("gets the refused status for an unimplemented capability and for a config schema no form can render", async () => {
     const channels = createPluginFixture({ id: "channels-plugin", capabilities: ["channels"] });
     const nested = createPluginFixture({
       id: "nested-plugin",
@@ -214,7 +219,7 @@ describe("a plugin whose register fails", () => {
     expect(broken.calls).toEqual([]);
   });
 
-  it("is errored naming the path when a contribution carries a function", async () => {
+  it("is errored, naming the path, when a contribution contains a function", async () => {
     const definition = {
       ...buildProviderDefinition("callback-provider", {}),
       defaultConfig: { onStart: () => undefined } as unknown as Schema.Json,
@@ -271,7 +276,7 @@ describe("a plugin whose register fails", () => {
     expect(findDetail(details, "other")?.contributions).toHaveLength(1);
   });
 
-  it("is errored when its provider carries a config schema no form can render", async () => {
+  it("is errored when its provider has a config schema no form can render", async () => {
     const unrenderable = createPluginFixture({
       id: "unrenderable",
       definitions: [
@@ -298,7 +303,7 @@ describe("a plugin whose register fails", () => {
     expect(errored?.message).toContain("deep-provider");
   });
 
-  it("is errored when its provider's display name overruns what an instance name takes", async () => {
+  it("is errored when its provider's display name is longer than an instance name allows", async () => {
     const shouty = createPluginFixture({
       id: "shouty",
       definitions: [
@@ -318,7 +323,7 @@ describe("a plugin whose register fails", () => {
     expect(detail.contributions).toEqual([]);
   });
 
-  it("is errored when its contribution carries a key the host does not know", async () => {
+  it("is errored when its contribution has a key the host does not know", async () => {
     const extra = createPluginFixture({
       id: "extra",
       definitions: [
@@ -396,7 +401,7 @@ describe("a plugin whose register crashes", () => {
 });
 
 describe("a registry that lists one plugin id twice", () => {
-  it("fails the boot naming the id, because the two would share every namespace", async () => {
+  it("fails the boot, naming the id, because the two would share every namespace", async () => {
     const first = createPluginFixture({ id: "doubled" });
     const second = createPluginFixture({ id: "doubled" });
 
@@ -411,7 +416,7 @@ describe("a registry that lists one plugin id twice", () => {
 });
 
 describe("a registry plugin whose manifest does not decode", () => {
-  it("fails the boot saying what is wrong, because the registry is a file in this binary", async () => {
+  it("fails the boot with the decode error, because the registry is compiled into this binary", async () => {
     const wrong = createPluginFixture({ id: "fine" });
     const broken: Plugin = {
       ...wrong.plugin,
@@ -429,8 +434,8 @@ describe("a registry plugin whose manifest does not decode", () => {
   });
 });
 
-describe("Plugins.read on an id no plugin carries", () => {
-  it("is not_found", async () => {
+describe("Plugins.read on an unknown plugin id", () => {
+  it("fails with not_found", async () => {
     const only = createPluginFixture({ id: "only" });
 
     const error = await run(
@@ -447,14 +452,14 @@ describe("Plugins.read on an id no plugin carries", () => {
 });
 
 /**
- * A secret-valued field. It is entered per provider instance and stored under
- * that instance's own owner, so the two other places a plugin may declare a
- * config schema have nowhere to put one. Both are refused at registration,
- * where the author reads the reason, rather than rendering a form whose value
+ * A secret field is entered per provider instance and stored under that
+ * instance as its owner. The two other places a plugin can declare a config
+ * schema have nowhere to store one. So both are rejected at registration,
+ * where the author sees the reason, rather than showing a form whose value
  * nothing would store.
  */
-describe("a secret-valued field declared outside a provider", () => {
-  it("refuses it in the plugin's own config, saying where one belongs", async () => {
+describe("a secret field declared outside a provider", () => {
+  it("gives the plugin the refused status when declared in its own config, and says where one belongs", async () => {
     const keyed = createPluginFixture({
       id: "keyed-plugin",
       configSchema: Schema.Struct({
@@ -480,7 +485,7 @@ describe("a secret-valued field declared outside a provider", () => {
     expect(keyed.hosts).toEqual([]);
   });
 
-  it("refuses it in a connection type, naming the type", async () => {
+  it("marks the plugin errored when declared in a connection type, naming the type", async () => {
     const plugin: Plugin = {
       manifest: {
         id: "keyed-connection",

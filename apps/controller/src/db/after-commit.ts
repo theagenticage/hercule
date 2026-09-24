@@ -1,23 +1,28 @@
 /**
- * What a transaction announces once it has committed.
+ * Collects the changes a transaction makes and announces them once it has
+ * committed.
  *
- * A change is worth telling anyone about only when it is durable, so nothing
- * announces from inside a write. A caller records what it changed while the
- * transaction runs, `withTransaction` hands the list on after the commit, and a
- * transaction that rolls back throws its list away with everything else it did.
- * That is one seam rather than one call per service method, and it cannot
- * announce a change that never happened.
+ * A change is worth announcing only once it is durable, so nothing announces
+ * from inside a write. Instead:
  *
- * The list is per transaction and per fiber: it is provided into the effect the
- * transaction wraps, so two transactions running at once cannot see each
- * other's, and a nested transaction joins the outer list because a savepoint
- * release is not a commit.
+ * - a caller records what it changed while the transaction runs;
+ * - `withTransaction` publishes the list after the commit;
+ * - a transaction that rolls back throws its list away with everything else.
+ *
+ * This is one mechanism rather than one call per service method, and it can
+ * never announce a change that did not happen.
+ *
+ * Each transaction has its own list, provided into the effect the transaction
+ * wraps, so two transactions running at once cannot see each other's changes.
+ * A nested transaction adds to the outer list, because releasing a savepoint is
+ * not a commit.
  *
  * A change recorded outside any transaction is announced at once: the statement
- * that made it was its own transaction and has already committed.
+ * that made it ran as its own transaction and has already committed.
  *
- * The listener is optional. A controller with no live socket - a migration run,
- * a repository test - provides none, and then there is nobody to tell.
+ * The listener is optional. A controller with no live socket, such as a
+ * migration run or a repository test, provides none, and then nothing is
+ * published.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -25,9 +30,9 @@ import * as Option from "effect/Option";
 import type { InvalidateKind, MutableLiveTopic, TapItem } from "@hercule/contract";
 
 /**
- * One thing a committed transaction changed, or - for `tap` - one thing that
- * was never a transaction at all: a token delta is announced the instant it is
- * reported, because it is never written anywhere for a commit to make durable.
+ * One thing a committed transaction changed. The exception is `tap`: a token
+ * delta is never written to the database, so it is announced as soon as it is
+ * reported, with no transaction involved.
  */
 export type Change =
   | {
@@ -40,7 +45,7 @@ export type Change =
   | { readonly _tag: "transcript"; readonly sessionId: string }
   | { readonly _tag: "tap"; readonly sessionId: string; readonly item: TapItem };
 
-/** Whoever wants to hear what the last transaction changed. */
+/** Receives the changes of each committed transaction. */
 export interface AfterCommitListener {
   readonly publish: (changes: ReadonlyArray<Change>) => Effect.Effect<void>;
 }
@@ -49,7 +54,7 @@ export class AfterCommit extends Context.Service<AfterCommit, AfterCommitListene
   "hercule/controller/db/AfterCommit",
 ) {}
 
-/** The lists the transaction in progress is filling. */
+/** The changes and settle callbacks collected by the transaction in progress. */
 class Pending extends Context.Service<
   Pending,
   { readonly changes: Array<Change>; readonly settles: Array<() => void> }
@@ -83,14 +88,14 @@ export const announce = (change: Change): Effect.Effect<void> =>
  * Runs `settle` once the transaction it is part of commits, and not at all if
  * that transaction rolls back.
  *
- * For the process-local state a write invalidates: a cache holding what a row
- * said before this write. Dropping it inside the transaction would leave a
- * window in which a concurrent reader still sees the old row, caches it again,
- * and is never told, because the drop has already happened.
+ * Use it for in-process state that a write makes stale, such as a cache of a
+ * row's old value. Clearing the cache inside the transaction would leave a gap
+ * in which a concurrent reader still sees the old row and caches it again, and
+ * nothing would clear it a second time.
  *
  * A settle recorded outside any transaction runs at once, for the same reason
- * `announce` publishes at once: the statement that made the change was its own
- * transaction and has already committed.
+ * `announce` publishes at once: the statement that made the change ran as its
+ * own transaction and has already committed.
  */
 export const afterCommit = (settle: () => void): Effect.Effect<void> =>
   Effect.flatMap(
@@ -105,9 +110,10 @@ export const afterCommit = (settle: () => void): Effect.Effect<void> =>
   );
 
 /**
- * Runs an effect with a list of its own, and announces that list afterwards.
- * An effect already running inside such a list adds to it instead, so the
- * announcement belongs to the outermost transaction, the one that commits.
+ * Runs an effect with its own list of changes, then runs the settle callbacks
+ * and publishes the changes. An effect that already runs inside such a list
+ * adds to the outer list instead, so only the outermost transaction, the one
+ * that commits, publishes.
  */
 export const withAnnouncements = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -120,11 +126,11 @@ export const withAnnouncements = <A, E, R>(
           const changes: Array<Change> = [];
           const settles: Array<() => void> = [];
           const value = yield* Effect.provideService(effect, Pending, { changes, settles });
-          // Uninterruptible, because the write is already durable: a client
-          // hanging up here would otherwise leave a change nobody is ever told
-          // about and a screen stale until it is reloaded. The settles run
-          // first, so nothing that hears the announcement can read state the
-          // commit has made stale.
+          // Uninterruptible, because the write is already durable. If a client
+          // disconnected here, the change would never be announced and a screen
+          // would stay stale until it is reloaded. The settle callbacks run
+          // first, so a listener can never read state the commit has made
+          // stale.
           yield* Effect.uninterruptible(
             Effect.andThen(
               Effect.sync(() => {
@@ -136,8 +142,8 @@ export const withAnnouncements = <A, E, R>(
           return value;
         }),
       onSome: (outer) =>
-        // A savepoint that rolls back has changed nothing either, so whatever
-        // it added to the outer list is taken off again.
+        // A savepoint that rolls back has changed nothing, so remove whatever
+        // it added to the outer lists.
         Effect.suspend(() => {
           const changes = outer.changes.length;
           const settles = outer.settles.length;

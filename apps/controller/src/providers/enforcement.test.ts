@@ -13,21 +13,21 @@ const IGNORING: ProviderDefinition = {
 const CATALOG: ReadonlyArray<ProviderDefinition> = [ENFORCING, IGNORING];
 
 describe("listUnenforcedFields", () => {
-  it("names disallowedTools where the provider stores the list and acts on none of it", () => {
+  it("returns disallowedTools when the provider stores the list but does not enforce it", () => {
     expect(listUnenforcedFields(CATALOG, IGNORING.id, ["edit", "shell"])).toEqual([
       "disallowedTools",
     ]);
   });
 
-  it("says nothing where there is no restriction to ignore", () => {
+  it("returns nothing when there is no restriction to ignore", () => {
     expect(listUnenforcedFields(CATALOG, IGNORING.id, [])).toEqual([]);
   });
 
-  it("says nothing where the provider enforces the restriction itself", () => {
+  it("returns nothing when the provider enforces the restriction itself", () => {
     expect(listUnenforcedFields(CATALOG, ENFORCING.id, ["edit"])).toEqual([]);
   });
 
-  it("says nothing for a provider this build no longer carries", () => {
+  it("returns nothing for a provider this build no longer has", () => {
     expect(listUnenforcedFields(CATALOG, "gone-provider", ["edit"])).toEqual([]);
   });
 });

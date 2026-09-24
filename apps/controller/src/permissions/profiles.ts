@@ -1,18 +1,19 @@
 /**
- * Permission profiles: the named grant bundles an Agent carries and every
- * Session copies at spawn.
+ * Stores permission profiles: the named sets of grants that an Agent has and
+ * that every Session copies when it is spawned.
  *
- * A grant is written family-dot-verb (`task.delete`, `infra.write`). Grants are
- * coarse and unscoped in v1: `session.read` reads any session. The vocabulary
- * itself lives in `@hercule/contract` - a 403 names the missing grant on the wire
- * and `profile.create` takes a list of them - and is re-exported here so the
- * controller reads it from the domain that enforces it. They are stored
- * as a JSON array of grant strings on the profile row, which keeps a profile
- * one row and one read - the enforcement path resolves token to session to
- * agent to profile on every call.
+ * A grant is written family-dot-verb (`task.delete`, `infra.write`). In v1,
+ * grants are coarse and unscoped: `session.read` allows reading any session.
+ * The list of grants is defined in `@hercule/contract`, because a 403 response
+ * includes the missing grant and `profile.create` takes a list of grants.
  *
- * The three shipped profiles are seeded at first run with `shipped = 1`: the
- * user may edit them, never delete them.
+ * A profile's grants are stored as a JSON array of grant strings on the
+ * profile row. That keeps a profile to one row and one read, which matters
+ * because permission checks resolve token to session to agent to profile on
+ * every call.
+ *
+ * The three shipped profiles are seeded at first run with `shipped = 1`. The
+ * user may edit them, but never delete them.
  */
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -47,13 +48,13 @@ export interface PermissionProfile {
   readonly updatedAt: string;
 }
 
-/** What editing a profile did, or why it did nothing. */
+/** The result of editing a profile: the updated profile, or why nothing was written. */
 export type UpdateOutcome =
   | { readonly _tag: "updated"; readonly profile: PermissionProfile }
   | { readonly _tag: "absent" }
   | { readonly _tag: "nameTaken" };
 
-/** A profile row holds something that is not a list of known grants. */
+/** A profile's stored or given grants are not a list of known grants. */
 export class GrantsError extends Schema.TaggedError<GrantsError>()("GrantsError", {
   name: Schema.String,
   message: Schema.String,
@@ -98,7 +99,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    /** The profile with that name, if one exists. Names are the user-facing key. */
+    /** Returns the profile with that name, if one exists. Users refer to profiles by name. */
     getByName: (
       name: string,
     ): Effect.Effect<Option.Option<PermissionProfile>, GrantsError | SqlError> =>
@@ -112,8 +113,8 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Seeds one shipped profile. A profile the user has already edited keeps
-     * its grants: seeding never overwrites.
+     * Seeds one shipped profile. If a profile with that name already exists,
+     * it keeps its grants: seeding never overwrites a profile the user edited.
      */
     ensureShipped: (
       name: string,
@@ -129,7 +130,7 @@ const make = Effect.gen(function* () {
         `;
       }),
 
-    /** The profile with that id, if one exists. */
+    /** Returns the profile with that id, if one exists. */
     getById: (
       id: string,
     ): Effect.Effect<Option.Option<PermissionProfile>, GrantsError | SqlError> =>
@@ -143,8 +144,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * One page of profiles, keyset-paged on `(name, id)`. Name is the only sort
-     * field the contract offers, and it is what the user reads.
+     * Returns one page of profiles, keyset-paged on `(name, id)`. Name is the
+     * only sort field the contract offers, because it is what the user reads.
+     * Fails with a `CursorError` if the cursor is invalid.
      */
     list: (
       page: PageRequest,
@@ -176,9 +178,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Creates a profile, or answers `None` when the name is taken. Names are
-     * unique and are what the user names a profile by, so a duplicate is the
-     * caller's to resolve rather than something to disambiguate silently.
+     * Creates a profile and returns it, or returns `None` when the name is
+     * taken. Names are unique and users refer to profiles by name, so the
+     * caller must resolve a duplicate name rather than have it silently
+     * renamed.
      */
     create: (
       name: string,
@@ -208,8 +211,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Edits a profile, including a shipped one: the three shipped profiles are
-     * editable. `None` means no such profile; a name another profile already
-     * holds is a `NameTaken`.
+     * editable. Returns `absent` when there is no such profile, and `nameTaken`
+     * when another profile already has the new name.
      */
     update: (
       id: string,
@@ -236,9 +239,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Deletes a profile. Whether this profile may be deleted at all is the
-     * service's rule, not the store's: a shipped profile is not deletable and
-     * never reaches here.
+     * Deletes a profile. The service, not the repository, decides whether a
+     * profile may be deleted: it never calls this for a shipped profile.
      */
     delete: (id: string): Effect.Effect<void, SqlError> =>
       sql`DELETE FROM permission_profiles WHERE id = ${uuidFromString(id)}`.pipe(Effect.asVoid),
