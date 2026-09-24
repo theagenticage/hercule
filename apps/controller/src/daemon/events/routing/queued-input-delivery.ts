@@ -19,10 +19,10 @@
  */
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SessionService } from "../../sessions";
+import { SessionService } from "../../../sessions";
 import type { Delivery } from "../event-router";
-import { forkAndAbsorbFailures } from "../absorbing";
-import { Live } from "../live";
+import { forkAndAbsorbFailures } from "../../absorbing";
+import { Live } from "../../sessions";
 
 export const queuedInputDelivery: Effect.Effect<Delivery, never, SessionService | Live> =
   Effect.gen(function* () {

@@ -141,8 +141,8 @@ console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the gr
 
 /**
  * The controller's domains, as a graph over the folders under `src/`: every
- * file in a domain is that domain, and an import of `../<other>` is an edge
- * from this domain to that one. `db/` and `config/` are infrastructure every
+ * file in a domain is that domain, at any depth, and an import that resolves
+ * to `src/<other>` is an edge from this domain to that one. `db/` and `config/` are infrastructure every
  * domain may import, and the check does not treat them as sources of edges.
  * `daemon/` is a node like any other here. No separate rule stops a domain
  * from importing it; such an import is caught only when it closes a cycle.
@@ -180,16 +180,21 @@ const listShippedFiles = async (dir: string): Promise<ReadonlyArray<string>> =>
 const domains = await listDomains();
 
 /**
- * Returns the domain an import specifier reaches, when it is exactly
- * `../<domain>`: the domain's index, which is the boundary other domains
+ * Returns the domain an import in `file` reaches, when the specifier resolves
+ * to `src/<domain>`: the domain's index, which is the boundary other domains
  * import it through, and the module whose evaluation order matters here. A
- * deep `../<domain>/<file>` reaches one module and never loads that index, so
- * it is not an edge between the two domains.
+ * deep `<domain>/<file>` reaches one module and never loads that index, so it
+ * is not an edge between the two domains.
+ *
+ * The specifier is resolved against the importing file rather than read as
+ * text, because a file one folder down, such as `daemon/sessions/placement.ts`,
+ * reaches the sessions domain as `../../sessions`, while its own `../sessions`
+ * is a folder inside the controller daemon and no domain at all.
  */
-const findReachedDomain = (specifier: string): string | undefined => {
-  const match = /^\.\.\/([^/]+)$/.exec(specifier);
-  const named = match?.[1];
-  return named !== undefined && domains.includes(named) ? named : undefined;
+const findReachedDomain = (file: string, specifier: string): string | undefined => {
+  if (!specifier.startsWith(".")) return undefined;
+  const reached = relative(controllerSrc, resolve(dirname(file), specifier));
+  return domains.includes(reached) ? reached : undefined;
 };
 
 const edges = new Map<string, Set<string>>();
@@ -201,7 +206,7 @@ for (const domain of domains) {
     // `scanImports` drops `import type`, which creates no runtime edge: a type
     // that crosses a domain boundary cannot be evaluated too early.
     for (const record of transpiler.scanImports(text)) {
-      const other = findReachedDomain(record.path);
+      const other = findReachedDomain(file, record.path);
       if (other !== undefined && other !== domain) out.add(other);
     }
   }

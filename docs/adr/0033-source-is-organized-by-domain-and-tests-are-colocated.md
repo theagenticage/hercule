@@ -53,3 +53,19 @@ Recorded by [The controller daemon (#208)](https://github.com/theagenticage/herc
 - **The import graph of `apps/controller/src` is a DAG**, enforced by `pnpm dep-lint` with no allowlist of edges. A write that crosses a domain comes from above; a read across domains - a repository query, a SQL predicate, a pure function, a type - stays sideways and is fine. Only `http/` imports the controller daemon; no domain may.
 - **Some operations' service methods live in the controller daemon**, not in the domain that owns the rows: `session.spawn`, `session.input`, `workspace.provision` and `runner.retire` are controller daemon use cases. The rule of [ADR 0031](./0031-the-backend-is-written-on-effect.md) is unchanged - an operation is still one method on an Effect service, and its handler is still one line.
 - One exception remains: the providers domain still sends its own frames to runners (login, probe, harness install). Same principle, no cycle today; tracked in [#209](https://github.com/theagenticage/hercule/issues/209).
+
+## Amendment: the controller daemon has one folder per concern (2026-09-24)
+
+Recorded by [Split the controller daemon into one folder per concern (#247)](https://github.com/theagenticage/hercule/issues/247). One flat folder of use cases stopped scaling at about fifteen files: a reader asking "where does a session get placed?" had to scan the whole list.
+
+- **The controller daemon's use cases are grouped in one folder per concern**, named with the CONTEXT.md word for what they act on:
+  - `sessions/`: placement, dispatch, the operations that reach a live session, the sweep of lost runners' sessions, and the resume check they share;
+  - `events/`: the event router, the pipeline, enrichment, and `events/routing/` with the routing tables and deliveries;
+  - `workspaces/`: provisioning, disposal and the workspace sweep;
+  - `runners/`: handling what runners report (inbound), and runner retirement;
+  - `permissions/`: deleting a permission profile;
+  - `runs/`: the run engine.
+- **Each folder's `index.ts` is its boundary.** Another folder of the controller daemon imports it through that `index.ts`, the same rule domains follow. `daemon/index.ts` re-exports only what the rest of the controller uses.
+- **The top level keeps only what belongs to no one folder**: `boot.ts`, `index.ts`, `testing.ts`, and helpers more than one folder uses (`absorbing.ts`). A new use case goes in the folder of its concern, and a new concern gets a new folder.
+- **The folders import each other without a cycle**: `events/` and `runners/` use `sessions/`, and every folder may use the top-level helpers. `pnpm dep-lint` checks cycles between the domains, and treats the whole controller daemon as one node, so a cycle between its folders is a review note rather than a lint.
+- **`dep-lint` resolves each import against the file it is in**, rather than matching the text `../<domain>`. A file one folder down reaches a domain as `../../sessions`, and its own `../sessions` is a sibling folder of the controller daemon, which the text match would have misread.

@@ -9,18 +9,18 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Grant } from "@hercule/contract";
-import { CurrentActor, type Actor } from "../actor";
-import { agentRepository } from "../agents";
-import { mintUuid, uuidFromString, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
-import { AuditLog, AuditLogLayer } from "../events";
+import { CurrentActor, type Actor } from "../../actor";
+import { agentRepository } from "../../agents";
+import { mintUuid, uuidFromString, uuidToString } from "../../db";
+import { TestDatabase } from "../../db/testing";
+import { AuditLog, AuditLogLayer } from "../../events";
 import {
   PermissionProfiles,
   PermissionProfilesLayer,
   Profiles,
   ProfilesLayer,
   SessionTokensLayer,
-} from "../permissions";
+} from "../../permissions";
 import { ProfileRemoval, ProfileRemovalLayer } from "./profile-removal";
 
 type Deps = ProfileRemoval | Profiles | PermissionProfiles | AuditLog | SqlClient.SqlClient;

@@ -15,10 +15,10 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { withTransaction } from "../db";
-import { runnerRepository } from "../runners";
-import { SessionService } from "../sessions";
-import { absorbFailures } from "./absorbing";
+import { withTransaction } from "../../db";
+import { runnerRepository } from "../../runners";
+import { SessionService } from "../../sessions";
+import { absorbFailures } from "../absorbing";
 
 /**
  * How often the sweep runs. The limit the sweep applies is a session's

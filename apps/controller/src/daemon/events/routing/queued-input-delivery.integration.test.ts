@@ -14,8 +14,8 @@ import {
   reportEvent,
   waitForStartFrames,
   WAIT_DEADLINE_MS,
-} from "../../sessions/testing";
-import { post } from "../../http/testing";
+} from "../../../sessions/testing";
+import { post } from "../../../http/testing";
 import {
   emitManualEvent,
   exitSession,
@@ -31,7 +31,7 @@ import {
   reportTurnCompleted,
   waitOutSeveralTicks,
   withPipeline,
-} from "../testing";
+} from "../../testing";
 
 /** Long enough for a fleet, a session and several ticks. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });

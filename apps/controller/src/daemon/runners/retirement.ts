@@ -8,10 +8,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { RunnerDetail } from "@hercule/contract";
-import { withTransaction } from "../db";
-import { RunnerConnections, RunnerService, type MoveError, type RetireInput } from "../runners";
-import { SessionService } from "../sessions";
-import { WorkspaceService } from "../workspaces";
+import { withTransaction } from "../../db";
+import { RunnerConnections, RunnerService, type MoveError, type RetireInput } from "../../runners";
+import { SessionService } from "../../sessions";
+import { WorkspaceService } from "../../workspaces";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

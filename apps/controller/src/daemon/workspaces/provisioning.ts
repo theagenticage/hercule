@@ -30,11 +30,11 @@ import {
   type Validation,
   type Workspace,
 } from "@hercule/contract";
-import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
-import { withTransaction } from "../db";
-import { RunnerConnections } from "../runners";
-import { WorkspaceService } from "../workspaces";
-import { absorbFailures, forkAndAbsorbFailures } from "./absorbing";
+import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../../actor";
+import { withTransaction } from "../../db";
+import { RunnerConnections } from "../../runners";
+import { WorkspaceService } from "../../workspaces";
+import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
 
 const Identified = Schema.Struct({ id: Id });
 

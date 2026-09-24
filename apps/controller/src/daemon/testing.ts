@@ -1,7 +1,9 @@
 /**
  * Test helpers shared by the event pipeline's integration tests: a real
  * controller, a fake runner on the runner socket, and helpers to set up
- * subscriptions and events.
+ * subscriptions and events. The boot step's tests and the run engine's tests
+ * use them too, which is why they sit at the top of the controller daemon
+ * rather than in `events/`.
  *
  * Everything runs against the real controller, because a delivery only counts
  * when a frame crosses the socket. Tests never call the pipeline directly: its

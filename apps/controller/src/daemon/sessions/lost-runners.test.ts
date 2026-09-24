@@ -9,9 +9,9 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { mintUuid, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
-import { SessionService } from "../sessions";
+import { mintUuid, uuidToString } from "../../db";
+import { TestDatabase } from "../../db/testing";
+import { SessionService } from "../../sessions";
 import { sweepSessionsOnLostRunners } from "./lost-runners";
 
 const at = "2026-09-22T10:00:00.000Z";

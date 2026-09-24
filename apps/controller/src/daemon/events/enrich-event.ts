@@ -23,11 +23,11 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../actor";
-import { withTransaction } from "../db";
-import { AuditLog, EventService } from "../events";
-import { SessionService } from "../sessions";
-import { EvaluationErrorNotifier } from "../subscriptions";
+import { currentStamp, requireGrant } from "../../actor";
+import { withTransaction } from "../../db";
+import { AuditLog, EventService } from "../../events";
+import { SessionService } from "../../sessions";
+import { EvaluationErrorNotifier } from "../../subscriptions";
 import { EventRouter } from "./event-router";
 import { buildRoutingTables } from "./routing";
 

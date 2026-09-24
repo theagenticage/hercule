@@ -20,15 +20,15 @@ import * as Result from "effect/Result";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Event } from "@hercule/contract";
-import { withTransaction } from "../db";
+import { withTransaction } from "../../db";
 import {
   advanceConsumerCursor,
   readConsumerPosition,
   readLogHead,
   readPipelineEvent,
   readPipelineEventsAfter,
-} from "../events";
-import { evaluateExpression, parseExpression, type CompiledExpression } from "../expressions";
+} from "../../events";
+import { evaluateExpression, parseExpression, type CompiledExpression } from "../../expressions";
 
 /** One entry of a routing table: a condition and what to write when it holds. */
 export interface Route {

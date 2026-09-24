@@ -19,13 +19,12 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { withTransaction } from "../db";
-import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../runners";
-import { SessionService } from "../sessions";
-import { WorkspaceService } from "../workspaces";
-import { absorbFailures, forkAndAbsorbFailures } from "./absorbing";
-import { Dispatch } from "./dispatch";
-import { Live } from "./live";
+import { withTransaction } from "../../db";
+import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
+import { SessionService } from "../../sessions";
+import { WorkspaceService } from "../../workspaces";
+import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
+import { Dispatch, Live } from "../sessions";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

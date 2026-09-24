@@ -7,7 +7,7 @@
  * for the tick's result.
  */
 import { describe, expect, it, vi } from "vitest";
-import { createProfile, at, waitUntil, WAIT_DEADLINE_MS } from "../sessions/testing";
+import { createProfile, at, waitUntil, WAIT_DEADLINE_MS } from "../../sessions/testing";
 import {
   BURST,
   buildPayload,
@@ -23,7 +23,7 @@ import {
   spawnSubscriber,
   readCursorAndHead,
   withPipeline,
-} from "./testing";
+} from "../testing";
 
 /** Long enough for a fleet, three sessions and several ticks. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });

@@ -17,11 +17,11 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SessionService } from "../sessions";
-import { EvaluationErrorNotifier } from "../subscriptions";
-import { absorbFailures } from "./absorbing";
+import { SessionService } from "../../sessions";
+import { EvaluationErrorNotifier } from "../../subscriptions";
+import { absorbFailures } from "../absorbing";
 import { EventRouter } from "./event-router";
-import { Live } from "./live";
+import { Live } from "../sessions";
 import { buildDeliveries, buildRoutingTables } from "./routing";
 
 /** How often the pipeline looks for events the router has not read. */

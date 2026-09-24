@@ -33,20 +33,26 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { agentRepository, type StoredAgent } from "../agents";
-import { requireGrant, type Actor } from "../actor";
-import { mintUuid, nowIso, uuidToString, withTransaction } from "../db";
-import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../permissions";
-import type { PluginHost } from "../plugins";
+import { agentRepository, type StoredAgent } from "../../agents";
+import { requireGrant, type Actor } from "../../actor";
+import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
+import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
+import type { PluginHost } from "../../plugins";
 import {
   isLoggedIn,
   NO_PLACEMENT,
   providerRepository,
   resolvedInstance,
   type StoredSnapshot,
-} from "../providers";
-import { resourceRepository } from "../resources";
-import { DRAINING, NO_SUCH_RUNNER, RETIRED, RunnerConnections, runnerRepository } from "../runners";
+} from "../../providers";
+import { resourceRepository } from "../../resources";
+import {
+  DRAINING,
+  NO_SUCH_RUNNER,
+  RETIRED,
+  RunnerConnections,
+  runnerRepository,
+} from "../../runners";
 import {
   buildContinuingSpec,
   readSessionOrFail,
@@ -55,9 +61,9 @@ import {
   sessionRepository,
   buildTimeouts,
   validateOptions,
-} from "../sessions";
-import { Settings, type SettingError } from "../settings";
-import { WorkspaceService } from "../workspaces";
+} from "../../sessions";
+import { Settings, type SettingError } from "../../settings";
+import { WorkspaceService } from "../../workspaces";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
 

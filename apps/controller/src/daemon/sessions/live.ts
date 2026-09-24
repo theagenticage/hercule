@@ -35,12 +35,12 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../actor";
-import { nowIso, withTransaction } from "../db";
-import { AuditLog } from "../events";
-import type { PluginHost } from "../plugins";
-import { providerRepository, resolvedInstance } from "../providers";
-import { RunnerConnections } from "../runners";
+import { currentStamp, requireGrant } from "../../actor";
+import { nowIso, withTransaction } from "../../db";
+import { AuditLog } from "../../events";
+import type { PluginHost } from "../../plugins";
+import { providerRepository, resolvedInstance } from "../../providers";
+import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
   readSessionOrFail,
@@ -50,9 +50,9 @@ import {
   validateOptions,
   type StoredInput,
   type StoredSession,
-} from "../sessions";
-import { Settings, type SettingError } from "../settings";
-import type { WorkspaceService } from "../workspaces";
+} from "../../sessions";
+import { Settings, type SettingError } from "../../settings";
+import type { WorkspaceService } from "../../workspaces";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
 
