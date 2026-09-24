@@ -416,7 +416,7 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (id: Id): Effect.Effect<Workflow, CallError | NotFound> =>
+    read: (id: Id): Effect.Effect<Workflow, Exclude<CallError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.read");
         return yield* failIfWorkflowNotFound(workflows.read(id));
@@ -526,7 +526,12 @@ const make = Effect.gen(function* () {
      * that is still acting. A finished run keeps the workflow's id and its own
      * copy of the definition.
      */
-    delete: (id: Id): Effect.Effect<Record<string, never>, CallError | NotFound | InvalidState> =>
+    delete: (
+      id: Id,
+    ): Effect.Effect<
+      Record<string, never>,
+      Exclude<CallError | NotFound | InvalidState, Validation>
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.delete");
         yield* withTransaction(

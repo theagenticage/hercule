@@ -227,7 +227,7 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (id: Id): Effect.Effect<Resource, ReadError | NotFound> =>
+    read: (id: Id): Effect.Effect<Resource, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("resource.read");
         return yield* Effect.flatMap(readStoredResourceOrFail(id), readResourceRecord);
@@ -398,7 +398,12 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    delete: (id: Id): Effect.Effect<Record<string, never>, ReadError | NotFound | InvalidState> =>
+    delete: (
+      id: Id,
+    ): Effect.Effect<
+      Record<string, never>,
+      Exclude<ReadError | NotFound | InvalidState, Validation>
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("resource.delete");
         return yield* withTransaction(

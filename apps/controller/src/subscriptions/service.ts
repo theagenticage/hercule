@@ -252,7 +252,9 @@ const make = Effect.gen(function* () {
      * So a caller learns nothing about what it may not reach, and in each case
      * there is nothing left for it to cancel.
      */
-    cancel: (id: Id): Effect.Effect<Record<string, never>, CommonError | NotFound> =>
+    cancel: (
+      id: Id,
+    ): Effect.Effect<Record<string, never>, Exclude<CommonError | NotFound, Validation>> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("subscription.cancel");
         const heldBy =

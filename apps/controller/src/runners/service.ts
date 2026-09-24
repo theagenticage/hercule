@@ -432,7 +432,7 @@ const make = Effect.gen(function* () {
      * something changed, so this is the only way to see a newly installed
      * provider CLI without waiting up to an hour.
      */
-    refreshFacts: (id: Id): Effect.Effect<RunnerDetail, MoveError> =>
+    refreshFacts: (id: Id): Effect.Effect<RunnerDetail, Exclude<MoveError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.refreshFacts");
         const before = yield* readRunnerOrFail(id);

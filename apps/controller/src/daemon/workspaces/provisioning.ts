@@ -111,7 +111,9 @@ const make = Effect.gen(function* () {
       }),
 
     /** Disposes of a workspace: marks the row gone, then tells the runner to delete it. */
-    disposeWorkspace: (id: Id): Effect.Effect<Record<string, never>, WorkspaceError> =>
+    disposeWorkspace: (
+      id: Id,
+    ): Effect.Effect<Record<string, never>, Exclude<WorkspaceError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.dispose");
         // The check and the write are one transaction, so a session that starts

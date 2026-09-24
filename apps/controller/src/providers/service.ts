@@ -333,7 +333,7 @@ const make = Effect.gen(function* () {
         return yield* all;
       }),
 
-    read: (id: Id): Effect.Effect<ProviderInstance, WriteError> =>
+    read: (id: Id): Effect.Effect<ProviderInstance, Exclude<WriteError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.read");
         return yield* readInstanceOrFail(id);
@@ -602,7 +602,7 @@ const make = Effect.gen(function* () {
      * has can still be deleted. If this was the provider's only instance, the
      * next boot creates a new default one.
      */
-    delete: (id: Id): Effect.Effect<Record<string, never>, WriteError> =>
+    delete: (id: Id): Effect.Effect<Record<string, never>, Exclude<WriteError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.delete");
         return yield* withTransaction(

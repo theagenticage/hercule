@@ -238,7 +238,7 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (id: Id): Effect.Effect<Agent, ReadError | NotFound> =>
+    read: (id: Id): Effect.Effect<Agent, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.read");
         const composeRecord = yield* agentRecordComposer;

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -105,25 +105,27 @@ describe("dep-lint", () => {
  * import-graph rule: pnpm links only direct dependencies, so an optional
  * dependency of the SDK shows up in the store and nowhere else.
  */
+/** How pnpm names the vendor SDK's directory in its store. */
+const SDK = "@anthropic-ai+claude-agent-sdk";
+
+/**
+ * Copies the script into a separate root with the given store packages, and
+ * returns the copy's path. The script reads the workspace it is in, so a
+ * failing case runs a copy without writing into this repository's own store
+ * or source.
+ */
+const createScriptRoot = async (...packages: ReadonlyArray<string>): Promise<string> => {
+  const one = await mkdtemp(join(tmpdir(), "hercule-dep-lint-root-"));
+  roots.push(one);
+  await mkdir(join(one, "scripts"), { recursive: true });
+  await copyFile(join(root, "scripts/dep-lint.ts"), join(one, "scripts/dep-lint.ts"));
+  for (const name of packages) {
+    await mkdir(join(one, "node_modules/.pnpm", name), { recursive: true });
+  }
+  return join(one, "scripts/dep-lint.ts");
+};
+
 describe("the vendor SDK's per-platform CLI packages", () => {
-  const SDK = "@anthropic-ai+claude-agent-sdk";
-
-  /**
-   * The script reads the workspace it is in, so the failing cases run a copy
-   * of it in a separate root, without writing into this repository's own
-   * store.
-   */
-  const createScriptRoot = async (...packages: ReadonlyArray<string>): Promise<string> => {
-    const one = await mkdtemp(join(tmpdir(), "hercule-dep-lint-root-"));
-    roots.push(one);
-    await mkdir(join(one, "scripts"), { recursive: true });
-    await copyFile(join(root, "scripts/dep-lint.ts"), join(one, "scripts/dep-lint.ts"));
-    for (const name of packages) {
-      await mkdir(join(one, "node_modules/.pnpm", name), { recursive: true });
-    }
-    return join(one, "scripts/dep-lint.ts");
-  };
-
   it("are not installed, and dep-lint reports that for this repository", async () => {
     const { stdout } = await run("bun", ["run", join(root, "scripts/dep-lint.ts")], { cwd: root });
 
@@ -155,5 +157,67 @@ describe("the vendor SDK's per-platform CLI packages", () => {
 
     expect(refusal, "dep-lint accepted a store with a per-platform package in it").toBeDefined();
     expect(refusal!.stderr).toContain(`${SDK}-darwin-arm64@0.3.263`);
+  });
+});
+
+/**
+ * The controller daemon's folders form a DAG and import each other through
+ * their `index.ts`. Each case writes a small controller daemon into a copy's
+ * root: `events/` uses `sessions/`, both use the top-level `absorbing.ts`, and
+ * the top-level `index.ts` imports both folders.
+ */
+describe("the controller daemon's folders", () => {
+  const CLEAN_DAEMON = {
+    "absorbing.ts": "export const absorb = 1;\n",
+    "index.ts": 'import "./sessions";\nimport "./events";\n',
+    "sessions/index.ts": 'import "../absorbing";\nexport * from "./placement";\n',
+    "sessions/placement.ts": "export const place = 1;\n",
+    "events/index.ts": 'import "../absorbing";\nimport "../sessions";\n',
+  };
+
+  /** Writes a controller daemon from `files` into a copy's root, and returns the copy's path. */
+  const createDaemonRoot = async (files: Readonly<Record<string, string>>): Promise<string> => {
+    const script = await createScriptRoot(`${SDK}@0.3.263`);
+    const daemon = join(dirname(script), "../apps/controller/src/daemon");
+    for (const [name, body] of Object.entries(files)) {
+      await mkdir(dirname(join(daemon, name)), { recursive: true });
+      await writeFile(join(daemon, name), body);
+    }
+    return script;
+  };
+
+  /** Resolves to the error output dep-lint failed with, or fails the test. */
+  const readDaemonFailure = async (files: Readonly<Record<string, string>>): Promise<string> => {
+    const refusal = await runDepLint("clean", await createDaemonRoot(files)).then(
+      () => undefined,
+      (thrown: { readonly stderr: string }) => thrown,
+    );
+    if (refusal === undefined) throw new Error("dep-lint accepted the controller daemon");
+    return refusal.stderr;
+  };
+
+  it("pass when they import each other through their index without a cycle", async () => {
+    const { stdout } = await runDepLint("clean", await createDaemonRoot(CLEAN_DAEMON));
+
+    expect(stdout).toContain("the controller daemon's 2 folders form a DAG");
+  });
+
+  it("fail the check when two of them import each other", async () => {
+    const stderr = await readDaemonFailure({
+      ...CLEAN_DAEMON,
+      "sessions/index.ts": 'import "../events";\nexport * from "./placement";\n',
+    });
+
+    expect(stderr).toContain("in a cycle");
+    expect(stderr).toContain("sessions/ -> events/");
+  });
+
+  it("fail the check when one reaches past another's index", async () => {
+    const stderr = await readDaemonFailure({
+      ...CLEAN_DAEMON,
+      "events/index.ts": 'import "../sessions/placement";\n',
+    });
+
+    expect(stderr).toContain('events/index.ts imports "../sessions/placement"');
   });
 });

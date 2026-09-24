@@ -459,8 +459,10 @@ const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
       .handle("update", ({ params, payload }) =>
         withApiErrors(sessions.updateInput({ ...params, ...payload })),
       )
-      .handle("cancel", ({ params }) => withApiErrors(sessions.cancelInput(params)))
-      .handle("steer", ({ params }) => withApiErrors(live.steer(params)));
+      .handle("cancel", ({ params }) =>
+        withApiErrors(sessions.cancelInput(params.id, params.inputId)),
+      )
+      .handle("steer", ({ params }) => withApiErrors(live.steer(params.id, params.inputId)));
   }),
 );
 

@@ -10,9 +10,9 @@
  * methods the daemon calls return frames, or return what is left to do,
  * instead of doing it.
  *
- * A method that takes only an id does not decode it again: the transport has
- * already decoded a request's id against the contract, and a caller inside
- * the controller passes an id it read from a stored row.
+ * A method that takes only ids does not decode them again: the transport has
+ * already decoded a request's ids against the contract, and a caller inside
+ * the controller passes ids it read from stored rows.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -103,10 +103,6 @@ export type InputQueryInput = Schema.Schema.Type<typeof InputQueryInput>;
 const InputUpdate = Schema.Struct({ id: Id, inputId: Id, ...INPUT_UPDATE_FIELDS });
 
 export type InputUpdate = Schema.Schema.Type<typeof InputUpdate>;
-
-const InputIdentified = Schema.Struct({ id: Id, inputId: Id });
-
-export type InputIdentified = Schema.Schema.Type<typeof InputIdentified>;
 
 export interface SessionPage {
   readonly items: ReadonlyArray<Session>;
@@ -241,7 +237,6 @@ const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeTranscript = Schema.decodeUnknownEffect(TranscriptInput);
 const decodeInputQuery = Schema.decodeUnknownEffect(InputQueryInput);
 const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
-const decodeInputIdentified = Schema.decodeUnknownEffect(InputIdentified);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 const decodeSpecDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(SessionSpec));
 
@@ -500,7 +495,7 @@ const make = Effect.gen(function* () {
         return yield* decodeSpecDocument(document.value);
       }),
 
-    read: (id: Id): Effect.Effect<Session, ReadError | NotFound> =>
+    read: (id: Id): Effect.Effect<Session, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("session.read");
         return (yield* recordComposer)(yield* one(id));
@@ -1194,20 +1189,19 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    cancelInput: (input: InputIdentified): Effect.Effect<Input, InputError> =>
+    cancelInput: (
+      sessionId: Id,
+      inputId: Id,
+    ): Effect.Effect<Input, Exclude<InputError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("input.cancel");
-        const { id, inputId } = yield* Effect.mapError(
-          decodeInputIdentified(input),
-          createDecodeValidationError,
-        );
-        yield* one(id);
+        yield* one(sessionId);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const row = yield* queuedInput(id, inputId);
+            const row = yield* queuedInput(sessionId, inputId);
             yield* inputs.cancel(inputId);
-            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
+            yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
             return { ...row, status: "cancelled" as const };
           }),
         );
@@ -1220,8 +1214,8 @@ const make = Effect.gen(function* () {
  * method wired where the other kind belongs:
  *
  * - `query`, `read`, `transcript`, `queryInputs`, `updateInput` and
- *   `cancelInput` are operations. Each checks its own grant and decodes its
- *   own input, and a route handler calls it directly.
+ *   `cancelInput` are operations. Each checks its own grant and decodes any
+ *   input object it takes, and a route handler calls it directly.
  * - Every other method changes rows or builds a frame, and checks no grant.
  *   Only the controller daemon calls them, after checking the grant for the
  *   operation it is running. Putting one of them on a route would expose it

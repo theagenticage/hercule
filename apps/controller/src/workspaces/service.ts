@@ -514,7 +514,7 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (id: Id): Effect.Effect<Workspace, ReadError | NotFound> =>
+    read: (id: Id): Effect.Effect<Workspace, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.read");
         return yield* Effect.flatMap(readStoredWorkspaceOrFail(id), readWorkspaceRecord);
