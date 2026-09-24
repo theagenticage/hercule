@@ -16,8 +16,11 @@ import { Schema } from "effect";
 /** The grant families and their verbs. Families are coarser than operations. */
 export const GRANT_FAMILIES = {
   task: ["read", "create", "update", "delete"],
-  workflow: ["read", "write", "run", "submit"],
-  run: ["read", "write"],
+  workflow: ["read", "write"],
+  // `start` is apart from `write` so that a profile can follow and cancel runs
+  // without starting any: the shipped `worker` profile must not start runs, or
+  // a workflow's agent step could start its own workflow again.
+  run: ["read", "start", "write"],
   session: ["read", "spawn", "steer"],
   subscription: ["read", "write"],
   notification: ["read", "write"],

@@ -546,6 +546,16 @@ const describeEmptyValue = (
 };
 
 /**
+ * Returns the error for a key the author left out. An input's `required` has
+ * no default (spec 07 section 1), so the author decides it for each input,
+ * and the error asks for that decision instead of naming the key alone.
+ */
+const describeMissingKey = (path: ReadonlyArray<string>): string =>
+  path.length === 3 && path[0] === "inputs" && path[2] === "required"
+    ? "Say whether this input is required: add required: true or required: false."
+    : `Add ${String(path.at(-1))}. It is required here.`;
+
+/**
  * Returns the issues for one leaf of a failed definition decode, or
  * `undefined` to keep the schema library's message. `value` is the whole
  * decoded value, used to quote what the author wrote.
@@ -570,7 +580,7 @@ const describeDefinitionLeaf = (
 ): ReadonlyArray<Issue> | undefined => {
   switch (leaf._tag) {
     case "MissingKey":
-      return [{ path, message: `Add ${String(path.at(-1))}. It is required here.` }];
+      return [{ path, message: describeMissingKey(path) }];
     case "InvalidType": {
       const written = readValueAt(value, path);
       if (!SchemaAST.isObjects(leaf.ast)) {

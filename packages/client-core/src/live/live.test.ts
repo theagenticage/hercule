@@ -702,6 +702,17 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("workflow", []), [["workflows"], ["workflow"]]);
   });
 
+  it("maps a run push to every run list and the page of each run in it", () => {
+    assert.deepStrictEqual(buildQueryKeys("run", ["r1", "r2"]), [
+      queryKeys.runs(),
+      queryKeys.run("r1"),
+      queryKeys.run("r2"),
+    ]);
+
+    // A push with no ids means any run may have changed.
+    assert.deepStrictEqual(buildQueryKeys("run", []), [["runs"], ["run"]]);
+  });
+
   it("maps a session push to the session list, each session's page, and each session's queued-input list", () => {
     assert.deepStrictEqual(buildQueryKeys("session", ["s1"]), [
       queryKeys.sessions(),

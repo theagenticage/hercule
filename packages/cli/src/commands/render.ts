@@ -7,8 +7,18 @@
  * tail the CLI accepts back as an argument.
  */
 import {
+  describeRunOrigin,
+  describeStepDuration,
+  formatAge,
+  readTimestamps,
+} from "@hercule/client-core";
+import {
   truncateText,
   formatIssue,
+  type Run,
+  type RunOrigin,
+  type RunStarted,
+  type RunSummary,
   type StructuredResult,
   type Workflow,
   type WorkflowAction,
@@ -87,14 +97,34 @@ const flatten = (
       : [[name, item] as const];
   });
 
-const renderKeyValues = (value: Record<string, unknown>): ReadonlyArray<string> => {
+/**
+ * Returns an object as aligned `key  value` lines. `formatValue` formats each
+ * value; by default an id is shortened to its tail.
+ */
+const renderKeyValues = (
+  value: Record<string, unknown>,
+  formatValue: (item: unknown) => string = formatCell,
+): ReadonlyArray<string> => {
   const entries = flatten(value);
   if (entries.length === 0) return ["ok"];
   const width = Math.max(...entries.map(([key]) => key.length));
   // Trim like the table's lines, so a key with an empty value has no trailing
   // padding.
-  return entries.map(([key, item]) => `${key.padEnd(width)}  ${formatCell(item)}`.trimEnd());
+  return entries.map(([key, item]) => `${key.padEnd(width)}  ${formatValue(item)}`.trimEnd());
 };
+
+/**
+ * Formats a value like `formatCell`, but keeps every id whole, in a list too.
+ * The run commands print ids in full, as `run start` prints the id it
+ * starts, so an id a reader copies from `run read`, such as a Connection an
+ * input names, works in every other command.
+ */
+const formatKeepingIds = (item: unknown): string =>
+  typeof item === "string"
+    ? item
+    : Array.isArray(item)
+      ? item.map(formatKeepingIds).join(",")
+      : formatCell(item);
 
 const isPage = (
   value: unknown,
@@ -224,9 +254,121 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
   };
 };
 
+/**
+ * Returns the lines printed after `run start`: the new run's full id, and the
+ * command that shows how far it got. The hint points at `run read` rather
+ * than a subscription, because the controller does not accept a subscription
+ * on a run yet.
+ */
+const renderRunStarted = (answer: RunStarted): ReadonlyArray<string> => [
+  `run ${answer.runId} started`,
+  "",
+  `see how far it got with \`hercule run read ${answer.runId}\``,
+];
+
+/**
+ * Describes who started a run, and how when not by hand, in the words the
+ * web app uses: "you", "session 7c82ebeb through the API", "run 1f3a9c2e at
+ * step spawn".
+ */
+const describeOrigin = (origin: RunOrigin): string => {
+  const { starter, howStarted } = describeRunOrigin(origin);
+  return howStarted === undefined ? starter.label : `${starter.label} ${howStarted}`;
+};
+
+/**
+ * Returns a run as a row of `run list`: its id, status, workflow, who started
+ * it, and its age. The failure reason follows the status of a failed run,
+ * because it is the first thing a reader of a failed run wants to know.
+ */
+const summarizeRun = (run: RunSummary, now: Date): Record<string, unknown> => ({
+  id: run.id,
+  status: run.status === "failed" ? `${run.status} (${run.failureReason})` : run.status,
+  workflow: run.workflowName,
+  startedBy: describeOrigin(run.origin),
+  age: formatAge(run.createdAt, now),
+});
+
+/** Returns the rows of `run list` as a table. */
+const renderRunList = (runs: ReadonlyArray<RunSummary>): ReadonlyArray<string> => {
+  const now = new Date();
+  return renderTable(runs.map((run) => summarizeRun(run, now)));
+};
+
+/**
+ * Returns the lines printed after `run cancel`: that the run is cancelled,
+ * and the command that shows what its steps did. The whole run is left to
+ * `run read`. The id is printed in full, as every run command prints it.
+ */
+const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
+  `run ${run.id} cancelled`,
+  "",
+  `see what its steps did with \`hercule run read ${run.id}\``,
+];
+
+/**
+ * Returns a run's failure reason and the step it failed at, as the fields of
+ * `run read`, or no fields for a run that did not fail. A run the controller
+ * could not carry out may have failed before it reached any step.
+ */
+const describeFailure = (run: Run): Record<string, string> => {
+  if (run.status !== "failed") return {};
+  return {
+    failureReason: run.failureReason,
+    ...(run.failedStepId === undefined ? {} : { failedStep: run.failedStepId }),
+  };
+};
+
+/**
+ * Returns the lines printed for `run read`: a summary of the run, the inputs
+ * it started with, and a table with one row per step record. A run with no
+ * inputs or no step records prints "none" under that heading. The plan and
+ * the steps' outputs are left out, because they are long; `--json` prints
+ * them.
+ */
+const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
+  ...renderKeyValues(
+    {
+      id: run.id,
+      workflow: run.plan.name,
+      status: run.status,
+      ...describeFailure(run),
+      startedBy: describeOrigin(run.origin),
+      createdAt: run.createdAt,
+      ...readTimestamps(run),
+    },
+    formatKeepingIds,
+  ),
+  "",
+  "inputs",
+  ...(Object.keys(run.inputs).length === 0
+    ? ["none"]
+    : renderKeyValues(run.inputs, formatKeepingIds)),
+  "",
+  "steps",
+  ...(run.steps.length === 0
+    ? ["none"]
+    : renderTable(
+        run.steps.map((record) => ({
+          step: record.stepId,
+          status: record.status,
+          took: describeStepDuration(readTimestamps(record), now),
+          error: record.status === "failed" ? `${record.error.code}: ${record.error.message}` : "",
+        })),
+      )),
+];
+
 /** Returns the lines the CLI prints for a successful command without `--json`. */
 export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
-  const asLines = command.id === "transcript.read" ? renderTranscript : renderTable;
+  // The derived client decoded each item with the operation's schema, so the
+  // items of `run.query` are run summaries.
+  const asLines =
+    command.id === "transcript.read"
+      ? renderTranscript
+      : command.id === "run.query"
+        ? (items: ReadonlyArray<Record<string, unknown>>) =>
+            renderRunList(items as ReadonlyArray<RunSummary>)
+        : renderTable;
 
   if (outcome.kind === "items") return asLines(outcome.items);
 
@@ -262,13 +404,16 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
       return renderWorkflowSaveResult(value as WorkflowSaveResult);
     }
     if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
+    if (command.id === "run.start") return renderRunStarted(value as RunStarted);
+    if (command.id === "run.read") return renderRun(value as Run, Date.now());
+    if (command.id === "run.cancel") return renderRunCancelled(value as Run);
     const lines = [...renderKeyValues(record)];
     // The only hint this build prints after a command. A caller who has just
     // spawned a session wants to watch it. The hint does not suggest a
     // subscription on the session: no platform event about a session is
     // emitted yet, so the controller would reject it. It points at the
     // transcript, which the caller can already read. `transcript read` returns
-    // the rows so far and does not follow the session, so the hint says "read",
+    // the rows so far and does not follow the session, so the hint uses "read",
     // not "watch".
     if (command.id === "session.spawn") {
       lines.push(

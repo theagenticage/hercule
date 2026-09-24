@@ -45,3 +45,5 @@ Analogy, for a reader who wants one: npm `@scope/name` and Docker `owner/image`.
 - A qualified id changes if the plugin id changes, which makes a plugin id rename a data migration over stored rows. Plugin ids are already stable identity ([spec 05](../spec/05-plugins.md) §2, the namespace for KV and secrets), so this adds no new constraint - it adds one more thing that depends on it.
 - Users see `github/github`, which reads redundantly for the common case of a plugin whose single contribution shares its name. The catalog carries a `displayName` for every contribution and the UI shows that; the qualified id is what the API and the rows speak.
 - Until the provider ticket lands, the codebase has two identity rules for catalog contributions. That is stated, not hidden: see Scope.
+
+*Amended 2026-09-24 ([#79](https://github.com/theagenticage/hercule/issues/79)).* The example `workflow.run` above is now `run.start`, the one operation that replaced `workflow.run` and `workflow.submit`. The built-in action `wait` has no operation, and its id is the bare word, unprefixed like every core contribution. Spec 07 §8 holds the catalogue.

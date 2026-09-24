@@ -13,6 +13,7 @@
  *   transcript order.
  */
 import type { TranscriptRow } from "@hercule/contract";
+import { readJsonObject } from "../json-shape";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
@@ -58,9 +59,6 @@ const readItemVerb = (kind: ItemKind): string => VERBS[kind] ?? "unknown";
 /** Long enough for a useful summary, short enough that a whole file never ends up in a row. */
 const MAX_TARGET_LENGTH = 200;
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
-
 /**
  * Returns the field of an item's `detail` that is worth showing in a row: the
  * command a shell item ran, the path a file item changed, or a tool call's
@@ -69,7 +67,7 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
  * (spec 06 §6.3), so every field is optional.
  */
 const findDetailText = (detail: Record<string, unknown>): string | undefined => {
-  const input = asRecord(detail.input);
+  const input = readJsonObject(detail.input);
   const candidate =
     input?.command ??
     detail.command ??
@@ -91,7 +89,7 @@ const summarizeDetail = (detail: unknown): string => {
   const text =
     typeof detail === "string"
       ? detail
-      : (findDetailText(asRecord(detail) ?? {}) ?? JSON.stringify(detail));
+      : (findDetailText(readJsonObject(detail) ?? {}) ?? JSON.stringify(detail));
   const line = text.split("\n")[0] ?? "";
   return line.length > MAX_TARGET_LENGTH ? `${line.slice(0, MAX_TARGET_LENGTH)}…` : line;
 };

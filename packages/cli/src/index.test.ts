@@ -96,14 +96,21 @@ const findLastLine = (out: ReadonlyArray<string>): string =>
 const startsWithWord = (line: string, word: string): boolean =>
   new RegExp(`^${word}\\b`).test(line.trim());
 
+/**
+ * Checks whether a root help line is the line that names a noun. A noun is
+ * indented by two spaces, and the wrapped summary lines under it by more, so
+ * a summary line that happens to start with a noun's word (`run, and where
+ * those steps run.`) is not taken for the noun.
+ */
+const isNounLine = (line: string, noun: string): boolean => new RegExp(`^  ${noun}\\s`).test(line);
+
 /** Returns the root help's block for one noun: its line, and every line before the next noun. */
 const readNounBlock = (out: ReadonlyArray<string>, noun: string): string => {
-  const from = out.findIndex((line) => startsWithWord(line, noun));
+  const from = out.findIndex((line) => isNounLine(line, noun));
   expect(from, `the root help has no ${noun} noun`).toBeGreaterThan(-1);
   const next = out.findIndex(
     (line, index) =>
-      index > from &&
-      Object.keys(NOUNS).some((other) => other !== noun && startsWithWord(line, other)),
+      index > from && Object.keys(NOUNS).some((other) => other !== noun && isNounLine(line, other)),
   );
   return out.slice(from, next === -1 ? out.length : next).join("\n");
 };
@@ -1298,4 +1305,117 @@ describe("hercule workflow validate", () => {
       }
     },
   );
+});
+
+/**
+ * The run commands. `run start` runs a stored workflow named with
+ * `--workflow`, or reads a workflow's source from stdin with
+ * `--source-stdin`, like `workflow create`, and prints the same lines for
+ * both, because both start a run the caller then follows with `run read`.
+ * `run list` prints one row per run, and `run cancel` confirms the cancel.
+ */
+describe("the run commands", () => {
+  const CREDENTIAL_ENV = { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" };
+  const RUN_ID = buildId("bbbbbbb1");
+  const WORKFLOW_ID = buildId("aaaaaaa1");
+  const SESSION_ID = buildId("ccccccc1");
+  const WORKFLOW_FILE = "name: File a task\nsteps:\n  - id: file_task\n";
+
+  const buildSummary = (tail: string, fields: Record<string, unknown>) => ({
+    id: buildId(tail),
+    workflowId: WORKFLOW_ID,
+    workflowName: "File a task",
+    origin: { kind: "manual", actor: "user" },
+    status: "completed",
+    createdAt: "2026-09-24T10:00:00.000Z",
+    startedAt: "2026-09-24T10:00:00.000Z",
+    finishedAt: "2026-09-24T10:00:01.000Z",
+    ...fields,
+  });
+
+  it("sends --workflow or stdin, with --inputs, to run start, and prints the same lines for both", async () => {
+    const runFetch = stubFetch(() => ({ runId: RUN_ID }));
+    const runIo = stubIo({ env: CREDENTIAL_ENV, fetch: runFetch });
+    expect(await main(["--home", home, "run", "start", "--workflow", WORKFLOW_ID], runIo)).toBe(0);
+    expect(runFetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/runs/start" });
+    expect(runFetch.calls[0]!.body).toEqual({ workflowId: WORKFLOW_ID });
+
+    const fetch = stubFetch(() => ({ runId: RUN_ID }));
+    const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: WORKFLOW_FILE });
+    expect(
+      await main(
+        ["--home", home, "run", "start", "--source-stdin", "--inputs", '{"title":"Fix login"}'],
+        io,
+      ),
+    ).toBe(0);
+
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/runs/start" });
+    expect(fetch.calls[0]!.body).toEqual({
+      source: WORKFLOW_FILE.slice(0, -1),
+      inputs: { title: "Fix login" },
+    });
+    expect(io.stdout).toEqual(runIo.stdout);
+    expect(io.stdout.join("\n")).toContain(`hercule run read ${RUN_ID}`);
+  });
+
+  it("prints run list as a table with the status, the workflow, who started it and its age", async () => {
+    const fetch = stubFetch(() => ({
+      items: [
+        buildSummary("bbbbbbb2", {
+          origin: { kind: "api", actor: `session:${SESSION_ID}` },
+          status: "failed",
+          failureReason: "step-failed",
+          failedStepId: "file_task",
+        }),
+        buildSummary("bbbbbbb1", {}),
+      ],
+    }));
+    const io = stubIo({ env: CREDENTIAL_ENV, fetch });
+
+    expect(await main(["--home", home, "run", "list"], io)).toBe(0);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/runs" });
+    expect(io.stdout).toHaveLength(3);
+    const [header, failed, completed] = io.stdout as [string, string, string];
+    expect(header).toMatch(/status/i);
+    expect(header).toMatch(/workflow/i);
+    expect(header).toMatch(/started/i);
+    expect(header).toMatch(/age/i);
+    expect(failed).toContain("failed");
+    expect(failed).toContain("File a task");
+    expect(failed).toContain(`session ${SESSION_ID.slice(-8)} through the API`);
+    expect(completed).toContain("completed");
+    expect(completed).toContain("File a task");
+    expect(completed).toContain("you");
+  });
+
+  it("sends run cancel to the run's cancel route and confirms it, without printing the whole run", async () => {
+    const fetch = stubFetch(() => ({
+      id: RUN_ID,
+      workflowId: WORKFLOW_ID,
+      plan: { name: "File a task", steps: [] },
+      inputs: {},
+      origin: { kind: "manual", actor: "user" },
+      status: "cancelled",
+      steps: [],
+      createdAt: "2026-09-24T10:00:00.000Z",
+      startedAt: "2026-09-24T10:00:00.000Z",
+      finishedAt: "2026-09-24T10:00:01.000Z",
+    }));
+    const io = stubIo({ env: CREDENTIAL_ENV, fetch });
+
+    expect(await main(["--home", home, "run", "cancel", RUN_ID], io)).toBe(0);
+
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: `/api/v1/runs/${RUN_ID}/cancel`,
+    });
+    const printed = io.stdout.join("\n");
+    expect(printed).toContain(RUN_ID.slice(-8));
+    expect(printed).toMatch(/cancelled/);
+    // The whole record, plan included, is what `run read` and --json are for.
+    expect(printed).not.toMatch(/^plan/m);
+  });
 });

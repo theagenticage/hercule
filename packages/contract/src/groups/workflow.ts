@@ -11,7 +11,15 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
-import { Forbidden, Internal, Issue, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Forbidden,
+  Internal,
+  InvalidState,
+  Issue,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -87,7 +95,7 @@ const UncheckedDefinition = Schema.Json.pipe(
  * definition object. The controller validates both, with `parseWorkflowSource`
  * and `decodeWorkflowDefinition`. The transport does not validate them.
  */
-const WORKFLOW_CONTENT_FIELDS = {
+export const WORKFLOW_CONTENT_FIELDS = {
   /** Stored byte for byte. */
   source: Schema.optionalKey(Schema.String),
   /** Converted to YAML and stored as that YAML. */
@@ -170,10 +178,15 @@ export const workflow = HttpApiGroup.make("workflow")
       success: WorkflowSaveResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
+    /**
+     * Deletes a workflow. Fails with `invalid_state` while one of its runs is
+     * pending or running. A finished run keeps the workflow's id and its own
+     * copy of the workflow.
+     */
     HttpApiEndpoint.delete("delete", "/workflows/:id", {
       params: { id: Id },
       success: Schema.Struct({}),
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**
      * Validates a workflow the same way a save does, but stores nothing. A

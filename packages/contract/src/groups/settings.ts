@@ -51,6 +51,9 @@ const PositiveHours = Schema.Int.check(Schema.isGreaterThan(0));
 /** A session timeout, in whole minutes. It is converted to milliseconds before it is sent to a runner. */
 const PositiveMinutes = Schema.Int.check(Schema.isGreaterThan(0));
 
+/** A count of at least one. */
+const PositiveCount = Schema.Int.check(Schema.isGreaterThan(0));
+
 /** A time of day in the user timezone setting, `HH:MM` on a 24-hour clock. */
 const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/));
 
@@ -100,6 +103,13 @@ export const SETTING_VALUES = {
     "workspace.orphanTtlHours": PositiveHours,
     /** How long an ephemeral workspace nothing has worked in is kept, in days. */
     "workspace.idleTtlDays": PositiveDays,
+    /**
+     * How deep runs may nest. A run started by hand or by a program is 1
+     * deep, and a run that a step of another run starts is one deeper than
+     * that run. A workflow that starts itself, directly or through another
+     * workflow, stops here instead of starting runs without end.
+     */
+    "run.nestingLimit": PositiveCount,
   },
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */

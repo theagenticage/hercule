@@ -21,6 +21,7 @@ import {
 } from "@hercule/client-core";
 import {
   MAX_PAGE_LIMIT,
+  type RunFilter,
   type Runner,
   type TaskFilter,
   type TranscriptRow,
@@ -401,4 +402,33 @@ export const agentsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.agents(),
     queryFn: () => client.agent.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * Reads the runs that match one filter, newest first, page by page, like the
+ * task list. When the filter changes, the previous rows stay until the new
+ * ones arrive, so the list does not flash empty.
+ */
+export const runsQuery = (client: HerculeClient, filter: RunFilter) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.runs(filter),
+    queryFn: ({ pageParam }) =>
+      client.run.query({
+        query: pageParam === undefined ? filter : { ...filter, cursor: pageParam },
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+    placeholderData: (previous) => previous,
+  });
+
+/**
+ * Reads one run, for its page: its frozen plan, its inputs and its step
+ * records. An error is not retried, because a run that returns 404 once will
+ * keep returning 404.
+ */
+export const runQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.run(id),
+    queryFn: () => client.run.read({ params: { id } }),
+    retry: false,
   });

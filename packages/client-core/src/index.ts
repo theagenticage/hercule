@@ -44,6 +44,43 @@ export {
   type RunnerDraft,
 } from "./runner-edit";
 export { describeRunnerFacts, type RunnerFactsReading } from "./runner-facts";
+export {
+  describeFailureReason,
+  describeRunOrigin,
+  describeRunStatus,
+  describeStepDuration,
+  describeStepState,
+  describeUnstartedStep,
+  formatElapsed,
+  isRunLive,
+  readTimestamps,
+  shouldRunRecede,
+} from "./run-display";
+export {
+  buildRunGraph,
+  buildStepLines,
+  buildTimeline,
+  type EdgeTravel,
+  type RunGraph,
+  type RunGraphEdge,
+  type RunGraphNode,
+  type StepProgress,
+  type StepLine,
+  type TickAlign,
+  type Timeline,
+} from "./run-graph";
+export {
+  buildRunInputDraft,
+  buildRunInputs,
+  decideRunFormIssues,
+  hasConnectionField,
+  buildRunForm,
+  UNREADABLE_NUMBER,
+  type RunInputDraft,
+  type RunInputField,
+  type RunInputIssues,
+  type RunInputValue,
+} from "./run-inputs";
 export { createLive, type Live } from "./live/live";
 export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
 export { detectLocalRunner, listLoopbackEndpoints } from "./local-runner";
@@ -52,7 +89,7 @@ export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
 export { decideSessionsEmptyState } from "./sessions-empty-state";
 export { findNextOnboardingStep, type OnboardingStep } from "./onboarding";
-export { formatSince, formatStamp, formatTimeContext } from "./time-context";
+export { formatPreciseStamp, formatSince, formatStamp, formatTimeContext } from "./time-context";
 export {
   readPriorityGlyph,
   describeProvenanceTarget,
@@ -127,6 +164,7 @@ export { computeInstanceDefaults, computeThreadDefaults } from "./threads/thread
 export { buildTurns, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {
   resolveBrowserTimezone,
+  resolveDisplayTimezone,
   FALLBACK_TIMEZONE,
   isSupportedTimezone,
   listSupportedTimezones,

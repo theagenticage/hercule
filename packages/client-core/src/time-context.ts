@@ -27,6 +27,15 @@ const SHAPES = {
     minute: "2-digit",
     hourCycle: "h23",
   },
+  precise: {
+    year: "numeric",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  },
 } as const satisfies Record<string, Intl.DateTimeFormatOptions>;
 
 type Shape = keyof typeof SHAPES;
@@ -100,6 +109,31 @@ export const formatStamp = (instant: Date, timezone: string): string | undefined
   const day = part("day");
   if (day === "") return undefined;
   return `${day} ${part("month")} ${part("hour")}:${part("minute")}`;
+};
+
+/**
+ * Formats an instant to the second, for events that are seconds apart, such
+ * as when a run started and ended: "4 Sep 17:21:08", or only "17:21:08" when
+ * it falls on the same day as `sameDayAs` in `timezone`. Returns `undefined`
+ * in the same cases as `formatTimeContext`.
+ */
+export const formatPreciseStamp = (
+  instant: Date,
+  timezone: string,
+  sameDayAs?: Date,
+): string | undefined => {
+  const part = buildPartReader("precise", instant, timezone);
+  if (part === undefined) return undefined;
+
+  const day = part("day");
+  if (day === "") return undefined;
+  const time = `${part("hour")}:${part("minute")}:${part("second")}`;
+  const other =
+    sameDayAs === undefined ? undefined : buildPartReader("precise", sameDayAs, timezone);
+  const isSameDay =
+    other !== undefined &&
+    (["year", "month", "day"] as const).every((type) => other(type) === part(type));
+  return isSameDay ? time : `${day} ${part("month")} ${time}`;
 };
 
 /** Formats the time context as the moment a screen counts from: "since Sunday 22:10". */

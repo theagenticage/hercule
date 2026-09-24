@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.263",
-    "@cfworker/json-schema": "4.1.1",
     "@hercule/home": "workspace:*",
     "@hercule/protocol": "workspace:*",
     "effect": "4.0.0-rc.112"

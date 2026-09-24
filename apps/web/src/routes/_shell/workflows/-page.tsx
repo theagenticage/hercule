@@ -3,6 +3,7 @@ import { useLocation } from "@tanstack/react-router";
 import { decideWorkflowHeaderStatus, type HerculeClient, type Live } from "@hercule/client-core";
 import { STARTER_WORKFLOW_SOURCE, type Workflow } from "@hercule/contract";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
+import { RunFormDrawer } from "../../../screens/runs/run-form-drawer";
 import type { WorkflowView } from "../../../screens/workflow-editor";
 import { WorkflowEditorBody } from "./-body";
 import { useWorkflowDelete } from "./-delete";
@@ -50,6 +51,7 @@ export function WorkflowEditorPage({
   const hasChanges = source !== storedSource;
 
   const [name, setName] = useState<string>();
+  const [isRunFormOpen, setRunFormOpen] = useState(false);
 
   const deletion = useWorkflowDelete(client);
   const { remove } = deletion;
@@ -124,7 +126,11 @@ export function WorkflowEditorPage({
             save: { status: save.status, source: save.variables, error: save.error },
             deleteError: remove.error,
           })}
-          canDelete={existingWorkflow !== undefined}
+          isStored={existingWorkflow !== undefined}
+          isRunDisabled={hasChanges}
+          onRun={() => {
+            setRunFormOpen(true);
+          }}
           isDeleteDisabled={remove.isPending}
           // While the page's own delete is in flight, a save would race it.
           isSaveDisabled={
@@ -139,6 +145,15 @@ export function WorkflowEditorPage({
           }}
         />
       </WorkflowHeader>
+      {isRunFormOpen && existingWorkflow !== undefined ? (
+        <RunFormDrawer
+          client={client}
+          workflowId={existingWorkflow.id}
+          onClose={() => {
+            setRunFormOpen(false);
+          }}
+        />
+      ) : null}
       <WorkflowEditorBody
         client={client}
         live={live}

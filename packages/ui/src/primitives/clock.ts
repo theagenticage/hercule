@@ -31,3 +31,28 @@ export function useMinuteClock(): Date {
 
   return now;
 }
+
+/** How often a ticking clock updates: often enough for a duration shown to the tenth of a second. */
+const TICK_MS = 100;
+
+/**
+ * Returns the current time in milliseconds, updated every tenth of a second
+ * while `isTicking` is true. Use it for a duration that counts up while
+ * something runs. While `isTicking` is false the clock stands still, so a
+ * screen showing only finished durations does not re-render.
+ */
+export function useTickingClock(isTicking: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isTicking) return;
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, TICK_MS);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [isTicking]);
+
+  return now;
+}

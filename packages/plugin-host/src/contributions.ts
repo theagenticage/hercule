@@ -133,8 +133,8 @@ export class ActionError extends Schema.TaggedError<ActionError>()("ActionError"
 }) {}
 
 /**
- * The context passed to one execution of a workflow action. The run's API
- * client and its cancel signal will be added when runs execute actions.
+ * The context passed to one execution of a workflow action. A public-API
+ * client for the run will be added when the first action needs one.
  */
 export interface ActionContext {
   /**
@@ -147,6 +147,12 @@ export interface ActionContext {
     readonly config: unknown;
   };
   readonly run: { readonly runId: string; readonly stepId: string };
+  /**
+   * Aborts when the run is cancelled while the action executes. An action
+   * that waits on something outside the controller, such as an HTTP request,
+   * passes it on so the wait ends with the run.
+   */
+  readonly signal: AbortSignal;
 }
 
 /**

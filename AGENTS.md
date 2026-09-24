@@ -97,6 +97,7 @@ One pnpm workspace. Every package is `@hercule/*`, `"type": "module"`, and expor
 | `packages/home` | `@hercule/home` | The Hercule Home: the global options that locate it, the layout inside it, and the build-time version (`@hercule/home/version`). A leaf every role links |
 | `packages/contract` | `@hercule/contract` | The public API contract in Effect Schema |
 | `packages/protocol` | `@hercule/protocol` | The controller-runner WebSocket protocol in Effect Schema |
+| `packages/plugin-host` | `@hercule/plugin-host` | The API a plugin is written against: its manifest, its hooks and the services the host passes them, and the contributions it registers (providers, event sources, Connection types, workflow actions with `ActionContext` and `ActionError`). Uses no controller internals |
 | `packages/client-core` | `@hercule/client-core` | The client library. The only client package that writes Effect code |
 | `packages/ui` | `@hercule/ui` | The React component library |
 | `apps/web` | `@hercule/web` | The web app. Routes and presentation only |

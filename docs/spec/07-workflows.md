@@ -37,11 +37,11 @@ interface InputDeclaration {           // exactly one of `schema` and `connectio
 *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The block above is now the shape as shipped. It changed in four places, each to the spelling the contract already had for the concept or to what exists today:
 
 - `inputs`, `triggers` and `edges` may be left out, and so may `workspace`: a workflow with no `workspace` runs each agent step with no checkout, which is what `{ kind: "none" }` was (section 4.4).
-- `runner?` is gone for now. No placement by runner capability and no explicit runner exist yet; the field joins additively with the run engine ([#79](https://github.com/theagenticage/hercule/issues/79), [#80](https://github.com/theagenticage/hercule/issues/80)).
+- `runner?` is gone for now. No placement by runner capability and no explicit runner exist yet; the field joins additively with ~~the run engine ([#79](https://github.com/theagenticage/hercule/issues/79), [#80](https://github.com/theagenticage/hercule/issues/80))~~ agent steps in runs ([#83](https://github.com/theagenticage/hercule/issues/83)) *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79): a run of action steps needs no runner, so the run engine did not add it)*.
 - An input is one object with exactly one of `schema` and `connection`, so a mistake in either is named at its own field and not at the whole input.
 - `connection.type` is the qualified Connection type, `github/github`, as everywhere else ([./05-plugins.md](./05-plugins.md) section 1).
 
-In the contract the parsed shape is `WorkflowDefinition`: the block above less `id`, `enabled` and the timestamps, which are row state. `workflow.read` answers those beside `source`, and `workflow.submit` (section 9) takes a `WorkflowDefinition`. Every object in it refuses a key it does not declare, because a misspelt key would otherwise be dropped and the stored workflow would do something other than what its text says. A workflow is created with `enabled: false`; only `workflow.update { enabled: true }` turns it on. `updatedAt` is when the text last changed: turning a workflow on or off, or saving the same text again, does not move it, so a list sorted by it keeps its order when a workflow is switched; the audit log records each toggle. The canonical render has one exception to the rule above: a string that a block scalar cannot hold exactly (whitespace and line breaks only, or a control character) is double-quoted. No line is folded, and the keys an author chooses (`params`, schemas, a trigger's mappings) keep the order they were sent in.
+In the contract the parsed shape is `WorkflowDefinition`: the block above less `id`, `enabled` and the timestamps, which are row state. `workflow.read` answers those beside `source`, and ~~`workflow.submit`~~ `run.start` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* (section 9) takes a `WorkflowDefinition`. Every object in it refuses a key it does not declare, because a misspelt key would otherwise be dropped and the stored workflow would do something other than what its text says. A workflow is created with `enabled: false`; only `workflow.update { enabled: true }` turns it on. `updatedAt` is when the text last changed: turning a workflow on or off, or saving the same text again, does not move it, so a list sorted by it keeps its order when a workflow is switched; the audit log records each toggle. The canonical render has one exception to the rule above: a string that a block scalar cannot hold exactly (whitespace and line breaks only, or a control character) is double-quoted. No line is folded, and the keys an author chooses (`params`, schemas, a trigger's mappings) keep the order they were sent in.
 
 *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* **Ids and names are what an expression can read.** An expression reads a step or a signal trigger as `steps.<id>`, an input as `inputs.<name>` and a signal output as `steps.<id>.output.<name>`. CEL reads `steps.open-pr.output` as `steps.open - pr.output`, which passes the check at save and fails when a run evaluates it. So every step id and trigger id matches `^[a-z][a-z0-9_]*$`, and the refusal suggests the snake_case spelling (`open_pr`). Every input name and signal output name matches `^[A-Za-z_][A-Za-z0-9_]*$`; case is free there, because such a name is a field name (`prUrl`). A word that CEL cannot read as a field name is refused too: `in`, `true`, `false` and `null`, and `constructor` and `__proto__`, which the evaluator cannot read back as fields. Steps and triggers share one set of ids, because both are read as `steps.<id>`; a repeated id is refused at the later one. The examples in this document were written with hyphens and are corrected to snake_case.
 
@@ -171,11 +171,21 @@ Every start trigger carries a spawn bound: the number of runs it may spawn per w
 
 ## 3. Inputs
 
-A workflow declares typed inputs. A start trigger maps event fields onto them with CEL expressions over `event`; the raw event is visible to the trigger's filter and mapping and nowhere else. It never enters the plan: steps see `inputs.*`, not `event`. (The run record separately copies the triggering event for audit; that copy is not readable by expressions.) Manual runs prompt the user for declared inputs; `workflow.run` action steps and ad-hoc plan runs pass them explicitly. Defaults fill unmapped optional inputs; a required input left unresolved fails stamping.
+A workflow declares typed inputs. A start trigger maps event fields onto them with CEL expressions over `event`; the raw event is visible to the trigger's filter and mapping and nowhere else. It never enters the plan: steps see `inputs.*`, not `event`. (The run record separately copies the triggering event for audit; that copy is not readable by expressions.) Manual runs prompt the user for declared inputs; ~~`workflow.run`~~ `run.start` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* action steps and ad-hoc plan runs pass them explicitly. Defaults fill unmapped optional inputs; a required input left unresolved fails stamping.
 
 Connections flow through inputs: an outbound action names the Connection it acts as, and that id may be mapped from the triggering event's `event.connectionId` into an input, then referenced by the action's parameters (`inputs.connection`).
 
 A Connection input is **first-class**: the declaration says ~~`connection: { type: "github" }`~~ `connection: { type: "github/github" }` *(amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the qualified Connection type, as everywhere else)* instead of a JSON schema, the value is a Connection id, and stamping validates that the Connection exists, is of that type and is not disabled, so a dead Connection fails at start rather than at step four. The manual-run form renders a Connection picker for it. A trigger with no event Connection (cron, manual) fills it from the declaration's `default` or a literal in its mapping (`'conn_abc'`). An action step may also name a Connection id literally in its `params` when the workflow only ever acts through one.
+
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* **The inputs are checked when a run starts**, by ~~`workflow.run`, `workflow.submit` and the `workflow.run` action~~ `run.start`, as an operation and as an action *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* (section 8). The controller checks the given values against the declarations:
+
+- A value for an input the workflow does not declare is refused.
+- A required input with no value and no default is refused.
+- An optional input with no value and no default is left out of `inputs`, so `has(inputs.x)` is false.
+- The value of a `schema` input, given or taken from its default, is checked against its JSON Schema (draft-07). A schema the checker cannot use is reported as a problem of the workflow, not of the value, because the author has to correct the schema.
+- A `connection` input must name an existing Connection of that type that is not disabled. A Connection whose status is `needs-reauth` or `error` is not refused; the action that uses it reports that problem.
+
+Each problem is one issue at the path `inputs.<name>`, and no run is created. So "a required input left unresolved fails stamping" above means that the start is refused. Known gap: a save does not yet check a `schema` itself, or its `default` against it. A `default` that does not match its schema is therefore accepted at save, and every start that relies on it is refused.
 
 ## 4. Steps and the graph
 
@@ -226,7 +236,9 @@ interface Edge {
 
 An action step invokes a plugin-contributed workflow action by contribution id (a tool call is just this). The contribution declares an input schema and an output schema; `params` are literals or expressions and are validated at save time. Built-in actions (section 8) have the same shape and are invoked the same way. The action's return value becomes `steps.<id>.output`. An action that fails fails the run; failure is not redirection, and actions never steer the graph ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)).
 
-Actor and permission context: a built-in action executing inside a run is stamped `run:<runId>` and is **ungated**: the workflow was authored by the user and its action steps run with the user's parity. Agent steps are sessions and act as `session:<id>` under their own profile ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). That is why the `worker` profile withholds `workflow.run` and `workflow.submit` (a session cannot fan out) while a `workflow.run` *action step* needs no grant (the user wrote it into the recipe). Plugin-contributed actions stand on the same footing: `execute()` receives `ctx.api`, a public-API client stamped `run:<runId>` with the `stepId` carried in the audit entry, and every mutation made through it is summarised on the step record ([ADR 0026](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md); interface in [./05-plugins.md](./05-plugins.md) section 4.4). Actions still never redirect: routing reads declared outputs only.
+Actor and permission context: a built-in action executing inside a run is stamped `run:<runId>` and is **ungated**: the workflow was authored by the user and its action steps run with the user's parity. Agent steps are sessions and act as `session:<id>` under their own profile ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). That is why the `worker` profile withholds ~~`workflow.run` and `workflow.submit`~~ `run.start` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* (a session cannot fan out) while a ~~`workflow.run`~~ `run.start` *action step* needs no grant (the user wrote it into the recipe). Plugin-contributed actions stand on the same footing: `execute()` receives `ctx.api`, a public-API client stamped `run:<runId>` with the `stepId` carried in the audit entry, and every mutation made through it is summarised on the step record ([ADR 0026](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md); interface in [./05-plugins.md](./05-plugins.md) section 4.4). Actions still never redirect: routing reads declared outputs only.
+
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* The built-in actions execute as described: each mutation one makes is stamped `run:<runId>`, and it passes every grant check, whoever started the run. The step's id is not yet written to the audit entry; the step record shows what the step returned. `ctx.api` does not exist yet, so a plugin action cannot call the public API and nothing is summarised on the step record ([./05-plugins.md](./05-plugins.md) section 4.4).
 
 ### 4.2 Agent steps
 
@@ -244,7 +256,7 @@ Iterations: when an edge brings the graph back to an agent step (a cycle, or a s
 
 Control flow lives entirely in the graph. ~~Steps with no incoming edges start when the run starts.~~ *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The run starts every **entry step**: a step with `entry: true`, or a step with no incoming edge. In a loop the old rule started nothing: in section 2.4's pattern every step has an incoming edge. A step that only a signal trigger leads into is not an entry step, because it waits for its signal. Validation refuses two things, and each message suggests `entry: true`. A workflow with steps and no entry step is refused at the first step, in definition order, that another step leads into, or at the first step when no step leads into another. A step that no path reaches from an entry step or a signal trigger is refused at that step. The graph preview draws an edge from each start trigger to each entry step ([./14-web-app.md](./14-web-app.md) §Workflow editing).
 
-When a step completes (or a signal node fires), every outgoing edge whose condition is absent or evaluates true fires; several firing edges run their targets in parallel. A branch the agent "chooses" is two outgoing edges with mutually exclusive conditions over an enum field of the step's output; the prompt tells the agent the choice exists, the schema carries it, the edges route it. Conditions route on `inputs.*` and `steps.<id>.output.*` only; there is no other run state visible to the graph.
+When a step completes (or a signal node fires), every outgoing edge whose condition is absent or evaluates true fires; several firing edges run their targets in parallel *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79): not built yet. The run engine executes a run's ready steps one at a time, in the order their step records were created. Every step it can run today is an action step that writes to the one database, so running them side by side would not finish sooner)*. A branch the agent "chooses" is two outgoing edges with mutually exclusive conditions over an enum field of the step's output; the prompt tells the agent the choice exists, the schema carries it, the edges route it. Conditions route on `inputs.*` and `steps.<id>.output.*` only; there is no other run state visible to the graph.
 
 **Joins.** A step with several incoming edges runs according to its `join`:
 
@@ -276,7 +288,7 @@ Policy: `none` runs sessions workspace-less (assistant-style, API-only work); `p
 
 Branch: `branch` is a template over `inputs` (and `steps`, though nothing has run yet); the default is `hercule/run-<runId>`, always unique. It is the *initial* name only: the runner tracks the worktree by path, so an agent is free to rename the branch to something meaningful and PR creation uses whatever branch is current. Shipped task-driven workflows template `task/{{ inputs.taskId }}`; "task branch" is a convention of those workflows, not a core rule.
 
-*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The policy is spelled as `session.spawn` spells a workspace, so one concept has one spelling: `{ kind: "primary", resourceId, branch? }`, with `branch` meaning what it means on `session.spawn`, or `{ kind: "ephemeral", checkouts: [{ resourceId, baseBranch? }] }`. `none` is leaving `workspace` out. Two things above are not in the shape yet, because nothing exists to act on them: the ephemeral `branch` template (no run-branch naming exists) and the run's `runner` placement inputs (no placement by runner capability exists). Both join additively with the run engine ([#79](https://github.com/theagenticage/hercule/issues/79), [#80](https://github.com/theagenticage/hercule/issues/80)).
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* The policy is spelled as `session.spawn` spells a workspace, so one concept has one spelling: `{ kind: "primary", resourceId, branch? }`, with `branch` meaning what it means on `session.spawn`, or `{ kind: "ephemeral", checkouts: [{ resourceId, baseBranch? }] }`. `none` is leaving `workspace` out. Two things above are not in the shape yet, because nothing exists to act on them: the ephemeral `branch` template (no run-branch naming exists) and the run's `runner` placement inputs (no placement by runner capability exists). Both join additively with ~~the run engine ([#79](https://github.com/theagenticage/hercule/issues/79), [#80](https://github.com/theagenticage/hercule/issues/80))~~ agent steps in runs ([#83](https://github.com/theagenticage/hercule/issues/83)) *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79): the run engine runs action steps only, which need neither a workspace nor a runner; a run freezes the `workspace` policy and does not use it)*.
 
 ## 5. Expressions: CEL
 
@@ -307,6 +319,36 @@ Interpolation: action parameter values and agent prompts are templates whose emb
 
 *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* A string inside `params` that holds `{{` is a template at any depth: the value of a param, an item of a list, or a field of a mapping. Section 8 puts `inputs.eventId` into `provenance`, which is a list of mappings, so a template only at the top would not be enough. The run renders nested strings the same way ([#79](https://github.com/theagenticage/hercule/issues/79)). An expression ends at the first `}}` after its `{{`, as a Mustache tag does, so the reader of a template needs to know nothing of CEL; an expression that must hold `}}` writes it another way, such as `'}' + '}'`.
 
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* **How a run renders the templates in `params`.** "A non-string value renders as JSON" above holds only inside text. The rules as built:
+
+- A param string that is exactly one `{{ expr }}`, with no other text around it, not even a space, renders to the expression's value with its own JSON type. So `"{{ inputs.count }}"` renders to the number 3 and can fill a field that takes a number. Without this rule a template could never fill a number or a list, although a save accepts a template in a field of any type (section 1).
+- Any other string that holds `{{ }}` renders to a string. Each expression is replaced by its value: a string as it is, any other value as JSON.
+- Rendering walks the params at any depth, as a save checks them.
+- CEL returns an integer (an int literal, what `size()` returns) as a big integer. A safe integer becomes a JSON number. A value with no JSON form fails the template: an integer too large to be exact as a JSON number, bytes, a duration or a timestamp. The message suggests converting it with `string()`.
+
+The rendered params are then decoded against the action's input schema. A decode failure fails the step with the code `validation`, and the run with `step-failed`: the expression evaluated, and the value it gave is wrong for the field. A template that throws fails the run with `expression-error`, with the step in `failedStepId`, and its step record fails with the code `expression_error`.
+
+~~A number read from `inputs` or from a step's output is a CEL double, because the context is plain JSON and `dyn` (above). An int literal is an int, and CEL does not mix the two: `inputs.count + 1` fails with "no such overload: dyn<double> + int". An author writes `inputs.count + 1.0`.~~
+
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* **An author never thinks about number types.** A number read from `inputs`, a step's output or `event` is a CEL double, because the context is plain JSON and `dyn` (above); an int literal and what `size()` returns are ints. Standard CEL keeps the two apart, so `inputs.count + 1` fails there. Hercule extends CEL on purpose, with these rules. One function builds the environment for both the save-time check and evaluation, so a save accepts exactly what a run can evaluate:
+
+- `+ - * / %` between an int and a double, in either order, give a double: `inputs.count + 1` is 4, `inputs.count / 2` is 1.5. `%` also works between two doubles, so `inputs.count % 2 == 0` works.
+- `==` and `!=` between an int and a double compare the values: `3 == 3.0` and `size(x) == inputs.count` hold. Ordering (`<`, `>=` and the rest) already compared across the two.
+- `+` between a string and a number, in either order, joins them as text: `"count: " + inputs.count` is `"count: 3"`. A whole double is written without `.0`, as JavaScript writes it.
+- A list or map literal may mix value types: `[1, inputs.price]`.
+- A list read from the context can be indexed by a number read from the context: `inputs.labels[inputs.index]`.
+- A whole double becomes a JSON integer when rendered: `{{ inputs.price * 2 }}` with a price of 2.5 renders 5.
+
+Limits of the evaluator, which the wrapper cannot change through its public API:
+
+- `/` between two ints still drops the remainder: `7 / 2` and `size(x) / 2` are 3. Write one side as a decimal (`size(x) / 2.0`) for the decimal result. A number read from the context is already a double, so `inputs.count / 2` is not affected.
+- The two branches of `? :` must have the same type: write `cond ? 1.0 : 2.5`, not `cond ? 1 : 2.5`.
+- A list literal is indexed by an int only: `["a", "b"][1]`, not `["a", "b"][1.0]`.
+- A decimal divided by zero gives infinity, and `x % 0.0` gives NaN. Neither has a JSON form, so a template that renders one fails.
+- A whole number above 2^53 mixed with a decimal loses precision, because the whole number becomes a decimal first, as CEL's own `double()` does.
+
+An optional input with no value stays absent from `inputs`, as section 3 says, so `has(inputs.x)` is the test for it. Reading it without `has()` fails with "no such key".
+
 **Verify at build time:** the exact values of the parse-time limits, and a Hercule-side corpus of representative expressions run in CI against the wrapper (optionally including selected official conformance cases from `@bufbuild/cel-spec`) to pin the subset Hercule relies on.
 
 ## 6. The agent-to-graph contract
@@ -335,16 +377,40 @@ A Run is one execution of an execution plan. Orchestration happens only on the c
 
 ### 7.1 Starting a run
 
-A run is created by: a start-trigger match (the matcher's pending-run effect row), direct manual creation, a `workflow.run` action step in another run, an API call by an actor holding the `workflow.run` grant (assistants do by default), or an unstored definition submitted through `workflow.submit` (section 9). At start the controller:
+A run is created by: a start-trigger match (the matcher's pending-run effect row), direct manual creation, a ~~`workflow.run`~~ `run.start` action step in another run, an API call by an actor holding the ~~`workflow.run`~~ `run.start` grant (assistants do by default), or an unstored definition ~~submitted through `workflow.submit`~~ sent with `run.start` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* (section 9). At start the controller:
 
-1. Freezes the plan: copies the workflow's inputs declaration, steps, edges, triggers, workspace policy and placement inputs into the run as an immutable execution plan ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md)). Start triggers in the plan are inert record; signal triggers are live.
-2. Re-validates the plan (section 1); a plan that no longer validates fails the run at start with reason `validation-error`.
+1. Freezes the plan: copies the workflow's inputs declaration, steps, edges, triggers, workspace policy ~~and placement inputs~~ *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79): the definition has no placement inputs until `runner` joins it, section 1)* into the run as an immutable execution plan ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md)). Start triggers in the plan are inert record; signal triggers are live.
+2. Re-validates the plan (section 1); a plan that no longer validates fails the run at start with reason `validation-error` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79): only for a start that nobody waits on, such as a trigger effect; a start by request is refused instead, below)*.
 3. Resolves inputs from the trigger's mappings, the manual form, or the caller's explicit values, applying defaults; a `connection` input is checked against the Connection table here.
 4. Copies the triggering event, if any, onto the run so event-log pruning never breaks audit.
 5. Instantiates a Subscription for every signal trigger in the plan.
 6. Starts every ~~step with no incoming edge~~ entry step (section 4.3; *amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78)*, because in a loop every step has an incoming edge). The workspace is provisioned, and the runner pinned, when the first agent step starts (section 4.4).
 
 Concurrent runs of one workflow are unlimited in v1; the per-runner session cap queues sessions at placement and the spawn bound limits trigger-driven creation.
+
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* **Starting a run by request, as built.** ~~`workflow.run` and `workflow.submit` check~~ `run.start` checks everything before they create anything, while the request is handled. The request is refused with `validation` (400, every problem as an issue at its path) and no run is created when:
+
+- the definition no longer validates (section 1);
+- the definition has an element that runs cannot execute yet (the list below);
+- the inputs are not valid (section 3).
+
+A run that failed at start would be one more failed run to read, for a problem the caller can be told about at once. `validation-error` as a run's failure reason stays for starts that nobody waits on: a trigger effect ([#82](https://github.com/theagenticage/hercule/issues/82)).
+
+Runs execute part of this document so far. Each element they cannot execute yet is one issue, at its place, in plain words ("Runs cannot evaluate edge conditions yet."):
+
+- an agent step, and a signal trigger ([#83](https://github.com/theagenticage/hercule/issues/83));
+- a step or edge `condition`, `join`, `terminal`, `maxTraversals`, a step that more than one edge leads into, and `entry: true` on a step that an edge also leads into. Such a step would run once as an entry step and again when the edge fires, and a step that runs twice needs the rules for loops ([#80](https://github.com/theagenticage/hercule/issues/80));
+- a plugin action that declares a Connection. The first plugin action that needs a Connection decides how a step names it (section 3, [./05-plugins.md](./05-plugins.md) section 4.4).
+
+Accepted: action steps, edges with no condition, fan-out (one step leading to several), several entry steps, start triggers (frozen and inert) and a `workspace` policy (frozen and unused, because no step needs a workspace yet).
+
+How the numbered steps above apply to a start by request:
+
+- The frozen plan is the parsed definition, including `name` and `description`, so a run can still be named and drawn after its workflow is renamed, edited or deleted. It is the contract's `WorkflowDefinition`; no separate execution-plan type exists (section 9).
+- Step 3 applies defaults: a required input with a default takes it.
+- Steps 4 and 5 do nothing yet: no run has a triggering event before [#82](https://github.com/theagenticage/hercule/issues/82), and a plan with a signal trigger is refused.
+- A disabled workflow can still be run by hand (section 1).
+- The request writes the run and a `pending` step record for each entry step, in one transaction, and answers `{ runId }` at once. It never waits for a step. The run engine then executes the run apart from the request. It executes ready steps one at a time, in the order their step records were created (section 4.3).
 
 ### 7.2 The run record
 
@@ -360,7 +426,7 @@ interface Run {
     | { kind: "trigger"; triggerId: string; eventId: string }
     | { kind: "manual"; actor: Actor }
     | { kind: "action"; parentRunId: string; stepId: string }
-    | { kind: "api"; actor: Actor }    // workflow.run or workflow.submit over the API
+    | { kind: "api"; actor: Actor }    // run.start over the API (amended 2026-09-24, #79)
   triggerEvent?: Event                 // copy of the triggering event
   rerunOf?: string                     // run id this run was re-run from (field name provisional)
   status: "pending" | "running" | "completed" | "failed" | "cancelled"
@@ -399,9 +465,64 @@ Step records are one per (node, iteration) and their status is monotonic: `pendi
 
 The record supports audit replay (walk the exact path a run took into its session transcripts) and re-execution; deterministic replay is a non-goal.
 
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* **The run record as built.** `run.read` returns this shape:
+
+```ts
+interface Run {
+  id: string
+  workflowId: string | null            // null for a workflow sent with run.start; kept after the workflow is deleted
+  plan: WorkflowDefinition             // the parsed definition as it was at start, name and description included
+  inputs: Record<string, unknown>      // resolved; an optional input with no value and no default is absent
+  origin:
+    | { kind: "manual"; actor: Actor }
+    | { kind: "api"; actor: Actor }
+    | { kind: "action"; parentRunId: string; stepId: string }
+  status: "pending" | "running" | "completed" | "failed" | "cancelled"
+  failureReason?: "expression-error" | "step-failed"
+  failedStepId?: string
+  steps: StepRecord[]                  // in the order they were created
+  createdAt: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+interface StepRecord {
+  stepId: string
+  iteration: number                    // 1 for every record until loops exist (#80)
+  status: "pending" | "running" | "completed" | "failed" | "cancelled"
+  startedAt?: string
+  finishedAt?: string
+  output?: unknown                     // what the action returned
+  error?: { code: string; message: string }
+}
+```
+
+- **Fields that join later**, each with the ticket that sets it: `workspaceId`, `runnerId` and a step record's `sessionId` with agent steps ([#83](https://github.com/theagenticage/hercule/issues/83)); `triggerEvent` and the `trigger` origin with trigger effects ([#82](https://github.com/theagenticage/hercule/issues/82)); `rerunOf` with re-run ([#81](https://github.com/theagenticage/hercule/issues/81)); the run's final output, which is its terminal step's output, with terminal steps ([#80](https://github.com/theagenticage/hercule/issues/80)); `taskId` ([./02-domain-model.md](./02-domain-model.md)) with the ticket that links a run to a Task.
+- **`origin`.** `manual` when the user starts a run by hand, from the web app or the CLI; `api` when a session calls ~~`workflow.run`; always `api` for `workflow.submit`, whoever calls it (section 9)~~ `run.start`, for a stored workflow or a sent one alike *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*; `action` for a run that a ~~`workflow.run`~~ `run.start` step started (section 8). `actor` is the starter's actor stamp. The user who sends a workflow with `run.start` starts it by hand as much as one who names a stored workflow, so the origin follows who started the run, not which kind of workflow it runs.
+- **A step record's `error` is `{ code, message }`**, not a string, so a client can tell the kinds of failure apart. `code` is one of:
+  - an error code of the API, when the action's operation failed with one, such as `not_found` or `validation`. `validation` is also the code when the rendered params do not match the action's input (section 5);
+  - `expression_error`, when a template in the step's params could not be rendered;
+  - `unexpected`, for a failure that is not one of the API's errors, such as a database error or a bug in the controller;
+  - `interrupted`, for a plugin action cut off by a restart (below);
+  - the `code` of a plugin's `ActionError` ([./05-plugins.md](./05-plugins.md) section 4.4).
+- **Built so far:** the failure reasons `expression-error`, `step-failed` and `controller-error` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*. The others join with the tickets that can cause them. The step status `skipped` joins with step conditions ([#80](https://github.com/theagenticage/hercule/issues/80)).
+- **`pending`** means created and not started yet, for a run and for a step record alike. A run is `pending` from the request that creates it until the run engine takes it up; it is never held back by validation, which happens before it exists, and nothing places it yet. A step record is `pending` from when the step before it completes until the engine calls its action, not only as a queued iteration behind a busy step.
+- **A step record moves to `running` in a transaction of its own, before its action is called.** What happens next depends on the action:
+  - A built-in action's effect, the end of its step record, and a `pending` record for each step an edge leads to commit in one transaction. A crash therefore never leaves the effect committed with the record unfinished. A built-in step record found `running` when the controller starts means that transaction never committed and the action took no effect, so the engine executes it again.
+  - A plugin action is called after its `running` record has committed, outside any transaction, because it reaches outside the database. Its step record found `running` when the controller starts may or may not have taken effect. Runs never retry an action (section 7.5), so the step fails with the code `interrupted` and the run fails with `step-failed`.
+- **A step that fails** fails the run with `step-failed` and `failedStepId`; every step record that has not ended is `cancelled`, and no later step starts. A run that the controller cannot carry out for a reason of its own, such as a bug, fails at its current step with the code `unexpected`, rather than staying `running` until the next restart.
+
+  *(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* Such a run fails with the reason `controller-error`, not `step-failed`: `step-failed` means the step's action failed, and the author can do something about that, while `controller-error` means the controller failed, and the author cannot. A database error while a built-in action writes counts as the controller's, not the step's, even though it happens inside the action. `failedStepId` and `startedAt` are set when the run was at a step, and absent when it failed before its first step. The step record's code is `unexpected`, and the controller's log has the details.
+- **Cancel** (`run.cancel`) works on a `pending` or `running` run: the run becomes `cancelled` with `finishedAt`, every `pending` and every `running` step record becomes `cancelled` (the pending ones too, not only the running ones), and no later step starts. A plugin action still running sees its `signal` abort ([./05-plugins.md](./05-plugins.md) section 4.4). A run that has already ended is refused with `invalid_state`, naming its status. There are no subscriptions or sessions to end yet.
+
+  *(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* Cancelling a run also cancels every unfinished run that its `run.start` steps started, and the runs those started, however deep, in the same transaction. A child run that has already ended stays as it is. A child of a finished child is still reached: a child can outlive the run that started it. So cancelling the first run of a chain that a workflow started on itself stops the whole chain. Only cancel reaches child runs: a parent that fails or completes leaves its children running, because a `run.start` step does not wait for its child (section 8).
+- Every committed change to a run or a step record publishes the run's id on the live topic `run` ([./14-web-app.md](./14-web-app.md)).
+
 ### 7.3 Platform events
 
 At a terminal state the controller emits `run.completed`, `run.failed` or `run.cancelled` into the pipeline; other workflows may trigger on them (this is how a "learning" workflow over run outcomes, or a failure-notification workflow, is built). Cancellation is not a failure: a "notify me on failures" workflow must not fire when the user cancels on purpose, so cancel has its own kind. The payload shapes are owned outright by [./08-events-and-connections.md](./08-events-and-connections.md).
+
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* Not emitted yet: a run reaches its terminal state and emits nothing into the pipeline until [#81](https://github.com/theagenticage/hercule/issues/81). Until then a client learns that a run ended from `run.read` and from the live topic `run` (section 7.2).
 
 ### 7.4 Re-run
 
@@ -418,25 +539,43 @@ There is no cleanup machinery beyond the substrate's: the run's ephemeral worksp
 
 ## 8. Built-in actions
 
-Five built-in actions ship in the core (three of them now; see the amendment below the table), registered into the workflow-action extension point like any plugin contribution but owned by the core. Each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)) and carries the **same id as the operation** it calls ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3); its input and output are that operation's contract schemas, so nothing is reachable through an action that is not reachable over HTTP. The tickets called the notification action `notify`; its id is `notification.create`. This table is the single owner of the catalogue; Task semantics are in [./09-tasks.md](./09-tasks.md), the Notification record and triage-specific usage in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
+Five built-in actions ship in the core (~~three~~ four of them now *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*; see the amendments below the table), registered into the workflow-action extension point like any plugin contribution but owned by the core. Each is a thin call into the same service layer the public API exposes ([ADR 0013](../adr/0013-agents-operate-hercule-through-the-public-api.md)) and carries the **same id as the operation** it calls ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.3); its input and output are that operation's contract schemas, so nothing is reachable through an action that is not reachable over HTTP. The tickets called the notification action `notify`; its id is `notification.create`. This table is the single owner of the catalogue; Task semantics are in [./09-tasks.md](./09-tasks.md), the Notification record and triage-specific usage in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
 
 | Action | Input (contract op) | Output | Notes |
 |---|---|---|---|
-| `workflow.run` | `{ workflowId, inputs }` | `{ runId }` | Fire-and-forget: starts a run of another workflow and returns immediately; does not wait or route on the child's output (that is the post-v1 sub-workflow step). The scheduled-tasks one-step shortcut uses it. |
+| ~~`workflow.run`~~ `run.start` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* | `{ workflowId, inputs }` | `{ runId }` | Fire-and-forget: starts a run of another workflow and returns immediately; does not wait or route on the child's output (that is the post-v1 sub-workflow step). The scheduled-tasks one-step shortcut uses it. |
 | `notification.create` | Notification producer input: `{ kind, title, body?, actions?, subject? }` (record and bound-action shape per [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)) | `{ notificationId }` | Creates one core-owned Notification with producer = the run and step; delivery is decided by the core router, never by the step. |
 | `task.create` | Task create input: `{ title, description, priority?, labels?, projectId?, provenance? }` | the created Task | Provenance may carry the triggering event id (`inputs.eventId`), the run id and external refs. |
 | `task.update` | `{ taskId, ...changes }` | the updated Task | One call, one `task.updated` event with per-field diffs. Appending provenance is an update. |
+| `wait` *(added 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* | `{ seconds }`, a whole number from 1 to 86400 (one day); no contract op | `{}` | Pauses the run. The one built-in action that is not an operation, below. |
 | `task.query` | `TaskFilter`: `{ refs?, labels?, status?, projectId?, text? }` (any-of within a field, and across fields; [./11](./11-public-api-and-agent-surface.md) section 2) | `{ items: Task[] }` | The same operation agents use. Structured fields match by exact identity: a provenance ref is matched by canonical external ref (`github:issue:owner/repo#42`), never by content; `text` is SQLite FTS over title and description and is normally absent in graphs. The guard-before-agent pattern: `task.query` on the event's refs, an edge on `size(steps.guard.output.items) > 0` to `task.update`, otherwise the agent step. |
 
-*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* Three are registered now: `task.create`, `task.update` and `task.query`. `workflow.run` joins with [#79](https://github.com/theagenticage/hercule/issues/79) and `notification.create` with [#84](https://github.com/theagenticage/hercule/issues/84), each in the ticket that adds its operation, because an action is its operation and cannot exist before it. Two inputs differ from the operation's, by necessity. `task.update` takes `taskId` in its params, because a request carries it in the path, and it is refused when it names no field to change, by the operation's own rule. `task.query` takes `TaskFilter` without the paging fields and answers the first page, `{ items, nextCursor? }`: a step reads the answer to decide where the run goes next, and the first page answers that. Nothing executes an action until runs exist ([#79](https://github.com/theagenticage/hercule/issues/79)).
+*(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* Three are registered now: `task.create`, `task.update` and `task.query`. `workflow.run` joins with [#79](https://github.com/theagenticage/hercule/issues/79) and `notification.create` with [#84](https://github.com/theagenticage/hercule/issues/84), each in the ticket that adds its operation, because an action is its operation and cannot exist before it. Two inputs differ from the operation's, by necessity. `task.update` takes `taskId` in its params, because a request carries it in the path, and it is refused when it names no field to change, by the operation's own rule. `task.query` takes `TaskFilter` without the paging fields and answers the first page, `{ items, nextCursor? }`: a step reads the answer to decide where the run goes next, and the first page answers that. ~~Nothing executes an action until runs exist ([#79](https://github.com/theagenticage/hercule/issues/79)).~~ *(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79): runs now execute these actions, below.)*
+
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* Runs execute the built-in actions, and ~~four are registered now: `workflow.run` joins `task.create`, `task.update` and `task.query`.~~ five are registered now: `task.create`, `task.update`, `task.query`, `run.start` and `wait` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*. `notification.create` still joins with [#84](https://github.com/theagenticage/hercule/issues/84), and until then a save refuses a step that names it as an unknown action.
+
+- **~~`workflow.run`~~ `run.start`** takes `{ workflowId, inputs? }` in its params and outputs `{ runId }`. As with `task.update`, the id that a request carries in its path is a param. It starts the child run and completes at once, without waiting for the child. The child's origin is `{ kind: "action", parentRunId, stepId }`. The child is checked exactly as a start by request is (section 7.1). A child that cannot start, because its workflow no longer validates, has an element runs cannot execute yet, or is given inputs that are not valid, fails the parent step with the code `validation` and creates no child run. A workflow that does not exist fails it with `not_found`.
+- **Actor.** Inside a run, a built-in action acts as `run:<runId>` and passes every grant check (section 4.1). So a ~~`workflow.run`~~ `run.start` step needs no grant, whoever started its run.
+- **The run on a Task's provenance.** ~~"Provenance may carry ... the run id" in the table is met by the entry's `actor`: every provenance entry a step writes is stamped `run:<runId>`.~~ Expressions read only `inputs` and `steps`, and no variable for the run's id is added to them.
+
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* **One operation starts a run, and the built-in actions are five.**
+
+- **`run.start` replaces `workflow.run` and `workflow.submit`**, as an operation and as an action. The two operations did one thing, start a run, for two kinds of workflow: a stored one and one sent with the request. One operation with one grant is simpler for a caller and for a profile. The rule above, that an action carries the id of the operation it calls, then gives the action the same id. The operation takes exactly one of `workflowId`, `source` and `definition`, beside `inputs` (section 9). The action takes only `{ workflowId, inputs? }`: a step that ran a workflow written into its own params would be a sub-workflow, which is post-v1. The grant is `run.start`; a profile that held `workflow.run` or `workflow.submit` holds `run.start` instead ([./13-security.md](./13-security.md)).
+- **`wait`** pauses the run for `seconds`, a whole number from 1 to 86400, and outputs `{}`. A save refuses any other value, at `params.seconds`. It is the one built-in action that is not an operation, because waiting changes nothing and no caller of the API needs it. It holds no transaction while it waits. A controller that restarts during a wait waits only for the time the step had left, counted from the step record's `startedAt`, and not at all if that time has passed. Cancelling the run ends the wait at once, and no later step starts.
+- **How deep runs may nest.** A run started by hand, by a program or by a trigger is 1 deep. A run that a `run.start` step starts is one deeper than the step's run. A `run.start` step whose child would be deeper than the controller setting `run.nestingLimit` (default 5) fails with the code `cap_exceeded` and starts no run, and the parent fails with `step-failed`. Without the limit, a workflow that starts itself, directly or through another workflow, would start runs without end, and with two such steps their number would double each time. The message names the depth and the limit and says how to change either. The setting is changed through the API or the CLI: `hercule settings update --controller '{"run.nestingLimit": 8}'`. Cancelling a run also cancels the runs it started (section 7.2).
+- **The run on a Task's provenance.** A task that a run's `task.create` step creates gets one provenance entry `{ runId }` after the entries the step's params give, unless one of those already names the run. Provenance records what created the task, and that was the run. Stamping the entries `run:<runId>` recorded who wrote them, not where the task came from. `task.update` adds nothing: provenance records where a task came from, and a run that edits a task did not create it. The entry is the core's own, so it does not count toward the limit on how many entries one request may add ([./09-tasks.md](./09-tasks.md)).
 
 GitHub and Gmail actions (for example creating a PR, commenting, fetching a mail body on demand, merging) are plugin contributions of the `github` and `gmail` plugins, invoked as ordinary action steps naming the Connection they act as (`connection.use` grant, [./13-security.md](./13-security.md)). Their exact roster is Open in [./05-plugins.md](./05-plugins.md). Mid-session mailbox access from an agent step is covered in v1 by gmail action steps around it and the session spec's MCP passthrough.
 
 ## 9. Ad-hoc workflows
 
-An agent (or the user) may start a run from a workflow definition that is not stored: `workflow.submit { definition, inputs }` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), where `definition` is the `Workflow` shape of section 1 minus `id` and timestamps. The controller validates it exactly as a stored workflow (section 1), freezes it into a run with `workflowId: null` and `origin.kind: "api"`, and executes it; `workflow.run` loads a stored definition and takes the same path. The definition lives only on that run; it is never stored as a workflow and nothing else references it. This is how "something weird once" is expressed without user code, and how an agent that needs a route no shipped workflow has gets one ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md), [ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)). The outside world only ever writes workflows; "execution plan" names the frozen copy on a run and appears in no contract. Graduating a submitted definition into a stored workflow ("save as workflow") is post-v1.
+An agent (or the user) may start a run from a workflow definition that is not stored: ~~`workflow.submit { definition, inputs }`~~ `run.start { source | definition, inputs? }` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), where `definition` is the `Workflow` shape of section 1 minus `id` and timestamps. The controller validates it exactly as a stored workflow (section 1), freezes it into a run with `workflowId: null` ~~and `origin.kind: "api"`~~ *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79): the origin follows who started the run, below)*, and executes it; ~~`workflow.run`~~ `run.start { workflowId }` loads a stored definition and takes the same path. The definition lives only on that run; it is never stored as a workflow and nothing else references it. This is how "something weird once" is expressed without user code, and how an agent that needs a route no shipped workflow has gets one ([ADR 0001](../adr/0001-runs-freeze-an-execution-plan.md), [ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)). The outside world only ever writes workflows; "execution plan" names the frozen copy on a run and appears in no contract. Graduating a submitted definition into a stored workflow ("save as workflow") is post-v1.
 
-Grant: `workflow.submit`, its own verb, held by the shipped `assistant` profile and withheld from `worker` ([./13-security.md](./13-security.md)).
+Grant: ~~`workflow.submit`, its own verb~~ `run.start`, the one grant for starting any run *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*, held by the shipped `assistant` profile and withheld from `worker` ([./13-security.md](./13-security.md)).
+
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* ~~`workflow.submit` takes `{ source | definition, inputs? }`: exactly one of `source` (the YAML text) and `definition` (the `WorkflowDefinition` object of section 1), as `workflow.create` does, and the values the run starts with. It is checked and refused exactly as `workflow.run` is (section 7.1), and it answers `{ runId }` at once. The workflow is never stored: the run has `workflowId: null`, its origin is `api` whoever calls it, and its `plan` is the only copy of the definition. A submitted source is parsed into the plan; the text itself is not kept.~~
+
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* **`run.start`** takes exactly one of `workflowId` (a stored workflow), `source` (the YAML text) and `definition` (the `WorkflowDefinition` object of section 1), beside `inputs?`, the values the run starts with. A request that names no workflow, or more than one, is refused with `validation`, as one issue at the whole request. A stored workflow is loaded and a sent one parsed, and from there both take the same path: checked and refused as section 7.1 says, answered with `{ runId }` at once. A sent workflow is never stored: the run has `workflowId: null`, and its `plan` is the only copy of the definition; a sent source is parsed into the plan and the text itself is not kept. The run's origin follows who started it, not the kind of workflow: `manual` for the user, `api` for a session, `action` for a run's step (section 7.2).
 
 ## 10. The human moment
 
@@ -451,7 +590,7 @@ Whether a gate step earns a return is a post-dogfooding question: it needs a kno
 ## Post-v1
 
 - Human-gate step; returns post-dogfooding once the question shape is known. Kept possible: steps are a closed tagged union that can grow a third kind.
-- Sub-workflow steps that wait and route on the child's output; v1 has fire-and-forget `workflow.run` only.
+- Sub-workflow steps that wait and route on the child's output; v1 has fire-and-forget ~~`workflow.run`~~ `run.start` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))* only.
 - Graduation ("save as workflow") of a submitted workflow; kept possible because a submitted definition already has the stored-workflow shape.
 - Per-workflow concurrency controls; automatic retries; partial re-run ("failed steps only").
 - Execution-plan snapshot dedup by content hash, only if per-run plan copies ever hurt.

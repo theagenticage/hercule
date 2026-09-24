@@ -10,9 +10,10 @@ const api: Readonly<Record<string, Handler>> = {
       user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
     },
   },
-  // Of the screens here, Tasks, Workflows, Fleet, Connections, Plugins and
-  // Secrets load data of their own.
+  // Of the screens here, Tasks, Runs, Workflows, Fleet, Connections, Plugins
+  // and Secrets load data of their own.
   "GET /api/v1/tasks": { body: { items: [] } },
+  "GET /api/v1/runs": { body: { items: [] } },
   "GET /api/v1/workflows": { body: { items: [] } },
   "GET /api/v1/plugins": { body: [] },
   "GET /api/v1/projects": { body: { items: [] } },

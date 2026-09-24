@@ -25,6 +25,8 @@ import {
   MAX_PLUGIN_MESSAGE_LENGTH,
   page,
   refuseEmptyTaskUpdate,
+  RunInputs,
+  RunStarted,
   Task,
   TaskCreateInput,
   TaskFilter,
@@ -48,7 +50,7 @@ export const CORE_CONTRIBUTION_OWNER = "core";
 /**
  * A workflow action registered at boot. `id` is the id a step uses to call
  * the action: `<pluginId>/<word>` for a plugin's action, and the operation id
- * for a built-in action.
+ * for a built-in action, except `wait`, which calls no operation.
  */
 export interface RegisteredWorkflowAction {
   readonly id: string;
@@ -63,6 +65,16 @@ export interface RegisteredWorkflowAction {
   readonly inputSchema: JsonSchema.JsonSchema;
   /** The same schema as an Effect schema, used to decode literal params. */
   readonly input: Schema.Top;
+  /** The schema of what the action returns, used to check a plugin action's result. */
+  readonly output: Schema.Top;
+  /** The qualified type of the Connection the action acts through, if it uses one. */
+  readonly connection?: { readonly type: string };
+  /**
+   * Carries out a plugin's action. A built-in action has none: the run engine
+   * calls the operation's service method itself, because the catalog sits
+   * below the domains those methods belong to.
+   */
+  readonly execute?: WorkflowActionContribution["execute"];
 }
 
 /**
@@ -97,6 +109,7 @@ interface DeclaredWorkflowAction {
   readonly input: Schema.Top;
   readonly output: Schema.Top;
   readonly connection?: { readonly type: string };
+  readonly execute?: WorkflowActionContribution["execute"];
 }
 
 /**
@@ -132,6 +145,9 @@ const addWorkflowAction = (
     description: action.description,
     inputSchema,
     input: action.input,
+    output: action.output,
+    ...(action.connection === undefined ? {} : { connection: action.connection }),
+    ...(action.execute === undefined ? {} : { execute: action.execute }),
   });
 };
 
@@ -140,9 +156,6 @@ const addWorkflowAction = (
  * qualified id is `<pluginId>/<word>`. Fails with a `PluginError` if a field
  * is invalid, the id is already registered, or the input schema is not a
  * struct.
- *
- * `execute` is not stored here: nothing calls it until runs execute action
- * steps.
  */
 export const registerWorkflowActionContribution = (
   pluginId: string,
@@ -192,26 +205,29 @@ export const registerWorkflowActionContribution = (
         input: contribution.input,
         output: contribution.output,
         ...(header.connection === undefined ? {} : { connection: header.connection }),
+        execute: contribution.execute,
       },
       declared,
       actions,
     );
   });
 
+/** The longest a `wait` step can wait: one day, in seconds. */
+const MAX_WAIT_SECONDS = 86_400;
+
 /**
- * The built-in workflow actions. Each one calls an operation of the public API
- * and has the operation's id, so a step can do nothing that an API request
- * cannot do. More built-in actions are added here as their operations are
- * built.
+ * The built-in workflow actions. Each one but `wait` calls an operation of the
+ * public API and has the operation's id, so a step can do nothing that an API
+ * request cannot do. `wait` only waits: it acts on nothing, so there is no
+ * operation for it to call. More built-in actions are added here as their
+ * operations are built.
  */
-const BUILT_IN_WORKFLOW_ACTIONS: ReadonlyArray<
-  DeclaredWorkflowAction & { readonly id: OperationId }
-> = [
+const BUILT_IN_WORKFLOW_ACTIONS = [
   {
     id: "task.create",
     displayName: "Create a task",
     description:
-      "Creates one Task from a title and a description, with an optional priority, labels, project and provenance.",
+      "Creates one Task from a title and a description, with an optional priority, labels, project and provenance. The task's provenance also records the run that created it.",
     input: TaskCreateInput,
     output: Task,
   },
@@ -236,7 +252,37 @@ const BUILT_IN_WORKFLOW_ACTIONS: ReadonlyArray<
     input: TaskFilter,
     output: page(Task),
   },
-];
+  {
+    id: "run.start",
+    displayName: "Start a run",
+    description:
+      "Starts a run of the stored workflow with the id workflowId, and does not wait for it to finish. The output holds the new run's id.",
+    // Of the operation's input, only a stored workflow: a step that starts a
+    // run of a workflow written into its own params would be a sub-workflow,
+    // which is not built yet.
+    input: Schema.Struct({ workflowId: Id, inputs: Schema.optionalKey(RunInputs) }),
+    output: RunStarted,
+  },
+  {
+    id: "wait",
+    displayName: "Wait",
+    description: `Waits the given number of seconds, from 1 to ${MAX_WAIT_SECONDS} (one day), before the run goes on. Cancelling the run ends the wait.`,
+    input: Schema.Struct({
+      seconds: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_WAIT_SECONDS })),
+    }),
+    output: Schema.Struct({}),
+  },
+] as const satisfies ReadonlyArray<DeclaredWorkflowAction & { readonly id: OperationId | "wait" }>;
+
+/** The id of a built-in workflow action. */
+export type BuiltInActionId = (typeof BUILT_IN_WORKFLOW_ACTIONS)[number]["id"];
+
+const BUILT_IN_ACTION_IDS: ReadonlySet<string> = new Set(
+  BUILT_IN_WORKFLOW_ACTIONS.map((action) => action.id),
+);
+
+/** Checks whether an action id is one of the built-in actions. */
+export const isBuiltInActionId = (id: string): id is BuiltInActionId => BUILT_IN_ACTION_IDS.has(id);
 
 /** Adds the built-in actions, owned by `core`, to the collections of a registration pass. */
 export const registerBuiltInWorkflowActions = (

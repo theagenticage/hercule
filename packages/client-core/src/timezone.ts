@@ -56,3 +56,11 @@ export const resolveBrowserTimezone = (resolve: TimezoneResolver = resolveFromIn
   const zone = resolve();
   return isSupportedTimezone(zone) ? zone : FALLBACK_TIMEZONE;
 };
+
+/**
+ * Returns the zone a screen shows times in: the user's stored zone, or UTC
+ * when none is stored or this browser cannot format the stored one. The top
+ * bar says when a stored zone is not used, so no screen repeats that.
+ */
+export const resolveDisplayTimezone = (stored: string | undefined): string =>
+  stored !== undefined && isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE;

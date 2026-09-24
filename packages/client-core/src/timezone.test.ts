@@ -1,6 +1,7 @@
 import { assert, describe, it } from "vitest";
 import {
   resolveBrowserTimezone,
+  resolveDisplayTimezone,
   FALLBACK_TIMEZONE,
   isSupportedTimezone,
   listSupportedTimezones,
@@ -53,5 +54,13 @@ describe("resolveBrowserTimezone", () => {
     assert.doesNotThrow(
       () => new Intl.DateTimeFormat("en-US", { timeZone: resolveBrowserTimezone() }),
     );
+  });
+});
+
+describe("resolveDisplayTimezone", () => {
+  it("uses the stored zone, and UTC when none is stored or the stored one is unknown", () => {
+    assert.strictEqual(resolveDisplayTimezone("Europe/Amsterdam"), "Europe/Amsterdam");
+    assert.strictEqual(resolveDisplayTimezone(undefined), "UTC");
+    assert.strictEqual(resolveDisplayTimezone("Europe/Nowhere"), "UTC");
   });
 });

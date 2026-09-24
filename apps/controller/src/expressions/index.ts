@@ -76,25 +76,84 @@ const SOURCE_LIMITS = {
 };
 
 /**
- * The environment used to parse and evaluate. No function is registered on it,
- * or on the scoped environments used for validation. That keeps the function
- * whitelist pure: a registered function is the only way a custom, and possibly
- * asynchronous, handler enters, and an asynchronous handler is the only thing
- * that turns `evaluate` into a `Promise`. So evaluation is synchronous by
- * construction, and a condition can call nothing that reaches outside the
- * context it is given.
- *
- * It declares no variables and reads each one from the evaluation context.
- * Which variables a source may read was already enforced when the source was
- * validated.
+ * The two operands of a binary operator, as CEL hands them to a handler. A
+ * whole number (int) arrives as a `bigint`, a decimal (double) as a `number`.
  */
-const environment = new Environment({
-  // Context variables are dynamic. A payload is loosely shaped, and a plain
-  // JSON number stays a number this way instead of needing a BigInt literal
-  // to compare against.
-  unlistedVariablesAreDyn: true,
-  limits: SOURCE_LIMITS,
-});
+type Operand = bigint | number;
+
+/** The arithmetic operators that combine a whole number and a decimal. */
+const ARITHMETIC: Record<"+" | "-" | "*" | "/" | "%", (left: number, right: number) => number> = {
+  "+": (left, right) => left + right,
+  "-": (left, right) => left - right,
+  "*": (left, right) => left * right,
+  "/": (left, right) => left / right,
+  "%": (left, right) => left % right,
+};
+
+/**
+ * Builds an environment with the structural limits and the operators every
+ * expression gets, whether it is being validated or evaluated. Validation and
+ * evaluation share this one function, so a save accepts exactly what a run can
+ * evaluate.
+ *
+ * Standard CEL keeps whole numbers (int) and decimals (double) apart, and a
+ * number read from the context is always a decimal, because the context is
+ * plain JSON. So `inputs.count + 1` fails in standard CEL. An author should
+ * never have to think about that, so the operators below extend CEL (spec 07,
+ * section 5):
+ *
+ * - `+ - * / %` between a whole number and a decimal, in either order, give a
+ *   decimal. `%` also works between two decimals. Two whole numbers stay whole,
+ *   so `7 / 2` is still 3: the evaluator's own `int / int` cannot be replaced.
+ * - `==` and `!=` between a whole number and a decimal compare the values, so
+ *   `3 == 3.0` is true. Ordering (`<`, `>=`) already compares across the two.
+ * - `+` between a string and a number, in either order, joins them as text. A
+ *   whole decimal is written without `.0`, as JavaScript writes it.
+ * - A list or map literal may mix value types, such as `[1, inputs.price]`.
+ *
+ * Every handler is pure and synchronous. A registered handler is the only way
+ * custom code enters the evaluator, and an asynchronous one is the only thing
+ * that would turn `evaluate` into a `Promise`, so evaluation stays synchronous
+ * and an expression can reach nothing outside the context it is given. No
+ * function is registered.
+ */
+const buildEnvironment = (unlistedVariablesAreDyn: boolean): Environment => {
+  const built = new Environment({
+    unlistedVariablesAreDyn,
+    homogeneousAggregateLiterals: false,
+    limits: SOURCE_LIMITS,
+  });
+  for (const [operator, apply] of Object.entries(ARITHMETIC)) {
+    const handler = (left: Operand, right: Operand): number => apply(Number(left), Number(right));
+    built.registerOperator(`int ${operator} double: double`, handler);
+    built.registerOperator(`double ${operator} int: double`, handler);
+  }
+  built.registerOperator("double % double: double", ARITHMETIC["%"]);
+  // Registering `==` also registers `double == int` and both `!=`.
+  built.registerOperator("int == double", (left: bigint, right: number) => Number(left) === right);
+  for (const number of ["int", "double"]) {
+    built.registerOperator(
+      `string + ${number}: string`,
+      (left: string, right: Operand) => left + String(right),
+    );
+    built.registerOperator(
+      `${number} + string: string`,
+      (left: Operand, right: string) => String(left) + right,
+    );
+  }
+  return built;
+};
+
+/**
+ * The environment used to parse and evaluate. It declares no variables and
+ * reads each one from the evaluation context. Which variables a source may
+ * read was already enforced when the source was validated.
+ *
+ * Context variables are dynamic. A payload is loosely shaped, and a plain
+ * JSON number stays a number this way instead of needing a BigInt literal to
+ * compare against.
+ */
+const environment = buildEnvironment(true);
 
 /**
  * Which variables an expression can read. This depends on where the
@@ -115,13 +174,13 @@ const SCOPE_VARIABLES: Record<ExpressionScope, ReadonlyArray<string>> = {
 
 /**
  * Builds an environment that declares only the variables of one scope, so
- * validation rejects a source that reads any other variable. It uses the same
- * limits as evaluation.
+ * validation rejects a source that reads any other variable. It has the same
+ * limits and operators as evaluation.
  */
 const buildScopedEnvironment = (scope: ExpressionScope): Environment =>
   SCOPE_VARIABLES[scope].reduce(
     (built, variable) => built.registerVariable(variable, "dyn"),
-    new Environment({ unlistedVariablesAreDyn: false, limits: SOURCE_LIMITS }),
+    buildEnvironment(false),
   );
 
 const SCOPED_ENVIRONMENTS: Record<ExpressionScope, Environment> = {
@@ -402,3 +461,140 @@ export const evaluateExpression = (
       }),
     );
   });
+
+/**
+ * Converts a value an expression returned into JSON. Returns `undefined` when
+ * the value has no JSON form.
+ *
+ * The evaluator returns an integer as a `BigInt`, for an integer literal and
+ * for what a function such as `size` returns, even inside a list or a map.
+ * `JSON.stringify` rejects a `BigInt`, and a schema for a number does not
+ * accept one, so an integer becomes a number here. An integer too large to be
+ * an exact number has no JSON form. So have bytes, durations, timestamps and
+ * the other values that are not plain data.
+ */
+const convertToJson = (value: unknown): unknown => {
+  switch (typeof value) {
+    case "string":
+    case "boolean":
+      return value;
+    case "number":
+      return Number.isFinite(value) ? value : undefined;
+    case "bigint":
+      return Number.isSafeInteger(Number(value)) ? Number(value) : undefined;
+    case "object": {
+      if (value === null) return null;
+      if (Array.isArray(value)) {
+        const items = value.map(convertToJson);
+        return items.includes(undefined) ? undefined : items;
+      }
+      if (Object.getPrototypeOf(value) !== Object.prototype) return undefined;
+      const entries = Object.entries(value).map(([key, item]) => [key, convertToJson(item)]);
+      return entries.some(([, item]) => item === undefined)
+        ? undefined
+        : Object.fromEntries(entries);
+    }
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Renders a template against a run's context (`inputs` and `steps`). Fails
+ * with `ExpressionError` if an expression cannot be evaluated, or returns a
+ * value with no JSON form.
+ *
+ * A template that is exactly one `{{ expr }}`, with no other text, renders to
+ * the expression's value with its own JSON type. So `{{ inputs.count }}`
+ * renders to the number 3, and can fill a field that takes a number. Any
+ * other template renders to text: each expression is replaced by its value,
+ * a string as it is and any other value as JSON.
+ */
+export const renderTemplate = (
+  template: string,
+  context: Record<string, unknown>,
+): Effect.Effect<unknown, ExpressionError> =>
+  Effect.gen(function* () {
+    const parsed = parseTemplateExpressions(template);
+    if (Result.isFailure(parsed)) {
+      return yield* Effect.fail(
+        new ExpressionError({
+          message: `The {{ at character ${String(countCharactersBefore(template, parsed.failure) + 1)} has no closing }}.`,
+        }),
+      );
+    }
+    const values: Array<unknown> = [];
+    for (const expression of parsed.success) {
+      const describeSite = (): string =>
+        `The expression that starts with the {{ at character ${String(countCharactersBefore(template, expression.offset) + 1)}`;
+      const value = yield* Effect.mapError(
+        evaluateExpression(expression.source, context),
+        (error) => new ExpressionError({ message: `${describeSite()}: ${error.message}` }),
+      );
+      const json = convertToJson(value);
+      if (json === undefined) {
+        return yield* Effect.fail(
+          new ExpressionError({
+            message: `${describeSite()} returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp, an integer too large for a JSON number, or the infinity or the NaN that dividing a decimal by zero gives (as in x / 0.0 or x % 0.0). Convert it with string(), or change the expression.`,
+          }),
+        );
+      }
+      values.push(json);
+    }
+    /** Returns the index just past the `}}` that closes an expression. */
+    const findEnd = (expression: TemplateExpression): number =>
+      expression.offset + TEMPLATE_OPEN.length + expression.source.length + TEMPLATE_CLOSE.length;
+    const [first] = parsed.success;
+    if (parsed.success.length === 1 && first!.offset === 0 && findEnd(first!) === template.length) {
+      return values[0];
+    }
+    let rendered = "";
+    let from = 0;
+    parsed.success.forEach((expression, index) => {
+      const value = values[index];
+      rendered +=
+        template.slice(from, expression.offset) +
+        (typeof value === "string" ? value : JSON.stringify(value));
+      from = findEnd(expression);
+    });
+    return rendered + template.slice(from);
+  });
+
+/**
+ * Renders every template in a JSON value, at any depth: each string that is a
+ * template (see `isTemplate`) is replaced by what `renderTemplate` renders it
+ * to. Every other value is returned as it is. Fails with `ExpressionError` for
+ * the first template that cannot be rendered; the message names the template's
+ * path in the value, such as `labels.0`.
+ */
+export const renderTemplates = (
+  value: unknown,
+  context: Record<string, unknown>,
+  path: ReadonlyArray<string> = [],
+): Effect.Effect<unknown, ExpressionError> => {
+  if (typeof value === "string") {
+    return isTemplate(value)
+      ? Effect.mapError(
+          renderTemplate(value, context),
+          (error) =>
+            new ExpressionError({
+              message: `The template in ${path.length === 0 ? "the value" : path.join(".")} could not be rendered. ${error.message}`,
+            }),
+        )
+      : Effect.succeed(value);
+  }
+  if (Array.isArray(value)) {
+    return Effect.forEach(value, (item, index) =>
+      renderTemplates(item, context, [...path, String(index)]),
+    );
+  }
+  if (typeof value === "object" && value !== null) {
+    return Effect.map(
+      Effect.forEach(Object.entries(value), ([key, item]) =>
+        Effect.map(renderTemplates(item, context, [...path, key]), (rendered) => [key, rendered]),
+      ),
+      Object.fromEntries,
+    );
+  }
+  return Effect.succeed(value);
+};

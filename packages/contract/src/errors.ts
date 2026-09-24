@@ -164,6 +164,21 @@ export type ApiError =
   | CapExceeded
   | Internal;
 
+const API_ERRORS = [
+  Unauthenticated,
+  Forbidden,
+  Validation,
+  NotFound,
+  Conflict,
+  InvalidState,
+  CapExceeded,
+  Internal,
+];
+
+/** Checks whether a value is one of the errors the API can return. */
+export const isApiError = (error: unknown): error is ApiError =>
+  API_ERRORS.some((constructor) => error instanceof constructor);
+
 /** Creates the error for a missing credential, or for a credential that does not resolve. */
 export const createUnauthenticatedError = (message: string): Unauthenticated =>
   new Unauthenticated({ error: { code: "unauthenticated", message } });

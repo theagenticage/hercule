@@ -3,6 +3,7 @@
  * are generic: they know nothing about tasks, and these tests do not mention
  * tasks.
  */
+import { StrictMode, useState, type JSX, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -62,6 +63,91 @@ describe("Drawer", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Drawer focus", () => {
+  /** Renders a button that opens a drawer, whose content is `children`. */
+  function Opener({ children }: { readonly children: ReactNode }): JSX.Element {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(true);
+          }}
+        >
+          Open
+        </button>
+        <Drawer
+          open={open}
+          onClose={() => {
+            setOpen(false);
+          }}
+          title="Details"
+        >
+          {children}
+        </Drawer>
+      </>
+    );
+  }
+
+  it("moves the focus into the panel, and back to the opener on close", async () => {
+    const user = userEvent.setup();
+    render(<Opener>Inside</Opener>);
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open" }));
+  });
+
+  it("keeps a control's focus when development mode runs the effects of a mounting drawer twice", async () => {
+    // React runs a component's effects twice only when it mounts, so the
+    // drawer here mounts already open, as a drawer a screen mounts to open.
+    function Mounter(): JSX.Element {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(true);
+            }}
+          >
+            Open
+          </button>
+          {open ? (
+            <Drawer open onClose={() => {}} title="Details">
+              <Input aria-label="Title" autoFocus />
+            </Drawer>
+          ) : null}
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <Mounter />
+      </StrictMode>,
+    );
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Title" }));
+  });
+
+  it("leaves the focus on a control inside that took it as the panel opened", async () => {
+    const user = userEvent.setup();
+    render(
+      <Opener>
+        <Input aria-label="Title" autoFocus />
+      </Opener>,
+    );
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Title" }));
+
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open" }));
   });
 });
 

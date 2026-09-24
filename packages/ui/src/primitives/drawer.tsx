@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "./button";
 
 /**
@@ -9,6 +9,8 @@ import { Button } from "./button";
  *   it by accident is never stuck in it.
  * - Focus moves into the panel when it opens and returns to the previously
  *   focused element when it closes, so keyboard users get the same behaviour.
+ *   A control inside that takes the focus as the panel opens, such as a
+ *   form's first field with `autoFocus`, keeps it.
  * - Escape is handled on the panel, not on the document, so a menu open over
  *   the drawer handles its own Escape and the drawer stays open.
  * - The page behind is not made inert, so the drawer does not claim to be
@@ -26,15 +28,28 @@ export function Drawer({
   readonly children: ReactNode;
 }): JSX.Element | null {
   const panel = useRef<HTMLDivElement>(null);
+  // The element that had the focus when the drawer opened. It is read while
+  // rendering, before a control inside the drawer can take the focus.
+  const [opener, setOpener] = useState(() => (open ? document.activeElement : null));
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setOpener(document.activeElement);
+  }
 
   useEffect(() => {
-    if (!open) return;
-    const returnTo = document.activeElement;
-    panel.current?.focus();
+    const node = panel.current;
+    if (!open || node === null) return;
+    if (!node.contains(document.activeElement)) node.focus();
     return () => {
-      if (returnTo instanceof HTMLElement) returnTo.focus();
+      // The focus goes back only once the panel has left the page. React's
+      // development mode runs every effect's cleanup once while the panel
+      // stays; moving the focus then would take it from a control inside.
+      queueMicrotask(() => {
+        if (!node.isConnected && opener instanceof HTMLElement) opener.focus();
+      });
     };
-  }, [open]);
+  }, [open, opener]);
 
   if (!open) return null;
 

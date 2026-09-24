@@ -5,9 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/output-schema.testing.ts"
+    "./testing": "./src/output-schema.testing.ts",
+    "./json-schema": "./src/json-schema.ts"
   },
   "dependencies": {
+    "@cfworker/json-schema": "4.1.1",
     "effect": "4.0.0-rc.112"
   }
 }

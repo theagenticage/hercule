@@ -104,6 +104,8 @@ Provenance is a task's append-only record of what created or touched it. Each en
 
 Provenance is what lets a duplicate signal find its existing task, and what the Intake "made from" line and the proactive "related to task X" link are rendered from.
 
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* A task that a run's `task.create` step creates always records its run: the core adds the entry `{ runId }` after the entries the step's params give, unless one of those already names the run. The entry is the core's own, so it does not count toward the limit on how many entries one request may add. A run's `task.update` step adds no such entry, because the run did not create the task ([./07-workflows.md](./07-workflows.md) section 8).
+
 ### External Ref canonical form
 
 An External Ref is a fully-qualified canonical identifier for a thing outside Hercule. Examples: `github:issue:owner/repo#42`, `gmail:thread:<id>`, `sentry:issue:123`.

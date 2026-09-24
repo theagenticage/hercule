@@ -10,6 +10,7 @@ import {
   RunGlyph,
   SessionGlyph,
   TaskGlyph,
+  WorkStateMark,
   WorkflowGlyph,
   WorkingMark,
 } from "./marks";
@@ -102,5 +103,23 @@ describe("the mark family", () => {
     const svg = container.querySelector("svg")!;
     expect(svg.classList.contains("hercule-equalizer")).toBe(true);
     expect(svg.querySelectorAll("rect")).toHaveLength(3);
+  });
+});
+
+describe("WorkStateMark", () => {
+  it.each([
+    ["pending", "queued"],
+    ["running", "working"],
+    ["completed", "done"],
+    ["failed", "failed"],
+    ["cancelled", "cancelled"],
+  ] as const)("draws the %s state with the %s mark", (state, mark) => {
+    const { container } = render(<WorkStateMark state={state} />);
+    expect(container.querySelector("svg")?.dataset.mark).toBe(mark);
+  });
+
+  it("draws no mark for work the run has not reached", () => {
+    const { container } = render(<WorkStateMark state="unreached" />);
+    expect(container.innerHTML).toBe("");
   });
 });

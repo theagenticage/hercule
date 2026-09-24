@@ -1,4 +1,4 @@
-export { useMinuteClock } from "./primitives/clock";
+export { useMinuteClock, useTickingClock } from "./primitives/clock";
 export { cn } from "./primitives/cn";
 export { Button, buildButtonClassName, type ButtonVariant } from "./primitives/button";
 export { Checkbox } from "./primitives/checkbox";
@@ -28,7 +28,10 @@ export {
   TaskGlyph,
   WorkflowGlyph,
   WorkingMark,
+  WorkStateMark,
+  WORK_STATE_HUES,
   type MarkProps,
+  type WorkState,
 } from "./marks/marks";
 export { Logo } from "./marks/logo";
 export { MarksLegend } from "./marks/marks-legend";
