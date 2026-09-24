@@ -61,6 +61,15 @@ describe("renderTemplate", () => {
       /cannot be written as JSON/,
     );
   });
+
+  it("fails, naming infinity and NaN, when a decimal is divided by zero", () => {
+    expect(readFailure(renderTemplate("{{ inputs.price / 0.0 }}", CONTEXT))).toMatch(
+      /infinity or the NaN/,
+    );
+    expect(readFailure(renderTemplate("{{ inputs.price % 0.0 }}", CONTEXT))).toMatch(
+      /infinity or the NaN/,
+    );
+  });
 });
 
 describe("renderTemplates", () => {

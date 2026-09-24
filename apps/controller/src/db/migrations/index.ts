@@ -35,6 +35,7 @@ import workflowsAndTriggers from "./0024-workflows-and-triggers";
 import runs from "./0025-runs";
 import runStartGrant from "./0026-run-start-grant";
 import runsByParent from "./0027-runs-by-parent";
+import runsFailedByTheController from "./0028-runs-failed-by-the-controller";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -64,6 +65,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [25, "runs", Effect.succeed(runs)],
   [26, "run-start-grant", Effect.succeed(runStartGrant)],
   [27, "runs-by-parent", Effect.succeed(runsByParent)],
+  [28, "runs-failed-by-the-controller", Effect.succeed(runsFailedByTheController)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

@@ -548,6 +548,25 @@ edges:
     ]);
   });
 
+  it("asks whether an input is required when its declaration leaves required out", () => {
+    const issues = collectIssues(`name: input with a default
+inputs:
+  - name: title
+    schema: { type: string }
+    default: Fix login
+steps:
+  - id: file_task
+    kind: action
+    action: task.create
+`);
+    expect(issues).toEqual([
+      {
+        path: ["inputs", "0", "required"],
+        message: "Say whether this input is required: add required: true or required: false.",
+      },
+    ]);
+  });
+
   it("reports an agent that is not an id at its path, with a message on how to find Agent ids", () => {
     const issues = collectIssues(`name: agent by name
 steps:

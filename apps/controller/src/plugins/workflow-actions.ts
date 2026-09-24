@@ -213,7 +213,7 @@ export const registerWorkflowActionContribution = (
   });
 
 /** The longest a `wait` step can wait: one day, in seconds. */
-export const MAX_WAIT_SECONDS = 86_400;
+const MAX_WAIT_SECONDS = 86_400;
 
 /**
  * The built-in workflow actions. Each one but `wait` calls an operation of the

@@ -42,7 +42,7 @@ import { workflowRepository, WorkflowService } from "../../workflows";
  * setting is not set. A run started by hand or through the API is 1 deep; a
  * run that a `run.start` step starts is one deeper than the step's run.
  */
-export const DEFAULT_RUN_NESTING_LIMIT = 5;
+const DEFAULT_RUN_NESTING_LIMIT = 5;
 
 const decodeStartInput = Schema.decodeUnknownEffect(RunStartInput);
 

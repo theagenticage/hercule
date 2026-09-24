@@ -535,7 +535,7 @@ export const renderTemplate = (
       if (json === undefined) {
         return yield* Effect.fail(
           new ExpressionError({
-            message: `${describeSite()} returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp, an integer too large for a JSON number, or the infinity that a division by zero gives. Convert it with string(), or change the expression.`,
+            message: `${describeSite()} returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp, an integer too large for a JSON number, or the infinity or the NaN that dividing a decimal by zero gives (as in x / 0.0 or x % 0.0). Convert it with string(), or change the expression.`,
           }),
         );
       }

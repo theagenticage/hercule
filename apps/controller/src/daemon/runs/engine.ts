@@ -155,7 +155,7 @@ const UNEXPECTED_RUN_FAILURE: EngineStepError = {
 };
 
 /** The step error for an action that failed with something other than one of the API's errors, such as a bug. */
-const UNEXPECTED_FAILURE: EngineStepError = {
+const UNEXPECTED_ACTION_FAILURE: EngineStepError = {
   code: "unexpected",
   message: "The action failed unexpectedly. The controller's log has the details.",
 };
@@ -470,7 +470,7 @@ const make = Effect.gen(function* () {
           return described === undefined
             ? Effect.as(
                 Effect.logError(`Step ${attempt.stepId} of run ${run.id} failed`, cause),
-                UNEXPECTED_FAILURE,
+                UNEXPECTED_ACTION_FAILURE,
               )
             : Effect.succeed(described);
         };
