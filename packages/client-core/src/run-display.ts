@@ -68,10 +68,10 @@ export interface Timestamps {
 }
 
 /**
- * A run, a run summary or a step record, reduced to the fields its times
- * follow from. The contract gives each status only the times it can have.
+ * A run or a run summary, reduced to the fields its times follow from. The
+ * contract gives each status only the times it can have.
  */
-type TimedRecord =
+type TimedRun =
   | { readonly status: "pending" }
   | { readonly status: "running"; readonly startedAt: string }
   | {
@@ -79,6 +79,12 @@ type TimedRecord =
       readonly startedAt?: string;
       readonly finishedAt: string;
     };
+
+/**
+ * A run, a run summary or a step record, reduced to the fields its times
+ * follow from. Only a step record can be skipped.
+ */
+type TimedRecord = TimedRun | { readonly status: "skipped"; readonly finishedAt: string };
 
 /**
  * Returns when a run, a run summary or a step record started and finished,
@@ -89,6 +95,7 @@ type TimedRecord =
  * - `completed`, `failed` and `cancelled`: `finishedAt`, and `startedAt` when
  *   it had started. A run cancelled before it started, or one the controller
  *   could not start, has none.
+ * - `skipped`: `finishedAt`. A skipped step record never started.
  */
 export const readTimestamps = (record: TimedRecord): Timestamps => {
   switch (record.status) {
@@ -103,6 +110,8 @@ export const readTimestamps = (record: TimedRecord): Timestamps => {
         ...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
         finishedAt: record.finishedAt,
       };
+    case "skipped":
+      return { finishedAt: record.finishedAt };
   }
 };
 
@@ -150,7 +159,7 @@ export const describeStepDuration = (times: Timestamps, now: number): string => 
  * after 1.2s", "cancelled after 4.1s". A run cancelled before it started has
  * no duration and is just "cancelled".
  */
-export const describeRunStatus = (run: TimedRecord, now: number): string => {
+export const describeRunStatus = (run: TimedRun, now: number): string => {
   const { startedAt, finishedAt } = readTimestamps(run);
   const elapsed = measureElapsed(startedAt, finishedAt, now);
   if (run.status === "pending" || elapsed === undefined) return run.status;
@@ -169,7 +178,9 @@ export const describeRunStatus = (run: TimedRecord, now: number): string => {
 
 /**
  * Returns a failure reason in a few plain words: "step failed", "template
- * error", or "controller error" for a run the controller could not carry out.
+ * error", "iteration limit" for an edge the run was to follow more often than
+ * its `maxTraversals` allows, or "controller error" for a run the controller
+ * could not carry out.
  */
 export const describeFailureReason = (reason: FailureReason): string => {
   switch (reason) {
@@ -177,6 +188,8 @@ export const describeFailureReason = (reason: FailureReason): string => {
       return "step failed";
     case "expression-error":
       return "template error";
+    case "iteration-limit":
+      return "iteration limit";
     case "controller-error":
       return "controller error";
   }
@@ -185,14 +198,23 @@ export const describeFailureReason = (reason: FailureReason): string => {
 /**
  * Returns the text the timeline shows where a step with no bar would be: "pending"
  * for a step waiting to start, "cancelled before it started" for one the run's
- * cancel reached first, and nothing for any other step.
+ * cancel reached first, "skipped" for one whose condition was false, and
+ * nothing for any other step.
  */
-export const describeUnstartedStep = (state: WorkState): string | undefined =>
-  state === "pending"
-    ? "pending"
-    : state === "cancelled"
-      ? "cancelled before it started"
-      : undefined;
+export const describeUnstartedStep = (state: WorkState): string | undefined => {
+  switch (state) {
+    case "pending":
+    case "skipped":
+      return state;
+    case "cancelled":
+      return "cancelled before it started";
+    case "running":
+    case "completed":
+    case "failed":
+    case "unreached":
+      return undefined;
+  }
+};
 
 /**
  * Returns the word for a step's state: its status as the contract spells it,

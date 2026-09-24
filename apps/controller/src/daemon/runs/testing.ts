@@ -9,7 +9,7 @@
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
 import type { ActionContext, Plugin } from "@hercule/plugin-host";
-import type { Issue, Run, RunStatus, StepRecord, Task } from "@hercule/contract";
+import type { Issue, Run, RunStatus, StepRecord, StepStatus, Task } from "@hercule/contract";
 import { get, post, type ServerHarness } from "../../http/testing";
 import { buildActionPlugin, createPluginFixture } from "../../plugins/testing";
 import type { RunPage } from "../../runs";
@@ -19,9 +19,17 @@ import { FACTS, MODELS, PROVIDER, runEffect } from "../testing";
 
 const FINAL_STATUSES: ReadonlyArray<RunStatus> = ["completed", "failed", "cancelled"];
 
+/** The statuses a step record never leaves. */
+const FINAL_STEP_STATUSES: ReadonlyArray<StepStatus> = [
+  "completed",
+  "failed",
+  "cancelled",
+  "skipped",
+];
+
 /**
- * How far along a status is. A run or a step record may only move to a status
- * with a higher rank, and once final it never changes again.
+ * How far along a status is. A run may only move to a status with a higher
+ * rank, and once final it never changes again.
  */
 const STATUS_RANK: Record<RunStatus, number> = {
   pending: 0,
@@ -29,6 +37,21 @@ const STATUS_RANK: Record<RunStatus, number> = {
   completed: 2,
   failed: 2,
   cancelled: 2,
+};
+
+/**
+ * How far along a step record's status is, read the same way as
+ * `STATUS_RANK`. A step record reaches `skipped` only from `pending`, which
+ * `expectMovedForward` checks on its own, because the rank alone would let
+ * `running` move to it.
+ */
+const STEP_STATUS_RANK: Record<StepStatus, number> = {
+  pending: 0,
+  running: 1,
+  completed: 2,
+  failed: 2,
+  cancelled: 2,
+  skipped: 2,
 };
 
 /** Sends `run.start` with `body` as it is, and returns the response. */
@@ -69,9 +92,12 @@ export const readRun = async (base: string, token: string, id: string): Promise<
   return (await response.json()) as Run;
 };
 
-/** Fails the test if any status moved backwards between two reads of the same run. */
+/**
+ * Fails the test if any status moved backwards between two reads of the same
+ * run, or if a step record that had started was later `skipped`.
+ */
 const expectMovedForward = (earlier: Run, later: Run): void => {
-  const describeMove = (what: string, from: RunStatus, to: RunStatus) =>
+  const describeMove = (what: string, from: StepStatus, to: StepStatus) =>
     `${what} went from ${from} to ${to}`;
   expect(
     STATUS_RANK[later.status],
@@ -89,11 +115,16 @@ const expectMovedForward = (earlier: Run, later: Run): void => {
     );
     expect(after, `${what} disappeared`).toBeDefined();
     expect(
-      STATUS_RANK[after!.status],
+      STEP_STATUS_RANK[after!.status],
       describeMove(what, before.status, after!.status),
-    ).toBeGreaterThanOrEqual(STATUS_RANK[before.status]);
-    if (FINAL_STATUSES.includes(before.status)) {
+    ).toBeGreaterThanOrEqual(STEP_STATUS_RANK[before.status]);
+    if (FINAL_STEP_STATUSES.includes(before.status)) {
       expect(after!.status, describeMove(what, before.status, after!.status)).toBe(before.status);
+    }
+    if (after!.status === "skipped") {
+      expect(["pending", "skipped"], describeMove(what, before.status, after!.status)).toContain(
+        before.status,
+      );
     }
   }
 };
@@ -115,7 +146,8 @@ export const expectStatus = <T extends { readonly status: string }, S extends T[
  * Checks what every finished run keeps true:
  * - its status is final, and it has a failure reason exactly when it failed;
  * - none of its step records is still `pending` or `running`;
- * - the first record of every step has iteration 1;
+ * - a `skipped` record never started, and has no output and no error;
+ * - the iterations of every step are 1, 2, 3... with no gap and no repeat;
  * - every timestamp is at or after the one before it.
  */
 const expectFinishedRun = (run: Run): void => {
@@ -133,7 +165,14 @@ const expectFinishedRun = (run: Run): void => {
     if (record.status === "pending" || record.status === "running") {
       expect.fail(`step record ${record.stepId} has not finished: ${where}`);
     }
-    if (record.startedAt !== undefined) {
+    if (record.status === "skipped") {
+      expect(Object.keys(record).sort(), where).toEqual([
+        "finishedAt",
+        "iteration",
+        "status",
+        "stepId",
+      ]);
+    } else if (record.startedAt !== undefined) {
       expect(record.finishedAt >= record.startedAt, where).toBe(true);
     }
   }
@@ -141,8 +180,11 @@ const expectFinishedRun = (run: Run): void => {
   for (const stepId of stepIds) {
     const iterations = run.steps
       .filter((record) => record.stepId === stepId)
-      .map((record) => record.iteration);
-    expect(Math.min(...iterations), `${stepId} in ${where}`).toBe(1);
+      .map((record) => record.iteration)
+      .sort((left, right) => left - right);
+    expect(iterations, `${stepId} in ${where}`).toEqual(
+      iterations.map((_iteration, index) => index + 1),
+    );
   }
 };
 

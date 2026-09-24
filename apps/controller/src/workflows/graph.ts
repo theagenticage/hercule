@@ -2,8 +2,10 @@
  * Validates the graph of a workflow definition: which nodes each edge may
  * connect, and these rules about the graph as a whole:
  *
+ * - no two edges have the same `from` and `to`;
  * - every loop has an edge with `maxTraversals`;
  * - a step inside a loop does not use `join: all`;
+ * - an entry step does not use `join: all`;
  * - at least one step is an entry step;
  * - every step can be reached from an entry step or a signal trigger.
  *
@@ -171,6 +173,24 @@ export const listGraphIssues = (
   const sortInStepOrder = (loop: ReadonlySet<string>): ReadonlyArray<string> =>
     stepIds.filter((id) => loop.has(id));
 
+  // A run counts how often it follows each edge, and a second edge between
+  // the same two nodes would make "the edge from A to B" mean two things.
+  // Report each repeat at the later edge.
+  const seenEdgeEndpoints = new Set<string>();
+  for (const edge of edges) {
+    const edgeEndpoints = JSON.stringify([edge.from, edge.to]);
+    if (seenEdgeEndpoints.has(edgeEndpoints)) {
+      issues.push({
+        path: ["edges", String(edge.index)],
+        message:
+          `An earlier edge already leads from ${quoteAuthorText(edge.from)} to ${quoteAuthorText(edge.to)}, ` +
+          "and two edges cannot connect the same two nodes. " +
+          "Remove this edge, or combine the two conditions into one with ||.",
+      });
+    }
+    seenEdgeEndpoints.add(edgeEndpoints);
+  }
+
   // Find the loops that remain after removing every edge with maxTraversals.
   // Report each one at its first edge in definition order.
   for (const loop of findLoops(
@@ -198,6 +218,19 @@ export const listGraphIssues = (
         message:
           "This step is inside a loop, so join: all can never run it: the edge that comes back round the loop " +
           "cannot fire before this step runs. Write join: any, or remove join.",
+      });
+    }
+  }
+
+  // An entry step starts when the run starts, before any incoming edge could
+  // fire, so it could never wait for all of them.
+  for (const [index, step] of steps.entries()) {
+    if (step.entry === true && step.join === "all") {
+      issues.push({
+        path: ["steps", String(index), "join"],
+        message:
+          "This step is an entry step, so it starts when a run starts and cannot wait for its incoming edges first. " +
+          "Remove join: all, or remove entry: true.",
       });
     }
   }

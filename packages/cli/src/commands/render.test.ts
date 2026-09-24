@@ -376,6 +376,38 @@ describe("hercule run", () => {
     ]);
   });
 
+  it("prints what went wrong at the edge a run failed at", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: { name: "A loop", steps: [] },
+          inputs: {},
+          origin: { kind: "manual", actor: "user" },
+          status: "failed",
+          failureReason: "iteration-limit",
+          failedStepId: "count",
+          failedEdgeIndex: 2,
+          failureMessage: "The edge ran out.",
+          steps: [],
+          edgeTraversals: [],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          startedAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.010Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(2, 6)).toEqual([
+      "status          failed",
+      "failureReason   iteration-limit",
+      "failedStep      count",
+      "failureMessage  The edge ran out.",
+    ]);
+  });
+
   it("describes who started a run in the words the web app uses", () => {
     const readStartedBy = (origin: Record<string, unknown>): string | undefined =>
       renderHuman(

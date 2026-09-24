@@ -410,6 +410,85 @@ describe("the graph rules", () => {
   });
 });
 
+/** Two edges from `count` to `file`, the second with a condition. */
+const DUPLICATE_EDGE_SOURCE = `name: The same edge twice
+steps:
+${buildTaskStep("count")}
+${buildTaskStep("file")}
+edges:
+  - from: count
+    to: file
+  - from: count
+    to: file
+    condition: "true"
+`;
+
+/** A step that is an entry step and also waits for every incoming edge. */
+const ENTRY_JOIN_ALL_SOURCE = `name: An entry step that waits
+steps:
+${buildTaskStep("left")}
+${buildTaskStep("merge", "entry: true", "join: all")}
+edges:
+  - from: left
+    to: merge
+`;
+
+/**
+ * Checks that the issues hold exactly one issue, whose path starts with
+ * `prefix`, and whose message is a sentence for a person.
+ */
+const expectOneIssueUnder = (
+  issues: ReadonlyArray<Issue>,
+  prefix: ReadonlyArray<string>,
+  description: string,
+): void => {
+  const shown = `${description}: ${JSON.stringify(issues)}`;
+  expect(issues, shown).toHaveLength(1);
+  expect(issues[0]!.path.slice(0, prefix.length), shown).toEqual(prefix);
+  expect(issues[0]!.message, shown).toMatch(/^[A-Z][^{}]*\.$/s);
+};
+
+describe("the routing rules", () => {
+  const ROUTING_FIXTURES = [
+    {
+      description: "two edges with the same from and to",
+      source: DUPLICATE_EDGE_SOURCE,
+      prefix: ["edges", "1"],
+    },
+    {
+      description: "entry: true with join: all",
+      source: ENTRY_JOIN_ALL_SOURCE,
+      prefix: ["steps", "1"],
+    },
+  ] as const;
+
+  it("rejects two edges with the same from and to, and entry: true with join: all, on create, validate and update, each with one issue at its path", async () => {
+    await withArrangedController(async ({ base, token }) => {
+      for (const { description, source, prefix } of ROUTING_FIXTURES) {
+        expectOneIssueUnder(
+          await readIssues(await createWorkflow(base, token, { source })),
+          prefix,
+          `create with ${description}`,
+        );
+        const validated = await readValidateResult(await validateWorkflow(base, token, { source }));
+        expectOneIssueUnder(validated.errors, prefix, `validate with ${description}`);
+      }
+      await expectNothingStored(base, token);
+
+      const created = await createWorkflow(base, token, { source: FILE_TASK_SOURCE });
+      expect([200, 201], await created.clone().text()).toContain(created.status);
+      const { workflow } = (await created.json()) as WorkflowSaveResult;
+      for (const { description, source, prefix } of ROUTING_FIXTURES) {
+        expectOneIssueUnder(
+          await readIssues(await updateWorkflow(base, token, workflow.id, { source })),
+          prefix,
+          `update with ${description}`,
+        );
+      }
+    });
+  });
+});
+
 /* ------------------------------------------------------------------------ */
 /* Where a run begins.                                                       */
 /* ------------------------------------------------------------------------ */

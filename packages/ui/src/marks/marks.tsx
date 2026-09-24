@@ -112,8 +112,11 @@ export function CancelledMark(props: MarkProps): JSX.Element {
 /**
  * The states a piece of work moves through, spelled as runs and step records
  * spell their statuses, and `unreached` for a step that has no record yet.
+ * Only a step record can be `skipped`: its condition was false, so it never
+ * ran.
  */
-export type WorkState = "pending" | "running" | "completed" | "failed" | "cancelled" | "unreached";
+export type WorkState =
+  "pending" | "running" | "completed" | "failed" | "cancelled" | "skipped" | "unreached";
 
 /**
  * The hue of the words beside a state mark: the live hue while the work runs,
@@ -127,12 +130,14 @@ export const WORK_STATE_HUES: Readonly<Record<WorkState, string | undefined>> = 
   completed: undefined,
   failed: "text-fail",
   cancelled: undefined,
+  skipped: undefined,
   unreached: undefined,
 };
 
 /**
  * Renders the state mark for a piece of work: queued for `pending`, working,
- * done, failed or cancelled. Work the run has not reached has no mark.
+ * done, failed or cancelled. Skipped work has no mark of its own yet, and
+ * work the run has not reached has none at all.
  */
 export function WorkStateMark({ state }: { readonly state: WorkState }): JSX.Element | null {
   switch (state) {
@@ -146,6 +151,7 @@ export function WorkStateMark({ state }: { readonly state: WorkState }): JSX.Ele
       return <FailedMark />;
     case "cancelled":
       return <CancelledMark />;
+    case "skipped":
     case "unreached":
       return null;
   }

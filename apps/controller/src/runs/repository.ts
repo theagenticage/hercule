@@ -1,7 +1,7 @@
 /**
- * Reads and writes the `runs` and `run_steps` tables. This module has no
- * policy: which status a run or a step record moves to, and when, is decided
- * by the run engine in the controller daemon.
+ * Reads and writes the `runs`, `run_steps` and `run_edge_traversals` tables.
+ * This module has no policy: which status a run or a step record moves to,
+ * and when, is decided by the run engine in the controller daemon.
  *
  * Every write announces the run's id on the `run` live topic once it commits,
  * so a screen that shows the run reads it again. The repository announces,
@@ -69,12 +69,21 @@ export type RunOutcome =
       readonly status: "failed";
       readonly failureReason: Exclude<FailureReason, "controller-error">;
       readonly failedStepId: string;
+      /** The index in the plan's edges of the edge the run failed at, when it failed at one. */
+      readonly failedEdgeIndex?: number;
+      /** What went wrong at that edge, when the run failed at one. */
+      readonly failureMessage?: string;
     }
   | {
       readonly status: "failed";
       readonly failureReason: "controller-error";
       /** Absent when the run failed outside any step. */
       readonly failedStepId?: string;
+      // A controller error never happens at an edge, so these two are never
+      // set. They are declared so that `finish` can read them from any
+      // failed outcome.
+      readonly failedEdgeIndex?: undefined;
+      readonly failureMessage?: undefined;
     };
 
 /**
@@ -97,6 +106,8 @@ interface RunRow {
   readonly status: RunStatus;
   readonly failure_reason: FailureReason | null;
   readonly failed_step_id: string | null;
+  readonly failed_edge_index: number | null;
+  readonly failure_message: string | null;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly finished_at: string | null;
@@ -113,6 +124,8 @@ interface SummaryRow {
   readonly status: RunStatus;
   readonly failure_reason: FailureReason | null;
   readonly failed_step_id: string | null;
+  readonly failed_edge_index: number | null;
+  readonly failure_message: string | null;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly finished_at: string | null;
@@ -134,6 +147,11 @@ interface StepRow {
   readonly error: string | null;
   readonly started_at: string | null;
   readonly finished_at: string | null;
+}
+
+interface TraversalRow {
+  readonly edge_index: number;
+  readonly count: number;
 }
 
 interface ParentRow {
@@ -188,6 +206,8 @@ const toStepRecord = (row: StepRow): StepRecord => {
         ...(row.started_at === null ? {} : { startedAt: row.started_at }),
         finishedAt: finishedAt(),
       };
+    case "skipped":
+      return { ...identity, status: "skipped", finishedAt: finishedAt() };
   }
 };
 
@@ -196,6 +216,8 @@ interface StatusColumns {
   readonly status: RunStatus;
   readonly failure_reason: FailureReason | null;
   readonly failed_step_id: string | null;
+  readonly failed_edge_index: number | null;
+  readonly failure_message: string | null;
   readonly started_at: string | null;
   readonly finished_at: string | null;
 }
@@ -229,6 +251,8 @@ const parseStatusColumns = (row: StatusColumns) => {
             status: "failed",
             failureReason,
             failedStepId: requireColumn(row.failed_step_id, "runs", "failed_step_id"),
+            ...(row.failed_edge_index === null ? {} : { failedEdgeIndex: row.failed_edge_index }),
+            ...(row.failure_message === null ? {} : { failureMessage: row.failure_message }),
             startedAt: startedAt(),
             finishedAt: finishedAt(),
           } as const);
@@ -239,20 +263,31 @@ const parseStatusColumns = (row: StatusColumns) => {
 };
 
 /**
- * Maps a run row and its step rows to a `Run`. The JSON columns are parsed
- * without being decoded again: the run engine wrote them from values that
- * were already validated.
+ * Maps a run row, its step rows and its traversal rows to a `Run`. The JSON
+ * columns are parsed without being decoded again: the run engine wrote them
+ * from values that were already validated. An edge with no traversal row
+ * has been followed 0 times.
  */
-const toRun = (row: RunRow, steps: ReadonlyArray<StepRow>): Run => ({
-  id: uuidToString(row.id),
-  workflowId: row.workflow_id === null ? null : uuidToString(row.workflow_id),
-  plan: JSON.parse(row.plan) as WorkflowDefinition,
-  inputs: JSON.parse(row.inputs) as Run["inputs"],
-  origin: JSON.parse(row.origin) as RunOrigin,
-  steps: steps.map(toStepRecord),
-  createdAt: row.created_at,
-  ...parseStatusColumns(row),
-});
+const toRun = (
+  row: RunRow,
+  steps: ReadonlyArray<StepRow>,
+  traversals: ReadonlyArray<TraversalRow>,
+): Run => {
+  const plan = JSON.parse(row.plan) as WorkflowDefinition;
+  const edgeTraversals = (plan.edges ?? []).map(() => 0);
+  for (const traversal of traversals) edgeTraversals[traversal.edge_index] = traversal.count;
+  return {
+    id: uuidToString(row.id),
+    workflowId: row.workflow_id === null ? null : uuidToString(row.workflow_id),
+    plan,
+    inputs: JSON.parse(row.inputs) as Run["inputs"],
+    origin: JSON.parse(row.origin) as RunOrigin,
+    steps: steps.map(toStepRecord),
+    edgeTraversals,
+    createdAt: row.created_at,
+    ...parseStatusColumns(row),
+  };
+};
 
 /** Maps a summary row to a `RunSummary`. */
 const toSummary = (row: SummaryRow): RunSummary => ({
@@ -279,7 +314,8 @@ const make = Effect.gen(function* () {
       stepIds,
       (stepId) => sql`
         INSERT INTO run_steps (run_id, step_id, iteration, status, created_at)
-        VALUES (${uuidFromString(runId)}, ${stepId}, 1, 'pending', ${at})
+        SELECT ${uuidFromString(runId)}, ${stepId}, COALESCE(MAX(iteration), 0) + 1, 'pending', ${at}
+        FROM run_steps WHERE run_id = ${uuidFromString(runId)} AND step_id = ${stepId}
       `,
       { discard: true },
     );
@@ -303,9 +339,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns a run with its step records in the order they were created, or
-     * `None` if no run has the id. Both reads are one transaction, so the run
-     * and its step records are from the same moment.
+     * Returns a run with its step records in the order they were created and
+     * its edge traversal counts, or `None` if no run has the id. The reads are
+     * one transaction, so they are all from the same moment.
      */
     read: (id: string): Effect.Effect<Option.Option<Run>, SqlError> =>
       withTransaction(
@@ -319,7 +355,10 @@ const make = Effect.gen(function* () {
             SELECT step_id, iteration, status, output, error, started_at, finished_at
             FROM run_steps WHERE run_id = ${bytes} ORDER BY rowid
           `;
-          return Option.some(toRun(row, steps));
+          const traversals = yield* sql<TraversalRow>`
+            SELECT edge_index, count FROM run_edge_traversals WHERE run_id = ${bytes}
+          `;
+          return Option.some(toRun(row, steps, traversals));
         }),
       ),
 
@@ -357,7 +396,8 @@ const make = Effect.gen(function* () {
         }
         const rows = yield* sql<SummaryRow>`
           SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, status,
-                 failure_reason, failed_step_id, created_at, started_at, finished_at
+                 failure_reason, failed_step_id, failed_edge_index, failure_message, created_at,
+                 started_at, finished_at
           FROM runs WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
@@ -448,7 +488,11 @@ const make = Effect.gen(function* () {
         yield* announceChange(id, "updated");
       }),
 
-    /** Adds a pending step record, at iteration 1, for each step id. */
+    /**
+     * Adds a pending step record for each step id, in the order given. Each
+     * record's iteration is one more than the step's latest record in the run,
+     * or 1 for the step's first record.
+     */
     insertSteps: (
       runId: string,
       stepIds: ReadonlyArray<string>,
@@ -510,6 +554,50 @@ const make = Effect.gen(function* () {
         yield* announceChange(runId, "updated");
       }),
 
+    /**
+     * Moves a pending step record to skipped. Fails with `StepRecordEnded` if
+     * the record is not pending any more.
+     */
+    skipStep: (
+      runId: string,
+      step: { readonly stepId: string; readonly iteration: number },
+      at: string,
+    ): Effect.Effect<void, SqlError | StepRecordEnded> =>
+      Effect.gen(function* () {
+        const skipped = yield* sql`
+          UPDATE run_steps SET status = 'skipped', finished_at = ${at}
+          WHERE run_id = ${uuidFromString(runId)} AND step_id = ${step.stepId}
+            AND iteration = ${step.iteration} AND status = 'pending'
+          RETURNING step_id
+        `;
+        if (skipped.length === 0) {
+          return yield* Effect.fail(new StepRecordEnded({ runId, stepId: step.stepId }));
+        }
+        yield* announceChange(runId, "updated");
+      }),
+
+    /**
+     * Adds 1 to the number of times a run has followed each edge, by the
+     * edge's index in the plan's edges. Each index appears at most once.
+     */
+    recordTraversals: (
+      runId: string,
+      edgeIndexes: ReadonlyArray<number>,
+    ): Effect.Effect<void, SqlError> =>
+      edgeIndexes.length === 0
+        ? Effect.void
+        : Effect.andThen(
+            // SQLite needs the `WHERE true` to parse an upsert whose rows
+            // come from a SELECT.
+            sql`
+              INSERT INTO run_edge_traversals (run_id, edge_index, count)
+              SELECT ${uuidFromString(runId)}, value, 1 FROM json_each(${JSON.stringify(edgeIndexes)})
+              WHERE true
+              ON CONFLICT (run_id, edge_index) DO UPDATE SET count = count + 1
+            `,
+            announceChange(runId, "updated"),
+          ),
+
     /** Cancels every step record of a run that is still pending or running. */
     cancelUnfinishedSteps: (runId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -528,6 +616,8 @@ const make = Effect.gen(function* () {
             status = ${ending.status},
             failure_reason = ${ending.status === "failed" ? ending.failureReason : null},
             failed_step_id = ${ending.status === "failed" ? (ending.failedStepId ?? null) : null},
+            failed_edge_index = ${ending.status === "failed" ? (ending.failedEdgeIndex ?? null) : null},
+            failure_message = ${ending.status === "failed" ? (ending.failureMessage ?? null) : null},
             finished_at = ${at}
           WHERE id = ${uuidFromString(id)} AND status IN ('pending', 'running')
         `;

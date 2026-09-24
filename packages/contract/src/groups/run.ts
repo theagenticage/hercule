@@ -1,5 +1,6 @@
 /**
- * Runs: a workflow's steps carried out once, one after another.
+ * Runs: a workflow's steps carried out once, following the edges between
+ * them.
  *
  * A run freezes the workflow definition it started from into `plan`, so what
  * a run did can still be read, and drawn, after its workflow is edited or
@@ -10,7 +11,9 @@
  *   steps to execute, and then `completed`, `failed` or `cancelled`;
  * - a step record is `pending` until its action is called, `running` while
  *   its action is being called, and then `completed`, `failed` or
- *   `cancelled`.
+ *   `cancelled`. A step record whose step's condition is false when it would
+ *   start moves from `pending` straight to `skipped`, and its action is never
+ *   called.
  *
  * `run.start` starts a run, either of a stored workflow or of a workflow sent
  * with the request and never stored. It returns the run's id at once and never
@@ -44,7 +47,14 @@ export const RunStatus = Schema.Literals(RUN_STATUSES);
 export type RunStatus = Schema.Schema.Type<typeof RunStatus>;
 
 /** The statuses of a step record, in the order a step record moves through them. */
-const STEP_STATUSES = ["pending", "running", "completed", "failed", "cancelled"] as const;
+const STEP_STATUSES = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "skipped",
+] as const;
 
 export const StepStatus = Schema.Literals(STEP_STATUSES);
 
@@ -53,10 +63,15 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
 /**
  * Why a run failed:
  *
- * - `expression-error`: a template in a step's params could not be evaluated.
- *   `failedStepId` names the step.
+ * - `expression-error`: a template in a step's params, or a condition, could
+ *   not be evaluated, or a condition gave something other than true or false.
+ *   `failedStepId` names the step. For an edge's condition it names the
+ *   edge's source step, and `failedEdgeIndex` names the edge.
  * - `step-failed`: a step's action failed. `failedStepId` names the step, and
  *   its step record holds the error.
+ * - `iteration-limit`: an edge's condition was true, but the edge had already
+ *   been followed as often as its `maxTraversals` allows. `failedStepId`
+ *   names the edge's source step, and `failedEdgeIndex` the edge.
  * - `controller-error`: the controller could not carry out the run for a
  *   reason of its own, such as a bug. `failedStepId` names the step the run
  *   was at, if it was at one. The controller's log has the details.
@@ -64,7 +79,12 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
  * The list grows as runs learn to do more; a client shows a reason it does not
  * know as the word itself.
  */
-const FAILURE_REASONS = ["expression-error", "step-failed", "controller-error"] as const;
+const FAILURE_REASONS = [
+  "expression-error",
+  "step-failed",
+  "iteration-limit",
+  "controller-error",
+] as const;
 
 export const FailureReason = Schema.Literals(FAILURE_REASONS);
 
@@ -99,7 +119,7 @@ export type StepError = Schema.Schema.Type<typeof StepError>;
 const STEP_RECORD_FIELDS = {
   /** The step's id in the plan. */
   stepId: Schema.String,
-  /** Counts the attempts at this step in the run, from 1. */
+  /** Counts the records of this step in the run, from 1. */
   iteration: Schema.Int,
 };
 
@@ -113,6 +133,8 @@ const STEP_RECORD_FIELDS = {
  *   action returned (`null` for an action that returns nothing).
  * - `failed`: `startedAt`, `finishedAt`, and `error`.
  * - `cancelled`: `finishedAt`, and `startedAt` if the step had started.
+ * - `skipped`: `finishedAt` only. The step's condition was false, so its
+ *   action was never called.
  */
 export const StepRecord = Schema.Union([
   Schema.Struct({ ...STEP_RECORD_FIELDS, status: Schema.Literal("pending") }),
@@ -137,6 +159,11 @@ export const StepRecord = Schema.Union([
     startedAt: Schema.optionalKey(Timestamp),
     finishedAt: Timestamp,
   }),
+  Schema.Struct({
+    ...STEP_RECORD_FIELDS,
+    status: Schema.Literal("skipped"),
+    finishedAt: Timestamp,
+  }),
 ]);
 
 export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
@@ -148,8 +175,9 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  * - `pending`: no timestamp but `createdAt`.
  * - `running`: `startedAt`.
  * - `completed`: `startedAt` and `finishedAt`.
- * - `failed` at a step (`expression-error` or `step-failed`): `failedStepId`,
- *   `startedAt` and `finishedAt`.
+ * - `failed` at a step (`expression-error`, `step-failed` or
+ *   `iteration-limit`): `failedStepId`, `startedAt` and `finishedAt`, and
+ *   `failedEdgeIndex` and `failureMessage` when the run failed at an edge.
  * - `failed` with `controller-error`: `finishedAt`, and `failedStepId` and
  *   `startedAt` when the run had got that far.
  * - `cancelled`: `finishedAt`, and `startedAt` if the run had started.
@@ -169,8 +197,16 @@ const buildRunStatusVariants = <const Fields extends Schema.Struct.Fields>(field
     Schema.Struct({
       ...fields,
       status: Schema.Literal("failed"),
-      failureReason: Schema.Literals(["expression-error", "step-failed"]),
+      failureReason: Schema.Literals(["expression-error", "step-failed", "iteration-limit"]),
       failedStepId: Schema.String,
+      /** The index in `plan.edges` of the edge the run failed at, when it failed at one. */
+      failedEdgeIndex: Schema.optionalKey(Schema.Int),
+      /**
+       * What went wrong at the edge the run failed at, when it failed at one:
+       * the condition's evaluation error, or the `maxTraversals` it reached.
+       * A failure at a step keeps its message on the step record instead.
+       */
+      failureMessage: Schema.optionalKey(Schema.String),
       startedAt: Timestamp,
       finishedAt: Timestamp,
     }),
@@ -202,6 +238,11 @@ export const Run = Schema.Union(
     inputs: Schema.Record(Schema.String, Schema.Json),
     origin: RunOrigin,
     steps: Schema.Array(StepRecord),
+    /**
+     * How many times the run has followed each edge: one count per edge of
+     * `plan.edges`, in the same order, zeros included.
+     */
+    edgeTraversals: Schema.Array(Schema.Int),
     createdAt: Timestamp,
   }),
 );

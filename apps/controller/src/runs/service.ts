@@ -29,6 +29,7 @@ import {
   type RunStatus,
   type RunSummary,
   type StepRecord,
+  type StepStatus,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
@@ -53,10 +54,10 @@ export interface RunPage {
 
 /**
  * Checks whether a run or a step record can still change: it is pending or
- * running. Only such a run is executed, cancelled or resumed at boot. A step
- * record's statuses are a run's, so this one check serves both.
+ * running. Only such a run is executed, cancelled or resumed at boot. A run
+ * and a step record share these two statuses, so this one check serves both.
  */
-export const isUnfinished = (status: RunStatus): boolean =>
+export const isUnfinished = (status: RunStatus | StepStatus): boolean =>
   status === "pending" || status === "running";
 
 /** A step record that can still change: one that is pending or running. */

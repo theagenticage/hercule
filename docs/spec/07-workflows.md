@@ -258,10 +258,23 @@ Control flow lives entirely in the graph. ~~Steps with no incoming edges start w
 
 When a step completes (or a signal node fires), every outgoing edge whose condition is absent or evaluates true fires; several firing edges run their targets in parallel *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79): not built yet. The run engine executes a run's ready steps one at a time, in the order their step records were created. Every step it can run today is an action step that writes to the one database, so running them side by side would not finish sooner)*. A branch the agent "chooses" is two outgoing edges with mutually exclusive conditions over an enum field of the step's output; the prompt tells the agent the choice exists, the schema carries it, the edges route it. Conditions route on `inputs.*` and `steps.<id>.output.*` only; there is no other run state visible to the graph.
 
+*(Amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80).)* `steps.<id>` holds the step's latest finished iteration: its output when that iteration completed, and nothing when it was skipped (section 5). A condition that reads a step on another branch depends on timing: the step is present only if its branch has already finished. An author who needs the outputs of both branches joins them with `join: all`.
+
 **Joins.** A step with several incoming edges runs according to its `join`:
 
 - `any` (default): every firing incoming edge runs the step once more, as a new iteration. For an agent step that is the next turn of its session, so a `summarize` step fed by `review_a` and `review_b` sees both reviews arrive in context, like a main thread receiving messages from subagents. Its outgoing edges fire per iteration, so anything after it runs once per firing.
-- `all`: the step runs once, when every incoming edge has *resolved*: fired, or dead. An edge is dead when its source is dead or skipped, or its source completed and the edge's condition was false. A step with incoming edges is dead when all of them are dead; a dead step gets no record. `all` is the fan-in barrier ("run two reviewers, then combine once"). Validation forbids `all` on a step inside a cycle, because the loop-back edge cannot resolve on the first visit.
+- `all`: the step runs once, ~~when every incoming edge has *resolved*: fired, or dead. An edge is dead when its source is dead or skipped, or its source completed and the edge's condition was false. A step with incoming edges is dead when all of them are dead; a dead step gets no record.~~ when every incoming edge is settled and at least one of them fired *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*: the settled rule below. `all` is the fan-in barrier ("run two reviewers, then combine once"). Validation forbids `all` on a step inside a cycle, because the loop-back edge cannot resolve on the first visit.
+
+*(Amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80).)* **The settled rule.** "Fired or dead" could not tell whether a source upstream of a loop would fire again, so `all` waits until its sources can no longer run. In the rules below, a record is *active* when it is `pending` or `running`.
+
+- An incoming edge is **settled** when its source can no longer run: the source has no active record, and no step with an active record has a path of edges to it. Conditions and `maxTraversals` are ignored when looking for a path.
+- When every incoming edge is settled and at least one fired, the step gets one `pending` record, iteration 1.
+- When every incoming edge is settled and none fired, the step is **dead**: it gets no record, and the steps that only it leads to can never run either. Nothing marks them; they are simply never reached.
+- A skipped source is not a reason for an edge to be dead: a skipped step passes through (below), so its outgoing edges are evaluated as if it had completed.
+
+Example: `review_a` finishes in 1 second and `review_b` takes 1 minute. `summarize` (`join: all`) waits the minute and then runs once, with both outputs. If a condition had cut `review_b` off, `review_b` is settled at once, and `summarize` runs after `review_a` alone. With a loop upstream of the join, the join runs once, after the loop has exited.
+
+Validation also refuses `join: all` on an entry step: an entry step starts when the run starts, so it cannot wait for its incoming edges first.
 
 **Skips.** A step whose `condition` evaluates false is skipped: a record with status `skipped`, no output, and its outgoing edges are evaluated as if it had completed (pass-through). Skipping is never a runtime act; it is a condition the author wrote, so the steps after it are written to expect it: `steps.<id>` is absent for a skipped step (section 5), and a downstream condition that reads it guards with `has()`:
 
@@ -272,13 +285,17 @@ review -> implement  condition: has(steps.review) && steps.review.output.verdict
 
 A forgotten guard is an expression error (below), never a silent false. Pruning the branch instead is expressed by putting the condition on the edges, which is why pass-through is the meaning of a step condition.
 
+*(Amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80).)* A step's condition is evaluated when its record would start, not when the record is created. A false condition moves the record `pending → skipped`: no output, no error, no `startedAt`, and `finishedAt` set. Its outgoing edges are then evaluated as for a completed step. A step skipped in its latest iteration is absent from `steps`, even if an earlier iteration completed, so nothing routes on an old output.
+
 **Cycles** use ordinary edges. Any edge may carry `maxTraversals >= 1`, the number of times it may fire in one run; validation requires every cycle to contain at least one capped edge, so every graph is bounded by construction. When a capped edge's condition holds but its cap is exhausted, the run fails with reason `iteration-limit`. When the condition is false the edge simply does not fire and the cap is irrelevant. The per-step `iteration` counter increments each time the step runs in the run.
+
+*(Amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80).)* A run counts how often it has followed each edge, and `run.read` returns the counts as `edgeTraversals` (section 7.2). A capped edge whose condition holds after it has fired `maxTraversals` times fails the run with `iteration-limit`, `failedStepId` set to the edge's source and `failedEdgeIndex` to the edge's index in `edges`. A step's next record takes the step's highest iteration so far plus one, so the iterations of a step are 1, 2, 3 and so on. Validation refuses two edges with the same `from` and `to`: counts are kept per edge, and two such edges would be one route counted twice. Two conditions on one route are written as one, joined with `||`.
 
 **Busy step.** An edge firing into a step that is currently running (a second review arriving while the summarizer is mid-turn, a second `checks_failed` signal while the fixer is still fixing) queues one iteration, recorded as `pending`; queued iterations run in order after the current one completes. Nothing is coalesced and nothing steers the running turn in v1: batching belongs at the source (subscribe to GitHub's per-suite and per-review kinds, not per-check and per-comment ones; [./08-events-and-connections.md](./08-events-and-connections.md)). Coalescing queued firings into one iteration, and steering a running session, are Post-v1.
 
 **Terminal steps.** A step with `terminal: true` completes the run when it completes: running branches are cancelled (their records `cancelled`), pending iterations dropped, live subscriptions ended, undelivered signal deliveries dropped. Otherwise a run completes when nothing is running or pending and no subscription is live. A graph with signal nodes therefore needs a terminal step to end on its own (a live `checks_failed` node would otherwise keep the run alive after `task_done`); without one it ends only by cancellation, which the editor warns about (section 1).
 
-**Failure.** A step failing fails the run; parallel branches still running are cancelled. There are no automatic retries. A CEL expression that throws at any in-run site (a step condition, an edge condition, a template in a prompt or a parameter) fails the run with reason `expression-error` and the site named in `failedStepId`. In-run errors are loud where trigger sites are quiet ([./08-events-and-connections.md](./08-events-and-connections.md): no-match plus health warning) because the pipeline must never stall on one workflow's bad expression, whereas a run is an isolated unit and a silently-false edge would route work wrongly.
+**Failure.** A step failing fails the run; parallel branches still running are cancelled. There are no automatic retries. A CEL expression that throws at any in-run site (a step condition, an edge condition, a template in a prompt or a parameter) fails the run with reason `expression-error` and the site named in `failedStepId`. *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*: a condition fails the same way when it gives something other than true or false. At an edge, `failedStepId` is the edge's source, whose record stays `completed`, and `failedEdgeIndex` is the edge's index. At a step condition, the step's record is `failed` with the code `expression_error`, `failedStepId` is the step, and there is no `failedEdgeIndex`. Either way every active record is `cancelled`, including records created for earlier edges in the same transaction. In-run errors are loud where trigger sites are quiet ([./08-events-and-connections.md](./08-events-and-connections.md): no-match plus health warning) because the pipeline must never stall on one workflow's bad expression, whereas a run is an isolated unit and a silently-false edge would route work wrongly.
 
 ### 4.4 One run, one workspace, one runner
 
@@ -305,7 +322,7 @@ One language, CEL, is used at every condition site. Termination is a property of
 | Edge `condition` | `inputs`, `steps` | bool |
 | Action `params`, agent `prompt` interpolation | `inputs`, `steps` | value |
 
-`inputs` is the run's resolved inputs by name. `steps` is a map of step id (or signal trigger id) to `{ output }`, holding the output of every step that has completed and every signal node that has fired in this run; when a step ran more than once, `steps.<id>.output` is the latest iteration's output. A skipped, dead or not-yet-run step has no entry, so `has(steps.<id>)` is the test for "did it run" (section 4.3). `event` is the event envelope as defined in [./08-events-and-connections.md](./08-events-and-connections.md): `event.kind`, `event.source`, `event.connectionId`, `event.system`, `event.refs`, `event.url`, `event.occurredAt`, `event.payload.*`; `event.raw` is not readable by expressions. `has()` covers presence tests on loosely shaped payloads (`has(event.changes.status) && event.changes.status.new == "done"`).
+`inputs` is the run's resolved inputs by name. `steps` is a map of step id (or signal trigger id) to `{ output }`, holding the output of every step that has completed and every signal node that has fired in this run; when a step ran more than once, `steps.<id>.output` is the latest iteration's output. A skipped, dead or not-yet-run step has no entry, so `has(steps.<id>)` is the test for "did it run" (section 4.3). *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*: `steps.<id>` is the step's latest finished iteration, so a step whose latest iteration was skipped has no entry either, even if an earlier iteration completed. `event` is the event envelope as defined in [./08-events-and-connections.md](./08-events-and-connections.md): `event.kind`, `event.source`, `event.connectionId`, `event.system`, `event.refs`, `event.url`, `event.occurredAt`, `event.payload.*`; `event.raw` is not readable by expressions. `has()` covers presence tests on loosely shaped payloads (`has(event.changes.status) && event.changes.status.new == "done"`).
 
 Evaluator: `@marcbachmann/cel-js` (pure JS, zero dependencies) behind a small Hercule-owned wrapper exposing parse, check and evaluate and nothing else; `@bufbuild/cel` is the named fallback implementation, swappable without touching stored workflows because definitions store CEL source only. Wrapper rules:
 
@@ -314,6 +331,8 @@ Evaluator: `@marcbachmann/cel-js` (pure JS, zero dependencies) behind a small He
 - Parse-time structural limits (`maxAstNodes`, `maxDepth`, list and map size, call arity) are set to modest values; conditions are small.
 - No async or side-effecting custom functions; the function whitelist is pure.
 - Evaluation of one expression is wall-clock guarded as a belt-and-braces measure, since neither implementation meters runtime cost.
+
+*(Amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80).)* **Conditions at run time.** A run evaluates a step or edge condition in the same scope that the save-time check and templates use, so a condition that saves also runs. The save-time check refuses a condition whose type is known and is not `bool`, but a `dyn` value's type is only known at run time: a condition that gives a string, a number, a list, a map or null there fails the run with `expression-error`, and so does a condition that throws. It is never read as false (section 4.3).
 
 Interpolation: action parameter values and agent prompts are templates whose embedded expressions are ordinary CEL over `inputs` and `steps`, delimited `{{ expr }}`: `Fix the failing checks on {{ inputs.prUrl }}. CI said: {{ steps.checks_failed.output.payload.summary }}`. A non-string value renders as JSON. A literal `{{` is written `{{ '{{' }}`. `{{ }}` was chosen over `${ }` because prompts routinely quote code, where `${...}` is common. Only the step `prompt` and ~~string `params`~~ the strings in `params` are templates; an Agent's system prompt is a standalone entity with no run to reference and is not interpolated. A template that throws is an `expression-error` (section 4.3).
 
@@ -399,10 +418,10 @@ A run that failed at start would be one more failed run to read, for a problem t
 Runs execute part of this document so far. Each element they cannot execute yet is one issue, at its place, in plain words ("Runs cannot evaluate edge conditions yet."):
 
 - an agent step, and a signal trigger ([#83](https://github.com/theagenticage/hercule/issues/83));
-- a step or edge `condition`, `join`, `terminal`, `maxTraversals`, a step that more than one edge leads into, and `entry: true` on a step that an edge also leads into. Such a step would run once as an entry step and again when the edge fires, and a step that runs twice needs the rules for loops ([#80](https://github.com/theagenticage/hercule/issues/80));
+- ~~a step or edge `condition`, `join`, `terminal`, `maxTraversals`, a step that more than one edge leads into, and `entry: true` on a step that an edge also leads into. Such a step would run once as an entry step and again when the edge fires, and a step that runs twice needs the rules for loops ([#80](https://github.com/theagenticage/hercule/issues/80));~~ `terminal` *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*: runs follow conditions, joins, loops and `maxTraversals` (section 4.3), and end at a terminal step in the next part of #80;
 - a plugin action that declares a Connection. The first plugin action that needs a Connection decides how a step names it (section 3, [./05-plugins.md](./05-plugins.md) section 4.4).
 
-Accepted: action steps, edges with no condition, fan-out (one step leading to several), several entry steps, start triggers (frozen and inert) and a `workspace` policy (frozen and unused, because no step needs a workspace yet).
+Accepted: action steps, ~~edges with no condition~~ step and edge conditions, `join`, `maxTraversals`, a step that several edges lead into, `entry: true` on a step that an edge also leads into *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*, fan-out (one step leading to several), several entry steps, start triggers (frozen and inert) and a `workspace` policy (frozen and unused, because no step needs a workspace yet).
 
 How the numbered steps above apply to a start by request:
 
@@ -478,9 +497,12 @@ interface Run {
     | { kind: "api"; actor: Actor }
     | { kind: "action"; parentRunId: string; stepId: string }
   status: "pending" | "running" | "completed" | "failed" | "cancelled"
-  failureReason?: "expression-error" | "step-failed"
+  failureReason?: "expression-error" | "step-failed" | "iteration-limit" | "controller-error"  // (amended 2026-09-25, #80)
   failedStepId?: string
+  failedEdgeIndex?: number             // the edge a run failed at, by index in plan.edges (amended 2026-09-25, #80)
+  failureMessage?: string              // what went wrong at that edge (amended 2026-09-25, #80)
   steps: StepRecord[]                  // in the order they were created
+  edgeTraversals: number[]             // how often the run followed each edge, one count per plan.edges index (amended 2026-09-25, #80)
   createdAt: string
   startedAt?: string
   finishedAt?: string
@@ -488,8 +510,8 @@ interface Run {
 
 interface StepRecord {
   stepId: string
-  iteration: number                    // 1 for every record until loops exist (#80)
-  status: "pending" | "running" | "completed" | "failed" | "cancelled"
+  iteration: number                    // 1, 2, 3...: the step's highest iteration so far plus one (amended 2026-09-25, #80)
+  status: "pending" | "running" | "completed" | "failed" | "cancelled" | "skipped"  // (amended 2026-09-25, #80)
   startedAt?: string
   finishedAt?: string
   output?: unknown                     // what the action returned
@@ -501,14 +523,14 @@ interface StepRecord {
 - **`origin`.** `manual` when the user starts a run by hand, from the web app or the CLI; `api` when a session calls ~~`workflow.run`; always `api` for `workflow.submit`, whoever calls it (section 9)~~ `run.start`, for a stored workflow or a sent one alike *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*; `action` for a run that a ~~`workflow.run`~~ `run.start` step started (section 8). `actor` is the starter's actor stamp. The user who sends a workflow with `run.start` starts it by hand as much as one who names a stored workflow, so the origin follows who started the run, not which kind of workflow it runs.
 - **A step record's `error` is `{ code, message }`**, not a string, so a client can tell the kinds of failure apart. `code` is one of:
   - an error code of the API, when the action's operation failed with one, such as `not_found` or `validation`. `validation` is also the code when the rendered params do not match the action's input (section 5);
-  - `expression_error`, when a template in the step's params could not be rendered;
+  - `expression_error`, when a template in the step's params could not be rendered, or the step's condition could not be decided *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*;
   - `unexpected`, for a failure that is not one of the API's errors, such as a database error or a bug in the controller;
   - `interrupted`, for a plugin action cut off by a restart (below);
   - the `code` of a plugin's `ActionError` ([./05-plugins.md](./05-plugins.md) section 4.4).
-- **Built so far:** the failure reasons `expression-error`, `step-failed` and `controller-error` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*. The others join with the tickets that can cause them. The step status `skipped` joins with step conditions ([#80](https://github.com/theagenticage/hercule/issues/80)).
+- **Built so far:** the failure reasons `expression-error`, `step-failed` and `controller-error` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*. The others join with the tickets that can cause them. ~~The step status `skipped` joins with step conditions ([#80](https://github.com/theagenticage/hercule/issues/80)).~~ `iteration-limit` and the step status `skipped` are built *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*.
 - **`pending`** means created and not started yet, for a run and for a step record alike. A run is `pending` from the request that creates it until the run engine takes it up; it is never held back by validation, which happens before it exists, and nothing places it yet. A step record is `pending` from when the step before it completes until the engine calls its action, not only as a queued iteration behind a busy step.
 - **A step record moves to `running` in a transaction of its own, before its action is called.** What happens next depends on the action:
-  - A built-in action's effect, the end of its step record, and a `pending` record for each step an edge leads to commit in one transaction. A crash therefore never leaves the effect committed with the record unfinished. A built-in step record found `running` when the controller starts means that transaction never committed and the action took no effect, so the engine executes it again.
+  - A built-in action's effect, the end of its step record, and ~~a `pending` record for each step an edge leads to~~ what routing decides after it (below) *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))* commit in one transaction. A crash therefore never leaves the effect committed with the record unfinished. A built-in step record found `running` when the controller starts means that transaction never committed and the action took no effect, so the engine executes it again.
   - A plugin action is called after its `running` record has committed, outside any transaction, because it reaches outside the database. Its step record found `running` when the controller starts may or may not have taken effect. Runs never retry an action (section 7.5), so the step fails with the code `interrupted` and the run fails with `step-failed`.
 - **A step that fails** fails the run with `step-failed` and `failedStepId`; every step record that has not ended is `cancelled`, and no later step starts. A run that the controller cannot carry out for a reason of its own, such as a bug, fails at its current step with the code `unexpected`, rather than staying `running` until the next restart.
 
@@ -516,6 +538,13 @@ interface StepRecord {
 - **Cancel** (`run.cancel`) works on a `pending` or `running` run: the run becomes `cancelled` with `finishedAt`, every `pending` and every `running` step record becomes `cancelled` (the pending ones too, not only the running ones), and no later step starts. A plugin action still running sees its `signal` abort ([./05-plugins.md](./05-plugins.md) section 4.4). A run that has already ended is refused with `invalid_state`, naming its status. There are no subscriptions or sessions to end yet.
 
   *(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* Cancelling a run also cancels every unfinished run that its `run.start` steps started, and the runs those started, however deep, in the same transaction. A child run that has already ended stays as it is. A child of a finished child is still reached: a child can outlive the run that started it. So cancelling the first run of a chain that a workflow started on itself stops the whole chain. Only cancel reaches child runs: a parent that fails or completes leaves its children running, because a `run.start` step does not wait for its child (section 8).
+- *(Amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80).)* **Routing as built.**
+  - A step record's status moves forward only: `pending → running → completed | failed | cancelled`, or `pending → skipped`, which is final. `skipped` is not set at creation, as the list above says: a record is created `pending`, and its step's condition is evaluated when the record would start (section 4.3). A skipped record has `finishedAt` and no `startedAt`, `output` or `error`.
+  - `edgeTraversals` always has one count per edge of `plan.edges`, in the same order, zeros included. A count goes up in the transaction that follows the edge, and survives a restart.
+  - `failedEdgeIndex` is set when the run failed at an edge: `iteration-limit`, or an `expression-error` in an edge's condition. `failedStepId` is then the edge's source.
+  - `failureMessage` is set with `failedEdgeIndex` and says what went wrong at the edge: the condition's evaluation error, or the `maxTraversals` it reached. A run that failed at a step has none; the step record's `error` holds the message.
+  - A step whose condition cannot be evaluated fails without running, so its failed record's `startedAt` equals its `finishedAt`.
+  - Every decision about what runs next is made in one of two transactions. The one that starts a record evaluates the step's condition and writes `running`, or `skipped` together with what follows from it. The one that ends a record writes its end together with the edges it follows, their counts, the new records, and the run's end when the run completes or fails. Every way a run ends goes through one function.
 - Every committed change to a run or a step record publishes the run's id on the live topic `run` ([./14-web-app.md](./14-web-app.md)).
 
 ### 7.3 Platform events

@@ -38,6 +38,7 @@ const STEP_STATUSES: readonly StepStatus[] = [
   "completed",
   "failed",
   "cancelled",
+  "skipped",
 ];
 
 /** Returns the ISO timestamp `seconds` seconds after `start`. */
@@ -114,6 +115,7 @@ const RUNNING_RUN: Run = {
     { stepId: "note", iteration: 1, status: "pending" },
     { stepId: "start", iteration: 1, status: "running", startedAt: addSeconds(T0, 12) },
   ],
+  edgeTraversals: [1],
   createdAt: T0,
   startedAt: T0,
 };

@@ -138,6 +138,8 @@ describe("buildTimeline", () => {
     inputs: {},
     origin: { kind: "manual", actor: "user" },
     steps: STEPS,
+    // `create` went to `label` and to `query`; `query` has not run yet.
+    edgeTraversals: [1, 1, 0],
     createdAt: START,
   } as const;
   const run: Run = { ...FIELDS, status: "running", startedAt: START };

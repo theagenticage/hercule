@@ -13,6 +13,7 @@ import {
   validateCondition,
   validateExpression,
   validateTemplate,
+  evaluateCondition,
   evaluateExpression,
   ExpressionBudget,
   isTemplate,
@@ -317,4 +318,48 @@ describe("evaluateExpression over the wall-clock budget", () => {
     // the same source, on the shipped budget, answers.
     expect(Effect.runSync(evaluateExpression(source, context))).toBe(true);
   });
+});
+
+describe("evaluateCondition", () => {
+  /** A run's context: its inputs, and `review` as a step that completed. */
+  const context = {
+    inputs: { approve: true, target: 3 },
+    steps: { review: { output: { verdict: "approved", items: [1, 2] } } },
+  };
+
+  it("returns true or false for a condition over the run's inputs and step outputs", () => {
+    expect(
+      Effect.runSync(
+        evaluateCondition('inputs.approve && steps.review.output.verdict == "approved"', context),
+      ),
+    ).toBe(true);
+    expect(
+      Effect.runSync(
+        evaluateCondition("size(steps.review.output.items) >= inputs.target", context),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns what a has() guard finds for a step that is absent from steps", () => {
+    expect(Effect.runSync(evaluateCondition("!has(steps.fix)", context))).toBe(true);
+    expect(Effect.runSync(evaluateCondition("has(steps.review)", context))).toBe(true);
+  });
+
+  it.each([
+    ["a read of a step that is absent", "steps.fix.output.verdict == 'approved'"],
+    ["a read of a field that is absent", "steps.review.output.no_such_field == 1"],
+  ])("fails with an expression error on %s", (_description, source) => {
+    expect(readFailureMessage(evaluateCondition(source, context))).toMatch(/\S/);
+  });
+
+  it.each([
+    ["a string", "steps.review.output.verdict"],
+    ["a number", "inputs.target"],
+    ["a list", "steps.review.output.items"],
+  ])(
+    "fails with an expression error when the condition gives %s, not true or false",
+    (_description, source) => {
+      expect(readFailureMessage(evaluateCondition(source, context))).toMatch(/\S/);
+    },
+  );
 });

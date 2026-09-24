@@ -1399,6 +1399,7 @@ describe("the run commands", () => {
       origin: { kind: "manual", actor: "user" },
       status: "cancelled",
       steps: [],
+      edgeTraversals: [],
       createdAt: "2026-09-24T10:00:00.000Z",
       startedAt: "2026-09-24T10:00:00.000Z",
       finishedAt: "2026-09-24T10:00:01.000Z",

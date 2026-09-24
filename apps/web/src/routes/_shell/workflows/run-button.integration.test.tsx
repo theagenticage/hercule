@@ -62,6 +62,7 @@ const STARTED_RUN: Run = {
   origin: { kind: "manual", actor: "user" },
   status: "pending",
   steps: [{ stepId: "sweep", iteration: 1, status: "pending" }],
+  edgeTraversals: [],
   createdAt: "2026-09-24T08:00:00.000Z",
 };
 

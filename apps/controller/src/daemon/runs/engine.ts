@@ -7,22 +7,30 @@
  *
  * 1. It reads the run and takes its first step record that is pending, or
  *    running because a restart cut it off.
- * 2. It moves a pending record to `running`, in a transaction of its own.
+ * 2. The start transaction: it reads the run again and evaluates the step's
+ *    condition. If the condition holds, or the step has none, the record
+ *    moves to `running`. If it is false, the record moves to `skipped` and
+ *    the run is routed as if the step had completed (see step 5). If it
+ *    cannot be decided, the record and the run fail.
  * 3. It renders the step's params from the run's inputs and the outputs of
- *    the steps that have completed, and decodes them with the action's input
+ *    the steps that have finished, and decodes them with the action's input
  *    schema.
- * 4. It calls the action, and ends the step record and adds a pending record
- *    for each step an edge leads to. A built-in action is called as the run,
- *    in the same transaction that ends its record; `wait` is the exception,
- *    because it holds no transaction while it waits. A plugin's action is
- *    called outside any transaction, and its record ends afterwards.
- * 5. It repeats until no step record is pending or running, and then
- *    completes the run.
+ * 4. It calls the action. A built-in action is called as the run, in the
+ *    same transaction that ends its record; `wait` is the exception, because
+ *    it holds no transaction while it waits. A plugin's action is called
+ *    outside any transaction, and its record ends afterwards.
+ * 5. The end transaction: it ends the step record, reads the run again, and
+ *    routes it (`routing.ts`): it follows the edges whose conditions hold,
+ *    adds the records of the steps that are ready, and completes or fails
+ *    the run when routing says so.
+ * 6. It repeats until the run has ended.
  *
- * A built-in action's effect and the end of its step record commit together,
- * so a crash never leaves the effect committed with the step still unfinished. A
- * failed step, or a template that cannot be rendered, fails the run and
- * cancels the step records that have not run.
+ * Every routing decision is made in a start or an end transaction, against
+ * rows read inside it, so the decision and its writes commit together. A
+ * built-in action's effect and the end of its step record commit together
+ * too, so a crash never leaves the effect committed with the step still
+ * unfinished. A failed step, or a template that cannot be rendered, fails the
+ * run and cancels the step records that have not run.
  *
  * Nothing about a run is held only in memory. When the controller starts, it
  * resumes every run that is pending or running from its rows. A built-in
@@ -83,7 +91,6 @@ import {
   type TaskCreateInput,
   type TaskFilter,
   type Unauthenticated,
-  type WorkflowDefinition,
 } from "@hercule/contract";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
 import { CurrentActor, requireGrant, type RunActor } from "../../actor";
@@ -100,12 +107,13 @@ import {
   isUnfinished,
   runRepository,
   StepRecordEnded,
-  type UnfinishedStepRecord,
+  type RunOutcome,
 } from "../../runs";
 import type { Settings } from "../../settings";
 import { TaskService } from "../../tasks";
 import type { WorkflowService } from "../../workflows";
 import { absorbFailures } from "../absorbing";
+import { buildRunContext, decideRouting, isStepConditionMet } from "./routing";
 import { makeRunStart } from "./start";
 
 /**
@@ -115,8 +123,9 @@ import { makeRunStart } from "./start";
  *
  * - `not_found`: the step's action is not in the catalog, or has nothing to
  *   call.
- * - `expression_error`: a template in the step's params could not be
- *   evaluated.
+ * - `expression_error`: the step's condition, or a template in its params,
+ *   could not be evaluated, or the condition gave something other than true
+ *   or false.
  * - `validation`: the rendered params do not match the action's input schema.
  * - `unexpected`: the action failed with something that is neither an API
  *   error nor an `ActionError`, such as a bug, or the controller could not
@@ -244,23 +253,6 @@ const executePluginAction = (
 const describeEnding = (status: RunStatus): string =>
   status === "cancelled" ? "has already been cancelled" : `has already ${status}`;
 
-/** Returns the ids of the steps an edge from `stepId` leads to, in definition order. */
-const listNextStepIds = (plan: WorkflowDefinition, stepId: string): ReadonlyArray<string> =>
-  (plan.edges ?? []).filter((edge) => edge.from === stepId).map((edge) => edge.to);
-
-/**
- * Returns the context a template is rendered against: the run's inputs, and
- * the output of each step that has completed.
- */
-const buildRenderContext = (run: Run): Record<string, unknown> => ({
-  inputs: run.inputs,
-  steps: Object.fromEntries(
-    run.steps.flatMap((record) =>
-      record.status === "completed" ? [[record.stepId, { output: record.output }]] : [],
-    ),
-  ),
-});
-
 /**
  * Waits `seconds` from `startedAt`, and returns `{}`. A step that a restart
  * cut off waits only for the time it had left, and not at all if that time
@@ -339,11 +331,49 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Fails a run at one of its steps: the step record fails with `error`,
-   * every other record that has not run is cancelled, and the run fails with
-   * `failureReason`. One transaction, so a reader never sees a failed run with
-   * a step still pending. A record that has already ended keeps its ending.
+   * Ends a run: cancels every step record of it that is still pending or
+   * running, and moves the run to `outcome`. Every way a run ends goes
+   * through here, inside the transaction that decided it, so a reader never
+   * sees an ended run with a step record still pending or running.
    */
+  const writeRunEnding = (
+    runId: string,
+    outcome: RunOutcome,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.andThen(runs.cancelUnfinishedSteps(runId, at), runs.finish(runId, outcome, at));
+
+  /**
+   * Fails a run at one of its steps, inside the caller's transaction: the
+   * step record fails with `error`, and the run fails with `failureReason`
+   * (see `writeRunEnding`). A record that has already ended keeps its ending.
+   */
+  const writeStepFailure = (
+    runId: string,
+    attempt: StepAttempt,
+    error: StepError,
+    failureReason: FailureReason,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      yield* Effect.catchTag(
+        runs.finishStep(
+          runId,
+          attempt,
+          { status: "failed", error },
+          { startedAt: attempt.startedAt ?? at, finishedAt: at },
+        ),
+        "StepRecordEnded",
+        () => Effect.void,
+      );
+      yield* writeRunEnding(
+        runId,
+        { status: "failed", failureReason, failedStepId: attempt.stepId },
+        at,
+      );
+    });
+
+  /** Fails a run at one of its steps (see `writeStepFailure`), in a transaction of its own. */
   const failRun = (
     runId: string,
     attempt: StepAttempt,
@@ -351,164 +381,225 @@ const make = Effect.gen(function* () {
     failureReason: FailureReason,
   ): Effect.Effect<void, SqlError> =>
     commitUninterruptibly(
-      Effect.gen(function* () {
-        const at = yield* nowIso;
-        yield* Effect.catchTag(
-          runs.finishStep(
-            runId,
-            attempt,
-            { status: "failed", error },
-            { startedAt: attempt.startedAt ?? at, finishedAt: at },
-          ),
-          "StepRecordEnded",
-          () => Effect.void,
-        );
-        yield* runs.cancelUnfinishedSteps(runId, at);
-        yield* runs.finish(
-          runId,
-          { status: "failed", failureReason, failedStepId: attempt.stepId },
-          at,
-        );
-      }),
+      Effect.flatMap(nowIso, (at) => writeStepFailure(runId, attempt, error, failureReason, at)),
     );
 
   /**
-   * Executes one pending or running step record of a run, and records how it
-   * ended. A failure of the step fails the run. This effect itself fails
-   * only with a database error, which is the controller's failure rather
-   * than the step's. Does nothing if the step record ended before its action
-   * was called, because the run was cancelled.
+   * Routes a run after the latest record of `stepId` finished, inside the
+   * caller's transaction, which has already written that record's ending.
+   * Reads the run again, so the decision sees every row the transaction can,
+   * and writes the decision: the edges followed, the new pending records,
+   * and the run's ending when routing ends it (see `decideRouting`).
+   */
+  const routeAfterStep = (
+    runId: string,
+    stepId: string,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      // Runs are never deleted, and the caller has just written a record of
+      // this one.
+      const run = Option.getOrThrow(yield* runs.read(runId));
+      const decision = yield* decideRouting(run, stepId);
+      yield* runs.recordTraversals(runId, decision.traversedEdgeIndexes);
+      yield* runs.insertSteps(runId, decision.readyStepIds, at);
+      const { ending } = decision;
+      if (ending._tag === "completed") {
+        yield* writeRunEnding(runId, { status: "completed" }, at);
+      } else if (ending._tag === "failed") {
+        yield* writeRunEnding(
+          runId,
+          {
+            status: "failed",
+            failureReason: ending.failureReason,
+            failedStepId: stepId,
+            failedEdgeIndex: ending.failedEdgeIndex,
+            failureMessage: ending.message,
+          },
+          at,
+        );
+      }
+    });
+
+  /**
+   * Starts a pending step record, in a transaction of its own. Reads the run
+   * again and evaluates the step's condition:
+   *
+   * - true, or no condition: the record moves to `running`, and this returns
+   *   the run as read, for rendering the step's params, and the moment the
+   *   record started;
+   * - false: the record moves to `skipped`, and the run is routed as if the
+   *   step had completed;
+   * - the condition cannot be decided: the record fails with
+   *   `expression_error`, and the run fails at the step.
+   *
+   * Returns `None` in the last two cases, and when the record is no longer
+   * pending, for example because the run was cancelled.
+   */
+  const startStepRecord = (
+    runId: string,
+    record: StepAttempt,
+  ): Effect.Effect<Option.Option<{ readonly run: Run; readonly startedAt: string }>, SqlError> =>
+    Effect.catchTag(
+      commitUninterruptibly(
+        Effect.gen(function* () {
+          const at = yield* nowIso;
+          const run = Option.getOrThrow(yield* runs.read(runId));
+          const met = yield* Effect.result(isStepConditionMet(run, record.stepId));
+          if (Result.isFailure(met)) {
+            yield* writeStepFailure(
+              runId,
+              record,
+              {
+                code: "expression_error",
+                message: `The condition of this step failed: ${met.failure.message}`,
+              },
+              "expression-error",
+              at,
+            );
+            return Option.none();
+          }
+          if (!met.success) {
+            yield* runs.skipStep(runId, record, at);
+            yield* routeAfterStep(runId, record.stepId, at);
+            return Option.none();
+          }
+          yield* runs.startStep(runId, record, at);
+          return Option.some({ run, startedAt: at });
+        }),
+      ),
+      "StepRecordEnded",
+      () => Effect.succeedNone,
+    );
+
+  /**
+   * Executes one running step record of a run, and records how it ended. A
+   * failure of the step fails the run. This effect itself fails only with a
+   * database error, which is the controller's failure rather than the
+   * step's. Does nothing more once the step record has ended some other way,
+   * for example because the run was cancelled.
    *
    * A built-in action's effect and the end of its step record commit in one
    * transaction, except for `wait`. A plugin's action reaches outside the
    * controller, so it is called after its record's `running` commits and
    * outside any transaction, and its record ends in a transaction of its own.
    */
-  const executeStep = (run: Run, current: UnfinishedStepRecord): Effect.Effect<void, SqlError> =>
-    Effect.catchTag(
-      Effect.gen(function* () {
-        // Starting the run checked that every step is an action step, and
-        // the plan never changes.
-        const step = run.plan.steps.find((candidate) => candidate.id === current.stepId);
-        if (step === undefined || step.kind !== "action") {
-          return yield* Effect.die(
-            `the plan of run ${run.id} has no action step ${current.stepId}`,
-          );
-        }
-        const startedAt = current.status === "running" ? current.startedAt : yield* nowIso;
-        const attempt: StepAttempt = { ...current, startedAt };
-        if (current.status === "pending") {
-          yield* commitUninterruptibly(runs.startStep(run.id, attempt, startedAt));
-        }
-        const rendered = yield* Effect.result(
-          renderTemplates(step.params ?? {}, buildRenderContext(run)),
+  const executeStep = (run: Run, attempt: Required<StepAttempt>): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      // Starting the run checked that every step is an action step, and
+      // the plan never changes.
+      const step = run.plan.steps.find((candidate) => candidate.id === attempt.stepId);
+      if (step === undefined || step.kind !== "action") {
+        return yield* Effect.die(`the plan of run ${run.id} has no action step ${attempt.stepId}`);
+      }
+      const { startedAt } = attempt;
+      const rendered = yield* Effect.result(
+        renderTemplates(step.params ?? {}, buildRunContext(run)),
+      );
+      if (Result.isFailure(rendered)) {
+        return yield* failRun(
+          run.id,
+          attempt,
+          { code: "expression_error", message: rendered.failure.message },
+          "expression-error",
         );
-        if (Result.isFailure(rendered)) {
-          return yield* failRun(
-            run.id,
-            attempt,
-            { code: "expression_error", message: rendered.failure.message },
-            "expression-error",
-          );
-        }
-        const catalogEntry = (yield* host.listActiveWorkflowActions()).find(
-          (action) => action.id === step.action,
+      }
+      const catalogEntry = (yield* host.listActiveWorkflowActions()).find(
+        (action) => action.id === step.action,
+      );
+      if (catalogEntry === undefined) {
+        return yield* failRun(
+          run.id,
+          attempt,
+          buildActionUnavailableError(step.action),
+          "step-failed",
         );
-        if (catalogEntry === undefined) {
-          return yield* failRun(
-            run.id,
-            attempt,
-            buildActionUnavailableError(step.action),
-            "step-failed",
-          );
-        }
-        const decoded = Schema.decodeUnknownResult(catalogEntry.input as Schema.Codec<unknown>)(
-          rendered.success,
-          { errors: "all", onExcessProperty: "error" },
+      }
+      const decoded = Schema.decodeUnknownResult(catalogEntry.input as Schema.Codec<unknown>)(
+        rendered.success,
+        { errors: "all", onExcessProperty: "error" },
+      );
+      if (Result.isFailure(decoded)) {
+        return yield* failRun(
+          run.id,
+          attempt,
+          {
+            code: "validation",
+            message: `The rendered params do not match the action's input: ${listDecodeIssues(decoded.failure).map(formatIssue).join("; ")}`,
+          },
+          "step-failed",
         );
-        if (Result.isFailure(decoded)) {
-          return yield* failRun(
+      }
+      const actor: RunActor = { _tag: "run", runId: run.id, stepId: attempt.stepId };
+      const completeStep = (output: unknown) =>
+        Effect.gen(function* () {
+          const finishedAt = yield* nowIso;
+          yield* runs.finishStep(
             run.id,
             attempt,
-            {
-              code: "validation",
-              message: `The rendered params do not match the action's input: ${listDecodeIssues(decoded.failure).map(formatIssue).join("; ")}`,
-            },
-            "step-failed",
+            { status: "completed", output },
+            { startedAt, finishedAt },
           );
-        }
-        const actor: RunActor = { _tag: "run", runId: run.id, stepId: attempt.stepId };
-        const completeStep = (output: unknown) =>
-          Effect.gen(function* () {
-            const finishedAt = yield* nowIso;
-            yield* runs.finishStep(
-              run.id,
-              attempt,
-              { status: "completed", output },
-              { startedAt, finishedAt },
-            );
-            yield* runs.insertSteps(run.id, listNextStepIds(run.plan, attempt.stepId), finishedAt);
-          });
-        // Returns the error to fail the step with, or `undefined` when
-        // something else ended the step while its action ran, such as a
-        // cancel. That ending stands, and a built-in action's effect rolled
-        // back with its transaction. A database error is the controller's
-        // failure, not the action's, so it fails this effect instead.
-        const decideStepError = (
-          cause: Cause.Cause<unknown>,
-        ): Effect.Effect<StepError | undefined, SqlError> => {
-          if (Cause.hasInterrupts(cause)) return Effect.interrupt;
-          const error = Option.getOrUndefined(Cause.findErrorOption(cause));
-          if (error instanceof StepRecordEnded) return Effect.succeed(undefined);
-          if (isSqlError(error)) return Effect.fail(error);
-          const described = describeActionFailure(error);
-          return described === undefined
-            ? Effect.as(
-                Effect.logError(`Step ${attempt.stepId} of run ${run.id} failed`, cause),
-                UNEXPECTED_ACTION_FAILURE,
-              )
-            : Effect.succeed(described);
-        };
-        // A built-in action is called through the engine's own handlers, and
-        // a plugin's action through the `execute` its plugin registered.
-        const builtIn = isBuiltInActionId(step.action) ? builtInActions[step.action] : undefined;
-        const pluginExecute = catalogEntry.execute;
-        let execute: Effect.Effect<void, unknown>;
-        if (builtIn !== undefined) {
-          const called = Effect.provideService(
-            builtIn.execute(decoded.success, { startedAt }),
-            CurrentActor,
-            actor,
-          );
-          execute = builtIn.inTransaction
-            ? commitUninterruptibly(Effect.flatMap(called, completeStep))
-            : Effect.flatMap(called, (output) => commitUninterruptibly(completeStep(output)));
-        } else if (pluginExecute !== undefined) {
-          execute = Effect.flatMap(
-            executePluginAction(catalogEntry, pluginExecute, decoded.success, {
-              runId: run.id,
-              stepId: attempt.stepId,
-            }),
-            (output) => commitUninterruptibly(completeStep(output)),
-          );
-        } else {
-          return yield* failRun(
-            run.id,
-            attempt,
-            buildActionUnavailableError(step.action),
-            "step-failed",
-          );
-        }
-        const failure = yield* Effect.catchCause(Effect.as(execute, undefined), decideStepError);
-        if (failure !== undefined) yield* failRun(run.id, attempt, failure, "step-failed");
-      }),
-      "StepRecordEnded",
-      () => Effect.void,
-    );
+          yield* routeAfterStep(run.id, attempt.stepId, finishedAt);
+        });
+      // Returns the error to fail the step with, or `undefined` when
+      // something else ended the step while its action ran, such as a
+      // cancel. That ending stands, and a built-in action's effect rolled
+      // back with its transaction. A database error is the controller's
+      // failure, not the action's, so it fails this effect instead.
+      const decideStepError = (
+        cause: Cause.Cause<unknown>,
+      ): Effect.Effect<StepError | undefined, SqlError> => {
+        if (Cause.hasInterrupts(cause)) return Effect.interrupt;
+        const error = Option.getOrUndefined(Cause.findErrorOption(cause));
+        if (error instanceof StepRecordEnded) return Effect.succeed(undefined);
+        if (isSqlError(error)) return Effect.fail(error);
+        const described = describeActionFailure(error);
+        return described === undefined
+          ? Effect.as(
+              Effect.logError(`Step ${attempt.stepId} of run ${run.id} failed`, cause),
+              UNEXPECTED_ACTION_FAILURE,
+            )
+          : Effect.succeed(described);
+      };
+      // A built-in action is called through the engine's own handlers, and
+      // a plugin's action through the `execute` its plugin registered.
+      const builtIn = isBuiltInActionId(step.action) ? builtInActions[step.action] : undefined;
+      const pluginExecute = catalogEntry.execute;
+      let execute: Effect.Effect<void, unknown>;
+      if (builtIn !== undefined) {
+        const called = Effect.provideService(
+          builtIn.execute(decoded.success, { startedAt }),
+          CurrentActor,
+          actor,
+        );
+        execute = builtIn.inTransaction
+          ? commitUninterruptibly(Effect.flatMap(called, completeStep))
+          : Effect.flatMap(called, (output) => commitUninterruptibly(completeStep(output)));
+      } else if (pluginExecute !== undefined) {
+        execute = Effect.flatMap(
+          executePluginAction(catalogEntry, pluginExecute, decoded.success, {
+            runId: run.id,
+            stepId: attempt.stepId,
+          }),
+          (output) => commitUninterruptibly(completeStep(output)),
+        );
+      } else {
+        return yield* failRun(
+          run.id,
+          attempt,
+          buildActionUnavailableError(step.action),
+          "step-failed",
+        );
+      }
+      const failure = yield* Effect.catchCause(Effect.as(execute, undefined), decideStepError);
+      if (failure !== undefined) yield* failRun(run.id, attempt, failure, "step-failed");
+    });
 
   /**
-   * Executes a run from its rows until it has ended. Reads the run again
-   * after each step, because each step adds the records of the steps after it.
+   * Executes a run from its rows until it has ended, one step record at a
+   * time. Reads the run again after each step, because routing adds the
+   * records of the steps after it.
    */
   const executeRun = (runId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -522,18 +613,26 @@ const make = Effect.gen(function* () {
         }
         const current = findCurrentStepRecord(run.steps);
         if (current === undefined) {
+          // Routing completes a run in the transaction that ends its last
+          // record. An earlier engine completed it in a transaction of its
+          // own, so a restart between the two leaves such a run with nothing
+          // to execute.
           return yield* commitUninterruptibly(
-            Effect.flatMap(nowIso, (at) => runs.finish(runId, { status: "completed" }, at)),
+            Effect.flatMap(nowIso, (at) => writeRunEnding(runId, { status: "completed" }, at)),
           );
         }
-        const step = run.plan.steps.find((candidate) => candidate.id === current.stepId);
-        if (
-          current.status === "running" &&
-          !(step?.kind === "action" && isBuiltInActionId(step.action))
-        ) {
-          return yield* failRun(runId, current, INTERRUPTED, "step-failed");
+        if (current.status === "running") {
+          const step = run.plan.steps.find((candidate) => candidate.id === current.stepId);
+          if (!(step?.kind === "action" && isBuiltInActionId(step.action))) {
+            return yield* failRun(runId, current, INTERRUPTED, "step-failed");
+          }
+          yield* executeStep(run, current);
+          continue;
         }
-        yield* executeStep(run, current);
+        const started = yield* startStepRecord(runId, current);
+        if (Option.isSome(started)) {
+          yield* executeStep(started.value.run, { ...current, startedAt: started.value.startedAt });
+        }
       }
     });
 
@@ -553,7 +652,7 @@ const make = Effect.gen(function* () {
       }
       yield* commitUninterruptibly(
         Effect.flatMap(nowIso, (at) =>
-          runs.finish(runId, { status: "failed", failureReason: "controller-error" }, at),
+          writeRunEnding(runId, { status: "failed", failureReason: "controller-error" }, at),
         ),
       );
     });
@@ -633,8 +732,7 @@ const make = Effect.gen(function* () {
               const at = yield* nowIso;
               const cancelled = [id, ...(yield* runs.listUnfinishedDescendants(id))];
               for (const runId of cancelled) {
-                yield* runs.cancelUnfinishedSteps(runId, at);
-                yield* runs.finish(runId, { status: "cancelled" }, at);
+                yield* writeRunEnding(runId, { status: "cancelled" }, at);
               }
               yield* afterCommit(() => {
                 for (const runId of cancelled) stopExecuting(runId);

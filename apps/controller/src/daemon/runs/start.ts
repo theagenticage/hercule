@@ -59,16 +59,13 @@ export type RunStartError =
 /**
  * Returns an issue for each element of a definition that runs cannot execute
  * yet, each at its path. Such a workflow can be saved, but starting a run of
- * it is refused: a run that ignored a condition or a join would do something
- * the author did not write.
+ * it is refused: a run that ignored a step or a trigger it cannot execute
+ * would do something the author did not write.
  */
 const listUnsupportedElements = (
   definition: WorkflowDefinition,
   actions: ReadonlyArray<RegisteredWorkflowAction>,
 ): ReadonlyArray<Issue> => {
-  const edges = definition.edges ?? [];
-  const countIncomingEdges = (stepId: string): number =>
-    edges.filter((edge) => edge.to === stepId).length;
   const triggerIssues = (definition.triggers ?? []).flatMap((trigger, index) =>
     trigger.kind === "signal"
       ? [
@@ -98,67 +95,15 @@ const listUnsupportedElements = (
           "Runs cannot call an action that acts through a Connection yet. Remove this step to run this workflow.",
       });
     }
-    if (step.condition !== undefined) {
-      issues.push({
-        path: [...path, "condition"],
-        message:
-          "Runs cannot evaluate step conditions yet. Remove the condition to run this workflow.",
-      });
-    }
-    if (step.join !== undefined) {
-      issues.push({
-        path: [...path, "join"],
-        message: "Runs cannot join branches yet. Remove join to run this workflow.",
-      });
-    }
     if (step.terminal !== undefined) {
       issues.push({
         path: [...path, "terminal"],
         message: "Runs cannot end at a terminal step yet. Remove terminal to run this workflow.",
       });
     }
-    const leadingEdges = countIncomingEdges(step.id);
-    if (leadingEdges > 1) {
-      issues.push({
-        path,
-        message:
-          "Runs cannot run a step that more than one edge leads into yet. Let only one edge lead into this step.",
-      });
-    } else if (leadingEdges === 1 && step.entry === true) {
-      // The step would run once as an entry step and again when the edge
-      // fires, and a step that runs twice needs the rules for loops.
-      issues.push({
-        path: [...path, "entry"],
-        message:
-          "Runs cannot start at a step that an edge also leads into yet. Remove entry, or the edge that leads into this step.",
-      });
-    }
     return issues;
   });
-  const edgeIssues = edges.flatMap((edge, index): ReadonlyArray<Issue> => {
-    const path = ["edges", String(index)];
-    return [
-      ...(edge.condition === undefined
-        ? []
-        : [
-            {
-              path: [...path, "condition"],
-              message:
-                "Runs cannot evaluate edge conditions yet. Remove the condition to run this workflow.",
-            },
-          ]),
-      ...(edge.maxTraversals === undefined
-        ? []
-        : [
-            {
-              path: [...path, "maxTraversals"],
-              message:
-                "Runs cannot follow an edge more than once yet. Remove maxTraversals to run this workflow.",
-            },
-          ]),
-    ];
-  });
-  return [...triggerIssues, ...stepIssues, ...edgeIssues];
+  return [...triggerIssues, ...stepIssues];
 };
 
 /** A run about to be written: the stored workflow it runs, if any, the inputs as given, and how it was started. */

@@ -307,15 +307,20 @@ const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
 ];
 
 /**
- * Returns a run's failure reason and the step it failed at, as the fields of
- * `run read`, or no fields for a run that did not fail. A run the controller
- * could not carry out may have failed before it reached any step.
+ * Returns a run's failure reason, the step it failed at, and what went wrong
+ * at the edge it failed at, as the fields of `run read`, or no fields for a
+ * run that did not fail. A run the controller could not carry out may have
+ * failed before it reached any step, and only a run that failed at an edge
+ * has a failure message.
  */
 const describeFailure = (run: Run): Record<string, string> => {
   if (run.status !== "failed") return {};
   return {
     failureReason: run.failureReason,
     ...(run.failedStepId === undefined ? {} : { failedStep: run.failedStepId }),
+    ...(run.failureReason === "controller-error" || run.failureMessage === undefined
+      ? {}
+      : { failureMessage: run.failureMessage }),
   };
 };
 

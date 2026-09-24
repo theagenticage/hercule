@@ -371,59 +371,12 @@ describe("the graphs a run accepts", () => {
           path: ["triggers", "0"],
         },
         {
-          element: "an edge condition",
-          definition: {
-            name: "Edge condition",
-            steps: [buildCreateStep("first"), buildCreateStep("second")],
-            edges: [{ from: "first", to: "second", condition: "true" }],
-          },
-          path: ["edges", "0", "condition"],
-        },
-        {
-          element: "a step condition",
-          definition: {
-            name: "Step condition",
-            steps: [buildCreateStep("first", { condition: "true" })],
-          },
-          path: ["steps", "0", "condition"],
-        },
-        {
-          element: "join",
-          definition: {
-            name: "Join",
-            steps: [buildCreateStep("first"), buildCreateStep("second", { join: "any" })],
-            edges: [{ from: "first", to: "second" }],
-          },
-          path: ["steps", "1", "join"],
-        },
-        {
           element: "terminal",
           definition: {
             name: "Terminal",
             steps: [buildCreateStep("first", { terminal: true })],
           },
           path: ["steps", "0", "terminal"],
-        },
-        {
-          element: "maxTraversals",
-          definition: {
-            name: "Max traversals",
-            steps: [buildCreateStep("first"), buildCreateStep("second")],
-            edges: [{ from: "first", to: "second", maxTraversals: 2 }],
-          },
-          path: ["edges", "0", "maxTraversals"],
-        },
-        {
-          element: "a step with two incoming edges",
-          definition: {
-            name: "Two incoming edges",
-            steps: [buildCreateStep("left"), buildCreateStep("right"), buildCreateStep("merge")],
-            edges: [
-              { from: "left", to: "merge" },
-              { from: "right", to: "merge" },
-            ],
-          },
-          path: ["steps", "2"],
         },
       ];
 
@@ -439,20 +392,182 @@ describe("the graphs a run accepts", () => {
 
   it("reports one issue per unsupported element when a plan has several", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
+      const agentId = await createAgent(base, token);
       const workflow = await createWorkflowOrFail(base, token, {
         definition: {
           name: "Two unsupported elements",
-          steps: [buildCreateStep("first", { condition: "true" }), buildCreateStep("second")],
-          edges: [{ from: "first", to: "second", condition: "true" }],
+          steps: [
+            buildCreateStep("first", { terminal: true }),
+            { id: "review", kind: "agent", agent: agentId, prompt: "Review the task." },
+          ],
+          edges: [{ from: "first", to: "review" }],
         },
       });
 
       const response = await requestRun(base, token, workflow.id);
 
       await expectRefusedAt(harness, response, [
-        ["steps", "0", "condition"],
-        ["edges", "0", "condition"],
+        ["steps", "0", "terminal"],
+        ["steps", "1"],
       ]);
+    });
+  });
+
+  it("runs each routing element to completion: conditions, join, maxTraversals, several incoming edges and an entry step an edge leads into", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      const fixtures: ReadonlyArray<{
+        readonly element: string;
+        readonly definition: unknown;
+        readonly records: ReadonlyArray<readonly [string, number, string]>;
+      }> = [
+        {
+          element: "an edge condition",
+          definition: {
+            name: "Edge condition",
+            steps: [buildCreateStep("first"), buildCreateStep("second")],
+            edges: [{ from: "first", to: "second", condition: "true" }],
+          },
+          records: [
+            ["first", 1, "completed"],
+            ["second", 1, "completed"],
+          ],
+        },
+        {
+          element: "a step condition",
+          definition: {
+            name: "Step condition",
+            steps: [buildCreateStep("first", { condition: "true" })],
+          },
+          records: [["first", 1, "completed"]],
+        },
+        {
+          element: "join: any",
+          definition: {
+            name: "Join any",
+            steps: [buildCreateStep("first"), buildCreateStep("second", { join: "any" })],
+            edges: [{ from: "first", to: "second" }],
+          },
+          records: [
+            ["first", 1, "completed"],
+            ["second", 1, "completed"],
+          ],
+        },
+        {
+          element: "join: all",
+          definition: {
+            name: "Join all",
+            steps: [
+              buildCreateStep("left"),
+              buildCreateStep("right"),
+              buildCreateStep("merge", { join: "all" }),
+            ],
+            edges: [
+              { from: "left", to: "merge" },
+              { from: "right", to: "merge" },
+            ],
+          },
+          records: [
+            ["left", 1, "completed"],
+            ["merge", 1, "completed"],
+            ["right", 1, "completed"],
+          ],
+        },
+        {
+          element: "maxTraversals",
+          definition: {
+            name: "Max traversals",
+            steps: [buildCreateStep("first"), buildCreateStep("second")],
+            edges: [{ from: "first", to: "second", maxTraversals: 2 }],
+          },
+          records: [
+            ["first", 1, "completed"],
+            ["second", 1, "completed"],
+          ],
+        },
+        {
+          element: "a step with two incoming edges",
+          definition: {
+            name: "Two incoming edges",
+            steps: [buildCreateStep("left"), buildCreateStep("right"), buildCreateStep("merge")],
+            edges: [
+              { from: "left", to: "merge" },
+              { from: "right", to: "merge" },
+            ],
+          },
+          records: [
+            ["left", 1, "completed"],
+            ["merge", 1, "completed"],
+            ["merge", 2, "completed"],
+            ["right", 1, "completed"],
+          ],
+        },
+        {
+          element: "entry: true on a step an edge leads into",
+          definition: {
+            name: "Entry with an incoming edge",
+            steps: [buildCreateStep("first"), buildCreateStep("second", { entry: true })],
+            edges: [{ from: "first", to: "second" }],
+          },
+          // `second` starts with the run, and runs again when the edge fires.
+          records: [
+            ["first", 1, "completed"],
+            ["second", 1, "completed"],
+            ["second", 2, "completed"],
+          ],
+        },
+      ];
+
+      for (const { element, definition, records } of fixtures) {
+        const workflow = await createWorkflowOrFail(base, token, { definition });
+        const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
+        expect(run.status, `${element}: ${JSON.stringify(run)}`).toBe("completed");
+        expect(
+          run.steps.map((record) => [record.stepId, record.iteration, record.status]).sort(),
+          element,
+        ).toEqual(records);
+      }
+    });
+  });
+
+  it("refuses two edges with the same from and to, and entry: true with join: all, each with one plain-worded issue at its path", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const fixtures: ReadonlyArray<{
+        readonly element: string;
+        readonly definition: unknown;
+        readonly path: ReadonlyArray<string>;
+      }> = [
+        {
+          element: "two edges with the same from and to",
+          definition: {
+            name: "Duplicate edge",
+            steps: [buildCreateStep("count"), buildCreateStep("file")],
+            edges: [
+              { from: "count", to: "file" },
+              { from: "count", to: "file", condition: "true" },
+            ],
+          },
+          path: ["edges", "1"],
+        },
+        {
+          element: "entry: true with join: all",
+          definition: {
+            name: "Entry and join all",
+            steps: [
+              buildCreateStep("left"),
+              buildCreateStep("merge", { entry: true, join: "all" }),
+            ],
+            edges: [{ from: "left", to: "merge" }],
+          },
+          path: ["steps", "1"],
+        },
+      ];
+
+      // A save refuses both shapes, so each plan is sent with the request.
+      for (const { element, definition, path } of fixtures) {
+        const response = await requestStart(base, token, { definition });
+        const issues = await expectRefusedAt(harness, response, [path], element);
+        expect(issues[0]!.message, element).toMatch(/^[A-Z][^{}]*\.$/s);
+      }
     });
   });
 
