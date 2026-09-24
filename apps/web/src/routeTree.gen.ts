@@ -23,6 +23,7 @@ import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/time
 import { Route as ShellConnectionsIndexRouteImport } from './routes/_shell/connections/index'
 import { Route as ShellFleetIndexRouteImport } from './routes/_shell/fleet/index'
 import { Route as ShellFleetRunnerIdRouteImport } from './routes/_shell/fleet/$runnerId'
+import { Route as ShellRunsPrototypeGraphRouteImport } from './routes/_shell/runs_.prototype-graph'
 import { Route as ShellSessionsIndexRouteImport } from './routes/_shell/sessions/index'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell/settings/index'
 import { Route as ShellSettingsAssistantsRouteImport } from './routes/_shell/settings/assistants'
@@ -108,6 +109,11 @@ const ShellFleetIndexRoute = ShellFleetIndexRouteImport.update({
 const ShellFleetRunnerIdRoute = ShellFleetRunnerIdRouteImport.update({
   id: '/fleet/$runnerId',
   path: '/fleet/$runnerId',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellRunsPrototypeGraphRoute = ShellRunsPrototypeGraphRouteImport.update({
+  id: '/runs_/prototype-graph',
+  path: '/runs/prototype-graph',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellSessionsIndexRoute = ShellSessionsIndexRouteImport.update({
@@ -210,6 +216,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ShellSettingsRouteWithChildren
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
+  '/runs/prototype-graph': typeof ShellRunsPrototypeGraphRoute
   '/settings/assistants': typeof ShellSettingsAssistantsRoute
   '/settings/bounds': typeof ShellSettingsBoundsRoute
   '/settings/identities': typeof ShellSettingsIdentitiesRoute
@@ -241,6 +248,7 @@ export interface FileRoutesByTo {
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/': typeof ShellIndexRoute
   '/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
+  '/runs/prototype-graph': typeof ShellRunsPrototypeGraphRoute
   '/settings/assistants': typeof ShellSettingsAssistantsRoute
   '/settings/bounds': typeof ShellSettingsBoundsRoute
   '/settings/identities': typeof ShellSettingsIdentitiesRoute
@@ -275,6 +283,7 @@ export interface FileRoutesById {
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/fleet/$runnerId': typeof ShellFleetRunnerIdRoute
+  '/_shell/runs_/prototype-graph': typeof ShellRunsPrototypeGraphRoute
   '/_shell/settings/assistants': typeof ShellSettingsAssistantsRoute
   '/_shell/settings/bounds': typeof ShellSettingsBoundsRoute
   '/_shell/settings/identities': typeof ShellSettingsIdentitiesRoute
@@ -309,6 +318,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/onboarding/timezone'
     | '/fleet/$runnerId'
+    | '/runs/prototype-graph'
     | '/settings/assistants'
     | '/settings/bounds'
     | '/settings/identities'
@@ -340,6 +350,7 @@ export interface FileRouteTypes {
     | '/onboarding/timezone'
     | '/'
     | '/fleet/$runnerId'
+    | '/runs/prototype-graph'
     | '/settings/assistants'
     | '/settings/bounds'
     | '/settings/identities'
@@ -373,6 +384,7 @@ export interface FileRouteTypes {
     | '/onboarding/timezone'
     | '/_shell/'
     | '/_shell/fleet/$runnerId'
+    | '/_shell/runs_/prototype-graph'
     | '/_shell/settings/assistants'
     | '/_shell/settings/bounds'
     | '/_shell/settings/identities'
@@ -499,6 +511,13 @@ declare module '@tanstack/react-router' {
       path: '/fleet/$runnerId'
       fullPath: '/fleet/$runnerId'
       preLoaderRoute: typeof ShellFleetRunnerIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/runs_/prototype-graph': {
+      id: '/_shell/runs_/prototype-graph'
+      path: '/runs/prototype-graph'
+      fullPath: '/runs/prototype-graph'
+      preLoaderRoute: typeof ShellRunsPrototypeGraphRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/sessions/': {
@@ -662,6 +681,7 @@ interface ShellRouteChildren {
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
   ShellFleetRunnerIdRoute: typeof ShellFleetRunnerIdRoute
+  ShellRunsPrototypeGraphRoute: typeof ShellRunsPrototypeGraphRoute
   ShellThreadsSessionIdRoute: typeof ShellThreadsSessionIdRoute
   ShellThreadsNewRoute: typeof ShellThreadsNewRoute
   ShellWorkflowsWorkflowIdRoute: typeof ShellWorkflowsWorkflowIdRoute
@@ -682,6 +702,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
   ShellFleetRunnerIdRoute: ShellFleetRunnerIdRoute,
+  ShellRunsPrototypeGraphRoute: ShellRunsPrototypeGraphRoute,
   ShellThreadsSessionIdRoute: ShellThreadsSessionIdRoute,
   ShellThreadsNewRoute: ShellThreadsNewRoute,
   ShellWorkflowsWorkflowIdRoute: ShellWorkflowsWorkflowIdRoute,

@@ -1,0 +1,118 @@
+/* PROTOTYPE - throwaway (P021 run graph). The motion of the four variants.
+   Everything here stops under prefers-reduced-motion, at the end of the file. */
+
+/* B: a short band of light runs round the border of the running card. The
+   band is a conic gradient masked down to the 1px border. */
+@property --proto-beam-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes proto-beam {
+  to {
+    --proto-beam-angle: 360deg;
+  }
+}
+
+.proto-beam {
+  border-color: color-mix(in oklch, var(--live) 28%, var(--line));
+}
+
+.proto-beam::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--proto-beam-angle),
+    transparent 0deg 220deg,
+    color-mix(in oklch, var(--live) 40%, transparent) 290deg,
+    var(--live) 345deg,
+    transparent 360deg
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: proto-beam 2.2s linear infinite;
+  pointer-events: none;
+}
+
+/* B: the dashes of the active edge flow in the direction of the run. One
+   dash and gap is 9px, so moving the pattern 9px makes a seamless loop. */
+@keyframes proto-flow {
+  to {
+    stroke-dashoffset: -9;
+  }
+}
+
+.proto-flow {
+  stroke-dasharray: 5 4;
+  animation: proto-flow 0.7s linear infinite;
+}
+
+/* C: the card in the spotlight is lifted, with a thin ring and a soft halo in
+   the hue of its state (--spot). While it runs, the halo breathes. */
+.proto-spot {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--spot) 55%, transparent),
+    0 0 0 5px color-mix(in oklch, var(--spot) 13%, transparent),
+    var(--lift-shadow);
+}
+
+@keyframes proto-spot {
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--spot) 55%, transparent),
+      0 0 0 9px color-mix(in oklch, var(--spot) 5%, transparent),
+      var(--lift-shadow);
+  }
+}
+
+.proto-spot-breathe {
+  animation: proto-spot 2.4s ease-in-out infinite;
+}
+
+/* C: a ring pulses out of the beacon on the running card. */
+@keyframes proto-beacon {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  80%,
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+
+.proto-beacon {
+  animation: proto-beacon 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* D: the head of the running bar in the timeline glows softly. */
+@keyframes proto-head {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.proto-head {
+  animation: proto-head 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proto-beam::before,
+  .proto-flow,
+  .proto-spot-breathe,
+  .proto-beacon,
+  .proto-head {
+    animation: none;
+  }
+
+  .proto-beam::before {
+    background: var(--live);
+    opacity: 0.55;
+  }
+}
