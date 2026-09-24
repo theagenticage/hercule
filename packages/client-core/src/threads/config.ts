@@ -1,9 +1,9 @@
 /**
  * What a thread runs with, and what the composer holds while the user changes
- * it. The picks are a partial config, so a value the user has not touched is
- * absent rather than a stale copy of what the catalog said when the composer
- * first rendered: that is what lets a draft pick up a fresh catalog after a
- * login without losing the choices already made.
+ * it. The picks are a partial config: a value the user has not touched is
+ * absent, rather than a stale copy of the catalog from when the composer first
+ * rendered. That lets a draft use a fresh catalog after a login without losing
+ * the choices already made.
  */
 import type {
   Project,
@@ -18,27 +18,27 @@ import type { ThreadDefaults } from "./thread-defaults";
 import type { WorkspacePick } from "./workspaces";
 
 /**
- * What a thread runs with: the defaults a new one starts from, plus the
- * per-model choices and where it works.
+ * What a thread runs with: the defaults a new thread starts from, plus the
+ * model options and where the thread works.
  *
- * The three placement fields are optional because a surface that has no
- * project to speak of - Settings > Threads, a thread that predates them - says
- * nothing about them rather than saying null three times. `workspace` is the
- * pick in the config: `null` means nothing has been picked and the default
- * stands, which is not the same as `{ kind: "none" }`, a thread deliberately
- * working without a checkout.
+ * The three placement fields are optional, because a screen with no project
+ * (Settings > Threads, or a thread created before projects existed) leaves
+ * them out rather than setting all three to null. `workspace` is the picked
+ * workspace. `null` means nothing has been picked and the default applies,
+ * which is different from `{ kind: "none" }`: a thread that deliberately works
+ * without a checkout.
  */
 export interface ThreadConfig extends ThreadDefaults {
   readonly options: Readonly<Record<string, string | boolean>>;
   readonly projectId?: string | null;
   readonly workspace?: WorkspacePick | null;
-  /** The stored `thread.workspace` setting; null while it is unset. */
+  /** The stored `thread.workspace` setting, or `null` while it is unset. */
   readonly preferredWorkspace?: ThreadWorkspace | null;
 }
 
 /**
- * What the user has touched since the last submission. The permission profile
- * is not among them: nothing in the composer offers it.
+ * What the user has changed since the last submission. The permission profile
+ * is not included, because the composer has no control for it.
  */
 export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
 
@@ -55,9 +55,9 @@ export type Thread =
 export type ThreadKind = Thread["kind"];
 
 /**
- * The records every composer view model reads. The last three are optional for
- * the same reason the config's placement fields are: a caller with no project
- * surface at all hands over what it has.
+ * The records every composer view model reads. The project fields are
+ * optional for the same reason as the config's placement fields: a caller
+ * with no project on screen passes only what it has.
  */
 export interface ThreadCatalogs {
   readonly instances: readonly ProviderInstance[];
@@ -66,13 +66,13 @@ export interface ThreadCatalogs {
   readonly projects?: readonly Project[];
   readonly resources?: readonly Resource[];
   readonly workspaces?: readonly Workspace[];
-  /** What is running where, which is what a machine's capacity is read from. */
+  /** The sessions, used to compute how much capacity each runner has free. */
   readonly sessions?: readonly Session[];
 }
 
 /**
- * What the thread itself runs with, before any pick: the draft's own config,
- * or what the session was spawned with and still carries.
+ * Returns what the thread runs with before any pick: the draft's own config,
+ * or the config stored on the session.
  */
 export const readThreadConfig = (thread: Thread): ThreadConfig =>
   thread.kind === "draft"
@@ -92,11 +92,11 @@ export const readThreadConfig = (thread: Thread): ThreadConfig =>
       };
 
 /**
- * What a thread runs with while the composer is open: its own configuration
- * with the picks over it. The per-model choices belong to the model that
- * offered them on the account that offered it, so they stand over what the
- * thread stored only while both are the ones it stored them for; any other
- * pair shows its own defaults.
+ * Returns what a thread runs with while the composer is open: its own config
+ * with the picks applied. The model options belong to one model on one
+ * instance. So the thread's stored options are kept only while the picked
+ * instance and model are the ones the thread already has; for any other pair,
+ * only the picked options are used.
  */
 export const computeEffectiveConfig = (base: ThreadConfig, picks: ThreadPicks): ThreadConfig => {
   const instanceId = picks.instanceId ?? base.instanceId;

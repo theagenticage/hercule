@@ -1,8 +1,8 @@
 /**
- * The rows the workspace selector offers. What matters: every row is a thing
- * that exists or a thing that would be made, in the order the project's shape
- * decides (a worktree of each repo leads where there are several), and a row
- * that cannot be had yet says why rather than going missing.
+ * Tests the rows the workspace selector offers. Every row is a workspace that
+ * exists or one that would be created, in an order that depends on the
+ * project (a worktree of each repo comes first when there are several repos).
+ * A row that is not available yet says why rather than being hidden.
  */
 import { describe, expect, it } from "vitest";
 import { buildWorkspaceMenu } from "./workspace-menu";
@@ -37,8 +37,8 @@ const buildMenu = (over: Partial<Parameters<typeof buildWorkspaceMenu>[0]> = {})
   });
 
 describe("buildWorkspaceMenu", () => {
-  // D-20d: a project that holds a repo never offers None.
-  it("leads with the main workspace in a project that holds one repo", () => {
+  // A project with a repo never offers None.
+  it("puts the main workspace first in a project with one repo", () => {
     expect(buildMenu().rows.map((row) => row.name)).toEqual([
       "Main workspace",
       "New workspace",
@@ -46,7 +46,7 @@ describe("buildWorkspaceMenu", () => {
     ]);
   });
 
-  it("leads with a worktree of each repo in a project that holds several, naming each checkout", () => {
+  it("puts a worktree of each repo first in a project with several repos, naming each main workspace", () => {
     const rows = buildMenu({ repos: [INFRA, RUNBOOKS], workspaces: [] }).rows;
 
     expect(rows.map((row) => row.name)).toEqual([
@@ -57,14 +57,14 @@ describe("buildWorkspaceMenu", () => {
     expect(rows[0]?.sub).toBe("a worktree of each repo, side by side, each on a new branch");
   });
 
-  it("says what a main workspace is on, and says so when the machine has none", () => {
+  it("shows a main workspace's branch, or that it is not cloned on the runner yet", () => {
     expect(buildMenu().rows[0]?.sub).toBe("on main · you and the agent share the files");
     expect(buildMenu({ runnerId: COVE.id }).rows[0]?.sub).toBe(
       "not cloned on cove · clones on first use",
     );
   });
 
-  it("names a live worktree after its branch, with its machine and the threads in it", () => {
+  it("names a live worktree after its branch, with its runner and its threads", () => {
     const row = buildMenu().rows[2];
 
     expect(row?.mono).toBe(true);
@@ -72,7 +72,7 @@ describe("buildWorkspaceMenu", () => {
     expect(row?.sub).toBe("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
   });
 
-  // D-20d: None is offered only where there is nothing else to offer.
+  // None is offered only when there is nothing else to offer.
   it("offers None alone in a project with no repo", () => {
     const empty = buildMenu({
       repos: [],
@@ -83,13 +83,13 @@ describe("buildWorkspaceMenu", () => {
     expect(empty.rows.map((row) => row.name)).toEqual(["None"]);
   });
 
-  it("calls it No workspace on a draft that stands in no project", () => {
+  it("calls the row No workspace for a draft with no project", () => {
     const loose = buildMenu({ repos: [], workspaces: [], project: undefined });
 
     expect(loose.rows.map((row) => row.name)).toEqual(["No workspace"]);
   });
 
-  it("reads the trigger off the row in force", () => {
+  it("uses the current row's name as the selector's label", () => {
     expect(buildMenu().label).toBe("Main workspace");
     expect(buildMenu({ pick: { kind: "existing", workspaceId: RUN_3F1.id } }).label).toBe(
       "hercule/run-3f1",

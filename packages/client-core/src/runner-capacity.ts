@@ -1,20 +1,21 @@
 /**
- * The runner page's capacity line: how many of a machine's slots are held and
- * how many sessions wait for one. A session holds its slot from `starting`
- * through `busy` - the controller does not free it until the session exits -
- * so only `queued` is left waiting and only `exited` counts as neither.
+ * The runner page's capacity line: how many of a runner's session slots are
+ * in use, and how many sessions are waiting for one. A session holds its slot
+ * from `starting` through `busy`, because the controller frees the slot only
+ * when the session exits. So only `queued` sessions are waiting, and only
+ * `exited` sessions are neither running nor waiting.
  */
 import type { Runner, Session, SessionStatus } from "@hercule/contract";
 
 /**
- * The one declaration of which statuses hold a slot - `runnerSessionsQuery`
- * builds its filter from this too, so the fetch and the count can never name
- * a different set of statuses.
+ * The statuses that hold a slot. `runnerSessionsQuery` builds its filter from
+ * this list too, so the query and the count always use the same statuses.
  */
 export const RUNNING_STATUSES: ReadonlyArray<SessionStatus> = ["starting", "idle", "busy"];
 
 const holdsSlot = new Set<SessionStatus>(RUNNING_STATUSES);
 
+/** Returns the capacity line, for example `2 running of 4 · 1 queued`. */
 export const describeCapacity = (runner: Runner, sessions: ReadonlyArray<Session>): string => {
   const running = sessions.filter((session) => holdsSlot.has(session.status)).length;
   const queued = sessions.filter((session) => session.status === "queued").length;
@@ -22,7 +23,7 @@ export const describeCapacity = (runner: Runner, sessions: ReadonlyArray<Session
   return queued === 0 ? line : `${line} · ${String(queued)} queued`;
 };
 
-/** The queue itself, oldest first: the session that has waited longest starts next. */
+/** Returns the queued sessions, oldest first: the session that has waited longest starts next. */
 export const listQueuedSessions = (sessions: ReadonlyArray<Session>): ReadonlyArray<Session> =>
   sessions
     .filter((session) => session.status === "queued")

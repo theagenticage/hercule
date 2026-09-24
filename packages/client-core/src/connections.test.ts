@@ -9,22 +9,22 @@ import {
 } from "./connections";
 
 describe("buildRedirectUri", () => {
-  it("is the callback path on the origin the browser is at", () => {
+  it("is the callback path on the browser's origin", () => {
     expect(buildRedirectUri("https://n.tail.ts.net")).toBe("https://n.tail.ts.net/oauth/callback");
   });
 
-  it("does not double the slash when the origin carries a trailing one", () => {
+  it("does not double the slash when the origin ends in one", () => {
     expect(buildRedirectUri("https://n.tail.ts.net/")).toBe("https://n.tail.ts.net/oauth/callback");
   });
 });
 
-/** A catalogued plugin, with whatever it contributes. */
+/** Returns a plugin from the plugin list, with the given contributions. */
 const buildPlugin = (id: string, contributions: PluginDetail["contributions"]): PluginDetail => ({
   id,
   displayName: `Plugin ${id}`,
   hostApi: 1,
   capabilities: ["connections"],
-  // Disabled: `register()` ran either way, so its types are still offered.
+  // Disabled, but `register()` still ran, so its types are still offered.
   enabled: false,
   status: { _tag: "active" },
   config: {},
@@ -39,7 +39,7 @@ const PAPER = {
 };
 
 describe("listConnectionTypes", () => {
-  it("is every connection-type contribution, and nothing else a plugin declares", () => {
+  it("returns every connection-type contribution, and no other contribution", () => {
     const types = listConnectionTypes([
       buildPlugin("paper-trail", [
         { extensionPoint: "connection-type", id: "paper-trail/paper", definition: PAPER },
@@ -58,7 +58,7 @@ describe("listConnectionTypes", () => {
     ]);
   });
 
-  it("names two plugins declaring one word apart, by the type and by the plugin", () => {
+  it("tells apart two plugins that declare a type with the same name, by type and by plugin", () => {
     const buildGmailType = (displayName: string) => ({ type: "x", displayName, setup: [] });
     const types = listConnectionTypes([
       buildPlugin("first", [
@@ -84,7 +84,7 @@ describe("listConnectionTypes", () => {
   });
 });
 
-/** A type with just the setup under test; nothing else is read. */
+/** Returns a connection type with only the setup under test; no other field is read. */
 const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   type: "p/t",
   displayName: "T",
@@ -93,7 +93,7 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
 });
 
 describe("decideSetupFlow", () => {
-  it("is the one step that decides how the credential is obtained", () => {
+  it("returns the step that decides how the credential is obtained", () => {
     expect(
       decideSetupFlow(withSetup([{ kind: "checklist", markdown: "do this" }, { kind: "oauth" }])),
     ).toBe("oauth");
@@ -105,7 +105,7 @@ describe("decideSetupFlow", () => {
     expect(decideSetupFlow(withSetup([{ kind: "pairing" }]))).toBe("pairing");
   });
 
-  it("prefers the redirect when a type declares both", () => {
+  it("prefers oauth when a type declares both oauth and credentials", () => {
     expect(
       decideSetupFlow(
         withSetup([
@@ -116,7 +116,7 @@ describe("decideSetupFlow", () => {
     ).toBe("oauth");
   });
 
-  it("is unknown when nothing in the setup is a step this build can render", () => {
+  it("returns unknown when no setup step is one this build can render", () => {
     expect(decideSetupFlow(withSetup([]))).toBe("unknown");
     expect(
       decideSetupFlow(
@@ -127,7 +127,7 @@ describe("decideSetupFlow", () => {
 });
 
 describe("listCredentialFields", () => {
-  it("is every declared field, in order, across the credential steps", () => {
+  it("returns every declared field, in order, across the credential steps", () => {
     const fields = listCredentialFields(
       withSetup([
         { kind: "checklist", markdown: "first" },
@@ -142,7 +142,7 @@ describe("listCredentialFields", () => {
     ]);
   });
 
-  it("is empty for a setup that asks the user to paste nothing", () => {
+  it("returns no fields for a setup that asks the user to paste nothing", () => {
     expect(listCredentialFields(withSetup([{ kind: "oauth" }]))).toEqual([]);
   });
 });

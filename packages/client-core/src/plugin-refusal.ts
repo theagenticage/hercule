@@ -1,8 +1,8 @@
 /**
- * Why a plugin was turned away, as a sentence. None of the three reasons means
- * anything on its own - a version the user never chose, a capability name, a
- * schema complaint - so turning each into something a person can act on is a
- * reading of the domain, and lives here with a test.
+ * Returns why the controller refused to load a plugin, as a sentence. The raw
+ * reasons (a host API version, a capability name, a schema error) mean little
+ * to a user on their own, so this function turns each into a sentence a
+ * person can act on.
  */
 import type { PluginRefusalReason } from "@hercule/contract";
 

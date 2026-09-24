@@ -1,15 +1,16 @@
 /**
- * The CLI role: every API-facing verb, spoken over HTTP only.
+ * The CLI role: a command for every public API operation, sent over HTTP only.
  *
- * The command tree is the contract's CLI table, so this file walks words,
- * routes and reports, and holds no list of commands.
+ * The command tree comes from the contract's CLI table, so this file matches
+ * words to commands, runs them and reports results, but holds no list of
+ * commands.
  *
- * `setup-url` is the one exception and always will be: it is a filesystem read
- * of `<home>/setup-url`, needing no credential, because it is what a user has
- * before they have any credential at all.
+ * `setup-url` is the only exception, and always will be: it reads
+ * `<home>/setup-url` from the filesystem and needs no credential, because it
+ * is what a user has before they have any credential.
  *
- * No Effect code lives past this package's own use of `@hercule/home`: the CLI
- * talks to the API through `client-core`'s promises.
+ * Apart from its use of `@hercule/home`, this package writes no Effect code:
+ * the CLI calls the API through `client-core`'s promises.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -32,7 +33,7 @@ import { EXIT, UsageError } from "./exit";
 import { login, getLoginHelp } from "./login";
 import { processIo, type Io } from "./io";
 
-/** What `hercule setup-url` prints, or the reason there is nothing to print. */
+/** Returns what `hercule setup-url` prints, or fails with the reason there is nothing to print. */
 export function readSetupUrl(argv: readonly string[], env: Env): Result.Result<string, string> {
   const options = parseGlobalOptions(argv);
   if (Result.isFailure(options)) {
@@ -42,8 +43,8 @@ export function readSetupUrl(argv: readonly string[], env: Env): Result.Result<s
   try {
     return Result.succeed(readFileSync(file, "utf8").trim());
   } catch {
-    // The controller deletes the file the moment setup completes, so an absent
-    // file is one of two ordinary states, never a crash.
+    // The controller deletes the file as soon as setup completes, so a missing
+    // file is a normal state, never a crash.
     return Result.fail(
       `No setup URL in ${file}: either setup is already complete, or \`hercule serve\` has not run yet.`,
     );
@@ -54,13 +55,14 @@ const wantsHelp = (tokens: ReadonlyArray<string>): boolean =>
   tokens.includes("--help") || tokens.includes("-h");
 
 /**
- * A request the client refused to encode, said as the command line that caused
- * it. Nothing was sent, so this is a usage error and not an API failure: a
- * value - a `--<flag>` carrying JSON, a document piped in - does not fit the
- * field it was written into.
+ * Converts a request the client could not encode into a usage error that
+ * names the command-line argument that caused it. Nothing was sent, so this is
+ * a usage error, not an API error: a value (a `--<flag>` with JSON, or a
+ * document piped in) does not match the field it was given for.
  *
- * The issue's path is the field's path inside the request, so its head names a
- * field of this command, and each is named the way the caller wrote it.
+ * Each issue's path is the field's path inside the request, so its first
+ * segment is a field of this command. The message names that field the way
+ * the caller wrote it.
  */
 const toUsageError = (error: RequestError, command: Command): UsageError => {
   const named = new Map(
@@ -77,12 +79,14 @@ const toUsageError = (error: RequestError, command: Command): UsageError => {
 };
 
 /**
- * What reads stdin, or the refusal that stands in for it at a terminal.
+ * Returns the function that reads stdin. When stdin is a terminal, the
+ * function throws a usage error instead.
  *
- * A command whose field is read from stdin must never sit there looking stopped
- * with a cursor blinking: it names the fields it wants and shows the line the
- * caller just wrote, with the pipe it was missing. The refusal is the read
- * itself, so a command that would not have read anything is unaffected.
+ * A command that reads a field from stdin must never sit waiting with a
+ * blinking cursor, looking stuck. Instead it names the fields it wants and
+ * shows the caller's command line with the missing pipe added. The error is
+ * thrown only when stdin is read, so a command that would not read stdin is
+ * unaffected.
  */
 const buildStdinReader = (
   command: Command,
@@ -107,7 +111,10 @@ const buildStdinReader = (
   };
 };
 
-/** Run one operation: parse, resolve a credential, call, print. */
+/**
+ * Runs one operation: parses the arguments, resolves a credential, calls the
+ * API and prints the result. Returns the exit code.
+ */
 const runOperation = async (
   command: Command,
   tokens: ReadonlyArray<string>,
@@ -164,12 +171,12 @@ const decideExitCode = (command: Command, outcome: Outcome): number =>
     : EXIT.ok;
 
 /**
- * Where the command's words end and its arguments begin.
+ * Finds where the command's words end and its arguments begin.
  *
- * The longest run of leading words the tree answers to is the command; what is
- * left is its arguments. A run the tree does not answer to is a mistake, and
- * what the tree does answer to at that position is the whole of the help a
- * misspelling needs.
+ * The longest run of leading words that matches a command in the tree is the
+ * command; the rest are its arguments. When no run matches, returns `prefix`:
+ * how many leading words do match a path in the tree. The valid words at that
+ * position are all the help a misspelling needs.
  */
 const findLongestCommand = (
   words: ReadonlyArray<string>,
@@ -184,7 +191,7 @@ const findLongestCommand = (
   return { prefix };
 };
 
-/** Everything after the global options have been stripped. Returns the exit code. */
+/** Parses the global options and runs the command. Returns the exit code. */
 const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
   const options = parseGlobalOptions(argv);
   if (Result.isFailure(options)) {
@@ -195,7 +202,7 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
   const [head, ...after] = options.success.rest;
   const home = resolveHomePath(options.success.home, io.env);
 
-  // `hercule` on its own is the same ask as `hercule --help`: what is there.
+  // `hercule` on its own does the same as `hercule --help`.
   if (head === undefined || head === "--help" || head === "-h") {
     for (const line of buildRootHelp()) io.out(line);
     return EXIT.ok;
@@ -206,13 +213,14 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
       io.out("usage: hercule setup-url");
       io.out("");
       io.out("Prints the one-time setup URL this machine's controller wrote, or says why");
-      io.out("there is none. Needs no credential: it is a read of <home>/setup-url.");
+      io.out("there is none. Needs no credential: it reads <home>/setup-url.");
       return EXIT.ok;
     }
     const url = readSetupUrl(argv, io.env);
     if (Result.isFailure(url)) {
-      // Nothing was sent, so this is not an API failure. It is the same class as
-      // a missing credential: the local file this command needs is not there.
+      // Nothing was sent, so this is not an API error. It is the same kind of
+      // failure as a missing credential: a local file this command needs is
+      // not there.
       io.err(`hercule: ${url.failure}`);
       return EXIT.connection;
     }
@@ -237,13 +245,15 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
     return EXIT.ok;
   }
 
-  // The command's words are the leading tokens before any flag: `--help` and a
-  // flag's value never name a word of the tree.
+  // The command's words are the leading tokens before the first flag: neither
+  // `--help` nor a flag's value is ever a word of the tree.
   const rest = options.success.rest;
   const flag = rest.findIndex((token) => token.startsWith("-"));
   const words = flag === -1 ? rest : rest.slice(0, flag);
   if (words.length === 0) {
-    throw new UsageError(`unknown command \`${head}\`; there is ${listWordsAfter([]).join(", ")}`);
+    throw new UsageError(
+      `unknown command \`${head}\`; the commands are ${listWordsAfter([]).join(", ")}`,
+    );
   }
   const found = findLongestCommand(words);
 
@@ -268,22 +278,25 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
   const unknown = words[found.prefix]!;
   const under = words.slice(0, found.prefix).join(" ");
   throw new UsageError(
-    `unknown command \`${unknown}\`; ${under === "" ? "" : `under \`${under}\` `}there is ${valid.join(", ")}`,
+    `unknown command \`${unknown}\`; the commands ${under === "" ? "" : `under \`${under}\` `}are ${valid.join(", ")}`,
     under === "" ? undefined : under,
   );
 };
 
 /**
- * What an error envelope said about the parameters it refused, one line each.
+ * Returns the issues of a `validation` error, one line each.
  *
- * A `validation` message is deliberately generic - "the request is not valid" -
- * because the detail is in the issues, and a human rendering that printed only
- * the message told the caller nothing it could act on.
+ * A `validation` message is deliberately generic ("the request is not
+ * valid"), because the details are in the issues. Printing only the message
+ * would tell the caller nothing they can act on.
  */
 const formatValidationIssues = (error: ApiError): ReadonlyArray<string> =>
   (readValidationIssues(error) ?? []).map(formatIssue);
 
-/** Turn whatever went wrong into a message and an exit code. */
+/**
+ * Prints an error message for any error, and returns its exit code. Rethrows an
+ * error of an unknown type.
+ */
 const reportError = (error: unknown, json: boolean, io: Io): number => {
   if (error instanceof UsageError) {
     io.err(`hercule: ${error.message}`);
@@ -297,7 +310,7 @@ const reportError = (error: unknown, json: boolean, io: Io): number => {
     return EXIT.connection;
   }
   if (error instanceof ConnectionError) {
-    // There is no envelope: nothing answered. `--json` gets the same line.
+    // There is no envelope, because nothing responded. `--json` prints the same line.
     io.err(`hercule: ${error.message}`);
     return EXIT.connection;
   }
@@ -310,9 +323,9 @@ const reportError = (error: unknown, json: boolean, io: Io): number => {
       if (typeof grant === "string" && !error.message.includes(grant)) {
         io.err(`missing grant ${grant}`);
       }
-      // A validation envelope says which parameter it refused and why, and
-      // without this the human rendering printed only "the request is not
-      // valid" - true, and no help at all.
+      // A validation envelope lists which parameter was invalid and why.
+      // Without these lines the output would only say "the request is not
+      // valid", which is true but no help at all.
       for (const line of formatValidationIssues(error)) io.err(line);
     }
     return EXIT.api;
@@ -320,7 +333,7 @@ const reportError = (error: unknown, json: boolean, io: Io): number => {
   throw error;
 };
 
-/** The CLI, as a function of its arguments and its world. Returns the exit code. */
+/** Runs the CLI with `argv` and `io`. Returns the exit code. */
 export const main = async (argv: readonly string[], io: Io): Promise<number> => {
   try {
     return await dispatch(argv, io);
@@ -329,6 +342,7 @@ export const main = async (argv: readonly string[], io: Io): Promise<number> => 
   }
 };
 
+/** Runs the CLI on the real process and sets `process.exitCode`. */
 export async function run(argv: readonly string[]): Promise<void> {
   process.exitCode = await main(argv, processIo);
 }

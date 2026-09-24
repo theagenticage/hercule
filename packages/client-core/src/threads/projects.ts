@@ -1,7 +1,8 @@
 /**
- * The project picker (spec 14 §The composer): "the project comes first because
- * it bounds everything below it". One row per project, saying how much stands
- * under it, so the choice is made on what is there rather than on a name.
+ * Builds the rows of the project picker (spec 14 §The composer): "the project
+ * comes first because it bounds everything below it". Each row shows how many
+ * repos, threads and workspaces the project has, so the user can choose by
+ * what is in a project rather than by its name alone.
  */
 import type { Project, Resource, Session, Workspace } from "@hercule/contract";
 import { pickProjectTone, type ProjectTone } from "./tone";
@@ -13,7 +14,7 @@ export interface ProjectPickerRow {
   readonly tone: ProjectTone;
   /** `1 repo · webshop · 5 threads · 2 workspaces`. */
   readonly sub: string;
-  /** `⌘1`; null past the ninth row, which has no key left to offer. */
+  /** `⌘1`, or `null` after the ninth row, because there are no more number keys. */
   readonly shortcut: string | null;
 }
 

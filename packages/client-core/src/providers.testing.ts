@@ -1,6 +1,7 @@
 /**
- * Test-only, not exported from the package index. `buildProviderRows` and
- * `decideSessionsEmptyState` read the same machine, so they share one arrangement of it.
+ * Test fixtures, not exported from the package index. The tests of
+ * `buildProviderRows` and `decideSessionsEmptyState` use the same runner, so
+ * they share these fixtures.
  */
 import type { ProviderInstance, Runner } from "@hercule/contract";
 
@@ -79,7 +80,7 @@ export const buildInstance = (
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-/** What the machine last reported about one instance; logged in unless overridden. */
+/** Returns an instance's capability snapshot on `BARE`, logged in unless `fields` overrides it. */
 export const buildSnapshot = (
   fields: Partial<ProviderInstance["snapshots"][number]> = {},
 ): ProviderInstance["snapshots"][number] => ({

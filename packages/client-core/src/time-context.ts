@@ -1,24 +1,23 @@
 /**
- * The time context the top bar carries beside the screen title: "Monday 09:14",
- * and "since Sunday 22:10" where a screen is framed on when the user last
- * looked.
+ * Formats times for display: the time context the top bar shows beside the
+ * screen title ("Monday 09:14", or "since Sunday 22:10" on a screen that
+ * counts from when the user last looked), and the stamp beside a record.
  *
- * Both readings are in the user's timezone, the one timezone source, and both
- * are 24-hour. The instant is a parameter rather than a clock this module
- * reads, so the caller decides what "now" is and a test can pin it.
+ * Every format uses the user's timezone setting and a 24-hour clock. The
+ * instant is a parameter rather than a clock this module reads, so the caller
+ * decides what "now" is and a test can fix it.
  *
- * Neither reading throws. A marker that is not a date and a zone this runtime
- * cannot format both answer with nothing, because there is nothing truthful to
- * say about either - and the top bar these feed is on every screen inside the
- * shell, so it must never be the reason nothing renders.
+ * No function here throws. An invalid date or a zone this runtime cannot
+ * format returns `undefined`, because there is nothing correct to show. The
+ * top bar is on every screen inside the shell, so it must never stop a screen
+ * from rendering.
  *
- * A formatter is expensive to build and free to reuse, and these readings are
- * asked for once per row per render, so the formatters are built once per zone
- * and held. There are as many of them as there are zones a user picks, which is
- * one.
+ * A formatter is expensive to build and cheap to reuse, and these functions
+ * run once per row per render, so each formatter is built once per zone and
+ * cached. In practice there is one zone: the user's.
  */
 
-/** A reading, and the fields it asks the runtime for. */
+/** Each format, and the `Intl.DateTimeFormat` options it uses. */
 const SHAPES = {
   context: { weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" },
   stamp: {
@@ -33,11 +32,15 @@ const SHAPES = {
 type Shape = keyof typeof SHAPES;
 
 /**
- * The formatters built so far, by shape and zone. `null` records a zone this
- * runtime refused, so a zone that cannot be formatted is not retried per row.
+ * The formatters built so far, by format and zone. `null` records a zone this
+ * runtime rejected, so an unusable zone is not retried for every row.
  */
 const held = new Map<string, Intl.DateTimeFormat | null>();
 
+/**
+ * Returns the cached formatter for a format and zone, building it on first use,
+ * or `null` for an unusable zone.
+ */
 const buildFormatter = (shape: Shape, timezone: string): Intl.DateTimeFormat | null => {
   const key = `${shape} ${timezone}`;
   const made = held.get(key);
@@ -53,7 +56,10 @@ const buildFormatter = (shape: Shape, timezone: string): Intl.DateTimeFormat | n
   return formatter;
 };
 
-/** The parts of one reading, or nothing when the zone or the instant is not one. */
+/**
+ * Returns a function that reads one part of the formatted instant, or
+ * `undefined` when the zone or the instant is invalid.
+ */
 const buildPartReader = (
   shape: Shape,
   instant: Date,
@@ -72,8 +78,9 @@ const buildPartReader = (
 };
 
 /**
- * Weekday and 24-hour clock time, in the zone given: "Monday 09:14". Nothing,
- * when the instant is not a date or the zone cannot be formatted.
+ * Formats the weekday and 24-hour time in `timezone`: "Monday 09:14". Returns
+ * `undefined` when the instant is not a valid date or the zone cannot be
+ * formatted.
  */
 export const formatTimeContext = (instant: Date, timezone: string): string | undefined => {
   const part = buildPartReader("context", instant, timezone);
@@ -82,9 +89,9 @@ export const formatTimeContext = (instant: Date, timezone: string): string | und
 };
 
 /**
- * A moment as a stamp beside a record: "4 Sep 17:21". The year is left off
- * because these sit in lists that are read in the present; the zone and the
- * 24-hour clock are the same ones every other reading uses.
+ * Formats an instant as the stamp shown beside a record: "4 Sep 17:21". The
+ * year is left out because these stamps sit in lists of recent records.
+ * Returns `undefined` in the same cases as `formatTimeContext`.
  */
 export const formatStamp = (instant: Date, timezone: string): string | undefined => {
   const part = buildPartReader("stamp", instant, timezone);
@@ -95,7 +102,7 @@ export const formatStamp = (instant: Date, timezone: string): string | undefined
   return `${day} ${part("month")} ${part("hour")}:${part("minute")}`;
 };
 
-/** The same reading, framed as the moment a screen counts from. */
+/** Formats the time context as the moment a screen counts from: "since Sunday 22:10". */
 export const formatSince = (instant: Date, timezone: string): string | undefined => {
   const reading = formatTimeContext(instant, timezone);
   return reading === undefined ? undefined : `since ${reading}`;

@@ -1,13 +1,13 @@
 /**
- * Editing and retiring one runner: what a form draft means, where a refusal
- * belongs, and what has to be said before a machine is retired. All three are
- * readings of the domain, so they live here with a test rather than in a
- * component.
+ * Editing and retiring a runner: turning a form draft into a patch, finding
+ * which field a `conflict` error belongs to, and deciding what to warn about
+ * before a runner is retired. These rules live here with a test rather than
+ * in a component.
  */
 import type { Runner, RunnerUpdateInput } from "@hercule/contract";
 import { ApiError } from "./errors";
 
-/** The five fields a runner's owner writes, as a form holds them. */
+/** The five editable fields of a runner, as the form holds them. */
 export interface RunnerDraft {
   readonly name: string;
   readonly labels: ReadonlyArray<string>;
@@ -16,7 +16,7 @@ export interface RunnerDraft {
   readonly reserved: boolean;
 }
 
-/** The draft a form opens on. */
+/** Returns the draft the form starts with: the runner's current values. */
 export const buildRunnerDraft = (runner: Runner): RunnerDraft => ({
   name: runner.name,
   labels: runner.labels,
@@ -30,16 +30,18 @@ const areLabelsEqual = (left: ReadonlyArray<string>, right: ReadonlyArray<string
   left.length === right.length && left.every((label, index) => label === right[index]);
 
 /**
- * What a draft asks the controller to change, and nothing else.
+ * Returns a patch with only the fields the draft changed.
  *
- * A patch naming a field the runner already holds is a write like any other: it
- * stamps an actor and appends an audit row. Sending only what moved keeps the
- * trail readable, and an empty patch is what the form reads as an untouched one.
+ * A patch field that equals the runner's current value is still a write: it
+ * is stamped with an actor and adds an audit row. Sending only the changed
+ * fields keeps the audit trail readable, and an empty patch tells the form
+ * that nothing was edited.
  *
- * The name is trimmed here and nowhere else, so padding a name is not a change
- * while a name the user has emptied still reads as one. The form refuses to
- * submit that, and a draft that differs from the machine is what stops a fresh
- * answer refilling the field under the user.
+ * The name is trimmed here and nowhere else. So adding spaces around a name
+ * is not a change, but a name the user has cleared is. The form does not
+ * submit an empty name, and because the draft still differs from the runner,
+ * a fresh read of the runner does not refill the field while the user edits
+ * it.
  */
 export const buildRunnerPatch = (runner: Runner, draft: RunnerDraft): RunnerUpdateInput => {
   const patch: { -readonly [K in keyof RunnerUpdateInput]: RunnerUpdateInput[K] } = {};
@@ -57,13 +59,14 @@ export const buildRunnerPatch = (runner: Runner, draft: RunnerDraft): RunnerUpda
 };
 
 /**
- * Which field a refused patch was refused over.
+ * Returns the field that caused a `conflict` error for a patch, or `null` when
+ * the error is not a conflict or the field cannot be known.
  *
- * The controller answers one `conflict` per patch and names no field, so the
- * patch itself is what attributes it: a name it did not send cannot be the name
- * that was taken. A patch moving both fields at once leaves no way to tell them
- * apart, and the refusal is answered whole rather than pinned on a field that
- * may be innocent.
+ * The controller returns one `conflict` per patch and does not say which field
+ * caused it, so the patch decides: a field the patch did not send cannot be
+ * the cause. When a patch changes both `name` and `reserved`, there is no way
+ * to tell which one caused the conflict, so it returns `null` rather than
+ * blaming a field that may be fine.
  */
 export const findRunnerConflictField = (
   error: unknown,
@@ -76,11 +79,11 @@ export const findRunnerConflictField = (
   return null;
 };
 
-/** What retiring this runner costs, and whether it has to be forced. */
+/** The warnings to show before retiring a runner, and whether the retire must be forced. */
 export interface RetireQuestion {
-  /** What the user is told before confirming, beyond the question itself. */
+  /** Warnings shown before the user confirms, in addition to the question itself. */
   readonly warnings: ReadonlyArray<string>;
-  /** Whether the controller will refuse without being told to do it anyway. */
+  /** Whether the controller rejects the retire unless it is forced. */
   readonly force: boolean;
 }
 
@@ -89,9 +92,12 @@ const UNREACHABLE = "This runner is unreachable; retiring it now forces it.";
 const LOSES_DEFAULT = "This is the default runner; the fleet will have no default.";
 
 /**
- * Retiring is not undoable and the two things it costs are not on the button.
- * A machine the controller cannot reach may still be running sessions nobody
- * can see the end of, and retiring the fleet's default leaves it without one.
+ * Returns the warnings for retiring a runner. Retiring cannot be undone, and
+ * the button does not show its two possible costs:
+ *
+ * - an unreachable runner may still be running sessions that nobody can
+ *   follow any more, and the controller retires it only when forced;
+ * - retiring the fleet's default runner leaves the fleet without one.
  */
 export const buildRetireQuestion = (
   runner: Runner,

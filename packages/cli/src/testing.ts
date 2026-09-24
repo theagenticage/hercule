@@ -1,9 +1,9 @@
 /**
  * Test doubles for the CLI. Imported only by `*.test.ts`.
  *
- * The CLI's whole contact with the world is `Io`, so a stub controller is a
- * function from a request to a response and a stub terminal is three arrays.
- * No server is started anywhere in this package's tests.
+ * The CLI reaches the outside world only through `Io`, so a stub controller is
+ * a function from a request to a response, and a stub terminal is three
+ * arrays. No test in this package starts a server.
  */
 import type { ErrorCode } from "@hercule/contract";
 import type { FetchLike } from "@hercule/client-core";
@@ -20,7 +20,7 @@ export interface StubRequest {
 
 export type Handler = (request: StubRequest) => unknown;
 
-/** The request body as an object, whatever shape the HTTP client handed `fetch`. */
+/** Parses the request body, whatever type the HTTP client passed to `fetch`. */
 const decodeBody = (body: unknown): unknown => {
   if (body === null || body === undefined) return undefined;
   const text =
@@ -39,7 +39,7 @@ const decodeBody = (body: unknown): unknown => {
   }
 };
 
-/** A controller that answers with whatever the handler returns. */
+/** Returns a stub controller that responds with whatever the handler returns. */
 export const stubFetch = (handler: Handler): FetchLike & { readonly calls: Array<StubRequest> } => {
   const calls: Array<StubRequest> = [];
   const fetch = (url: string, init?: RequestInit): Promise<Response> => {
@@ -66,7 +66,7 @@ export const stubFetch = (handler: Handler): FetchLike & { readonly calls: Array
   return Object.assign(fetch, { calls });
 };
 
-/** The error envelope, at the status the code maps to. */
+/** Returns an error envelope response with the given status. */
 export const buildErrorEnvelope = (
   code: ErrorCode,
   status: number,
@@ -118,7 +118,7 @@ export const stubIo = (options: StubIoOptions = {}): StubIo => {
   };
 };
 
-/** A canonical UUIDv7, distinguished by its last characters. */
+/** Returns a valid UUIDv7 that ends in `tail`, padded with zeros. */
 export const buildId = (tail: string): string => {
   const padded = tail.padStart(12, "0");
   return `0192f0a1-0000-7000-8000-${padded}`;

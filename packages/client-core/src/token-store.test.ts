@@ -24,7 +24,7 @@ describe("token store", () => {
     );
   });
 
-  it("reads back what it wrote, per origin", () => {
+  it("reads back what it stored, per origin", () => {
     const storage = createMemoryStorage();
     const here = createTokenStore("http://a.test", storage);
     const there = createTokenStore("http://b.test", storage);
@@ -38,7 +38,7 @@ describe("token store", () => {
     assert.strictEqual(storage.map.get("hercule:token:http://a.test"), "tok_a");
   });
 
-  it("removes the entry when written null", () => {
+  it("removes the entry when null is written", () => {
     const storage = createMemoryStorage();
     const store = createTokenStore("http://a.test", storage);
     store.write("tok");
@@ -49,7 +49,7 @@ describe("token store", () => {
   });
 });
 
-describe("a browser that denies site data", () => {
+describe("a browser that blocks site data", () => {
   const createDeniedStorage = (): StorageLike => ({
     getItem: () => {
       throw new DOMException("denied", "SecurityError");
@@ -62,7 +62,7 @@ describe("a browser that denies site data", () => {
     },
   });
 
-  it("holds no token and swallows the write, rather than throwing at the caller", () => {
+  it("returns no token and ignores the write, rather than throwing", () => {
     const store = createTokenStore("http://a.test", createDeniedStorage());
     assert.strictEqual(store.read(), null);
     assert.doesNotThrow(() => {

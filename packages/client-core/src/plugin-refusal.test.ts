@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { describeRefusalReason } from "./plugin-refusal";
 
 describe("describeRefusalReason", () => {
-  it("says which host API the plugin wanted and which one it found", () => {
+  it("names the host API the plugin was built against and the one the controller supports", () => {
     const reason = describeRefusalReason({ kind: "hostApi", expected: 1, actual: 2 });
     expect(reason).toContain("2");
     expect(reason).toContain("1");
@@ -14,7 +14,7 @@ describe("describeRefusalReason", () => {
     ).toContain("channels");
   });
 
-  it("carries the schema complaint through, which is the only detail there is", () => {
+  it("includes the schema error message, which is the only detail there is", () => {
     expect(
       describeRefusalReason({
         kind: "unsupportedConfigSchema",

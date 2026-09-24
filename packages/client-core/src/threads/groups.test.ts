@@ -1,8 +1,12 @@
 /**
- * How the sidebar's threads fall into groups. What matters: both orderings
- * follow activity so the work in hand is at the top, the two "and the rest"
- * groups are pinned last however busy they are, and the draft being written
- * stands in the group it will belong to once it starts.
+ * Tests how the sidebar's threads are grouped. The tests check that:
+ *
+ * - projects are sorted by activity, so current work is at the top;
+ * - inside a project, worktrees come first in catalog order, then the main
+ *   workspace, then the threads with no workspace;
+ * - threads with no project come last, however recent they are;
+ * - the draft being written sits in the group it will belong to once it
+ *   starts.
  */
 import { describe, expect, it } from "vitest";
 import { decideDraftPlace, buildThreadGroups } from "./groups";
@@ -66,7 +70,7 @@ const buildGroups = (
     draft,
   });
 
-/** A project's lanes as they read, in the order they stand. */
+/** Returns the labels of a project's workspace groups, in order. */
 const listLaneLabels = (
   group: { workspaces: readonly { label: { clip: string; keep: string } | null }[] } | undefined,
 ) => group?.workspaces.map((lane) => (lane.label === null ? null : joinLabelText(lane.label)));
@@ -74,7 +78,7 @@ const listLaneLabels = (
 describe("decideDraftPlace", () => {
   const resources = [WEBSHOP];
 
-  it("files a draft that names no workspace under the project's own checkout on that machine", () => {
+  it("puts a draft with no workspace under the project's main workspace on its runner", () => {
     expect(
       decideDraftPlace({
         projectId: WEBSHOP_PROJECT.id,
@@ -86,7 +90,7 @@ describe("decideDraftPlace", () => {
     ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id });
   });
 
-  it("files it under no workspace at all while no machine has cloned the repo", () => {
+  it("puts the draft under no workspace while no runner has cloned the repo", () => {
     expect(
       decideDraftPlace({
         projectId: WEBSHOP_PROJECT.id,
@@ -98,7 +102,7 @@ describe("decideDraftPlace", () => {
     ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: null });
   });
 
-  it("files it under no workspace when the project opens in a worktree of its own", () => {
+  it("puts the draft under no workspace when the project opens in a new worktree", () => {
     expect(
       decideDraftPlace({
         projectId: WEBSHOP_PROJECT.id,
@@ -111,7 +115,7 @@ describe("decideDraftPlace", () => {
     ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: null });
   });
 
-  it("takes the workspace the address names, whatever the project would open in", () => {
+  it("uses the workspace the address names, whatever the project's default", () => {
     expect(
       decideDraftPlace({
         projectId: WEBSHOP_PROJECT.id,
@@ -125,7 +129,7 @@ describe("decideDraftPlace", () => {
 });
 
 describe("buildThreadGroups", () => {
-  it("heads each project with its name and the threads under it, the ones in no project last", () => {
+  it("heads each project with its name and threads, with the threads in no project last", () => {
     expect(buildGroups().map((group) => [group.name, group.count])).toEqual([
       ["webshop", 3],
       ["ops", 1],
@@ -133,7 +137,7 @@ describe("buildThreadGroups", () => {
     ]);
   });
 
-  it("puts the worktrees first, then the main workspace, then the workspace-less lane", () => {
+  it("puts the worktrees first, then the main workspace, then the threads with no workspace", () => {
     expect(listLaneLabels(buildGroups()[0])).toEqual([
       "hercule/run-3f1",
       "webshop · moss",
@@ -141,7 +145,7 @@ describe("buildThreadGroups", () => {
     ]);
   });
 
-  it("keeps the worktrees in the catalog's own order, whatever their threads did last", () => {
+  it("keeps the worktrees in catalog order, however recent their threads are", () => {
     const second = { ...RUN_3F1, id: "ws-run-8a0" };
     const ordered = buildThreadGroups({
       sessions: [
@@ -154,7 +158,7 @@ describe("buildThreadGroups", () => {
         ...SESSIONS,
       ],
       projects: [WEBSHOP_PROJECT],
-      // The catalog lists run-3f1 first, though run-8a0 holds the newer thread.
+      // The catalog lists run-3f1 first, although run-8a0 has the newer thread.
       workspaces: [RUN_3F1, second, PRIMARY],
       resources: [WEBSHOP],
       runners: [MOSS],
@@ -170,13 +174,13 @@ describe("buildThreadGroups", () => {
     ]);
   });
 
-  it("heads nothing where a project's threads are all in no workspace: there is nothing to separate", () => {
+  it("shows no label when all of a project's threads have no workspace, because there is nothing to tell apart", () => {
     expect(listLaneLabels(buildGroups()[1])).toEqual([null]);
   });
 
-  // The group order is the workspaces' own, so joining one does not move it:
-  // the draft joins the main workspace where the main workspace stands.
-  it("puts the draft in the group it will join, in that group's own place", () => {
+  // Groups follow the workspaces' order, so the draft does not move a group:
+  // it joins the main workspace's group where that group already is.
+  it("puts the draft in the group it will join, without moving the group", () => {
     const webshop = buildGroups({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id })[0];
     const lane = webshop?.workspaces.find((each) => each.draft);
 
@@ -184,7 +188,7 @@ describe("buildThreadGroups", () => {
     expect(listLaneLabels(webshop)).toEqual(["hercule/run-3f1", "webshop · moss", "no workspace"]);
   });
 
-  it("stands a project up for a draft even while nothing has been started in it", () => {
+  it("shows the draft's project even when it has no threads yet", () => {
     const fresh = buildThreadGroups({
       sessions: [],
       projects: [WEBSHOP_PROJECT],
@@ -199,10 +203,10 @@ describe("buildThreadGroups", () => {
     expect(fresh[0]?.workspaces[0]?.draft).toBe(true);
   });
 
-  it("says nothing over a lane that holds the draft alone: it has no workspace to name yet", () => {
+  it("shows no label for a group that holds only the draft, which has no workspace yet", () => {
     const webshop = buildThreadGroups({
-      // Every thread of this project is in a workspace, so the lane the draft
-      // stands in holds nothing else.
+      // Every thread of this project is in a workspace, so the draft's group
+      // holds nothing else.
       sessions: SESSIONS.filter((each) => each.workspaceId !== null),
       projects: [WEBSHOP_PROJECT],
       workspaces: [PRIMARY, RUN_3F1],
@@ -217,7 +221,7 @@ describe("buildThreadGroups", () => {
     expect(lane?.rows).toEqual([]);
   });
 
-  it("keeps the no-workspace label where the draft stands among threads that have none", () => {
+  it("keeps the no-workspace label when the draft joins threads that have no workspace", () => {
     const loose = buildThreadGroups({
       sessions: SESSIONS,
       projects: [WEBSHOP_PROJECT, OPS_PROJECT],

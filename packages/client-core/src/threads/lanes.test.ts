@@ -1,7 +1,7 @@
 /**
- * `buildLanes(sessions)` buckets sessions into the five pinned lanes in their
- * fixed order, and `buildHeadline(sessions, now)` reads the same buckets as one
- * sentence.
+ * Tests `buildLanes(sessions)`, which groups sessions into the five lanes in
+ * their fixed order, and `buildHeadline(sessions, now)`, which summarizes the
+ * same groups in one sentence.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
@@ -37,7 +37,7 @@ const buildSession = (overrides: Partial<Session> & { id: string }): Session => 
 });
 
 describe("buildLanes", () => {
-  it("always returns the five pinned lanes, in order, even with no sessions", () => {
+  it("always returns the five lanes, in order, even with no sessions", () => {
     const lanes = buildLanes([]);
 
     expect(lanes.map((lane) => lane.kind)).toEqual([
@@ -145,7 +145,7 @@ describe("buildHeadline", () => {
     expect(buildHeadline(sessions, now)).toBe("Nothing active this week");
   });
 
-  it("reads as Nothing active this week when every exit is more than seven days old", () => {
+  it("returns Nothing active this week when every exit is more than seven days old", () => {
     const sessions = [
       buildSession({ id: "old1", status: "exited", exitedAt: "2026-08-01T00:00:00.000Z" }),
       buildSession({ id: "old2", status: "exited", exitedAt: "2026-07-01T00:00:00.000Z" }),
@@ -154,7 +154,7 @@ describe("buildHeadline", () => {
     expect(buildHeadline(sessions, now)).toBe("Nothing active this week");
   });
 
-  it("reads as No sessions yet only when there is nothing at all", () => {
+  it("returns No sessions yet only when there are no sessions", () => {
     expect(buildHeadline([], now)).toBe("No sessions yet");
   });
 });

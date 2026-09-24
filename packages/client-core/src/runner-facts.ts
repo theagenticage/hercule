@@ -1,16 +1,16 @@
 /**
- * What a machine reported about itself, as a reader sees it.
+ * Formats the facts a runner reported about its machine for display.
  *
- * A runner's report is raw: byte counts, a provider list carrying the ones that
- * are absent, a boolean for Docker. Turning that into the words a page prints is
- * a reading of the domain, so it lives here with a test rather than in the
- * component that lays it out. `null` is a fact the machine has not reported;
- * saying so is the caller's wording, not this module's.
+ * A runner's report is raw: byte counts, a provider list that includes the
+ * providers that are missing, a boolean for Docker. Turning it into text lives
+ * here with a test rather than in the component that lays it out. `null`
+ * means the runner has not reported that fact; the caller decides how to
+ * show that.
  */
 import type { Runner } from "@hercule/contract";
 import { formatBytes } from "./format-bytes";
 
-/** One line each, in the order a page states them. */
+/** One line per fact, in the order a page shows them. */
 export interface RunnerFactsReading {
   readonly machine: string | null;
   readonly memory: string | null;
@@ -23,8 +23,8 @@ export interface RunnerFactsReading {
 
 export const describeRunnerFacts = (runner: Runner): RunnerFactsReading => {
   const { facts, watermark } = runner;
-  // A machine that answered and found no provider has said something; one that
-  // has not answered has not. The two must not read alike.
+  // A runner that reported no installed provider is different from one that
+  // has not reported yet, so the two must be shown differently.
   const installed = facts?.providers.filter((provider) => provider.present) ?? [];
 
   return {

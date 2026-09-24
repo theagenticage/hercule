@@ -1,9 +1,10 @@
 /**
- * Why a thread cannot take input, in the words a placeholder can say - or
- * `null` when it can. A session that has exited is refused only when it
- * cannot be resumed, and then for one of two reasons the record already
- * carries: no native session means the transcript is gone; otherwise the
- * runner it ran on was retired.
+ * Returns why a thread cannot take input, as a phrase the composer placeholder
+ * can show, or `null` when the thread can take input. Only an exited session
+ * that cannot be resumed is blocked, for one of two reasons:
+ *
+ * - it has no native session id, so its transcript is gone;
+ * - otherwise, the runner it ran on was retired.
  */
 import type { Session } from "@hercule/contract";
 

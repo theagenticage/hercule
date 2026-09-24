@@ -1,18 +1,19 @@
 /**
- * `buildAccessModeMenu(declared, providerName)` renders the four access modes with
- * their fixed meaning and the downward fallback of spec 06 §8.4, whose
- * annotation names the provider that decided it (spec 14 §The composer:
- * `runs as auto-accept-edits on pi`, ticket #70).
+ * Tests `buildAccessModeMenu(declared, providerName)`, which lists the four
+ * access modes with their fixed meaning and the downward fallback of spec 06
+ * §8.4. A dimmed mode's note names the provider that falls back (spec 14
+ * §The composer: `runs as auto-accept-edits on pi`, #70).
  *
- * `AccessMode` is defined in `@hercule/protocol` (packages/protocol/src/sessions.ts)
- * and re-exported unchanged by `@hercule/contract`, which is the only dependency
- * this package already declares.
+ * `AccessMode` is defined in `@hercule/protocol`
+ * (packages/protocol/src/sessions.ts) and re-exported unchanged by
+ * `@hercule/contract`, which is the only one of the two this package depends
+ * on.
  */
 import { describe, expect, it } from "vitest";
 import type { AccessMode } from "@hercule/contract";
 import { buildAccessModeMenu } from "./access-modes";
 
-/** The provider's display name, as the row that names the fallback reads it. */
+/** The provider's display name, as used in a dimmed row's note. */
 const PROVIDER = "Claude Code";
 
 const ALL_NATIVE: Record<AccessMode, "native" | "unsupported"> = {
@@ -60,7 +61,7 @@ describe("buildAccessModeMenu", () => {
     });
   });
 
-  it("names the provider it was given, not a fixed phrase standing in for one", () => {
+  it("names the given provider, not a fixed placeholder", () => {
     const items = buildAccessModeMenu({ ...ALL_NATIVE, auto: "unsupported" }, "pi");
 
     expect(items.find((item) => item.mode === "auto")).toMatchObject({
@@ -68,7 +69,7 @@ describe("buildAccessModeMenu", () => {
     });
   });
 
-  it("never dims approval-required, even when it is itself declared unsupported", () => {
+  it("never dims approval-required, even when it is declared unsupported", () => {
     const items = buildAccessModeMenu(
       { ...ALL_NATIVE, "approval-required": "unsupported" },
       PROVIDER,

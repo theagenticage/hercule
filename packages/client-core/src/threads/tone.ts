@@ -1,21 +1,20 @@
 /**
- * The identity hue a project wears, read in one place so every surface that
- * shows a project - the picker, the sidebar's headers, a draft's heading -
- * gives the same project the same hue.
+ * Picks the identity hue for a project. It is decided in one place so every
+ * screen that shows a project (the picker, the sidebar headers, a draft's
+ * heading) gives the same project the same hue.
  */
 import type { Project } from "@hercule/contract";
 
 /**
- * Which identity hue a project's dot carries. The design language fixes two
- * (§Color doctrine), so they alternate: a hue tells two neighbouring projects
- * apart, it does not name one.
+ * The identity hue of a project's dot. The design language defines two hues
+ * (§Color doctrine), and they alternate: a hue tells two neighbouring projects
+ * apart, it does not identify a project.
  *
- * Which is why the hue follows the project's place in the listing rather than
- * anything about the project itself: hashing the id gave two projects the same
- * hue as often as not, and two headers standing next to each other in one
- * colour is the one thing the dot exists to prevent (R6). The listing is the
- * one `project.query` answers with, which every surface here reads, so the
- * same project wears the same hue on all of them.
+ * That is why the hue follows the project's position in the project list, not
+ * anything about the project itself. Hashing the id gave two projects the same
+ * hue about half the time, and two neighbouring headers in the same colour is
+ * exactly what the dot is meant to prevent. Every screen reads the same list
+ * from `project.query`, so a project has the same hue on all of them.
  */
 export type ProjectTone = "hercule" | "ops";
 
@@ -23,6 +22,6 @@ const TONES: readonly ProjectTone[] = ["hercule", "ops"];
 
 export const pickProjectTone = (projectId: string, projects: readonly Project[]): ProjectTone => {
   const index = projects.findIndex((each) => each.id === projectId);
-  // A project the listing does not hold has no neighbours to differ from.
+  // A project that is not in the list has no neighbours to differ from.
   return index < 0 ? TONES[0]! : TONES[index % TONES.length]!;
 };

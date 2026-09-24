@@ -47,7 +47,7 @@ const REPORTED: Runner = {
 };
 
 describe("describeRunnerFacts", () => {
-  it("reads a machine that has reported", () => {
+  it("formats the facts of a runner that has reported", () => {
     expect(describeRunnerFacts(REPORTED)).toEqual({
       machine: "darwin · arm64",
       memory: "64 GiB",
@@ -59,7 +59,7 @@ describe("describeRunnerFacts", () => {
     });
   });
 
-  it("reads every fact as absent when the machine has said nothing", () => {
+  it("returns null for every fact when the runner has reported nothing", () => {
     expect(describeRunnerFacts(SILENT)).toEqual({
       machine: null,
       memory: null,
@@ -71,26 +71,26 @@ describe("describeRunnerFacts", () => {
     });
   });
 
-  it("tells a machine that found no provider from one that has not looked", () => {
+  it("tells a runner that found no provider apart from one that has not reported", () => {
     const none = { ...REPORTED, facts: { ...REPORTED.facts!, providers: [] } };
     expect(describeRunnerFacts(none).providers).toBe("none installed");
     expect(describeRunnerFacts(SILENT).providers).toBeNull();
   });
 
-  it("says so when Docker is not installed", () => {
+  it("shows when Docker is not installed", () => {
     expect(
       describeRunnerFacts({ ...REPORTED, facts: { ...REPORTED.facts!, docker: false } }).docker,
     ).toBe("not installed");
   });
 
-  it("has nothing to say about a machine that probed no toolchain", () => {
+  it("returns null for toolchains when the runner found none", () => {
     expect(
       describeRunnerFacts({ ...REPORTED, facts: { ...REPORTED.facts!, toolchains: [] } })
         .toolchains,
     ).toBeNull();
   });
 
-  it("reads the disk off the watermark, which arrives apart from the facts", () => {
+  it("reads free disk space from the watermark, which is reported separately from the facts", () => {
     expect(describeRunnerFacts({ ...REPORTED, watermark: null }).diskFree).toBeNull();
     expect(describeRunnerFacts({ ...REPORTED, watermark: null }).memory).toBe("64 GiB");
   });

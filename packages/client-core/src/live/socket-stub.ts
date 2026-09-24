@@ -1,26 +1,30 @@
 /**
- * A `WebSocket` that is also the fake server it talks to.
+ * A fake `WebSocket` that also plays the server on the other end.
  *
- * The transport under it is Effect RPC over JSON, so a stub has to speak that
- * framing rather than the contract's own shapes; putting that knowledge in one
- * module keeps it out of every test that only wants to press a push. The stub
- * opens immediately, records every frame the client writes, and answers the
- * three things the transport cannot get on without - its own keepalive,
- * `hello` and `ping`. Everything else is driven by the test.
+ * The live transport is Effect RPC over JSON, so the stub has to use that
+ * framing rather than the contract's types. Keeping that knowledge in one
+ * module keeps it out of every test that only wants to send a push. The stub:
  *
- * It lives in the shipped source rather than beside one test because two
- * packages drive the same supervisor: this one's unit tests and the web app's
- * integration tests. It is reached as `@hercule/client-core/testing`, which
- * nothing in the app imports.
+ * - opens immediately;
+ * - records every frame the client sends;
+ * - replies to the three messages the transport needs to work: its keepalive
+ *   ping, `hello` and `ping`.
+ *
+ * The test drives everything else.
+ *
+ * It lives in the package source rather than beside one test because two
+ * packages use it: this package's unit tests and the web app's integration
+ * tests. It is imported as `@hercule/client-core/testing`, which no app code
+ * imports.
  */
 
-/** What the stub greets with, and what a caller can assert it read. */
+/** The server version the stub replies to `hello` with, so a test can assert on it. */
 export const STUB_SERVER_VERSION = "0.1.0";
 
 /**
- * The `webSocket` a supervisor is built with in a test: it opens a stub and
- * keeps it, in the order it opened them, so the caller can reach the one a
- * connection is on now and the ones it has been on.
+ * Returns a `webSocket` factory for tests. Each call creates a stub socket and
+ * appends it to `sockets`, so the test can reach the current socket and every
+ * earlier one.
  */
 export const stubWebSocketInto =
   (sockets: Array<StubSocket>) =>
@@ -30,7 +34,7 @@ export const stubWebSocketInto =
     return socket as unknown as WebSocket;
   };
 
-/** One frame as it crosses the wire: the RPC codec's own JSON envelope. */
+/** One frame as sent over the socket: the RPC codec's JSON envelope. */
 export type Frame = Record<string, unknown>;
 
 interface Listener {
@@ -84,19 +88,19 @@ export class StubSocket {
     queueMicrotask(() => this.emit("close", { code, reason }));
   }
 
-  /** The frames the client sent, of one kind. */
+  /** Returns the frames the client sent with the given `_tag`. */
   frames(tag: string): Array<Frame> {
     return this.sent.filter((frame) => frame._tag === tag);
   }
 
-  /** The calls the client made to one RPC method, oldest first. */
+  /** Returns the client's calls to one RPC method, oldest first. */
   calls(name: string): Array<Frame> {
     return this.frames("Request").filter((frame) => frame.tag === name);
   }
 
   /**
-   * The subscriptions the client is holding open, oldest first: every
-   * `subscribe` it sent that it has not interrupted since.
+   * Returns the subscriptions the client holds open, oldest first: every
+   * `subscribe` call it has not interrupted since.
    */
   subscriptions(): Array<{ readonly topic: string; readonly requestId: unknown }> {
     const ended = new Set(this.frames("Interrupt").map((frame) => frame.requestId));
@@ -109,9 +113,9 @@ export class StubSocket {
   }
 
   /**
-   * One live message on the subscription the client holds for `topic`. Asking
-   * for a topic nothing is subscribed to is the test's mistake, not a push
-   * that goes nowhere, so it says so.
+   * Sends a live message on the client's subscription to `topic`. Throws when
+   * the client has no subscription to `topic`, because that is a mistake in
+   * the test, not a push that should silently go nowhere.
    */
   push(topic: string, message: unknown): void {
     const held = this.subscriptions().find((subscription) => subscription.topic === topic);
@@ -119,12 +123,12 @@ export class StubSocket {
     this.chunk(held.requestId, [message]);
   }
 
-  /** A stream chunk for a call the client has open. */
+  /** Sends a stream chunk for a call the client has open. */
   chunk(requestId: unknown, values: ReadonlyArray<unknown>): void {
     this.deliver({ _tag: "Chunk", requestId, values });
   }
 
-  /** A call's typed failure, in the contract's envelope. */
+  /** Fails a call with a typed error, in the contract's envelope. */
   fail(requestId: unknown, error: unknown): void {
     this.deliver({
       _tag: "Exit",
@@ -133,7 +137,7 @@ export class StubSocket {
     });
   }
 
-  /** The connection going away underneath the client. */
+  /** Closes the connection from the server side, without the client asking. */
   drop(code = 1006): void {
     this.readyState = 3;
     this.emit("close", { code, reason: "" });

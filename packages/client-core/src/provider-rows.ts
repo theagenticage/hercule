@@ -1,25 +1,26 @@
 /**
- * A row joins the instance, this machine's last snapshot, and the adapters its
- * runner build carries. Which moves a row offers follows from those, so it is
- * decided here rather than in the markup.
+ * Builds the provider rows of a runner. A row combines the provider instance,
+ * the runner's last snapshot of it, and the adapters in the runner's build.
+ * The actions a row offers follow from those, so they are decided here rather
+ * than in the markup.
  */
 import type { ProviderInstance, ProviderSecretField, Runner } from "@hercule/contract";
 
-/** What an install can be on a row: offered, dimmed with its reason, or absent. */
+/** A row's install action: offered, blocked (shown dimmed with its reason), or not shown. */
 type Install = "offered" | "blocked" | "none";
 
 /**
- * A secret-valued field of a provider, with what the action that asks for it
- * reads. A provider credentialled this way has no vendor browser flow: the
- * value is typed in, not fetched.
+ * A provider's secret field, with the label of the action that asks for it. A
+ * provider that uses such a field has no vendor login in the browser: the
+ * user types the value in.
  */
 export interface SecretFieldOffer extends ProviderSecretField {
   readonly label: string;
 }
 
 /**
- * Replacing says what saving would do: the value in place cannot be read, only
- * written over.
+ * Adds the action label. A field that is already set says "Replace", because
+ * the stored value cannot be read, only overwritten.
  */
 const buildOffer = (field: ProviderSecretField): SecretFieldOffer => ({
   ...field,
@@ -30,18 +31,18 @@ export interface ProviderRow {
   readonly id: string;
   readonly providerId: string;
   readonly name: string;
-  /** What the harness said it is, or that it has not said. */
+  /** The harness version it reported, or `not reported`. */
   readonly version: string;
-  /** How that version stands against the one this build was tested with. */
+  /** How that version compares with the versions this build was tested with. */
   readonly verdict: string | null;
-  /** Whose login the harness is holding, or why it is holding none. */
+  /** The account the harness is logged in with, or why it is not logged in. */
   readonly account: string;
   readonly models: string;
   readonly loggedIn: boolean;
   readonly install: Install;
   readonly logIn: boolean;
   readonly logInLabel: string;
-  /** The credentials this provider is signed in with instead of a browser flow. */
+  /** The secret fields this provider signs in with instead of a browser login. */
   readonly secretFields: ReadonlyArray<SecretFieldOffer>;
   readonly probe: boolean;
 }
@@ -58,9 +59,9 @@ const describeAccount = (snapshot: ProviderInstance["snapshots"][number] | undef
   const { auth } = snapshot;
   if (auth.status === "unauthenticated") return "not logged in";
   if (auth.status === "error") return auth.message ?? "the probe failed";
-  // A harness credentialled from the environment reports neither an identity
-  // nor a plan, so the line says what the login is instead of standing empty:
-  // where the token came from if the harness named it, else that there is one.
+  // A harness that gets its credential from the environment reports neither
+  // an identity nor a plan. Rather than leave the line empty, show where the
+  // token came from if the harness reported it, and otherwise "signed in".
   const named = [auth.identity, auth.planLabel].filter(
     (part): part is string => part !== undefined && part !== "",
   );
@@ -75,6 +76,7 @@ const describeModelCount = (
   return count === 1 ? "1 model" : `${String(count)} models`;
 };
 
+/** Returns one row per provider instance, as seen on `runner`. */
 export const buildProviderRows = (
   runner: Runner,
   instances: ReadonlyArray<ProviderInstance>,
@@ -82,16 +84,16 @@ export const buildProviderRows = (
   instances.map((instance) => {
     const snapshot = instance.snapshots.find((each) => each.runnerId === runner.id);
     const adapter = (runner.facts?.adapters ?? []).includes(instance.providerId);
-    // The name the machine reports on its `PATH` is the name the instance
-    // carries, so the join needs no table of its own.
+    // The binary name the runner reports from its `PATH` is the instance's
+    // `binaryName`, so no lookup table is needed.
     const present = (runner.facts?.providers ?? []).some(
       (binary) => binary.name === instance.binaryName && binary.present,
     );
-    // Every move runs on the machine, so a machine holding no connection
-    // offers none of them.
+    // Every action runs on the runner, so an offline runner offers none.
     const reachable = runner.connectivity === "online";
-    // A credential is entered for a harness that is on this machine, because
-    // the machine is asked about the instance the moment one is saved.
+    // A credential can only be entered for a harness installed on this runner,
+    // because the controller probes the runner for the instance as soon as the
+    // credential is saved.
     const usable = reachable && present && adapter;
     return {
       id: instance.id,
@@ -99,13 +101,13 @@ export const buildProviderRows = (
       name: instance.displayName,
       version: snapshot?.harnessVersion ?? "not reported",
       verdict: snapshot === undefined ? null : (VERDICTS[snapshot.versionVerdict] ?? null),
-      // Said once, in place of whatever a stale snapshot claimed.
+      // Without an adapter, show that instead of what a stale snapshot reported.
       account: adapter ? describeAccount(snapshot) : NO_ADAPTER,
       models: describeModelCount(snapshot),
       loggedIn: snapshot?.auth.status === "ok",
       install: !reachable || present ? "none" : adapter ? "offered" : "blocked",
-      // A provider whose credential is typed in has no vendor to send the user
-      // to, so it offers the key instead of a login.
+      // A provider whose credential is typed in has no vendor login page, so
+      // it offers the key fields instead of a login.
       logIn: usable && instance.secretFields.length === 0,
       logInLabel: snapshot?.auth.status === "ok" ? "Log in again" : "Log in",
       secretFields: usable ? instance.secretFields.map(buildOffer) : [],

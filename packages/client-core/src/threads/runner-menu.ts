@@ -1,7 +1,7 @@
 /**
- * The composer's runner selector, scoped to the one instance the model
- * selector has already picked: what matters here is whether each machine can
- * host that instance, not the whole fleet's login state.
+ * Builds the composer's runner selector for the instance the model selector
+ * has already picked. Each row shows whether that runner can host the
+ * instance; the login state of other instances does not matter here.
  */
 import type { ProviderInstance, Runner } from "@hercule/contract";
 
@@ -24,6 +24,12 @@ export interface RunnerMenu {
 const readRunnerState = (runner: Runner): RunnerMenuRow["state"] =>
   runner.lifecycle !== "active" ? runner.lifecycle : runner.connectivity;
 
+/**
+ * Returns one row per runner, and the default runner: the local runner when it
+ * is usable, else the first usable runner, else `null`. A row is dimmed, with
+ * the reason, when its runner is not online, is draining, or is not logged in
+ * to the instance.
+ */
 export const buildRunnerMenu = (
   runners: readonly Runner[],
   localId: string | null,
@@ -62,10 +68,14 @@ export const buildRunnerMenu = (
 };
 
 /**
- * The runner the composer names when it has to speak about one but none is
- * selectable - a dimmed reason, the model menu's catalog: the selected runner
- * when there is one, else the local machine, else the first runner in the
- * list, else no runner exists at all to name.
+ * Returns the runner the composer refers to when it needs one even though
+ * none may be selectable, for example in a dimmed reason or to read the model
+ * menu's catalog. Returns, in order of preference:
+ *
+ * - the selected runner;
+ * - otherwise the local runner;
+ * - otherwise the first runner in the list;
+ * - otherwise `undefined`, when there are no runners.
  */
 export const findReferenceRunner = (
   runners: readonly Runner[],

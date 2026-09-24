@@ -1,7 +1,7 @@
 /**
- * `buildRunnerMenu(runners, localId, instance)` builds the composer's runner
- * selector: one row per runner, dimmed by connectivity, then lifecycle, then
- * login, plus the default selection.
+ * Tests `buildRunnerMenu(runners, localId, instance)`, which builds the
+ * composer's runner selector: one row per runner, dimmed for connectivity,
+ * then lifecycle, then login, plus the default runner.
  */
 import { describe, expect, it } from "vitest";
 import type { Runner } from "@hercule/contract";
@@ -14,7 +14,7 @@ const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
 });
 
 describe("buildRunnerMenu", () => {
-  it("dims an offline or unreachable runner over everything else, even draining and no login", () => {
+  it("dims an offline or unreachable runner for that reason first, even when it is also draining and not logged in", () => {
     const claude = buildInstance("claude-code", "Claude Code", []); // logged in nowhere
 
     const offlineDraining = buildRunner({
@@ -38,7 +38,7 @@ describe("buildRunnerMenu", () => {
     });
   });
 
-  it("derives the state word: lifecycle when the runner is not active, else connectivity", () => {
+  it("derives the state: the lifecycle when the runner is not active, else the connectivity", () => {
     const claude = buildInstance("claude-code", "Claude Code", []);
 
     expect(
@@ -188,7 +188,7 @@ describe("findReferenceRunner", () => {
     expect(findReferenceRunner([a, b], "not-a-runner-id", "also-not-one")).toBe(a);
   });
 
-  it("has nothing to name when there are no runners at all", () => {
+  it("returns undefined when there are no runners", () => {
     expect(findReferenceRunner([], null, null)).toBeUndefined();
   });
 });

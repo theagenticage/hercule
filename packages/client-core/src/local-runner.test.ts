@@ -1,16 +1,18 @@
 /**
- * Working out which fleet runner is the one on the user's own machine.
+ * Tests detecting which runner in the fleet runs on the user's own machine.
  *
- * The question can only be answered from the browser, by asking each online
- * runner's loopback port who is there and seeing which one answers - a runner
- * on another machine is unreachable on 127.0.0.1, so silence is the normal
- * answer and not an error. That makes the failures the interesting half: a
- * fleet where nothing answers, a port that hangs, and an answer naming a
- * runner the fleet does not list online, all of which mean "no local runner"
- * rather than a guess. Detection is a convenience, so a wrong answer would be
- * worse than none.
+ * Only the browser can detect this, by asking each online runner's loopback
+ * port which runner is listening. A runner on another machine cannot be
+ * reached on 127.0.0.1, so no response is the normal case, not an error. So
+ * the failure cases matter most. Each of these means "no local runner" rather
+ * than a guess:
  *
- * The fetch is handed in, so every one of those is pressed here rather than
+ * - no port responds;
+ * - a port hangs;
+ * - a response names a runner that is not listed as online.
+ *
+ * Detection is a convenience, so a wrong result would be worse than none. The
+ * tests pass in the fetch, so each case is triggered directly rather than
  * waited for.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -48,7 +50,7 @@ const buildRunner = (
   lastSeenAt: null,
 });
 
-/** Two runners: one on the default port, one on a port it fell back to. */
+/** Two runners: one on the default port, and one on the fallback port it chose. */
 const HERE = buildRunner("r_here", 4939);
 const THERE = buildRunner("r_there", 5000);
 
@@ -59,8 +61,8 @@ const buildIdentityResponse = (id: string): Response =>
   });
 
 /**
- * A fetch that answers per port. A port with no answer behind it rejects, the
- * way a browser reports a connection nothing is listening on.
+ * Returns a fetch with one response per port. A port with no response set
+ * rejects, the way a browser reports a port nothing is listening on.
  */
 const stubFleetFetch = (
   answers: Readonly<Record<number, Response | "refuse" | "hang">>,
@@ -78,15 +80,15 @@ const stubFleetFetch = (
   return { fetch, asked };
 };
 
-/** Short enough that the timeout cases cost nothing. */
+/** A timeout short enough that the timeout cases run quickly. */
 const QUICK = 20;
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("finding the runner on this machine", () => {
-  it("returns the id that came back from a listed online runner's port", async () => {
+describe("detectLocalRunner", () => {
+  it("returns the id that an online runner's port responds with", async () => {
     const { fetch, asked } = stubFleetFetch({
       4939: "refuse",
       5000: buildIdentityResponse(THERE.id),
@@ -95,42 +97,42 @@ describe("finding the runner on this machine", () => {
     const found = await detectLocalRunner([HERE, THERE], fetch, QUICK);
 
     expect(found).toBe(THERE.id);
-    // Loopback, every time: the browser must never leave the machine to ask.
+    // Always loopback: the browser must never ask another machine.
     expect([...asked].sort()).toEqual([
       "http://127.0.0.1:4939/identity",
       "http://127.0.0.1:5000/identity",
     ]);
   });
 
-  it("does not let one refused port hide the runner behind another", async () => {
-    // The mirror of the case above: the answer arrives on the other port.
+  it("still finds the runner on one port when another port rejects", async () => {
+    // The reverse of the case above: the response comes from the other port.
     const { fetch } = stubFleetFetch({ 4939: buildIdentityResponse(HERE.id), 5000: "refuse" });
 
     expect(await detectLocalRunner([HERE, THERE], fetch, QUICK)).toBe(HERE.id);
   });
 
-  it("does not let one hanging port hide the runner behind another", async () => {
+  it("still finds the runner on one port when another port hangs", async () => {
     const { fetch } = stubFleetFetch({ 4939: "hang", 5000: buildIdentityResponse(THERE.id) });
 
     expect(await detectLocalRunner([HERE, THERE], fetch, QUICK)).toBe(THERE.id);
   });
 });
 
-describe("when there is no answer to trust", () => {
-  it("returns null when nothing answers", async () => {
+describe("detectLocalRunner with no trustworthy response", () => {
+  it("returns null when no port responds", async () => {
     const { fetch, asked } = stubFleetFetch({ 4939: "refuse", 5000: "refuse" });
 
     expect(await detectLocalRunner([HERE, THERE], fetch, QUICK)).toBe(null);
     expect(asked).toHaveLength(2);
   });
 
-  it("returns null when every answer times out", async () => {
+  it("returns null when every request times out", async () => {
     const { fetch } = stubFleetFetch({ 4939: "hang", 5000: "hang" });
 
     expect(await detectLocalRunner([HERE, THERE], fetch, QUICK)).toBe(null);
   });
 
-  it("waits IDENTITY_TIMEOUT_MS for an answer when no timeout is given", async () => {
+  it("waits IDENTITY_TIMEOUT_MS for a response when no timeout is given", async () => {
     vi.useFakeTimers();
     const { fetch } = stubFleetFetch({ 4939: "hang", 5000: "hang" });
 
@@ -141,33 +143,33 @@ describe("when there is no answer to trust", () => {
     expect(await detection).toBe(null);
   });
 
-  it("returns null when the answer names a runner the fleet does not have", async () => {
+  it("returns null when the response names a runner that is not in the fleet", async () => {
     const { fetch } = stubFleetFetch({ 4939: buildIdentityResponse("r_stranger"), 5000: "refuse" });
 
     expect(await detectLocalRunner([HERE, THERE], fetch, QUICK)).toBe(null);
   });
 
-  it("returns null when the answer names a runner that is not online", async () => {
+  it("returns null when the response names a runner that is not online", async () => {
     const offline = buildRunner("r_offline", 4939, "offline");
     const { fetch } = stubFleetFetch({ 4939: buildIdentityResponse(offline.id), 5000: "refuse" });
 
-    // The machine has a runner on it, but it is not one work can be placed on,
-    // so "local" has nothing to resolve to.
+    // The machine has a runner, but no work can be placed on it, so there is
+    // no usable local runner.
     expect(await detectLocalRunner([offline, THERE], fetch, QUICK)).toBe(null);
   });
 });
 
-describe("what it will not take for an answer", () => {
-  it("does not believe a port that names a runner other than the one that reported it", async () => {
-    // Two machines with runners, and something on this one's port answering
-    // with the other's id. Believing it would place the user's next session on
-    // a machine they are not sitting at.
+describe("detectLocalRunner with an untrustworthy response", () => {
+  it("rejects a port that responds with a different runner's id", async () => {
+    // Two machines with runners, and something on this machine's port
+    // responds with the other runner's id. Trusting it would place the user's
+    // next session on a machine they are not using.
     const { fetch } = stubFleetFetch({ 4939: buildIdentityResponse(THERE.id), 5000: "refuse" });
 
     expect(await detectLocalRunner([HERE, THERE], fetch, QUICK)).toBe(null);
   });
 
-  it("does not read a refusal as an answer", async () => {
+  it("rejects an error response", async () => {
     const { fetch } = stubFleetFetch({
       4939: new Response("no", { status: 500 }),
       5000: "refuse",
@@ -176,8 +178,8 @@ describe("what it will not take for an answer", () => {
     expect(await detectLocalRunner([HERE, THERE], fetch, QUICK)).toBe(null);
   });
 
-  it("does not read something that is not a runner as an answer", async () => {
-    // 4939 is an ordinary port number; anything at all may be sitting on it.
+  it("rejects a response that is not from a runner", async () => {
+    // 4939 is an ordinary port number; any program may be listening on it.
     const { fetch } = stubFleetFetch({
       4939: new Response(JSON.stringify({ version: "2.1" }), { status: 200 }),
       5000: "refuse",
@@ -186,7 +188,7 @@ describe("what it will not take for an answer", () => {
     expect(await detectLocalRunner([HERE, THERE], fetch, QUICK)).toBe(null);
   });
 
-  it("asks nothing of a runner that has reported no port", async () => {
+  it("does not call a runner that has reported no port", async () => {
     const silent: Runner = { ...HERE, facts: null };
     const { fetch, asked } = stubFleetFetch({ 5000: buildIdentityResponse(THERE.id) });
 

@@ -1,15 +1,16 @@
 /**
  * Where the CLI gets its controller URL and its bearer token.
  *
- * Two sources, in one fixed order: the environment, then
- * `<home>/credentials.json`. The environment is what a session gets - the
- * runner injects `HERCULE_API_URL` and `HERCULE_TOKEN` - and the file is what
- * `hercule login` wrote for the user's own shell.
+ * There are two sources, always read in this order:
+ *
+ * - the environment. Inside a session, the runner sets `HERCULE_API_URL` and
+ *   `HERCULE_TOKEN`.
+ * - `<home>/credentials.json`, which `hercule login` writes for the user's own
+ *   shell.
  *
  * `HERCULE_SESSION=1` marks a process the runner started. The file is then
- * refused outright rather than merely deprioritised, so an agent whose
- * environment token is missing or expired fails instead of silently acting as
- * the user.
+ * never read, not just read last, so an agent whose environment token is
+ * missing or expired fails instead of silently acting as the user.
  */
 import { readFileSync } from "node:fs";
 import { locateCredentialsFile } from "@hercule/home";
@@ -20,7 +21,7 @@ export interface CredentialFile {
   readonly apiKey: string;
 }
 
-/** Where a resolved credential came from; what the human error messages name. */
+/** Where a resolved credential came from. Error messages for people name it. */
 export type CredentialSource = "environment" | "file";
 
 export interface Credential {
@@ -29,21 +30,23 @@ export interface Credential {
   readonly source: CredentialSource;
 }
 
-/** A credential could not be resolved. The message says which source failed and why. */
+/** A credential could not be resolved. The message names the source that failed, and why. */
 export class CredentialError extends Error {
   override readonly name = "CredentialError";
 }
 
 export type Env = Readonly<Record<string, string | undefined>>;
 
-/** True when this process was started by the runner inside a session. */
+/** Returns true when the runner started this process inside a session. */
 export const isInSession = (env: Env): boolean => env["HERCULE_SESSION"] === "1";
 
 /**
- * Read the credential file, or `undefined` when there is none.
+ * Reads the credential file. Returns `undefined` when the file cannot be read,
+ * for example because it does not exist.
  *
- * An unreadable or malformed file is an error rather than "no credential": it
- * is a broken state the user has to see, not a fallback to anonymity.
+ * A malformed file throws a `CredentialError` rather than counting as "no
+ * credential": it is a broken state the user has to see, not a reason to
+ * continue without a credential.
  */
 const readCredentialFile = (path: string): CredentialFile | undefined => {
   let text: string;
@@ -73,11 +76,11 @@ const readCredentialFile = (path: string): CredentialFile | undefined => {
 };
 
 /**
- * The controller URL and the token to send, or a `CredentialError` saying what
- * to do about it.
+ * Returns the controller URL and the token to send. Throws a `CredentialError`
+ * that says what to do when there is no usable credential.
  *
- * `home` is the already-resolved Hercule Home, so `--home` and `HERCULE_HOME` are
- * honoured by the one parser every role runs.
+ * `home` is the Hercule Home, already resolved, so `--home` and `HERCULE_HOME`
+ * are handled by the same parser every role uses.
  */
 export const resolveCredential = (home: string, env: Env): Credential => {
   const token = env["HERCULE_TOKEN"];
@@ -86,19 +89,19 @@ export const resolveCredential = (home: string, env: Env): Credential => {
   if (token !== undefined && token !== "") {
     if (envUrl === undefined || envUrl === "") {
       throw new CredentialError(
-        "HERCULE_TOKEN is set but HERCULE_API_URL is not. Set both, or none.",
+        "HERCULE_TOKEN is set but HERCULE_API_URL is not. Set both, or neither.",
       );
     }
     return { url: envUrl, token, source: "environment" };
   }
 
-  // The two sources are never blended. A lone HERCULE_API_URL would otherwise
-  // send the file's long-lived API key to a host it was never minted for, so it
-  // is refused rather than ignored: a stale variable is a misconfiguration the
-  // user has to see.
+  // The two sources are never mixed. A lone HERCULE_API_URL would otherwise
+  // send the file's long-lived API key to a host it was not created for. So it
+  // is an error rather than ignored: a stale variable is a misconfiguration
+  // the user has to see.
   if (envUrl !== undefined && envUrl !== "") {
     throw new CredentialError(
-      "HERCULE_API_URL is set but HERCULE_TOKEN is not; unset it or set both. The credential file's key is only ever sent to the controller it was minted for.",
+      "HERCULE_API_URL is set but HERCULE_TOKEN is not. Unset HERCULE_API_URL, or set both. The credential file's key is only ever sent to the controller that created it.",
     );
   }
 
@@ -106,7 +109,7 @@ export const resolveCredential = (home: string, env: Env): Credential => {
 
   if (isInSession(env)) {
     throw new CredentialError(
-      `HERCULE_SESSION=1 and no HERCULE_TOKEN. Inside a session the CLI refuses the credential file (${path}), so it cannot act as the user by accident.`,
+      `HERCULE_SESSION=1 is set but HERCULE_TOKEN is not. Inside a session the CLI does not read the credential file (${path}), so it cannot act as the user by accident.`,
     );
   }
 
@@ -116,22 +119,25 @@ export const resolveCredential = (home: string, env: Env): Credential => {
       `No credential. Set HERCULE_TOKEN and HERCULE_API_URL, or run \`hercule login <url>\`.`,
     );
   }
-  // A non-empty HERCULE_API_URL threw above, so the file's own URL is the only
-  // one left: a file credential is never sent to a controller it was not
-  // minted for.
+  // A non-empty HERCULE_API_URL threw above, so the file's own URL is the
+  // only one left: a file credential is never sent to a controller that did
+  // not create it.
   return { url: file.url, token: file.apiKey, source: "file" };
 };
 
 /**
- * The controller URL alone, for the two operations that need no credential
- * (`setup.read`, `auth.login`) and for `setup.complete`, which carries a setup
- * token instead.
+ * Returns only the controller URL. Used for the two operations that need no
+ * credential (`setup.read`, `auth.login`) and for `setup.complete`, which
+ * sends a setup token instead. Throws a `CredentialError` when no URL is
+ * found.
  */
 export const resolveUrl = (home: string, env: Env): string => {
   const envUrl = env["HERCULE_API_URL"];
   if (envUrl !== undefined && envUrl !== "") return envUrl;
   if (isInSession(env)) {
-    throw new CredentialError("HERCULE_SESSION=1 and no HERCULE_API_URL. Set HERCULE_API_URL.");
+    throw new CredentialError(
+      "HERCULE_SESSION=1 is set but HERCULE_API_URL is not. Set HERCULE_API_URL.",
+    );
   }
   const file = readCredentialFile(locateCredentialsFile(home));
   if (file === undefined) {

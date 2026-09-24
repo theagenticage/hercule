@@ -1,7 +1,7 @@
 /**
- * `findDefaultInstanceId(instances)` picks the instance the composer and
- * Settings > Threads both prefill from: the first with a logged-in snapshot,
- * else the first instance, else none.
+ * Tests `findDefaultInstanceId(instances)`, which picks the instance the
+ * composer and Settings > Threads both prefill from: the first logged-in
+ * instance, else the first instance, else none.
  */
 import { describe, expect, it } from "vitest";
 import { buildInstance, buildSnapshot } from "../providers.testing";

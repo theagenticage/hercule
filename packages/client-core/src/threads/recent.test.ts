@@ -1,6 +1,6 @@
 /**
- * `pushRecent(recent, pair)` is the last three (instance, model) pairs the
- * user picked, newest first.
+ * Tests `pushRecent(recent, pair)`, which keeps the last three (instance,
+ * model) pairs the user picked, newest first.
  */
 import { describe, expect, it } from "vitest";
 import { pushRecent } from "./recent";
@@ -12,7 +12,7 @@ const OPUS = "claude-opus-5";
 const HAIKU = "claude-haiku-5";
 
 describe("pushRecent", () => {
-  it("starts the list with the first pair picked", () => {
+  it("starts the list with the first pick", () => {
     expect(pushRecent([], { instanceId: WORK, model: SONNET })).toEqual([
       { instanceId: WORK, model: SONNET },
     ]);
@@ -27,7 +27,7 @@ describe("pushRecent", () => {
     ]);
   });
 
-  it("moves a pair already held to the front rather than holding it twice", () => {
+  it("moves a pair that is already in the list to the front rather than adding it twice", () => {
     expect(
       pushRecent(
         [

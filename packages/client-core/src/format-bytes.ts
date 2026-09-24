@@ -1,14 +1,14 @@
 /**
- * A byte count as a person reads it.
+ * Formats a byte count for people to read.
  *
- * Every size a runner reports is in bytes, and a fleet row is scanned rather
- * than studied, so what a row wants is the largest unit that leaves a figure
- * someone can hold: whole numbers from ten up, one decimal below that.
+ * A runner reports every size in bytes, and a fleet row is scanned rather than
+ * studied, so sizes use the largest unit that still gives a number of at least
+ * one: whole numbers from ten up, one decimal below ten.
  */
 
 const UNITS = ["B", "KiB", "MiB", "GiB", "TiB"] as const;
 
-/** `68719476736` reads `64 GiB`; `1288490188` reads `1.2 GiB`. */
+/** Formats `68719476736` as `64 GiB` and `1288490188` as `1.2 GiB`. */
 export const formatBytes = (bytes: number): string => {
   let value = bytes;
   let unit = 0;
@@ -16,8 +16,8 @@ export const formatBytes = (bytes: number): string => {
     value /= 1024;
     unit += 1;
   }
-  // Rounded before the unit is settled, so a figure that rounds up to 1024
-  // climbs rather than being written as `1024 MiB`.
+  // Round before choosing the final unit, so a value that rounds up to 1024
+  // moves to the next unit instead of being shown as `1024 MiB`.
   const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
   return rounded === 1024 && unit < UNITS.length - 1
     ? `1 ${UNITS[unit + 1]}`

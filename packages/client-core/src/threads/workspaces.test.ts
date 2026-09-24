@@ -1,11 +1,12 @@
 /**
- * Naming the places a thread works in, and picking the one it opens in.
+ * Tests naming the workspaces a thread works in, and picking the one it opens
+ * in.
  *
- * What matters here is what `composer-fields.test.ts` does not reach: the two
- * names a workspace wears (its branch, or the repo and machine of a shared
- * checkout), and the two sentences for places nothing has been cloned into yet
- * - a repo no machine holds has no branch to name, so the clause goes rather
- * than being filled with a word standing in for "we do not know".
+ * These tests cover what `composer-fields.test.ts` does not: the two kinds of
+ * workspace name (a branch, or the repo and runner of a main workspace), and
+ * the lead sentences for repos that no runner has cloned yet. Such a repo has
+ * no known branch, so the branch clause is left out rather than filled with a
+ * word for "unknown".
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -42,11 +43,11 @@ import {
 } from "./workspaces.testing";
 
 describe("formatRepoName", () => {
-  it("is the last segment of the canonical remote", () => {
+  it("returns the last segment of the canonical remote", () => {
     expect(formatRepoName(WEBSHOP)).toBe("webshop");
   });
 
-  it("falls back to the label a resource that is not a repo carries", () => {
+  it("falls back to the label of a resource that is not a repo", () => {
     expect(
       formatRepoName({
         ...buildRepo("res-mail", null, null),
@@ -56,41 +57,42 @@ describe("formatRepoName", () => {
     ).toBe("work inbox");
   });
 
-  it("still reads as something for a resource the catalog no longer holds", () => {
+  it("returns a placeholder for a resource that no longer exists", () => {
     expect(formatRepoName(undefined)).toBe("the repo");
   });
 });
 
 describe("formatWorkspaceName and formatWorkspaceLabel", () => {
-  it("names a worktree after the branch it sits on", () => {
+  it("names a worktree after its branch", () => {
     expect(formatWorkspaceName(RUN_3F1)).toBe("hercule/run-3f1");
   });
 
-  it("names a main workspace after its repo and its machine", () => {
+  it("names a main workspace after its repo and its runner", () => {
     expect(formatWorkspaceLabel(PRIMARY, [WEBSHOP], [MOSS])).toBe("webshop · moss");
   });
 
-  it("names a machine that is no longer in the fleet rather than going blank", () => {
+  it("shows a placeholder for a runner that is no longer in the fleet rather than a blank", () => {
     expect(formatWorkspaceLabel(PRIMARY, [WEBSHOP], [])).toBe("webshop · unknown machine");
   });
 
-  // The sidebar is narrower than some of these labels, and the machine is what
-  // tells one repo's two checkouts apart: the repo is what gives way.
-  it("splits a main workspace's label into the repo, which may be cut, and the rest", () => {
+  // The sidebar is narrower than some of these labels, and the runner name is
+  // what tells one repo's main workspaces apart, so the repo name is
+  // truncated instead.
+  it("splits a main workspace's label into the repo, which may be truncated, and the rest", () => {
     expect(buildWorkspaceLabelParts(PRIMARY, [WEBSHOP], [MOSS])).toEqual({
       clip: "webshop",
       keep: " · moss",
     });
   });
 
-  it("gives a worktree's whole name as the part that may be cut: it is one word", () => {
+  it("lets a worktree's whole name be truncated, because it is one word", () => {
     expect(buildWorkspaceLabelParts(RUN_3F1, [WEBSHOP], [MOSS])).toEqual({
       clip: "hercule/run-3f1",
       keep: "",
     });
   });
 
-  it("reads both parts back as the one label a tooltip shows", () => {
+  it("joins both parts into the label a tooltip shows", () => {
     expect(joinLabelText(buildWorkspaceLabelParts(PRIMARY, [WEBSHOP], [MOSS]))).toBe(
       "webshop · moss",
     );
@@ -98,11 +100,11 @@ describe("formatWorkspaceName and formatWorkspaceLabel", () => {
 });
 
 describe("findReadyPrimary", () => {
-  it("finds the repo's main workspace on the machine asked about", () => {
+  it("finds the repo's main workspace on the given runner", () => {
     expect(findReadyPrimary([PRIMARY, RUN_3F1], WEBSHOP.id, MOSS.id)?.id).toBe(PRIMARY.id);
   });
 
-  it("is nothing on another machine, and nothing while it is still being made", () => {
+  it("returns undefined on another runner, and while the workspace is still being created", () => {
     expect(findReadyPrimary([PRIMARY], WEBSHOP.id, "r-cove")).toBeUndefined();
     expect(
       findReadyPrimary([{ ...PRIMARY, status: "provisioning" }], WEBSHOP.id, MOSS.id),
@@ -111,7 +113,7 @@ describe("findReadyPrimary", () => {
 });
 
 describe("findBaseBranch", () => {
-  it("takes the main workspace on the picked machine, which is the clone a worktree is cut from", () => {
+  it("uses the main workspace on the picked runner, which is the clone a worktree is created from", () => {
     const elsewhere = buildWorkspace({
       id: "ws-cove",
       runnerId: COVE.id,
@@ -121,22 +123,22 @@ describe("findBaseBranch", () => {
     expect(findBaseBranch([elsewhere, PRIMARY], WEBSHOP.id, MOSS.id)).toBe("main");
   });
 
-  it("falls back to any machine that has cloned it: a default branch is the remote's fact", () => {
+  it("falls back to any runner that has cloned the repo, because the default branch belongs to the remote", () => {
     expect(findBaseBranch([RUN_3F1], WEBSHOP.id, COVE.id)).toBe("main");
   });
 
-  it("reads nothing off a workspace that is gone or was never made", () => {
+  it("ignores a failed or deleted workspace", () => {
     expect(findBaseBranch([{ ...PRIMARY, status: "failed" }], WEBSHOP.id, MOSS.id)).toBeNull();
     expect(findBaseBranch([{ ...PRIMARY, status: "deleted" }], WEBSHOP.id, MOSS.id)).toBeNull();
   });
 
-  it("is nothing while no machine has cloned the repo at all", () => {
+  it("returns null while no runner has cloned the repo", () => {
     expect(findBaseBranch([PRIMARY], INFRA.id, MOSS.id)).toBeNull();
   });
 });
 
 describe("buildPickKey", () => {
-  it("does not tell two picks of one checkout apart by the branch, which is a choice inside it", () => {
+  it("gives two picks of the same checkout the same key, whatever their branch", () => {
     expect(buildPickKey({ kind: "primary", resourceId: WEBSHOP.id, branch: "release/2.4" })).toBe(
       buildPickKey({ kind: "primary", resourceId: WEBSHOP.id }),
     );
@@ -155,7 +157,7 @@ describe("buildPickKey", () => {
 });
 
 describe("withBranch", () => {
-  it("switches the main workspace's checkout to it", () => {
+  it("sets the branch the main workspace switches to", () => {
     expect(withBranch({ kind: "primary", resourceId: WEBSHOP.id }, "release/2.4")).toEqual({
       kind: "primary",
       resourceId: WEBSHOP.id,
@@ -163,7 +165,7 @@ describe("withBranch", () => {
     });
   });
 
-  it("starts a lone worktree from it, keeping the repo it is of", () => {
+  it("sets the base branch of a single-repo worktree, keeping its repo", () => {
     expect(
       withBranch({ kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }] }, "release/2.4"),
     ).toEqual({
@@ -172,7 +174,7 @@ describe("withBranch", () => {
     });
   });
 
-  it("refuses a worktree of several repos rather than claiming they share a branch", () => {
+  it("leaves a worktree of several repos unchanged rather than giving them all one branch", () => {
     const many = {
       kind: "ephemeral" as const,
       checkouts: [{ resourceId: WEBSHOP.id }, { resourceId: INFRA.id }],
@@ -181,7 +183,7 @@ describe("withBranch", () => {
     expect(withBranch(many, "main")).toEqual(many);
   });
 
-  it("has nothing to switch on a joined workspace or on no checkout", () => {
+  it("leaves a joined workspace and a pick with no checkout unchanged", () => {
     expect(withBranch({ kind: "existing", workspaceId: RUN_3F1.id }, "main")).toEqual({
       kind: "existing",
       workspaceId: RUN_3F1.id,
@@ -191,24 +193,24 @@ describe("withBranch", () => {
 });
 
 describe("findRunnerForPick", () => {
-  it("takes the machine of the workspace a thread joins, which never moves", () => {
+  it("returns the runner of the workspace a thread joins, which never moves", () => {
     expect(findRunnerForPick({ kind: "existing", workspaceId: RUN_3F1.id }, [RUN_3F1])).toBe(
       MOSS.id,
     );
   });
 
-  it("settles no machine for a pick that is not a workspace already standing", () => {
+  it("returns null for a pick that is not an existing workspace", () => {
     expect(findRunnerForPick({ kind: "primary", resourceId: WEBSHOP.id }, [PRIMARY])).toBeNull();
     expect(findRunnerForPick({ kind: "existing", workspaceId: "ws-gone" }, [PRIMARY])).toBeNull();
   });
 });
 
 describe("findDraftSubject", () => {
-  // R6: the hue is the listing's to say, so the subject carries the answer
-  // rather than the id every surface would have to read it from again.
+  // The hue depends on the project list, so the subject includes the hue
+  // rather than making every screen look it up again from the id.
   const PROJECTS = [OPS_PROJECT, WEBSHOP_PROJECT];
 
-  it("names the workspace a draft joins, which stands for itself and wears no hue", () => {
+  it("names the workspace a draft joins, with no project hue", () => {
     expect(
       findDraftSubject(
         { kind: "existing", workspaceId: RUN_3F1.id },
@@ -219,7 +221,7 @@ describe("findDraftSubject", () => {
     ).toEqual({ label: "hercule/run-3f1", projectId: null, tone: null });
   });
 
-  it("names the project a draft stands in, in the hue the listing gives it", () => {
+  it("names the draft's project, with the hue from the project list", () => {
     expect(
       findDraftSubject(
         { kind: "primary", resourceId: WEBSHOP.id },
@@ -234,26 +236,27 @@ describe("findDraftSubject", () => {
     });
   });
 
-  it("names nothing on a draft that stands in neither", () => {
+  it("returns null for a draft with neither", () => {
     expect(findDraftSubject({ kind: "none" }, [], null, PROJECTS)).toBeNull();
   });
 });
 
 describe("decideDefaultWorkspacePick", () => {
-  it("has nowhere to open a project with no repo, whatever the setting says", () => {
+  it("returns none for a project with no repo, whatever the setting", () => {
     expect(decideDefaultWorkspacePick([], "primary")).toEqual({ kind: "none" });
   });
 
-  it("takes the main workspace of the first repo when the setting says primary", () => {
+  it("uses the first repo's main workspace when the setting is primary", () => {
     expect(decideDefaultWorkspacePick([INFRA, WEBSHOP], "primary")).toEqual({
       kind: "primary",
       resourceId: INFRA.id,
     });
   });
 
-  // D-20d dropped `none` from the setting; one stored before that reads as
-  // unset, so the rule decides rather than a value nobody can set any more.
-  it("reads a stored none as nothing stored", () => {
+  // `none` is no longer a valid setting. A `none` stored by an older version
+  // counts as unset, so the default rule decides rather than a value nobody
+  // can set any more.
+  it("treats a stored none as unset", () => {
     expect(parsePreferredWorkspace("none")).toBeNull();
     expect(parsePreferredWorkspace(undefined)).toBeNull();
     expect(parsePreferredWorkspace("primary")).toBe("primary");
@@ -280,7 +283,7 @@ describe("buildComposerPlaceholder", () => {
     expect(buildPlaceholder()).toBe("Say what you want done…");
   });
 
-  it("names the workspace a draft joins, whose files already stand", () => {
+  it("names the workspace a draft joins, whose files already exist", () => {
     expect(buildPlaceholder({ pick: { kind: "existing", workspaceId: RUN_3F1.id } })).toBe(
       "Say what this thread should do in hercule/run-3f1…",
     );
@@ -290,7 +293,7 @@ describe("buildComposerPlaceholder", () => {
     expect(buildPlaceholder({ active: true })).toBe("Reply…");
   });
 
-  it("says input is queued while the turn runs, and why it takes none at all", () => {
+  it("says input is queued while a turn runs, and why a thread takes no input", () => {
     expect(buildPlaceholder({ active: true, busy: true })).toBe("Queued until the turn finishes…");
     expect(buildPlaceholder({ active: true, readOnly: "its runner is gone" })).toBe(
       "This thread can't be resumed: its runner is gone.",
@@ -301,11 +304,11 @@ describe("buildComposerPlaceholder", () => {
 describe("buildWorkspaceLead", () => {
   const reading = { resources: [WEBSHOP, INFRA], workspaces: [PRIMARY], machine: "moss" };
 
-  /** The sentence as it reads; which parts of it are mono is a claim of its own. */
+  /** Returns the lead as plain text. Which parts are mono is tested separately. */
   const readLeadText = (...args: Parameters<typeof buildWorkspaceLead>): string =>
     joinPhraseText(buildWorkspaceLead(...args));
 
-  it("leaves the branch clause out of a checkout no machine holds yet", () => {
+  it("leaves out the branch clause for a repo no runner has cloned yet", () => {
     expect(
       readLeadText({ kind: "primary", resourceId: INFRA.id }, { ...reading, runnerId: MOSS.id }),
     ).toBe(
@@ -313,7 +316,7 @@ describe("buildWorkspaceLead", () => {
     );
   });
 
-  it("sets the branch it names in mono, as a git word is set everywhere", () => {
+  it("sets the branch name in mono, as git names are everywhere", () => {
     expect(
       buildWorkspaceLead(
         { kind: "primary", resourceId: WEBSHOP.id },
@@ -322,7 +325,7 @@ describe("buildWorkspaceLead", () => {
     ).toContainEqual({ text: "main", mono: true });
   });
 
-  it("says a base nothing has reported is the repo's own default branch", () => {
+  it("says the new branch starts from the default branch when no base is known", () => {
     expect(
       readLeadText(
         { kind: "ephemeral", checkouts: [{ resourceId: INFRA.id }] },
@@ -331,7 +334,7 @@ describe("buildWorkspaceLead", () => {
     ).toBe("It gets its own worktree of ops-infra, on a new branch from its default branch.");
   });
 
-  it("speaks of the repos together when a worktree is made of several", () => {
+  it("describes all repos together for a worktree of several repos", () => {
     expect(
       readLeadText(
         { kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }, { resourceId: INFRA.id }] },
@@ -340,7 +343,7 @@ describe("buildWorkspaceLead", () => {
     ).toBe("It gets a worktree of each repo, side by side, each on a new branch.");
   });
 
-  it("says something about a workspace the catalog no longer holds", () => {
+  it("still produces a sentence for a workspace that no longer exists", () => {
     expect(
       readLeadText({ kind: "existing", workspaceId: "ws-gone" }, { ...reading, runnerId: null }),
     ).toContain("that workspace");

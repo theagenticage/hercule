@@ -1,6 +1,6 @@
 /**
- * The project picker's rows: enough of what stands under a project to choose
- * on, rather than a name alone.
+ * Tests the project picker's rows, which show enough about each project to
+ * choose by, not just its name.
  */
 import { describe, expect, it } from "vitest";
 import { buildProjectPickerRows } from "./projects";
@@ -31,20 +31,20 @@ const rows = buildProjectPickerRows({
 });
 
 describe("buildProjectPickerRows", () => {
-  it("says how much stands under a project, naming its repos", () => {
+  it("shows the counts of a project's repos, threads and workspaces, and names its repos", () => {
     expect(rows[0]?.sub).toBe("1 repo · webshop · 2 threads · 1 workspace");
     expect(rows[1]?.sub).toBe("2 repos · ops-infra, ops-runbooks · 1 thread · 0 workspaces");
   });
 
-  it("leaves the names out of a project with no repo rather than an empty gap", () => {
+  it("leaves out repo names for a project with no repo rather than an empty gap", () => {
     expect(rows[2]?.sub).toBe("0 repos · 0 threads · 0 workspaces");
   });
 
-  it("leaves the main workspace out of the workspaces there are to join", () => {
+  it("does not count the main workspace among the workspaces to join", () => {
     expect(rows[0]?.sub).toContain("1 workspace");
   });
 
-  it("offers a key to the first nine and none past them", () => {
+  it("offers a shortcut for the first nine rows and none after", () => {
     const many = buildProjectPickerRows({
       projects: Array.from({ length: 10 }, (_, index) =>
         buildProject(`p${String(index)}`, `p${String(index)}`),
@@ -63,9 +63,9 @@ describe("buildProjectPickerRows", () => {
 describe("pickProjectTone", () => {
   const PROJECTS = [WEBSHOP_PROJECT, OPS_PROJECT, SANDBOX];
 
-  // R6: hashing the id gave two projects one hue as often as not; the place in
-  // the listing cannot.
-  it("gives two projects standing next to each other different hues", () => {
+  // Hashing the id gave two projects the same hue about half the time; using
+  // the position in the list cannot.
+  it("gives two neighbouring projects different hues", () => {
     expect(pickProjectTone(WEBSHOP_PROJECT.id, PROJECTS)).not.toBe(
       pickProjectTone(OPS_PROJECT.id, PROJECTS),
     );
@@ -74,7 +74,7 @@ describe("pickProjectTone", () => {
     );
   });
 
-  it("answers the same hue for the same project every time, and the rows agree", () => {
+  it("returns the same hue for the same project every time, and the rows match", () => {
     expect(pickProjectTone(WEBSHOP_PROJECT.id, PROJECTS)).toBe(
       pickProjectTone(WEBSHOP_PROJECT.id, PROJECTS),
     );
@@ -83,7 +83,7 @@ describe("pickProjectTone", () => {
     );
   });
 
-  it("only ever answers one of the two hues the design language fixes", () => {
+  it("only returns one of the two hues the design language defines", () => {
     const many = Array.from({ length: 40 }, (_, index) =>
       buildProject(`p-${String(index)}`, `p${String(index)}`),
     );

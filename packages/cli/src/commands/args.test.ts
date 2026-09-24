@@ -18,9 +18,9 @@ const stubStdin = (text: string) => () => Promise.resolve(text);
 
 const ID = "1f3a9c2e";
 
-// what comes from stdin, and what refuses to.
+// Tests which fields are read from stdin, and which inline values are rejected.
 describe("a required stdin field", () => {
-  it("is the whole of stdin less one trailing newline, with no marker given", async () => {
+  it("is all of stdin minus one trailing newline, without a marker", async () => {
     const args = await parseArguments(
       taskCreate,
       ["--title", "Fix the flaky login test"],
@@ -39,13 +39,13 @@ describe("a required stdin field", () => {
     expect(args.payload["description"]).toBe("one\r\ntwo");
   });
 
-  it("is read unasked on session input too", async () => {
+  it("is read without a marker on session input too", async () => {
     const args = await parseArguments(sessionInput, [ID], stubStdin("Carry on.\n"));
     expect(args.payload["text"]).toBe("Carry on.");
     expect(args.positionals).toEqual([ID]);
   });
 
-  it("accepts its marker redundantly", async () => {
+  it("accepts its marker even though it is not needed", async () => {
     const args = await parseArguments(sessionInput, [ID, "--text-stdin"], stubStdin("Carry on.\n"));
     expect(args.payload["text"]).toBe("Carry on.");
   });
@@ -69,7 +69,7 @@ describe("an optional stdin field", () => {
 });
 
 describe("a stdin field given inline", () => {
-  it("refuses --description <value> and names the stdin form", async () => {
+  it("rejects --description <value> and names the stdin form", async () => {
     await expect(
       parseArguments(taskUpdate, [ID, "--description", "inline"], refuseStdinRead),
     ).rejects.toThrow(/--description-stdin/);
@@ -78,13 +78,13 @@ describe("a stdin field given inline", () => {
     ).rejects.toThrow(UsageError);
   });
 
-  it("refuses --description-stdin=<value>", async () => {
+  it("rejects --description-stdin=<value>", async () => {
     await expect(
       parseArguments(taskUpdate, [ID, "--description-stdin=inline"], refuseStdinRead),
     ).rejects.toThrow(UsageError);
   });
 
-  it("refuses an inline password and says why", async () => {
+  it("rejects an inline password and says why", async () => {
     await expect(
       parseArguments(setPassword, ["--current", "old"], refuseStdinRead),
     ).rejects.toThrow(/--current-stdin/);
@@ -97,7 +97,7 @@ describe("user set-password", () => {
     expect(args.payload).toEqual({ current: "old", next: "new" });
   });
 
-  it("reads the same two lines whatever order the markers are written in", async () => {
+  it("assigns the two lines in schema order, whatever order the markers are in", async () => {
     const args = await parseArguments(
       setPassword,
       ["--next-stdin", "--current-stdin"],
@@ -111,9 +111,9 @@ describe("user set-password", () => {
     expect(args.payload).toEqual({ current: "old", next: "new" });
   });
 
-  it("refuses stdin that is not two lines", async () => {
+  it("rejects stdin that is not two lines", async () => {
     await expect(parseArguments(setPassword, [], stubStdin("only-one\n"))).rejects.toThrow(
-      /1 line\(s\) but 2 fields/,
+      /1 line\(s\), but 2 fields/,
     );
   });
 });
@@ -140,7 +140,7 @@ describe("parseArguments", () => {
   });
 
   it("parses --sort into a field and an optional direction", async () => {
-    // No direction means no direction: the operation's own default order stands.
+    // Without a direction, none is set: the operation's default order applies.
     expect((await parseArguments(profileList, ["--sort", "name"], refuseStdinRead)).sort).toEqual({
       field: "name",
     });
@@ -158,7 +158,7 @@ describe("parseArguments", () => {
     ).rejects.toThrow(UsageError);
   });
 
-  it("refuses a short flag rather than counting it as an argument", async () => {
+  it("rejects a short flag rather than counting it as an argument", async () => {
     await expect(parseArguments(profileList, ["-x"], refuseStdinRead)).rejects.toThrow(
       /unknown flag -x/,
     );
@@ -171,11 +171,11 @@ describe("parseArguments", () => {
     );
   });
 
-  it("sends null for a nullable field written as null, and text for one that is not", async () => {
+  it("sends null for a nullable field given null, and the text for a field that is not nullable", async () => {
     const detached = await parseArguments(taskUpdate, [ID, "--project", "null"], refuseStdinRead);
     expect(detached.payload["projectId"]).toBeNull();
 
-    // A field that does not accept null keeps the word as the word.
+    // A field that does not accept null gets the text "null".
     const titled = await parseArguments(taskUpdate, [ID, "--title", "null"], refuseStdinRead);
     expect(titled.payload["title"]).toBe("null");
 
@@ -183,7 +183,7 @@ describe("parseArguments", () => {
     expect(named.payload["name"]).toBe("null");
   });
 
-  it("still takes a plain value for a nullable field", async () => {
+  it("still accepts a normal value for a nullable field", async () => {
     const full = "0199e0e7-0000-7000-8000-000000000001";
     const args = await parseArguments(taskUpdate, [ID, "--project", full], refuseStdinRead);
     expect(args.payload["projectId"]).toBe(full);

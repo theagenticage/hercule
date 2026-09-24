@@ -1,12 +1,12 @@
 /**
- * How a session reads as a row in the sidebar and on All sessions. The
- * `now`-free `activityAt` stays raw: formatting "how long ago" needs a clock,
- * and the caller's is the one that should ever run.
+ * How a session is shown as a row in the sidebar and on All sessions.
+ * `activityAt` stays a raw timestamp: formatting "how long ago" needs a clock,
+ * and only the caller should read one.
  */
 import type { ProviderInstance, Session, ThreadRows } from "@hercule/contract";
 import { isSettled, WORKING_STATUSES } from "./status";
 
-/** What a row's state mark says: working, waiting, or over. */
+/** A row's state marker: working, waiting for input, or over. */
 export type ThreadMark = "working" | "idle" | "exited";
 
 export interface ThreadRow {
@@ -17,20 +17,20 @@ export interface ThreadRow {
   readonly secondLine: string | null;
 }
 
+/** Returns the state marker for a session's row. */
 export const decideThreadMark = (session: Session): ThreadMark => {
   if (WORKING_STATUSES.has(session.status)) return "working";
-  // An exit that can be resumed takes input like any idle thread, so it reads
-  // as one; only an exit that is refused reads as an ending.
+  // An exited session that can be resumed takes input like any idle thread,
+  // so it is shown as idle. Only a session that cannot be resumed is over.
   if (isSettled(session)) return "exited";
   return "idle";
 };
 
 /**
- * What the thread runs, as the catalog that offers it names it: `Claude Sonnet
- * 5`, never the `claude-sonnet-5` a request is written with, and never the bare
- * word `default` for the model a provider picks for itself. A slug no snapshot
- * offers any more is still what the thread runs under, so it is named as it
- * stands rather than going blank.
+ * Returns the display name of the thread's model from the catalog, such as
+ * `Claude Sonnet 5`, rather than the slug `claude-sonnet-5`. When no snapshot
+ * offers the slug any more, returns the slug itself rather than a blank,
+ * because the thread still runs on that model.
  */
 const findModelName = (instances: readonly ProviderInstance[], session: Session): string => {
   const slug = session.modelSelection.model;
@@ -45,7 +45,7 @@ const findModelName = (instances: readonly ProviderInstance[], session: Session)
 export const buildThreadRows = (
   sessions: readonly Session[],
   mode: ThreadRows,
-  /** The catalogs a meta row's model is named from; a plain row names none. */
+  /** The instances whose catalogs give a `meta` row its model name. A plain row shows no model. */
   instances: readonly ProviderInstance[] = [],
 ): readonly ThreadRow[] =>
   [...sessions]

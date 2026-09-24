@@ -1,19 +1,18 @@
 /**
- * The live supervisor against a stub socket.
+ * Tests the live supervisor against a stub socket.
  *
- * The supervisor is the one piece of this feature no server test can reach: it
- * owns the ticket fetch, the reconnect schedule, the keepalive and what a
- * subscription does after the connection it was made on is gone. So the socket
- * here is a stub that is also the server - it records what the client sends and
- * answers only what the transport needs answering (its own keepalive, `hello`
- * and `ping`); every push and every failure is pressed by the test, so what is
- * being measured is the supervisor's reaction and never the controller's.
+ * No controller test can reach the supervisor: it owns the ticket fetch, the
+ * reconnect schedule, the keepalive, and what a subscription does after its
+ * connection is gone. So the socket here is a stub that also plays the
+ * server. It records what the client sends and replies only to what the
+ * transport needs (its keepalive, `hello` and `ping`). The test triggers every
+ * push and every failure, so the tests check only the supervisor's reaction,
+ * never the controller's.
  *
- * Time is faked throughout. The reconnect schedule and the 30-second keepalive
- * are the behaviour under test, and waiting for them in real time would make
- * the suite slow and flaky at once. The backoff may carry jitter that only ever
- * shortens a delay, so advancing by the nominal delay always reaches the next
- * attempt.
+ * All timers are fake. The reconnect schedule and the 30-second keepalive are
+ * the behaviour under test, and waiting for them in real time would make the
+ * suite both slow and flaky. The backoff's jitter only ever shortens a delay,
+ * so advancing by the nominal delay always reaches the next attempt.
  */
 import { afterEach, assert, beforeEach, describe, it, vi } from "vitest";
 import type { Event } from "@hercule/contract";
@@ -48,18 +47,18 @@ const readOpenedSocket = (index: number): StubSocket => {
 const readLastSocket = (): StubSocket => readOpenedSocket(opened.length - 1);
 
 /**
- * Lets everything already due happen: the promises of the ticket fetch, the
- * frames the stub answers, and the fibers the client runs them on. A tick of
- * exactly zero does not release the fibers waiting on the scheduler's
- * `setImmediate`, so this moves the clock by a millisecond at a time; the 20 ms
- * it costs is far below any interval under test, and the backoff's jitter only
- * ever shortens a delay, so a little extra elapsed time never hides an attempt.
+ * Runs everything that is already due: the ticket fetch's promises, the stub's
+ * replies, and the fibers the client runs them on. Advancing by exactly zero
+ * does not release fibers waiting on the scheduler's `setImmediate`, so this
+ * advances the clock one millisecond at a time. The 20 ms total is far below
+ * any interval under test, and the backoff's jitter only ever shortens a
+ * delay, so the extra time never skips an attempt.
  */
 const settleTimers = async (): Promise<void> => {
   for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(1);
 };
 
-/** A `fetch` that answers the ticket route with a fresh ticket every time. */
+/** Returns a `fetch` that responds to the ticket route with a new ticket every time. */
 const stubTicketServer = () => {
   const seen: Array<Request> = [];
   let issued = 0;
@@ -76,7 +75,10 @@ const stubTicketServer = () => {
   return { fetch, seen };
 };
 
-/** A `fetch` that refuses the ticket the way a spent credential is refused. */
+/**
+ * Returns a `fetch` that rejects the ticket request as `unauthenticated`, as
+ * for an expired credential.
+ */
 const stubRefusingFetch = (): { readonly fetch: FetchLike; readonly count: () => number } => {
   let count = 0;
   return {
@@ -141,7 +143,7 @@ const buildEvent = (id: number): Event => ({
   actor: "user",
 });
 
-/** Keys compare as sets: the criterion names which keys, not their order. */
+/** Sorts keys so they compare as sets: the tests check which keys, not their order. */
 const sortKeys = (keys: ReadonlyArray<LiveQueryKey>): Array<string> =>
   keys.map((key) => JSON.stringify(key)).sort();
 
@@ -153,7 +155,7 @@ const createSupervisor = (fetch: FetchLike): Live => {
   return live;
 };
 
-/** A started, greeted supervisor with its first socket. */
+/** Returns a started supervisor that received its `hello` reply, with its first socket. */
 const startConnectedSupervisor = async (
   fetch: FetchLike,
 ): Promise<{ readonly live: Live; readonly socket: StubSocket }> => {
@@ -169,8 +171,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  // Real timers first: tearing down waits on the client's own fibers, and a
-  // clock nobody is advancing any more would never let them finish.
+  // Switch to real timers first: stopping waits on the client's fibers, and
+  // with a fake clock that nobody advances they would never finish.
   const started = live;
   live = null;
   vi.useRealTimers();
@@ -178,7 +180,7 @@ afterEach(async () => {
 });
 
 describe("createLive", () => {
-  it("fetches a ticket, opens the socket, greets and exposes the server version", async () => {
+  it("fetches a ticket, opens the socket, sends hello and exposes the server version", async () => {
     const { fetch, seen } = stubTicketServer();
     const started = createSupervisor(fetch);
     const statuses: Array<string> = [];
@@ -210,8 +212,8 @@ describe("createLive", () => {
 
     assert.strictEqual(opened.length, 1);
 
-    // The sixth and seventh delays would be 32 s and 64 s uncapped, so reaching
-    // an attempt after 30 s is what proves the cap.
+    // Without the cap, the sixth and seventh delays would be 32 s and 64 s, so
+    // an attempt after 30 s proves the cap works.
     const delays = [1000, 2000, 4000, 8000, 16000, 30000, 30000];
     let current = socket;
 
@@ -227,7 +229,7 @@ describe("createLive", () => {
       current = readLastSocket();
     }
 
-    // Every attempt bought its own ticket, and no ticket was used twice.
+    // Every attempt fetched its own ticket, and no ticket was used twice.
     const tickets = opened.map((each) => {
       const hello = each.calls("hello")[0];
       return (hello?.payload as { readonly ticket: string }).ticket;
@@ -237,11 +239,11 @@ describe("createLive", () => {
     assert.strictEqual(seen.length, tickets.length);
   });
 
-  it("waits from the shortest delay again after a connection that held", async () => {
+  it("starts again from the shortest delay after a connection that stayed up", async () => {
     const { fetch } = stubTicketServer();
     const { socket } = await startConnectedSupervisor(fetch);
 
-    // Three quick drops walk the wait up to eight seconds.
+    // Three quick drops raise the wait to eight seconds.
     let current = socket;
     for (const delay of [1000, 2000, 4000]) {
       current.drop();
@@ -250,8 +252,8 @@ describe("createLive", () => {
       current = readLastSocket();
     }
 
-    // A connection that outlasts the longest wait was not a client that cannot
-    // connect, so the drop after it starts the schedule over.
+    // A connection that lasts longer than the longest wait shows the client
+    // can connect, so the drop after it starts the schedule over.
     await vi.advanceTimersByTimeAsync(31_000);
     await settleTimers();
     const before = opened.length;
@@ -264,7 +266,7 @@ describe("createLive", () => {
     await settleTimers();
     assert.strictEqual(opened.length, before + 1);
 
-    // Started over, not flattened: the wait after that one doubles again.
+    // The schedule starts over rather than staying flat: the next wait doubles again.
     readLastSocket().drop();
     await vi.advanceTimersByTimeAsync(1000);
     await settleTimers();
@@ -275,9 +277,9 @@ describe("createLive", () => {
     assert.strictEqual(opened.length, before + 2);
   });
 
-  it("closes the socket when it is stopped, and opens a fresh one when it is started again", async () => {
-    // Signing out and back in inside one page is exactly this, and the second
-    // connection must be the second person's rather than the first's.
+  it("closes the socket when stopped, and opens a new one when started again", async () => {
+    // This is what signing out and back in on one page does, and the second
+    // connection must use the new sign-in, not the first one.
     const { fetch, seen } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
     started.subscribe("task", () => {});
@@ -292,7 +294,7 @@ describe("createLive", () => {
     assert.strictEqual(opened.length, 2);
     assert.strictEqual(seen.length, 2);
     assert.strictEqual(readLastSocket().calls("hello").length, 1);
-    // The registry survived, so the second connection watches what the first did.
+    // The registry was kept, so the second connection has the same subscriptions as the first.
     assert.deepStrictEqual(
       readLastSocket()
         .subscriptions()
@@ -314,7 +316,7 @@ describe("createLive", () => {
     assert.deepStrictEqual(statuses, ["idle"]);
   });
 
-  it("stops for good and reports unauthenticated when the ticket is refused", async () => {
+  it("stops for good and reports unauthenticated when the ticket request is rejected", async () => {
     const { fetch, count } = stubRefusingFetch();
     const started = createSupervisor(fetch);
     const statuses: Array<string> = [];
@@ -326,7 +328,7 @@ describe("createLive", () => {
     assert.strictEqual(statuses[statuses.length - 1], "unauthenticated");
     assert.strictEqual(opened.length, 0);
 
-    // Terminal: no later attempt, however long it is given.
+    // This is final: there is no later attempt, however long the test waits.
     await vi.advanceTimersByTimeAsync(120_000);
     await settleTimers();
     assert.strictEqual(count(), 1);
@@ -391,8 +393,8 @@ describe("createLive", () => {
     assert.deepStrictEqual(eventAgain?.payload, { topic: "event", cursor: "7" });
     assert.deepStrictEqual(taskAgain?.payload, { topic: "task" });
 
-    // Everything the topic covers is invalidated once, and it happened before
-    // the connection carried any push.
+    // Every key of the topic is invalidated once, before the connection
+    // delivered any push.
     assert.strictEqual(invalidations.length, invalidatedBeforeDrop + 1);
     const onReconnect = invalidations[invalidatedBeforeDrop];
     assert.deepStrictEqual(sortKeys(onReconnect ?? []), sortKeys(buildQueryKeys("task", [])));
@@ -407,10 +409,10 @@ describe("createLive", () => {
     );
   });
 
-  it("reads everything again for a reader that subscribed before the first connection", async () => {
-    // A screen mounted before the socket was up read the API over HTTP and then
-    // subscribed. Whatever was pushed in between named records it cannot name,
-    // so the first greeting owes it the same sweep a reconnect owes.
+  it("invalidates everything for a subscriber that subscribed before the first connection", async () => {
+    // A screen that mounted before the socket was open fetched over HTTP and
+    // then subscribed. It cannot know what was pushed in between, so the first
+    // connection must tell it to refetch, as a reconnect does.
     const { fetch } = stubTicketServer();
     const started = createSupervisor(fetch);
 
@@ -423,7 +425,7 @@ describe("createLive", () => {
     assert.strictEqual(invalidations.length, 1);
     assert.deepStrictEqual(sortKeys(invalidations[0] ?? []), sortKeys(buildQueryKeys("task", [])));
 
-    // And it happened before the connection carried anything.
+    // And the invalidation came before the connection delivered anything.
     const socket = readLastSocket();
     const call = socket.calls("subscribe")[0];
     assert.isDefined(call);
@@ -436,7 +438,7 @@ describe("createLive", () => {
     );
   });
 
-  it("reads everything again for a reader that subscribed while the connection was down", async () => {
+  it("invalidates everything for a subscriber that subscribed while the connection was down", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
@@ -445,7 +447,7 @@ describe("createLive", () => {
     await settleTimers();
     started.subscribe("task", (keys) => invalidations.push(keys));
 
-    // Nothing is owed while there is nothing to have missed a push.
+    // No invalidation yet: it happens when the next connection opens.
     assert.strictEqual(invalidations.length, 0);
 
     await vi.advanceTimersByTimeAsync(1000);
@@ -455,7 +457,7 @@ describe("createLive", () => {
     assert.deepStrictEqual(sortKeys(invalidations[0] ?? []), sortKeys(buildQueryKeys("task", [])));
   });
 
-  it("drops a refused cursor, resubscribes from the head and tells the handler", async () => {
+  it("drops a rejected cursor, resubscribes from the head and tells the handler", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
@@ -479,13 +481,13 @@ describe("createLive", () => {
     reopened.fail(withCursor?.id, validationFailure);
     await settleTimers();
 
-    // The cursor is gone, so the subscription is taken out again from the head.
+    // The cursor was dropped, so the subscription starts again from the head.
     const retry = reopened.calls("subscribe")[1];
     assert.isDefined(retry);
     assert.deepStrictEqual(retry?.payload, { topic: "event" });
 
-    // And the handler is told, so a screen reading the log refetches its page
-    // rather than sitting on a gap it cannot see.
+    // And the handler is told, so a screen showing the log refetches its page
+    // rather than keeping a gap it cannot see.
     const afterRefusal = deltas.slice(seenBefore);
     assert.isTrue(
       afterRefusal.some((delta) => delta.reset),
@@ -503,8 +505,8 @@ describe("createLive", () => {
 
   it("starts an append-only subscription from a cursor the caller already holds, not from the head", async () => {
     // A caller that fetched a page over HTTP before subscribing has already
-    // read everything up to some position; starting the subscription from the
-    // head would miss whatever was written between that fetch and this call.
+    // read up to some position. Starting from the head would miss whatever
+    // was written between that fetch and this call.
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
@@ -541,8 +543,8 @@ describe("createLive", () => {
       "the handler was never told the topic was gone",
     );
 
-    // Nothing retries it: no second `subscribe` call for that topic appears,
-    // even after the backoff a transient refusal would wait out.
+    // Nothing retries it: there is no second `subscribe` call for that topic,
+    // even after the backoff that a temporary error would wait for.
     await vi.advanceTimersByTimeAsync(30_000);
     await settleTimers();
     const streamCalls = socket
@@ -560,7 +562,7 @@ describe("createLive", () => {
     assert.isTrue(invalidations.length > 0, "the unrelated subscription stopped receiving pushes");
   });
 
-  it("tells a capped reader to read everything again, and waits before asking again", async () => {
+  it("invalidates everything for a subscriber that hit a cap, and waits before resubscribing", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
@@ -572,20 +574,20 @@ describe("createLive", () => {
     socket.fail(first?.id, capFailure);
     await settleTimers();
 
-    // Nothing names what was dropped, so everything the topic covers is read
-    // again - the same answer a reconnect gives.
+    // There is no way to know what was dropped, so every key of the topic is
+    // invalidated, as after a reconnect.
     assert.strictEqual(invalidations.length, 1);
     assert.deepStrictEqual(sortKeys(invalidations[0] ?? []), sortKeys(buildQueryKeys("task", [])));
 
-    // A reader that fell behind once falls behind again, so asking as fast as
-    // the refusal arrives would be a flood.
+    // A subscriber that fell behind once will fall behind again, so
+    // resubscribing as fast as the errors arrive would flood the controller.
     assert.strictEqual(socket.calls("subscribe").length, 1);
     await vi.advanceTimersByTimeAsync(1000);
     await settleTimers();
     assert.strictEqual(socket.calls("subscribe").length, 2);
   });
 
-  it("closes the socket and reconnects when a subscription is told the credential is gone", async () => {
+  it("closes the socket and reconnects when a subscription fails with unauthenticated", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
@@ -601,20 +603,20 @@ describe("createLive", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await settleTimers();
 
-    // The fresh connection is what finds out whether there is a credential
-    // left: its ticket fetch is the one that would be refused.
+    // The new connection finds out whether the credential is still valid: its
+    // ticket fetch is the request that would be rejected.
     assert.strictEqual(opened.length, 2);
     assert.strictEqual(readLastSocket().calls("hello").length, 1);
   });
 
-  it("keeps a refused subscription trying, and leaves the connection out of it", async () => {
+  it("keeps retrying a rejected subscription without closing the connection", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
     started.subscribe("event", () => undefined);
     await settleTimers();
 
-    // The wait grows, so a refusal that keeps repeating costs a couple of
+    // The wait grows, so an error that keeps repeating costs a couple of
     // frames a minute rather than a flood.
     for (const [attempt, delay] of [1000, 2000, 4000].entries()) {
       socket.fail(socket.calls("subscribe")[attempt]?.id, forbiddenFailure);
@@ -630,13 +632,13 @@ describe("createLive", () => {
       assert.strictEqual(socket.calls("subscribe").length, attempt + 2);
     }
 
-    // One subscription being refused is not the connection's problem, and the
-    // others on it go on working.
+    // One failing subscription is not a problem for the connection, and the
+    // other subscriptions keep working.
     assert.strictEqual(opened.length, 1);
     assert.isNull(socket.closedWith);
   });
 
-  it("ends the subscription the caller lets go of, and delivers nothing more to it", async () => {
+  it("ends a subscription the caller unsubscribes, and delivers nothing more to it", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
@@ -664,7 +666,7 @@ describe("buildQueryKeys", () => {
       ["task", "b"],
     ]);
 
-    // The same builders the tasks queries are keyed on.
+    // The same key builders the task queries use.
     assert.deepStrictEqual(buildQueryKeys("task", ["a"]), [queryKeys.tasks(), queryKeys.task("a")]);
   });
 
@@ -672,24 +674,24 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("task", []), [["tasks"], ["task"]]);
   });
 
-  it("maps a runner push to the fleet listing and the page of each machine named", () => {
+  it("maps a runner push to the runner list and the page of each runner in it", () => {
     assert.deepStrictEqual(buildQueryKeys("runner", ["r1", "r2"]), [
       ["runners"],
       ["runner", "r1"],
       ["runner", "r2"],
     ]);
 
-    // The same builders the fleet and the runner page are keyed on.
+    // The same key builders the fleet and runner page queries use.
     assert.deepStrictEqual(buildQueryKeys("runner", ["r1"]), [
       queryKeys.runners(),
       queryKeys.runner("r1"),
     ]);
 
-    // A push naming no machine means every one of them moved.
+    // A push with no ids means any runner may have changed.
     assert.deepStrictEqual(buildQueryKeys("runner", []), [["runners"], ["runner"]]);
   });
 
-  it("maps a workflow push to the listing and the page of each workflow id in it", () => {
+  it("maps a workflow push to the workflow list and the page of each workflow in it", () => {
     assert.deepStrictEqual(buildQueryKeys("workflow", ["w1", "w2"]), [
       queryKeys.workflows(),
       queryKeys.workflow("w1"),
@@ -700,14 +702,14 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("workflow", []), [["workflows"], ["workflow"]]);
   });
 
-  it("maps a session push to the listing, each session's own page, and each session's queued-input list", () => {
+  it("maps a session push to the session list, each session's page, and each session's queued-input list", () => {
     assert.deepStrictEqual(buildQueryKeys("session", ["s1"]), [
       queryKeys.sessions(),
       queryKeys.session("s1"),
       queryKeys.inputs("s1"),
     ]);
 
-    // A push naming no session means every one of them moved.
+    // A push with no ids means any session may have changed.
     assert.deepStrictEqual(buildQueryKeys("session", []), [
       queryKeys.sessions(),
       queryKeys.session(),

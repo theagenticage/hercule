@@ -1,13 +1,16 @@
 /**
- * A transcript is a flat log of provider events; a turn is what the thread
- * surface renders. Grouping it here means the transcript column is a render
- * of this shape and nothing about the provider vocabulary leaks into it.
+ * Groups a transcript into turns. A transcript is a flat log of provider
+ * events, and a turn is what the thread screen renders. Grouping here means
+ * the transcript column only renders turns, and no provider event names leak
+ * into it.
  *
- * Text is never on `item.started` / `item.completed` for a message item - it
- * only ever arrives as `content.delta` (spec 06 §6.3-6.4) - so the user's
- * message comes off `item.started`'s `detail.text` and the assistant's comes
- * off the concatenated `assistant_text` deltas in the turn, in the order the
- * transcript carries them.
+ * The assistant's text is never on `item.started` or `item.completed`: it
+ * only arrives as `content.delta` events (spec 06 §6.3-6.4). So:
+ *
+ * - the user's message comes from `detail.text` on the `user_message` item's
+ *   `item.started`;
+ * - the assistant's text is the turn's `assistant_text` deltas joined in
+ *   transcript order.
  */
 import type { TranscriptRow } from "@hercule/contract";
 
@@ -21,9 +24,9 @@ export interface ThreadItem {
   readonly verb: string;
   readonly target: string;
   /**
-   * `awaiting approval` is what an open item the session is parked on reads
-   * as: the word is here rather than in the column that prints it, so both
-   * surfaces that render an item say the same thing about it.
+   * `awaiting approval` marks a running item the session's open request is
+   * about. The text is decided here rather than in the column that shows it,
+   * so both screens that render an item show the same text.
    */
   readonly result: "completed" | "failed" | "declined" | "running" | "awaiting approval";
 }
@@ -37,7 +40,7 @@ export interface ThreadTurn {
   readonly duration: number | null;
 }
 
-/** The word a tool item's verb is drawn from. Never expanded per kind's fine detail. */
+/** The verb shown for each item kind. It is one word per kind, never more detailed. */
 const VERBS: Partial<Record<ItemKind, string>> = {
   reasoning: "reasoning",
   command_execution: "command",
@@ -52,18 +55,18 @@ const VERBS: Partial<Record<ItemKind, string>> = {
 
 const readItemVerb = (kind: ItemKind): string => VERBS[kind] ?? "unknown";
 
-/** Long enough to read as a summary, short enough that a whole file body never lands in a row. */
+/** Long enough for a useful summary, short enough that a whole file never ends up in a row. */
 const MAX_TARGET_LENGTH = 200;
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
 
 /**
- * The one field of an item's `detail` a reader actually wants in a row: the
- * command a shell item ran, the path a file item touched, or the description
- * a tool call carried - never the row's own raw JSON when one of those exists.
- * `detail` is adapter-owned Json (spec 06 §6.3), so every field is read
- * optionally; the fallback is the same JSON dump this always fell back to.
+ * Returns the field of an item's `detail` that is worth showing in a row: the
+ * command a shell item ran, the path a file item changed, or a tool call's
+ * description. Returns `undefined` when none of these is present, and the
+ * caller then shows the raw JSON. `detail` is JSON owned by the adapter
+ * (spec 06 §6.3), so every field is optional.
  */
 const findDetailText = (detail: Record<string, unknown>): string | undefined => {
   const input = asRecord(detail.input);
@@ -78,7 +81,11 @@ const findDetailText = (detail: Record<string, unknown>): string | undefined => 
   return typeof candidate === "string" ? candidate : undefined;
 };
 
-/** `detail` is adapter-owned Json; a plain string speaks for itself, anything else is compact JSON. */
+/**
+ * Returns a one-line summary of an item's `detail`, truncated to
+ * `MAX_TARGET_LENGTH`. A string is used as it is; any other value is
+ * summarized by `findDetailText`, or else shown as compact JSON.
+ */
 const summarizeDetail = (detail: unknown): string => {
   if (detail === undefined || detail === null) return "";
   const text =
@@ -97,10 +104,14 @@ interface Building {
   items: ThreadItem[];
   itemIndex: Map<string, number>;
   assistantText: string;
-  /** Which item `assistantText`'s last delta belonged to - a turn's own paragraph break. */
+  /**
+   * The item of the last `assistant_text` delta, used to insert a paragraph
+   * break when a new item starts.
+   */
   lastAssistantItemId: string | null;
 }
 
+/** Returns the transcript's turns, in the order they first appear. */
 export const buildTurns = (
   rows: readonly TranscriptRow[],
   /** The item the session's open request is about, if it has one. */
@@ -139,8 +150,8 @@ export const buildTurns = (
       case "item.started": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
-          // A steered input opens a second `user_message` in the turn it folded
-          // into (spec 06 §5), so the first one is appended to, never replaced.
+          // A steered input adds a second `user_message` to the running turn
+          // (spec 06 §5), so its text is appended to the first, never replaces it.
           const detail = event.detail as { text?: string } | undefined;
           const text = detail?.text ?? "";
           turn.user = turn.user === "" ? text : `${turn.user}\n\n${text}`;
@@ -167,10 +178,10 @@ export const buildTurns = (
       case "content.delta": {
         if (event.streamKind !== "assistant_text") break;
         const turn = findOrStartTurn(event.turnId, event.at);
-        // A turn holds any number of model calls (spec 06 §6.2), so its
-        // assistant text can carry more than one assistant_message item; a
-        // new item's first delta after another's is a paragraph break, not a
-        // continuation, so the two never run together as one sentence.
+        // A turn can make any number of model calls (spec 06 §6.2), so its
+        // text can come from several assistant_message items. Start each new
+        // item on a new paragraph, so two items never run together as one
+        // sentence.
         if (turn.lastAssistantItemId !== null && turn.lastAssistantItemId !== event.itemId) {
           turn.assistantText += "\n\n";
         }
@@ -186,9 +197,9 @@ export const buildTurns = (
   return Array.from(turns.values()).map((turn) => ({
     turnId: turn.turnId,
     user: turn.user,
-    // Only an item still running can be the one a request is parked on: one
-    // the harness already settled keeps its own outcome, whatever the row
-    // still names.
+    // Only a running item can be waiting for the open request. An item the
+    // harness already finished keeps its result, even if the request still
+    // refers to it.
     items: turn.items.map((item) =>
       item.itemId === awaitingItemId && item.result === "running"
         ? { ...item, result: "awaiting approval" as const }

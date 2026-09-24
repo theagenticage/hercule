@@ -1,19 +1,19 @@
 /**
- * The thread chrome's tab strip (spec 14 §The thread surface): when the
- * workspace a thread stands in holds more than one thread, the title is the
- * active tab and its siblings sit beside it, in the workspace's own thread
- * order. A draft joining the workspace is the last tab.
+ * Builds the tab strip above a thread (spec 14 §The thread surface). When the
+ * thread's workspace has more than one thread, the thread's title is the
+ * active tab and the other threads sit beside it, in the workspace's thread
+ * order. A draft that joins the workspace is the last tab.
  *
- * With one thread and no draft there is no strip at all: the row is the title.
+ * Returns no tabs for a single thread with no draft: the title alone is shown.
  */
 import type { Session, Workspace } from "@hercule/contract";
 import { decideThreadMark, type ThreadMark } from "./rows";
 
 export interface ThreadTab {
-  /** Null on the draft being written, which is not a session yet. */
+  /** `null` for the draft, which is not a session yet. */
   readonly sessionId: string | null;
   readonly title: string;
-  /** `draft` is the one the sidebar marks with a dot; the rest are threads. */
+  /** `draft` for the draft, which the sidebar marks with a dot; otherwise the thread's mark. */
   readonly mark: ThreadMark | "draft";
   readonly active: boolean;
 }
@@ -26,7 +26,7 @@ export const buildSiblingTabs = ({
 }: {
   readonly workspace: Workspace | undefined;
   readonly sessions: readonly Session[];
-  /** The thread on screen; null while the draft is the one on screen. */
+  /** The thread on screen, or `null` while the draft is on screen. */
   readonly activeSessionId: string | null;
   /** Whether the draft being written joins this workspace. */
   readonly draft?: boolean;

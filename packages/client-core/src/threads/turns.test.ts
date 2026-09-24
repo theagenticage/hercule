@@ -1,12 +1,15 @@
 /**
- * `buildTurns(rows)` groups a session's transcript rows into turns.
+ * Tests `buildTurns(rows)`, which groups a session's transcript rows into
+ * turns.
  *
- * Fixtures follow the Claude adapter's real shapes (spec 06 §6.3, and
+ * The fixtures use the Claude adapter's real shapes (spec 06 §6.3, and
  * `apps/runner/src/providers/claude-code.ts` / `claude-code-normalize.ts`):
- * a `user_message` item carries `detail: { text }` on both `item.started` and
- * `item.completed`; a tool item's `detail` on `item.started` is
- * `{ name, input, kind? }`; assistant text and reasoning arrive only on
- * `content.delta`, never on the `assistant_message` item events themselves.
+ *
+ * - a `user_message` item has `detail: { text }` on both `item.started` and
+ *   `item.completed`;
+ * - a tool item's `detail` on `item.started` is `{ name, input, kind? }`;
+ * - assistant text and reasoning arrive only as `content.delta`, never on the
+ *   `assistant_message` item events.
  */
 import { describe, expect, it } from "vitest";
 import type { TranscriptRow } from "@hercule/contract";
@@ -23,7 +26,7 @@ const buildRow = (event: TranscriptRow["event"]): TranscriptRow => ({
   event,
 });
 
-/** The `kind` an `item.started` row carries, narrowed off the row union. */
+/** The `kind` of an `item.started` row, narrowed from the row union. */
 type ItemKindType = Extract<TranscriptRow["event"], { _tag: "item.started" }>["kind"];
 
 describe("buildTurns", () => {
@@ -274,7 +277,7 @@ describe("buildTurns", () => {
     expect(turns[0]!.assistantText).toBe("Sleep 1 of 4 finished.\n\nSleep 2 of 4 finished.");
   });
 
-  it("summarizes a command item's target to the command it ran, not the row's raw JSON", () => {
+  it("summarizes a command item's target as the command it ran, not the raw JSON", () => {
     // The real Claude adapter's shape for a shell item (spec 06 §6.3's
     // command_execution): `{ name, input: { command, description } }`.
     const rows: TranscriptRow[] = [
@@ -305,7 +308,7 @@ describe("buildTurns", () => {
     expect(turns[0]!.items[0]!.target).toBe("ls -la");
   });
 
-  it("falls back down summarize's chain: file_path, then description, then name, then raw JSON", () => {
+  it("falls back from file_path to description, then name, then raw JSON", () => {
     const fileChange = buildTurns([
       buildRow({
         _tag: "item.started",
@@ -415,7 +418,7 @@ describe("buildTurns", () => {
     ]);
   });
 
-  it("carries a failed or declined item.completed status through as the item's result", () => {
+  it("passes a failed or declined item.completed status through as the item's result", () => {
     const rows: TranscriptRow[] = [
       buildRow({
         _tag: "turn.started",
@@ -484,7 +487,7 @@ describe("buildTurns", () => {
     ]);
   });
 
-  it("renders an item kind outside this build's vocabulary as unknown, generically rather than crashing", () => {
+  it("shows an item kind this build does not know as unknown, rather than crashing", () => {
     const novelKind = "image_generation" as unknown as ItemKindType;
 
     const rows: TranscriptRow[] = [
@@ -502,10 +505,9 @@ describe("buildTurns", () => {
         at: "2026-09-08T13:00:00.500Z",
         turnId: "t5",
         itemId: "novel1",
-        // A kind this build's vocabulary has never heard of, forced past the
-        // type to simulate a future harness emitting something unmapped
-        // (spec 06: "Enums are open for consumers: unknown kinds render
-        // generically, never crash").
+        // A kind this build does not know, cast past the type to simulate a
+        // future harness that sends something unmapped (spec 06: "Enums are
+        // open for consumers: unknown kinds render generically, never crash").
         kind: novelKind,
         detail: { note: "review mode" },
       }),
@@ -537,7 +539,7 @@ describe("buildTurns", () => {
     ]);
   });
 
-  it("has an empty items array when a turn holds only the user and assistant messages", () => {
+  it("has no items when a turn has only the user and assistant messages", () => {
     const rows: TranscriptRow[] = [
       buildRow({
         _tag: "turn.started",
@@ -612,7 +614,7 @@ describe("buildTurns", () => {
     expect(turns[0]!.assistantText).toBe("Hi!");
   });
 
-  it("renders target as the empty string when item.started carries no detail at all", () => {
+  it("sets target to an empty string when item.started has no detail", () => {
     const rows: TranscriptRow[] = [
       buildRow({
         _tag: "turn.started",
@@ -686,8 +688,8 @@ describe("buildTurns", () => {
         status: "completed",
         detail: { text: "Fix the login bug" },
       }),
-      // A steered input folds into the same running turn as a second
-      // user_message, rather than opening a turn of its own.
+      // A steered input joins the running turn as a second user_message,
+      // rather than starting a new turn.
       buildRow({
         _tag: "item.started",
         eventId: nextId(),
@@ -727,9 +729,9 @@ describe("buildTurns", () => {
 });
 
 /**
- * The item a session is parked on reads `awaiting approval` in place of
- * `running`, so the transcript line for `openRequest.itemId` says what the
- * card above the composer is asking about (ticket #70).
+ * The item a session's open request is about shows `awaiting approval`
+ * instead of `running`, so the transcript line for `openRequest.itemId`
+ * matches what the card above the composer is asking about (#70).
  */
 describe("buildTurns: the item an open request is about", () => {
   const buildParkedRows = (): TranscriptRow[] => [
@@ -762,20 +764,20 @@ describe("buildTurns: the item an open request is about", () => {
     }),
   ];
 
-  it("reads the item named by the open request as awaiting approval, and only that one", () => {
+  it("marks the item of the open request as awaiting approval, and only that one", () => {
     const items = buildTurns(buildParkedRows(), "tool9")[0]!.items;
 
     expect(items.find((item) => item.itemId === "tool9")!.result).toBe("awaiting approval");
     expect(items.find((item) => item.itemId === "tool10")!.result).toBe("running");
   });
 
-  it("reads every open item as running when no request is open", () => {
+  it("marks every open item as running when no request is open", () => {
     const items = buildTurns(buildParkedRows())[0]!.items;
 
     expect(items.map((item) => item.result)).toEqual(["running", "running"]);
   });
 
-  it("leaves a settled item at its own status, whatever the open request names", () => {
+  it("keeps a finished item's result, even when the open request refers to it", () => {
     const rows = [
       ...buildParkedRows(),
       buildRow({

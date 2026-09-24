@@ -26,23 +26,23 @@ const RUNNER: Runner = {
   lastSeenAt: null,
 };
 
-/** The form as it opens on the runner above, with something typed into it. */
+/** Returns the form's draft for the runner above, with the fields in `into` changed. */
 const buildTypedDraft = (into: Partial<RunnerDraft>): RunnerDraft => ({
   ...buildRunnerDraft(RUNNER),
   ...into,
 });
 
 describe("buildRunnerPatch", () => {
-  it("says nothing when nothing moved", () => {
+  it("returns an empty patch when nothing changed", () => {
     expect(buildRunnerPatch(RUNNER, buildRunnerDraft(RUNNER))).toEqual({});
   });
 
-  it("carries only the fields the draft moved", () => {
+  it("includes only the fields the draft changed", () => {
     const draft = buildTypedDraft({ name: "moss-2", reserved: true });
     expect(buildRunnerPatch(RUNNER, draft)).toEqual({ name: "moss-2", reserved: true });
   });
 
-  it("reads labels by their order, so a reordering is a change", () => {
+  it("compares labels in order, so reordering them is a change", () => {
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ labels: ["gpu", "primary"] }))).toEqual({});
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ labels: ["primary", "gpu"] }))).toEqual({
       labels: ["primary", "gpu"],
@@ -50,33 +50,33 @@ describe("buildRunnerPatch", () => {
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ labels: [] }))).toEqual({ labels: [] });
   });
 
-  it("trims a name, so padding one is not a change", () => {
+  it("trims the name, so added spaces are not a change", () => {
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ name: "  moss  " }))).toEqual({});
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ name: "  moss-2 " }))).toEqual({
       name: "moss-2",
     });
   });
 
-  it("reads an emptied name as a change, so nothing refills the field behind the user", () => {
-    // The form refuses to submit it; what matters here is that the draft is not
-    // mistaken for an untouched one.
+  it("treats a cleared name as a change, so a refresh does not refill the field", () => {
+    // The form does not submit an empty name. What matters here is that the
+    // draft is not mistaken for an untouched one.
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ name: "" }))).toEqual({ name: "" });
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ name: "   " }))).toEqual({ name: "" });
   });
 
-  it("sends a cap the controller will refuse rather than swallowing it", () => {
+  it("sends a maximum the controller will reject rather than dropping it", () => {
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ maxConcurrentSessions: 0 }))).toEqual({
       maxConcurrentSessions: 0,
     });
   });
 
-  it("carries a moved disk watermark, in bytes", () => {
+  it("includes a changed disk watermark, in bytes", () => {
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ diskWatermarkBytes: 2 * GIB }))).toEqual({
       diskWatermarkBytes: 2 * GIB,
     });
   });
 
-  it("sends an emptied disk watermark the controller will refuse rather than swallowing it", () => {
+  it("sends a zero disk watermark the controller will reject rather than dropping it", () => {
     expect(buildRunnerPatch(RUNNER, buildTypedDraft({ diskWatermarkBytes: 0 }))).toEqual({
       diskWatermarkBytes: 0,
     });
@@ -86,17 +86,17 @@ describe("buildRunnerPatch", () => {
 describe("findRunnerConflictField", () => {
   const conflict = new ApiError("conflict", "another runner already has that name");
 
-  it("blames the one field of the two the patch moved", () => {
+  it("returns the one of the two fields that the patch changed", () => {
     expect(findRunnerConflictField(conflict, { name: "moss" })).toBe("name");
     expect(findRunnerConflictField(conflict, { reserved: true })).toBe("reserved");
     expect(findRunnerConflictField(conflict, { name: "moss", labels: [] })).toBe("name");
   });
 
-  it("blames no field when either of the two could have been refused", () => {
+  it("returns null when the patch changed both fields", () => {
     expect(findRunnerConflictField(conflict, { name: "moss", reserved: true })).toBeNull();
   });
 
-  it("blames no field for anything that is not a conflict", () => {
+  it("returns null for any error that is not a conflict", () => {
     expect(findRunnerConflictField(null, { name: "moss" })).toBeNull();
     expect(
       findRunnerConflictField(new ApiError("validation", "too long"), { name: "" }),
@@ -106,25 +106,25 @@ describe("findRunnerConflictField", () => {
 });
 
 describe("buildRetireQuestion", () => {
-  it("asks plainly when nothing is at stake beyond the machine itself", () => {
+  it("has no warnings for an online runner that is not the default", () => {
     expect(buildRetireQuestion(RUNNER, null)).toEqual({ warnings: [], force: false });
   });
 
-  it("says a machine it cannot reach is being forced, and forces it", () => {
+  it("warns that an unreachable runner is forced, and forces it", () => {
     expect(buildRetireQuestion({ ...RUNNER, connectivity: "unreachable" }, null)).toEqual({
       warnings: ["This runner is unreachable; retiring it now forces it."],
       force: true,
     });
   });
 
-  it("says the fleet is about to lose its default", () => {
+  it("warns that the fleet will lose its default runner", () => {
     expect(buildRetireQuestion(RUNNER, RUNNER.id)).toEqual({
       warnings: ["This is the default runner; the fleet will have no default."],
       force: false,
     });
   });
 
-  it("says both, reachability first", () => {
+  it("gives both warnings, the unreachable one first", () => {
     const question = buildRetireQuestion({ ...RUNNER, connectivity: "unreachable" }, RUNNER.id);
     expect(question.warnings).toEqual([
       "This runner is unreachable; retiring it now forces it.",
@@ -133,7 +133,7 @@ describe("buildRetireQuestion", () => {
     expect(question.force).toBe(true);
   });
 
-  it("says nothing about a default that is another machine", () => {
+  it("does not warn when another runner is the default", () => {
     expect(buildRetireQuestion(RUNNER, "01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb").warnings).toEqual(
       [],
     );

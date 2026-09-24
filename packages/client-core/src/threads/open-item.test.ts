@@ -1,7 +1,7 @@
 /**
- * `findOpenItem(rows)` finds the one item still in flight, if any: the last
- * `item.started` with no matching `item.completed`. Fixtures follow the same
- * shapes `turns.test.ts` uses (spec 06 §6.3).
+ * Tests `findOpenItem(rows)`, which finds the item still in progress, if any:
+ * the last `item.started` with no matching `item.completed`. The fixtures
+ * have the same shapes as in `turns.test.ts` (spec 06 §6.3).
  */
 import { describe, expect, it } from "vitest";
 import type { TranscriptRow } from "@hercule/contract";
@@ -46,14 +46,14 @@ const buildCompletedRow = (itemId: string, kind: ItemKindType, at = "2026-09-08T
   });
 
 describe("findOpenItem", () => {
-  it("is nothing when there are no rows, or every item has completed", () => {
+  it("returns null when there are no rows, or every item has completed", () => {
     expect(findOpenItem([])).toBeNull();
     expect(
       findOpenItem([buildStartedRow("i1", "tool_call"), buildCompletedRow("i1", "tool_call")]),
     ).toBeNull();
   });
 
-  it("is the item whose item.started has no item.completed yet", () => {
+  it("returns the item whose item.started has no item.completed yet", () => {
     const rows = [buildStartedRow("i1", "assistant_message"), buildStartedRow("i2", "tool_call")];
     expect(findOpenItem(rows)).toBe("i2");
   });

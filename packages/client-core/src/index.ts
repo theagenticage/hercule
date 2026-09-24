@@ -1,9 +1,9 @@
 /**
  * `@hercule/client-core`: the public API as promises.
  *
- * The one client package that writes Effect code. The web
- * app and the CLI import `createClient` and see promises, plain objects, and
- * the three error classes below - nothing else.
+ * The only client package that writes Effect code. The web app and the CLI
+ * import `createClient` and see only promises, plain objects and the three
+ * error classes below.
  */
 export { describeActor, type ActorReading } from "./actor-display";
 export { createClient, type FetchLike, type HerculeClient } from "./client";

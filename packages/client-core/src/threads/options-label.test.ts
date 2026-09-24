@@ -1,6 +1,6 @@
 /**
- * `buildOptionsLabel(descriptors, selected)` is the one line the model options
- * selector shows for what is picked under the model.
+ * Tests `buildOptionsLabel(descriptors, selected)`, the short label the model
+ * options selector shows for the picked options.
  */
 import { describe, expect, it } from "vitest";
 import type { ModelOption } from "@hercule/contract";
@@ -33,11 +33,11 @@ const FAST_MODE: ModelOption = {
 };
 
 describe("buildOptionsLabel", () => {
-  it("has nothing to say when the model declares no options", () => {
+  it("returns null when the model declares no options", () => {
     expect(buildOptionsLabel([], {})).toBeNull();
   });
 
-  it("reads the selected effort choice's label, lower-cased", () => {
+  it("uses the selected effort choice's label, in lower case", () => {
     expect(buildOptionsLabel([EFFORT], { effort: "high" })).toBe("high");
   });
 
@@ -45,11 +45,11 @@ describe("buildOptionsLabel", () => {
     expect(buildOptionsLabel([THINKING], { thinking: true })).toBe("thinking on");
   });
 
-  it("has nothing to say while thinking is off", () => {
+  it("returns null while thinking is off", () => {
     expect(buildOptionsLabel([THINKING], { thinking: false })).toBeNull();
   });
 
-  it("has nothing to append the bolt to when fast mode is all the model offers", () => {
+  it("returns null when fast mode is the only option, because the bolt has nothing to follow", () => {
     expect(buildOptionsLabel([FAST_MODE], { fastMode: true })).toBeNull();
   });
 

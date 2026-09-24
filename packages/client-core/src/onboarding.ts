@@ -5,9 +5,9 @@
  * resumes where it left off. The step list lives in the client: adding a step
  * is client-side work, and the settings store keeps ids it does not interpret.
  *
- * Reading the list is therefore forgiving in one direction only. An id this
- * client does not know is ignored - a newer client wrote it, or an older one
- * did. Onboarding is done when every id this client does know is present.
+ * So the list is read leniently: an id this client does not know is ignored,
+ * because a newer or older client wrote it. Onboarding is done when every step
+ * this client knows is in the list.
  */
 
 /** The steps after the setup gate, in the order they are offered. */
@@ -15,6 +15,6 @@ export const ONBOARDING_STEPS = ["timezone"] as const;
 
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
-/** The first step not yet completed, or `null` when there is none left. */
+/** Returns the first step not yet completed, or `null` when every step is done. */
 export const findNextOnboardingStep = (completedSteps: readonly string[]): OnboardingStep | null =>
   ONBOARDING_STEPS.find((step) => !completedSteps.includes(step)) ?? null;

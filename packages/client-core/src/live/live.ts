@@ -1,25 +1,28 @@
 /**
- * The live supervisor: one WebSocket, held open, carrying Live Topic
+ * The live supervisor: one WebSocket, kept open, that carries Live Topic
  * subscriptions.
  *
- * Everything Effect-shaped about the socket stops here. A caller starts it,
- * hands it a topic and a callback, and gets an unsubscribe function back; what
- * it never sees is the ticket fetch, the RPC client, the reconnect schedule or
+ * No Effect types get past this module. A caller starts the supervisor, passes
+ * a topic and a callback, and gets an unsubscribe function back. The caller
+ * never deals with the ticket fetch, the RPC client, the reconnect schedule or
  * the keepalive.
  *
- * The connection is disposable and the subscriptions are not. A subscription is
- * a record in this module's own registry, and every connection takes the whole
- * registry out again from scratch - which is why subscribing before the socket
- * is up is ordinary rather than an error, and why a drop costs the caller
- * nothing but a refetch.
+ * Connections come and go, but subscriptions stay. A subscription is an entry
+ * in this module's registry, and every new connection subscribes to everything
+ * in the registry again. That is why subscribing before the socket is open is
+ * normal rather than an error, and why a dropped connection costs the caller
+ * only a refetch.
  *
- * The two families are answered differently, because they lose different things
- * when a connection goes. A mutable topic's subscriber missed pushes naming
- * records it cannot name itself, so on reconnect it is told to refetch
- * everything it watches. An append-only subscriber holds a cursor, so it asks
- * to be caught up from it and misses nothing - unless the controller refuses
- * the cursor, which means the log it came back to is not the log it left, and
- * then the position is dropped and the reader is told so it can start again.
+ * The two kinds of topic recover differently, because they lose different
+ * things when a connection drops:
+ *
+ * - A mutable topic's subscriber may have missed pushes about records it
+ *   cannot list itself, so after a reconnect it is told to refetch everything
+ *   it watches.
+ * - An append-only topic's subscriber holds a cursor, so it resubscribes from
+ *   that cursor and misses nothing. If the controller rejects the cursor, the
+ *   log is no longer the one the cursor came from: the cursor is dropped and
+ *   the subscriber is told, so it can start again.
  */
 import {
   isAppendOnlyLiveTopic,
@@ -53,46 +56,48 @@ import { buildQueryKeys, type LiveQueryKey } from "./keys";
 const FIRST_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 30_000;
 
-/** How often a connection proves itself to the controller. */
+/** How often the connection pings the controller to show it is still alive. */
 const PING_INTERVAL_MS = 30_000;
 
 /**
- * How much of a reconnect delay is given up to chance. Jitter only ever
- * shortens the wait, so the schedule stays the one the caller was promised
- * while many tabs coming back at once spread out rather than arriving together.
+ * The largest fraction by which a reconnect delay is randomly shortened. Jitter
+ * only ever shortens the wait, so no wait is longer than the schedule, while
+ * many tabs reconnecting at once spread out rather than arriving together.
  */
 const JITTER = 0.2;
 
 /**
- * Only what dialling the socket needs: a url in, a socket out. The seam a test
- * hands a stub through, and the reason nothing here reaches for the global.
+ * Creates a WebSocket for a URL. Tests pass a stub through this option, which
+ * is why nothing here uses the global `WebSocket` directly.
  */
 export type LiveWebSocketConstructor = (url: string) => WebSocket;
 
 export interface LiveOptions {
-  /** The client the ticket is fetched with, and whose credential the socket inherits. */
+  /** The client used to fetch the socket ticket; the socket uses the same credential. */
   readonly client: HerculeClient;
-  /** Where the controller lives, e.g. `http://127.0.0.1:7717`. */
+  /** The controller's address, for example `http://127.0.0.1:7717`. */
   readonly baseUrl: string;
-  /** The `WebSocket` to dial with. Defaults to the global one; a seam for tests. */
+  /** Creates the `WebSocket`. Defaults to the global one; tests pass a stub. */
   readonly webSocket?: LiveWebSocketConstructor;
 }
 
-/** A mutable topic's push, as the keys its records are cached under. */
+/** Receives a mutable topic's push, as the query keys to invalidate. */
 export type LiveInvalidateHandler = (keys: ReadonlyArray<LiveQueryKey>) => void;
 
 /**
- * An append-only topic's push. `reset` says the position was lost rather than
- * advanced: everything the reader holds is now unrelated to what follows, so it
- * reads its page again instead of appending to a gap. There is no cursor to
- * report on such a call, because there is no position.
+ * An append-only topic's push.
  *
- * `gone` says the topic itself was refused `not_found` - the session it names
- * was never spawned, or is gone for good - which nothing here can recover by
- * asking again. The subscription is left exactly as `unauthenticated` leaves a
- * connection: not retried. Unlike a dropped connection, this is a property of
- * the topic rather than of the socket, so only this one subscription stops;
- * the caller ends it (its own `subscribe` return value) once it has read `gone`.
+ * `reset` is true when the position in the log was lost. What the subscriber
+ * holds no longer connects to what follows, so it must fetch its page again
+ * rather than append after a gap. `cursor` is then `null`, because there is
+ * no position.
+ *
+ * `gone` is true when the controller rejected the topic with `not_found`: the
+ * session it names was never spawned, or no longer exists. Subscribing again
+ * cannot fix that, so the subscription is not retried, just as a connection
+ * is not retried after `unauthenticated`. The problem is with the topic, not
+ * the socket, so only this subscription stops. The caller should unsubscribe
+ * (with the function `subscribe` returned) once it sees `gone`.
  */
 export interface LiveDelta {
   readonly cursor: string | null;
@@ -104,34 +109,33 @@ export interface LiveDelta {
 export type LiveDeltaHandler = (delta: LiveDelta) => void;
 
 /**
- * Where the supervisor is. Neither `unauthenticated` nor `stopped` goes
- * anywhere on its own - the first means the credential is gone, the second that
- * the caller asked for it - and `start` is what leaves either of them.
+ * The supervisor's status. `unauthenticated` (the credential is gone) and
+ * `stopped` (the caller stopped it) never change on their own; only `start`
+ * leaves them.
  */
 export type LiveStatus =
   "idle" | "connecting" | "connected" | "disconnected" | "unauthenticated" | "stopped";
 
 export interface Live {
   /**
-   * Begins connecting, and keeps connecting. Calling it while it is already
-   * connecting or connected does nothing; calling it after it stopped, or
-   * after it gave up on a credential that was gone, is how a fresh sign-in
-   * gets live updates back.
+   * Starts connecting, and keeps reconnecting. Does nothing while already
+   * connecting or connected. After `stop`, or after the credential was
+   * rejected, calling it again restarts live updates, for example after the
+   * user signs in again.
    */
   start(): void;
   /**
-   * Ends the connection and everything it was doing. What was subscribed stays
-   * subscribed: a later `start` takes the whole registry out again, the way a
+   * Closes the connection and stops all its work. Subscriptions stay
+   * registered: a later `start` subscribes to all of them again, as a
    * reconnect does.
    */
   stop(): Promise<void>;
   subscribe(topic: MutableLiveTopic, handler: LiveInvalidateHandler): () => void;
   /**
-   * `cursor` seeds where an append-only subscription starts replaying from,
-   * for a caller that already holds a page fetched over HTTP before this call
-   * is made - without it, replay starts from the head, and whatever was
-   * written between that fetch and this subscription taking hold is missed
-   * for good.
+   * `cursor` sets where an append-only subscription starts replaying from.
+   * Pass it when the caller already fetched a page over HTTP. Without it,
+   * replay starts from the head, and anything written between that fetch and
+   * the subscription starting is lost.
    */
   subscribe(topic: AppendOnlyLiveTopic, handler: LiveDeltaHandler, cursor?: string): () => void;
   /**
@@ -139,53 +143,53 @@ export interface Live {
    * Returns a function that removes the listener.
    */
   onStatus(listener: (status: LiveStatus) => void): () => void;
-  /** What the controller answered at the greeting, or `null` before the first one. */
+  /** The server version from the controller's `hello` reply, or `null` before the first one. */
   readonly serverVersion: string | null;
 }
 
-/** One thing being watched, across however many connections carry it. */
+/** One subscription in the registry. It outlives any single connection. */
 interface Subscription {
   readonly topic: LiveTopic;
   readonly handler: LiveInvalidateHandler | LiveDeltaHandler;
-  /** Where an append-only reader has got to; `undefined` means from the head. */
+  /** How far an append-only subscriber has read; `undefined` means from the head. */
   cursor: string | undefined;
 }
 
-/** What a subscription's stream can fail with: a refusal, or the transport. */
+/** The errors a subscription's stream can fail with: a controller error, or a transport error. */
 type LiveFailure =
   Unauthenticated | Forbidden | Validation | NotFound | CapExceeded | Internal | RpcClientError;
 
-/** The contract group's own client, as one connection hands it over. */
+/** The RPC client for the contract's live group, on one connection. */
 type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof liveGroup>, RpcClientError>;
 
-/** The socket sits at `/ws` on the authority the API is served from. */
+/** Returns the socket URL: `/ws` on the same host and port as the API. */
 const buildSocketUrl = (baseUrl: string): string =>
   `${baseUrl.replace(/\/+$/, "").replace(/^http/, "ws")}/ws`;
 
 /**
- * The code a refusal names, or nothing when the failure is the transport's
- * rather than the controller's. The contract's errors are told apart by the
- * code in their envelope; none of them carries a tag.
+ * Returns the error code of a controller error, or `undefined` for a transport
+ * error. The contract's errors are told apart by the code in their envelope;
+ * none of them has a tag.
  */
 const readErrorCode = (failure: LiveFailure) =>
   "error" in failure ? failure.error.code : undefined;
 
 /**
- * Waits before trying again. The wait is shortened by chance rather than
- * lengthened, so the schedule stays the one that was promised while many
- * waiters - tabs, or subscriptions capped in the same flush - stop waking
- * together.
+ * Waits before trying again. The wait is randomly shortened, never
+ * lengthened, so it never exceeds the schedule, while many waiters (tabs, or
+ * subscriptions that hit a cap at the same moment) stop waking up together.
  */
 const sleepWithJitter = (delay: number): Effect.Effect<void> =>
   Effect.sleep(delay * (1 - JITTER * Math.random()));
 
+/** Creates a live supervisor. It does not connect until `start` is called. */
 export const createLive = (options: LiveOptions): Live => {
   const url = buildSocketUrl(options.baseUrl);
   const dial: LiveWebSocketConstructor =
     options.webSocket ?? ((address) => new globalThis.WebSocket(address));
 
   const subscriptions = new Set<Subscription>();
-  /** Opened whenever the registry changes, so a live connection picks it up. */
+  /** Opened whenever the registry changes, so the current connection picks up the change. */
   const changed = Latch.makeUnsafe(false);
 
   const listeners = new Set<(status: LiveStatus) => void>();
@@ -200,10 +204,10 @@ export const createLive = (options: LiveOptions): Live => {
   let running: Fiber.Fiber<void> | null = null;
 
   /**
-   * Tells a mutable topic's reader that everything it watches may have moved.
-   * The answer whenever pushes were missed and nothing names which records they
-   * were about: after a drop, and after a subscription ended for any reason
-   * other than the caller letting go of it.
+   * Tells a mutable topic's subscriber that everything it watches may have
+   * changed. Used whenever pushes may have been missed and there is no way to
+   * know which records they were about: after a dropped connection, and after
+   * a subscription ended for any reason other than the caller unsubscribing.
    */
   const sweep = (subscription: Subscription): void => {
     const topic = subscription.topic;
@@ -212,10 +216,10 @@ export const createLive = (options: LiveOptions): Live => {
   };
 
   /**
-   * Runs one of the caller's callbacks. A callback that throws is the caller's
-   * bug and not this connection's business, so the throw is handed to the host
-   * to report - the way a DOM listener's is - rather than taking a reader off
-   * the air, or the whole connection down, with nothing said.
+   * Runs one of the caller's callbacks. A callback that throws is a bug in the
+   * caller, not in the connection, so the error is rethrown in a microtask for
+   * the host to report, the way a DOM listener's error is. It does not stop the
+   * subscription or bring the connection down silently.
    */
   const isolate = (call: () => void): void => {
     try {
@@ -227,7 +231,7 @@ export const createLive = (options: LiveOptions): Live => {
     }
   };
 
-  /** Hands one message to the caller's callback. */
+  /** Passes one message to the subscription's callback. */
   const deliver = (subscription: Subscription, message: LiveMessage): void => {
     isolate(() => {
       if (message._tag === "delta") {
@@ -247,18 +251,26 @@ export const createLive = (options: LiveOptions): Live => {
   };
 
   /**
-   * Holds one subscription open for as long as the connection lasts, and takes
-   * it out again whenever it ends.
+   * Keeps one subscription open for as long as the connection lasts, and
+   * subscribes again whenever the stream ends.
    *
-   * There are three answers, not one per refusal. A credential that is gone is
-   * the connection's problem and ends it. A cursor the log cannot honour is
-   * given up, and the reader is told so it can start its page again. Everything
-   * else - falling behind, a read that failed, a stream that ended - is
-   * answered the same way: whatever was pushed in the meantime was missed, so a
-   * mutable reader reads everything again, and the subscription is taken out
-   * once more after a wait that grows, so a refusal that keeps repeating costs
-   * two frames a minute rather than a flood. Nothing here ends a subscription
-   * for good: only the caller does that.
+   * How a stream's end is handled:
+   *
+   * - `unauthenticated`: the credential is gone, which is a problem for the
+   *   whole connection, so the connection is closed.
+   * - `not_found` on an append-only topic: the topic will never exist, so the
+   *   subscriber is told it is `gone` and this subscription stops.
+   * - `validation` on an append-only topic with a cursor: the log rejected the
+   *   cursor, so the cursor is dropped, the subscriber is told to `reset`, and
+   *   the subscription starts again from the head.
+   * - Anything else (falling behind, a failed read, a stream that ended): any
+   *   pushes in the meantime were missed, so a mutable subscriber refetches
+   *   everything, and the subscription is retried after a growing wait. An
+   *   error that keeps repeating then costs two frames a minute rather than a
+   *   flood.
+   *
+   * Apart from `not_found`, nothing here ends a subscription for good: only
+   * the caller does that.
    */
   const follow = (rpc: LiveClient, subscription: Subscription, closed: Latch.Latch) =>
     Effect.gen(function* () {
@@ -276,18 +288,17 @@ export const createLive = (options: LiveOptions): Live => {
 
         const code = Result.isFailure(outcome) ? readErrorCode(outcome.failure) : undefined;
         if (code === "unauthenticated") {
-          // The credential behind this connection is gone, so nothing on it can
-          // be recovered by asking again. A fresh connection is the only move,
-          // and its ticket fetch is what finds out whether there is a credential
-          // left at all.
+          // The connection's credential is gone, so retrying on this connection
+          // cannot help. Only a new connection can, and its ticket fetch finds
+          // out whether there is still a valid credential.
           closed.openUnsafe();
           return;
         }
         if (code === "not_found" && isAppendOnlyLiveTopic(subscription.topic)) {
-          // The topic names a record that does not exist - a session id nobody
-          // ever spawned, or one gone for good - which asking again cannot fix.
-          // Only this subscription stops; the connection and every other
-          // subscription on it are unaffected.
+          // The topic names a record that does not exist (a session id that was
+          // never spawned, or one that no longer exists), and retrying cannot
+          // fix that. Only this subscription stops; the connection and every
+          // other subscription on it are unaffected.
           isolate(() =>
             (subscription.handler as LiveDeltaHandler)({
               cursor: null,
@@ -321,15 +332,17 @@ export const createLive = (options: LiveOptions): Live => {
     });
 
   /**
-   * One greeted connection's work: tell the readers that missed pushes to
-   * refetch, keep the connection proven, and keep the registry on the wire.
+   * Does the work of one connection after the `hello` reply: tells subscribers
+   * that may have missed pushes to refetch, pings the controller to keep the
+   * connection alive, and keeps the controller's subscriptions in step with
+   * the registry.
    *
-   * Every mutable reader in the registry is swept, whether or not a connection
-   * has carried it before. A subscription made while there was no connection
-   * has the same gap as one that survived a drop: whatever was pushed between
-   * the screen's own read and this greeting named records nobody can name any
-   * more. The price is one refetch per reader on the first connection of a page
-   * load, which is what a gap nobody can see is worth.
+   * Every mutable subscriber is told to refetch, whether or not an earlier
+   * connection carried it. A subscription made while there was no connection
+   * has the same gap as one that survived a drop: pushes sent between the
+   * screen's own fetch and this connection are lost. The cost is one refetch
+   * per subscriber on the first connection of a page load, which is worth it
+   * to close a gap that is otherwise invisible.
    */
   const runConnection = (rpc: LiveClient, closed: Latch.Latch) =>
     Effect.gen(function* () {
@@ -353,9 +366,9 @@ export const createLive = (options: LiveOptions): Live => {
         for (const [subscription, fiber] of held) {
           if (subscriptions.has(subscription)) continue;
           held.delete(subscription);
-          // Ending a stream is a round trip the socket may no longer be able to
-          // make, so it is never waited on: the caller's unsubscribe already
-          // returned and the connection's scope collects whatever is left.
+          // Ending a stream needs a round trip that the socket may no longer be
+          // able to make, so it is never awaited: the caller's unsubscribe has
+          // already returned, and the connection's scope cleans up the rest.
           yield* Effect.forkChild(Fiber.interrupt(fiber));
         }
         yield* changed.await;
@@ -363,11 +376,12 @@ export const createLive = (options: LiveOptions): Live => {
     });
 
   /**
-   * One connection, from the dial to whatever ends it. Answers how long it was
-   * greeted for, or nothing when it never was, which is what tells the next
-   * wait whether this was one drop in a bad minute or the first after a good
-   * hour. The reading is monotonic, so a clock the machine corrects while the
-   * connection is up does not make a moment look like an hour.
+   * Runs one connection, from opening the socket until it ends. Returns how
+   * long the connection was up after the `hello` reply, or `null` when there
+   * was no reply. The supervisor uses that to decide whether this was one more
+   * drop in a bad minute or the first drop after a good hour. It uses a
+   * monotonic clock, so a system clock correction during the connection cannot
+   * make a moment look like an hour.
    */
   const connect = (ticket: string) =>
     Effect.suspend(() => {
@@ -384,10 +398,9 @@ export const createLive = (options: LiveOptions): Live => {
       };
 
       const protocol = Layer.effect(RpcClient.Protocol)(
-        // The transport reconnects on its own by default, which would leave a
-        // socket that has never been greeted answering for a connection this
-        // module thinks it still owns. Reconnecting is this module's job,
-        // because only it holds a ticket.
+        // By default the transport reconnects on its own, which would leave
+        // this module using a socket that never received a `hello` reply.
+        // Reconnecting is this module's job, because only it has a ticket.
         RpcClient.makeProtocolSocket({ retryPolicy: Schedule.recurs(0) }),
       ).pipe(
         Layer.provide(Socket.layerWebSocket(url)),
@@ -410,7 +423,7 @@ export const createLive = (options: LiveOptions): Live => {
       );
     });
 
-  /** Connect, and go on connecting, until the credential turns out to be gone. */
+  /** Connects, and keeps reconnecting until the credential is rejected. */
   const supervise = Effect.gen(function* () {
     let delay = FIRST_RETRY_MS;
     for (;;) {
@@ -425,18 +438,18 @@ export const createLive = (options: LiveOptions): Live => {
         ),
       );
       if (ticket.refused) {
-        // Only a fresh sign-in helps, and when one happens the caller starts
-        // this supervisor again rather than building another, so the fiber
-        // hands its slot back on the way out.
+        // Only a new sign-in can help. After one, the caller calls `start` on
+        // this supervisor again rather than creating another, so clear
+        // `running` before the fiber ends.
         running = null;
         setStatus("unauthenticated");
         return;
       }
       const held = ticket.ticket === null ? null : yield* connect(ticket.ticket);
       setStatus("disconnected");
-      // A connection that lasted longer than the longest wait was not a client
-      // that cannot connect, so the next drop starts over at the shortest wait
-      // rather than inheriting a schedule from hours ago.
+      // A connection that lasted longer than the longest wait shows the client
+      // can connect, so the next wait starts again from the shortest delay
+      // rather than continuing a backoff from hours ago.
       if (held !== null && held >= MAX_RETRY_MS) delay = FIRST_RETRY_MS;
       yield* sleepWithJitter(delay);
       delay = Math.min(delay * 2, MAX_RETRY_MS);

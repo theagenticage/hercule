@@ -1,12 +1,15 @@
 /**
- * The Threads face's shape: threads grouped per project, and inside a project
- * per workspace (spec 14 §App shell, amended by #160 and by #72). Both
- * orderings follow activity, newest group first, with the two "and the rest"
- * groups pinned last - the threads of a project that are in no workspace, and
- * the threads that belong to no project at all.
+ * Groups the sidebar's threads by project, and inside a project by workspace
+ * (spec 14 §App shell, amended by #160 and #72).
  *
- * The draft being written joins the group it will belong to once it starts, so
- * the sidebar shows where a thread is going before it exists.
+ * - Projects are sorted newest first by the latest thread in their first
+ *   workspace group. The draft's project comes first, and the threads with
+ *   no project come last.
+ * - Inside a project, worktrees come first in catalog order, then the main
+ *   workspace, then the threads with no workspace (see `rankLane`).
+ *
+ * The draft being written joins the group it will belong to once it starts,
+ * so the sidebar shows where a thread will go before it exists.
  */
 import type {
   Project,
@@ -31,10 +34,11 @@ import {
 export interface WorkspaceGroup {
   readonly workspaceId: string | null;
   /**
-   * `hercule/run-3f1`, `webshop · moss`, or `no workspace` last, in the
-   * two parts a narrow sidebar cuts it in. Null on a project whose threads are
-   * all in no workspace: the label separates one lane from another, and there
-   * is nothing there to separate.
+   * The group's label, such as `hercule/run-3f1`, `webshop · moss` or `no
+   * workspace`, split into the two parts a narrow sidebar truncates
+   * separately. `null` for the no-workspace group when it is the project's
+   * only group (the label tells groups apart, and there is nothing to tell
+   * apart), or when it holds only the draft.
    */
   readonly label: WorkspaceLabel | null;
   /** Whether the draft being written joins this group. */
@@ -44,28 +48,30 @@ export interface WorkspaceGroup {
 
 export interface ProjectGroup {
   readonly projectId: string | null;
-  /** Null on the threads that belong to no project: they stand under no header. */
+  /** `null` for the threads that belong to no project: they have no header. */
   readonly name: string | null;
-  /** The identity hue its dot wears; null where there is no header to wear one. */
+  /** The identity hue of the project's dot, or `null` when there is no header. */
   readonly tone: ProjectTone | null;
   readonly count: number;
   readonly workspaces: readonly WorkspaceGroup[];
 }
 
-/** Where the draft being written is headed, as the address names it. */
+/** Where the draft being written will go, from the address it was opened at. */
 export interface DraftPlace {
   readonly projectId: string | null;
   readonly workspaceId: string | null;
 }
 
 /**
- * Which group the draft being written belongs to. The address settles it where
- * it names a workspace; where it names none, the draft will open in whatever
- * the project opens in (`decideDefaultWorkspacePick`), and a main workspace that
- * already stands on the machine it would run on is a group of its own - the
- * draft is filed with the threads it will sit beside, not under "no
- * workspace". A checkout nothing has cloned yet is no group at all: the draft
- * stands under the project itself until the machine has made one.
+ * Returns the group the draft being written belongs to.
+ *
+ * - When the address names a workspace, the draft goes there.
+ * - Otherwise the draft will open in the project's default workspace
+ *   (`decideDefaultWorkspacePick`). If that is a main workspace already
+ *   cloned on the draft's runner, the draft joins that workspace's group,
+ *   next to the threads it will sit beside, not under "no workspace".
+ * - If the main workspace is not cloned yet, it has no group, so the draft
+ *   sits directly under the project until the runner has cloned it.
  */
 export const decideDraftPlace = ({
   projectId,
@@ -76,11 +82,11 @@ export const decideDraftPlace = ({
   preferred = null,
 }: {
   readonly projectId: string | null;
-  /** The workspace the address names, where it names one. */
+  /** The workspace the address names, if any. */
   readonly workspaceId: string | null;
   readonly resources: readonly Resource[];
   readonly workspaces: readonly Workspace[];
-  /** The machine the draft would run on; a primary stands on one machine. */
+  /** The runner the draft would run on. A main workspace exists on one runner. */
   readonly runnerId: string | null;
   readonly preferred?: ThreadWorkspace | null;
 }): DraftPlace => {
@@ -93,7 +99,7 @@ export const decideDraftPlace = ({
   };
 };
 
-/** Whether this lane is the one the draft being written joins. */
+/** Checks whether the draft being written joins this group. */
 const holdsDraft = (
   draft: DraftPlace | null,
   joins: boolean,
@@ -104,9 +110,9 @@ const readRecency = (rows: readonly ThreadRow[]): number =>
   rows.length === 0 ? 0 : Date.parse(rows[0]!.activityAt);
 
 /**
- * Where a lane stands among its project's: the draft's own place first, then
- * one place per worktree in catalog order, then the main workspace, then the
- * lane of threads that work without a checkout.
+ * Returns a group's sort rank inside its project: the draft's own group with no
+ * workspace first, then each worktree in catalog order, then the main
+ * workspace, then the threads that work without a checkout.
  */
 const rankLane = (lane: WorkspaceGroup, workspaces: readonly Workspace[]): number => {
   if (lane.workspaceId === null) return lane.draft ? -1 : workspaces.length + 2;
@@ -115,6 +121,10 @@ const rankLane = (lane: WorkspaceGroup, workspaces: readonly Workspace[]): numbe
   return workspaces.findIndex((each) => each.id === lane.workspaceId);
 };
 
+/**
+ * Returns the sidebar's project groups, each with its workspace groups, sorted
+ * as described at the top of this file.
+ */
 export const buildThreadGroups = ({
   sessions,
   projects,
@@ -130,7 +140,7 @@ export const buildThreadGroups = ({
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
-  /** What a meta row names its model from. */
+  /** The instances whose catalogs give a `meta` row its model name. */
   readonly instances?: readonly ProviderInstance[];
   readonly mode: ThreadRows;
   readonly draft?: DraftPlace | null;
@@ -143,7 +153,7 @@ export const buildThreadGroups = ({
     const projectId = sessionsById.get(row.id)?.projectId ?? null;
     byProject.set(projectId, [...(byProject.get(projectId) ?? []), row]);
   }
-  // A project the draft is headed for stands even while it holds no thread.
+  // The draft's project is shown even when it has no threads yet.
   if (draft !== null && !byProject.has(draft.projectId)) byProject.set(draft.projectId, []);
 
   const groups = [...byProject].map(([projectId, held]): ProjectGroup => {
@@ -160,10 +170,10 @@ export const buildThreadGroups = ({
       const workspace = workspaces.find((each) => each.id === workspaceId);
       return {
         workspaceId,
-        // "no workspace" names a lane of threads that work without a
-        // checkout. A lane holding nothing but the draft is not that: it is
-        // where the draft stands until it has a workspace, and it stands
-        // under the project's own header with nothing said about it.
+        // "no workspace" labels the threads that work without a checkout. A
+        // group that holds only the draft is different: the draft sits there
+        // until it has a workspace, directly under the project's header, with
+        // no label.
         label:
           workspace === undefined
             ? alone || (holdsDraft(draft, joins, workspaceId) && rowsIn.length === 0)
@@ -180,11 +190,11 @@ export const buildThreadGroups = ({
       name: projects.find((each) => each.id === projectId)?.name ?? null,
       tone: projectId === null ? null : pickProjectTone(projectId, projects),
       count: held.length,
-      // The prototype's own order: the worktrees first, in the order the
-      // catalog lists them, then the repo's main workspace, then the threads
-      // that work without a checkout. A draft that has no workspace at all yet
-      // is not that last lane - it stands under the project's own header,
-      // before everything, which is where the user just asked for it.
+      // The prototype's order: the worktrees first, in catalog order, then the
+      // repo's main workspace, then the threads that work without a checkout.
+      // A draft with no workspace yet is not in that last group: it sits
+      // directly under the project's header, before everything, because that
+      // is where the user just started it.
       workspaces: lanes.sort((a, b) => rankLane(a, workspaces) - rankLane(b, workspaces)),
     };
   });

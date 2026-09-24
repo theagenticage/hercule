@@ -21,7 +21,7 @@ const MOSS: Runner = {
 
 let next = 0;
 
-/** One session in the state that matters here; nothing else is read. */
+/** Returns a session with the given status; no other field matters here. */
 const buildSession = (status: SessionStatus): Session => {
   next += 1;
   return {
@@ -50,7 +50,7 @@ const buildSession = (status: SessionStatus): Session => {
 };
 
 describe("describeCapacity", () => {
-  it("says how many slots are taken and how many sessions wait for one", () => {
+  it("shows how many slots are in use and how many sessions are waiting", () => {
     expect(
       describeCapacity(MOSS, [
         buildSession("busy"),
@@ -60,7 +60,7 @@ describe("describeCapacity", () => {
     ).toBe("1 running of 2 · 2 queued");
   });
 
-  it("says nothing about a queue that is empty", () => {
+  it("leaves out the queue when it is empty", () => {
     expect(describeCapacity(MOSS, [buildSession("busy")])).toBe("1 running of 2");
   });
 
@@ -70,10 +70,10 @@ describe("describeCapacity", () => {
     );
   });
 
-  it("counts a session as running from the moment it is started until it is gone", () => {
-    // `starting` and `idle` hold a slot exactly as `busy` does: the controller
-    // admits against all three, so a line that counted only `busy` would say a
-    // full machine had room.
+  it("counts a session as running from starting until it exits", () => {
+    // `starting` and `idle` hold a slot just as `busy` does: the controller
+    // counts all three against the limit, so counting only `busy` would show
+    // a full runner as having room.
     expect(
       describeCapacity(MOSS, [
         buildSession("starting"),
@@ -89,11 +89,11 @@ describe("describeCapacity", () => {
     );
   });
 
-  it("reads an empty machine as empty", () => {
+  it("shows zero running for a runner with no sessions", () => {
     expect(describeCapacity(MOSS, [])).toBe("0 running of 2");
   });
 
-  it("reads the cap off the machine it is given", () => {
+  it("reads the maximum from the given runner", () => {
     expect(describeCapacity({ ...MOSS, maxConcurrentSessions: 7 }, [buildSession("busy")])).toBe(
       "1 running of 7",
     );

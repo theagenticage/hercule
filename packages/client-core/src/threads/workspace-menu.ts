@@ -1,13 +1,13 @@
 /**
- * The composer's workspace menu: what a thread may open in, as rows (spec 14
- * §The composer, the Workspace selector). One row per thing that exists - the
- * repo's main workspace, a fresh worktree, every live worktree of the project -
- * with the reason a row is what it is on its sub-line, because "dimmed with the
- * reason, never hidden" is the rule for everything here.
+ * Builds the composer's workspace menu: the workspaces a thread can open in
+ * (spec 14 §The composer, the Workspace selector). There is one row per
+ * option: each repo's main workspace, a new worktree, and every live worktree
+ * of the project. Each row explains itself on its second line, because the
+ * rule here is "dimmed with the reason, never hidden".
  *
- * None is not one of them: a project that holds a repo always works in one of
- * its workspaces, so None is offered only where there is nothing else to offer
- * (D-20d), and there the selector itself is locked.
+ * "None" is usually not offered: a project with a repo always works in one of
+ * its workspaces. "None" is the only row when there is no repo, and then the
+ * selector is locked.
  */
 import type { Project, Resource, Runner, Session, Workspace } from "@hercule/contract";
 import {
@@ -24,24 +24,30 @@ export interface WorkspaceMenuRow {
   readonly key: string;
   readonly pick: WorkspacePick;
   readonly name: string;
-  /** A workspace is named after its branch, which is mono everywhere. */
+  /**
+   * Whether the name is shown in mono. A worktree is named after its branch,
+   * and branches are always mono.
+   */
   readonly mono: boolean;
-  /** The note at the row's right: the machine a live workspace stands on. */
+  /** The note on the right of the row: the runner the workspace is on. */
   readonly note: string | null;
   readonly sub: string | null;
   readonly current: boolean;
 }
 
 export interface WorkspaceMenu {
-  /** What the selector's own trigger reads. */
+  /** The text on the selector's button. */
   readonly label: string;
   readonly rows: readonly WorkspaceMenuRow[];
 }
 
-/** The pick a thread makes when it works without a checkout at all. */
+/** The pick for a thread that works without a checkout. */
 const NONE: WorkspacePick = { kind: "none" };
 
-/** `2 threads · “Fix flaky webhook tests”, “Write the retry runbook”`. */
+/**
+ * Returns a summary of the workspace's threads, such as `2 threads · “Fix flaky
+ * webhook tests”, “Write the retry runbook”`, or `null` when it has none.
+ */
 const describeThreadsIn = (workspace: Workspace, sessions: readonly Session[]): string | null => {
   const titles = workspace.sessionIds.map(
     (id) => sessions.find((session) => session.id === id)?.title ?? null,
@@ -62,7 +68,7 @@ export const buildWorkspaceMenu = ({
   runnerId,
   pick,
 }: {
-  /** The project the draft stands in; undefined means it stands in none. */
+  /** The draft's project, or `undefined` when the draft has no project. */
   readonly project: Project | undefined;
   readonly repos: readonly Resource[];
   readonly workspaces: readonly Workspace[];
@@ -79,8 +85,9 @@ export const buildWorkspaceMenu = ({
   const current = buildPickKey(pick);
   const rows: WorkspaceMenuRow[] = [];
 
-  // A project with several repos opens a worktree of each by default, so that
-  // row leads; with one repo the main workspace leads, as t3 code's does.
+  // A project with several repos opens a worktree of each by default, so the
+  // new-workspace row comes first. With one repo the main workspace comes
+  // first, as in t3 code.
   const fresh: WorkspaceMenuRow | null =
     repos.length === 0
       ? null
@@ -106,8 +113,8 @@ export const buildWorkspaceMenu = ({
       pick: sharedPick,
       name: repos.length === 1 ? "Main workspace" : `Main workspace of ${formatRepoName(repo)}`,
       mono: false,
-      // The machine stands at the right of every row that has one, the shared
-      // checkout included: it is on a machine as much as a worktree is.
+      // Every row that is on a runner shows the runner's name on the right,
+      // including the main workspace: it is on a runner just like a worktree.
       note: runnerId === null ? null : machine,
       sub:
         branch === null
@@ -133,9 +140,9 @@ export const buildWorkspaceMenu = ({
     });
   }
 
-  // A project with a repo always works in one of its workspaces (D-20d). Only
-  // one with nothing checked out anywhere - and a draft standing in no project
-  // at all - has none to offer, and there it is the single row.
+  // A project with a repo always works in one of its workspaces. Only a
+  // project with no repo, or a draft with no project, offers "None", and then
+  // it is the only row.
   const none = project === undefined ? "No workspace" : "None";
   if (repos.length === 0) {
     rows.push({
@@ -149,8 +156,8 @@ export const buildWorkspaceMenu = ({
     });
   }
 
-  // A thread that already stands in a workspace names it even when no row
-  // offers it: an active thread's main workspace is not something to pick.
+  // A thread that is already in a workspace shows its name even when no row
+  // offers it, because an active thread's main workspace is not a menu row.
   const joined =
     pick.kind === "existing" ? workspaces.find((each) => each.id === pick.workspaceId) : undefined;
 

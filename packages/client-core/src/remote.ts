@@ -1,21 +1,23 @@
 /**
- * Whether a remote is one Hercule will hand to git, asked before the form is
- * sent so the user is told on the spot rather than by a round trip (D-20b).
+ * Checks whether a git remote is one Hercule will pass to git. The form checks
+ * this before it sends, so the user sees the error at once instead of after a
+ * round trip to the controller.
  *
- * The rule is the controller's `isClonableRemote` (`apps/controller/src/
- * resources/remote.ts`), which stays the one that decides: this refuses early,
- * it refuses finally. The two are the same three sentences - an `https://` URL
- * or git's own `user@host:owner/repo`, and never a word git would read as an
- * option - so a spelling that passes here is one the controller takes.
+ * The controller's `isClonableRemote` (`apps/controller/src/resources/remote.ts`)
+ * makes the final decision; this copy only rejects early. Both apply the same
+ * rules, so a remote that passes here is one the controller accepts:
+ *
+ * - an `https://` URL, or git's scp-like `user@host:owner/repo`;
+ * - never a value that starts with `-`, which git would read as an option.
  */
 
 /** What git reads as an option rather than as a remote. */
 const OPTION = /^-/;
 
-/** `scheme://` at the front, which tells a URL from git's scp-like spelling. */
+/** A leading `scheme://`, which tells a URL apart from git's scp-like form. */
 const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 
-/** `user@host:path`, git's own spelling, which carries no scheme. */
+/** `user@host:path`, git's scp-like form, which has no scheme. */
 const SCP = /^[^@/]+@[^@/:]+:[^:]+$/;
 
 export const isClonableRemote = (remote: string): boolean => {
@@ -25,5 +27,5 @@ export const isClonableRemote = (remote: string): boolean => {
   return scheme === null ? SCP.test(written) : scheme[0].toLowerCase() === "https://";
 };
 
-/** What the form says when it refuses one, naming both spellings it takes. */
+/** The form's error for an invalid remote. It shows both accepted forms. */
 export const REMOTE_REFUSAL = "Write an https:// URL or git@host:owner/repo";
