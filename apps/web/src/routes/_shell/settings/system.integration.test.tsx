@@ -1,11 +1,11 @@
 /**
- * Settings > System (ticket #70). The access-mode fallback policy is fixed
- * rather than configurable (spec 06 §8.4, spec 13 §7), so the screen states
- * it as read-only text; the retention, backup and HTTPS settings of spec 14's
- * Screens row are still an empty state.
+ * Tests for Settings > System (#70). The access-mode fallback policy is fixed,
+ * not configurable (spec 06 §8.4, spec 13 §7), so the screen describes it as
+ * read-only text. The retention, backup and HTTPS settings from spec 14's
+ * Screens table are still an empty state.
  *
- * Driven through `renderApp` over a stubbed `fetch`, never by reaching into
- * the screen's own modules.
+ * The tests render the whole app with `renderApp` over a stubbed `fetch`,
+ * rather than importing the screen's own modules.
  */
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
@@ -27,11 +27,11 @@ const openApp = async () => {
   return { ...app, api };
 };
 
-/** The chain as spec 06 §8.4 pins it, tolerant of how the markup breaks it up. */
+/** The chain of access modes as spec 06 §8.4 gives it, allowing any whitespace between the parts. */
 const CHAIN = /approval-required\s*<\s*auto-accept-edits\s*<\s*auto\s*<\s*full-access/;
 
 describe("Settings > System: the access-mode fallback policy", () => {
-  it("states the ordered chain, the downward substitution, and that it is fixed", async () => {
+  it("describes the ordered chain, the downward substitution, and that it is fixed", async () => {
     await openApp();
 
     const text = readPageText();
@@ -39,8 +39,9 @@ describe("Settings > System: the access-mode fallback policy", () => {
     // The chain, in order, least permissive first.
     expect(text).toMatch(CHAIN);
 
-    // What the chain does, and that it is a statement about the system rather
-    // than a setting - both as whole sentences, so half of one cannot pass.
+    // What the chain does, and that it is a property of the system rather
+    // than a setting. Both are checked as whole sentences, so half a sentence
+    // cannot pass.
     expect(text).toContain(
       "A thread asking for a mode its provider does not support runs at the nearest less permissive mode that provider does support.",
     );
@@ -50,15 +51,15 @@ describe("Settings > System: the access-mode fallback policy", () => {
     expect(text).toMatch(/fixed|not configurable/i);
   });
 
-  it("offers nothing to change the policy with", async () => {
+  it("offers no control that changes the policy", async () => {
     await openApp();
 
-    // The statement is text: it is not itself a control and sits in none.
+    // The chain is plain text: it is not a control and is not inside one.
     expect(
       screen.getByText(CHAIN).closest("button, input, select, textarea, [role=radio]"),
     ).toBeNull();
 
-    // And nothing else on the screen offers to change it either.
+    // No other control on the screen changes it either.
     const controls = [
       ...screen.queryAllByRole("button"),
       ...screen.queryAllByRole("radio"),
@@ -74,7 +75,7 @@ describe("Settings > System: the access-mode fallback policy", () => {
     }
   });
 
-  it("keeps the retention, backup and HTTPS settings an empty state that no longer promises the policy", async () => {
+  it("shows the retention, backup and HTTPS settings as an empty state that does not mention the policy", async () => {
     await openApp();
 
     const headline = await screen.findByRole("heading", {
@@ -83,8 +84,8 @@ describe("Settings > System: the access-mode fallback policy", () => {
     const empty = readPageText(headline.parentElement);
     expect(empty).toContain("Retention");
     expect(empty).toContain("HTTPS");
-    // The empty state no longer says the fallback policy is set here: the
-    // screen states it above as read-only text instead.
+    // The empty state does not say the fallback policy is set here, because
+    // the screen describes the policy above as read-only text.
     expect(empty).not.toMatch(/fallback/i);
   });
 });

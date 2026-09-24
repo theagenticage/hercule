@@ -12,7 +12,11 @@ import { ProviderKeyEntry, ProviderLogin } from "../../../screens/provider-login
 import { readErrorMessage } from "../../../screens/save-status";
 import { providersQuery } from "../../../app/queries";
 
-/** A move the machine cannot make is dimmed with its reason rather than hidden. */
+/**
+ * The Providers card on the runner page: one row per provider instance, with
+ * its install, log-in and probe actions. An install the machine cannot do is
+ * shown disabled, with the reason on the row, rather than hidden.
+ */
 export function Providers({
   client,
   runner,
@@ -71,9 +75,9 @@ export function Providers({
             onInstall={() => {
               install.mutate(row.providerId);
             }}
-            // A credential the stored snapshot knows nothing about, however it
-            // was entered, so the machine is asked about the instance again
-            // rather than the page re-reading what it already had.
+            // The stored snapshot does not know about the new credential yet, so
+            // the machine is probed again rather than the page refetching the
+            // same stale snapshot.
             onCredentialEntered={() => {
               probe.mutate(row.id);
             }}
@@ -111,8 +115,8 @@ function Row({
   readonly onCredentialEntered: () => void;
 }): JSX.Element {
   return (
-    // Grouped so a screen reader takes one provider's facts and moves as one
-    // unit.
+    // Grouped so a screen reader reads one provider's facts and actions as
+    // one unit.
     <div
       role="group"
       aria-label={row.name}

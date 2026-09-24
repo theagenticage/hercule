@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { resolveBrowserTimezone } from "@hercule/client-core";
 import { renderApp, stubApi, type Handler } from "../../app/testing";
 
-/** A signed-in controller with nothing recorded against onboarding yet. */
+/** Returns stub routes for a controller whose user has completed no onboarding steps yet. */
 const buildFreshController = (): Readonly<Record<string, Handler>> => {
   let user: Record<string, unknown> = {};
   return {

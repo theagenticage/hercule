@@ -2,17 +2,17 @@ import type { JSX } from "react";
 import { listSupportedTimezones } from "@hercule/client-core";
 import { Select } from "@hercule/ui";
 
-/** The zones on offer never change within a page load, so they are read once. */
+/** The supported zones do not change during a page load, so they are listed once. */
 const ZONES = listSupportedTimezones();
 
 /**
  * The timezone control, shared by the onboarding step and Settings > Profile.
  *
- * The list is closed: an IANA zone this browser cannot format throws wherever
- * a time is read, so the only zones on offer are the ones it knows. A zone
- * already stored that is not on the list is offered too, so the screen shows
- * what is set rather than a different zone - which is how a value written from
- * elsewhere gets confirmed or corrected here.
+ * The list offers only the zones this browser supports, because formatting a
+ * time in an unsupported IANA zone throws. A stored zone that is not on the
+ * list is added to it, so the field shows the actual setting rather than a
+ * different zone. That way a value set elsewhere can be confirmed or
+ * corrected here.
  */
 export function TimezoneField({
   value,

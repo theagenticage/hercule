@@ -2,7 +2,7 @@ import type { ComponentProps, JSX } from "react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { cn } from "./cn";
 
-/** A switch between two or more faces of the same surface; one is always on. */
+/** A control that switches between two or more views of one surface. One is always selected. */
 export function SegmentedControl({
   className,
   value,

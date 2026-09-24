@@ -20,8 +20,8 @@ export function Shell({
   readonly live: Live;
   readonly children: ReactNode;
 }): JSX.Element {
-  // A screen with its own chrome frames itself, down to its padding: the
-  // shell's own would sit between that chrome and the window edge.
+  // A screen that draws its own top bar also sets its own padding. The
+  // shell's padding would otherwise sit between that header and the window edge.
   const bare = ownsItsTopBar(useMatches());
 
   return (

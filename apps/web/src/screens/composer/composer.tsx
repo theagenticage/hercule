@@ -37,16 +37,17 @@ import { useComposerModel } from "./use-composer-model";
 type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
 
 /**
- * The composer: what the thread runs with, and the message about to go to it. One
- * component for a draft and an active thread - `useComposerModel` holds the
- * difference, and every lock, dimming and blocker comes from `buildComposerFields`.
+ * The composer: the thread's settings, and the message about to be sent to it.
+ * The same component serves a draft and an active thread. `useComposerModel`
+ * handles the difference, and every lock, dimmed row and blocker comes from
+ * `buildComposerFields`.
  */
 export function Composer({
   thread,
   onSend,
 }: {
   readonly thread: Thread;
-  /** An active thread's way to rejoin the tail as a message goes out. */
+  /** Called after a message is sent; an active thread uses it to scroll back to the bottom. */
   readonly onSend?: () => void;
 }): JSX.Element {
   const { client, detectLocalRunner } = useRouteContext({ from: "/_shell" });
@@ -54,9 +55,8 @@ export function Composer({
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const localRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
-  // The three catalogs the workspace menu reads. A controller that cannot
-  // answer them leaves the composer with no project and no workspace to offer,
-  // which is exactly what it shows before #72's records exist.
+  // The catalogs the workspace menu reads. If the controller cannot return
+  // them, the composer simply offers no project and no workspace.
   const projects = useQuery(projectsQuery(client)).data?.items ?? [];
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
@@ -71,7 +71,7 @@ export function Composer({
     sessions,
   };
   const [open, setOpen] = useState<SelectorKey | null>(null);
-  // Where the model pill begins: what the lip's branch menu keeps clear of.
+  // The model pill's element. The lip's branch menu measures it to stay clear of the pill.
   const pill = useRef<HTMLSpanElement>(null);
   const [filter, setFilter] = useState("");
   const model = useComposerModel(thread, catalogs, client, onSend);
@@ -80,12 +80,13 @@ export function Composer({
   const login = buildLoginSlot(client, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   });
-  // A click opening B is also a click outside A, so closing clears only the selector asking to.
+  // A click that opens selector B is also a click outside selector A. So a
+  // close request clears the open selector only if that selector asked to close.
   const handleOpenChange = (key: SelectorKey, next: boolean): void => {
     setOpen((current) => (next ? key : current === key ? null : current));
     if (key === "model" && !next) setFilter("");
   };
-  // The catalog behind the model pill is worth resolving only while it is on show.
+  // The model menu is built only while it is open.
   const models =
     open === "model"
       ? buildModelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent })
@@ -99,9 +100,9 @@ export function Composer({
     workspaces,
     sessions,
     runners,
-    // The machine the fields resolved, never the draft's raw pick: those two
-    // differ before anything is selectable, and the menu would then say the
-    // repo is not cloned on a machine the sentence above it never named.
+    // Use the machine the fields resolved, not the draft's raw pick. The two
+    // differ before anything is picked, and the raw pick would make the menu
+    // say the repo is not cloned on a machine the draft's sentence never named.
     runnerId: fields.machine.runnerId,
     pick,
   });
@@ -109,7 +110,7 @@ export function Composer({
   const cannotSend = fields.blocked !== null || model.readOnly !== null || model.sending;
   const canSend = !cannotSend && model.message.trim() !== "";
   return (
-    // A draft stands under its own sentence, which takes the room above the card.
+    // A draft shows its sentence above the card, and the sentence takes the free space.
     <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
       {fields.lead === null ? null : (
         <DraftHero
@@ -119,10 +120,10 @@ export function Composer({
           loginSlot={login}
         />
       )}
-      {/* The card is the same box whatever is docked to it: the lip below and
-          the permission dock above both tuck under it, so its own radius,
-          border and lift never change (spec 14 §Measurements, amended
-          2026-09-14). It sits above both of them. */}
+      {/* The card looks the same whatever is docked to it. The lip below and
+          the permission dock above both tuck under it, so its radius, border
+          and shadow never change (spec 14 §Measurements, amended 2026-09-14).
+          The card is stacked above both of them. */}
       <div className="relative z-[1] flex flex-col gap-2 rounded-[14px] border border-line bg-raised px-3.5 pt-3 pb-2.5 shadow-lift">
         <MessageBox
           value={model.message}
@@ -202,8 +203,8 @@ export function Composer({
         open={open === "workspace" || open === "branch" || open === "machine" ? open : null}
         onOpenChange={handleOpenChange}
         onPickWorkspace={(picked) => {
-          // A workspace that already stands settles the machine too, which is
-          // `findRunnerForPick`'s to say rather than this component's.
+          // An existing workspace also fixes the machine. `findRunnerForPick`
+          // decides that, not this component.
           const settled = findRunnerForPick(picked, workspaces);
           if (settled === null) model.pick({ kind: "workspace", value: picked });
           else

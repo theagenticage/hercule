@@ -1,13 +1,13 @@
 import { useLayoutEffect, useRef, type JSX } from "react";
 
-/** One line of text at 14px/1.5, and the eight the box grows to at most. */
+/** The height of one line of text at 14px/1.5, and the most lines the box grows to. */
 const LINE_HEIGHT = 21;
 const MAX_LINES = 8;
 
 /**
- * The card's own field. It grows with what is typed, from one line to eight,
- * and then scrolls: a composer that keeps growing would push the thread it is
- * about off the screen.
+ * The composer card's text field. It grows with the text from one line to
+ * eight, and then scrolls. A composer that kept growing would push the thread
+ * off the screen.
  */
 export function MessageBox({
   value,
@@ -27,8 +27,8 @@ export function MessageBox({
   useLayoutEffect(() => {
     const field = ref.current;
     if (field === null) return;
-    // Measured from scratch: the height just set is itself a floor on
-    // `scrollHeight`, so a box that has grown would never shrink again.
+    // Reset the height before measuring. `scrollHeight` is never less than
+    // the current height, so without the reset a grown box would never shrink.
     field.style.height = "auto";
     field.style.height = `${String(Math.min(field.scrollHeight, MAX_LINES * LINE_HEIGHT))}px`;
   }, [value]);
@@ -44,10 +44,10 @@ export function MessageBox({
         onChange(event.target.value);
       }}
       onKeyDown={(event) => {
-        // Enter sends, Shift+Enter is a newline. An IME's own Enter - the one
-        // that commits a composition - is not a send: React reports it as
-        // `isComposing`, and swallowing it would cut a Japanese or Chinese
-        // sentence off mid-word.
+        // Enter sends and Shift+Enter inserts a newline. The Enter that
+        // commits an IME composition does not send: it arrives with
+        // `isComposing` set, and treating it as a send would cut off a
+        // Japanese or Chinese sentence mid-word.
         if (event.key !== "Enter" || event.shiftKey) return;
         if (event.nativeEvent.isComposing) return;
         event.preventDefault();

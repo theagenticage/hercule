@@ -1,8 +1,9 @@
 /**
- * The one thing the bundler adds to the module system that this package uses.
+ * The one bundler feature this package uses that plain TypeScript does not know.
  *
- * `@hercule/ui` takes no build of its own - it is imported as source - so it
- * links no bundler's types, and `import.meta.glob` is declared here instead.
+ * `@hercule/ui` has no build of its own - it is imported as source - so it does
+ * not depend on any bundler's types, and `import.meta.glob` is declared here
+ * instead.
  */
 interface ImportMeta {
   readonly glob: (
@@ -15,7 +16,7 @@ interface ImportMeta {
   ) => Record<string, unknown>;
 }
 
-/** A stylesheet imported for its source rather than for its effect. */
+/** A stylesheet imported as a text string, instead of being applied to the page. */
 declare module "*.css?raw" {
   const source: string;
   export default source;

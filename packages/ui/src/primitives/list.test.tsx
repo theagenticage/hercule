@@ -1,6 +1,7 @@
 /**
- * The four primitives a list-with-detail screen is built from. All four are
- * generic: they know nothing about tasks, and nothing here mentions one.
+ * Tests the four primitives that a list-with-detail screen is built from. They
+ * are generic: they know nothing about tasks, and these tests do not mention
+ * tasks.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -18,7 +19,7 @@ describe("Drawer", () => {
     expect(screen.queryByText("Inside")).toBeNull();
   });
 
-  it("is a dialog named by its title, holding what it was given", () => {
+  it("is a dialog named by its title, showing its children", () => {
     render(
       <Drawer open onClose={() => {}} title="Details">
         Inside
@@ -68,7 +69,7 @@ describe("PriorityGlyph", () => {
   const listBars = () => [...document.querySelectorAll<HTMLElement>("[data-bar]")];
   const listFilledBars = () => listBars().filter((bar) => bar.dataset.filled === "true");
 
-  it("is always three bars, of which it paints the ones it was given", () => {
+  it("always draws three bars and fills the given number of them", () => {
     const { rerender } = render(<PriorityGlyph filled={1} label="low" />);
     expect(listBars()).toHaveLength(3);
     expect(listFilledBars()).toHaveLength(1);
@@ -82,12 +83,12 @@ describe("PriorityGlyph", () => {
     expect(listFilledBars()).toHaveLength(3);
   });
 
-  it("carries the name it was given", () => {
+  it("uses its label as its accessible name", () => {
     render(<PriorityGlyph filled={2} label="normal priority" />);
     expect(screen.getByLabelText("normal priority")).toBeTruthy();
   });
 
-  it("paints in the grey it was asked for, and in the middle grey by default", () => {
+  it("uses the requested grey, and the middle grey by default", () => {
     const { rerender } = render(<PriorityGlyph filled={3} label="urgent" />);
     expect(screen.getByLabelText("urgent").className).toContain("text-muted");
 
@@ -98,7 +99,7 @@ describe("PriorityGlyph", () => {
     expect(screen.getByLabelText("urgent").className).toContain("text-ink");
   });
 
-  it("says importance in shape and grey, never in colour", () => {
+  it("shows importance by shape and grey, never by colour", () => {
     for (const tone of ["faint", "muted", "ink"] as const) {
       const { unmount } = render(<PriorityGlyph filled={3} label="urgent" tone={tone} />);
       const markup = screen.getByLabelText("urgent").outerHTML;
@@ -110,22 +111,22 @@ describe("PriorityGlyph", () => {
 });
 
 describe("Textarea", () => {
-  it("carries what the user types", async () => {
+  it("holds what the user types", async () => {
     render(<Textarea aria-label="Description" />);
     const field = screen.getByLabelText("Description");
     await userEvent.type(field, "two lines");
     expect(field).toHaveProperty("value", "two lines");
   });
 
-  it("wears the same border, ground and focus as a single-line field", () => {
+  it("has the same border, background and focus style as a single-line field", () => {
     render(
       <>
         <Input aria-label="Title" />
         <Textarea aria-label="Description" />
       </>,
     );
-    // The treatment is whatever the input states; the point is that the two
-    // fields state the same thing, so a change to one is a change to both.
+    // The exact classes do not matter. The test checks only that the two
+    // fields use the same ones, so a change to one must be made to both.
     const readTreatmentClasses = (element: Element) =>
       element.className.split(" ").filter((name) => /^(border|bg-|focus-visible:)/.test(name));
 
@@ -143,14 +144,14 @@ describe("ListRow", () => {
     expect(screen.getByRole("button", { name: "A row" })).toHaveProperty("type", "button");
   });
 
-  it("reports the press", async () => {
+  it("calls onClick when pressed", async () => {
     const onClick = vi.fn();
     render(<ListRow onClick={onClick}>A row</ListRow>);
     await userEvent.click(screen.getByRole("button"));
     expect(onClick).toHaveBeenCalledOnce();
   });
 
-  it("recedes when it is dimmed, and stands at full strength otherwise", () => {
+  it("fades when dimmed, and shows at full opacity otherwise", () => {
     const dimmed = /(^|\s)opacity-(66|\[0?\.66])/;
     const { rerender } = render(<ListRow>A row</ListRow>);
     expect(screen.getByRole("button").className).not.toMatch(dimmed);
@@ -159,7 +160,7 @@ describe("ListRow", () => {
     expect(screen.getByRole("button").className).toMatch(dimmed);
   });
 
-  it("says which row is the current one", () => {
+  it("marks the selected row as current", () => {
     const { rerender } = render(<ListRow>A row</ListRow>);
     expect(screen.getByRole("button").getAttribute("aria-current")).toBeNull();
 

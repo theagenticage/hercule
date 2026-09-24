@@ -1,8 +1,11 @@
 /**
- * The login panel on its own, over a stubbed API. Two flows reach it: the one
- * where the vendor asks for a code the user pastes back, and the one where the
- * vendor printed the code itself and the browser finishes the exchange alone -
- * which this panel only shows, never relays.
+ * Tests the login drawer on its own, against a stubbed API. It covers two
+ * flows:
+ *
+ * - the vendor gives the user a code in the browser, which the user pastes
+ *   back here;
+ * - the vendor printed a one-time code, and the browser completes the login
+ *   on its own. The drawer only shows the code and sends nothing.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -24,7 +27,7 @@ const USER_CODE = "CH61-0FI2N";
 const LOGIN = `POST /api/v1/providers/${INSTANCE}/login`;
 const LOGIN_CODE = `POST /api/v1/providers/${INSTANCE}/login-code`;
 
-/** What the follow-up probe leaves behind; the panel only needs it to be valid. */
+/** The probe result the login code endpoint returns; the drawer only needs it to be valid. */
 const SNAPSHOT = {
   runnerId: RUNNER,
   probedAt: "2026-09-14T09:10:00.000Z",
@@ -37,7 +40,7 @@ const SNAPSHOT = {
 const listSentCodes = (api: ReturnType<typeof stubApi>) =>
   api.calls.filter((call) => call.path.endsWith("/login-code"));
 
-/** Mounts the panel and presses the button that starts a login. */
+/** Renders the Log in button and clicks it to start a login. */
 const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
   const api = stubApi(handlers);
   const onLoggedIn = vi.fn();
@@ -60,8 +63,8 @@ const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
   return { api, user, onLoggedIn };
 };
 
-describe("a login the vendor printed a code for", () => {
-  it("shows the code, asks for nothing, and is done when the user says so", async () => {
+describe("a login with a one-time code from the vendor", () => {
+  it("shows the code, asks for no input, and finishes when the user clicks Done", async () => {
     const { api, user, onLoggedIn } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE } },
       [LOGIN_CODE]: { body: SNAPSHOT },
@@ -71,20 +74,20 @@ describe("a login the vendor printed a code for", () => {
       expect(readPageText()).toContain(USER_CODE);
     });
     expect(readPageText()).toContain(DEVICE_URL);
-    // What to do when the browser cannot reach this machine at all.
+    // The fallback instructions for when the browser cannot reach this machine at all.
     expect(readPageText()).toContain("ssh -L 1455:localhost:1455");
     expect(readPageText()).toContain("auth.json");
-    // Both are long enough to mistype and neither can be read off a terminal.
+    // Both are long enough to mistype, so both get a copy button.
     expect(screen.getByRole("button", { name: "Copy code" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Copy address" })).toBeDefined();
     // The code is typed into the browser, never back into Hercule.
     expect(screen.queryByLabelText("Code", { exact: true })).toBeNull();
     expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
-    // A second login would kill the child whose code is on screen.
+    // A second login would kill the process whose code is on screen.
     expect(screen.getByRole("button", { name: "Log in" })).toHaveProperty("disabled", true);
 
-    // Nothing is relayed and nothing is waited on: the browser and the vendor
-    // finish this between themselves.
+    // Nothing is sent and nothing is awaited: the browser and the vendor
+    // complete the login between them.
     expect(listSentCodes(api)).toEqual([]);
     expect(onLoggedIn).not.toHaveBeenCalled();
 
@@ -97,8 +100,8 @@ describe("a login the vendor printed a code for", () => {
   });
 });
 
-describe("a login the vendor wants a code pasted into", () => {
-  it("asks for the code and waits for the user to send it", async () => {
+describe("a login where the user pastes back a code", () => {
+  it("asks for the code and waits for the user to submit it", async () => {
     const { api } = await openLoginPanel({
       [LOGIN]: { body: { url: PASTE_URL } },
       [LOGIN_CODE]: { body: SNAPSHOT },

@@ -1,6 +1,7 @@
 /**
- * Settings > Threads defaults: the four `thread.*` fields that prefill the
- * composer, above the existing Sidebar rows control.
+ * Tests for Settings > Threads: the four `thread.*` defaults that prefill the
+ * composer, the workspace and GitHub account defaults, and their position
+ * above the Sidebar rows control.
  */
 import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
@@ -74,7 +75,7 @@ const buildProviderInstance = (
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-/** Logged in on the local runner, offering two models. */
+/** An instance logged in on the local runner, with two models. */
 const INSTANCE_LOCAL = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000001",
   "Claude Code",
@@ -86,14 +87,14 @@ const INSTANCE_LOCAL = buildProviderInstance(
   ],
 );
 
-/** Never probed on the local runner, but has one snapshot from another one. */
+/** An instance never probed on the local runner, with one snapshot from another runner. */
 const INSTANCE_ELSEWHERE = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000002",
   "Claude Code (work)",
   [buildSnapshot(RUNNER_OTHER.id, [{ slug: "claude-haiku-5", name: "Haiku 5" }])],
 );
 
-/** Never probed anywhere. */
+/** An instance never probed on any runner. */
 const INSTANCE_UNPROBED = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000003",
   "Claude Code (new)",
@@ -135,7 +136,7 @@ const STORED_BASE = {
   "thread.profileId": PROFILE_UNRESTRICTED.id,
 };
 
-/** A controller that answers `settings.update` with the store the patch makes. */
+/** Builds a stub controller that responds to `settings.update` with the settings after the patch. */
 const buildController = (
   user: Record<string, unknown>,
   update?: Handler,
@@ -184,10 +185,9 @@ describe("Settings > Threads defaults", () => {
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
-    // One patch, not two: a stale model is only ever what the runner list
-    // stops offering, never an artefact of switching instances. Its one
-    // snapshot's one model, "Haiku 5", carries no `isDefault`, so it is the
-    // fallback default.
+    // One patch, not two, so switching instances never leaves a model the new
+    // instance does not offer. The instance's only snapshot has one model,
+    // "Haiku 5", with no `isDefault`, so that model is the fallback default.
     expect(listWrites(api)[0]?.body).toEqual({
       user: { "thread.instanceId": INSTANCE_ELSEWHERE.id, "thread.model": "claude-haiku-5" },
     });
@@ -284,7 +284,7 @@ describe("Settings > Threads defaults", () => {
     expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.profileId": PROFILE_WORKER.id } });
   });
 
-  it("shows a refused write as the API worded it", async () => {
+  it("shows a failed write's error message as the API sent it", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(
       {},
@@ -317,14 +317,16 @@ describe("Settings > Threads defaults", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * Slice 3 of #72 (AC-22): what a thread opens in, and which GitHub
- * account a thread with no checkout acts through.
+ * The workspace a new thread opens in, and the GitHub account a thread
+ * with no checkout acts through (#72).
  *
- * Readings picked here, where the SPEC names copy but not a handle:
- * - the two faces of the Workspace control write the `thread.workspace`
- *   values they stand for: Main workspace -> `primary`, New workspace ->
- *   `ephemeral` (D-20d dropped None);
- * - the select's label is the row's own wording, "GitHub account for threads
+ * The spec gives the copy for these controls but not their stored values
+ * or labels, so these tests pin the choices made here:
+ * - the Workspace control's two options store these `thread.workspace`
+ *   values: Main workspace -> `primary`, New workspace -> `ephemeral`.
+ *   There is no None option: a project without a source always runs
+ *   without a workspace, so nobody picks it as a default;
+ * - the select's label is the row's wording, "GitHub account for threads
  *   without a checkout".
  * ------------------------------------------------------------------ */
 
@@ -350,7 +352,7 @@ const GITHUB_WORK: Connection = {
   displayName: "acme-bot",
 };
 
-/** A Connection of another type, which this select must not offer. */
+/** A connection of another type, which the select must not offer. */
 const SLACK: Connection = {
   ...GITHUB,
   id: "01a06d02-7500-7000-8000-000000000003",
@@ -376,8 +378,8 @@ const openWithConnections = async (
   return { ...app, api };
 };
 
-describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
-  it("offers the two faces and writes thread.workspace on pick", async () => {
+describe("Settings > Threads: the workspace a thread opens in", () => {
+  it("offers the two options and writes thread.workspace on pick", async () => {
     const user = userEvent.setup();
     const { api } = await openWithConnections({ "thread.workspace": "primary" });
 
@@ -385,8 +387,8 @@ describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
     for (const face of ["Main workspace", "New workspace"]) {
       expect(within(group).getByRole("radio", { name: face })).toBeDefined();
     }
-    // D-20d: a project without a source always runs without a workspace, so
-    // None is not a default anyone picks.
+    // A project without a source always runs without a workspace, so None
+    // is not a default anyone picks.
     expect(within(group).queryByRole("radio", { name: "None" })).toBeNull();
 
     await user.click(within(group).getByRole("radio", { name: "New workspace" }));
@@ -396,8 +398,8 @@ describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
     expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.workspace": "ephemeral" } });
   });
 
-  // D-20d: the fine print is what says a project without a source runs
-  // without a workspace, since there is no face for it any more.
+  // There is no None option, so the fine print is the only place that says a
+  // project without a source runs without a workspace.
   it("says in its fine print that a project with no source runs without a workspace", async () => {
     await openWithConnections();
 
@@ -405,7 +407,7 @@ describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
     expect(fine.textContent).toContain("A project with no source always runs without a workspace.");
   });
 
-  it("says in its fine print that a project with several repos takes a new workspace anyway", async () => {
+  it("says in its fine print that a project with several repos opens in a New workspace", async () => {
     await openWithConnections();
 
     const fine = await screen.findByText(/repos/);
@@ -413,7 +415,7 @@ describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
   });
 });
 
-describe("Settings > Threads: the GitHub account a checkout-less thread uses (AC-22)", () => {
+describe("Settings > Threads: the GitHub account for threads without a checkout", () => {
   it("offers only the github connections and writes thread.githubConnectionId on pick", async () => {
     const user = userEvent.setup();
     const { api } = await openWithConnections();

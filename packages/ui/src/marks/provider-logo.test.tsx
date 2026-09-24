@@ -12,7 +12,7 @@ describe("ProviderLogo", () => {
     expect(svg!.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("draws pi as a text glyph, with no asset behind it", () => {
+  it("draws pi as the character π, not as an SVG", () => {
     const { container } = render(<ProviderLogo providerId="pi" />);
 
     expect(container.querySelector("svg")).toBeNull();

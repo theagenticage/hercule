@@ -16,8 +16,8 @@ import { RunnerRow } from "./-row";
 
 export const Route = createFileRoute("/_shell/fleet/")({
   staticData: { title: "Fleet" },
-  // Answered before it is shown: a fleet that grew a machine under the reader a
-  // moment after the screen opened would read as one arriving.
+  // Loaded before the screen renders. Otherwise runners would appear a moment
+  // after the screen opens and look like machines that just joined.
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),

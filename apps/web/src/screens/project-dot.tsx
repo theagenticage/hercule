@@ -3,20 +3,22 @@ import type { ProjectTone } from "@hercule/client-core";
 import { cn } from "@hercule/ui";
 
 /**
- * A project's identity dot: a small square in one of the two identity hues the
- * design language fixes (§Color doctrine, §Lineage - "on group headers only,
- * never per row"). Which hue a project wears is `pickProjectTone`'s to say, and it
- * is read where the projects are listed rather than here: the hue follows a
- * project's place among the others, which a dot on its own cannot see.
- *
- * The class names are written out rather than built, because a class the
- * stylesheet has never seen written is a class Tailwind never emits.
+ * The background class per identity hue. The class names are written out in
+ * full rather than built from parts, because Tailwind only generates classes
+ * it finds written in the source.
  */
 const TONE = {
   hercule: "bg-project-hercule",
   ops: "bg-project-ops",
 } as const;
 
+/**
+ * A project's identity dot: a small square in one of the two identity hues
+ * set by the design language (§Color doctrine, §Lineage - "on group headers
+ * only, never per row"). `pickProjectTone` decides a project's hue, and the
+ * caller calls it where the projects are listed: the hue depends on the
+ * project's position among the others, which the dot alone does not know.
+ */
 export function ProjectDot({
   tone,
   className,

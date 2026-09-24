@@ -2,12 +2,14 @@ import { type JSX } from "react";
 import { Field, Input, Select } from "@hercule/ui";
 
 /**
- * One source a new project would hold. Only a git repository for now (D-20b),
- * so the row is that row rather than a kind and a shape behind it.
+ * One source in the New project form. For now the only kind of source is a
+ * git repository, so this type holds a repository's fields directly rather
+ * than a kind plus kind-specific fields.
  *
- * `message` is what came back about this source, or what the form refused
- * before it sent anything; `createdId` is set once it stands, so a second
- * submission after a refusal does not create it twice.
+ * - `message` is the error for this source: from the server, or from the form's
+ *   own check before sending.
+ * - `createdId` is set once the source is created, so resubmitting after an
+ *   error does not create it twice.
  */
 export interface SourceDraft {
   readonly key: string;
@@ -18,20 +20,20 @@ export interface SourceDraft {
   readonly createdId: string | null;
 }
 
-/** A GitHub account a source may be cloned and pushed through. */
+/** A GitHub account a source can be cloned and pushed with. */
 export interface ConnectionOption {
   readonly id: string;
   readonly label: string;
 }
 
 /**
- * The New project dialog: a name and the sources the project works with
- * (D-20b). It stands over a scrim in the project picker's own register - the
- * raised card, 520px - because it is the same one question asked in the same
- * place, and setting a repo up is no longer something the composer does.
+ * The New project dialog: a name and the sources the project works with. It
+ * sits over a scrim and uses the project picker's style (a raised card, 520px
+ * wide), because it opens from the same place. Repos are set up here, not in
+ * the composer.
  *
- * Presentational: every value and every refusal is handed to it, and pressing
- * anything is the orchestrator's to answer.
+ * This component is presentational: it receives every value and error as
+ * props, and the parent handles every button press.
  */
 export function NewProjectDialog({
   name,
@@ -49,9 +51,9 @@ export function NewProjectDialog({
   readonly name: string;
   readonly sources: readonly SourceDraft[];
   readonly accounts: readonly ConnectionOption[];
-  /** Whether a write is in flight: while one is, there is no way out. */
+  /** Whether a save is in progress. While it is, Cancel and Create are disabled. */
   readonly pending: boolean;
-  /** Why the project itself was not made; a source carries its own. */
+  /** Why the project itself was not created; each source has its own `message`. */
   readonly failure: string | null;
   readonly onName: (name: string) => void;
   readonly onAddSource: () => void;
@@ -63,7 +65,7 @@ export function NewProjectDialog({
   return (
     <div
       className="fixed inset-0 z-40 flex justify-center overflow-y-auto bg-scrim pt-[12vh] pb-8"
-      // The page behind it is the way out, as it is on every other overlay here.
+      // Clicking the page behind closes the dialog, as on every other overlay in the app.
       onClick={onClose}
     >
       <div
@@ -188,8 +190,8 @@ function SourceRow({
             Remove
           </button>
         ) : (
-          // What already stands is not removed from a form: the project holds
-          // it, and taking it away is done where resources are edited.
+          // A source that is already created cannot be removed here. It
+          // belongs to the project now, and is removed where resources are edited.
           <span className="ml-auto text-fine text-faint">added</span>
         )}
       </div>

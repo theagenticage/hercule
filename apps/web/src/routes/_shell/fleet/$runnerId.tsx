@@ -38,13 +38,13 @@ export const Route = createFileRoute("/_shell/fleet/$runnerId")({
 });
 
 /**
- * One machine: what it reported about itself, the four things its owner owns,
- * and the moves that take it out of service.
+ * The page for one runner: what the machine reported about itself, the fields
+ * its owner can edit, and the actions that take it out of service.
  *
- * Where a fleet row says only what is news, a page says every fact, so the
- * lifecycle is written out even when it is the ordinary one. A retired machine
- * has no move left to make, so its moves are gone; its record is still the
- * owner's to name and label.
+ * A fleet row shows only what is unusual, but this page shows every fact, so
+ * the lifecycle is shown even when it is the ordinary one. A retired runner
+ * has no actions left, so they are hidden; the owner can still edit its name
+ * and labels.
  */
 function RunnerPage(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
@@ -59,8 +59,8 @@ function RunnerPage(): JSX.Element {
   const stored = useSuspenseQuery(settingsQuery(client)).data.user.timezone ?? FALLBACK_TIMEZONE;
   const timezone = isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE;
   const sessions = useSuspenseQuery(runnerSessionsQuery(client, runnerId)).data.items;
-  // Ages read the clock, not the last invalidation, so a wait ticks upward on
-  // its own the same way a thread row's does.
+  // Ages are computed from a ticking clock, not from the last refetch, so a
+  // waiting time counts up on its own, as it does in a thread row.
   const now = useMinuteClock();
 
   return (

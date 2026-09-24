@@ -41,7 +41,7 @@ function renderLegendRow([mark, meaning]: [ReactNode, string]): JSX.Element {
   );
 }
 
-/** True while the keystroke belongs to something the user is typing into. */
+/** Checks whether a key event's target is a field the user is typing into. */
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return (
@@ -53,9 +53,9 @@ function isTyping(target: EventTarget | null): boolean {
 }
 
 /**
- * The marks legend: a toggle at the foot of the sidebar whose fly-out explains
- * the mark family. `?` opens it from anywhere, Esc closes it. It is never
- * permanently on a page.
+ * The marks legend: a toggle at the foot of the sidebar that opens a popover
+ * explaining the marks. `?` opens it from anywhere on the page, and Esc closes
+ * it. The legend is never permanently on a page.
  */
 export function MarksLegend(): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -87,7 +87,7 @@ export function MarksLegend(): JSX.Element {
         </div>
         {things.map(renderLegendRow)}
         <p className="mt-2 border-t border-line-soft pt-2 text-fine text-faint">
-          Toggle with <kbd className="font-mono">?</kbd> · Esc closes
+          Open with <kbd className="font-mono">?</kbd> · Esc closes
         </p>
       </PopoverContent>
     </Popover>

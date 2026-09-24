@@ -1,17 +1,23 @@
 /**
- * The "Worked for" / "Working for" divider: collapsed by default, expanding to
- * a quiet mono `verb · target · result` list per tool item (spec 14 §The
- * thread surface). The live reading ticks every second and carries the shimmer
- * in the live hue. `prefers-reduced-motion` drops the sweep and keeps the hue
- * (design language §Semantic encodings); that rule is the stylesheet's alone -
- * `.hercule-thread-shimmer` in `@hercule/ui` answers the media query - so there is
- * no second copy of it here to drift from it.
+ * The "Worked for" / "Working for" divider. It is collapsed by default and
+ * expands to a quiet mono list with one `verb · target · result` line per tool
+ * item (spec 14 §The thread surface).
+ *
+ * While the turn is live, the time updates every second and shimmers in the
+ * live colour. With `prefers-reduced-motion`, the shimmer stops and the colour
+ * stays (design language §Semantic encodings). Only the stylesheet handles
+ * that: `.hercule-thread-shimmer` in `@hercule/ui` has the media query, so
+ * there is no second copy of the rule here that could drift.
  */
 import { useEffect, useState, type JSX } from "react";
 import { cn } from "@hercule/ui";
 import { formatDuration, type ThreadItem } from "@hercule/client-core";
 
-/** A running item reads live; the one a request is parked on needs the reader. */
+/**
+ * Returns the text colour class for a tool item's result: the live colour
+ * while it runs, the attention colour while it awaits approval, and none
+ * otherwise.
+ */
 const chooseResultHue = (result: ThreadItem["result"]): string | undefined =>
   result === "running" ? "text-live" : result === "awaiting approval" ? "text-attn" : undefined;
 
@@ -23,9 +29,10 @@ export function TurnDivider({
 }: {
   readonly live: boolean;
   /**
-   * Milliseconds; null for a turn with no `turn.completed` row. A live turn
-   * reads its own elapsed time instead; one that is not live and still has no
-   * duration was abandoned rather than finished, so its reading omits a number.
+   * The turn's duration in milliseconds; null for a turn with no
+   * `turn.completed` row. A live turn shows its elapsed time instead. A turn
+   * that is not live and has no duration was abandoned rather than finished,
+   * so it shows no number.
    */
   readonly duration: number | null;
   readonly startedAt: string;
@@ -40,10 +47,9 @@ export function TurnDivider({
     return () => clearInterval(id);
   }, [live]);
 
-  // A turn that is neither live nor carries a duration was abandoned before
-  // `turn.completed` ever arrived - an interrupt, most often - so there is no
-  // honest number to read; "0s" would claim it finished instantly, which it
-  // did not.
+  // A turn that is not live and has no duration was abandoned before
+  // `turn.completed` arrived, most often by an interrupt. There is no true
+  // number to show, and "0s" would wrongly suggest it finished instantly.
   const reading = live
     ? `Working for ${formatDuration(now - Date.parse(startedAt))}`
     : duration === null

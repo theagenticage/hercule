@@ -3,11 +3,13 @@ import type { HerculeClient, LoginTarget } from "@hercule/client-core";
 import { ProviderLogin } from "../provider-login";
 
 /**
- * What fills the Log in affordance wherever one is offered: the draft's own
- * blocker, or an account's row in the model menu. The target names itself,
- * because the row offering the login is often not the account in force, and
- * it names its machine too - a credential lands on one machine and works only
- * there (spec 06 §3.1).
+ * Returns a function that renders the Log in button wherever one is offered:
+ * in the draft's blocker, or on an account's row in the model menu.
+ *
+ * The login drawer names its full target, such as `Log in to Claude Code on
+ * atlas`. It names the account because the row offering the login is often
+ * not the account in use. It names the machine because a credential is stored
+ * on one machine and works only there (spec 06 §3.1).
  */
 export const buildLoginSlot =
   (client: HerculeClient, onLoggedIn: () => void) =>

@@ -8,17 +8,17 @@ const LINES: ReadonlyArray<readonly [string, keyof RunnerFactsReading]> = [
   ["Memory", "memory"],
   ["Disk free", "diskFree"],
   ["Toolchains", "toolchains"],
-  // Not "Providers": the card below carries that word for the instances, and
-  // this line is the binaries the machine found on its PATH.
+  // Not "Providers": the card below uses that word for provider instances,
+  // and this line lists the binaries the machine found on its PATH.
   ["Harnesses", "providers"],
   ["Docker", "docker"],
   ["Binary", "binary"],
 ];
 
 /**
- * What the machine reported about itself. A fleet row runs these together
- * because it is scanned; a page is read, so each fact is named. None of it is
- * editable: the only way to change it is to make the machine report again.
+ * The facts the machine reported about itself, one labelled line each. A
+ * fleet row joins them into one line for scanning; this page labels each one.
+ * None of them are editable: they change only when the machine reports again.
  */
 export function RunnerFacts({ runner }: { readonly runner: RunnerDetail }): JSX.Element {
   const reading = describeRunnerFacts(runner);

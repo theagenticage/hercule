@@ -1,36 +1,39 @@
 /**
  * The thread's prose, rendered as markdown.
  *
- * `react-markdown` builds React elements rather than an HTML string, so an
- * agent that emits `<script>` gets visible characters back, and nothing has to
- * be configured for that to hold: the safety is in the renderer's shape. A
- * plugin that parsed raw HTML would take it away, so there is none.
+ * `react-markdown` builds React elements rather than an HTML string, so a
+ * `<script>` from an agent is shown as plain text. This safety needs no
+ * configuration; it comes from how the renderer works. A plugin that parses
+ * raw HTML would remove it, so none is used.
  *
- * The blocks carry design-language classes directly instead of a prose plugin:
- * the set of elements an agent actually emits is small, and every class below
- * is one the rest of the app already uses.
+ * The elements get design-language classes directly instead of a prose
+ * plugin: agents emit only a small set of elements, and every class below is
+ * already used elsewhere in the app.
  */
 import { Component, createElement, memo, type JSX, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
-/** What every rule below accepts: the renderer's own props, loosely. */
+/** The props every component below accepts: a loose subset of the renderer's props. */
 type Dressable = { readonly node?: unknown; readonly className?: string | undefined };
 
-/** The gap between two blocks, and none above the first one in its container. */
+/** The gap between two blocks, with no gap above the first block in its container. */
 const STACKED = "mt-3 first:mt-0";
 
-/** A heading takes more air above it than below: that gap is what groups it. */
+/** A heading has more space above it than below, which groups it with the text that follows. */
 const HEADING = "mt-5 first:mt-0";
 
 /**
- * One element of the prose, dressed.
+ * Returns a component that renders `tag` with the given classes.
  *
- * Two things this does beyond setting a class. It drops the hast node
- * `react-markdown` hands every component, which is not a DOM attribute. And it
- * appends to whatever class the renderer already put there rather than
- * replacing it: `sr-only` on the footnote label, for one, is load-bearing.
+ * Beyond setting the classes, the component does two things:
+ *
+ * - It drops the hast `node` prop that `react-markdown` passes to every
+ *   component, because it is not a DOM attribute.
+ * - It appends its classes to any class the renderer already set, rather than
+ *   replacing it. Some of those matter, such as `sr-only` on the footnote
+ *   label.
  */
 const createStyledComponent =
   (tag: string, className: string) =>
@@ -42,9 +45,10 @@ const createStyledComponent =
     });
 
 /**
- * A fenced block is the one card in the prose, built from the same tokens as
- * the user's bubble. The `<code>` inside it is stripped back, because the
- * inline rule dresses every `<code>` and a fenced one is already in a card.
+ * The classes for a fenced code block, the only card in the prose. It uses the
+ * same tokens as the user's message bubble. The `<code>` inside it has its
+ * inline-code styling removed, because the `code` rule styles every `<code>`
+ * and a fenced one is already in a card.
  */
 const FENCE =
   `${STACKED} overflow-x-auto rounded-card border border-line-soft bg-surface px-3 py-2.5 ` +
@@ -54,7 +58,7 @@ const FENCE =
 const CELL = "border border-line-soft px-2 py-1 align-top";
 
 /**
- * A table cell, with its column's alignment as a class.
+ * Renders a table cell, with its column's alignment as a class.
  *
  * `remark-gfm` puts the alignment of `|:---|---:|` in an inline `style`. This
  * function converts the alignment to a class and drops the style, so markdown
@@ -79,10 +83,10 @@ const renderTableCell = (
 };
 
 const components: Components = {
-  // The heading scale is shallow and stops one step above the body: an answer
-  // is prose with sections, not a document, and the thread's own title sits a
-  // few pixels away in the chrome. What separates a heading is the air above
-  // it and the weight, not the size.
+  // The heading sizes stay small, with the largest one step above the body
+  // text: an answer is prose with sections, not a document, and the thread's
+  // title is just above in the chrome. Headings stand out through the space
+  // above them and their weight, not their size.
   h1: createStyledComponent("h1", `${HEADING} text-lead font-emph text-ink`),
   h2: createStyledComponent("h2", `${HEADING} text-body font-emph text-ink`),
   h3: createStyledComponent("h3", `${HEADING} font-emph text-ink`),
@@ -90,12 +94,12 @@ const components: Components = {
   h5: createStyledComponent("h5", `${HEADING} font-emph text-ink`),
   h6: createStyledComponent("h6", `${HEADING} font-emph text-ink`),
   p: createStyledComponent("p", `${STACKED} leading-relaxed`),
-  // 500, not the browser's 700: heavier bolds squint in this face.
+  // Weight 500, not the browser's 700: heavier bold looks cramped in this font.
   strong: createStyledComponent("strong", "font-emph"),
-  // The link text is written by the agent and the target need not match it, so
-  // a click leaves this tab where it is and carries no referrer out. A link
-  // into the page itself - a footnote's number and its way back - is the
-  // exception: sending that to a new tab opens a second copy of the app.
+  // The agent writes the link text, and the target may not match it, so a
+  // click opens a new tab and sends no referrer. A link within the page, such
+  // as a footnote number and its back link, stays in this tab: opening it in
+  // a new tab would open a second copy of the app.
   a: (props) =>
     createElement("a", {
       ...props,
@@ -105,12 +109,12 @@ const components: Components = {
     }),
   ul: createStyledComponent("ul", `${STACKED} list-disc space-y-1 pl-5 marker:text-faint`),
   ol: createStyledComponent("ol", `${STACKED} list-decimal space-y-1 pl-5 marker:text-faint`),
-  // A list inside a list item belongs to that item, so it sits closer to it
+  // A nested list belongs to its list item, so it sits closer to the item
   // than two blocks of prose sit to each other.
   li: createStyledComponent("li", "leading-relaxed [&>ul]:mt-1 [&>ol]:mt-1"),
-  // A tint rather than a filled chip, because the same rule has to read on the
-  // page behind the prose and on the surface of the user's bubble; an alpha
-  // over either one shows, a second opaque colour over one of them does not.
+  // A translucent tint rather than an opaque chip, because inline code
+  // appears both on the page and inside the user's bubble. A translucent
+  // colour shows on both backgrounds; an opaque one would vanish on one of them.
   code: createStyledComponent(
     "code",
     "rounded-control bg-line-soft px-1 py-px font-mono text-[0.92em]",
@@ -132,13 +136,15 @@ const components: Components = {
 };
 
 /**
- * Deeply nested markdown - a few thousand `>` in a row will do it - overflows
- * the stack inside the parser, and that throw happens while React is
- * rendering. Without this the whole thread screen is replaced by the router's
- * failure panel, and because the message sits in the transcript it is replaced
- * again on every reload: one answer would make a thread permanently
- * unreadable. Falling back to the characters the agent sent keeps the answer
- * legible and the rest of the thread intact.
+ * An error boundary that shows the raw text when the markdown fails to render.
+ *
+ * Deeply nested markdown, such as a few thousand `>` in a row, overflows the
+ * stack inside the parser, and the error is thrown while React is rendering.
+ * Without this boundary, the router's failure screen would replace the whole
+ * thread screen. Because the message stays in the transcript, that would
+ * happen again on every reload, so one answer would make the thread
+ * permanently unreadable. Showing the raw text keeps the answer readable and
+ * the rest of the thread intact.
  */
 class Legible extends Component<
   { readonly text: string; readonly children: ReactNode },
@@ -166,10 +172,12 @@ class Legible extends Component<
 }
 
 /**
- * The thread rebuilds every turn from the transcript whenever a row lands, and
- * parsing is the expensive part of rendering one. The React Compiler already
- * caches this element on the text it is given; `memo` is what makes that hold
- * whether or not the compiler managed to compile the component above it.
+ * The thread's prose, rendered as markdown.
+ *
+ * The thread rebuilds every turn from the transcript whenever a new row
+ * arrives, and parsing is the expensive part of rendering a turn. The React
+ * Compiler already caches this element by its text; `memo` keeps that caching
+ * even when the compiler could not compile the parent component.
  */
 export const Markdown = memo(function Markdown({
   text,
@@ -177,16 +185,16 @@ export const Markdown = memo(function Markdown({
 }: {
   readonly text: string;
   /**
-   * Render a single newline as a line break. The composer's textarea makes
-   * ⇧⏎ the only way to type one, so a newline in what the user wrote is
-   * deliberate and CommonMark would swallow it as a soft break. An agent's
-   * prose keeps the soft break, which is what it wrote the newline to mean.
+   * Renders a single newline as a line break. In the composer, ⇧⏎ is the only
+   * way to type a newline, so a newline in the user's message is deliberate,
+   * and CommonMark would otherwise collapse it into a space. An agent's prose
+   * keeps CommonMark's behaviour, because that is what the agent meant.
    */
   readonly breaks?: boolean;
 }): JSX.Element {
-  // The blocks are returned bare, so the caller's box is their only parent:
-  // the thread's live tail has to sit beside them as a sibling, and a wrapper
-  // here would push it out of the prose it is finishing.
+  // The blocks are returned without a wrapper, so the caller's element is
+  // their direct parent. The thread's live tail must sit beside them as a
+  // sibling; a wrapper here would separate it from the prose it continues.
   return (
     <Legible text={text}>
       <ReactMarkdown

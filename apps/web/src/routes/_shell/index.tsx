@@ -11,8 +11,8 @@ import { readErrorMessage } from "../../screens/save-status";
 
 export const Route = createFileRoute("/_shell/")({
   staticData: { title: "Sessions" },
-  // Detection is awaited: a flash of "no runner has been detected" would send
-  // the reader off to start one they already have.
+  // Wait for local runner detection. Otherwise "No runner has been detected"
+  // could flash up and send the user off to start a runner they already have.
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
@@ -26,9 +26,9 @@ export const Route = createFileRoute("/_shell/")({
 });
 
 /**
- * The home screen, and the rest of onboarding: what it says is what the user
- * does next. Nothing starts a thread yet, so the button that would is disabled
- * with its reason rather than hidden.
+ * The home screen, which also finishes onboarding: it tells the user what to
+ * do next. Until a logged-in harness is ready, the Create new thread button is
+ * shown disabled, with the reason above it, rather than hidden.
  */
 function Sessions(): JSX.Element {
   const { client, queryClient, live, detectLocalRunner } = Route.useRouteContext();
@@ -45,8 +45,9 @@ function Sessions(): JSX.Element {
   const reread = (): void => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   };
-  // A login writes a credential the stored snapshot knows nothing about, so the
-  // machine is asked about the instance again before this screen believes it.
+  // A login writes a credential that the stored provider snapshot does not
+  // know about, so ask the machine to probe the instance again before this
+  // screen treats it as logged in.
   const probe = useMutation({
     mutationFn: (asked: { readonly runnerId: string; readonly instanceId: string }) =>
       client.runner.probe({
@@ -56,8 +57,8 @@ function Sessions(): JSX.Element {
     onSuccess: reread,
   });
 
-  // `local === null` is what narrows the type below; the state alone already
-  // says so.
+  // The state alone already covers `local === null`; the check is here so
+  // TypeScript narrows `local` for the code below.
   if (local === null || state.kind === "no-runner") {
     return (
       <Screen
@@ -102,8 +103,8 @@ function Sessions(): JSX.Element {
           const probeOfferedInstance = () => {
             probe.mutate({ runnerId: local.id, instanceId: row.id });
           };
-          // A provider credentialled with a value of the user's has no vendor
-          // to send them to; it asks for that value here instead.
+          // A provider that authenticates with a value the user supplies, such
+          // as an API key, has no vendor login page, so ask for the value here.
           return row.secretFields.length === 0
             ? [
                 <ProviderLogin
@@ -154,7 +155,7 @@ function Screen({
   readonly fine?: ReactNode;
   /** Whether a thread can actually be started from here yet. */
   readonly ready?: boolean;
-  /** What the last move on this screen failed with, if it failed. */
+  /** The error message of the last action on this screen, if it failed. */
   readonly failure?: string | null;
   readonly children?: ReactNode;
 }): JSX.Element {
@@ -179,7 +180,7 @@ function Screen({
   );
 }
 
-/** The harnesses on offer, read as a sentence rather than as a list. */
+/** Returns a headline sentence naming the harnesses found, such as "Claude Code and Codex were found on this machine." */
 const describeFoundHarnesses = (names: ReadonlyArray<string>): string =>
   names.length < 2
     ? `${names[0] ?? "A coding harness"} was found on this machine.`

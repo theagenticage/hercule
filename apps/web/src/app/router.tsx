@@ -1,8 +1,9 @@
 /**
  * The router, built from the generated route tree.
  *
- * History is a parameter rather than a default so the app and a test build the
- * same router: the app hands it the browser's, a test hands it one in memory.
+ * History is a parameter rather than a default, so the app and a test build the
+ * same router: the app passes the browser history, a test passes an in-memory
+ * one.
  */
 import { createRouter, type RouterHistory } from "@tanstack/react-router";
 import { routeTree } from "../routeTree.gen";
@@ -15,10 +16,10 @@ export const createAppRouter = (context: RouterContext, history: RouterHistory) 
     context,
     history,
     defaultPreload: "intent",
-    // `_shell/$` is pathless and sits at the top of the tree, so it answers
-    // every unknown address the router can parse. The default is for the ones
-    // it cannot: a path whose percent escapes do not decode never reaches a
-    // route, and so never reaches the shell.
+    // `_shell/$` sits at the top of the tree, so it catches every unknown
+    // path the router can parse. These defaults handle the paths it cannot: a
+    // path whose percent escapes do not decode never reaches a route, and so
+    // never reaches the shell.
     defaultErrorComponent: RenderFailure,
     defaultNotFoundComponent: NotFound,
   });
@@ -28,12 +29,12 @@ declare module "@tanstack/react-router" {
     router: ReturnType<typeof createAppRouter>;
   }
 
-  /** What a screen tells the shell about itself. The shell reads all three. */
+  /** Static data a screen declares for the shell. The shell reads all three fields. */
   interface StaticDataRouteOption {
     readonly title?: string;
-    /** The last-checked marker the screen is framed on, where it is framed on one. */
+    /** The last-checked marker the screen is based on, if it has one. */
     readonly sinceMarker?: "lastChecked.intake";
-    /** Set by a screen that renders its own chrome, so the shell's top bar stands down. */
+    /** Set by a screen that renders its own top bar, so the shell does not render one. */
     readonly ownsTopBar?: true;
   }
 }

@@ -19,13 +19,13 @@ import { Button, Drawer, Input, LaneLabel, PriorityGlyph, Row, Select } from "@h
 const NO_PROJECT = "";
 
 /**
- * One task in full, in the drawer over the list.
+ * The full view of one task, in the drawer over the list.
  *
- * Every edit here is one field, sent the moment it is made: there is no save
- * button, because a status the user has already moved is a status a triage
- * agent reading the same task should already see. Labels move one at a time for
- * the same reason. Provenance is the one thing that is only ever read - it is
- * the record of what made this task, and it is appended to, never edited.
+ * Each edit changes one field and is sent as soon as it is made. There is no
+ * save button, because a triage agent reading the same task should see a
+ * status change as soon as the user makes it. Labels are added and removed one
+ * at a time for the same reason. Provenance is read-only: it records what
+ * created the task, and it is only ever appended to, never edited.
  */
 export function TaskDetail({
   task,
@@ -38,7 +38,7 @@ export function TaskDetail({
   readonly task: Task;
   readonly projects: readonly Project[];
   readonly timezone: string;
-  /** What the controller answered, when it refused the last edit. */
+  /** The controller's error message, if the last edit failed. */
   readonly failure: string | undefined;
   readonly onEdit: (patch: TaskUpdateInput) => void;
   readonly onClose: () => void;
@@ -46,9 +46,9 @@ export function TaskDetail({
   const [label, setLabel] = useState("");
   const glyph = readPriorityGlyph(task.priority);
 
-  // A task keeps its project past that project's deletion, and the picker holds
-  // one page. Either way the task names a project the list does not, and the
-  // select must say so rather than fall through to "No project".
+  // A task keeps its project id after the project is deleted, and the project
+  // list holds only one page. In both cases the task's project is missing from
+  // the list, so add it by id rather than letting the select show "No project".
   const offered =
     task.projectId === undefined || projects.some((project) => project.id === task.projectId)
       ? projects

@@ -31,9 +31,9 @@ function Setup(): JSX.Element {
       <CenteredScreen title="Open the setup link">
         <p className="text-meta text-muted">
           {
-            "`hercule serve` printed a setup URL in the terminal. It carries the one-time token this "
+            "`hercule serve` printed a setup URL in the terminal. It contains the one-time token this "
           }
-          {"screen needs, so this is where you have to arrive from."}
+          {"screen needs, so open that URL to continue."}
         </p>
       </CenteredScreen>
     );
@@ -43,17 +43,17 @@ function Setup(): JSX.Element {
     event.preventDefault();
     setFailure(null);
 
-    // The timezone is never asked for here: the controller needs one from its
-    // first minute, and the browser already knows it.
+    // The form does not ask for a timezone: the controller needs one from the
+    // start, and the browser already knows it.
     const checked = validate(SetupForm, { username, password, timezone: resolveBrowserTimezone() });
     setErrors(checked.errors ?? {});
     if (checked.errors !== undefined) return;
 
     setSubmitting(true);
-    // The setup token is presented the way every other credential is, as the
-    // client's bearer, but it is never written where it would outlive the call:
-    // it is spent by the answer, and a tab closed mid-flight must leave no
-    // credential behind. A successful call replaces it with the login token.
+    // Send the setup token as the client's bearer token, like any other
+    // credential, but never store it: the call uses it up, and a tab closed
+    // during the call must leave no credential behind. A successful call
+    // replaces it with the login token.
     client.presentToken(token);
     try {
       await client.setup.complete({ payload: checked.value });
@@ -64,12 +64,12 @@ function Setup(): JSX.Element {
       return;
     }
 
-    // First run has happened and there is a user now, so nothing read before
-    // this point still holds.
+    // First run is complete and a user exists now, so everything cached before
+    // this point is out of date.
     queryClient.clear();
-    // The one-time token has been spent. Replacing the entry that carried it
-    // takes it out of the address bar and out of the back button at once; the
-    // entry guard sends the replacement on to the first onboarding step.
+    // The one-time token is used up. Replacing the history entry that holds it
+    // removes it from both the address bar and the back button. The entry
+    // guard then redirects to the first onboarding step.
     await navigate({ to: SETUP_PATH, search: { token: undefined }, replace: true });
   };
 

@@ -1,10 +1,10 @@
 /**
- * What a screen does with the live connection: nothing it has to think about.
+ * Keeps a screen's data current through the live connection.
  *
- * Records change under a screen all the time - an agent triages a task, a
- * machine goes quiet - so what is on screen is what the controller says it is
- * rather than what it said when the screen opened. A push names the reads that
- * moved and the cache fetches them again; the screen itself never learns of the
+ * Records change while a screen is open - an agent triages a task, a machine
+ * goes quiet - so a screen should show the controller's current state, not the
+ * state when the screen opened. Each push lists the query keys that changed,
+ * and the cache fetches them again. The screen itself never deals with the
  * socket.
  */
 import { useEffect } from "react";
@@ -12,7 +12,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { Live } from "@hercule/client-core";
 import type { MutableLiveTopic } from "@hercule/contract";
 
-/** Follows one topic for as long as the calling screen is mounted. */
+/** Subscribes to one topic while the calling component is mounted, and invalidates the query keys each push lists. */
 export const useLiveInvalidation = (
   live: Live,
   queryClient: QueryClient,

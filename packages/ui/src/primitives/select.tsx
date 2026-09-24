@@ -2,13 +2,13 @@ import type { ComponentProps, JSX } from "react";
 import { cn } from "./cn";
 
 /**
- * One choice out of a closed list, as the platform's own control.
+ * A dropdown for one choice from a fixed list, built on the native `<select>`.
  *
- * The native element carries typeahead, keyboard handling and a list the
- * browser can scroll at any length - a timezone list is four hundred entries -
- * and it renders nothing into the document that the served content policy has
- * to allow. It wears the same border, ground and focus treatment as `Input`,
- * with the platform's own arrow suppressed for the one drawn here.
+ * The native element brings typeahead, keyboard handling and a list the browser
+ * can scroll at any length (the time zone list has about four hundred entries).
+ * It also adds nothing to the document that the content security policy would
+ * have to allow. It uses the same border, background and focus style as
+ * `Input`; the browser's own arrow is hidden and an arrow is drawn here instead.
  */
 export function Select({ className, children, ...props }: ComponentProps<"select">): JSX.Element {
   return (

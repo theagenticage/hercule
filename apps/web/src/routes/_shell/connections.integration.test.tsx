@@ -1,16 +1,16 @@
 /**
- * Connections: what the screen says about the accounts Hercule acts through, and
- * what setting one up sends.
+ * Tests for the Connections screen: what it shows about the accounts Hercule
+ * acts through, and what it sends when the user sets one up.
  *
  * Everything the screen offers comes from the plugin catalog: the types, their
  * setup steps, their fields and their per-connection settings form. Nothing
- * about GitHub, Gmail or any other account is written into the web app, so the
- * fixtures below are types no plugin in this repository declares - a screen
- * that still shows something for them is a screen reading the catalog.
+ * about GitHub, Gmail or any other account is hard-coded in the web app, so the
+ * fixtures below are types that no plugin in this repository declares. If the
+ * screen still shows them, it must be reading the catalog.
  *
- * A credential value goes out on a write and never comes back: the wire record
- * carries references only, so a row has no value to leak and the assertions
- * about writes below are about what went out, not what came back.
+ * A credential value is sent in a request and never returned: the connection
+ * record holds only references to it. So a row has no value to leak, and the
+ * assertions below check what was sent, not what came back.
  */
 import { describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -56,7 +56,7 @@ interface Connection {
 
 const CHECKLIST = "Make a token with the repo scope, then paste it below.";
 
-/** A credentials flow: a checklist, one pasted field, and settings of its own. */
+/** A type with a credentials flow: a checklist, one pasted field, and its own settings. */
 const PAPER_TYPE = {
   type: "paper-trail/paper",
   displayName: "Paper Trail",
@@ -77,7 +77,7 @@ const PAPER_TYPE = {
   },
 };
 
-/** A redirect flow: nothing to paste, and no settings of its own. */
+/** A type with a redirect flow: nothing to paste, and no settings of its own. */
 const SKY_TYPE = {
   type: "skyline/mail",
   displayName: "Skyline",
@@ -89,7 +89,7 @@ const SKY_TYPE = {
   },
 };
 
-/** A flow the core does not run yet. */
+/** A type with a pairing flow, which the web app does not support yet. */
 const CHATTER_TYPE = {
   type: "chatterbox/chatter",
   displayName: "Chatterbox",
@@ -98,8 +98,8 @@ const CHATTER_TYPE = {
 
 const buildPlugin = (id: string, definition: { type: string; displayName: string }): Plugin => ({
   id,
-  // Named apart from the type it declares, because a row shows both: the type
-  // by its display name, the plugin under it.
+  // The plugin's name differs from its type's name, because a row shows both:
+  // the type's display name, and the plugin under it.
   displayName: `${id} plugin`,
   hostApi: 1,
   capabilities: ["connections"],
@@ -109,7 +109,7 @@ const buildPlugin = (id: string, definition: { type: string; displayName: string
   contributions: [{ extensionPoint: "connection-type", id: definition.type, definition }],
 });
 
-/** Installed, but contributing nothing a connection can be made of. */
+/** A plugin that is installed but contributes no connection type. */
 const BYSTANDER: Plugin = {
   id: "quiet-sink",
   displayName: "Quiet Sink",
@@ -155,7 +155,7 @@ const SKY: Connection = {
   updatedAt: "2026-09-12T07:05:00.000Z",
 };
 
-/** A controller holding `connections`, with the catalog above behind it. */
+/** Builds a stub controller that returns `connections` and the catalog above. */
 const buildController = (
   connections: () => readonly Connection[],
   extra: Readonly<Record<string, Handler>> = {},
@@ -183,7 +183,7 @@ const openApp = async (
   return {
     ...app,
     api,
-    /** What the controller answers with from now on, as a write would leave it. */
+    /** Replaces the connections the controller returns from now on, as a write would. */
     hold: (next: readonly Connection[]) => {
       held.splice(0, held.length, ...next);
     },
@@ -191,9 +191,9 @@ const openApp = async (
 };
 
 /**
- * The writes this screen made, in order. The shell opens a live connection on
- * every screen inside it, and the ticket it fetches is a POST nobody on this
- * screen asked for, so it is not one of them.
+ * Returns the writes this screen made, in order. The shell opens a live
+ * connection on every screen and fetches a ticket for it with a POST. This
+ * screen did not make that request, so it is left out.
  */
 const listWrites = (api: {
   readonly calls: readonly { method: string; path: string; body: unknown }[];
@@ -202,7 +202,7 @@ const listWrites = (api: {
 const countConnectionReads = (api: { readonly calls: readonly { path: string }[] }) =>
   api.calls.filter((call) => call.path === "/api/v1/connections").length;
 
-/** The nearest thing around `inner` that is a whole one of `name`. */
+/** Returns the nearest ancestor of `inner` that contains a button named `name`. */
 const findGroupOffering = (inner: HTMLElement, name: string): HTMLElement => {
   let group: HTMLElement | null = inner.parentElement;
   while (group !== null && within(group).queryByRole("button", { name }) === null) {
@@ -212,22 +212,22 @@ const findGroupOffering = (inner: HTMLElement, name: string): HTMLElement => {
   return group;
 };
 
-/** The row about one connection: what sits around the account it names. */
+/** Finds the row of one connection, starting from its account name. */
 const findConnectionRow = async (connection: Connection): Promise<HTMLElement> =>
   findGroupOffering(await screen.findByText(connection.displayName), "Delete");
 
-/** The row about one catalogued type in the empty state. */
+/** Finds the offer row of one catalogued type. */
 const findTypeOffer = async (displayName: string): Promise<HTMLElement> =>
   findGroupOffering(await screen.findByText(displayName), "Connect");
 
-/** The setup or settings form holding the field labelled `label`. */
+/** Returns the setup or settings form that holds the field labelled `label`. */
 const getFormWithField = (label: string | RegExp): HTMLElement => {
   const form = screen.getByLabelText(label).closest("form");
   if (form === null) throw new Error(`the field ${String(label)} is in no form`);
   return form;
 };
 
-/** What the input labelled `label` offers as suggestions, through its datalist. */
+/** Returns the suggestions in the datalist of the input labelled `label`. */
 const readSuggestions = (label: string): readonly string[] => {
   const input = screen.getByLabelText<HTMLInputElement>(label);
   const id = input.getAttribute("list");
@@ -236,7 +236,10 @@ const readSuggestions = (label: string): readonly string[] => {
   return [...list.querySelectorAll("option")].map((option) => option.value);
 };
 
-/** Whether the message shown is about that field and no other. */
+/**
+ * Checks that `message` is shown in the same group as `field`, and not in a
+ * group that also holds `other`.
+ */
 const expectMessageAtField = (
   message: string,
   field: HTMLElement,
@@ -268,23 +271,23 @@ describe("Connections", () => {
         false,
       );
     }
-    // The rows are the catalog and nothing else: not a plugin contributing to
-    // another extension point, and not a name the web app was once written to
-    // know about. The lead above them still names GitHub, Gmail, Discord and
-    // Slack - it is a sentence about what a connection is, not a row.
+    // The rows come only from the catalog: no row for a plugin that contributes
+    // to another extension point, and no hard-coded account name. The lead text
+    // above them still mentions GitHub, Gmail, Discord and Slack, but that text
+    // explains what a connection is and is not a row.
     const offered = screen
       .getAllByRole("button", { name: "Connect" })
       .map((connect) =>
         readPageText(findGroupOffering(connect, "Connect").querySelector<HTMLElement>("b")),
       );
     expect(offered).toEqual(["Paper Trail", "Skyline", "Chatterbox"]);
-    // Under each name, the plugin that declares the type: two plugins may
-    // declare one word, so the name alone does not say which this is.
+    // Each name has the plugin that declares the type under it, because two
+    // plugins may declare the same type name.
     expect(readPageText(await findTypeOffer("Paper Trail"))).toContain("paper-trail plugin");
     expect(readPageText(await findTypeOffer("Skyline"))).toContain("skyline plugin");
   });
 
-  it("offers two plugins declaring one word as two rows, told apart by the plugin under each", async () => {
+  it("shows two plugins that declare the same type name as two rows, each with its plugin", async () => {
     const buildGmailPlugin = (id: string): Plugin => ({
       ...buildPlugin(id, { type: `${id}/gmail`, displayName: "Gmail" }),
       contributions: [
@@ -316,7 +319,7 @@ describe("Connections", () => {
     expect(rows[1]).toContain("second plugin");
   });
 
-  it("says which account each connection is, where it stands and where it files", async () => {
+  it("shows each connection's account, status and topic", async () => {
     await openApp([PAPER, SKY]);
 
     const paper = readPageText(await findConnectionRow(PAPER));
@@ -343,7 +346,7 @@ describe("Connections", () => {
     expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(3);
   });
 
-  it("reads the list again when a connection changes elsewhere", async () => {
+  it("fetches the list again when a connection changes elsewhere", async () => {
     const { api, live, hold } = await openApp([PAPER]);
     await waitFor(() => {
       expect(live.topics()).toContain("connection");
@@ -360,7 +363,7 @@ describe("Connections", () => {
   });
 });
 
-describe("Connections > setting one up", () => {
+describe("Connections > setting up a connection", () => {
   const created: Connection = { ...PAPER, id: "0199c0ff-cccc-7000-8000-000000000003" };
 
   const fill = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
@@ -369,7 +372,7 @@ describe("Connections > setting one up", () => {
     await user.type(screen.getByLabelText("Default topic"), "Code");
   };
 
-  it("shows what the type asks for, and asks for it in secret", async () => {
+  it("shows the fields the type asks for, as password inputs", async () => {
     const user = userEvent.setup();
     await openApp([]);
 
@@ -377,7 +380,7 @@ describe("Connections > setting one up", () => {
       within(await findTypeOffer("Paper Trail")).getByRole("button", { name: "Connect" }),
     );
 
-    // The offers it replaced are gone, so the form names what is being set up.
+    // The form replaces the offers, so it has a heading naming what is set up.
     expect(readPageText()).toContain("Connect Paper Trail");
     expect(readPageText()).toContain(CHECKLIST);
     expect(screen.getByLabelText<HTMLInputElement>("Access token").type).toBe("password");
@@ -387,7 +390,7 @@ describe("Connections > setting one up", () => {
     );
   });
 
-  it("sends what was filled in, and shows the connection it made", async () => {
+  it("sends the filled-in values, and shows the new connection", async () => {
     const user = userEvent.setup();
     const { api, hold } = await openApp([], {
       "POST /api/v1/connections": { status: 201, body: created },
@@ -418,14 +421,14 @@ describe("Connections > setting one up", () => {
       credentials: { token: "pt-secret-9931" },
     });
 
-    // The setup is done with, and the row it made is on the page.
+    // The setup form is closed, and the new connection's row is on the page.
     await waitFor(() => {
       expect(screen.queryByLabelText("Access token")).toBeNull();
     });
     expect(readPageText(await findConnectionRow(created))).toContain("acct:paper-work");
   });
 
-  it("puts a refused credential's message under the field it was about", async () => {
+  it("shows a rejected credential's error under that field", async () => {
     const user = userEvent.setup();
     const complaint = "Paper Trail rejected that token";
     await openApp([], {
@@ -448,7 +451,7 @@ describe("Connections > setting one up", () => {
     );
   });
 
-  it("says pairing is not built yet rather than offering a form", async () => {
+  it("says pairing is not built yet instead of showing a form", async () => {
     const user = userEvent.setup();
     await openApp([]);
 
@@ -464,14 +467,17 @@ describe("Connections > a redirect flow", () => {
   const AUTHORIZATION_URL =
     "https://skyline.test/oauth/authorize?client_id=sky&state=s-1&code_challenge=c-1";
 
-  /** A window whose navigation a test can watch. jsdom performs none. */
+  /**
+   * Replaces `window.location` with one whose `assign` is a mock, and returns
+   * that mock. jsdom does not navigate.
+   */
   const watchNavigation = (): ReturnType<typeof vi.fn> => {
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, origin: window.location.origin, assign });
     return assign;
   };
 
-  it("shows the redirect URI to register, and hands the browser to the provider", async () => {
+  it("shows the redirect URI to register, and sends the browser to the provider", async () => {
     const user = userEvent.setup();
     const assign = watchNavigation();
     const { api } = await openApp([], {
@@ -504,19 +510,19 @@ describe("Connections > a redirect flow", () => {
     vi.unstubAllGlobals();
   });
 
-  it("says so on the way back from one that worked", async () => {
+  it("shows a success notice after a redirect that worked", async () => {
     await openApp([PAPER], {}, "/connections?oauth=ok");
 
     expect(readPageText(await screen.findByRole("status"))).toMatch(/connected/i);
   });
 
-  it("says what went wrong on the way back from one that did not", async () => {
+  it("shows what went wrong after a redirect that failed", async () => {
     await openApp([PAPER], {}, "/connections?oauth=denied");
 
     expect(readPageText(await screen.findByRole("alert"))).toContain("denied");
   });
 
-  it("does not echo a word it does not know back onto the screen", async () => {
+  it("does not show an unknown outcome value from the address", async () => {
     await openApp([PAPER], {}, "/connections?oauth=%3Cscript%3Eboom%3C%2Fscript%3E");
 
     const alert = readPageText(await screen.findByRole("alert"));
@@ -528,7 +534,7 @@ describe("Connections > a redirect flow", () => {
 describe("Connections > reconnecting and removing", () => {
   const STALE: Connection = { ...PAPER, status: "needs-reauth", statusDetail: "token revoked" };
 
-  it("pastes a fresh credential into the connection that already exists", async () => {
+  it("sends a fresh pasted credential for an existing connection", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([STALE], {
       [`POST /api/v1/connections/${STALE.id}/credentials`]: { body: PAPER },
@@ -555,7 +561,7 @@ describe("Connections > reconnecting and removing", () => {
     });
   });
 
-  it("starts a redirect flow against the connection that already exists", async () => {
+  it("starts a redirect flow for an existing connection", async () => {
     const user = userEvent.setup();
     vi.stubGlobal("location", {
       ...window.location,
@@ -582,7 +588,7 @@ describe("Connections > reconnecting and removing", () => {
     vi.unstubAllGlobals();
   });
 
-  it("asks before it removes a connection, then removes it", async () => {
+  it("asks for confirmation, then removes the connection", async () => {
     const user = userEvent.setup();
     const { api, hold } = await openApp([PAPER, SKY], {
       [`DELETE /api/v1/connections/${SKY.id}`]: { body: {} },
@@ -611,7 +617,7 @@ describe("Connections > reconnecting and removing", () => {
   });
 });
 
-describe("Connections > configuring one", () => {
+describe("Connections > configuring a connection", () => {
   it("shows the type's own settings beside the label and the topic", async () => {
     const user = userEvent.setup();
     const { api } = await openApp([PAPER], {
@@ -649,7 +655,7 @@ describe("Connections > configuring one", () => {
     });
   });
 
-  it("puts a refused setting's message under the setting it is about", async () => {
+  it("shows a rejected setting's error under that setting", async () => {
     const user = userEvent.setup();
     const complaint = "no such folder";
     await openApp([PAPER], {

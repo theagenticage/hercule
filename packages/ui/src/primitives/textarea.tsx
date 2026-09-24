@@ -1,7 +1,7 @@
 import type { ComponentProps, JSX } from "react";
 import { cn } from "./cn";
 
-/** A multi-line field, wearing exactly what the single-line one wears. */
+/** A multi-line text field, styled exactly like `Input`. */
 export function Textarea({ className, ...props }: ComponentProps<"textarea">): JSX.Element {
   return (
     <textarea

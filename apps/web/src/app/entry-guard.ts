@@ -1,15 +1,17 @@
 /**
- * Where a page load actually lands.
+ * The entry guard: decides where a page load actually lands.
  *
- * Four things stand between a URL and the screen behind it, and they are
- * ordered: an installation that has not been set up has nothing but the setup
- * screen, a visitor with no token has nothing but the login screen, a user with
- * onboarding left has that step, and everyone else gets the route they asked
- * for.
+ * The checks run in this order:
  *
- * This module only sequences. What the steps are, when onboarding is finished
- * and what clears a rejected token are all decided in `client-core`; nothing
- * here interprets a settings value or an error beyond routing on it.
+ * - an installation that has not been set up goes to the setup screen;
+ * - a visitor with no token goes to the login screen;
+ * - a user with an onboarding step left goes to that step;
+ * - everyone else gets the route they asked for.
+ *
+ * This module only puts the checks in order. `client-core` decides what the
+ * onboarding steps are, when onboarding is finished and when a rejected token
+ * is dropped. Nothing here interprets a settings value or an error beyond
+ * choosing a route from it.
  */
 import { ApiError, findNextOnboardingStep, type OnboardingStep } from "@hercule/client-core";
 import type { SettingsState } from "@hercule/contract";
@@ -20,7 +22,7 @@ export const HOME_PATH = "/";
 export const LOGIN_PATH = "/login";
 export const SETUP_PATH = "/setup";
 
-/** Where each onboarding step is answered. */
+/** The path of each onboarding step's screen. */
 const ONBOARDING_PATH = {
   timezone: "/onboarding/timezone",
 } as const satisfies Record<OnboardingStep, string>;
@@ -32,10 +34,10 @@ export type EntryPath =
   | typeof SETUP_PATH
   | (typeof ONBOARDING_PATH)[OnboardingStep];
 
-/** The screens that exist only before the app itself is reachable. */
+/** The screens that are only shown before the user can reach the app itself. */
 const BEFORE_THE_APP = new Set<string>([LOGIN_PATH, SETUP_PATH, ...Object.values(ONBOARDING_PATH)]);
 
-/** What the guard needs to know, as three questions. */
+/** The three reads the guard depends on, so a test can replace them. */
 export interface EntryDeps {
   readonly hasToken: () => boolean;
   readonly readSetup: () => Promise<{ readonly complete: boolean }>;
@@ -48,7 +50,7 @@ export const buildEntryDeps = ({ client, queryClient }: RouterContext): EntryDep
   readSettings: () => queryClient.ensureQueryData(settingsQuery(client)),
 });
 
-/** Where `pathname` must go instead, or `null` to let it through. */
+/** Returns the path to redirect `pathname` to, or `null` to let it through. */
 export const resolveEntry = async (
   deps: EntryDeps,
   pathname: string,

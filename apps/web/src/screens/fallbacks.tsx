@@ -5,18 +5,21 @@ import { HOME_PATH } from "../app/entry-guard";
 import { CenteredScreen } from "./centered-screen";
 
 /**
- * What the router shows when a screen cannot be shown.
+ * The screen the router shows when a screen fails to render.
  *
- * A render that throws must not take the app with it: without a boundary the
- * router replaces the whole tree with its own bare text, and the navigation
- * that would lead somewhere else goes with it. The message is shown rather
- * than swallowed, so the person reading it can say what happened.
+ * A render that throws must not take down the whole app. Without this
+ * boundary, the router replaces the whole tree with its own bare text, and
+ * the navigation goes with it. The error message is shown, not hidden, so the
+ * user can report what happened.
  *
- * Where it is drawn follows where the failure is. Inside the app shell the
- * sidebar and the top bar are still standing and only the content column is
- * empty, so the screen is a screen of the shell, the way a mistyped address
- * is. Outside it - the entry guard itself failing, before any of that is
- * mounted - there is nothing to keep, so it is the whole page.
+ * Where the screen appears depends on where the failure is:
+ *
+ * - Inside the app shell, the sidebar and top bar still work and only the
+ *   content column is empty. So the screen renders inside the shell, like the
+ *   not-found screen for a mistyped address.
+ * - Outside the shell, for example when the entry guard itself fails before
+ *   the shell is mounted, there is nothing to keep, so the screen takes the
+ *   whole page.
  */
 export function RenderFailure({ error }: { readonly error: Error }): JSX.Element {
   const inShell = useMatches().some((match) => match.routeId.startsWith("/_shell"));
@@ -45,15 +48,16 @@ export function RenderFailure({ error }: { readonly error: Error }): JSX.Element
   );
 }
 
-/** What both not-found screens are headed with. */
+/** The headline of both not-found screens. */
 export const NOT_FOUND_HEADLINE = "No screen here";
 
 /**
- * A path the router could not answer at all.
+ * The screen for a path the router cannot match at all.
  *
- * The pathless splat inside the shell answers every address that parses, which
- * leaves the ones that do not: a malformed percent escape (`/%zz`) fails to
- * decode before any route is matched, so there is no shell to draw this in.
+ * The catch-all route inside the shell matches every address that parses.
+ * This screen covers the ones that do not: a malformed percent escape
+ * (`/%zz`) fails to decode before any route is matched, so there is no shell
+ * to render inside.
  */
 export function NotFound(): JSX.Element {
   return (
@@ -66,7 +70,7 @@ export function NotFound(): JSX.Element {
   );
 }
 
-/** The way back that every fallback screen offers. */
+/** The link back to Sessions that every fallback screen offers. */
 export function HomeLink(): JSX.Element {
   return (
     <Link

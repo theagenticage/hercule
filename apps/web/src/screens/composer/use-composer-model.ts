@@ -24,10 +24,14 @@ import {
 } from "@hercule/client-core";
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
 
-/** Where the last models picked are kept; nothing on the API carries them. */
+/** The localStorage key for the recently picked models. The API does not store them. */
 const RECENT_KEY = "hercule.recentModels";
 
-/** A browser with no usable store loses Recent and nothing else. */
+/**
+ * Returns the recently picked models from localStorage, or an empty list when
+ * storage is unavailable or holds something unreadable. Without storage, only
+ * the Recent lane is lost.
+ */
 const readRecent = (): readonly RecentModel[] => {
   try {
     const held: unknown = JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? "[]");
@@ -40,13 +44,13 @@ const writeRecent = (recent: readonly RecentModel[]): void => {
   try {
     window.localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
   } catch {
-    // A convenience; losing it is not worth a word to anyone.
+    // Recent is only a convenience, so a failed write is ignored silently.
   }
 };
 export interface ComposerModel {
   readonly kind: ThreadKind;
   readonly config: ThreadConfig;
-  /** Every lock, blocker and resolved pick the composer draws from. */
+  /** Every lock, blocker and resolved pick the composer renders. */
   readonly fields: ComposerFields;
   readonly picks: ThreadPicks;
   readonly recent: readonly RecentModel[];
@@ -65,11 +69,14 @@ export interface ComposerModel {
 }
 
 /**
- * The one place a draft thread and an active one differ. A draft holds no
- * configuration of its own: its defaults are recomputed every render and the
- * picks lie over them, so a catalog arriving late - a login landing while the
- * draft is open - fills what the user has not picked. Below this hook nothing
- * knows which of the two it is drawing.
+ * Returns the composer's state and actions for a draft or an active thread.
+ * This hook is the only place that handles the difference between the two;
+ * the components below it do not know which kind they render.
+ *
+ * A draft stores no configuration of its own. Its defaults are recomputed on
+ * every render and the user's picks are applied on top. So a catalog that
+ * arrives late, such as after a login while the draft is open, fills in
+ * whatever the user has not picked.
  */
 export function useComposerModel(
   thread: Thread,
@@ -87,7 +94,8 @@ export function useComposerModel(
   const base = readThreadConfig(thread);
   const config = computeEffectiveConfig(base, picks);
   const fields = buildComposerFields(catalogs, config, thread.kind);
-  // Recent follows the submission home, and holds only what was picked.
+  // Recent is updated only after a successful send, and records only a model
+  // the user picked, not a default.
   const rememberRecentModel = (): void => {
     const model = picks.model ?? null;
     if (model === null || config.instanceId === null) return;
@@ -107,7 +115,8 @@ export function useComposerModel(
       client.session.input({ params: { id: sent.id }, payload: sent.payload }),
     onSuccess: async (_answer, sent) => {
       rememberRecentModel();
-      // The picks are cleared only once the row that holds them is in the cache.
+      // Clear the picks only after the updated session is in the cache, so the
+      // composer never falls back to the old configuration in between.
       await queryClient.invalidateQueries({ queryKey: queryKeys.session(sent.id) });
       setMessage("");
       setPicks({});
@@ -144,15 +153,15 @@ export function useComposerModel(
     sending: spawn.isPending || input.isPending,
     error: spawn.error ?? input.error ?? interrupt.error,
     setMessage,
-    // Folded against the thread's own configuration, never against the picks
-    // already made, so a pick landing back on it is not a pick at all.
+    // Each pick is compared with the thread's own configuration, not with
+    // earlier picks, so picking the configured value again clears the pick.
     pick: (...steps) => {
       setPicks((held) => steps.reduce((acc, step) => applyPick(catalogs, base, acc, step), held));
     },
     submit: () => {
-      // A draft spawns with the workspace the composer resolved, default
-      // included: a pick the user never touched is still where the thread
-      // works, and a workspace that already stands settles the machine too.
+      // A draft is spawned with the workspace the composer resolved, even when
+      // it is the default the user never touched. An existing workspace also
+      // fixes the machine.
       const workspace = fields.workspace.value;
       const settled = findRunnerForPick(workspace, catalogs.workspaces ?? []);
       const sent = buildSubmission(

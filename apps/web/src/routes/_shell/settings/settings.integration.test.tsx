@@ -8,13 +8,13 @@ const stored = {
   user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
 };
 
-/** A controller that answers `settings.update` with the store the patch makes. */
+/** Builds a stub controller that responds to `settings.update` with the settings after the patch. */
 const buildController = (update?: Handler): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/setup": { body: { complete: true } },
   "GET /api/v1/settings": { body: stored },
   "PATCH /api/v1/settings": update ?? applyPatch,
-  // Settings > Threads' four defaults read these; empty on purpose, this
-  // describe block is about the sidebar-rows control, not the defaults.
+  // The four defaults on Settings > Threads read these. They are empty on
+  // purpose: these tests are about the sidebar-rows control, not the defaults.
   "GET /api/v1/providers": { body: [] },
   "GET /api/v1/runners": { body: { items: [] } },
   "GET /api/v1/profiles": { body: { items: [] } },
@@ -59,7 +59,7 @@ describe("Settings > Profile", () => {
     }
   });
 
-  it("signs out even when the controller refuses the revocation", async () => {
+  it("signs out even when revoking the token fails", async () => {
     const user = userEvent.setup();
     const api = stubApi({
       ...buildController(),
@@ -76,8 +76,8 @@ describe("Settings > Profile", () => {
 
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
-    // A revocation the controller refused leaves the bearer working, so a
-    // connection left open would carry whoever signs in next on this one.
+    // A failed revocation leaves the old token valid, so a live connection
+    // left open would keep that session's access for whoever signs in next.
     await waitFor(() => {
       expect(live.connected()).toBe(false);
     });
@@ -88,8 +88,8 @@ describe("Settings > Profile", () => {
     expect(client.getToken()).toBeNull();
     expect(api.calls.some((call) => call.path === "/api/v1/auth/logout")).toBe(true);
 
-    // Nothing is read back without a bearer on the way out. A refetch would
-    // be queued rather than sent, so the queue is let run first.
+    // Nothing is fetched without a token after sign-out. A refetch would be
+    // queued rather than sent at once, so the queue runs first.
     await new Promise((resolve) => setTimeout(resolve, 0));
     const after = api.calls.slice(
       api.calls.findIndex((call) => call.path === "/api/v1/auth/logout"),
@@ -97,7 +97,7 @@ describe("Settings > Profile", () => {
     expect(after.filter((call) => call.path === "/api/v1/settings")).toEqual([]);
   });
 
-  it("shows a refused write as the API worded it", async () => {
+  it("shows a failed write's error message as the API sent it", async () => {
     const user = userEvent.setup();
     const api = stubApi(
       buildController({
@@ -114,7 +114,7 @@ describe("Settings > Profile", () => {
 });
 
 describe("Settings > Threads", () => {
-  it("opens on the default density and writes the one the user picks", async () => {
+  it("starts on the default row style and writes the one the user picks", async () => {
     const user = userEvent.setup();
     const api = stubApi(buildController());
     await renderApp({ path: "/settings/threads", api: api.fetch, token: "held" });
@@ -132,8 +132,8 @@ describe("Settings > Threads", () => {
     expect(api.calls.filter((call) => call.method === "PATCH")[0]?.body).toEqual({
       user: { "ui.threadRows": "plain" },
     });
-    // The answer replaces the cached store, so the screen and the sidebar both
-    // read the choice back without a refetch.
+    // The response replaces the cached settings, so the screen and the
+    // sidebar both show the choice without a refetch.
     expect(readChosenRowsOption()).toBe("plain");
   });
 });

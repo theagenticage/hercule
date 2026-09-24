@@ -7,10 +7,10 @@ import { inputsQuery } from "../../app/queries";
 import { readErrorMessage } from "../save-status";
 
 /**
- * The queued list above the composer: every `queued` row from a session's
- * input history, each with Steer and Cancel. A row a caller cannot
- * act on any more (delivered, cancelled) never reaches here - the query holds
- * the whole history, this filters to what is still waiting.
+ * The list of queued messages above the composer, each with Steer and Cancel.
+ * The query returns the session's whole input history; this component shows
+ * only the inputs still `queued`, because delivered or cancelled ones can no
+ * longer be acted on.
  */
 export function QueuedInputs({
   client,

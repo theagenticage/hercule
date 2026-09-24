@@ -16,16 +16,20 @@ import { Pulse } from "./pulse";
 import { ThreadsFace } from "./threads-face";
 
 /**
- * What the count slots hold. Nothing counts proposals, decisions or unseen
- * notifications yet, so every slot renders empty; the treatment, including the
- * attention hue the two that carry it use, is in place for the operations that
- * will fill them.
+ * The count shown beside each nav item that has one. Nothing counts proposals,
+ * decisions or unseen notifications yet, so every count is empty. The styling,
+ * including the attention hue on the check-in count, is ready for the
+ * operations that will fill them.
  */
 type Counts = Partial<Record<NonNullable<NavItem["count"]>, number>>;
 
 const NO_COUNTS: Counts = {};
 
-/** The attention hue is the check-in count's, wherever that count appears. */
+/**
+ * A number beside a nav item, hidden when it is zero or missing. `attention`
+ * draws it in the attention hue, which the check-in count uses wherever it
+ * appears.
+ */
 function Count({
   value,
   attention = false,
@@ -113,10 +117,10 @@ function OrchestrationFace({
 }
 
 /**
- * One sidebar with two faces. The face follows the screen and the switch
- * overrides it for as long as the user stays on that screen: navigating puts
- * the screen back in charge. The check-in count sits on the Hercule segment so
- * the orchestration side never hides while the user works in threads.
+ * The sidebar, with two faces: threads and orchestration. The current screen
+ * picks the face. The segmented switch overrides that choice until the user
+ * navigates to another path. The check-in count sits on the Hercule segment,
+ * so it stays visible while the user works on the threads face.
  */
 export function Sidebar({
   settings,

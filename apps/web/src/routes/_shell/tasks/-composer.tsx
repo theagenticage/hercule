@@ -11,11 +11,11 @@ import { validate, type FieldErrors } from "../../../app/form";
 const NO_PROJECT = "";
 
 /**
- * A task written by hand.
+ * The form for writing a task by hand.
  *
- * The form is checked against the very schema the controller checks it with,
- * so a title that is too long is refused here in the same words rather than
- * after a round trip.
+ * The form is validated with the same schema the controller uses, so a title
+ * that is too long is rejected here with the same message, without a round
+ * trip.
  */
 export function TaskComposer({
   projects,
@@ -26,7 +26,7 @@ export function TaskComposer({
 }: {
   readonly projects: readonly Project[];
   readonly pending: boolean;
-  /** What the controller answered, when it refused the last attempt. */
+  /** The controller's error message, if the last attempt failed. */
   readonly failure: string | undefined;
   readonly onCreate: (input: TaskCreateInput) => void;
   readonly onCancel: () => void;

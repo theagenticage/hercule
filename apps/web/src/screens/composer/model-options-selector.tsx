@@ -8,12 +8,13 @@ import { SelectorShell } from "./selector-shell";
 const HEADER = "Model options";
 
 /**
- * What is picked under the model: one labelled segmented row per descriptor
- * the model declares, verbatim - no free-text entry anywhere, since the
- * choices are the provider's own.
+ * The selector for the model's options: one labelled segmented control per
+ * option the model declares, shown as declared. There is no free-text entry,
+ * because the provider defines the choices.
  *
- * The selector wears its own value (`high ⚡`) rather than a name, at a fixed
- * minimum width, so the pill beside it never moves as the value changes.
+ * The trigger shows the current value (`high ⚡`) rather than a name, at a
+ * fixed minimum width, so the model pill beside it does not move when the
+ * value changes.
  */
 export function ModelOptionsSelector({
   descriptors,
@@ -27,7 +28,7 @@ export function ModelOptionsSelector({
 }: {
   readonly descriptors: readonly ModelOption[];
   readonly selected: Readonly<Record<string, string | boolean>>;
-  /** The value in one word, or nothing to say - then the selector names itself. */
+  /** The current value in one word, or null to show the "Model options" header as the label. */
   readonly label: string | null;
   readonly modelName: string | null;
   readonly disabled: boolean;

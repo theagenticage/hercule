@@ -26,7 +26,7 @@ export const Route = createFileRoute("/_shell/sessions/")({
   component: AllSessions,
 });
 
-/** The pinned lane order, and the heading a non-empty lane shows. */
+/** The heading of each lane. The lane order comes from `buildLanes`. */
 const LANE_LABELS: Readonly<Record<LaneKind, string>> = {
   waiting: "Waiting on you",
   running: "Running",
@@ -39,8 +39,8 @@ function AllSessions(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
 
   useLiveInvalidation(live, queryClient, "session");
-  // The headline and every row's age read the clock, so they tick on their
-  // own rather than waiting for the next invalidation.
+  // The headline and every row's age are computed from this clock, so they
+  // update every minute rather than waiting for the next invalidation.
   const now = useMinuteClock();
 
   const sessions = useSuspenseQuery(sessionsQuery(client)).data.items;
@@ -49,10 +49,9 @@ function AllSessions(): JSX.Element {
   const providerNames = new Map(instances.map((instance) => [instance.id, instance.displayName]));
   const sessionsById = new Map<string, Session>(sessions.map((session) => [session.id, session]));
 
-  // `buildHeadline` already reads "No sessions yet" when the list is empty, and
-  // an empty list leaves every lane empty too - so the empty state is just
-  // this same header with nothing rendered below it, not a second block
-  // repeating what the header already says.
+  // `buildHeadline` returns "No sessions yet" for an empty list, and every lane
+  // is empty too. So the empty state is this same header with nothing below
+  // it, rather than a second block that repeats the header.
   const lanes = buildLanes(sessions).filter((lane) => lane.sessions.length > 0);
 
   return (

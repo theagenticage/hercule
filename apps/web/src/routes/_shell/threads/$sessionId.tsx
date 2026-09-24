@@ -17,11 +17,13 @@ import {
 import { ThreadScreen } from "../../../screens/thread/thread-screen";
 
 /**
- * A thread: the screen renders its own chrome, title and all, so the shell's
- * top bar stands down here. The transcript is fetched before the route renders
- * so the first paint is never a spinner over an empty column. The composer at
- * the foot reads the provider instances and the fleet, so its model menu and
- * its locked fields have something to read the moment the thread does.
+ * The thread screen. The screen draws its own header, title included, so the
+ * shell's top bar is hidden here.
+ *
+ * The loader fetches the transcript before the route renders, so the first
+ * paint is never a spinner over an empty column. It also fetches the provider
+ * instances and the runners, because the composer at the bottom needs them
+ * for its model menu and its locked fields as soon as the thread shows.
  */
 export const Route = createFileRoute("/_shell/threads/$sessionId")({
   staticData: { title: "Thread", ownsTopBar: true },
@@ -31,12 +33,11 @@ export const Route = createFileRoute("/_shell/threads/$sessionId")({
       context.queryClient.ensureQueryData(transcriptQuery(context.client, params.sessionId)),
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
       context.queryClient.ensureQueryData(providersQuery(context.client)),
-      // What the chrome names beside the title: the project this thread is
-      // in, and the other threads in its workspace. Prefetched rather than
-      // ensured, for the reason the draft route gives - a controller that
-      // cannot list them leaves a thread with a plainer chrome, not a screen
-      // the user cannot reach - but prefetched all the same, so the crumb and
-      // the tabs are there at the first paint instead of popping in.
+      // The header shows the thread's project and the other threads in its
+      // workspace. These lists are prefetched rather than ensured: if the
+      // controller cannot list them, the header is plainer, but the screen
+      // still opens. They are still fetched here so the breadcrumb and the
+      // tabs are there at the first paint instead of popping in later.
       context.queryClient.prefetchQuery(projectsQuery(context.client)),
       context.queryClient.prefetchQuery(resourcesQuery(context.client)),
       context.queryClient.prefetchQuery(workspacesQuery(context.client)),
@@ -56,10 +57,10 @@ function ThreadRoute(): JSX.Element {
   const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
   const timezone = isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE;
 
-  // Keyed on the session: the router does not remount this component for a
-  // param-only navigation, and this screen holds per-thread state (the live
-  // tap's buffer, the seeded stream cursor, the composer's own) that must not
-  // carry over from the thread just left to the one just opened.
+  // The key is the session id. The router does not remount this component
+  // when only the param changes, and the screen holds per-thread state (the
+  // live tap's buffer, the stream cursor, the composer's state). A new key
+  // makes sure none of that carries over from the previous thread.
   return (
     <ThreadScreen
       key={sessionId}

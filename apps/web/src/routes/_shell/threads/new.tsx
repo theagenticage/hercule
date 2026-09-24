@@ -16,20 +16,23 @@ import {
 import { Composer } from "../../../screens/composer/composer";
 import { ThreadChrome, ThreadColumn } from "../../../screens/thread/thread-chrome";
 
-/** Where a draft opens: the project it belongs to, and the workspace it joins. */
+/** The search params of a draft: the project it belongs to, and the workspace it joins. */
 interface DraftSearch {
   readonly project?: string;
   readonly workspace?: string;
 }
 
 /**
- * A draft thread (spec 14 §The composer): "Creating a thread is one step,
- * after the project." A static route, so it must resolve ahead of the param
- * route beside it (`$sessionId.tsx`) rather than reading "new" as a session id
- * - TanStack Router ranks a static segment above a param one on its own.
+ * The draft thread screen (spec 14 §The composer): "Creating a thread is one
+ * step, after the project."
  *
- * The project picker, a project's `+` and a workspace's `+` all land here with
- * the address saying where the draft stands; nothing else carries that.
+ * This is a static route, so `/threads/new` must match it and not the param
+ * route beside it (`$sessionId.tsx`), which would read "new" as a session id.
+ * TanStack Router ranks a static segment above a param segment by itself.
+ *
+ * The project picker, a project's `+` and a workspace's `+` all open this
+ * route. Only the URL search params record which project and workspace the
+ * draft belongs to.
  */
 export const Route = createFileRoute("/_shell/threads/new")({
   staticData: { title: "New thread", ownsTopBar: true },
@@ -43,9 +46,10 @@ export const Route = createFileRoute("/_shell/threads/new")({
       context.queryClient.ensureQueryData(providersQuery(context.client)),
       context.queryClient.ensureQueryData(profilesQuery(context.client)),
       context.queryClient.ensureQueryData(settingsQuery(context.client)),
-      // The catalogs the workspace menu reads. Prefetched rather than ensured:
-      // a controller that cannot answer them leaves a draft with no project to
-      // stand in, which is a composer with fewer choices, not a broken screen.
+      // The lists the workspace menu reads. They are prefetched rather than
+      // ensured: if the controller cannot list them, the draft has no project
+      // to choose from. The composer then offers fewer choices, but the screen
+      // still works.
       context.queryClient.prefetchQuery(projectsQuery(context.client)),
       context.queryClient.prefetchQuery(resourcesQuery(context.client)),
       context.queryClient.prefetchQuery(workspacesQuery(context.client)),
@@ -79,11 +83,13 @@ function NewThread(): JSX.Element {
     localRunnerId,
   );
 
-  // Resolved every render rather than snapshotted: a login landing while the
-  // draft is open has to reach it, and the composer lays the picks over this.
-  // The address is handed over as it stands - where the draft opens, and the
-  // workspace it joins if it names one. What a draft that names none opens in,
-  // and which machine a joined workspace settles, are the composer's to decide.
+  // The config is rebuilt on every render instead of being captured once, so
+  // a provider login that finishes while the draft is open still reaches it.
+  // The composer applies the user's picks on top of this config.
+  //
+  // The search params are passed on unchanged: the project, and the workspace
+  // to join if there is one. The composer decides where a draft with no
+  // workspace opens, and which runner a joined workspace uses.
   const config = {
     ...defaults,
     options: {},

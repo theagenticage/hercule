@@ -11,14 +11,13 @@ import {
 import { joinTokensQuery } from "../../../app/queries";
 
 /**
- * The spot a machine is enlisted from: the command that spends a token, and the
- * tokens already outstanding.
+ * The card for adding a machine to the fleet: the command that uses a join
+ * token, and the tokens that are still unused.
  *
- * A token is minted before the operator gets to the machine, so the ones still
- * live are listed with the invitation rather than left as something only the
- * database knows. Whether the machine is personal is answered here because it
- * is set at enlistment and nowhere else; a machine already in the fleet has the
- * tick on its own page.
+ * - A token is created before the operator gets to the machine, so the unused
+ *   tokens are listed here rather than known only to the database.
+ * - The "personal machine" checkbox is here because the join command sets it.
+ *   A machine already in the fleet has the same checkbox on its own page.
  */
 export function AddMachine({
   client,
@@ -57,8 +56,8 @@ export function AddMachine({
     <section className="flex max-w-[560px] flex-col items-start gap-1 rounded-card border border-dashed border-line px-4 py-3 text-row text-muted">
       {command === undefined ? (
         <>
-          {/* Before a token exists the action is the whole of this spot, so it
-              carries the name rather than repeating one above itself. */}
+          {/* Before a token exists, the button is the card's only action, so it
+              doubles as the card's title. */}
           <Button
             variant="primary"
             className="-ml-2"
@@ -80,7 +79,7 @@ export function AddMachine({
         </>
       )}
 
-      {/* Above the command, because it is what the command says. */}
+      {/* Above the command, because the checkbox changes the command. */}
       <div className="pt-1.5">
         <Checkbox
           label="Personal machine - only runs work you send to it"
@@ -96,8 +95,8 @@ export function AddMachine({
           <code className="mt-1.5 rounded-[4px] bg-line-soft px-1.5 py-px font-mono text-fine break-all text-muted">
             {command}
           </code>
-          {/* A fleet is enlisted one machine at a time and each needs a token of
-              its own, so there is a way to the next one without a reload. */}
+          {/* Each machine needs its own token, so the user can create the next
+              one without a reload. */}
           <Button
             className="-ml-2 mt-1.5"
             onClick={() => {
@@ -116,8 +115,8 @@ export function AddMachine({
         <ul className="mt-2 flex w-full flex-col gap-0.5 border-t border-line-soft pt-2">
           {outstanding.map((token) => (
             <li key={token.id} className="flex items-baseline gap-2 text-fine">
-              {/* Two tokens minted in the same minute read alike, so each says
-                  which one it is: the tail is what the revoke names. */}
+              {/* Two tokens created in the same minute look alike, so each shows
+                  the tail of its id to tell them apart. */}
               <span className="min-w-0 flex-1 truncate text-muted">
                 Token <code className="font-mono text-faint">{toIdTail(token.id)}</code> expires{" "}
                 {formatStamp(new Date(token.expiresAt), timezone)}

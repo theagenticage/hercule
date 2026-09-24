@@ -4,10 +4,12 @@ import type { ThreadRow } from "@hercule/client-core";
 import { DoneMark, WorkingMark, cn } from "@hercule/ui";
 
 /**
- * One thread row: the sidebar and All sessions both render `buildThreadRows`'
- * output this way, differing only in what they pass as the second line (a
- * model slug in the sidebar's meta mode, a provider display name on All
- * sessions) and whether a row can be the open thread.
+ * One thread row. The sidebar and All sessions both render the output of
+ * `buildThreadRows` with it. They differ only in:
+ *
+ * - the second line: a model slug in the sidebar's meta mode, a provider
+ *   display name on All sessions;
+ * - whether a row can be marked as the open thread.
  */
 export function ThreadRowView({
   mark,

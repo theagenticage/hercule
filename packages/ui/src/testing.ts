@@ -1,13 +1,12 @@
 /**
- * A `localStorage` that lives in memory for one test.
+ * Creates an in-memory `localStorage` for one test, filled from `seed`.
  *
- * Whether a jsdom has a `localStorage` of its own depends on the Node it runs
- * under, which is why the code under test reaches the real one through a try.
- * A stub makes both read the same: every render starts from the seed it was
- * given and nothing one test writes reaches the next. The app's own test
- * harness (`apps/web/src/app/testing.tsx`) reaches for this through the
- * package's `/testing` subpath, the way `@hercule/client-core/testing` is
- * reached for.
+ * Whether jsdom provides a `localStorage` depends on the Node version it runs
+ * under, which is why the code under test wraps its storage access in a try.
+ * With this stub both cases behave the same: every render starts from the
+ * given seed, and nothing one test writes reaches the next. The web app's test
+ * harness (`apps/web/src/app/testing.tsx`) imports it from this package's
+ * `/testing` subpath, as it imports `@hercule/client-core/testing`.
  */
 export const createMemoryStorage = (seed: Readonly<Record<string, string>> = {}): Storage => {
   const held = new Map(Object.entries(seed));

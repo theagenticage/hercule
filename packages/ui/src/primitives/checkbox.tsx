@@ -2,10 +2,11 @@ import type { ComponentProps, JSX } from "react";
 import { cn } from "./cn";
 
 /**
- * The name is part of the control rather than a label stacked above it: a lone
- * box under a heading leaves the reader working out which of the two the tick
- * belongs to, and the whole row is a bigger thing to hit. Wearing `Input`'s
- * border and focus means the platform's box is off and the tick is drawn here.
+ * A checkbox with its label beside it, inside one clickable element. A label
+ * stacked above a lone box leaves the reader guessing what the tick belongs
+ * to, and the whole row is a bigger click target. The browser's own box is
+ * hidden so the checkbox can use `Input`'s border and focus style, and the
+ * tick is drawn here instead.
  *
  * A checked box is filled with ink, like a switch that is on. It uses no
  * colour, because the design language uses colour only at the size of a word

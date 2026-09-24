@@ -17,10 +17,9 @@ import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 import { Naming } from "./-naming";
 
 /**
- * What the user decides about a connection after it exists: its label, its
- * topic, and whatever settings its type declares. Never the account and never
- * the credential - those are the type's answer and the setup's, and neither is
- * editable here.
+ * The form that edits an existing connection: its label, its topic, and the
+ * settings its type declares. The account and the credential are fixed at
+ * setup, so this form does not edit them.
  */
 export function ConfigureConnection({
   client,
@@ -63,12 +62,13 @@ export function ConfigureConnection({
     },
   });
 
-  // A setting the type refused belongs under the setting it named; anything
-  // else refused is the form's own to say.
+  // An error about one setting is shown under that setting; any other error
+  // is shown at the bottom of the form.
   const issues = readConfigIssues(save.error, fields, "config");
   const failure = issues.rest ? save.error : null;
 
-  // What the last save was refused for is about what was in the fields then.
+  // Clears the last save's error on any edit, because that error was about
+  // the values the fields held then.
   const edit = (): void => {
     if (!save.isIdle) save.reset();
   };
@@ -116,7 +116,7 @@ export function ConfigureConnection({
         </Button>
       </div>
 
-      {/* The form closes on a save that worked, so only a refusal is shown. */}
+      {/* The form closes after a successful save, so only a failure is shown here. */}
       <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
     </form>
   );

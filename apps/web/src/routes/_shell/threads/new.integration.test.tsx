@@ -1,22 +1,19 @@
 /**
- * The composer on a draft thread over a stubbed controller, plus the routing
- * check that `/threads/new` is a static route rather than `$sessionId` reading
- * "new" as a session id.
+ * Tests the composer on a draft thread against a stubbed controller. Also
+ * checks that `/threads/new` matches the static route, and that the
+ * `$sessionId` route does not read "new" as a session id.
  *
- * Driven only through `renderApp` and the stubbed `fetch` - never by reaching
- * into the screen's own modules.
+ * The tests drive the app only through `renderApp` and the stubbed `fetch`.
+ * They never import the screen's own modules.
  *
- * Decisions made where the SPEC does not pin an exact rendering detail:
- * - The `+` and voice buttons expose their disabled reason via a `title`
- *   attribute (`screen.getByTitle(...)`), there being no established
- *   lone-icon-button convention in this codebase to follow (`ListRow`'s
- *   "dimmed, second line" rule is for menu rows).
- * - The send control's accessible name contains "send".
- * - The model pill's effort segment is the chosen choice's `label` (e.g.
- *   "Medium"), not its `value` ("medium") - spec 14's own example
- *   ("claude-sonnet-5 · medium") is illustrative prose, not one of this
- *   SPEC's locked ACs, and "effort label" in AC-15's own wording points at
- *   the descriptor's `label` field.
+ * Where the spec leaves a rendering detail open, these tests assume:
+ * - The `+` and voice buttons show why they are disabled in a `title`
+ *   attribute (`screen.getByTitle(...)`). The codebase has no convention yet
+ *   for a lone icon button; `ListRow`'s "dimmed, second line" rule is for
+ *   menu rows.
+ * - The send button's accessible name contains "send".
+ * - The model options selector is labelled with the chosen effort choice's
+ *   `label` in lower case (e.g. "Medium" shows as "medium").
  */
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -223,9 +220,9 @@ const buildController = (
   "GET /api/v1/providers": { body: instances },
   "GET /api/v1/runners": { body: { items: [RUNNER] } },
   "GET /api/v1/profiles": { body: { items: [PROFILE_UNRESTRICTED, PROFILE_WORKER] } },
-  // Where AC-18's navigation lands: a stub for whichever id a test's spawn
-  // answers with, so the destination route's own loader does not 404 the
-  // navigation this test is really about.
+  // After a send, the app navigates to the new thread. These stubs
+  // serve the session that the spawn returns, so the thread route's loader
+  // does not fail with a 404 and break the navigation under test.
   [`GET /api/v1/sessions/${NEW_SESSION.id}`]: { body: NEW_SESSION },
   [`GET /api/v1/sessions/${NEW_SESSION.id}/transcript`]: { body: { items: [] } },
   ...extra,
@@ -248,7 +245,7 @@ const openApp = async (
   return { ...app, api };
 };
 
-describe("Composer: draft defaults (AC-15)", () => {
+describe("Composer: draft defaults", () => {
   it("prefills from the spawn defaults when no thread.* setting is stored", async () => {
     await openApp([INSTANCE_A]);
 
@@ -256,14 +253,14 @@ describe("Composer: draft defaults (AC-15)", () => {
 
     expect(screen.getByRole("textbox")).toBeDefined();
 
-    const attach = screen.getByTitle<HTMLButtonElement>("attachments are not built");
+    const attach = screen.getByTitle<HTMLButtonElement>("Attachments are not built yet");
     expect(attach.disabled).toBe(true);
 
-    const voice = screen.getByTitle<HTMLButtonElement>("dictation is not built");
+    const voice = screen.getByTitle<HTMLButtonElement>("Dictation is not built yet");
     expect(voice.disabled).toBe(true);
 
-    // The model pill names the default model; its options sit in the selector
-    // beside it, labelled with the effort choice "Medium" lower-cased.
+    // The model pill shows the default model. Its options are in the selector
+    // next to it, labelled with the effort choice "Medium" in lower case.
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Claude Sonnet 5" })).toBeDefined();
     });
@@ -286,8 +283,9 @@ describe("Composer: draft defaults (AC-15)", () => {
       "thread.profileId": PROFILE_WORKER.id,
     });
 
-    // Two accounts of one provider, so the pill names which; claude-haiku-5
-    // carries no options, so no options selector renders beside it.
+    // There are two accounts of one provider, so the pill includes the
+    // account name. claude-haiku-5 has no options, so no options selector
+    // appears next to the pill.
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "work Claude Haiku 5" })).toBeDefined();
     });
@@ -296,16 +294,16 @@ describe("Composer: draft defaults (AC-15)", () => {
 });
 
 describe("Composer: a fresh install, nothing logged in on the one runner yet", () => {
-  it("shows the pill with only the parts it has, never a dangling separator, when there is no model to offer", async () => {
+  it("shows only the pill parts it has, with no dangling separator, when there is no model to offer", async () => {
     await openApp([INSTANCE_FRESH]);
 
-    // No model to name, and no dangling separator left over from one.
+    // There is no model to show, and no separator is left over.
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "No model" })).toBeDefined();
     });
   });
 
-  it("names the runner in its own trigger, dimmed with its reason, instead of the bare word Runner", async () => {
+  it("shows the runner's name and why it is dimmed on the runner button, not just the word Runner", async () => {
     await openApp([INSTANCE_FRESH]);
 
     await waitFor(() => {
@@ -316,21 +314,22 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
     expect(screen.queryByRole("button", { name: "Runner" })).toBeNull();
   });
 
-  it("says why the draft cannot start, with no Log in to offer on a machine the instance was never found on", async () => {
+  it("explains why the draft cannot start, and offers no Log in on a machine where the instance was never found", async () => {
     await openApp([INSTANCE_FRESH]);
 
-    // Nothing has ever probed this instance on the one runner, so there is no
-    // login to offer there - only the reason.
+    // This instance was never probed on the only runner, so there is nothing
+    // to log in to there. The screen shows only the reason.
     await waitFor(() => {
       expect(readPageText()).toContain(`Can't start yet. Claude Code is not on ${RUNNER.name}.`);
     });
     expect(screen.queryByRole("button", { name: "Log in" })).toBeNull();
   });
 
-  it("keeps send disabled with the reason, rather than spawning a payload of empty ids", async () => {
-    // Nothing is logged in, so `buildRunnerMenu` offers no selectable row and the
-    // draft runner, model and profile stay null. Sending would post ids the
-    // contract's own `Id` refuses, naming fields the user never touched.
+  it("keeps send disabled and shows the reason, instead of spawning with empty ids", async () => {
+    // Nothing is logged in, so `buildRunnerMenu` offers no selectable row, and
+    // the draft's runner, model and profile stay null. Sending would post ids
+    // that the contract's `Id` schema rejects, and the error would be about
+    // fields the user never touched.
     const user = userEvent.setup();
     const { api } = await openApp([INSTANCE_FRESH]);
 
@@ -360,28 +359,28 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
   });
 });
 
-describe("Composer: selector popovers (AC-16)", () => {
+describe("Composer: selector popovers", () => {
   it("opens one popover at a time, closes on Esc and on an outside click, and keeps typed text", async () => {
     const user = userEvent.setup();
     await openApp();
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
 
-    // D-20b: the workspace selector of a project-less draft is locked text
-    // now, so the pair of selectors driven here is the machine and the model.
+    // On a draft with no project, the workspace selector is locked text, so
+    // this test uses the machine and model selectors.
     await user.click(screen.getByRole("button", { name: /^machine / }));
     expect(await screen.findByText("Machine")).toBeDefined();
 
-    // A second selector opened closes the first. The new one's own content
-    // mounts through Radix's `Presence`, one microtask behind the click, so
-    // this is awaited rather than asserted synchronously.
+    // Opening a second selector closes the first. The new popover's content
+    // mounts through Radix's `Presence` one microtask after the click, so the
+    // test waits for it instead of asserting right away.
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await waitFor(() => {
       expect(screen.queryByText("Machine")).toBeNull();
     });
     expect(await screen.findByRole("button", { name: /claude opus 5/i })).toBeDefined();
 
-    // Esc closes the open one.
+    // Esc closes the open popover.
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /claude opus 5/i })).toBeNull();
@@ -395,15 +394,14 @@ describe("Composer: selector popovers (AC-16)", () => {
       expect(screen.queryByText("Machine")).toBeNull();
     });
 
-    // Text typed before any of this survives.
+    // The text typed at the start is still there.
     expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Fix the login bug");
   });
 
-  // D-20d: with nothing to work in there is nothing to choose between, so the
-  // workspace field is greyed plain text carrying the way out as its reason.
-  // R5: the way out of a draft in no project is picking one, not adding a repo
-  // to a project it does not stand in.
-  it("reads No workspace as locked text on a draft standing in no project", async () => {
+  // A draft in no project has no workspace to choose, so the workspace field
+  // is greyed-out text. Its tooltip asks the user to pick a project, because
+  // adding a repo makes no sense while the draft is in no project.
+  it("shows No workspace as locked text on a draft in no project", async () => {
     const user = userEvent.setup();
     await openApp();
 
@@ -415,41 +413,42 @@ describe("Composer: selector popovers (AC-16)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens the runner menu with the state and the capacity beside the machine, and what it is under it", async () => {
+  it("opens the runner menu with each machine's state and capacity beside it, and its description below", async () => {
     const user = userEvent.setup();
     await openApp();
 
     await user.click(screen.getByRole("button", { name: "machine moss" }));
 
-    // The state word sits in its own colored span, so the row's own text
-    // spans several elements - read the dialog's whole text rather than
-    // asking for one element whose own text is the exact string.
+    // The state word is in its own colored span, so the row's text spans
+    // several elements. The test reads the whole dialog's text instead of
+    // looking for one element with the exact string.
     const dialog = readPageText(await screen.findByRole("dialog"));
-    // The machine, then its state and how much of it is taken; what this
-    // machine is stands under it. Who is logged in is the model menu's to say.
+    // The row shows the machine, its state and how many session slots are
+    // used, with a description below. The model menu shows who is logged in,
+    // not this menu.
     expect(dialog).toContain("moss online 0/4");
     expect(dialog).toContain("this machine · default");
     expect(dialog).toContain("The thread runs where you say; nothing moves it later.");
   });
 });
 
-describe("Composer: model menu (AC-17)", () => {
-  it("groups models per AC-8's rules and offers no free-text entry", async () => {
+describe("Composer: model menu", () => {
+  it("expands the current instance, collapses the others and offers no free-text entry", async () => {
     const user = userEvent.setup();
     await openApp();
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     const menu = await screen.findByRole("dialog");
 
-    // The other account's own row: who it is and what plan, off its snapshot.
+    // The other account's row shows its identity and plan, from its snapshot.
     expect(readPageText()).toContain("work@example.com");
     expect(readPageText()).toContain("Claude Pro");
 
-    // The current instance (A) expanded: both its models listed.
+    // The current instance (A) is expanded, with both its models listed.
     expect(within(menu).getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     expect(within(menu).getByRole("button", { name: /claude opus 5/i })).toBeDefined();
 
-    // The other instance (B) collapsed to one row: "<n> models".
+    // The other instance (B) is collapsed to one row: "<n> models".
     expect(readPageText()).toContain("1 models");
 
     expect(screen.queryByText(/custom model/i)).toBeNull();
@@ -462,17 +461,16 @@ describe("Composer: model menu (AC-17)", () => {
 
     await user.click(screen.getByRole("button", { name: "medium" }));
 
-    // `SegmentedControl` is built on Radix's `ToggleGroup` with `type="single"`,
-    // which renders each item `role="radio"` (see
-    // `packages/ui/src/primitives/primitives.test.tsx`'s own SegmentedControl
-    // suite) - a single-choice group is genuinely more accessible than a set of
-    // plain buttons faking one, and the composer reuses the exact primitive
-    // Settings > Threads already uses for its own access-mode segmented row
-    // (AD-2: no new UI dependency, reuse what is already there).
+    // `SegmentedControl` is built on Radix's `ToggleGroup` with
+    // `type="single"`, which gives each item `role="radio"` (see the
+    // SegmentedControl tests in `packages/ui/src/primitives/primitives.test.tsx`).
+    // A radio group is more accessible than plain buttons that act like one.
+    // The composer reuses the control that Settings > Threads uses for its
+    // access mode row, so no new UI dependency is needed.
     for (const choice of ["Low", "Medium", "High"]) {
       expect(screen.getByRole("radio", { name: choice })).toBeDefined();
     }
-    // A boolean descriptor is the same segmented row with two faces.
+    // A boolean descriptor is the same segmented row with two choices.
     expect(screen.getByRole("radio", { name: "on" })).toBeDefined();
     expect(screen.getByRole("radio", { name: "off" })).toBeDefined();
   });
@@ -482,8 +480,8 @@ describe("Composer: model menu (AC-17)", () => {
     await openApp();
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
-    // Instance B is collapsed to its one-row summary; clicking it is what
-    // spec 14 §The composer calls "click to switch".
+    // Instance B is collapsed to a one-row summary. Clicking that row is the
+    // "click to switch" of spec 14 §The composer.
     await user.click(screen.getByRole("button", { name: /work.*1 models/i }));
 
     await waitFor(() => {
@@ -491,13 +489,13 @@ describe("Composer: model menu (AC-17)", () => {
     });
   });
 
-  it("changes the options selector's own label when an option is chosen", async () => {
+  it("changes the options selector's label when an option is chosen", async () => {
     const user = userEvent.setup();
     await openApp();
 
     await user.click(screen.getByRole("button", { name: "medium" }));
-    // See the AC-17 "renders a select option..." test above: `SegmentedControl`
-    // renders each choice `role="radio"`, not `role="button"`.
+    // As in the "renders a select option..." test above, `SegmentedControl`
+    // gives each choice `role="radio"`, not `role="button"`.
     await user.click(screen.getByRole("radio", { name: "High" }));
 
     await waitFor(() => {
@@ -506,7 +504,7 @@ describe("Composer: model menu (AC-17)", () => {
   });
 });
 
-describe("Composer: sending (AC-18)", () => {
+describe("Composer: sending", () => {
   it("spawns with exactly the selectors' values, navigates to the new thread, and never patches settings", async () => {
     const user = userEvent.setup();
     const { api, router } = await openApp(
@@ -534,8 +532,8 @@ describe("Composer: sending (AC-18)", () => {
       accessMode: "approval-required",
       runnerId: RUNNER.id,
       permissionProfileId: PROFILE_UNRESTRICTED.id,
-      // A spawn carries the option picks unconditionally, so a thread started
-      // with none reads as an empty record rather than an absent field.
+      // A spawn always sends the option picks, so a thread started with no
+      // picks sends an empty record instead of leaving the field out.
       options: {},
     });
 
@@ -544,7 +542,7 @@ describe("Composer: sending (AC-18)", () => {
     ).toBe(false);
   });
 
-  it("spawns with the model options picked in the pill (AC-5)", async () => {
+  it("spawns with the model options picked in the pill", async () => {
     const user = userEvent.setup();
     const { api, router } = await openApp(
       [INSTANCE_A],
@@ -556,8 +554,8 @@ describe("Composer: sending (AC-18)", () => {
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
 
-    // The picks are made in the model options popover: the `effort` row and
-    // the `thinking` row, which defaults on and is turned off here.
+    // The picks are made in the model options popover: the `effort` row, and
+    // the `thinking` row, which is on by default and is turned off here.
     await user.click(screen.getByRole("button", { name: "medium" }));
     await user.click(await screen.findByRole("radio", { name: "High" }));
     await user.click(screen.getByRole("radio", { name: "off" }));
@@ -583,7 +581,7 @@ describe("Composer: sending (AC-18)", () => {
     });
   });
 
-  it("sends on Enter, inserts a newline on Shift+Enter, and never sends an IME's own Enter", async () => {
+  it("sends on Enter, inserts a newline on Shift+Enter, and never sends on an IME's Enter", async () => {
     const user = userEvent.setup();
     const { api, router } = await openApp(
       [INSTANCE_A],
@@ -604,10 +602,10 @@ describe("Composer: sending (AC-18)", () => {
       api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
     ).toBe(false);
 
-    // The Enter that commits an IME composition is not a send either: it
-    // would cut a Japanese or Chinese sentence off mid-word. Typing one more
-    // character afterwards is what flushes the request this would have sent,
-    // so the assertion below is not just running ahead of it.
+    // The Enter that commits an IME composition does not send either, or it
+    // would cut off a Japanese or Chinese sentence mid-word. Typing one more
+    // character afterwards gives a wrongly sent request time to show up, so
+    // the assertion below does not pass just because it ran too early.
     fireEvent.keyDown(textbox, { key: "Enter", isComposing: true });
     await user.type(textbox, "!");
     expect(
@@ -632,7 +630,7 @@ describe("Composer: sending (AC-18)", () => {
     expect(send.disabled).toBe(true);
   });
 
-  it("shows the API's refusal message under the card and keeps the typed text", async () => {
+  it("shows the API's error message under the card and keeps the typed text", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(
       [INSTANCE_A],
@@ -658,7 +656,7 @@ describe("Composer: sending (AC-18)", () => {
   });
 });
 
-describe("Routing: /threads/new is the static route (AD-6)", () => {
+describe("Routing: /threads/new is the static route", () => {
   it("renders the composer rather than reading 'new' as a session id", async () => {
     const { api } = await openApp([INSTANCE_A]);
 
@@ -670,22 +668,22 @@ describe("Routing: /threads/new is the static route (AD-6)", () => {
 });
 
 /**
- * The rebuilt composer on a draft thread, driven through `renderApp` at
- * `/threads/new` with `stubApi`, like everything above.
+ * Tests for the rebuilt composer on a draft thread, rendered with `renderApp`
+ * at `/threads/new` and `stubApi`, like the tests above.
  *
- * How the surface is read here:
- * - the model pill is the button whose accessible name holds the model's
- *   *display* name ("Claude Sonnet 5");
- * - the model options selector is the button whose accessible name is its
- *   label text ("medium", "high", "high ⚡");
- * - a boolean descriptor is a segmented `off · on` row, like every other
- *   descriptor;
- * - the older-models fold and every menu row are buttons carrying their text;
- * - a menu is the Radix popover, read as `role="dialog"`, so a query for a row
- *   is scoped to it rather than to a page that also holds the trigger.
+ * How these tests find things on the page:
+ * - The model pill is the button whose accessible name contains the model's
+ *   *display* name ("Claude Sonnet 5").
+ * - The model options selector is the button whose accessible name is its
+ *   label text ("medium", "high", "high ⚡").
+ * - A boolean descriptor is a segmented `off · on` row, like every other
+ *   descriptor.
+ * - The older-models fold and every menu row are buttons with their text.
+ * - A menu is the Radix popover, found as `role="dialog"`. Queries for a row
+ *   are scoped to it, because the page outside also holds the trigger.
  */
 
-/** A snapshot of an instance that is on the machine with nobody logged in. */
+/** Builds a snapshot of an instance that is installed on the runner with nobody logged in. */
 const buildUnauthenticatedSnapshot = (runnerId: string): ProviderInstance["snapshots"][number] => ({
   runnerId,
   probedAt: "2026-09-05T09:10:00.000Z",
@@ -702,7 +700,7 @@ const LOGGED_OUT = buildProviderInstance(
   [buildUnauthenticatedSnapshot(RUNNER.id)],
 );
 
-/** The same instance once the login this test drives has landed. */
+/** The same instance after the login in the test below has finished. */
 const LOGGED_IN: ProviderInstance = {
   ...LOGGED_OUT,
   snapshots: [
@@ -714,8 +712,8 @@ const LOGGED_IN: ProviderInstance = {
 
 const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=1";
 
-describe("Composer: after login the draft re-resolves", () => {
-  it("blocks the draft with the login sentence, then picks up the fresh catalog and spawns on it", async () => {
+describe("Composer: a login updates the open draft", () => {
+  it("blocks the draft with the login message, then uses the new model list and spawns with it", async () => {
     const user = userEvent.setup();
     let held: readonly ProviderInstance[] = [LOGGED_OUT];
     const { api } = await openApp(
@@ -732,8 +730,8 @@ describe("Composer: after login the draft re-resolves", () => {
       },
     );
 
-    // Nothing is logged in: no model to name, and the blocker says who is
-    // where and what is missing.
+    // Nothing is logged in, so there is no model to show. The blocking
+    // message names the provider and the machine, and what is missing.
     await waitFor(() => {
       expect(readPageText()).toContain(
         "Can't start yet. Claude Code is on moss but not logged in.",
@@ -743,7 +741,8 @@ describe("Composer: after login the draft re-resolves", () => {
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /send/i }).disabled).toBe(true);
 
-    // The login is offered where the blocker is, and runs on the draft's runner.
+    // The Log in button is next to the blocking message, and the login runs
+    // on the draft's runner.
     await user.click(screen.getByRole("button", { name: "Log in" }));
     await waitFor(() => {
       expect(readPageText()).toContain(AUTHORIZE_URL);
@@ -755,8 +754,9 @@ describe("Composer: after login the draft re-resolves", () => {
     await user.type(screen.getByLabelText("Code", { exact: true }), "the-whole-code");
     await user.click(screen.getByRole("button", { name: /submit/i }));
 
-    // The draft never snapshotted its defaults, so the fresh catalog fills
-    // what the user did not pick: the model appears and the blocker goes.
+    // The draft recomputes its defaults on every render, so the new model
+    // list fills in what the user did not pick: the model appears and the
+    // blocking message goes away.
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     });
@@ -784,7 +784,7 @@ describe("Composer: after login the draft re-resolves", () => {
   });
 });
 
-/** Nine models across two accounts: one over the filter threshold. */
+/** Builds a model with no options. `extra` adds or overrides fields. */
 const buildModel = (slug: string, name: string, extra: Record<string, unknown> = {}) => ({
   slug,
   name,
@@ -792,6 +792,7 @@ const buildModel = (slug: string, name: string, extra: Record<string, unknown> =
   ...extra,
 });
 
+/** With `MANY_B`: nine models across two accounts, one over the filter threshold. */
 const MANY_A = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000011",
   "personal",
@@ -821,7 +822,7 @@ const MANY_B = buildProviderInstance(
   ],
 );
 
-/** The same pair one model short of the threshold. */
+/** With `MANY_A`: eight models in total, which is not over the filter threshold. */
 const EIGHT_B: ProviderInstance = {
   ...MANY_B,
   snapshots: [
@@ -833,7 +834,7 @@ const EIGHT_B: ProviderInstance = {
   ],
 };
 
-/** One legacy model, which the lane folds away. */
+/** An instance with one legacy model, which the menu hides under "older models". */
 const WITH_LEGACY = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000013",
   "personal",
@@ -847,7 +848,7 @@ const WITH_LEGACY = buildProviderInstance(
   ],
 );
 
-/** A second provider with one account, so its rows never name an account. */
+/** A second provider with one account, so its rows never show an account name. */
 const CODEX: ProviderInstance = {
   ...buildProviderInstance("01a06d02-1000-7000-8000-000000000014", "openai", "Codex", [
     buildSnapshot(RUNNER.id, "rogier@openai.test", "Plus", [
@@ -869,12 +870,12 @@ const OTHER_LOGGED_OUT: ProviderInstance = {
 
 const RECENT_KEY = "hercule.recentModels";
 
-/** What `localStorage` holds for a draft whose Recent lane is already written. */
+/** Builds the `localStorage` contents for a draft whose Recent lane already holds `pairs`. */
 const buildRecentStorage = (
   pairs: ReadonlyArray<{ instanceId: string; model: string }>,
 ): Record<string, string> => ({ [RECENT_KEY]: JSON.stringify(pairs) });
 
-/** Opens the model menu by its pill and hands back the popover. */
+/** Opens the model menu by clicking its pill, and returns the popover. */
 const openModelMenu = async (
   user: ReturnType<typeof userEvent.setup>,
   name: RegExp,
@@ -884,7 +885,7 @@ const openModelMenu = async (
 };
 
 describe("Composer: model menu shapes", () => {
-  it("(a) offers a focused filter past eight models and narrows every account to what matches", async () => {
+  it("(a) offers a focused filter above eight models, and shows only the matches in every account", async () => {
     const user = userEvent.setup();
     await openApp([MANY_A, MANY_B]);
 
@@ -895,8 +896,8 @@ describe("Composer: model menu shapes", () => {
 
     await user.type(filter, "opus");
 
-    // The current account keeps only its match, and the other account is
-    // expanded to its own.
+    // The current account shows only its match, and the other account is
+    // expanded to show its match.
     await waitFor(() => {
       expect(within(menu).queryByRole("button", { name: /claude sonnet 5/i })).toBeNull();
     });
@@ -914,7 +915,7 @@ describe("Composer: model menu shapes", () => {
     expect(within(menu).queryByPlaceholderText("Filter models…")).toBeNull();
   });
 
-  it("(b) lists the recent pairs newest first, naming the account only where there are two", async () => {
+  it("(b) lists the recent pairs newest first, and shows the account only when the provider has two", async () => {
     const user = userEvent.setup();
     await openApp(
       [INSTANCE_A, INSTANCE_B, CODEX],
@@ -930,12 +931,12 @@ describe("Composer: model menu shapes", () => {
     const lane = readPageText(menu);
 
     expect(lane).toContain("Recent");
-    // Newest first, both above the current account's own lane.
+    // Newest first, and both above the current account's lane.
     expect(lane.indexOf("Recent")).toBeLessThan(lane.indexOf("GPT-5 Codex"));
     expect(lane.indexOf("GPT-5 Codex")).toBeLessThan(lane.indexOf("Claude Opus 5"));
 
-    // Claude Code holds two accounts here, so its recent row names one; the
-    // single-account provider's row names none.
+    // Claude Code has two accounts here, so its recent row shows the account.
+    // The row of the provider with one account shows none.
     const recentOpus = within(menu).getAllByRole("button", { name: /claude opus 5/i })[0];
     expect(readPageText(recentOpus ?? null)).toContain("personal");
     expect(readPageText(within(menu).getByRole("button", { name: /gpt-5 codex/i }))).not.toContain(
@@ -943,7 +944,7 @@ describe("Composer: model menu shapes", () => {
     );
   });
 
-  it("(c) folds a legacy model away behind older models (1) until it is opened", async () => {
+  it("(c) hides a legacy model under older models (1) until that is opened", async () => {
     const user = userEvent.setup();
     await openApp([WITH_LEGACY]);
 
@@ -957,7 +958,7 @@ describe("Composer: model menu shapes", () => {
     expect(await within(menu).findByRole("button", { name: /claude sonnet 4/i })).toBeDefined();
   });
 
-  it("(d) dims an unauthenticated account to one row that logs in from where it stands", async () => {
+  it("(d) shows an unauthenticated account as one dimmed row with its own Log in", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(
       [INSTANCE_A, OTHER_LOGGED_OUT],
@@ -970,8 +971,8 @@ describe("Composer: model menu shapes", () => {
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
     expect(readPageText(menu)).toContain("not logged in");
-    // The account is one row, not a lane of models: it offers nothing of its
-    // own to pick.
+    // The account is one row, not a lane of models, because it has no models
+    // to pick.
     expect(within(menu).queryByRole("button", { name: /claude haiku 5/i })).toBeNull();
 
     await user.click(within(menu).getByRole("button", { name: "Log in" }));
@@ -979,15 +980,15 @@ describe("Composer: model menu shapes", () => {
     await waitFor(() => {
       expect(readPageText()).toContain(AUTHORIZE_URL);
     });
-    // The row logs in to the account it stands for, not to the one in force,
-    // and on the machine the credential will land on.
+    // The row logs in to its own account, not the currently selected one, on
+    // the machine where the credential will be stored.
     expect(screen.getByText("Log in to Codex on moss")).toBeDefined();
     expect(api.calls.find((call) => call.path.endsWith("/login"))?.body).toEqual({
       runnerId: RUNNER.id,
     });
   });
 
-  it("(e) labels the current lane with the account name when the provider holds two", async () => {
+  it("(e) labels the current lane with the account name when the provider has two", async () => {
     const user = userEvent.setup();
     await openApp([INSTANCE_A, INSTANCE_B]);
 
@@ -996,7 +997,7 @@ describe("Composer: model menu shapes", () => {
     expect(readPageText(menu)).toContain("personal");
   });
 
-  it("(e) labels the current lane with the provider's name when it holds one", async () => {
+  it("(e) labels the current lane with the provider's name when it has one", async () => {
     const user = userEvent.setup();
     await openApp([INSTANCE_A]);
 
@@ -1007,7 +1008,7 @@ describe("Composer: model menu shapes", () => {
   });
 });
 
-describe("Composer: Recent follows the submission home", () => {
+describe("Composer: the Recent lane is written only after a successful spawn", () => {
   const pickOpusAndSend = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
     await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
@@ -1015,7 +1016,7 @@ describe("Composer: Recent follows the submission home", () => {
     await user.click(screen.getByRole("button", { name: /send/i }));
   };
 
-  it("writes the pair the user picked once the spawn has landed", async () => {
+  it("writes the pair the user picked once the spawn succeeds", async () => {
     const user = userEvent.setup();
     await openApp(
       [INSTANCE_A],
@@ -1033,7 +1034,7 @@ describe("Composer: Recent follows the submission home", () => {
     });
   });
 
-  it("writes nothing when the spawn is refused, since nothing was reached", async () => {
+  it("writes nothing when the spawn fails, because no thread was started", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(
       [INSTANCE_A],
@@ -1054,7 +1055,7 @@ describe("Composer: Recent follows the submission home", () => {
         api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
       ).toBe(true);
     });
-    // Untouched: still the empty list it was seeded with.
+    // Unchanged: still the empty list it started with.
     expect(localStorage.getItem(RECENT_KEY)).toBe("[]");
   });
 });
@@ -1066,7 +1067,7 @@ const FAST_MODE: ModelOption = {
   default: false,
 };
 
-/** One model, carrying a select descriptor and a boolean one. */
+/** An instance with one model, which has a select descriptor and a boolean one. */
 const WITH_OPTIONS = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000016",
   "personal",
@@ -1084,16 +1085,16 @@ const WITH_OPTIONS = buildProviderInstance(
 );
 
 describe("Composer: the model options selector's label", () => {
-  it("reads the effort choice lower-cased, follows a pick, and appends the bolt with fast mode on", async () => {
+  it("shows the effort choice in lower case, updates on a pick, and adds a bolt when fast mode is on", async () => {
     const user = userEvent.setup();
     await openApp([WITH_OPTIONS]);
 
-    // `medium` is the descriptor's own default, lower-cased off its label.
+    // `medium` is the descriptor's default, from its label "Medium" in lower case.
     const selector = await screen.findByRole("button", { name: "medium" });
 
     await user.click(selector);
     const menu = await screen.findByRole("dialog");
-    // The header names what is being changed, and what it is being changed on.
+    // The header shows what is being changed, and for which model.
     expect(readPageText(menu)).toContain("Model options");
     expect(readPageText(menu)).toContain("Claude Sonnet 5");
 
@@ -1110,9 +1111,10 @@ describe("Composer: the model options selector's label", () => {
 });
 
 /**
- * `auto` is not native here, so it runs as the nearest native mode below it.
- * Its display name is its own rather than `INSTANCE_A`'s, so a row naming the
- * provider can only be reading this instance's `displayName` (ticket #70).
+ * An instance where `auto` is not native, so it runs as the nearest native
+ * mode below it. It has a display name different from `INSTANCE_A`'s, so a
+ * row that shows "Claude Code Work" must be reading this instance's
+ * `displayName` (ticket #70).
  */
 const NO_AUTO: ProviderInstance = {
   ...INSTANCE_A,
@@ -1121,24 +1123,24 @@ const NO_AUTO: ProviderInstance = {
 };
 
 describe("Composer: the access mode menu", () => {
-  it("lists four modes with no header and names the fallback of one that is not native", async () => {
+  it("lists four modes with no header, and shows the fallback of a mode that is not native", async () => {
     const user = userEvent.setup();
     await openApp([NO_AUTO]);
 
     await user.click(screen.getByRole("button", { name: /approval-required/i }));
     const menu = await screen.findByRole("dialog");
 
-    // Read by the text on the row rather than by the row's accessible name:
-    // a name concatenates the mode with its meaning, and "auto" would then
-    // also match "auto-accept-edits".
+    // The rows are found by their text, not by their accessible name. The
+    // name joins the mode and its meaning, so "auto" would also match
+    // "auto-accept-edits".
     for (const mode of ["approval-required", "auto-accept-edits", "auto", "full-access"]) {
       expect(within(menu).getByText(mode, { exact: true })).toBeDefined();
     }
-    // The four modes stand on their own: this menu is the one with no header.
+    // The four modes need no introduction, so this menu has no header.
     expect(readPageText(menu)).not.toContain("Access mode");
 
-    // The unsupported mode keeps its row and stays pickable, saying what it
-    // will really run as.
+    // The unsupported mode keeps its row and can still be picked. The row
+    // shows which mode it will actually run as.
     expect(readPageText(menu)).toContain("runs as auto-accept-edits on Claude Code Work");
     await user.click(within(menu).getByText("auto", { exact: true }));
     await user.keyboard("{Escape}");
@@ -1150,11 +1152,12 @@ describe("Composer: the access mode menu", () => {
   });
 
   /**
-   * The fallback annotation names the provider that decided it (spec 14 §The
-   * composer, `runs as auto-accept-edits on pi`) and stands in the attention
-   * hue under the mode's own meaning, which every row keeps (ticket #70).
+   * The fallback annotation names the provider that caused the fallback (spec
+   * 14 §The composer, `runs as auto-accept-edits on pi`). It is shown in the
+   * attention color below the mode's meaning, which every row keeps
+   * (ticket #70).
    */
-  it("shows each mode's meaning and names the provider in the fallback annotation, in the attention hue", async () => {
+  it("shows each mode's meaning and names the provider in the fallback annotation, in the attention color", async () => {
     const user = userEvent.setup();
     await openApp([NO_AUTO]);
 
@@ -1167,52 +1170,52 @@ describe("Composer: the access mode menu", () => {
       "lets a harness-side reviewer judge routine actions",
       "allows everything",
     ];
-    // Four rows, each carrying its own meaning; the one that falls back says
-    // so under its meaning rather than in place of it.
+    // Four rows, each with its meaning. The row that falls back shows the
+    // fallback below its meaning, not instead of it.
     for (const meaning of MEANINGS) {
       expect(readPageText(menu)).toContain(meaning);
     }
 
     const annotation = within(menu).getByText("runs as auto-accept-edits on Claude Code Work");
     expect(annotation.className).toContain("text-attn");
-    // The provider is named, not alluded to.
+    // The annotation names the provider, not a vague "this provider".
     expect(readPageText(menu)).not.toContain("on this provider");
   });
 });
 
 /**
- * The chrome is the screen's own first row on a draft too, with no actions on
- * it. The same readings hold as in `thread.integration.test.tsx`: the crumb
- * and the title are siblings in one row.
+ * On a draft too, the screen's first row is its own header, here with no
+ * actions. As in `thread.integration.test.tsx`, the breadcrumb and the title
+ * are siblings in one row.
  */
-describe("Draft: the chrome is the screen's first row", () => {
-  it("reads Threads / New thread, with no … button and no shell h1", async () => {
+describe("Draft: the header is the screen's first row", () => {
+  it("shows Threads / New thread, with no … button and no shell h1", async () => {
     await openApp([INSTANCE_A]);
 
     const crumb = await waitFor(() => screen.getByText("Threads /"));
     expect(readPageText(crumb.parentElement)).toBe("Threads / New thread");
 
     expect(screen.queryByRole("button", { name: "…" })).toBeNull();
-    // The hero "What should the agent do?" is an h2, so level 1 belongs to
-    // nobody on this route once the shell's top bar steps aside.
+    // The prompt "What should the agent do?" is an h2, and the shell's top bar
+    // is hidden, so this route has no h1.
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 });
 
 /* ------------------------------------------------------------------ *
- * Slice 3 of #72: the project picker, the workspace, branch and
- * machine selectors, and the workspace menu's foot (AC-16 to AC-19,
- * AC-23). Driven through `renderApp` and the stubbed `fetch`, like
- * everything above.
+ * Tests for the project picker and the workspace, branch and machine
+ * selectors (#72). They drive the app through `renderApp` and the stubbed
+ * `fetch`, like the tests above.
  *
- * Readings picked here, where the SPEC names copy but not a handle:
- * - the picker is the Radix overlay, read as `role="dialog"`, opened by the
- *   sidebar's "Create new thread";
- * - a menu row is a button carrying its text, as in the menus above;
- * - the New project dialog (D-20b) is read as `role="dialog"` named "New
- *   project", like the picker; its fields are labelled "Name", "Remote URL",
- *   "GitHub account" and "Setup command", a source is added with "+ Git
- *   repository", and it submits through a button named "Create project".
+ * The spec gives the text of these controls but not how to find them.
+ * These tests assume:
+ * - The picker is the Radix overlay, found as `role="dialog"`, and the
+ *   sidebar's "Create new thread" opens it.
+ * - A menu row is a button with its text, as in the menus above.
+ * - The New project dialog is found as `role="dialog"` named "New
+ *   project", like the picker. Its fields are labelled "Name", "Remote
+ *   URL", "GitHub account" and "Setup command". "+ Git repository" adds a
+ *   source, and the "Create project" button submits it.
  * ------------------------------------------------------------------ */
 
 const AT = "2026-09-10T09:00:00.000Z";
@@ -1223,10 +1226,10 @@ const GITHUB_ID = "01a06d02-7500-7000-8000-000000000001";
 
 const BUMP_THE_BUN_PIN = "01a06d02-7400-7000-8000-000000000004";
 
-/** The webshop/ops world every workspace suite shares, with ids the contract
- * takes. What stands beside it below - the edge and sandbox projects, the
- * worktree on cove, the main workspaces of the two ops repos - is this
- * suite's own. */
+/** The ids of the shared webshop/ops test data that every workspace suite
+ * uses, in the format the contract accepts. The fixtures added below (the
+ * edge and sandbox projects, the worktree on cove, the main workspaces of the
+ * two ops repos) belong to this suite only. */
 const IDS = {
   moss: RUNNER.id,
   cove: COVE.id,
@@ -1430,7 +1433,7 @@ const GITHUB: Connection = {
   updatedAt: AT,
 };
 
-/** The one Connection of another type, which the GitHub selects must not offer. */
+/** A Connection of another type, which the GitHub account selects must not offer. */
 const SLACK: Connection = {
   ...GITHUB,
   id: "01a06d02-7500-7000-8000-000000000002",
@@ -1451,7 +1454,10 @@ const RESOURCES: readonly Resource[] = [R_WEBSHOP, R_INFRA, R_RUNBOOKS, R_EDGE];
 
 const PROJECTS: readonly Project[] = [WEBSHOP, OPS, EDGE, SANDBOX];
 
-/** The catalogs slice 3 adds, over the ones every composer test already stubs. */
+/**
+ * Builds the extra routes the project and workspace tests need, on top of the
+ * ones every composer test stubs.
+ */
 const buildWorldRoutes = (
   overrides: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
@@ -1464,7 +1470,7 @@ const buildWorldRoutes = (
   ...overrides,
 });
 
-/** A draft at `path`, with the slice-3 catalogs behind it. */
+/** Opens a draft at `path`, with the project and workspace routes stubbed. */
 const openDraftAt = async (
   path: string,
   user: Record<string, unknown> = {},
@@ -1482,7 +1488,7 @@ const openDraftAt = async (
 
 const buildProjectDraftPath = (id: string) => `/threads/new?project=${id}`;
 
-/** Opens the workspace selector and hands back its menu. */
+/** Opens the workspace selector and returns its menu. */
 const openWorkspaceMenu = async (
   user: ReturnType<typeof userEvent.setup>,
 ): Promise<HTMLElement> => {
@@ -1490,7 +1496,7 @@ const openWorkspaceMenu = async (
   return screen.findByRole("dialog");
 };
 
-/** Opens the branch selector and hands back its menu. */
+/** Opens the branch selector and returns its menu. */
 const openBranchMenu = async (
   user: ReturnType<typeof userEvent.setup>,
   name: RegExp,
@@ -1499,7 +1505,7 @@ const openBranchMenu = async (
   return screen.findByRole("dialog");
 };
 
-describe("Picker: a thread starts from a project (AC-16)", () => {
+describe("Picker: a thread starts from a project", () => {
   const openPicker = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
     await user.click(screen.getByText("Create new thread"));
     return screen.findByRole("dialog");
@@ -1514,7 +1520,7 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     expect(readPageText(picker)).toContain("New thread in");
     // One repo, five threads in the project, two ephemeral workspaces.
     expect(readPageText(picker)).toContain("1 repo · webshop · 5 threads · 2 workspaces");
-    // The plural half of `<n> repo(s) · <repo names>`, with the names listed.
+    // The plural form of `<n> repo(s) · <repo names>`, with the names listed.
     expect(readPageText(picker)).toContain("2 repos · ops-infra, ops-runbooks");
     expect(readPageText(picker)).toContain("⌘1");
     expect(readPageText(picker)).toContain("⌘2");
@@ -1544,7 +1550,7 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     });
   });
 
-  it("picks the first project with its own ⌘1", async () => {
+  it("picks the first project with its shortcut ⌘1", async () => {
     const user = userEvent.setup();
     const { router } = await openDraftAt("/threads/new");
 
@@ -1569,19 +1575,19 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     expect(router.state.location.href).toBe("/threads/new");
   });
 
-  it("closes on a click past the panel, and on Esc after a click inside it", async () => {
+  it("closes on a click outside the panel, and on Esc after a click inside it", async () => {
     const user = userEvent.setup();
     const { router } = await openDraftAt("/threads/new");
 
     const picker = await openPicker(user);
-    // The scrim is the panel's parent: the page behind the picker.
+    // The scrim is the panel's parent element and covers the page behind the picker.
     await user.click(picker.parentElement!);
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
-    // A click inside takes the focus the panel was listening with, so Esc is
-    // heard on the document rather than on the panel.
+    // A click inside moves focus away from the panel, so the Esc key event
+    // reaches the document instead of the panel. The picker must still close.
     const again = await openPicker(user);
     await user.click(within(again).getByRole("button", { name: /webshop/ }));
     await user.keyboard("{Escape}");
@@ -1602,8 +1608,8 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     expect(text.indexOf("sandbox")).toBeLessThan(text.indexOf("New project"));
   });
 
-  // D-20b: the picker no longer names a project itself; its New project row
-  // opens the dialog that does.
+  // The picker does not create a project itself. Its New project row opens
+  // the New project dialog, which does.
   it("offers New project and nothing else when there is no project yet, and opens the dialog", async () => {
     const user = userEvent.setup();
     const created = buildProject("01a06d02-7000-7000-8000-000000000009", "first");
@@ -1635,7 +1641,7 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
     ).toEqual({ name: "first" });
   });
 
-  it("heads the draft with the project it is in", async () => {
+  it("shows the draft's project in the heading", async () => {
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     expect(
@@ -1644,8 +1650,8 @@ describe("Picker: a thread starts from a project (AC-16)", () => {
   });
 });
 
-describe("Composer: the workspace selector (AC-17)", () => {
-  it("heads the menu with what it picks and when it stops being pickable", async () => {
+describe("Composer: the workspace selector", () => {
+  it("shows a header saying what the menu picks and when the pick locks", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
@@ -1655,7 +1661,8 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(readPageText(menu)).toContain("locks when the thread starts");
   });
 
-  // D-20c/D-20d: the primary is the Main workspace, and None is not offered.
+  // The primary workspace is shown as "Main workspace". None is not offered
+  // when the project has a repo.
   it("offers the main workspace, a new worktree and the live workspaces", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
@@ -1667,8 +1674,8 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(text).toContain("on main · you and the agent share the files");
     expect(text).toContain("New workspace");
     expect(text).toContain("a fresh worktree of webshop on a new branch");
-    // The project's own live ephemeral workspaces, named after their branch,
-    // with the machine they stand on and the threads already in them.
+    // The project's live ephemeral workspaces, named after their branch, with
+    // their machine and the threads already in them.
     expect(text).toContain("hercule/run-3f1");
     expect(text).toContain("moss");
     expect(text).toContain("2 threads · “Fix flaky webhook tests”, “Write the retry runbook”");
@@ -1676,7 +1683,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(text).not.toContain("None");
   });
 
-  it("names the repo per row and lists New workspace first in a multi-repo project", async () => {
+  it("shows the repo on each row and lists New workspace first in a multi-repo project", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(OPS.id));
 
@@ -1689,12 +1696,13 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(text.indexOf("New workspace")).toBeLessThan(text.indexOf("Main workspace of"));
   });
 
-  it("asks about the machine the draft would be placed on, not the one it picked", async () => {
+  it("checks the clone on the machine the draft would be placed on, not on the picked one", async () => {
     const user = userEvent.setup();
-    // `INSTANCE_FRESH` is on no machine, so no row is selectable and the draft
-    // picks none - but it would still be placed on moss, which holds webshop's
-    // main workspace. The menu has to ask about that machine, or it says the
-    // repo is not cloned on a machine nothing else ever named.
+    // `INSTANCE_FRESH` is on no machine, so no runner row is selectable and
+    // the draft picks no runner. The draft would still be placed on moss,
+    // which holds webshop's main workspace. The menu must check moss;
+    // otherwise it would say the repo is not cloned on a machine the user
+    // never saw.
     const api = stubApi(buildController([INSTANCE_FRESH], {}, buildWorldRoutes()));
     await renderApp({
       path: buildProjectDraftPath(WEBSHOP.id),
@@ -1708,7 +1716,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(readPageText(menu)).not.toContain("not cloned");
   });
 
-  it("says a repo is not cloned on the machine rather than hiding the row", async () => {
+  it("shows that a repo is not cloned on the machine instead of hiding the row", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(EDGE.id));
 
@@ -1717,8 +1725,9 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(readPageText(menu)).toContain("not cloned on moss · clones on first use");
   });
 
-  // D-20d: a project with no source works in None and says how to change that.
-  it("reads None as locked text in a project with no repo", async () => {
+  // A project with no source works in None, and the tooltip explains how to
+  // change that.
+  it("shows None as locked text in a project with no repo", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(SANDBOX.id));
 
@@ -1739,7 +1748,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
   });
 
-  it("follows the stored thread.workspace", async () => {
+  it("uses the stored thread.workspace setting", async () => {
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id), { "thread.workspace": "ephemeral" });
     expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
   });
@@ -1764,7 +1773,8 @@ describe("Composer: the workspace selector (AC-17)", () => {
 
     await openWorkspaceMenu(user);
     await pickRow(user, /hercule\/run-3f1/);
-    // D-19: joining names the work already going on there, not the workspace.
+    // When joining, the sentence names the threads already working there,
+    // not the workspace.
     await waitFor(() => {
       expect(readPageText()).toContain(
         "It joins “Fix flaky webhook tests” and “Write the retry runbook” there: the agents see each other's edits, on one branch.",
@@ -1772,9 +1782,9 @@ describe("Composer: the workspace selector (AC-17)", () => {
     });
   });
 
-  // D-20d: None is offered only where there is nothing else, and there it is
-  // what the draft stands under.
-  it("says a draft in a project with no repo works without a checkout", async () => {
+  // None is offered only when there is no other choice, and then the draft
+  // uses it.
+  it("explains that a draft in a project with no repo works without a checkout", async () => {
     await openDraftAt(buildProjectDraftPath(SANDBOX.id));
 
     await waitFor(() => {
@@ -1782,7 +1792,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     });
   });
 
-  it("spawns with the project and the main workspace the draft stands in", async () => {
+  it("spawns with the draft's project and its main workspace", async () => {
     const user = userEvent.setup();
     const { api, router } = await openDraftAt(
       buildProjectDraftPath(WEBSHOP.id),
@@ -1840,7 +1850,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     });
   });
 
-  it("spawns with one checkout per repo when a multi-repo project takes a new workspace", async () => {
+  it("spawns with one checkout per repo when a multi-repo project uses a new workspace", async () => {
     const user = userEvent.setup();
     const { api } = await openDraftAt(
       buildProjectDraftPath(OPS.id),
@@ -1868,7 +1878,7 @@ describe("Composer: the workspace selector (AC-17)", () => {
     });
   });
 
-  it("preselects the workspace named in the address", async () => {
+  it("preselects the workspace named in the URL", async () => {
     await openDraftAt(`/threads/new?project=${WEBSHOP.id}&workspace=${W_RUN_3F1.id}`);
 
     expect(
@@ -1877,8 +1887,8 @@ describe("Composer: the workspace selector (AC-17)", () => {
   });
 });
 
-describe("Composer: the branch selector (AC-18)", () => {
-  it("lists the main workspace's branches, badges the one it is on and dims one a workspace holds", async () => {
+describe("Composer: the branch selector", () => {
+  it("lists the main workspace's branches, badges the current one and dims one held by another workspace", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
@@ -1889,37 +1899,39 @@ describe("Composer: the branch selector (AC-18)", () => {
     expect(text).toContain("the checkout switches to it");
     expect(text).toContain("release/2.4");
     expect(text).toContain("current");
-    // `hercule/run-3f1` is a branch of the primary, but a ready ephemeral on the
-    // same machine is sitting on it, so it is dimmed with what holds it.
+    // `hercule/run-3f1` is a branch of the primary workspace, but a ready
+    // ephemeral workspace on the same machine has it checked out. The row is
+    // dimmed and shows which workspace holds it.
     expect(text).toContain("in workspace hercule/run-3f1");
     expect(within(menu).queryByRole("button", { name: /hercule\/run-3f1/ })).toBeNull();
   });
 
-  // R6: the branch is what is being picked and is read whole; what holds it is
-  // a note about it, so the note is what gives when the row runs out of room.
-  it("keeps a held branch whole, cuts the note that holds it, and keeps it right-aligned", async () => {
+  // The branch name is what the user picks, so it is never truncated. The
+  // note about which workspace holds it is secondary, so the note is
+  // truncated when the row runs out of room.
+  it("never truncates a held branch, truncates its note instead, and keeps the note right-aligned", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
     const menu = await openBranchMenu(user, /main/);
 
-    // The annotation is the cell that gives, and carries the whole of itself
-    // as its title so what is cut is still readable.
+    // The note is the truncated cell, and its title holds the full text so
+    // the cut-off part can still be read.
     const note = within(menu).getByTitle("in workspace hercule/run-3f1");
     expect(note.className).toContain("truncate");
 
-    // The branch is read whole: its cell takes what it needs and never cuts.
+    // The branch cell takes the width it needs and is never truncated.
     const branch = within(menu).getByText("hercule/run-3f1", { selector: "span.font-mono" });
     expect(branch.parentElement?.className).not.toContain("truncate");
 
-    // And the note keeps the row's right edge: its column is the wide one and
-    // its contents sit at the end of it, as every other row's badge does.
+    // The note stays at the row's right edge: its column is the wide one and
+    // its content is aligned to the end, like every other row's badge.
     const cell = note.parentElement;
     expect(cell?.className).toContain("justify-end");
     expect(cell?.parentElement?.className).toContain("grid-cols-[auto_auto_minmax(0,1fr)]");
   });
 
-  it("switches the lip and the lead to the branch that was picked", async () => {
+  it("updates the branch selector and the lead sentence to the picked branch", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
@@ -1934,7 +1946,7 @@ describe("Composer: the branch selector (AC-18)", () => {
     expect(await screen.findByRole("button", { name: /release\/2\.4/ })).toBeDefined();
   });
 
-  it("asks for a base branch on a new workspace, badging the default and saying where it starts", async () => {
+  it("asks for a base branch on a new workspace, badges the default and explains where the branch starts", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
@@ -1956,19 +1968,19 @@ describe("Composer: the branch selector (AC-18)", () => {
     );
   });
 
-  it("reads the bases side by side, and takes no pick, in a multi-repo project", async () => {
+  it("shows the base branches side by side, with nothing to pick, in a multi-repo project", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(OPS.id));
 
     const lip = await screen.findByText("from master · main");
     expect(lip.closest("button")).toBeNull();
 
-    // Nothing opens behind it: there is no base to pick per repo in v1.
+    // Clicking it opens nothing, because v1 has no per-repo base branch pick.
     await user.click(lip);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("reads default, with nothing to pick, on a repo no machine has cloned", async () => {
+  it("shows default, with nothing to pick, for a repo no machine has cloned", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(EDGE.id));
 
@@ -1991,7 +2003,7 @@ describe("Composer: the branch selector (AC-18)", () => {
     expect(screen.queryByRole("button", { name: /^from / })).toBeNull();
     joined.unmount();
 
-    // D-20d: None stands alone in a project with no repo, and carries no branch.
+    // In a project with no repo, None is the only choice and has no branch.
     await openDraftAt(buildProjectDraftPath(SANDBOX.id));
     await waitFor(() => {
       expect(screen.queryByText("Branch")).toBeNull();
@@ -2000,8 +2012,8 @@ describe("Composer: the branch selector (AC-18)", () => {
   });
 });
 
-describe("Composer: the machine selector follows the workspace (AC-19)", () => {
-  it("is read-only, naming the workspace, once the thread joins one", async () => {
+describe("Composer: the machine selector follows the workspace", () => {
+  it("is read-only and names the workspace once the thread joins one", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
 
@@ -2014,7 +2026,7 @@ describe("Composer: the machine selector follows the workspace (AC-19)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("keeps a machine without the repo pickable, saying it clones on first use", async () => {
+  it("keeps a machine without the repo pickable, and explains that the repo is cloned on first use", async () => {
     const user = userEvent.setup();
     await openDraftAt(buildProjectDraftPath(EDGE.id));
 
@@ -2022,36 +2034,35 @@ describe("Composer: the machine selector follows the workspace (AC-19)", () => {
     const menu = await screen.findByRole("dialog");
 
     expect(readPageText(menu)).toContain("edge-api is not cloned there · clones on first use");
-    // "not cloned" is a wait, not a refusal: the row stays a button. Asserted
-    // on moss rather than on cove (D-15), which this fixture dims for a reason
-    // of its own - no provider instance was ever probed there - and which
-    // #160's own rule (a dimmed row is inert) keeps inert whatever this ticket
-    // does.
+    // "not cloned" only means a wait, not a blocker, so the row stays a
+    // button. The test checks moss, not cove: in this fixture cove is dimmed
+    // for another reason (no provider instance was ever probed there), and a
+    // dimmed row is never clickable (#160).
     expect(within(menu).getByRole("button", { name: /moss/ })).toBeDefined();
   });
 });
 
 /* ------------------------------------------------------------------ *
- * D-20b: repo setup left the composer. The add-repo and adopt forms in
- * the workspace menu's foot are gone, and a project and its sources are
- * made in the New project dialog, opened from the sidebar or from the
- * picker's New project row.
+ * Repo setup is no longer part of the composer. The add-repo and adopt
+ * forms at the bottom of the workspace menu are gone. A project and its
+ * sources are created in the New project dialog, which opens from the
+ * sidebar or from the picker's New project row.
  * ------------------------------------------------------------------ */
 
-describe("The New project dialog (D-20b)", () => {
+describe("The New project dialog", () => {
   const NEW_PROJECT = buildProject("01a06d02-7000-7000-8000-000000000009", "checkout");
 
   const NEW_REPO = buildRepoResource("01a06d02-7100-7000-8000-000000000009", "acme", "checkout", [
     NEW_PROJECT.id,
   ]);
 
-  /** Opens the dialog from the sidebar's own icon beside Create new thread. */
+  /** Opens the dialog from the sidebar's icon next to Create new thread, and returns it. */
   const openDialog = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
     await user.click(await screen.findByRole("button", { name: "New project" }));
     return screen.findByRole("dialog", { name: "New project" });
   };
 
-  it("creates the project, then a resource per source, and opens a draft in it", async () => {
+  it("creates the project, then one resource per source, and opens a draft in the project", async () => {
     const user = userEvent.setup();
     const { api, router } = await openDraftAt(
       "/threads/new",
@@ -2091,7 +2102,7 @@ describe("The New project dialog (D-20b)", () => {
     });
   });
 
-  it("offers only the GitHub connections, and says what an account is for", async () => {
+  it("offers only GitHub connections, and explains what an account is for", async () => {
     const user = userEvent.setup();
     await openDraftAt("/threads/new");
 
@@ -2105,7 +2116,7 @@ describe("The New project dialog (D-20b)", () => {
     expect(readPageText(dialog)).toContain("A private repo needs one.");
   });
 
-  it("refuses a remote git would not take before anything is sent", async () => {
+  it("rejects a remote that git would not accept, before anything is sent", async () => {
     const user = userEvent.setup();
     const { api } = await openDraftAt(
       "/threads/new",
@@ -2131,7 +2142,7 @@ describe("The New project dialog (D-20b)", () => {
     ).toBe(false);
   });
 
-  it("shows the API's refusal beside the source it was about", async () => {
+  it("shows the API's error next to the source it is about", async () => {
     const user = userEvent.setup();
     const { router } = await openDraftAt(
       "/threads/new",
@@ -2157,13 +2168,14 @@ describe("The New project dialog (D-20b)", () => {
     expect((await within(dialog).findByRole("alert")).textContent).toBe(
       "that repo is already a resource",
     );
-    // The dialog stands: nothing is navigated away from what was refused.
+    // The dialog stays open, and the app does not navigate away.
     expect(router.state.location.href).toBe("/threads/new");
   });
 
-  // R4: a project made before a source was refused is not left unseen - the
-  // way out opens the draft in it, with what was refused simply not made.
-  it("opens the draft in the project it made when the dialog is left after a refusal", async () => {
+  // The project is created before its sources. If a source then fails, the
+  // project already exists, so closing the dialog opens a draft in it. The
+  // failed source is simply not created.
+  it("opens a draft in the created project when the dialog is closed after a source fails", async () => {
     const user = userEvent.setup();
     const { router } = await openDraftAt(
       "/threads/new",
@@ -2195,7 +2207,7 @@ describe("The New project dialog (D-20b)", () => {
     expect(screen.queryByRole("dialog", { name: "New project" })).toBeNull();
   });
 
-  it("names the project before anything is sent", async () => {
+  it("requires a project name before anything is sent", async () => {
     const user = userEvent.setup();
     const { api } = await openDraftAt("/threads/new");
 
@@ -2212,8 +2224,8 @@ describe("The New project dialog (D-20b)", () => {
     ).toBe(false);
   });
 
-  // R6: a modal says what it is and takes the focus, as the picker does.
-  it("is a modal dialog named after itself, with the focus in it", async () => {
+  // Like the picker, the dialog is a labelled modal that takes focus.
+  it("is a modal dialog with an accessible name, with the focus inside it", async () => {
     const user = userEvent.setup();
     await openDraftAt("/threads/new");
 

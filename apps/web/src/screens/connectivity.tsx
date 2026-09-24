@@ -4,9 +4,10 @@ import { formatStamp } from "@hercule/client-core";
 import type { Runner } from "@hercule/contract";
 
 /**
- * Only `online` is live and only `unreachable` was nobody's choice. The
- * attention hue is left free for the fleet row's skew warning, the one
- * actionable thing there.
+ * The text colour per connectivity state. Only `online` gets the live colour,
+ * and only `unreachable` gets the failure colour, because no one chose it.
+ * The attention colour is not used, so that it stays reserved for the fleet
+ * row's version skew warning, the one thing there the user can act on.
  */
 const HUE: Record<Runner["connectivity"], string> = {
   online: "text-live",
@@ -15,9 +16,9 @@ const HUE: Record<Runner["connectivity"], string> = {
 };
 
 /**
- * Whether the controller can reach a machine, drawn the same way wherever it is
- * read: a live dot only while the socket is up, and how long ago the row was
- * true whenever it is not.
+ * Shows whether the controller can reach a machine, the same way everywhere:
+ * a live dot while the connection is up, and when the machine was last seen
+ * while it is not.
  */
 export function Connectivity({
   runner,

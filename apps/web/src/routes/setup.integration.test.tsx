@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { resolveBrowserTimezone } from "@hercule/client-core";
 import { buildErrorBody, renderApp, stubApi, type Answer, type Handler } from "../app/testing";
 
-/** A controller on its first run, which is over once setup has answered. */
+/** Returns stub routes for a controller on its first run. First run is complete once the setup call has returned `complete`. */
 const buildFirstRunController = (complete: Answer): Readonly<Record<string, Handler>> => {
   let done = false;
   return {
@@ -54,7 +54,7 @@ describe("the setup screen", () => {
     });
   });
 
-  it("takes the spent token out of the address bar and out of the back button", async () => {
+  it("removes the used token from the address bar and the back button", async () => {
     const api = stubApi(buildFirstRunController({ body: { token: "minted" } }));
     const { router } = await renderApp({ path: "/setup?token=one-time", api: api.fetch });
 
@@ -67,7 +67,7 @@ describe("the setup screen", () => {
     expect(router.history.canGoBack()).toBe(false);
   });
 
-  it("shows what the API said when it refuses", async () => {
+  it("shows the API's error message when setup fails", async () => {
     const api = stubApi(
       buildFirstRunController({
         status: 401,
@@ -82,7 +82,7 @@ describe("the setup screen", () => {
     expect(router.state.location.pathname).toBe("/setup");
   });
 
-  it("refuses a password the contract would refuse, without asking the API", async () => {
+  it("rejects a password the contract schema rejects, without calling the API", async () => {
     const api = stubApi(buildFirstRunController({ body: { token: "minted" } }));
     await renderApp({ path: "/setup?token=one-time", api: api.fetch });
 

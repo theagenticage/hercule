@@ -15,9 +15,12 @@ import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { SaveStatus, readErrorMessage } from "../../../screens/save-status";
 
 /**
- * Only `errored` is something gone wrong; `refused` is the attention hue
- * because it is the one state nothing on this screen can move - it takes
- * another binary - and `inactive` is the user's own choice, in no hue at all.
+ * The text colour of each plugin status.
+ *
+ * - Only `errored` means something went wrong, so only it uses the failure colour.
+ * - `refused` uses the attention colour, because nothing on this screen can
+ *   change it: it needs a different binary.
+ * - `inactive` is the user's own choice, so it is not coloured.
  */
 const STATUS_HUE: Record<PluginStatus["_tag"], string> = {
   active: "text-live",
@@ -27,10 +30,11 @@ const STATUS_HUE: Record<PluginStatus["_tag"], string> = {
 };
 
 /**
- * A plugin cannot be installed or removed - the binary decides that - so the
- * card is about the two facts the user does own, the switch and the config. A
- * refused plugin has neither: it was never loaded, so there is nothing to
- * switch on and no schema to generate a form from.
+ * The card for one plugin. The binary decides which plugins exist, so the user
+ * cannot install or remove one here. The card covers what the user controls:
+ * whether the plugin is enabled, and its config. A refused plugin has neither,
+ * because it was never loaded: there is nothing to enable and no schema to
+ * build a form from.
  */
 export function PluginCard({
   client,
@@ -45,9 +49,9 @@ export function PluginCard({
   const refused = plugin.status._tag === "refused";
   const fields = buildConfigFields(plugin.configSchema);
 
-  // Every move answers with the plugin as it now stands, but a move can change
-  // more than the plugin it names - deactivating one invalidates what it
-  // contributed - so the listing is reread rather than patched in place.
+  // Every action responds with the updated plugin, but an action can change
+  // more than that plugin (disabling one also removes its contributions), so
+  // the whole list is fetched again rather than patched in place.
   const reread = () => queryClient.invalidateQueries({ queryKey: queryKeys.plugins() });
 
   const params = { id: plugin.id };
@@ -70,9 +74,8 @@ export function PluginCard({
   });
 
   const issues = readConfigIssues(configure.error, fields);
-  // A move that failed leaves the card exactly as it was, so the card is the
-  // only thing that can say it failed. A refusal shown under the field it
-  // blamed has already been said.
+  // A failed action leaves the card unchanged, so the card must show the error
+  // itself. A config error already shown under its field is not repeated here.
   const failed =
     (issues.rest ? configure.error : null) ?? toggle.error ?? retry.error ?? reset.error;
 
@@ -109,8 +112,8 @@ export function PluginCard({
 
       {fields.length === 0 ? null : (
         <ConfigForm
-          // A config changed elsewhere arrives as a fresh listing; the form is
-          // built again from it rather than holding values nobody stored.
+          // A config changed elsewhere arrives in a refetched list. The key
+          // rebuilds the form from it, rather than keeping values nobody stored.
           key={JSON.stringify(plugin.config)}
           id={plugin.id}
           fields={fields}
@@ -162,7 +165,7 @@ export function PluginCard({
         )}
       </div>
 
-      {/* Wiping cannot be undone, unlike everything else on this screen, so
+      {/* Unlike everything else on this screen, a reset cannot be undone, so
           the button asks for confirmation first. */}
       {confirmingReset ? (
         <InPlaceQuestion

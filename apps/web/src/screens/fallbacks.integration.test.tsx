@@ -16,9 +16,8 @@ const api: Readonly<Record<string, Handler>> = {
 };
 
 /**
- * The failure screen where the router would draw it: in the real router,
- * standing at the path that failed, so the frame it picks is the one the app
- * would show.
+ * Renders the failure screen inside the real router, at the path that failed,
+ * so it picks the same frame the app would show.
  */
 const renderFailureAt = async (path: string, token: string | null = "held") => {
   const { router, queryClient, unmount } = await renderApp({
@@ -37,8 +36,8 @@ const renderFailureAt = async (path: string, token: string | null = "held") => {
   );
 };
 
-describe("the screen a render failure leaves behind", () => {
-  it("names what went wrong and offers the way back", async () => {
+describe("the screen shown after a render failure", () => {
+  it("shows the error message and a link back to Sessions", async () => {
     await renderFailureAt("/tasks");
 
     expect(screen.getByText("This screen did not load")).toBeDefined();
@@ -46,14 +45,14 @@ describe("the screen a render failure leaves behind", () => {
     expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
   });
 
-  it("is a screen of the shell when the shell is what failed inside", async () => {
+  it("renders inside the shell when the failure is inside the shell", async () => {
     await renderFailureAt("/tasks");
 
     expect(screen.getByText(/The rest of Hercule is still here/)).toBeDefined();
     expect(screen.queryByText("Hercule")).toBeNull();
   });
 
-  it("is the whole page outside the shell, where there is nothing to keep", async () => {
+  it("takes the whole page when the failure is outside the shell", async () => {
     await renderFailureAt("/login", null);
 
     expect(screen.queryByText(/The rest of Hercule is still here/)).toBeNull();

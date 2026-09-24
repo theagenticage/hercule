@@ -16,10 +16,10 @@ export const Route = createFileRoute("/_shell/settings/secrets")({
 });
 
 /**
- * What the controller holds, and nothing of what it holds: every read here is
- * a reference, so the screen is a list of owners and names with the times they
- * were last written. The way to set one is on the same screen, because setting
- * and rotating are the same call.
+ * The Secrets screen: the secrets the controller stores, without their
+ * values. The API returns only references, so the screen lists each secret's
+ * owner and name with the time it was last written. The form to set a secret
+ * is on the same screen, because setting and rotating are the same call.
  */
 function Secrets(): JSX.Element {
   const { client } = Route.useRouteContext();
@@ -38,8 +38,8 @@ function Secrets(): JSX.Element {
       ) : (
         <section>
           <LaneLabel>Stored</LaneLabel>
-          {/* Settings is a column of 520px cards, which a list of rows sits
-              in rather than beside. */}
+          {/* The settings screens are a column of 520px cards, so the list
+              uses the same width. */}
           <div className="max-w-[520px]">
             <Group>
               <ul className="flex flex-col">

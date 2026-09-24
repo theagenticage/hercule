@@ -7,7 +7,7 @@ import { validate, type FieldErrors } from "../app/form";
 import { HOME_PATH } from "../app/entry-guard";
 import { CenteredScreen } from "../screens/centered-screen";
 
-/** One message for both halves, so the form never says which one was right. */
+/** One message for both fields, so the form never reveals which one was right. */
 const REJECTED = "Wrong username or password.";
 
 export const Route = createFileRoute("/login")({
@@ -48,7 +48,7 @@ function Login(): JSX.Element {
       return;
     }
 
-    // Everything read before the sign-in was read as somebody else.
+    // Everything cached before the sign-in was read as another user.
     queryClient.clear();
     await navigate({ to: HOME_PATH });
   };

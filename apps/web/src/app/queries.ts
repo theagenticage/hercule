@@ -1,16 +1,16 @@
 /**
  * Every read the app makes, as query options.
  *
- * The first two are the shell's own: they are answered once per page load and
- * then held, because first run happens once and the settings store changes only
- * through a write this app made, which puts the answer it got back into the
- * cache. Neither retries - a failure there is something the user has to see,
- * not something to sit through. The listings below are ordinary reads, keyed on
- * what narrows them so a filter that has been seen before answers from cache.
+ * The first two queries belong to the shell. They are fetched once per page
+ * load and then kept, because first run happens only once, and the settings
+ * store changes only through this app's own writes, which put the response
+ * into the cache. Neither retries: the user needs to see a failure there, not
+ * wait through retries. The list queries below are ordinary reads, keyed on
+ * their filters, so a filter that was used before is served from the cache.
  *
- * The keys themselves are `client-core`'s, not this file's: a live push names
- * records, and only builders both sides share can turn that into the keys the
- * cache holds them under.
+ * The query keys come from `client-core`, not from this file. A live push lists
+ * changed records, and only key builders that both sides share can turn those
+ * records into the keys the cache uses.
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
@@ -26,7 +26,7 @@ import {
   type TranscriptRow,
 } from "@hercule/contract";
 
-/** Whether first run has been completed. Reachable without a token. */
+/** Reads whether first run has been completed. Works without a token. */
 export const setupQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.setup(),
@@ -35,7 +35,7 @@ export const setupQuery = (client: HerculeClient) =>
     retry: false,
   });
 
-/** The settings store, both scopes. The user scope carries onboarding progress. */
+/** Reads the settings store, both scopes. The user scope holds onboarding progress. */
 export const settingsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.settings(),
@@ -45,10 +45,10 @@ export const settingsQuery = (client: HerculeClient) =>
   });
 
 /**
- * One page of tasks after another, under one filter. Paging is followed rather
- * than capped: a listing that stopped at its first page would be hiding tasks
- * without saying so. A narrowed filter holds the rows it had until the new ones
- * arrive, so a list does not blink out from under the reader between keystrokes.
+ * Reads the tasks that match one filter, page by page. Every page can be
+ * loaded: a list that stopped at its first page would hide tasks without
+ * telling the user. When the filter changes, the previous rows stay until the
+ * new ones arrive, so the list does not flash empty between keystrokes.
  */
 export const tasksQuery = (client: HerculeClient, filter: TaskFilter) =>
   infiniteQueryOptions({
@@ -63,14 +63,14 @@ export const tasksQuery = (client: HerculeClient, filter: TaskFilter) =>
   });
 
 /**
- * One task on its own, which is what the detail drawer reads. A task opened by
- * address is not necessarily on a page the listing has fetched, and a task the
- * user has just edited may have left the listing's filter entirely, so the
- * panel showing it reads it rather than looking it up in a list.
+ * Reads one task, for the detail drawer. A task opened by URL may not be on a
+ * page the list has fetched, and a task the user just edited may no longer
+ * match the list's filter, so the drawer reads the task itself instead of
+ * looking it up in the list.
  *
- * A refusal is answered at once rather than retried: a task deleted while the
- * panel is open answers 404 for good, and retrying it behind the reader leaves
- * the panel showing a record the list beside it has already dropped.
+ * An error is not retried. A task deleted while the drawer is open keeps
+ * returning 404, and retrying in the background would keep the drawer showing
+ * a task the list beside it has already dropped.
  */
 export const taskQuery = (client: HerculeClient, id: string) =>
   queryOptions({
@@ -80,9 +80,9 @@ export const taskQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * Every project, for the pickers that name one. One page: there are few of
- * them, and a task naming a project outside it says the id rather than
- * claiming the task has none.
+ * Reads every project in a single page, for the project pickers. There are few
+ * projects. If a task's project is not in the page, the task shows the project
+ * id instead of claiming it has no project.
  */
 export const projectsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -91,9 +91,8 @@ export const projectsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Every resource, as one page: the repos the workspace menu offers checkouts
- * of. A handful per project, so the whole set is one answer, like the projects
- * above it.
+ * Reads every resource in a single page: the repos the workspace menu offers
+ * checkouts of. There are only a handful per project, as with projects.
  */
 export const resourcesQuery = (client: HerculeClient) =>
   queryOptions({
@@ -102,9 +101,9 @@ export const resourcesQuery = (client: HerculeClient) =>
   });
 
 /**
- * Every workspace, as one page: what the composer's menu lists, what the
- * sidebar groups by, and where the branch lists come from. Disposed ones are
- * read along with the rest - a thread that ended in one still names it.
+ * Reads every workspace in a single page. The composer's menu lists them, the
+ * sidebar groups by them, and the branch lists come from them. Disposed
+ * workspaces are included, because a thread that ended in one still shows it.
  */
 export const workspacesQuery = (client: HerculeClient) =>
   queryOptions({
@@ -113,9 +112,9 @@ export const workspacesQuery = (client: HerculeClient) =>
   });
 
 /**
- * One workspace on its own, polled while it is being made: provisioning is the
- * machine's own work and nothing pushes its end, so the form that started it
- * asks again every second until the machine has said either way.
+ * Reads one workspace, and polls it while it is provisioning. Provisioning
+ * runs on the machine and no push reports when it ends, so the query refetches
+ * until the workspace is no longer provisioning.
  */
 export const workspaceQuery = (client: HerculeClient, id: string) =>
   queryOptions({
@@ -126,13 +125,13 @@ export const workspaceQuery = (client: HerculeClient, id: string) =>
     retry: false,
   });
 
-/** How often a workspace being made is asked about again. */
+/** How often a provisioning workspace is fetched again. */
 const WORKSPACE_POLL_MS = 400;
 
 /**
- * The fleet, as one page. A fleet is a handful of machines and the screen shows
- * all of them, so nothing follows the cursor; a fleet past one page would lose
- * rows silently, and is the point at which this grows a listing of its own.
+ * Reads the fleet in a single page. A fleet is a handful of machines and the
+ * screen shows all of them, so the cursor is not followed. A fleet larger than
+ * one page would silently lose rows; at that point this query needs paging.
  */
 export const runnersQuery = (client: HerculeClient) =>
   queryOptions({
@@ -141,12 +140,12 @@ export const runnersQuery = (client: HerculeClient) =>
   });
 
 /**
- * One machine on its own, which is what its page reads. A runner reached by
- * address is not necessarily on a listing this browser has fetched, and the
- * page shows more than a row does, so it is read rather than looked up.
+ * Reads one runner, for its page. A runner opened by URL may not be in a list
+ * this browser has fetched, and the page shows more than a row does, so the
+ * page reads the runner itself instead of looking it up in the list.
  *
- * A refusal is answered at once rather than retried: a runner that is not there
- * answers 404 for good.
+ * An error is not retried, because a runner that returns 404 once will keep
+ * returning 404.
  */
 export const runnerQuery = (client: HerculeClient, id: string) =>
   queryOptions({
@@ -156,9 +155,8 @@ export const runnerQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * One session on its own, which is what a thread page reads. A refusal is
- * answered at once rather than retried: a session that is not there answers
- * 404 for good.
+ * Reads one session, for a thread page. An error is not retried, because a
+ * session that returns 404 once will keep returning 404.
  */
 export const sessionQuery = (client: HerculeClient, id: string) =>
   queryOptions({
@@ -168,14 +166,15 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * A session's whole transcript, oldest first - every row is fetched rather
- * than a page of them, because the thread surface renders every turn it
- * covers. `session:<id>:stream` appends straight to this cache entry as new
- * rows are written, and a `reset` refetches it; neither is TanStack Query's
- * own staleness knowing anything happened, so this entry never goes stale on
- * its own and is never refetched behind those two - a background refetch
- * racing a live append could otherwise win with an answer older than what the
- * append just wrote.
+ * Reads a session's whole transcript, oldest first. Every page is fetched,
+ * because the thread screen renders every turn.
+ *
+ * After the first fetch, only the live connection updates this cache entry:
+ * `session:<id>:stream` appends new rows directly, and a `reset` refetches it.
+ * TanStack Query's own staleness knows about neither, so the entry never goes
+ * stale on its own and is never refetched in the background. A background
+ * refetch that raced a live append could otherwise replace the entry with
+ * older data than the append just wrote.
  */
 export const transcriptQuery = (client: HerculeClient, sessionId: string) =>
   queryOptions({
@@ -200,12 +199,14 @@ export const transcriptQuery = (client: HerculeClient, sessionId: string) =>
   });
 
 /**
- * A session's input history, queued rows included: the composer's queued list
- * above the textarea. One page, same as the fleet and the session listing
- * above - a thread queues a handful of turns at most, never enough to page.
- * The page is 500 rows ascending and its readers filter to `queued`
- * themselves, because `input.query` has no status filter; a thread past 500
- * inputs would stop showing its queued ones, which is when this grows one.
+ * Reads a session's input history, including queued inputs, for the queued
+ * list above the composer's textarea. It reads a single page, like the fleet
+ * and session queries: a thread queues a handful of turns at most.
+ *
+ * The page holds up to `MAX_PAGE_LIMIT` rows, oldest first, and callers filter
+ * to `queued` themselves, because `input.query` has no status filter. A
+ * thread with more inputs than that would stop showing its queued ones; at
+ * that point `input.query` needs a status filter.
  */
 export const inputsQuery = (client: HerculeClient, sessionId: string) =>
   queryOptions({
@@ -215,8 +216,8 @@ export const inputsQuery = (client: HerculeClient, sessionId: string) =>
   });
 
 /**
- * The join tokens still outstanding. A token lives an hour and is spent by one
- * machine, so this is a handful at most and the whole set is one answer.
+ * Reads the join tokens that are still unused. A token lasts an hour and is
+ * used by one machine, so there are a handful at most.
  */
 export const joinTokensQuery = (client: HerculeClient) =>
   queryOptions({
@@ -225,8 +226,8 @@ export const joinTokensQuery = (client: HerculeClient) =>
   });
 
 /**
- * Every plugin the binary was built with, which is the whole set: the registry
- * is compiled in, so there is nothing to page through or narrow by.
+ * Reads every plugin the binary was built with. The registry is compiled in,
+ * so the list is small and has no paging or filters.
  */
 export const pluginsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -235,9 +236,9 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Every secret reference, as one page. A reference is what a read carries -
- * never a value - and there are as many of them as there are connections and
- * plugins, so the whole set is one answer.
+ * Reads every secret reference in a single page. A read returns references,
+ * never secret values. There is about one per connection and plugin, so there
+ * are few.
  */
 export const secretsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -246,9 +247,9 @@ export const secretsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Every connection, as one page. A connection is an account the user set up by
- * hand, so there are a handful; the screen shows all of them, and the point at
- * which they outgrow one page is the point at which this grows a listing.
+ * Reads every connection in a single page. A connection is an account the user
+ * set up by hand, so there are a handful, and the screen shows all of them. If
+ * they ever outgrow one page, this query needs paging.
  */
 export const connectionsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -263,9 +264,9 @@ export const providersQuery = (client: HerculeClient) =>
   });
 
 /**
- * Every session, as one page. The sidebar and All sessions both read the whole
- * set - the point at which a fleet's threads outgrow one page is the point at
- * which this grows a listing of its own, same as the fleet above.
+ * Reads every session in a single page. The sidebar and All sessions both read
+ * the whole set. If a fleet's threads ever outgrow one page, this query needs
+ * paging, like the fleet query.
  */
 export const sessionsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -274,13 +275,14 @@ export const sessionsQuery = (client: HerculeClient) =>
   });
 
 /**
- * One machine's live sessions: the runner page reads both its capacity
- * (`starting | idle | busy`) and its queue (`queued`) from the same list, so
- * it is fetched once rather than once per status. `exited` is never read
- * here: a machine that has run hundreds of sessions would otherwise exceed
- * `MAX_PAGE_LIMIT` and the running count would go wrong. Built from
- * `RUNNING_STATUSES` rather than named again, so the fetch and the capacity
- * line it feeds cannot drift apart.
+ * Reads one runner's queued and running sessions. The runner page reads both
+ * its capacity (`starting | idle | busy`) and its queue (`queued`) from this
+ * one list, so it is fetched once rather than once per status.
+ *
+ * `exited` sessions are left out: a machine that has run hundreds of sessions
+ * would otherwise exceed `MAX_PAGE_LIMIT`, and the running count would be
+ * wrong. The statuses come from `RUNNING_STATUSES` rather than being listed
+ * again, so this query and the capacity line it feeds cannot drift apart.
  */
 export const runnerSessionsQuery = (client: HerculeClient, runnerId: string) =>
   queryOptions({
@@ -292,8 +294,8 @@ export const runnerSessionsQuery = (client: HerculeClient, runnerId: string) =>
   });
 
 /**
- * The permission profiles, for the Settings > Threads profile field. Not a
- * live topic, so nothing but this browser's own write ever moves it.
+ * Reads the permission profiles, for the profile field in Settings > Threads.
+ * Profiles have no live topic, so only this browser's own writes update them.
  */
 export const profilesQuery = (client: HerculeClient) =>
   queryOptions({
@@ -302,9 +304,9 @@ export const profilesQuery = (client: HerculeClient) =>
   });
 
 /**
- * The controller itself: its identity, its version and the runner work falls
- * back to. The version is what a runner's own is compared against, so it is
- * read rather than assumed to match.
+ * Reads the controller itself: its identity, its version and the fallback
+ * runner. Each runner's version is compared with the controller's, so the
+ * version is read rather than assumed to match.
  */
 export const controllerQuery = (client: HerculeClient) =>
   queryOptions({
@@ -313,13 +315,13 @@ export const controllerQuery = (client: HerculeClient) =>
   });
 
 /**
- * Which listed runner is on the machine this browser is on.
+ * Finds which listed runner runs on the same machine as this browser.
  *
- * Keyed on the machines that could answer and on where each says to ask, so a
- * runner that joined, left or moved its port is asked again while a refetch of
- * the same fleet is not. A refusal is not retried: silence, a hang and a
- * stranger's answer all mean the same thing, and retrying only turns a bounded
- * wait into a longer one.
+ * The key holds each runner's id and loopback port. So the check runs again
+ * when a runner joins, leaves or changes its port, but not when the same fleet
+ * is refetched. A failure is not retried: no response, a timeout and a
+ * response from the wrong runner all mean "no local runner", and retrying
+ * would only make a bounded wait longer.
  */
 export const localRunnerQuery = (
   detect: (runners: ReadonlyArray<Runner>) => Promise<string | null>,

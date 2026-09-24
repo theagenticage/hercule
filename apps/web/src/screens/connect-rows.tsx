@@ -5,15 +5,17 @@ export interface Offer {
   readonly name: string;
   readonly gist: string;
   /**
-   * What Connect does. An offer without one is dimmed: a screen whose setup is
-   * not built yet still shows what will be there, with the reason under it.
+   * Called when Connect is clicked. Without it, the Connect button is
+   * disabled: a screen whose setup is not built yet still shows what it will
+   * offer, with the reason below.
    */
   readonly onConnect?: () => void;
 }
 
 /**
- * The Connect rows a screen offers. What cannot be picked is dimmed with its
- * reason under the group, never hidden.
+ * The list of things a screen offers to connect, each with a Connect button.
+ * An offer that cannot be connected yet is disabled, not hidden, and the
+ * reason is shown below the group.
  */
 export function ConnectRows({
   offers,

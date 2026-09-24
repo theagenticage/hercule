@@ -3,10 +3,10 @@ import { useState, type JSX } from "react";
 const OPEN_KEY = "hercule.pulse.open";
 
 /**
- * Whether the pulse is open, remembered for this browser session only.
+ * Reads whether the pulse was left open in this browser session.
  *
- * Reading and writing are both guarded: a browser with storage denied still
- * renders the pulse, it just forgets between page loads.
+ * Both this function and `writeOpen` catch storage errors. A browser that denies
+ * storage still renders the pulse; it just forgets its state between page loads.
  */
 const readOpen = (): boolean => {
   try {
@@ -20,14 +20,15 @@ const writeOpen = (open: boolean): void => {
   try {
     window.sessionStorage.setItem(OPEN_KEY, String(open));
   } catch {
-    // Nothing to do: the state is a convenience, not a record.
+    // Ignore the error: losing this state is harmless.
   }
 };
 
 /**
- * The fleet's ambient signals at the sidebar foot: one summary line that opens
- * to the full block. Closed by default; nothing reports into it yet, so both
- * states say so rather than showing an empty list.
+ * The pulse at the foot of the sidebar: a one-line summary of the fleet's
+ * signals that expands to the full block. It starts closed. Nothing reports
+ * into it yet, so both the line and the block explain that instead of showing
+ * an empty list.
  */
 export function Pulse(): JSX.Element {
   const [open, setOpen] = useState(readOpen);

@@ -1,8 +1,12 @@
 /**
- * One turn of the transcript: a mono timestamp, the user's message as a
- * right-aligned bubble, the assistant's prose full width, both as markdown,
- * and the "Worked for" divider where there is something to disclose (spec 14
- * §The thread surface).
+ * One turn of the transcript (spec 14 §The thread surface). It shows:
+ *
+ * - a mono timestamp;
+ * - the user's message as a right-aligned bubble;
+ * - the assistant's prose at full width;
+ * - the "Worked for" divider, when the turn is live or has tool items.
+ *
+ * Both messages are rendered as markdown.
  */
 import type { JSX, RefObject } from "react";
 import { formatStamp, type ThreadTurn } from "@hercule/client-core";
@@ -16,9 +20,9 @@ export function Turn({
   timezone,
 }: {
   readonly turn: ThreadTurn;
-  /** Still running: no `turn.completed` row has arrived for this turn yet. */
+  /** Whether the turn is running: the last turn of a busy session, with no `turn.completed` yet. */
   readonly live: boolean;
-  /** Where this turn's open item live-streams its token deltas, when it has one. */
+  /** The element the live tail streams text into; set only on the live turn. */
   readonly tailRef?: RefObject<HTMLSpanElement | null> | undefined;
   readonly timezone: string;
 }): JSX.Element {
@@ -39,8 +43,8 @@ export function Turn({
       {turn.assistantText === "" && !live ? null : (
         <div className="w-full text-row text-ink">
           <Markdown text={turn.assistantText} />
-          {/* The tail is painted as plain text while the agent types, so it
-              keeps the whitespace behaviour the settled prose no longer has. */}
+          {/* The tail is plain text while the agent writes, so its whitespace
+              is kept as sent; the finished prose is rendered as markdown. */}
           {tailRef === undefined ? null : <span ref={tailRef} className="whitespace-pre-wrap" />}
         </div>
       )}

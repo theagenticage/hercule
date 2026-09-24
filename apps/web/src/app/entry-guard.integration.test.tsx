@@ -19,13 +19,13 @@ const waitForPath = async (
 };
 
 describe("the entry guard", () => {
-  it("sends everything to setup while first run has not happened", async () => {
+  it("redirects every path to setup until first run is complete", async () => {
     const api = stubApi(SETUP_INCOMPLETE);
     const { router } = await renderApp({ path: "/tasks", api: api.fetch });
     await waitForPath(router, "/setup");
   });
 
-  it("leaves the setup link alone while first run has not happened", async () => {
+  it("keeps the setup link and its query string until first run is complete", async () => {
     const api = stubApi(SETUP_INCOMPLETE);
     const { router } = await renderApp({ path: "/setup?token=abc", api: api.fetch });
     await waitForPath(router, "/setup");
@@ -38,13 +38,13 @@ describe("the entry guard", () => {
     await waitForPath(router, "/login");
   });
 
-  it("sends a signed-in user with onboarding left to the step that is left", async () => {
+  it("sends a signed-in user with an unfinished onboarding step to that step", async () => {
     const api = stubApi({ ...SETUP_COMPLETE, ...buildSettingsRoute({}) });
     const { router } = await renderApp({ path: "/runs", api: api.fetch, token: "bearer" });
     await waitForPath(router, "/onboarding/timezone");
   });
 
-  it("lets a signed-in user with onboarding done through to the route they asked for", async () => {
+  it("lets a signed-in user who finished onboarding through to the requested route", async () => {
     const api = stubApi({
       ...SETUP_COMPLETE,
       ...buildSettingsRoute({
@@ -66,9 +66,9 @@ describe("the entry guard", () => {
     await waitForPath(router, "/");
   });
 
-  it("sends a token the live connection found rejected back to the login screen", async () => {
-    // Nobody asked for the ticket the live connection fetches, so a refusal
-    // there is the one 401 no navigation is waiting behind.
+  it("sends the user to the login screen when the live connection's token is rejected", async () => {
+    // The live connection requests its ticket on its own, so this 401 is the
+    // only one that arrives without a navigation waiting for it.
     const api = stubApi({
       ...SETUP_COMPLETE,
       ...buildSettingsRoute({ "onboarding.completedSteps": ["timezone"] }),
@@ -88,7 +88,7 @@ describe("the entry guard", () => {
     expect(client.getToken()).toBeNull();
   });
 
-  it("sends a rejected token back to the login screen, holding it no longer", async () => {
+  it("sends the user to the login screen and drops the token when the token is rejected", async () => {
     const api = stubApi({
       ...SETUP_COMPLETE,
       "GET /api/v1/settings": {

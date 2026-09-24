@@ -4,9 +4,9 @@ import { EmptyState } from "@hercule/ui";
 import { HomeLink, NOT_FOUND_HEADLINE } from "../../screens/fallbacks";
 
 /**
- * Any path inside the app that names no screen. It is a screen of the shell
- * rather than a bare page, so a mistyped address leaves the navigation where
- * it was and the next click is one away.
+ * The screen for any path inside the app that matches no other screen. It is
+ * rendered inside the shell rather than as a bare page, so after a mistyped
+ * address the sidebar stays in place and the next screen is one click away.
  */
 export const Route = createFileRoute("/_shell/$")({
   staticData: { title: "Not found" },
