@@ -32,14 +32,14 @@ export const Timestamp = Schema.String.check(
 export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
 
 /**
- * Who performed an operation. Derived from the
- * credential, never supplied by the caller; widened when multi-user arrives,
- * never restructured.
+ * Who performed an operation. The controller derives it from the credential;
+ * the caller never supplies it. It will be widened when multi-user support
+ * arrives, never restructured.
  *
- * `system` is Hercule itself: a mutation that nothing holding a credential asked
- * for. Enlisting a machine that presented a join token, and everything a runner
- * reports about itself afterwards, are its writes - a runner is never an actor,
- * because it can do nothing on the public API.
+ * `system` is Hercule itself: a mutation that nothing holding a credential
+ * asked for. Enlisting a machine that presented a join token, and everything a
+ * runner reports about itself afterwards, are written as `system`. A runner is
+ * never an actor, because it cannot call the public API.
  */
 export const Actor = Schema.String.check(
   Schema.isPattern(
@@ -72,17 +72,18 @@ const EXTERNAL_REF_PATTERN = /^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/;
  * `<system>:<kind>:<identity>`, for example `github:issue:owner/repo#42` or
  * `gmail:thread:19b2c`.
  *
- * The core pins the grammar and nothing else. What a system's identities look
- * like is the plugin's to canonicalize, and for systems with no plugin it is
- * the triage agent's, so anything without whitespace is an identity here. The
- * system is lowercase so two spellings of the same system cannot become two
- * refs, which would defeat the duplicate-signal query the ref exists for.
+ * The core fixes the grammar and nothing else. The plugin for a system puts
+ * that system's identities in canonical form; for a system with no plugin, the
+ * triage agent does. So here, anything without whitespace is a valid identity.
+ * The system must be lowercase, so that two spellings of the same system
+ * cannot become two refs, which would break the duplicate-signal query the ref
+ * exists for.
  */
 export const ExternalRef = Schema.String.check(
   Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),
-  // A filter rather than a pattern check, so that the refusal quotes the ref
-  // the caller wrote: a pattern check reports the position of the value and
-  // never the value, and a caller sending a list of refs cannot act on a
+  // A filter rather than a pattern check, so that the error message quotes the
+  // ref the caller wrote: a pattern check reports the position of the value
+  // but never the value, and a caller sending a list of refs cannot act on a
   // position alone. The ref comes last, so a client that truncates a long
   // message still shows the instruction.
   Schema.makeFilter((ref) =>

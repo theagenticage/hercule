@@ -1,12 +1,12 @@
 /**
- * What a branch name may be when a caller writes one, and what a checkout
- * carries when a machine reports one back.
+ * Tests which branch names a caller may write, and what a checkout holds when a
+ * machine reports it back.
  *
- * A branch a caller writes ends up as an argument to a command on a machine -
- * `git checkout`, `git worktree add` - so it is held to git's own rules here, in
- * one refusal a caller can act on, rather than as a command that fails halfway
- * through on a runner. What comes back is a different thing: a fact, which the
- * record carries as the machine said it (D-21 F2).
+ * A branch a caller writes becomes an argument to a command on a machine -
+ * `git checkout`, `git worktree add` - so it is validated against git's own
+ * rules here, with one error a caller can act on, rather than by a command that
+ * fails halfway through on a runner. What comes back is different: a fact the
+ * machine reported, which the record holds exactly as reported.
  */
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
@@ -16,7 +16,7 @@ const isAccepted = (schema: Schema.Codec<string>, value: string): boolean =>
   Schema.decodeUnknownExit(schema)(value)._tag === "Success";
 
 describe("a branch name", () => {
-  it("takes the names people write", () => {
+  it("accepts the names people write", () => {
     for (const branch of [
       "main",
       "feature/x",
@@ -29,7 +29,7 @@ describe("a branch name", () => {
     }
   });
 
-  it("refuses what git refuses, and what a shell would read as an option", () => {
+  it("rejects what git rejects, and what git would read as an option", () => {
     for (const branch of [
       "",
       "-f",
@@ -49,7 +49,7 @@ describe("a branch name", () => {
       "feature*",
       "feature[1]",
       "feature\\x",
-      // D-21 F13: a component beginning with a dot is not a ref component.
+      // git does not accept a path component that begins with a dot.
       ".hidden",
       "feature/.git",
       `${"a".repeat(256)}`,
@@ -59,11 +59,11 @@ describe("a branch name", () => {
   });
 });
 
-describe("a checkout as the API hands it out", () => {
+describe("a checkout as the API returns it", () => {
   /**
-   * D-21 F2: the machine could read no branch - a detached HEAD, or a clone of
-   * an empty repository - and the record says so. Encoding it as `Branch` would
-   * make the API unable to describe a checkout it is holding.
+   * The machine could not read a branch - a detached HEAD, or a clone of an
+   * empty repository - and the record holds null. Encoding the field as
+   * `Branch` would make the API unable to describe a checkout it holds.
    */
   it("encodes a checkout the machine could read no branch for", () => {
     const checkout = {
@@ -79,9 +79,9 @@ describe("a checkout as the API hands it out", () => {
   });
 
   /**
-   * And what a machine did say, whatever it is: a detached worktree reports
-   * `(HEAD detached at abc1234)`-shaped words on some gits, and a record that
-   * refused them would be a record of nothing.
+   * A branch the machine reported is kept whatever it is: on some git
+   * versions a detached worktree reports text like `(HEAD detached at
+   * abc1234)`, and a record that rejected it would be useless.
    */
   it("encodes a branch a caller could never have asked for", () => {
     expect(

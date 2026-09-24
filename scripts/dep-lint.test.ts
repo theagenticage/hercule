@@ -10,8 +10,8 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const run = promisify(execFile);
 
 /**
- * The rule is only worth having if the failing direction is proven. Each
- * fixture is a runner entrypoint that reaches one forbidden thing by one
+ * The rule is only useful if the tests prove it fails when it should. Each
+ * fixture is a runner entrypoint that imports one forbidden thing with one
  * import form; `clean` is the control.
  */
 const FIXTURES = {
@@ -26,8 +26,8 @@ export const run = (): void => console.log("runner");`,
   const { Database } = await import("bun:sqlite");
   console.log(Database);
 }`,
-  // Talking about the rule is not breaking it, and a type-only import is no
-  // runtime edge. Both must pass.
+  // Mentioning a forbidden module in a comment does not break the rule, and a
+  // type-only import is not a runtime edge. Both must pass.
   "type-only": `// The runner must never import "bun:sqlite" or require("bun:sqlite").
 import type { Database } from "bun:sqlite";
 export const run = (db?: Database): void => console.log(typeof db);`,
@@ -102,16 +102,16 @@ describe("dep-lint", () => {
 /**
  * The vendor SDK's eight per-platform CLI packages (one is 196 MB) are excluded
  * from the install and must stay excluded. This is a workspace rule, not an
- * import-graph one: pnpm links only direct dependencies, so an optional
+ * import-graph rule: pnpm links only direct dependencies, so an optional
  * dependency of the SDK shows up in the store and nowhere else.
  */
 describe("the vendor SDK's per-platform CLI packages", () => {
   const SDK = "@anthropic-ai+claude-agent-sdk";
 
   /**
-   * The script reads the workspace it sits in, so a copy in a root of its own is
-   * how the failing direction is proven without writing into this repository's
-   * own store.
+   * The script reads the workspace it is in, so the failing cases run a copy
+   * of it in a separate root, without writing into this repository's own
+   * store.
    */
   const createScriptRoot = async (...packages: ReadonlyArray<string>): Promise<string> => {
     const one = await mkdtemp(join(tmpdir(), "hercule-dep-lint-root-"));
@@ -124,15 +124,15 @@ describe("the vendor SDK's per-platform CLI packages", () => {
     return join(one, "scripts/dep-lint.ts");
   };
 
-  it("are not installed, and dep-lint says so over the repository as it stands", async () => {
+  it("are not installed, and dep-lint reports that for this repository", async () => {
     const { stdout } = await run("bun", ["run", join(root, "scripts/dep-lint.ts")], { cwd: root });
 
     expect(stdout).toContain("is clean");
     expect(stdout).toContain("no per-platform CLI package");
   });
 
-  // Without the SDK there are no per-platform packages beside it either, so the
-  // platform check alone would call an install that never happened clean.
+  // Without the SDK there are no per-platform packages either, so the platform
+  // check alone would pass on an install that never happened.
   it("fail the check when the SDK itself is not installed", async () => {
     const script = await createScriptRoot("effect@4.0.0");
 
@@ -145,7 +145,7 @@ describe("the vendor SDK's per-platform CLI packages", () => {
     expect(refusal!.stderr).toContain("is not installed");
   });
 
-  it("fail the check when one finds its way into the store", async () => {
+  it("fail the check when one of them is in the store", async () => {
     const script = await createScriptRoot(`${SDK}@0.3.263`, `${SDK}-darwin-arm64@0.3.263`);
 
     const refusal = await runDepLint("clean", script).then(

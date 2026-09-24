@@ -1,42 +1,43 @@
 /**
- * A field written as one token.
+ * Shorthand: a field whose structured value is typed as one word.
  *
- * Some fields hold a structured value that a person and an agent type as one
+ * Some fields hold a structured value that people and agents type as one
  * word: `run:r_3` for a Subscription Target, `session:<id>` for a holder. The
- * codec that reads that word is declared beside the field's own schema and
- * marked on it, so a client that takes the word only has to find the codec and
- * use it. It never parses the word itself, and it never has to know which
- * operation it is serving.
+ * codec that parses the word is declared beside the field's schema and
+ * attached to it as an annotation. A client that accepts the word only has to
+ * find the codec and use it. The client never parses the word itself, and
+ * never needs to know which operation it is serving.
  *
- * Where the wire carries the word as it was written - a query string does -
- * the field's schema is that codec, and it is marked with itself.
+ * When the wire carries the word as it was typed, as a query string does, the
+ * field's schema is the codec itself, and it is annotated with itself.
  */
 import { Schema } from "effect";
 
-/** The annotation a marked field carries: the codec that reads its one word. */
+/** The annotation key that holds the codec for a field's one-word form. */
 const SHORTHAND = "shorthand";
 
-/** Marks a field's schema with the codec that reads one written word into it. */
+/** Annotates a field's schema with the codec that parses the field's one-word form. */
 export const markShorthand = <S extends Schema.Top>(
   schema: S,
   shorthand: Schema.Codec<S["Type"], string>,
 ): S => schema.annotate({ [SHORTHAND]: shorthand }) as S;
 
 /**
- * Marks a field whose wire form is the written word itself: its schema is the
- * codec that reads the word, so the codec is marked with itself and a caller
- * finds it where it finds every other shorthand. A query string carries the
- * written word, which is where this happens.
+ * Annotates a schema that is already the codec for the word with itself. Used
+ * for fields whose wire form is the typed word, such as query string fields,
+ * so a caller finds the codec in the same place as for every other shorthand.
  */
 export const markShorthandOnItself = <S extends Schema.Codec<unknown, string>>(schema: S): S =>
   markShorthand(schema, schema as unknown as Schema.Codec<S["Type"], string>);
 
 /**
- * Decodes one written word with the codec a field's schema carries, or
- * `undefined` for a field whose written text is its value.
+ * Returns a function that decodes a typed word with the codec annotated on a
+ * field's schema. Returns `undefined` when the field has no codec, which means
+ * the typed text is the value as is.
  *
- * The decoder throws what the codec refuses with, so the writer reads the
- * codec's own message and no second message about the same word exists.
+ * The returned function throws the codec's own error for an invalid word, so
+ * the user sees the codec's message and not a second message about the same
+ * word.
  */
 export const readShorthandDecoder = (field: unknown): ((text: string) => unknown) | undefined => {
   const marked = (

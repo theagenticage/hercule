@@ -1,14 +1,15 @@
 /**
- * The payload schemas again, as Standard Schema validators.
+ * The payload schemas of the web app's forms, converted to Standard Schema
+ * validators.
  *
- * A form validates what it is about to send with the same schema the API will
- * validate it with, so the two can never disagree. The web app writes no Effect
- * code, and the Standard Schema interface is the whole surface it needs: one
- * `validate(value)` that answers with the decoded value or a list of issues,
- * each carrying the field path and a message the form can show.
+ * A form validates what it is about to send with the same schema the API
+ * validates it with, so the two can never disagree. The web app writes no
+ * Effect code, and the Standard Schema interface is all it needs: one
+ * `validate(value)` that returns the decoded value or a list of issues, each
+ * with the field path and a message the form can show.
  *
- * These validators are synchronous for every schema here - no filter of theirs
- * is effectful - so a caller may treat the answer as a value rather than a
+ * These validators are synchronous, because none of these schemas has an
+ * effectful filter. So a caller may treat the result as a value rather than a
  * promise.
  */
 import { Schema } from "effect";

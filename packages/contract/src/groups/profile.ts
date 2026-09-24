@@ -26,13 +26,13 @@ import { atMost, bounded } from "../strings";
 const ProfileName = bounded(1, 128);
 
 /**
- * The longest grant list a profile may carry: the grant vocabulary itself. A
- * profile names a grant or it does not, so a longer list is repeats, and the
- * bound moves on its own as the vocabulary grows.
+ * The longest grant list a profile may carry: the size of the grant
+ * vocabulary. A profile either has a grant or not, so a longer list could only
+ * hold repeats. The bound grows on its own with the vocabulary.
  */
 export const MAX_PROFILE_GRANTS = ALL_GRANTS.length;
 
-/** The grants of a profile, as it is written and as it reads back. */
+/** The grants of a profile, in a request and in a response. */
 const Grants = atMost(GrantSchema, MAX_PROFILE_GRANTS);
 
 export const Profile = Schema.Struct({

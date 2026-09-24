@@ -44,7 +44,7 @@ describe("parseGlobalOptions", () => {
     expect(options.rest).toEqual(["serve", "--verbose"]);
   });
 
-  it("reports where the verb sat, so the dispatcher can hand the rest on untouched", () => {
+  it("reports the position of the verb, so the dispatcher can pass the rest on unchanged", () => {
     expect(parseOrFail(["--home", "/tmp/h", "serve"]).verbIndex).toBe(2);
     expect(parseOrFail(["-c", "bind.port=1", "serve", "extra"]).verbIndex).toBe(2);
     // A verb that repeats an option value is still found by position.

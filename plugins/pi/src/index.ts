@@ -9,8 +9,8 @@ import {
 
 /**
  * What pi's RPC mode can do, at the version Hercule pins. Every value is a fact,
- * so the controller and the UI read their affordances off this rather than off
- * the provider's name.
+ * so the controller and the UI decide what to offer from these values rather
+ * than from the provider's name.
  */
 const definition: ProviderDefinition = {
   id: "pi",
@@ -59,7 +59,7 @@ export const pi: Plugin = {
     configSchema: Schema.Struct({}),
   },
   register: (host) => registerProvider(host, definition),
-  // Nothing runs on the controller for a provider: execution lives on the
-  // runner, keyed by the definition above.
+  // Nothing runs on the controller for a provider: the runner runs sessions,
+  // based on the definition above.
   activate: () => Effect.succeed(Effect.void),
 };

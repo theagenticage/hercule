@@ -1,22 +1,23 @@
 /**
  * The event log, read.
  *
- * One table holds two populations under one envelope: pipeline events, which
- * the event router will evaluate against triggers, and audit entries, which it never
- * will. Both come back from `query`, told apart by `kind`, because the log is
- * also the audit log and the reason to open it is usually to read a security
- * entry beside the events around it. One population filter applies: the
- * security entries - the audit kinds of the secret, auth and user account
- * families - are returned only to a caller that also holds `event.audit`. To
- * anyone else they are absent from the page rather than refused, and `read` of
- * one answers not-found, so the log does not confirm what it withholds.
+ * One table holds two kinds of entry in the same format: pipeline events,
+ * which the event router evaluates against triggers, and audit entries, which
+ * it never evaluates. `query` returns both, told apart by `kind`, because the
+ * log is also the audit log, and people usually open it to read a security
+ * entry next to the events around it.
  *
- * An event's id is its position in the log, so it is an integer, and the one
+ * Security entries - the audit kinds of the secret, auth and user account
+ * families - are returned only to a caller that also holds `event.audit`. For
+ * anyone else they are left out of the page rather than rejected, and `read`
+ * of one fails with not_found, so the log does not reveal what it withholds.
+ *
+ * An event's id is its position in the log, so it is an integer: the only
  * integer id in a system of UUIDv7s.
  *
- * Two filters spec 11 names are missing here, `triggerId` and `runId`: triggers
- * and runs do not exist yet, and a filter that always answers empty tells the
- * caller something untrue. The workflows ticket completes this operation.
+ * Two filters from spec 11, `triggerId` and `runId`, are missing here: events
+ * are not linked to triggers or runs yet, and a filter that always returns an
+ * empty page would mislead the caller.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -66,7 +67,7 @@ export const Event = Schema.Struct({
 
 export type Event = Schema.Schema.Type<typeof Event>;
 
-/** The log is walked by position, and by nothing else. */
+/** The log is sorted by position only. */
 export const EVENT_SORT_FIELDS = ["id"] as const;
 
 /** The longest idempotency key an emitter may write. */
@@ -78,7 +79,7 @@ export const MAX_EVENT_SYSTEM_LENGTH = 64;
 /** The longest source URL. It is where a person opens the event, not a document. */
 export const MAX_EVENT_URL_LENGTH = 2048;
 
-/** What a manual emit hands over. Everything else on the envelope is the core's. */
+/** The payload of a manual emit. The core fills in every other field of the event. */
 export const EventEmitInput = Schema.Struct({
   kind: EventKind,
   payload: JsonObject,
@@ -89,15 +90,15 @@ export const EventEmitInput = Schema.Struct({
 
 export type EventEmitInput = Schema.Schema.Type<typeof EventEmitInput>;
 
-/** Where a manual emit lands in the log. */
+/** The id of the event a manual emit wrote. */
 export const EventEmitted = Schema.Struct({ eventId: EventId });
 
 export type EventEmitted = Schema.Schema.Type<typeof EventEmitted>;
 
 /**
- * What enrichment may amend. An omitted field is left as it was; `refs` is
- * added to and never taken from, so a later reader of an event never finds
- * fewer identities on it than an earlier one did.
+ * The fields enrichment may amend. A field left out is not changed. `refs` are
+ * only ever added, never removed, so a later reader of an event never finds
+ * fewer refs on it than an earlier one did.
  */
 export const EventEnrichInput = Schema.Struct({
   system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
@@ -114,11 +115,11 @@ export const event = HttpApiGroup.make("event")
         connectionId: Schema.optionalKey(Id),
         kind: Schema.optionalKey(EventKind),
         /**
-         * Both bound `receivedAt`, when the log took the event, not
-         * `occurredAt`, when the source says it happened. Arrival is the log's
-         * own axis and the one its ids run with, so a window and the order a
-         * page comes back in never disagree; an emitter's claim about when
-         * something happened is neither.
+         * Both filter on `receivedAt`, when the log stored the event, not on
+         * `occurredAt`, when the source claims it happened. Event ids follow
+         * arrival order, so a time window and the order of a page always
+         * agree. An emitter's claim about when something happened has neither
+         * property.
          */
         since: Schema.optionalKey(Timestamp),
         until: Schema.optionalKey(Timestamp),
@@ -133,9 +134,9 @@ export const event = HttpApiGroup.make("event")
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     /**
-     * A synthetic event, posted by hand. A namespaced kind means a manual
-     * `github.issue.opened` reaches a subscription the way an ingested one
-     * does; a filter that has to tell the two apart reads `event.source`.
+     * A synthetic event, posted by hand. A manual `github.issue.opened` reaches
+     * a subscription the same way an ingested one does; a filter that has to
+     * tell the two apart reads `event.source`.
      */
     HttpApiEndpoint.post("emit", "/events/emit", {
       payload: EventEmitInput,

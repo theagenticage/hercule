@@ -1,22 +1,22 @@
 /**
  * The events this plugin can emit, and what each one carries.
  *
- * Every payload begins with the same `subject` block, so a reader derives the
- * External Ref and the "open in GitHub" URL of any event the same way, whatever
- * kind it is. A kind carries a field of its own only where the fact needs one:
- * which label moved, who reviewed, what the checks concluded.
+ * Every payload starts with the same `subject` block, so a reader gets the
+ * External Ref and the "open in GitHub" URL of any event the same way,
+ * whatever its kind. A kind has a field of its own only when it needs one:
+ * which labels changed, who reviewed, what the checks concluded.
  *
- * Nothing here polls. Declaring the kinds is what lets a subscription and a
- * workflow filter name them, and what an emitted payload is read against; the
- * ingest loop that fills them arrives with its own ticket.
+ * Nothing here polls. Declaring the kinds lets a subscription and a workflow
+ * filter refer to them, and gives the schemas emitted payloads are validated
+ * against. The ingest loop that emits them will be added by its own ticket.
  */
 import { Schema } from "effect";
 import type { EventKindDeclaration } from "@hercule/plugin-host";
 
 /**
  * The thing an event is about: a repository, and the issue or pull request
- * inside it where there is one. Only the repository and the web URL are always
- * known; the rest is what GitHub had to say at the time.
+ * inside it, if there is one. Only the repository and the web URL are always
+ * known; the other fields are what GitHub reported at the time.
  */
 const Subject = Schema.Struct({
   repo: Schema.String,
@@ -26,18 +26,18 @@ const Subject = Schema.Struct({
   state: Schema.optionalKey(Schema.String),
   url: Schema.String,
 }).annotate({
-  // Named, so the catalog holds the block once, under its name, and each of
-  // the fifteen kinds points at it instead of repeating it.
+  // Named, so the catalog stores the block once, under its name, and each of
+  // the fifteen kinds refers to it instead of repeating it.
   identifier: "GithubSubject",
 });
 
-/** A kind that says what happened and nothing more than what it happened to. */
+/** Declares a kind whose payload is only the subject: what happened, and to what. */
 const declareSubjectKind = (description: string): EventKindDeclaration => ({
   description,
   schema: Schema.Struct({ subject: Subject }),
 });
 
-/** Which labels went on and which came off, in one event rather than one each. */
+/** Declares a label kind: which labels were added and which were removed, in one event. */
 const declareLabelKind = (description: string): EventKindDeclaration => ({
   description,
   schema: Schema.Struct({

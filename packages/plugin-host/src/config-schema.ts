@@ -1,9 +1,10 @@
 import { Effect, JsonSchema, Result, Schema, SchemaAST } from "effect";
 
 /**
- * A config schema the generated settings form cannot render. Carries the reason
- * as prose because the plugin author is the only reader: the form supports one
- * flat object of scalars, and every refusal names the property that broke it.
+ * A config schema the generated settings form cannot render. The message
+ * explains why in prose, because the plugin author is the only reader: the
+ * form supports one flat object of scalars, and every message includes the
+ * property that broke that rule.
  */
 export class UnsupportedConfigSchema extends Schema.TaggedError<UnsupportedConfigSchema>()(
   "UnsupportedConfigSchema",
@@ -11,9 +12,10 @@ export class UnsupportedConfigSchema extends Schema.TaggedError<UnsupportedConfi
 ) {}
 
 /**
- * effect derives a struct with no properties as "an object or an array" rather
+ * Effect derives a struct with no properties as "an object or an array" rather
  * than as an empty object schema. A plugin with nothing to configure is the
- * ordinary case, so that one shape is normalised instead of refused.
+ * ordinary case, so that shape is converted to an empty object instead of
+ * rejected.
  */
 const EMPTY_OBJECT = {
   type: "object",
@@ -23,40 +25,43 @@ const EMPTY_OBJECT = {
 } as const;
 
 /**
- * A config field whose value is a credential. It is never stored in the
- * instance's config: it goes to the secrets table under the instance's own
- * owner, is entered through a masked form, and is never read back. Only a
- * string can be one, because that is the only field the form can mask.
+ * Returns a string schema for a config field whose value is a credential. The
+ * value is never stored in the instance's config: it goes to the secrets table
+ * under the instance's own owner, is entered through a masked input, and is
+ * never read back. Only a string field can be secret, because that is the only
+ * field the form can mask.
  */
 export const secret = (words: {
   readonly title: string;
   readonly description: string;
 }): Schema.String => Schema.String.annotate({ ...words, secret: true });
 
-/** What the derived JSON schema marks such a property with. */
+/** The key the derived JSON Schema uses to mark a secret property. */
 const SECRET_MARKER = "x-secret";
 
-/** An annotation is declared as `unknown`, so each one is read at its own type. */
+/** Reads a string annotation. Annotations are typed `unknown`, so the type is checked here. */
 const readAnnotation = (ast: SchemaAST.AST, word: "title" | "description"): string | undefined => {
   const value = ast.annotations?.[word];
   return typeof value === "string" ? value : undefined;
 };
 
 /**
- * A schema that carries a refinement - `Schema.Finite` is one - takes an
- * annotation on that refinement rather than on itself.
+ * Checks whether a field is marked secret. A schema with a refinement - such
+ * as `Schema.Finite` - has its annotation on that refinement rather than on
+ * itself, so both places are checked.
  */
 const isSecret = (ast: SchemaAST.AST): boolean =>
   ast.annotations?.secret === true ||
   (ast.checks ?? []).some((check) => check.annotations?.secret === true);
 
 /**
- * The fields a plugin marked secret, in its own words: what the UI asks for one
- * with, and what the controller keeps out of the stored config.
+ * Lists the fields a plugin marked secret, with the title and description the
+ * plugin wrote. The UI uses these to ask for each secret, and the controller
+ * keeps these fields out of the stored config.
  *
- * Read off the schema rather than off its JSON Schema, because the derivation
- * drops an annotation it does not know - which is also why the marker is put
- * back by hand below.
+ * Reads the schema rather than its JSON Schema, because the derivation drops
+ * annotations it does not know. That is also why `deriveConfigJsonSchema` adds
+ * the marker back by hand.
  */
 export const listSecretFields = (
   schema: Schema.Top,
@@ -65,8 +70,8 @@ export const listSecretFields = (
   readonly title: string;
   readonly description: string;
 }> => {
-  // `Objects` is the node a struct derives to; anything else has no named
-  // properties to mark, and `deriveConfigJsonSchema` refuses it separately.
+  // `Objects` is the AST node of a struct; anything else has no named
+  // properties to mark, and `deriveConfigJsonSchema` rejects it separately.
   if (!SchemaAST.isObjects(schema.ast)) return [];
   return schema.ast.propertySignatures.flatMap(({ name, type }) => {
     if (typeof name !== "string" || !isSecret(type)) return [];
@@ -80,7 +85,10 @@ export const listSecretFields = (
   });
 };
 
-/** A branch that says a type and nothing else, as an empty struct's two do. */
+/**
+ * Checks whether a branch has only a `type` key with the given type, as both
+ * branches of an empty struct do.
+ */
 const isBareType = (branch: unknown, type: string) => {
   const keys = Object.keys(branch as object);
   return keys.length === 1 && (branch as JsonSchema.JsonSchema).type === type;
@@ -95,7 +103,7 @@ const derivesAsEmptyStruct = (root: JsonSchema.JsonSchema): boolean => {
   );
 };
 
-/** Why one property cannot be rendered, or `undefined` when it can. */
+/** Returns why one property cannot be rendered, or `undefined` when it can. */
 const findUnsupportedReason = (property: JsonSchema.JsonSchema): string | undefined => {
   // A select renders string options; a number or boolean enum would need a
   // widget that does not exist.
@@ -124,8 +132,9 @@ const findUnsupportedReason = (property: JsonSchema.JsonSchema): string | undefi
 };
 
 /**
- * The JSON Schema the catalog persists and the web app builds a form from, or a
- * refusal. Only a flat object of scalars renders, so anything deeper is caught
+ * Derives the JSON Schema the catalog stores and the web app builds a form
+ * from. Fails with `UnsupportedConfigSchema` when the form cannot render the
+ * schema. Only a flat object of scalars renders, so anything deeper is caught
  * here, at load, rather than as an unrenderable form later.
  */
 export const deriveConfigJsonSchema = (
@@ -173,12 +182,13 @@ export const deriveConfigJsonSchema = (
 };
 
 /**
- * A stored config read against the live schema the plugin authored: every issue
- * at once, so a form can put each message under its own field, and an unknown
- * key refused rather than dropped, so a stale field is said out loud.
+ * Decodes a stored config with the live schema the plugin wrote. Reports every
+ * issue at once, so a form can show each message under its own field, and
+ * rejects an unknown key rather than dropping it, so a stale field is reported
+ * rather than ignored.
  *
- * The schema crosses the boundary opaque, so what comes back is `unknown` until
- * the plugin's own hook is handed it.
+ * The schema's type is not known here, so the result is `unknown` until it is
+ * passed to the plugin's own hook.
  */
 export const decodeAgainst = (
   schema: Schema.Top,
@@ -190,18 +200,19 @@ export const decodeAgainst = (
   })(config);
 
 /**
- * The same schema with every secret-marked field taken out of it: what a stored
- * config is read against, so a config is complete without a credential in it
- * and a credential written into one is refused by name rather than saved.
+ * Returns the same schema with every secret field removed. A stored config is
+ * decoded with this schema, so a config is complete without a credential in
+ * it, and a credential written into one is rejected by name rather than
+ * saved.
  */
 export const excludeSecretFields = (schema: Schema.Top): Schema.Top => {
   const marked = new Set(listSecretFields(schema).map((field) => field.name));
   if (marked.size === 0) return schema;
   // `fields` is public on `Schema.Struct` but not on `Schema.Top`, which is
   // what a plugin's config schema arrives as, and effect 4.0.0-rc.112 exports
-  // no guard that narrows one to the other; the struct AST above has already
-  // said this is a struct. Rebuilding drops the struct's own annotations, which
-  // nothing reads: the result is only ever decoded against.
+  // no guard that narrows one to the other; `listSecretFields` has already
+  // checked that the AST is a struct. Rebuilding drops the struct's own
+  // annotations, which nothing reads: the result is only used for decoding.
   const fields = (schema as unknown as { readonly fields: Record<string, Schema.Top> }).fields;
   return Schema.Struct(
     Object.fromEntries(Object.entries(fields).filter(([name]) => !marked.has(name))),

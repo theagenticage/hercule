@@ -1,18 +1,22 @@
 /**
  * Settings.
  *
- * Two scopes, one closed key set each: `controller` holds the controller's
- * operational settings seeded at first run, `user` holds the user settings
- * store, which is keyed by user id so a later multi-user concept is a `WHERE`
- * clause rather than a table rebuild. A key that is not set is absent rather
- * than defaulted, so the default lives in exactly one place.
+ * There are two scopes, each with a closed set of keys:
  *
- * `SETTING_VALUES` is the single declaration of what a key holds: the two
- * structs here are derived from it, and the controller's settings store reads
- * the same map to encode a value into its JSON column. A key declared once
- * cannot drift between the wire and the row.
+ * - `controller` holds the controller's operational settings, seeded at first
+ *   run;
+ * - `user` holds the user settings store, which is keyed by user id, so adding
+ *   multiple users later means a `WHERE` clause rather than a table rebuild.
  *
- * Unknown keys are rejected, in the schema itself: `closedStruct` says why.
+ * A key that is not set is absent rather than filled with its default, so the
+ * default is defined in exactly one place.
+ *
+ * `SETTING_VALUES` is the only declaration of what each key holds: the two
+ * structs here are derived from it, and the controller's settings store uses
+ * the same map to encode a value into its JSON column. So a key cannot differ
+ * between the wire and the database row.
+ *
+ * The schema itself rejects unknown keys; `closedStruct` explains why.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -25,9 +29,9 @@ import { atMost, Timezone } from "../strings";
 import { Authenticated } from "../security";
 
 /**
- * The session-level permission axis a provider adapter enforces, re-exported so
- * the wire shape and the support a provider plugin declares per mode cannot
- * drift apart.
+ * The session-level access mode a provider adapter enforces. Re-exported so
+ * that the wire shape and the modes a provider plugin declares support for
+ * cannot drift apart.
  */
 export { AccessMode };
 
@@ -44,13 +48,13 @@ const PositiveDays = Schema.Int.check(Schema.isGreaterThan(0));
 /** An expiry window in whole hours. */
 const PositiveHours = Schema.Int.check(Schema.isGreaterThan(0));
 
-/** A session timeout, in whole minutes: the wire carries the milliseconds this turns into. */
+/** A session timeout, in whole minutes. It is converted to milliseconds before it is sent to a runner. */
 const PositiveMinutes = Schema.Int.check(Schema.isGreaterThan(0));
 
 /** A time of day in the user timezone setting, `HH:MM` on a 24-hour clock. */
 const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/));
 
-/** What a notification mute names. */
+/** The target of a notification mute. */
 const MuteTarget = Schema.NonEmptyString.check(
   Schema.isPattern(/^(workflow|plugin|assistant):.+$/, {
     description: "`workflow:<id>`, `plugin:<id>` or `assistant:<id>`",
@@ -58,13 +62,13 @@ const MuteTarget = Schema.NonEmptyString.check(
 );
 
 /**
- * What a thread opens in unless the draft says otherwise. Two values, not
- * three: `none` was a third that could never be read back as itself, because a
- * project with repos does not offer "no workspace" at all (spec 14 §The
- * composer, amended 2026-09-16, [#72]) and a project without them has nothing
- * else to offer - so a stored `none` always read as unset, and unset is what
- * it is. Nothing migrates: a row still holding it fails to decode and reads
- * unset, which is the same answer it already gave.
+ * The workspace a thread opens in, unless the draft chooses another. There are
+ * two values, not three. A former third value, `none`, could never be read
+ * back as itself: a project with repos does not offer "no workspace" at all
+ * (spec 14 §The composer, amended 2026-09-16, [#72]), and a project without
+ * repos offers nothing else. So a stored `none` always behaved as unset.
+ * Nothing is migrated: a row that still holds `none` fails to decode and is
+ * treated as unset, which is how it already behaved.
  */
 export const ThreadWorkspace = Schema.Literals(["primary", "ephemeral"]);
 
@@ -75,7 +79,7 @@ export const ThreadRows = Schema.Literals(["meta", "plain"]);
 
 export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
 
-/** What every settings key holds, per scope. The one declaration of a key. */
+/** What every settings key holds, per scope. This is the only declaration of each key. */
 export const SETTING_VALUES = {
   controller: {
     /** TTL for the event log and per-session streams, in days. */
@@ -112,9 +116,9 @@ export const SETTING_VALUES = {
     "thread.profileId": Id,
     /**
      * What a thread opens in: the repo's main workspace or a worktree of its
-     * own. Unset follows the project - one repo takes the main workspace,
-     * several take a worktree - and a project with no repos opens with no
-     * workspace whatever this says.
+     * own. When unset, the project decides: a project with one repo uses the
+     * main workspace, and one with several uses a worktree. A project with no
+     * repos opens with no workspace, whatever this setting holds.
      */
     "thread.workspace": ThreadWorkspace,
     /** The GitHub Connection a thread with no checkout of its own acts through. */

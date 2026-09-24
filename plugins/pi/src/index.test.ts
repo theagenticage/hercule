@@ -1,16 +1,16 @@
 /**
- * What the pi plugin declares about itself, read the way the catalog reads it:
- * the definition it registers, and the form the derivation makes of its config.
+ * Tests what the pi plugin declares about itself, as the catalog reads it:
+ * the definition it registers, and the JSON Schema derived from its config.
  *
- * The key is a paid credential, so the field it is entered in is the plugin's
- * own words and the plugin's own marking - never the runner's, never the UI's.
+ * The key is a paid credential, so the plugin itself names, describes and
+ * marks the field it is entered in - never the runner, never the UI.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
 import { deriveConfigJsonSchema, type ProviderDefinition } from "@hercule/plugin-host";
 import { pi } from "./index";
 
-/** The definition the plugin hands the catalog, captured from its registration. */
+/** Returns the definition the plugin gives the catalog, captured from its registration. */
 const captureProviderDefinition = (): ProviderDefinition => {
   const definitions: Array<ProviderDefinition> = [];
   Effect.runSync(

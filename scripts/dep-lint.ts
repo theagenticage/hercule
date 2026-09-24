@@ -1,38 +1,39 @@
 #!/usr/bin/env bun
 /**
- * Mode isolation, enforced (spec 15 section 3, ADR 0018).
+ * Enforces mode isolation (spec 15 section 3, ADR 0018).
  *
  * The runner entrypoint's module graph MUST NOT include any controller
  * package: no DB engine, no plugin host, no web bundle. Isolation is a
  * property of the import graph per entrypoint, not of the file on disk, so
- * this reads the graph Bun actually links: `--sourcemap=external` emits a map
- * whose `sources` array is the post-tree-shake module list. Bun has no
+ * this script reads the graph Bun actually links: `--sourcemap=external` emits
+ * a map whose `sources` array is the module list after tree shaking. Bun has no
  * `--metafile`.
  *
- * The rule sees specifiers, so a specifier assembled at runtime
- * (`await import("bun" + ":sqlite")`) is invisible to it. Nothing in the
- * codebase does that, and no scan short of running the code could catch it.
+ * The rule reads specifiers, so it cannot see a specifier built at runtime
+ * (`await import("bun" + ":sqlite")`). Nothing in the codebase does that, and
+ * no scan short of running the code could catch it.
  *
  * A second graph rule is about the controller rather than the runner: its
  * domains form a DAG, with no allowlist of edges. `src/<domain>/index.ts` is
- * the boundary a domain is imported through, and a cycle between two of them
- * is not only a design smell - a constant in one that calls a function
- * exported by the other is evaluated before that function exists, so which
- * domain is imported first decides whether the process starts. That is a
+ * the boundary a domain is imported through. A cycle between two domains is
+ * more than a design smell: a constant in one that calls a function exported
+ * by the other is evaluated before that function exists, so which domain is
+ * imported first decides whether the process starts. That is a
  * `ReferenceError` no test finds until an import order changes, which is why
  * it is a lint rather than a review note.
  *
- * What keeps that graph acyclic is `src/daemon/`, the controller daemon: the
- * layer above the domains, holding every sequence that crosses two domains or
- * reaches a runner. Only `http/` imports it; no domain may.
+ * `src/daemon/`, the controller daemon, is what keeps that graph acyclic: it is
+ * the layer above the domains, and holds every sequence that crosses two
+ * domains or reaches a runner. Only `http/` imports it; no domain may.
  *
  * One rule is about the workspace, not an import graph: the Agent SDK's eight
  * per-platform CLI packages (one is 196 MB) are excluded at install, and the
- * shipped binary would carry them if they came back. The pnpm store is read
- * directly, because pnpm links only direct dependencies into `node_modules`.
+ * shipped binary would include them if they were installed again. The pnpm
+ * store is read directly, because pnpm links only direct dependencies into
+ * `node_modules`.
  *
- * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. The optional entrypoint
- * is what `scripts/dep-lint.test.ts` points at its fixtures.
+ * Usage: `bun run scripts/dep-lint.ts [entrypoint]`. `scripts/dep-lint.test.ts`
+ * uses the optional entrypoint to point the script at its fixtures.
  */
 import { readdir, rm } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
@@ -42,7 +43,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const entrypoint = process.argv[2] ?? "apps/runner/src/index.ts";
 
 /**
- * Each rule names what it forbids and why; the message is the CI output.
+ * Each rule describes what it forbids in `what`, which the CI output prints.
  * Patterns are matched against repository-relative paths and bare specifiers,
  * so a first-party plugin is `plugins/...` while a dependency that happens to
  * ship a `plugins/` directory is under `node_modules/` and does not match.
@@ -86,11 +87,12 @@ const mapDir = dirname(map.path);
 const linked = sources.map((source) => relative(root, resolve(mapDir, source)));
 
 /**
- * A specifier the bundler leaves external, `bun:sqlite` above all, never lands
- * in `sources`, and Bun deletes a bare `import "bun:sqlite"` outright. So read
- * the imports of our own linked sources, parsed rather than pattern-matched:
- * `scanImports` sees through comments and string literals, and drops
- * `import type`, which creates no runtime edge and so is no violation.
+ * A specifier the bundler leaves external, above all `bun:sqlite`, never
+ * appears in `sources`, and Bun removes a bare `import "bun:sqlite"`
+ * entirely. So the script also reads the imports of our own linked sources,
+ * parsed rather than pattern-matched: `scanImports` ignores comments and
+ * string literals, and drops `import type`, which creates no runtime edge and
+ * so is not a violation.
  */
 const written = (
   await Promise.all(
@@ -108,9 +110,10 @@ const written = (
 ).flat();
 
 /**
- * Secondary: third-party sources are not scanned above, since their own dead
- * branches are not this repo's violations. The emitted bundle still carries
- * whatever external they import, so scan it for every specifier form.
+ * A second check: third-party sources are not scanned above, because their
+ * own dead branches are not this repository's violations. The emitted bundle
+ * still contains every external they import, so it is scanned for every
+ * specifier form.
  */
 const IMPORT_FORMS = /(?:\b(?:from|import)\s*\(?|require\s*\()\s*["']([^"']+)["']/g;
 const js = built.outputs.find((o) => o.kind === "entry-point");
@@ -140,16 +143,17 @@ console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the gr
  * The controller's domains, as a graph over the folders under `src/`: every
  * file in a domain is that domain, and an import of `../<other>` is an edge
  * from this domain to that one. `db/` and `config/` are infrastructure every
- * domain may reach and are not folded into the check as sources of edges.
- * `daemon/` is a node like any other here; that no domain imports it is what
- * the DAG says, not something this rule names.
+ * domain may import, and the check does not treat them as sources of edges.
+ * `daemon/` is a node like any other here. No separate rule stops a domain
+ * from importing it; such an import is caught only when it closes a cycle.
  */
 const controllerSrc = `${root}apps/controller/src`;
 
 /**
- * Empty where there is no controller to read: `scripts/dep-lint.test.ts` proves
- * the store rules by copying this script into a root of its own, and a rule
- * about a directory that is not there has nothing to say.
+ * Lists the controller's domain folders. Returns an empty list when there is
+ * no controller to read: `scripts/dep-lint.test.ts` tests the store rules by
+ * copying this script into a root of its own, and a rule about a missing
+ * directory has nothing to check.
  */
 const listDomains = async (): Promise<ReadonlyArray<string>> => {
   const entries = await readdir(controllerSrc, { withFileTypes: true }).catch(() => undefined);
@@ -159,11 +163,11 @@ const listDomains = async (): Promise<ReadonlyArray<string>> => {
 };
 
 /**
- * Every shipped `.ts` under a directory. A test and the harness beside it are
- * left out on purpose: they are loaded by vitest, one file at a time, and a
- * suite that drives one domain through another's harness is what a colocated
- * integration test is for. What this rule is about is the order the controller
- * links its own modules in at boot.
+ * Checks whether a file is shipped code: a `.ts` file that is not a test or a
+ * test harness. Tests and harnesses are left out on purpose: vitest loads them
+ * one file at a time, and driving one domain through another's harness is
+ * what a colocated integration test is for. This rule is about the order in
+ * which the controller loads its own modules at boot.
  */
 const isShipped = (name: string): boolean =>
   name.endsWith(".ts") && !name.endsWith(".test.ts") && name !== "testing.ts";
@@ -176,10 +180,11 @@ const listShippedFiles = async (dir: string): Promise<ReadonlyArray<string>> =>
 const domains = await listDomains();
 
 /**
- * `../<domain>` exactly: the domain's index, which is the boundary another
- * domain imports it through and the module whose evaluation order this is
- * about. A deep `../<domain>/<file>` reaches one module and never loads that
- * index, so it is not an edge between the two domains.
+ * Returns the domain an import specifier reaches, when it is exactly
+ * `../<domain>`: the domain's index, which is the boundary other domains
+ * import it through, and the module whose evaluation order matters here. A
+ * deep `../<domain>/<file>` reaches one module and never loads that index, so
+ * it is not an edge between the two domains.
  */
 const findReachedDomain = (specifier: string): string | undefined => {
   const match = /^\.\.\/([^/]+)$/.exec(specifier);
@@ -203,7 +208,10 @@ for (const domain of domains) {
   edges.set(domain, out);
 }
 
-/** The first cycle a depth-first walk closes, as the path that closed it. */
+/**
+ * Returns the first cycle a depth-first search finds, as the path around it,
+ * or `undefined` when there is none.
+ */
 const findCycle = (): ReadonlyArray<string> | undefined => {
   const open = new Set<string>();
   const done = new Set<string>();
@@ -237,7 +245,7 @@ if (cycle !== undefined) {
     "A domain is imported through its index, and a cycle makes a constant in one " +
       "evaluate before the other has defined what it calls: whichever domain is " +
       "imported first decides whether the process starts. Move the shared piece " +
-      "into the domain that owns it, or hand it over where both are already held.",
+      "into the domain that owns it, or pass it in from the controller daemon, which may import both.",
   );
   process.exit(1);
 }

@@ -1,13 +1,13 @@
 /**
- * Live topics out of the release binary.
+ * Tests live topics through the release binary.
  *
- * The socket is the one part of the live overlay that no unit test can prove:
- * `client-core`'s tests drive a stub `WebSocket` and the controller's drive an
- * in-process RPC client. This suite runs `./hercule` as the controller and as the
- * CLI, and puts a real `client-core` live client - real ticket fetch, real
- * WebSocket, real greeting - between them, so a `hercule task create` in one
- * process has to reach a subscriber in another. `pnpm build:binary` first, then
- * `pnpm test:binary`.
+ * The socket is the only part of the live overlay that no unit test can prove:
+ * `client-core`'s tests use a stub `WebSocket` and the controller's tests use
+ * an in-process RPC client. This suite runs `./hercule` as the controller and
+ * as the CLI, and puts a real `client-core` live client - real ticket fetch,
+ * real WebSocket, real greeting - between them, so a `hercule task create` in
+ * one process has to reach a subscriber in another. `pnpm build:binary` first,
+ * then `pnpm test:binary`.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -32,20 +32,26 @@ const binary = join(ROOT, "hercule");
 
 let controller: Controller;
 let url: string;
-/** The token `hercule login` wrote, which is what a client of the same home holds. */
+/** The token `hercule login` wrote, which a client using the same home holds. */
 let token: string;
 
-/** The CLI, as the binary, under the credential file the login wrote. */
+/** Runs the CLI binary with the credential file the login wrote. */
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, binary, stdin });
 
-/** Fails with the command's own output rather than on an undefined field. */
+/**
+ * Parses a command's JSON output. Fails with the command's own output, rather
+ * than later on an undefined field.
+ */
 const expectJsonOutput = (ran: { code: number; stdout: string; stderr: string }): unknown => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
   return parseJsonOutput(ran);
 };
 
-/** Waits for something a socket delivers, and says what it was waiting for. */
+/**
+ * Waits for something a socket delivers. On timeout, the error includes what
+ * it was waiting for.
+ */
 const waitUntil = async (what: string, done: () => boolean): Promise<void> => {
   const deadline = Date.now() + 10_000;
   while (!done()) {
@@ -81,10 +87,10 @@ afterAll(async () => {
 });
 
 describe("the binary serving live topics", () => {
-  it("stops when it is told to, although a socket is still open", async () => {
-    // A watched controller always has an open socket, and the listener's drain
-    // waits for every connection, so without a deadline `hercule serve` could not
-    // be stopped while anybody was looking at it.
+  it("stops when asked to, even though a socket is still open", async () => {
+    // A controller someone is watching always has an open socket, and the
+    // listener's drain waits for every connection, so without a deadline
+    // `hercule serve` could not be stopped while anybody was watching it.
     const home = createTemporaryHome();
     let its: Controller | undefined;
     try {
@@ -92,12 +98,12 @@ describe("the binary serving live topics", () => {
       const completed = await completeSetup({ home: home.home, url: its.url, binary });
       expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-      // Nothing is said on it: an upgraded connection is enough to hold a drain,
-      // and one that never greets is the worst case.
+      // Nothing is sent on it: an upgraded connection is enough to block a
+      // drain, and one that never sends a greeting is the worst case.
       const socket = new WebSocket(`${its.url.replace(/^http/, "ws")}/ws`);
       await new Promise<void>((resolve, reject) => {
         socket.addEventListener("open", () => resolve(), { once: true });
-        socket.addEventListener("error", () => reject(new Error("the socket never opened")), {
+        socket.addEventListener("error", () => reject(new Error("the socket did not open")), {
           once: true,
         });
       });
@@ -117,9 +123,10 @@ describe("the binary serving live topics", () => {
     }
   }, 60_000);
 
-  it("mints a ws ticket over the wire, and has no command for it", async () => {
-    // The ticket is the web app's, so its operation is hidden from the CLI: the
-    // route is called the way the web app calls it, with the key the login minted.
+  it("creates a ws ticket over HTTP, and has no command for it", async () => {
+    // The ticket is for the web app, so its operation is hidden from the CLI:
+    // the route is called the way the web app calls it, with the key the login
+    // created.
     const response = await fetch(`${url}/api/v1/auth/ws-ticket`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
@@ -129,7 +136,7 @@ describe("the binary serving live topics", () => {
     expect(typeof ticket.ticket).toBe("string");
     expect(ticket.ticket.length).toBeGreaterThanOrEqual(43);
 
-    // Hidden means absent, not undocumented: the spelling is an unknown command.
+    // Hidden means absent, not just undocumented: the command is unknown.
     const ran = await runLoggedInCli(["auth", "ws-ticket", "--json"]);
     expect(ran.code).toBe(2);
   }, 30_000);
@@ -145,8 +152,8 @@ describe("the binary serving live topics", () => {
     });
 
     try {
-      // The greeting sweeps every mutable subscription, so the first call is
-      // how this test knows the socket is up before the CLI mutates anything.
+      // The greeting refreshes every mutable subscription, so the first call
+      // tells this test that the socket is up before the CLI changes anything.
       await waitUntil("the connection to greet", () => calls.length > 0);
       const greeted = calls.length;
 

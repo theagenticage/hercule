@@ -3,10 +3,10 @@
  *
  * The controller derives its routes and its request validation from `api`, the
  * CLI and `client-core` derive their client from it, and the OpenAPI document
- * is generated from it. `OPERATIONS` is the route and grant table every 403 and
- * every `hercule ... --help` reads.
+ * is generated from it. `OPERATIONS` is the route and grant table that every
+ * 403 response and every `hercule ... --help` is built from.
  */
-/** Version of the public API surface this build speaks. */
+/** The version of the public API that this build implements. */
 export const API_VERSION = 1;
 
 export { api } from "./api";
@@ -83,7 +83,7 @@ export {
 
 export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 
-/** The form-validation interface the schemas above answer to. */
+/** The form-validation interface that the form schemas above implement. */
 export type { StandardSchemaV1 } from "effect/StandardSchema";
 
 export {

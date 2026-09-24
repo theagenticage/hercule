@@ -2,9 +2,9 @@
  * The controller-runner protocol: one versioned catalogue of the messages that
  * cross the single WebSocket a runner holds with its controller.
  *
- * A hello that cannot be honoured is answered by closing the socket with a
- * reason rather than by a message, which is why the catalogue carries no error
- * member.
+ * When a hello cannot be accepted, the other side closes the socket with a
+ * reason rather than sending a message, which is why the catalogue has no
+ * error message.
  *
  * This package sits on the runner's import path, so it depends on nothing but
  * `effect`.
@@ -48,36 +48,40 @@ export { Fact, InstanceId, MAX_FACT_LENGTH, Sequenced, StorageId, Subdirectory }
 export const PROTOCOL_VERSION = 1;
 
 /**
- * How the controller ends a connection whose runner it has just retired, and
- * the one close reason the runner reads. Retiring revokes the credential, so a
- * runner told this stops rather than dialling again with something dead. The
- * code is RFC 6455's policy violation: the connection is fine, the runner is
- * no longer one this controller will have.
+ * The close code and reason the controller uses to end the connection of a
+ * runner it has just retired; this is the only close reason the runner reads.
+ * Retiring revokes the credential, so a runner that receives this stops rather
+ * than reconnecting with a revoked credential. The code is RFC 6455's policy
+ * violation: the connection works, but this controller no longer accepts the
+ * runner.
  */
 export const RETIRED_CLOSE_CODE = 1008;
 
 export const RETIRED_CLOSE_REASON = "RETIRED";
 
-/** RFC 6455's "going away": the connection is fine, this end is done with it. */
+/** RFC 6455's "going away": the connection works, but this side is closing it. */
 export const GOING_AWAY_CLOSE_CODE = 1001;
 
 /**
- * A version a peer claims. Any version that could exist decodes, ours or not,
- * so a mismatch is refused by name rather than reported as an unreadable frame.
+ * The protocol version a peer claims. Any version that could exist decodes,
+ * ours or not, so a mismatch is rejected with a clear reason rather than
+ * reported as an unreadable frame.
  *
- * Every other kind of skew between the two binaries is warn-don't-block, which
- * is why the runner sends its binary version and the controller only stores it.
+ * Any other version difference between the two binaries only causes a
+ * warning, never a block. That is why the runner sends its binary version and
+ * the controller only stores it.
  */
 const ProtocolVersion = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
 export const MAX_FACT_ITEMS = 64;
 
-/** The extensibility seam: a feature is used only when both hellos name it. */
+/** The extension point: a feature is used only when both hellos list it. */
 export const Capabilities = Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS));
 
 /**
- * Standard base64, padding and all: the URL-safe alphabet is a different
- * encoding, refused here rather than later as a signature that will not verify.
+ * Standard base64, with padding. The URL-safe alphabet is a different encoding,
+ * and it is rejected here rather than later as a signature that fails to
+ * verify.
  */
 const Base64 = Schema.String.check(
   Schema.isLengthBetween(4, 1024),
@@ -91,7 +95,7 @@ const Bytes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 export const Toolchain = Schema.Struct({
   name: Fact,
-  /** What `--version` said, raw when the runner could not parse it. */
+  /** The output of `--version`, unparsed when the runner could not parse it. */
   version: Fact,
   path: Fact,
 });
@@ -107,23 +111,24 @@ export const ProviderBinary = Schema.Struct({
 export type ProviderBinary = Schema.Schema.Type<typeof ProviderBinary>;
 
 /**
- * The first loopback port a runner offers `GET /identity` on, and how many
- * consecutive ports it will settle for.
+ * The first loopback port a runner tries for `GET /identity`, and how many
+ * consecutive ports it tries.
  *
- * The set is small and fixed rather than "whatever is free" because the web
- * app's Content-Security-Policy has to name the ports in advance, and a policy
- * naming every port would let any script in the app reach every service on the
- * reader's machine.
+ * The set is small and fixed rather than "whatever is free", because the web
+ * app's Content-Security-Policy has to list the ports in advance, and a policy
+ * listing every port would let any script in the app reach every service on the
+ * user's machine.
  */
 export const IDENTITY_PORT = 4939;
 
 export const IDENTITY_PORT_COUNT = 10;
 
 /**
- * What a runner knows about the machine it is on. Latest-wins state, not
- * events: it rides the hello and is re-sent only when a value changed. The
- * controller stores a report whole and hands it back on its public API, which
- * is why `@hercule/contract` exports this schema rather than a copy of it.
+ * What a runner knows about the machine it is on. This is state where the
+ * latest value wins, not a series of events: it is sent with the hello and sent
+ * again only when a value changed. The controller stores a report whole and
+ * returns it on its public API, which is why `@hercule/contract` exports this
+ * schema rather than a copy of it.
  */
 export const RunnerFacts = Schema.Struct({
   os: Fact,
@@ -133,22 +138,22 @@ export const RunnerFacts = Schema.Struct({
   toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   providers: Schema.Array(ProviderBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /**
-   * The provider ids this runner build carries an adapter for. A fact about the
-   * binary rather than the machine, so the fleet can say "no adapter in this
-   * runner build" instead of finding out by asking and failing.
+   * The provider ids this runner build has an adapter for. A fact about the
+   * binary rather than the machine, so the fleet view can show "no adapter in
+   * this runner build" instead of finding out by trying and failing.
    */
   adapters: Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
-  /** Serves `GET /identity`, which is what resolves the "local" alias. */
+  /** The port that serves `GET /identity`, which is used to resolve the "local" alias. */
   identityPort: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
 });
 
 export type RunnerFacts = Schema.Schema.Type<typeof RunnerFacts>;
 
 /**
- * The fast-moving half of a runner's state. Never buffered: only the latest
- * matters. What a reading means for placement is the controller's to decide,
- * against the watermark it holds, so the runner reports only what the machine
- * has left.
+ * The fast-changing part of a runner's state. Never buffered: only the latest
+ * value matters. The controller decides what a reading means for placement,
+ * by comparing it with the watermark it holds, so the runner reports only what
+ * the machine has left.
  */
 export const RunnerWatermark = Schema.Struct({
   diskFreeBytes: Bytes,
@@ -158,12 +163,13 @@ export const RunnerWatermark = Schema.Struct({
 export type RunnerWatermark = Schema.Schema.Type<typeof RunnerWatermark>;
 
 /**
- * What a machine says about itself as it presents a join token. Only what the
- * controller cannot work out for itself: everything else about a runner is
- * probed or assigned. An absent `reserved` is a machine that is not personal.
+ * What a machine reports about itself when it presents a join token: only what
+ * the controller cannot work out for itself. Everything else about a runner is
+ * probed or assigned. When `reserved` is absent, the machine is not reserved.
  *
- * The one decoder of this refuses unknown keys, so a misspelled `reserved` is
- * an error rather than a machine quietly enlisted as a shared one.
+ * The only decoder of this schema rejects unknown keys, so a misspelled
+ * `reserved` is an error rather than a machine silently enrolled as a shared
+ * one.
  */
 export const JoinRequest = Schema.Struct({
   reserved: Schema.optionalKey(Schema.Boolean),
@@ -172,10 +178,11 @@ export const JoinRequest = Schema.Struct({
 export type JoinRequest = Schema.Schema.Type<typeof JoinRequest>;
 
 /**
- * What the controller hands a machine that presented a valid join token. The
- * credential appears in this one answer and nowhere else, and the identity and
- * key are what the runner pins: a controller is a logical identity, not an
- * address, so a hello signed by another key is refused wherever it appears.
+ * What the controller returns to a machine that presented a valid join token.
+ * The credential appears in this response and nowhere else. The runner stores
+ * the identity and key and trusts only them: a controller is a logical
+ * identity, not an address, so a hello signed by another key is rejected
+ * wherever it comes from.
  */
 export const JoinAnswer = Schema.Struct({
   runnerId: Fact,
@@ -188,10 +195,10 @@ export const JoinAnswer = Schema.Struct({
 export type JoinAnswer = Schema.Schema.Type<typeof JoinAnswer>;
 
 /**
- * The first line a runner spawned by a controller writes to its stdout: the id
- * it already holds, or a request to be enlisted. Nothing durable says which
- * runner is the local one, and `runner.json` is the runner's own file, so the
- * child says on the one pipe they share who it turned out to be.
+ * The first line a runner started by a controller writes to its stdout: the id
+ * it already holds, or a request to be enrolled. No stored record tells the
+ * controller which runner is the local one, and `runner.json` belongs to the
+ * runner, so the child reports its identity over the pipe they share.
  */
 export const LocalAnnouncement = Schema.Union([
   Schema.Struct({ runnerId: Fact }),
@@ -201,12 +208,13 @@ export const LocalAnnouncement = Schema.Union([
 export type LocalAnnouncement = Schema.Schema.Type<typeof LocalAnnouncement>;
 
 /**
- * What the controller writes back on the child's stdin. The only place that
- * token appears: not in the argv `ps` shows every account on the machine, and
- * not in the environment every process the child starts inherits.
+ * What the controller writes back on the child's stdin. This is the only place
+ * the token appears: not in the argv, which `ps` shows to every account on the
+ * machine, and not in the environment, which every process the child starts
+ * inherits.
  */
 export const LocalEnrolment = Schema.Struct({
-  /** Where the controller answers, as something on this machine reaches it. */
+  /** The controller's URL, as a process on this machine reaches it. */
   controllerUrl: Fact,
   token: Fact,
 });
@@ -214,19 +222,19 @@ export const LocalEnrolment = Schema.Struct({
 export type LocalEnrolment = Schema.Schema.Type<typeof LocalEnrolment>;
 
 /**
- * Just enough of any frame to read the version off it. A later peer's hello may
- * carry fields this build's schema refuses, so the full decode fails before the
- * version can be looked at; reading it first is what lets an incompatible peer
- * be refused by name. It has to exist in version 1, because version 2 cannot
- * add it retroactively to the build it is talking to.
+ * Just enough of any frame to read its protocol version. A newer peer's hello
+ * may have fields this build's schema rejects, so the full decode fails before
+ * the version can be read. Reading the version first lets this build reject an
+ * incompatible peer with a clear reason. It has to exist in version 1, because
+ * version 2 cannot add it to an older build it is talking to.
  */
 export const PeerVersion = Schema.Struct({ protocolVersion: ProtocolVersion });
 
 export type PeerVersion = Schema.Schema.Type<typeof PeerVersion>;
 
 /**
- * The runner's opening frame. It proves nothing: the credential rode the
- * upgrade request, and this carries the nonce the controller signs back.
+ * The runner's opening frame. It proves nothing: the credential was sent with
+ * the upgrade request, and this frame carries the nonce the controller signs.
  */
 export const RunnerHello = Schema.Struct({
   _tag: Schema.Literal("runnerHello"),
@@ -239,15 +247,15 @@ export const RunnerHello = Schema.Struct({
 
 export type RunnerHello = Schema.Schema.Type<typeof RunnerHello>;
 
-/** The answer to a `Ping`. Its arrival is what advances `lastSeenAt`. */
+/** The reply to a `Ping`. Receiving it updates `lastSeenAt`. */
 export const Pong = Schema.Struct({ _tag: Schema.Literal("pong") });
 
 export type Pong = Schema.Schema.Type<typeof Pong>;
 
 /**
- * What the runner reports about its machine: hourly when something changed, and
- * whenever the controller asks. Named for the runner because the controller has
- * facts of its own that this frame does not carry.
+ * What the runner reports about its machine: hourly when something changed,
+ * and whenever the controller asks. The name includes "runner" because the
+ * controller has facts of its own that this frame does not carry.
  */
 export const RunnerFactsReport = Schema.Struct({
   _tag: Schema.Literal("factsReport"),
@@ -265,8 +273,8 @@ export type WatermarkReport = Schema.Schema.Type<typeof WatermarkReport>;
 
 /**
  * One choice the composer offers for a model: a select over named values, or a
- * switch. What a harness accepts per model is the harness's to say, so this is
- * probed rather than authored.
+ * switch. Each harness decides what it accepts per model, so this is probed
+ * from the harness rather than written by hand.
  */
 export const ModelOption = Schema.Struct({
   id: Fact,
@@ -307,8 +315,9 @@ export const SnapshotAuth = Schema.Struct({
 export type SnapshotAuth = Schema.Schema.Type<typeof SnapshotAuth>;
 
 /**
- * What one runner found out about one provider instance. Side-effect free: a
- * probe reads the harness's own account and model list and makes no API call.
+ * What one runner found out about one provider instance. A probe has no side
+ * effects: it reads the harness's own account and model list and makes no API
+ * call.
  */
 export const ProbeResult = Schema.Struct({
   harnessVersion: Schema.NullOr(Fact),
@@ -319,7 +328,7 @@ export const ProbeResult = Schema.Struct({
 export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
 
 /**
- * Correlates a request with its answer: several exchanges can be in flight on
+ * Matches a request with its reply: several exchanges can be in progress on
  * one connection.
  */
 const RequestId = Fact;
@@ -360,23 +369,24 @@ export type InstallRequest = Schema.Schema.Type<typeof InstallRequest>;
 export const MAX_INSTALL_MESSAGE_LENGTH = 4096;
 
 /**
- * How an install ended. The runner reports its facts before this, so a
- * controller reading the row after an `ok` reads the machine as it now is.
+ * How an install ended. The runner reports its facts before this frame, so a
+ * controller that reads the row after an `ok` sees the machine's current
+ * state.
  */
 export const InstallResult = Schema.Struct({
   _tag: Schema.Literal("installResult"),
   requestId: RequestId,
   ok: Schema.Boolean,
-  /** What the installer said when it failed, so an operator can act on it. */
+  /** The installer's error output when it failed, so an operator can act on it. */
   message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(MAX_INSTALL_MESSAGE_LENGTH))),
 });
 
 export type InstallResult = Schema.Schema.Type<typeof InstallResult>;
 
 /**
- * An authorize URL a vendor's login printed. OAuth URLs carry a challenge and a
- * redirect; exported because the runner refuses a longer one rather than
- * relaying a link nobody can finish.
+ * The longest authorize URL a vendor's login may print. OAuth URLs include a
+ * challenge and a redirect. Exported because the runner rejects a longer one
+ * rather than forwarding a link nobody can finish.
  */
 export const MAX_AUTHORIZE_URL_LENGTH = 2048;
 
@@ -405,20 +415,21 @@ export const LoginCode = Schema.Struct({
 
 export type LoginCode = Schema.Schema.Type<typeof LoginCode>;
 
-/** Where the user has to go to authorize, in their own browser, on any machine. */
+/** The URL the user opens to authorize, in their own browser, on any machine. */
 export const LoginUrl = Schema.Struct({
   _tag: Schema.Literal("loginUrl"),
   requestId: RequestId,
   url: AuthorizeUrl,
-  /** Present when the vendor printed a code to type there instead of reading one back. */
+  /** Present when the vendor printed a code to type in the browser, instead of expecting a code back. */
   userCode: Schema.optionalKey(Fact),
 });
 
 export type LoginUrl = Schema.Schema.Type<typeof LoginUrl>;
 
 /**
- * The exchange cannot go on: no URL came, or there is no login to hand a code
- * to. Distinct from a refused code, which leaves the login standing.
+ * The login cannot continue: no URL arrived, or there is no login in progress
+ * to send a code to. This is different from a rejected code, which leaves the
+ * login in progress.
  */
 export const LoginFailed = Schema.Struct({
   _tag: Schema.Literal("loginFailed"),
@@ -429,8 +440,8 @@ export const LoginFailed = Schema.Struct({
 export type LoginFailed = Schema.Schema.Type<typeof LoginFailed>;
 
 /**
- * How a pasted code went. `ok: false` is the vendor's own complaint about the
- * code, and the login is still up for another paste.
+ * The result of a pasted code. `ok: false` means the vendor rejected the code,
+ * and the login still accepts another one.
  */
 export const LoginResult = Schema.Struct({
   _tag: Schema.Literal("loginResult"),
@@ -441,7 +452,7 @@ export const LoginResult = Schema.Struct({
 
 export type LoginResult = Schema.Schema.Type<typeof LoginResult>;
 
-/** A deliberate departure, which is what tells `offline` from silence. */
+/** A deliberate disconnect, which is how the controller tells `offline` apart from silence. */
 export const Goodbye = Schema.Struct({ _tag: Schema.Literal("goodbye") });
 
 export type Goodbye = Schema.Schema.Type<typeof Goodbye>;
@@ -467,18 +478,18 @@ export const RunnerToController = Schema.Union([
 export type RunnerToController = Schema.Schema.Type<typeof RunnerToController>;
 
 /**
- * The controller's opening frame. `signature` is over `encodeChallengeBytes`, made
- * with the key `publicKey` names, which is how a runner recognises its own
- * controller at whatever address it answers on.
+ * The controller's opening frame. `signature` signs `encodeChallengeBytes` with
+ * the key in `publicKey`, which is how a runner recognises its own controller
+ * at whatever address it is reached.
  */
 export const ControllerHello = Schema.Struct({
   _tag: Schema.Literal("controllerHello"),
   protocolVersion: ProtocolVersion,
   capabilities: Capabilities,
   /**
-   * Compared byte for byte with the one `runner.json` holds. Its grammar is the
-   * public contract's to state and this package reaches nothing but `effect`,
-   * so all that is checked here is that it is an identifier.
+   * Compared byte for byte with the one `runner.json` holds. The public
+   * contract defines its format, and this package depends on nothing but
+   * `effect`, so this only checks that it is an identifier.
    */
   identityId: Fact,
   publicKey: Base64,
@@ -489,15 +500,15 @@ export const ControllerHello = Schema.Struct({
 export type ControllerHello = Schema.Schema.Type<typeof ControllerHello>;
 
 /**
- * The bytes a controller signs when it answers a hello.
+ * Returns the bytes a controller signs when it answers a hello.
  *
- * The runner's own id is in there beside the nonce. Over the nonce alone a
- * signature would be good on any connection: anyone holding any runner
+ * The bytes include the runner's own id next to the nonce. A signature over the
+ * nonce alone would be valid on any connection: anyone holding any runner
  * credential could open a socket, forward a victim's nonce as its own, and
- * relay the answer back as proof of an identity it does not have. The prefix
- * keeps these bytes from being mistaken for something else the same key signs,
- * and a nonce is standard base64, whose alphabet has no colon, so the last
- * colon always separates the two halves.
+ * relay the reply as proof of an identity it does not have. The prefix keeps
+ * these bytes from being mistaken for anything else the same key signs. A
+ * nonce is standard base64, whose alphabet has no colon, so the last colon
+ * always separates the id from the nonce.
  */
 export const encodeChallengeBytes = (runnerId: string, nonce: string): Uint8Array<ArrayBuffer> =>
   new TextEncoder().encode(`hercule:runner-hello:${runnerId}:${nonce}`);
@@ -505,8 +516,8 @@ export const encodeChallengeBytes = (runnerId: string, nonce: string): Uint8Arra
 /**
  * Asks the runner to probe its machine now and report what it finds, whether or
  * not anything changed. The hourly report is sent only on a change, so without
- * this an operator pressing "Refresh facts" on a machine nothing happened to
- * would wait for a frame that is never coming.
+ * this, an operator who presses "Refresh facts" on an unchanged machine would
+ * wait for a frame that never comes.
  */
 export const RunnerFactsRequest = Schema.Struct({ _tag: Schema.Literal("factsRequest") });
 

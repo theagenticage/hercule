@@ -1,10 +1,14 @@
 /**
  * Where Hercule keeps things on a machine: the Hercule Home layout.
  *
- * Pure path arithmetic, no filesystem and no Effect services, because three
- * roles resolve a home and only one of them may link controller state: the
- * dispatcher routes on `--home`, the CLI reads `<home>/setup-url`, the runner
- * reads `<home>/runner/`, and the controller opens the database.
+ * Pure path computation, with no filesystem access and no Effect services,
+ * because every role resolves a home and only the controller may link
+ * controller state:
+ *
+ * - the dispatcher routes on `--home`;
+ * - the CLI reads `<home>/setup-url`;
+ * - the runner reads `<home>/runner/`;
+ * - the controller opens the database.
  */
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -31,13 +35,14 @@ export interface HomePaths {
 /** The default Hercule Home, used when neither `--home` nor `HERCULE_HOME` is set. */
 export const DEFAULT_HOME_NAME = ".hercule";
 
-/** The controller's one SQLite database, inside the Data Root. */
+/** The file name of the controller's SQLite database, inside the Data Root. */
 export const DATABASE_FILE_NAME = "hercule.db";
 
 /**
- * Where this process's Hercule Home is: `--home` beats `HERCULE_HOME` beats
- * `~/.hercule`. Relative paths resolve against the
- * working directory; the result is always absolute.
+ * Returns the path of this process's Hercule Home: `--home` takes precedence
+ * over `HERCULE_HOME`, which takes precedence over `~/.hercule`. A relative
+ * path is resolved against the working directory, so the result is always
+ * absolute.
  */
 export function resolveHomePath(
   homeOption: string | undefined,
@@ -49,27 +54,27 @@ export function resolveHomePath(
     : resolve(chosen);
 }
 
-/** Where `config.toml` lives; known before any config has been read. */
+/** Returns the path of `config.toml`, which is known before any config has been read. */
 export function locateConfigFile(home: string): string {
   return join(home, "config.toml");
 }
 
-/** Where the CLI credential file lives; mode 0600, `{ url, apiKey }`. */
+/** Returns the path of the CLI credential file (mode 0600, holding `{ url, apiKey }`). */
 export function locateCredentialsFile(home: string): string {
   return join(home, "credentials.json");
 }
 
-/** Where the runner keeps its own material state: `runner.json`, and its storage directories. */
+/** Returns the directory where the runner keeps its own state: `runner.json` and its storage directories. */
 export function locateRunnerDir(home: string): string {
   return join(home, "runner");
 }
 
-/** Where `setup-url` lives; known without reading any config. */
+/** Returns the path of `setup-url`, which is known without reading any config. */
 export function locateSetupUrlFile(home: string): string {
   return join(home, "setup-url");
 }
 
-/** The home layout for a home directory and an already-resolved Data Root. */
+/** Builds the home layout for a home directory and an already-resolved Data Root. */
 export function buildHomePaths(home: string, dataDir: string): HomePaths {
   const resolvedDataDir = isAbsolute(dataDir) ? dataDir : resolve(home, dataDir);
   return {

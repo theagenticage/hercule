@@ -1,10 +1,10 @@
 /**
  * GitHub, as a connection type: a personal access token pasted by the user and
- * checked against the account it belongs to.
+ * checked by asking GitHub which account it belongs to.
  *
- * It is also the source the pipeline knows GitHub events by: the event kinds it
- * can emit are declared here, so a subscription or a filter can name one before
- * anything polls. Ingest, resources and the watch list arrive with the tickets
+ * It is also the event source for GitHub events: the event kinds it can emit
+ * are declared here, so a subscription or a filter can use one before anything
+ * polls. Ingest, resources and the watch list will be added with the tickets
  * that need them; a type with no per-connection config declares no config
  * schema at all.
  */
@@ -21,16 +21,16 @@ import {
 } from "@hercule/plugin-host";
 import { GITHUB_EVENT_KINDS } from "./kinds";
 
-/** The endpoint that answers who a token belongs to. */
+/** The endpoint that returns the account a token belongs to. */
 const USER_URL = "https://api.github.com/user";
 
-/** GitHub refuses a request without one, so it is part of the contract. */
+/** GitHub rejects a request without a user agent, so one is always sent. */
 const USER_AGENT = "Hercule";
 
 const failValidation = (message: string) =>
   Effect.fail(new ConnectionValidationFailed({ message }));
 
-/** The one field of the answer this plugin reads; the rest of it is GitHub's. */
+/** The only field of the response this plugin reads. */
 const Account = Schema.Struct({ login: Schema.String });
 
 const decodeAccount = Schema.decodeUnknownEffect(Account);
@@ -43,7 +43,7 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
   Effect.gen(function* () {
     const response = yield* HttpClient.get(USER_URL, {
       headers: {
-        // The host hands over exactly the fields the type declared.
+        // The host passes exactly the fields the type declared.
         authorization: `Bearer ${credentials["pat"]!}`,
         accept: "application/vnd.github+json",
         "user-agent": USER_AGENT,
@@ -51,11 +51,11 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
     });
     if (response.status === 401) return yield* failValidation("GitHub rejected the token.");
     if (response.status !== 200) {
-      return yield* failValidation(`GitHub answered ${String(response.status)}.`);
+      return yield* failValidation(`GitHub returned status ${String(response.status)}.`);
     }
     const account = yield* decodeAccount(yield* response.json).pipe(
       Effect.catchTag("SchemaError", () =>
-        failValidation("GitHub answered without naming an account."),
+        failValidation("GitHub's response did not include an account name."),
       ),
     );
     return { displayName: account.login };
@@ -83,7 +83,7 @@ const connectionType: ConnectionTypeContribution = {
   validate,
 };
 
-/** The bare word the host qualifies into `github/github`. */
+/** The unqualified id, which the host prefixes to make `github/github`. */
 const eventSource: EventSourceDefinition = {
   id: "github",
   connectionType: "github/github",
@@ -103,7 +103,7 @@ export const github: Plugin = {
       registerConnectionType(host, connectionType),
       registerEventSource(host, eventSource),
     ),
-  // Nothing runs on the controller yet: the ingest loop belongs to the event
-  // source ticket.
+  // Nothing runs on the controller yet: the ingest loop will be added by the
+  // event source ticket.
   activate: () => Effect.succeed(Effect.void),
 };

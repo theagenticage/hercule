@@ -1,14 +1,17 @@
 /**
- * The downward-only access-mode fallback of spec 06 §8.4: a mode a provider
- * declares `unsupported` runs as the nearest less-permissive mode it does
- * declare `native`, never a more permissive one. The controller spawns on
- * this; the composer's menu dims on it - one function, so the mode the menu
- * offers as available is always the mode the controller will actually grant.
+ * The access-mode fallback (spec 06 §8.4). When a provider declares a mode
+ * `unsupported`, a session asking for it runs in the nearest less permissive
+ * mode the provider declares `native`, never in a more permissive one.
+ *
+ * The controller uses this function when it spawns a session, and the
+ * composer's menu uses it to dim modes. Because both use the same function,
+ * the mode the menu shows as available is always the mode the controller
+ * grants.
  */
 import type { DeclaredCapabilities } from "@hercule/plugin-host";
 import type { AccessMode } from "@hercule/protocol";
 
-/** Least to most permissive - the order the fallback walks down. */
+/** The access modes from least to most permissive. The fallback moves down this list. */
 export const ACCESS_MODE_CHAIN: readonly AccessMode[] = [
   "approval-required",
   "auto-accept-edits",
@@ -17,10 +20,10 @@ export const ACCESS_MODE_CHAIN: readonly AccessMode[] = [
 ];
 
 /**
- * The mode a spawn or a menu actually gets for `requested`: the nearest mode
- * at or below it that `declared` marks `native`. `undefined` means even
- * `approval-required` is not native on this provider, so there is nothing to
- * fall back to.
+ * Returns the mode a session actually gets when it asks for `requested`: the
+ * nearest mode at or below `requested` that `declared` marks `native`.
+ * Returns `undefined` when not even `approval-required` is native on this
+ * provider, so there is no mode to fall back to.
  */
 export const findNearestSupportedAccessMode = (
   requested: AccessMode,

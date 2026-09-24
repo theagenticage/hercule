@@ -2,10 +2,10 @@
  * Connections as a plugin sees them: the type it declares at registration, and
  * the connections of that type it reaches at runtime.
  *
- * A connection is core-owned. The plugin contributes what setting one up takes
- * and the one question only it can answer - whether these credentials work, and
- * which account they name - and the core owns the row, the secrets, the status
- * and the screen.
+ * The core owns a connection. The plugin contributes what setting one up takes,
+ * and answers the one question only it can answer: whether these credentials
+ * work, and which account they belong to. The core owns the row, the secrets,
+ * the status and the screen.
  */
 import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
@@ -13,23 +13,26 @@ import type { PluginError } from "./plugin";
 import { ContributionWord } from "./contributions";
 import { SchemaValue } from "./manifest";
 
-/** Where a connection stands. Ingest runs in `connected` and nowhere else. */
+/** The status of a connection. Events are ingested only while it is `connected`. */
 export const ConnectionStatus = Schema.Literals(["connected", "needs-reauth", "error", "disabled"]);
 
 export type ConnectionStatus = Schema.Schema.Type<typeof ConnectionStatus>;
 
 /**
- * One secret the user pastes: named for the store, labelled for the form.
+ * One secret the user pastes: a name for the secrets store, and a label for
+ * the form.
  *
- * The name is what the value is stored under, and the store binds a value to
- * `<kind>|<id>|<name>`, so a name holding the separator would have two
- * readings. It is refused here, where the plugin is told, rather than at the
- * write, where the user would be.
+ * The value is stored under the name, and the store binds a value to
+ * `<kind>|<id>|<name>`, so a name containing the separator would be ambiguous.
+ * It is rejected here, where the plugin author sees the error, rather than at
+ * the write, where the user would.
  */
 export const CredentialField = Schema.Struct({
   name: Schema.String.check(
     Schema.isMinLength(1),
-    Schema.isPattern(/^[^|]+$/, { message: "A credential field name cannot hold a | character." }),
+    Schema.isPattern(/^[^|]+$/, {
+      message: "A credential field name cannot contain a | character.",
+    }),
   ),
   label: Schema.String,
   help: Schema.optionalKey(Schema.String),
@@ -38,9 +41,9 @@ export const CredentialField = Schema.Struct({
 export type CredentialField = Schema.Schema.Type<typeof CredentialField>;
 
 /**
- * One step of a setup flow. The set is fixed and the core renders all of it:
- * there is no UI extension point, which is what lets the Connections screen
- * show what a type takes before its plugin is even enabled.
+ * One step of a setup flow. The set of steps is fixed and the core renders all
+ * of them: there is no UI extension point. That is what lets the Connections
+ * screen show what a type needs before its plugin is even enabled.
  */
 export const SetupStep = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("checklist"), markdown: Schema.String }),
@@ -62,16 +65,16 @@ export const OAuthDeclaration = Schema.Struct({
 export type OAuthDeclaration = Schema.Schema.Type<typeof OAuthDeclaration>;
 
 /**
- * Everything about a type that the catalog can hold. `validate` is the rest of
- * the contribution and is deliberately not here: a function does not survive
- * the crossing into a JSON column.
+ * Everything about a type that the catalog can store. `validate` is the rest of
+ * the contribution and is deliberately not here: a function cannot be stored
+ * in a JSON column.
  */
 export const ConnectionType = Schema.Struct({
   /**
-   * The bare word this plugin calls the type, which the host qualifies with the
-   * plugin's id to make the identity the rest of Hercule keys on. The separator
-   * is refused here, where the plugin is told, so that the qualified string has
-   * exactly one reading.
+   * The plugin's own short name for the type. The host prefixes it with the
+   * plugin's id to make the id the rest of Hercule uses. The separator is
+   * rejected here, where the plugin author sees the error, so that the
+   * qualified id has exactly one meaning.
    */
   type: ContributionWord,
   displayName: Schema.String.check(Schema.isMinLength(1)),
@@ -83,16 +86,16 @@ export const ConnectionType = Schema.Struct({
 
 export type ConnectionType = Schema.Schema.Type<typeof ConnectionType>;
 
-/** The type turned the credentials down, in the plugin's own words. */
+/** The type rejected the credentials, with the plugin's own message. */
 export class ConnectionValidationFailed extends Schema.TaggedError<ConnectionValidationFailed>()(
   "ConnectionValidationFailed",
   { message: Schema.String },
 ) {}
 
 /**
- * The connection cannot be acted through: it is not one of this plugin's, or
- * its credentials are no longer usable. One error for both, because a plugin
- * may not learn that another plugin's row exists.
+ * The connection cannot be used: it does not belong to this plugin, or its
+ * credentials are no longer usable. One error for both, because a plugin must
+ * not learn that another plugin's row exists.
  */
 export class ConnectionUnavailable extends Schema.TaggedError<ConnectionUnavailable>()(
   "ConnectionUnavailable",
@@ -100,9 +103,10 @@ export class ConnectionUnavailable extends Schema.TaggedError<ConnectionUnavaila
 ) {}
 
 /**
- * What a plugin declares one type as. `validate` asks the external service who
- * the credentials belong to, so it needs an `HttpClient` and nothing else: the
- * host provides the live one, and a plugin test provides a stub.
+ * A connection type as a plugin declares it. `validate` asks the external
+ * service who the credentials belong to, so it needs an `HttpClient` and
+ * nothing else: the host provides the real one, and a plugin test provides a
+ * stub.
  */
 export interface ConnectionTypeContribution extends ConnectionType {
   readonly validate: (
@@ -114,7 +118,7 @@ export interface ConnectionTypeContribution extends ConnectionType {
   >;
 }
 
-/** What `register` may declare: the types this plugin services. */
+/** What `register` may declare: the connection types this plugin supports. */
 export interface ConnectionRegistration {
   readonly registerType: (
     contribution: ConnectionTypeContribution,
@@ -124,7 +128,7 @@ export interface ConnectionRegistration {
 /** One connection as its own plugin sees it. Never the credential values. */
 export interface ConnectionSummary {
   readonly id: string;
-  /** The qualified type, `<pluginId>/<word>`, not the bare word declared. */
+  /** The qualified type, `<pluginId>/<word>`, not the short name the plugin declared. */
   readonly type: string;
   readonly label: string;
   readonly status: ConnectionStatus;
@@ -142,9 +146,9 @@ export interface ConnectionReport {
 export interface ConnectionsRuntime {
   readonly list: () => Effect.Effect<ReadonlyArray<ConnectionSummary>>;
   /**
-   * Every secret the connection owns, decoded, by name: the fields the user
-   * pasted, or `{ accessToken }` for a redirect flow, refreshed first when the
-   * stored token is spent or nearly so.
+   * Returns every secret the connection owns, decrypted, keyed by name: the
+   * fields the user pasted, or `{ accessToken }` for a redirect flow. The
+   * access token is refreshed first when it has expired or is about to.
    */
   readonly credentials: (
     connectionId: string,

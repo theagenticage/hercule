@@ -1,11 +1,11 @@
 /**
- * Sessions on the wire: what the controller authors, what the runner reports
- * back, and the one normalized vocabulary every provider's traffic is turned
- * into before it leaves the machine it ran on (spec 06 sections 4 and 6).
+ * Sessions on the wire: what the controller sends, what the runner reports
+ * back, and the normalized vocabulary every provider's traffic is converted to
+ * before it leaves the machine it ran on (spec 06 sections 4 and 6).
  *
- * Normalization happens at the runner, so this file is the whole contract a
- * consumer of a session reads. An `unknown` item kind and a `raw` passthrough
- * carry a vendor message nobody mapped rather than dropping it.
+ * The runner normalizes, so this file is the whole contract for anything that
+ * reads a session. An `unknown` item kind and a `raw` passthrough keep a vendor
+ * message nobody mapped, rather than dropping it.
  */
 import { Schema } from "effect";
 
@@ -20,9 +20,9 @@ import {
 } from "./primitives";
 
 /**
- * How much of a session a caller may act on without being asked (spec 06
- * section 2). It rides `SessionSpec`, so the protocol owns it and the plugin
- * host re-exports it rather than declaring a second one.
+ * How much a session may do without asking first (spec 06 section 2). It is
+ * part of `SessionSpec`, so the protocol owns it and the plugin host
+ * re-exports it rather than declaring a second one.
  */
 export const AccessMode = Schema.Literals([
   "approval-required",
@@ -35,17 +35,18 @@ export type AccessMode = Schema.Schema.Type<typeof AccessMode>;
 
 /**
  * The longest piece of free text a harness may put in an event. A `Fact` is too
- * short: an error body or a stack trace over 512 bytes would be an undecodable
- * frame, which costs the runner its socket and every session on it.
+ * short: an error body or a stack trace over 512 bytes would make the frame
+ * undecodable, which would cost the runner its socket and every session on it.
  */
 export const MAX_MESSAGE_LENGTH = 4096;
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
 
 /**
- * A duration on the wire, in milliseconds: the controller turns whole-minute
- * settings into this so the runner never has to know the unit they were
- * authored in, and a test can pick a value a wall clock could not sit through.
+ * A duration on the wire, in milliseconds. The controller converts
+ * whole-minute settings to milliseconds, so the runner never needs to know the
+ * unit they were set in, and a test can use a value much shorter than a
+ * minute.
  */
 const PositiveMillis = Schema.Int.check(Schema.isGreaterThan(0));
 
@@ -71,9 +72,9 @@ const isDisallowedTool = (value: string): value is DisallowedTool =>
   (TOOL_FAMILIES as ReadonlyArray<string>).includes(value);
 
 /**
- * One family, refused by name. A union of five literals answers "expected one
- * of five", and a caller that sent several entries must then guess which entry
- * the refusal was about. This check names the word it did not accept.
+ * One tool family. A union of five literals fails with "expected one of five",
+ * and a caller that sent several entries must then guess which entry was
+ * wrong. This check includes the rejected word in its error message.
  */
 export const DisallowedTool = Schema.String.check(
   Schema.makeFilter<string>(
@@ -83,14 +84,14 @@ export const DisallowedTool = Schema.String.check(
         : `${value} is not a tool family; the families are ${TOOL_FAMILIES.join(", ")}`,
     undefined,
     // Without this, the type guard below would add a second issue about the
-    // same entry, and that issue carries no words.
+    // same entry, with no message.
     true,
   ),
 ).pipe(Schema.refine(isDisallowedTool));
 
 /**
- * What the controller authors for one session: ids, never paths (ADR 0002).
- * The runner resolves it to a `ProviderRunnerContext` on its own machine.
+ * What the controller sends for one session: ids, never paths (ADR 0002). The
+ * runner resolves it to a `ProviderRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, so a field is added here
  * only when something sends it. The rest of spec 06 section 4 - `mcpServers` -
@@ -98,10 +99,10 @@ export const DisallowedTool = Schema.String.check(
  */
 export const SessionSpec = Schema.Struct({
   instanceId: InstanceId,
-  /** `null` is a workspace-less session: the runner gives it a scratch cwd. */
+  /** `null` for a session without a workspace: the runner gives it a scratch working directory. */
   workspaceId: Schema.NullOr(Fact),
   modelSelection: ModelSelection,
-  /** Post-fallback: always a mode the target provider declares native. */
+  /** The mode after the access-mode fallback: always one the target provider declares native. */
   accessMode: AccessMode,
   /**
    * Appended to the harness's own system prompt, never in place of it. A
@@ -115,22 +116,22 @@ export const SessionSpec = Schema.Struct({
    */
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
   /**
-   * What the session's turns must answer with, as a JSON Schema inside the
-   * subset `lintOutputSchema` accepts. An absent schema means prose.
+   * What the session's turns must return, as a JSON Schema within the subset
+   * `lintOutputSchema` accepts. Without a schema, turns return prose.
    */
   outputSchema: Schema.optionalKey(OutputSchema),
   /**
-   * Picks the provider-native session this one carries on from, on the same
-   * runner and the same instance (spec 06 section 4.1). A resume continues that
+   * The provider-native session this one continues from, on the same runner
+   * and the same instance (spec 06 section 4.1). A resume continues that
    * native session; a fork branches off it, leaving the original untouched.
    */
   continue: Schema.optionalKey(
     Schema.Struct({ nativeSessionId: Fact, mode: Schema.Literals(["resume", "fork"]) }),
   ),
   /**
-   * The two clocks the runner supervisor holds this session to (spec 03
-   * section 6.2). Required: a spec without it is a controller bug, not a
-   * runner choice, and the runner holds no default of its own to fall back on.
+   * The two time limits the runner supervisor enforces on this session (spec
+   * 03 section 6.2). Required: a spec without them is a controller bug, and
+   * the runner has no default of its own to fall back on.
    */
   timeouts: Schema.Struct({
     inactivityMs: PositiveMillis,
@@ -153,10 +154,10 @@ export const SessionBinding = Schema.Struct({
 export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
 
 /**
- * One turn's input. Attachments are the open item in spec 16 section B.
- * `modelSelection` is the session's current model, on every frame; a harness
- * takes a model change only on the input that opens a turn, so an adapter
- * applies it there and leaves it alone the rest of the time.
+ * One turn's input. Attachments are an open item in spec 16 section B.
+ * `modelSelection` is the session's current model, sent on every frame. A
+ * harness accepts a model change only on the input that starts a turn, so an
+ * adapter applies it there and ignores it the rest of the time.
  */
 export const TurnInput = Schema.Struct({
   text: Schema.String,
@@ -171,16 +172,16 @@ export const Delivery = Schema.Literals(["opened", "steered"]);
 export type Delivery = Schema.Schema.Type<typeof Delivery>;
 
 /**
- * What the adapter says an input did. The only authority on it: reading it off
- * the order events arrive in is the inference ADR 0007 rules out.
+ * What the adapter reports an input did. This is the only reliable source:
+ * inferring it from the order events arrive in is ruled out by ADR 0007.
  */
 export const SendResult = Schema.Struct({ turnId: Fact, delivery: Delivery });
 
 export type SendResult = Schema.Schema.Type<typeof SendResult>;
 
 /**
- * Why a session is gone (spec 06 section 4.1). Pinned because the session view
- * reads it: only `idle_unload` and `runner_restart` leave native state behind.
+ * Why a session ended (spec 06 section 4.1). The session view reads it: only
+ * `idle_unload` and `runner_restart` leave native state behind.
  */
 export const ExitReason = Schema.Literals([
   "stopped",
@@ -225,17 +226,18 @@ export const ItemStatus = Schema.Literals(["completed", "failed", "declined"]);
 export type ItemStatus = Schema.Schema.Type<typeof ItemStatus>;
 
 /**
- * The four answers a parked session can be given. `allow_always` persists a
- * rule for the rest of the session, `cancel` denies and ends the turn with it.
+ * The four answers a parked session can be given. `allow_always` keeps a rule
+ * for the rest of the session; `cancel` denies the request and ends the turn.
  */
 export const ApprovalDecision = Schema.Literals(["allow", "allow_always", "deny", "cancel"]);
 
 export type ApprovalDecision = Schema.Schema.Type<typeof ApprovalDecision>;
 
 /**
- * Which answers this request takes. A request that may persist no rule, or that
- * has nothing for an allow to carry, says so here rather than leaving a surface
- * to offer an answer the harness would have to substitute for silently.
+ * The answers this request accepts. When a request cannot keep a rule, or an
+ * allow would have nothing to apply to, this list leaves those answers out.
+ * Otherwise a surface could offer an answer the harness would silently
+ * replace with another.
  */
 const Decisions = Schema.NonEmptyArray(ApprovalDecision);
 
@@ -244,7 +246,7 @@ const Decisions = Schema.NonEmptyArray(ApprovalDecision);
  *
  * `detail` is a closed struct per `kind` rather than free Json: the surfaces
  * render the card from it, and a vendor-shaped payload there would make what
- * the user reads a function of which harness answered (ADR 0007).
+ * the user sees depend on which harness asked (ADR 0007).
  */
 const defineOpenRequest = <const K extends string, F extends Schema.Struct.Fields>(
   kind: K,
@@ -259,7 +261,7 @@ const defineOpenRequest = <const K extends string, F extends Schema.Struct.Field
     detail: Schema.Struct(detail),
   });
 
-/** A rename carries two paths, a multi-file edit more, so it is a list. */
+/** A rename has two paths and a multi-file edit more, so this is a list. */
 const Paths = Schema.Array(Fact);
 
 const CommandApproval = defineOpenRequest("command_approval", { command: Message });
@@ -277,8 +279,8 @@ const ToolApproval = defineOpenRequest("tool_approval", { toolName: Fact });
  * keeps its own structure rather than being flattened to text: a surface that
  * reads only the text cannot show what the answers were.
  *
- * The struct is closed, as every detail here is - a vendor's extra field (the
- * Claude SDK's `preview`) would make what the user reads a function of which
+ * The struct is closed, like every detail here: a vendor's extra field (the
+ * Claude SDK's `preview`) would make what the user sees depend on which
  * harness asked (ADR 0007). Every provider maps its own shape into this one.
  */
 const Question = Schema.Struct({
@@ -289,14 +291,14 @@ const Question = Schema.Struct({
   multiSelect: Schema.Boolean,
 });
 
-/** A harness asks one to four at a time, so the request carries a list. */
+/** A harness asks one to four questions at a time, so the request holds a list. */
 const QuestionRequest = defineOpenRequest("question", {
   questions: Schema.NonEmptyArray(Question),
 });
 
 /**
- * The request a session is parked on, as the row that holds it and the API
- * that hands it out read it. The same five shapes ride `request.opened`.
+ * The request a session is parked on, as the database row and the API hold it.
+ * `request.opened` carries the same five shapes.
  */
 export const OpenRequest = Schema.Union([
   CommandApproval,
@@ -309,9 +311,9 @@ export const OpenRequest = Schema.Union([
 export type OpenRequest = Schema.Schema.Type<typeof OpenRequest>;
 
 /**
- * The three append-only text streams. Where a vendor sends raw and summarized
- * reasoning separately the adapter picks one, raw preferred, and the other
- * stays raw-only (spec 06 section 6.4).
+ * The three append-only text streams. When a vendor sends raw and summarized
+ * reasoning separately, the adapter picks one, preferring raw, and keeps the
+ * other only in `raw` (spec 06 section 6.4).
  */
 export const StreamKind = Schema.Literals(["assistant_text", "reasoning_text", "command_output"]);
 
@@ -322,9 +324,10 @@ const Tokens = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Money = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
- * A cumulative token snapshot for the session, not a per-turn delta: cadence
- * differs per harness and the snapshot shape absorbs that. The optional fields
- * are the ones only some harnesses report (spec 06 section 6.6).
+ * A cumulative token snapshot for the session, not a per-turn delta: harnesses
+ * report at different intervals, and a snapshot works for all of them. The
+ * optional fields are the ones only some harnesses report (spec 06 section
+ * 6.6).
  */
 export const Usage = Schema.Struct({
   inputTokens: Tokens,
@@ -337,14 +340,14 @@ export const Usage = Schema.Struct({
 export type Usage = Schema.Schema.Type<typeof Usage>;
 
 /**
- * The fields every normalized event carries identically. `turnId` and `itemId`
- * are declared per member instead, so an event about a turn or an item requires
- * its id and the rest have no place to put one.
+ * The fields every normalized event has. `turnId` and `itemId` are declared
+ * per event instead, so an event about a turn or an item requires its id and
+ * the other events have no field for one.
  */
 const base = {
   eventId: Fact,
   sessionId: Fact,
-  /** An ISO-8601 instant, as the runner read its own clock. */
+  /** An ISO-8601 timestamp, from the runner's own clock. */
   at: Fact,
   /** Native ids: thread id, vendor item id, tool_use id. */
   providerRefs: Schema.optionalKey(
@@ -361,8 +364,8 @@ const defineEvent = <const Tag extends string, Fields extends Schema.Struct.Fiel
 const SessionStarted = defineEvent("session.started", {});
 
 /**
- * `message` carries what the exit was, where the reason alone does not say it:
- * a workspace that could not be made says why in the machine's own words.
+ * `message` explains the exit when the reason alone does not: for a workspace
+ * that could not be made, it holds the machine's own error message.
  */
 const SessionExited = defineEvent("session.exited", {
   reason: ExitReason,
@@ -370,7 +373,7 @@ const SessionExited = defineEvent("session.exited", {
 });
 
 /**
- * What a turn answered under the session's output schema (spec 06 section 7).
+ * What a turn returned under the session's output schema (spec 06 section 7).
  * It has one shape for every harness. The runner validates whatever its
  * harness produced against the declared schema, so `ok` means the same thing
  * on every provider, and a failure gives its reason in the same words.
@@ -383,8 +386,8 @@ export const StructuredResult = Schema.Union([
 export type StructuredResult = Schema.Schema.Type<typeof StructuredResult>;
 
 /**
- * A completion the controller cannot bracket against its start is not a turn
- * boundary, so the id is required on both.
+ * The controller must be able to match a turn's completion with its start, so
+ * the turn id is required on both.
  */
 const TurnStarted = defineEvent("turn.started", { turnId: Fact, model: Schema.optionalKey(Fact) });
 
@@ -396,17 +399,17 @@ const TurnCompleted = defineEvent("turn.completed", {
   costUsd: Schema.optionalKey(Money),
   error: Schema.optionalKey(Message),
   /**
-   * How the turn answered the session's output schema. It is absent on a
-   * session that was given no schema, and on a turn that ended for a reason of
-   * its own. An ordinary failure is reported by `state`, and not as a verdict
-   * about a schema.
+   * How the turn's result matched the session's output schema. It is absent
+   * on a session that was given no schema, and on a turn that ended for
+   * another reason. An ordinary failure is reported by `state`, not as a
+   * schema result.
    */
   structuredResult: Schema.optionalKey(StructuredResult),
 });
 
 /**
- * `detail` stays Json: its shape is the adapter's to decide per kind, and
- * pinning twelve shapes here would freeze what each harness may yet report.
+ * `detail` stays Json: each adapter decides its shape per kind, and fixing
+ * twelve shapes here would limit what each harness can report in future.
  */
 const itemFields = {
   /** Every item belongs to a turn; unsolicited output gets a synthetic one. */
@@ -437,9 +440,9 @@ const RuntimeWarning = defineEvent("runtime.warning", {
 });
 
 /**
- * `class` is the one open vocabulary here. Codex's `codexErrorInfo` enum is the
- * reference set adapters map into, with `unknown` for the rest; it stays a
- * string so a class this build has not heard of still reaches the user.
+ * `class` is the only open vocabulary here. Adapters map into Codex's
+ * `codexErrorInfo` enum as the reference set, with `unknown` for the rest. It
+ * stays a string, so a class this build does not know still reaches the user.
  */
 const RuntimeError = defineEvent("runtime.error", {
   turnId: Schema.optionalKey(Fact),
@@ -449,15 +452,15 @@ const RuntimeError = defineEvent("runtime.error", {
 
 /**
  * The session is parked: nothing more happens on this turn until a decision
- * arrives. The request is nested rather than spread across the event, so what
- * the row and the API hold is exactly what arrived, whatever the envelope
- * around it grows to carry.
+ * arrives. The request is nested rather than spread across the event, so the
+ * row and the API hold exactly what arrived, whatever fields the event
+ * envelope gains later.
  */
 const RequestOpened = defineEvent("request.opened", { request: OpenRequest });
 
 /**
- * The park is over, whoever ended it: the user's answer, the turn being
- * interrupted, or the harness withdrawing the question.
+ * The session is no longer parked, whatever ended it: the user's answer, an
+ * interrupted turn, or the harness withdrawing the question.
  */
 const RequestResolved = defineEvent("request.resolved", {
   requestId: Fact,
@@ -482,15 +485,15 @@ export const ProviderEvent = Schema.Union([
 export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
 
 /**
- * The longest a session token may be. Hercule mints 32 random bytes rendered
- * base64url, which is 43 characters; the bound is a multiple of that so a
- * change of encoding does not need a protocol change, and it is far below a
- * fact's, because a credential is not free text.
+ * The longest a session token may be. Hercule creates 32 random bytes encoded
+ * as base64url, which is 43 characters. The limit leaves room, so a change of
+ * encoding does not need a protocol change, and it is far below a fact's
+ * limit, because a credential is not free text.
  */
 const MAX_TOKEN_LENGTH = 128;
 
 /**
- * Start one session. It carries the instance's decoded config the way a probe
+ * Starts one session. It carries the instance's decoded config, as a probe
  * does, because the runner holds no Hercule state and cannot look it up.
  */
 export const SessionStart = Schema.Struct({
@@ -502,21 +505,21 @@ export const SessionStart = Schema.Struct({
   secrets: InstanceSecrets,
   spec: SessionSpec,
   /**
-   * The session's own credential on the public API, minted for this start. The
-   * runner injects it into the agent's environment and keeps it nowhere else:
-   * this frame is the only place its plaintext ever travels, and the controller
-   * holds nothing but its hash. An empty one would authenticate nobody, so the
-   * wire refuses it rather than leaving the agent to find out. It is also what
-   * the session proves itself with when it asks this machine for a git
-   * credential.
+   * The session's own credential for the public API, created for this start.
+   * The runner puts it in the agent's environment and keeps it nowhere else:
+   * this frame is the only place the plaintext is ever sent, and the
+   * controller stores only its hash. An empty token would authenticate nobody,
+   * so the schema rejects it rather than leaving the agent to find out. The
+   * session also uses it to prove its identity when it asks this machine for a
+   * git credential.
    */
   token: Schema.String.check(Schema.isLengthBetween(1, MAX_TOKEN_LENGTH)),
-  /** `GH_TOKEN` for this session, where a GitHub Connection backs it. */
+  /** `GH_TOKEN` for this session, when a GitHub Connection backs it. */
   ghToken: Schema.optionalKey(Fact),
   /**
    * Who the session commits as: the account its Connection belongs to. Absent
-   * where no Connection backs it, and the machine then leaves git's own
-   * identity alone rather than inventing one.
+   * when no Connection backs it; the machine then leaves git's own identity
+   * unchanged rather than inventing one.
    */
   gitIdentity: Schema.optionalKey(Schema.Struct({ name: Fact, email: Fact })),
   /** The branch the session's checkout is switched to before the harness starts. */
@@ -534,7 +537,7 @@ export type SessionStop = Schema.Schema.Type<typeof SessionStop>;
 
 export const SessionInput = Schema.Struct({
   _tag: Schema.Literal("sessionInput"),
-  /** The Queued Input row this is, which is what the answer is correlated by. */
+  /** The id of the Queued Input row, which the reply is matched by. */
   requestId: Fact,
   sessionId: SessionId,
   input: TurnInput,
@@ -543,9 +546,9 @@ export const SessionInput = Schema.Struct({
 export type SessionInput = Schema.Schema.Type<typeof SessionInput>;
 
 /**
- * Ends the running turn as `interrupted`. Fire-and-forget: the outcome arrives
- * in the session's own stream as `turn.completed`, so a second answer channel
- * would carry nothing.
+ * Ends the running turn as `interrupted`. There is no reply frame: the outcome
+ * arrives in the session's own stream as `turn.completed`, so a reply would
+ * add nothing.
  */
 export const SessionInterrupt = Schema.Struct({
   _tag: Schema.Literal("sessionInterrupt"),
@@ -556,9 +559,9 @@ export type SessionInterrupt = Schema.Schema.Type<typeof SessionInterrupt>;
 
 /**
  * Answers the request the session is parked on. `requestId` is the adapter's
- * own, echoed back: the controller mints none of its own for a park it did not
- * open. Fire-and-forget in the shape above - what the answer did arrives in the
- * session's own stream as `request.resolved`.
+ * own id, sent back: the controller does not create ids for requests it did
+ * not open. Like `SessionInterrupt`, there is no reply frame: the result
+ * arrives in the session's own stream as `request.resolved`.
  */
 export const SessionRespond = Schema.Struct({
   _tag: Schema.Literal("sessionRespond"),
@@ -570,22 +573,22 @@ export const SessionRespond = Schema.Struct({
 export type SessionRespond = Schema.Schema.Type<typeof SessionRespond>;
 
 /**
- * What one input did, under the row id it was sent with. It carries no turn id:
- * the turn reaches the controller on `turn.started`, and a field with no
- * consumer is a field that will be wrong.
+ * What happened to one input, with the row id it was sent with. It has no turn
+ * id: the controller learns the turn from `turn.started`, and a field nothing
+ * reads would sooner or later be wrong.
  */
 export const SessionInputResult = Schema.Struct({
   _tag: Schema.Literal("sessionInputResult"),
   requestId: Fact,
   ok: Schema.Boolean,
   delivery: Schema.optionalKey(Delivery),
-  /** Why it was not delivered, so the caller reads a reason rather than a flag. */
+  /** Why it was not delivered, so the caller gets a reason rather than only a flag. */
   message: Schema.optionalKey(Message),
 });
 
 export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
 
-/** One normalized event, under the sequence number the controller inserts it on, once. */
+/** One normalized event, with the sequence number the controller uses to store it exactly once. */
 export const SessionEvent = Schema.Struct({
   _tag: Schema.Literal("sessionEvent"),
   ...Sequenced.fields,
@@ -596,11 +599,11 @@ export type SessionEvent = Schema.Schema.Type<typeof SessionEvent>;
 
 /**
  * The most sessions one runner will ever report. The per-runner cap of spec 03
- * section 5.3 is well under it, so this refuses nonsense, not a real report.
+ * section 5.3 is well under it, so this only rejects a nonsense report.
  */
 export const MAX_SESSIONS_PER_RUNNER = 256;
 
-/** What the runner's adapters actually hold, as `listSessions` found them. */
+/** The sessions the runner's adapters actually hold, as `listSessions` found them. */
 export const SessionsReport = Schema.Struct({
   _tag: Schema.Literal("sessionsReport"),
   sessions: Schema.Array(SessionBinding).check(Schema.isMaxLength(MAX_SESSIONS_PER_RUNNER)),

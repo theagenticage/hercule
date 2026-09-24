@@ -41,19 +41,19 @@ describe("the plugin manifest", () => {
     expect(decoded.displayName).toBe("Fixture Plugin");
     expect(decoded.hostApi).toBe(1);
     expect(decoded.capabilities).toEqual(["providers", "kv"]);
-    // The schema crosses as the very value the plugin authored, not a copy: the
+    // The schema is passed as the same value the plugin wrote, not a copy: the
     // host derives the JSON Schema from this object.
     expect(decoded.configSchema).toBe(configSchema);
   });
 
   it.each(["id", "displayName", "hostApi", "capabilities"])(
-    "refuses a manifest without %s",
+    "rejects a manifest without %s",
     (key) => {
       expect(decode(omitKey(key))).toBe("Failure");
     },
   );
 
-  it("takes every capability the package declares", () => {
+  it("accepts every capability the package declares", () => {
     expect(decode({ ...manifest, capabilities: PLUGIN_CAPABILITIES })).toBe("Success");
   });
 
@@ -64,25 +64,25 @@ describe("the plugin manifest", () => {
     "workflowActions",
     "provider",
     "",
-  ])("refuses the capability %j", (capability) => {
+  ])("rejects the capability %j", (capability) => {
     expect(decode({ ...manifest, capabilities: [capability] })).toBe("Failure");
     expect(decode({ ...manifest, capabilities: ["providers", capability] })).toBe("Failure");
   });
 
-  it("refuses a host API version that is not an integer", () => {
+  it("rejects a host API version that is not an integer", () => {
     expect(decode({ ...manifest, hostApi: "1" })).toBe("Failure");
   });
 
-  // The config schema is the one thing crossing the boundary that is not plain
-  // data: the host derives JSON Schema from it and decodes stored config
-  // against it, so a manifest without a live schema is not loadable.
+  // The config schema is the only thing passed across the boundary that is not
+  // plain data: the host derives JSON Schema from it and decodes stored config
+  // with it, so a manifest without a live schema cannot be loaded.
   it("requires a config schema", () => {
     const without: Record<string, unknown> = { ...manifest };
     delete without.configSchema;
     expect(decode(without)).toBe("Failure");
   });
 
-  it("refuses a config schema that is not an Effect Schema", () => {
+  it("rejects a config schema that is not an Effect Schema", () => {
     expect(decode({ ...manifest, configSchema: "not a schema" })).toBe("Failure");
   });
 
@@ -94,7 +94,7 @@ describe("the plugin manifest", () => {
   });
 
   it.each(["", "Claude", "a|b", "a b", "-lead", "trail-", "a--b", "a_b", "a/b"])(
-    "refuses the id %j",
+    "rejects the id %j",
     (id) => {
       expect(decode({ ...manifest, id })).toBe("Failure");
     },

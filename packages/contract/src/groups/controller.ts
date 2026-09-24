@@ -1,11 +1,11 @@
 /**
  * The controller's own identity, and the one thing a caller may set about it.
  *
- * `defaultRunnerId` is where a placement lands when nothing names a runner. It
- * is nullable rather than absent: a controller with no fleet has no default,
- * and a client reads one shape either way. Update availability belongs here
- * too, but there is no update check yet, so it is not declared; it gains its
- * field once it is built.
+ * `defaultRunnerId` is the runner that placement falls back to when no runner
+ * is chosen. It is null rather than absent when there is none, so a client
+ * reads one shape either way. Update availability belongs here too, but there
+ * is no update check yet, so it has no field; the field is added once the
+ * check is built.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -27,12 +27,12 @@ export const ControllerInfo = Schema.Struct({
 export type ControllerInfo = Schema.Schema.Type<typeof ControllerInfo>;
 
 /**
- * What editing the controller takes. A patch that names nothing is accepted
- * and changes nothing; every other key is refused rather than dropped, because
- * the rest of what `controller.read` answers is the controller's own to say.
+ * The payload of `controller.update`. An empty patch is accepted and changes
+ * nothing. Any other key is rejected rather than ignored, because the
+ * controller itself sets everything else that `controller.read` returns.
  */
 export const ControllerUpdateInput = closedStruct({
-  /** `null` takes the default off again, leaving placement with no fallback. */
+  /** `null` removes the default, leaving placement with no fallback. */
   defaultRunnerId: Schema.optionalKey(Schema.NullOr(Id)),
 });
 

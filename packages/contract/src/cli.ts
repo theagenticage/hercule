@@ -4,22 +4,22 @@
  * One row per operation: how the `hercule` CLI spells the command, what the
  * command is for, worked examples, and one line of help per field. The CLI
  * derives its whole command tree, its argument parsing and its help from this
- * table plus the operation's schemas, so nothing per-operation lives in the CLI
- * package. `NOUNS` below carries the same for a root noun.
+ * table and the operation's schemas, so no per-operation code lives in the CLI
+ * package. `NOUNS` below does the same for each root noun.
  *
- * Standing rule: an operation added to the contract lands its row here in the
- * same change - spelling, purpose, examples and a line per field, or
+ * Rule: an operation added to the contract gets its row here in the same
+ * change - spelling, purpose, examples and a line per field, or
  * `hidden: true` with the reason in a comment. The row type is keyed by
  * operation id, so a contract without a row does not compile.
  *
  * The help is written for an agent reading it mid-task, not for a reference
- * manual: what the command does and when to reach for it, what comes back, and
- * what to call next by its exact spelling. A field's line is one line.
+ * manual: what the command does and when to use it, what it returns, and
+ * what to call next, by its exact spelling. A field's line is one line.
  */
 import type { ErrorCode } from "./errors";
 import type { OperationId } from "./operations";
 
-/** One worked invocation: the tokens after the command words, and what is piped in. */
+/** One example invocation: the arguments after the command words, and what is piped to stdin. */
 export interface CliExample {
   readonly args: ReadonlyArray<string>;
   readonly stdin?: string;
@@ -27,22 +27,23 @@ export interface CliExample {
 
 /**
  * One field of an operation, as the command line takes it: a positional, a
- * flag, or a value read from stdin. A stdin field still names a flag, because
- * the marker that asks for it is `--<flag>-stdin`.
+ * flag, or a value read from stdin. A stdin field still has a flag, because
+ * the switch that asks for it is `--<flag>-stdin`.
  */
 export type FieldRow =
   | {
       readonly positional: true;
       readonly help: string;
       /**
-       * What the placeholder is called in usage, where the field's own name
-       * would not say whose id it is: the `id` of `/sessions/:id/inputs` is a
-       * session's, so it is spelled `<session-id>`.
+       * The placeholder shown in usage, for when the field's own name does not
+       * make clear whose id it is: the `id` of `/sessions/:id/inputs` is a
+       * session's, so it is shown as `<session-id>`.
        */
       readonly placeholder?: string;
       /**
-       * The listing an eight-character-or-longer tail is resolved through. A
-       * positional without one takes the full id, and its line says so.
+       * The list operation that resolves an id tail of eight or more
+       * characters to a full id. A positional without one takes only the full
+       * id, and its help line must say so.
        */
       readonly resolves?: OperationId;
     }
@@ -50,9 +51,9 @@ export type FieldRow =
       readonly flag: string;
       readonly help: string;
       /**
-       * The listing that resolves a tail written for this flag, exactly as for
-       * a positional. A tail is eight characters or more. Where the field
-       * holds an id, the command line takes a tail and the wire takes the
+       * The list operation that resolves an id tail given for this flag, as
+       * for a positional. A tail is eight characters or more. The command
+       * line accepts a tail, and the request sent to the API carries the
        * full id.
        */
       readonly resolves?: OperationId;
@@ -88,11 +89,11 @@ export type CliRow =
       /** At least one, most common first. */
       readonly examples: ReadonlyArray<CliExample>;
       readonly fields: Record<string, FieldRow>;
-      /** Only where the code's generic meaning does not say enough here. */
+      /** Set only where the error code's generic meaning is not specific enough for this command. */
       readonly errors?: Partial<Record<ErrorCode, string>>;
     };
 
-/** A root noun, as the root help and the noun help introduce it. */
+/** A root noun, as the root help and the noun's own help describe it. */
 export interface NounRow {
   readonly summary: string;
   /** The usual order its verbs are called in, when the noun has one. */
@@ -102,13 +103,13 @@ export interface NounRow {
 export const CLI = {
   "setup.read": {
     command: "setup read",
-    help: "Says whether first-run setup has been completed. Reach for it when a controller may be brand new: until setup is done every other operation answers unauthenticated. Finish setup with `hercule setup complete`.",
+    help: "Shows whether first-run setup has been completed. Use it when a controller may be brand new: until setup is done, every other operation fails with unauthenticated. Finish setup with `hercule setup complete`.",
     examples: [{ args: [] }],
     fields: {},
   },
   "setup.complete": {
     command: "setup complete",
-    help: "Creates the one user and finishes first-run setup. Answers with the bearer token that user is logged in with, and takes the one-time setup token the controller printed at first boot, not a credential.",
+    help: "Creates the user and finishes first-run setup. Takes the one-time setup token the controller printed at first boot, not a credential, and returns a bearer token for the new user.",
     examples: [
       {
         args: [
@@ -136,13 +137,15 @@ export const CLI = {
     },
   },
 
-  // The bearer `hercule login` trades for an API key. It is never shown, and a
-  // second way to mint a bearer would be a second credential to look after.
+  // Returns a bearer token, which `hercule login` exchanges for an API key. It
+  // has no command, because a second way to create a bearer token would be a
+  // second credential to look after.
   "auth.login": { hidden: true },
   // Revokes a bearer token, which the CLI never holds: it authenticates with an
   // API key or a session token.
   "auth.logout": { hidden: true },
-  // The one-shot ticket the web app trades for a live socket. No terminal use.
+  // Returns the one-time ticket the web app exchanges for a live socket. A
+  // terminal has no use for it.
   "auth.wsTicket": { hidden: true },
 
   "apiKey.query": {
@@ -150,16 +153,19 @@ export const CLI = {
     help: "Lists the user's API keys - references only, never the tokens. Use it to find the id of a key to revoke with `hercule api-key revoke`.",
     examples: [{ args: [] }],
     fields: {},
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
   "apiKey.create": {
     command: "api-key create",
-    help: "Mints a long-lived user credential and prints its token once. The token is shown here and nowhere else, so capture it as you read it; every request it makes is the user's own identity.",
+    help: "Creates a long-lived user credential and prints its token once. The token is shown here and nowhere else, so save it now; every request made with it acts as the user.",
     examples: [{ args: ["--name", "ci-deploy"] }],
     fields: {
-      name: { flag: "name", help: "What to call the key, so a later listing says what it is for." },
+      name: {
+        flag: "name",
+        help: "What to call the key, so `hercule api-key list` shows what it is for.",
+      },
     },
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
   "apiKey.revoke": {
     command: "api-key revoke",
@@ -172,7 +178,7 @@ export const CLI = {
         resolves: "apiKey.query",
       },
     },
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
 
   "user.setPassword": {
@@ -183,11 +189,11 @@ export const CLI = {
       current: {
         stdin: true,
         flag: "current",
-        help: "The password in force now.",
+        help: "The current password.",
       },
       next: { stdin: true, flag: "next", help: "The password to set." },
     },
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
 
   "settings.read": {
@@ -195,11 +201,11 @@ export const CLI = {
     help: "Reads every setting that is set, in both scopes. `controller` holds the controller's operational settings, `user` the user's own preferences. A key that is not set is absent rather than defaulted. Write with `hercule settings update`.",
     examples: [{ args: [] }],
     fields: {},
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
   "settings.update": {
     command: "settings update",
-    help: "Sets settings in either scope; a key you do not name is left alone. Each flag takes a JSON object keyed by setting name, and an unknown key is refused rather than dropped.",
+    help: "Sets settings in either scope; a key you do not name is left alone. Each flag takes a JSON object keyed by setting name, and an unknown key is rejected rather than ignored.",
     examples: [
       { args: ["--user", '{"ui.threadRows":"plain"}'] },
       { args: ["--controller", '{"retention.events":30,"backup.time":"03:30"}'] },
@@ -214,18 +220,18 @@ export const CLI = {
         help: "The user's own settings as a JSON object: timezone, thread defaults, topic order, mutes.",
       },
     },
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
 
   "profile.query": {
     command: "profile list",
-    help: "Lists the Permission Profiles a session can be spawned under, each with the Grants it carries. Use it to find the id `hercule session spawn --profile` names.",
+    help: "Lists the Permission Profiles a session can be spawned under, each with the Grants it carries. Use it to find the id that `hercule session spawn --profile` takes.",
     examples: [{ args: [] }],
     fields: {},
   },
   "profile.read": {
     command: "profile read",
-    help: "Reads one Permission Profile in full: its name and its grants. It says too whether it is one of the shipped three.",
+    help: "Reads one Permission Profile in full: its name and its grants. It also shows whether it is one of the three shipped profiles.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -256,7 +262,7 @@ export const CLI = {
       name: { flag: "name", help: "What to call the profile." },
       grants: {
         flag: "grant",
-        help: "A grant the profile carries, written family-dot-verb: task.delete, infra.write. A family is coarser than the operations it covers.",
+        help: "A grant the profile carries, written <family>.<verb>: task.delete, infra.write. A family covers several operations.",
       },
     },
   },
@@ -290,7 +296,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "that profile is one of the shipped three, which are never deleted; edit its grants instead",
+        "that profile is one of the three shipped profiles, which cannot be deleted; edit its grants instead",
     },
   },
 
@@ -305,16 +311,16 @@ export const CLI = {
       },
       ownerId: { flag: "owner-id", help: "Only secrets of this one owner, by its full id." },
     },
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
   "secret.set": {
     command: "secret set",
-    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is refused here.",
+    help: "Stores or rotates one secret under an owner. The value can never be read back out. The `core` owner kind is the controller's own key material and is not allowed here.",
     examples: [{ args: ["plugin", "github", "client_secret"], stdin: "ghp_the_secret_value" }],
     fields: {
       ownerKind: {
         positional: true,
-        help: "Which kind of thing owns the secret; it and the owner id together name the owner.",
+        help: "Which kind of thing owns the secret; together with the owner id, it identifies the owner.",
       },
       ownerId: {
         positional: true,
@@ -326,16 +332,16 @@ export const CLI = {
       },
       value: { stdin: true, flag: "value", help: "The secret value." },
     },
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
   "secret.delete": {
     command: "secret delete",
-    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is refused here.",
+    help: "Removes one secret from an owner. Whatever used it fails on its next call, so check with `hercule secret list` first. The `core` owner kind is the controller's own key material and is not allowed here.",
     examples: [{ args: ["plugin", "github", "client_secret"] }],
     fields: {
       ownerKind: {
         positional: true,
-        help: "Which kind of thing owns the secret; it and the owner id together name the owner.",
+        help: "Which kind of thing owns the secret; together with the owner id, it identifies the owner.",
       },
       ownerId: {
         positional: true,
@@ -346,12 +352,12 @@ export const CLI = {
         help: "What the secret is called under that owner; it may not contain `|` either.",
       },
     },
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
 
   "task.query": {
     command: "task list",
-    help: "Lists tasks. Repeating a flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. This is how to find the id `hercule task read` and `hercule task update` name.",
+    help: "Lists tasks. Repeating a flag widens (any of its values); adding another flag narrows (all must hold); there is no negation. Use it to find the id that `hercule task read` and `hercule task update` take.",
     examples: [
       { args: ["--status", "open"] },
       { args: ["--status", "open", "--status", "in-progress", "--label", "triage"] },
@@ -364,11 +370,11 @@ export const CLI = {
       },
       labels: {
         flag: "label",
-        help: "A label the task carries; several of them find the tasks carrying any one.",
+        help: "A label the task carries; repeat the flag to find tasks with any of the labels.",
       },
       status: {
         flag: "status",
-        help: "Where the work stands; give it twice to watch open and in-progress together.",
+        help: "The task's status; repeat the flag to list open and in-progress tasks together.",
       },
       projectId: {
         flag: "project",
@@ -394,7 +400,7 @@ export const CLI = {
   },
   "task.create": {
     command: "task create",
-    help: "Creates a Task: a unit of human intent, never an execution. The description is markdown. Comes back with the task's id, which `hercule task update` and `hercule task read` take.",
+    help: "Creates a Task: a unit of human intent, never an execution. The description is markdown. Returns the task's id, which `hercule task update` and `hercule task read` take.",
     examples: [
       {
         args: ["--title", "Fix the flaky login test", "--label", "triage", "--priority", "high"],
@@ -411,7 +417,7 @@ export const CLI = {
       },
       priority: {
         flag: "priority",
-        help: "How much this matters; leave it off and the server's own default stands.",
+        help: "How much this matters; leave it off to use the server's default.",
       },
       labels: {
         flag: "label",
@@ -423,13 +429,13 @@ export const CLI = {
       },
       provenance: {
         flag: "provenance",
-        help: "A JSON entry saying what created this task - at least one of ref, eventId and runId - so a repeated signal finds it again.",
+        help: "A JSON entry that records what created this task - at least one of ref, eventId and runId - so a repeated signal finds it again.",
       },
     },
   },
   "task.update": {
     command: "task update",
-    help: "Edits a task; a field you do not name is untouched. Labels move one at a time with --add-label and --remove-label, so a user and an agent writing the same task never undo each other.",
+    help: "Edits a task; a field you leave out is not changed. Labels move one at a time with --add-label and --remove-label, so a user and an agent writing the same task never undo each other.",
     examples: [
       { args: ["1f3a9c2e", "--status", "in-progress"] },
       { args: ["1f3a9c2e", "--add-label", "triaged", "--remove-label", "needs-triage"] },
@@ -452,7 +458,7 @@ export const CLI = {
       },
       status: {
         flag: "status",
-        help: "Where the work stands. There is no state machine: every transition is legal.",
+        help: "The task's status. There is no state machine: every transition is allowed.",
       },
       priority: { flag: "priority", help: "How much this matters now." },
       projectId: {
@@ -472,7 +478,7 @@ export const CLI = {
   },
   "task.delete": {
     command: "task delete",
-    help: "Deletes a task. The delete is soft and there is no undelete: the task answers not_found on read and is gone from `hercule task list` and from search.",
+    help: "Deletes a task. The delete is soft and cannot be undone: reading the task fails with not_found, and it no longer appears in `hercule task list` or in search.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -485,7 +491,7 @@ export const CLI = {
 
   "project.query": {
     command: "project list",
-    help: "Lists projects: the groupings that hold related work and its materials. A project carries no behaviour and no defaults. Use it to find the id `hercule task create --project` names.",
+    help: "Lists projects: the groupings that hold related work and its materials. A project carries no behaviour and no defaults. Use it to find the id that `hercule task create --project` takes.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -522,7 +528,7 @@ export const CLI = {
   },
   "project.update": {
     command: "project update",
-    help: "Edits a project; a field you do not name is left as it was.",
+    help: "Edits a project; a field you leave out is not changed.",
     examples: [
       { args: ["1f3a9c2e", "--name", "Hercule v1.1"] },
       {
@@ -546,7 +552,7 @@ export const CLI = {
   },
   "project.delete": {
     command: "project delete",
-    help: "Deletes a project. The delete is soft, and a task that names it keeps its project id, so nothing about that task changes.",
+    help: "Deletes a project. The delete is soft, and a task in the project keeps its project id, so nothing about that task changes.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -559,7 +565,7 @@ export const CLI = {
 
   "resource.query": {
     command: "resource list",
-    help: "Lists the Resources Hercule knows: the repos, folders and mailboxes projects work with. Use it to find the id the other commands name.",
+    help: "Lists the Resources Hercule knows: the repos, folders and mailboxes projects work with. Use it to find the id the other `hercule resource` commands take.",
     examples: [{ args: [] }, { args: ["--kind", "repo"] }],
     fields: {
       kind: { flag: "kind", help: "Only resources of this kind: repo, folder or mailbox." },
@@ -568,7 +574,7 @@ export const CLI = {
   },
   "resource.read": {
     command: "resource read",
-    help: "Reads one Resource in full. It answers with the remote and the canonical form of it, the Connection it acts through, its setup command and the projects it is filed under.",
+    help: "Reads one Resource in full. It shows the remote and its canonical form, the Connection it acts through, its setup command and the projects it is filed under.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -603,15 +609,15 @@ export const CLI = {
       kind: { flag: "kind", help: "What it is: repo, folder or mailbox." },
       remote: {
         flag: "remote",
-        help: "The git remote, ssh or https; required for a repo and refused for anything else.",
+        help: "The git remote, ssh or https; required for a repo and not allowed for anything else.",
       },
       label: {
         flag: "label",
-        help: "What to call it; required for a folder and a mailbox, which have no remote to name them, and refused on a repo.",
+        help: "What to call it; required for a folder and a mailbox, which have no remote to identify them, and not allowed on a repo.",
       },
       connectionId: {
         flag: "connection",
-        help: "The Connection Hercule acts through for it; a repo takes a github one.",
+        help: "The Connection Hercule acts through for it; a repo's connection must be a GitHub connection.",
       },
       setupCommand: {
         flag: "setup-command",
@@ -623,11 +629,11 @@ export const CLI = {
       },
       projectIds: { flag: "project", help: "A project to file it under; repeat for several." },
     },
-    errors: { conflict: "another resource already names the same repository" },
+    errors: { conflict: "another resource already points to the same repository" },
   },
   "resource.update": {
     command: "resource update",
-    help: "Changes a Resource. It takes a new remote, Connection, setup command or include flag, and the project list it is given replaces the one the resource had.",
+    help: "Changes a Resource: its remote, Connection, setup command or include flag. A project list given here replaces the one the resource had.",
     examples: [
       { args: ["1f3a9c2e", "--setup-command", "pnpm install"] },
       { args: ["1f3a9c2e", "--connection", "null"] },
@@ -638,18 +644,21 @@ export const CLI = {
         help: "The resource's id, or a tail of eight or more characters.",
         resolves: "resource.query",
       },
-      remote: { flag: "remote", help: "The git remote; it is canonicalised again and re-checked." },
+      remote: {
+        flag: "remote",
+        help: "The git remote; it is converted to canonical form and validated again.",
+      },
       label: {
         flag: "label",
-        help: "What to call it; null takes the label off again. Refused on a repo.",
+        help: "What to call it; null removes the label. Not allowed on a repo.",
       },
       connectionId: {
         flag: "connection",
-        help: "The Connection to act through; null takes it off again.",
+        help: "The Connection to act through; null removes it.",
       },
       setupCommand: {
         flag: "setup-command",
-        help: "Run in every fresh checkout; null takes it off again. A repo only.",
+        help: "Run in every fresh checkout; null removes it. A repo only.",
       },
       workspaceInclude: {
         flag: "workspace-include",
@@ -660,11 +669,11 @@ export const CLI = {
         help: "The projects to file it under, replacing the ones it has; repeat for several.",
       },
     },
-    errors: { conflict: "another resource already names the same repository" },
+    errors: { conflict: "another resource already points to the same repository" },
   },
   "resource.delete": {
     command: "resource delete",
-    help: "Removes a Resource and the project links it had. A resource a workspace still stands on is refused; dispose of that workspace first.",
+    help: "Removes a Resource and the project links it had. It fails while a workspace still uses the resource; dispose of the workspace before deleting the resource, or retire its runner if it is a main workspace.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -673,12 +682,15 @@ export const CLI = {
         resolves: "resource.query",
       },
     },
-    errors: { invalid_state: "a workspace still stands on it; dispose of that workspace first" },
+    errors: {
+      invalid_state:
+        "a workspace still uses that resource; dispose of the workspace before deleting the resource, or retire its runner if it is a main workspace",
+    },
   },
 
   "workspace.query": {
     command: "workspace list",
-    help: 'Lists the Workspaces on the fleet: what each holds and where it stands. Use it to find one to open a thread in with `hercule session spawn --workspace \'{"kind":"existing","workspaceId":"<id>"}\'`.',
+    help: 'Lists the Workspaces on the fleet: what each holds and its status. Use it to find one to open a thread in with `hercule session spawn --workspace \'{"kind":"existing","workspaceId":"<id>"}\'`.',
     examples: [{ args: [] }, { args: ["--runner", "7b41d0a5", "--status", "ready"] }],
     fields: {
       runnerId: { flag: "runner", help: "Only workspaces on this machine." },
@@ -690,7 +702,10 @@ export const CLI = {
         flag: "project",
         help: "Only workspaces holding a checkout of this project's repos.",
       },
-      kind: { flag: "kind", help: "Only workspaces of this kind: primary or ephemeral." },
+      kind: {
+        flag: "kind",
+        help: "Only workspaces of this kind: primary (a repo's main workspace) or ephemeral.",
+      },
       status: {
         flag: "status",
         help: "Only workspaces in this state: provisioning, ready, failed, deleted or lost.",
@@ -699,7 +714,7 @@ export const CLI = {
   },
   "workspace.read": {
     command: "workspace read",
-    help: "Reads one Workspace in full. It answers with its checkouts and their branches, where it stands, and the sessions in it that have not exited; poll it after `hercule workspace provision` until it reads ready.",
+    help: "Reads one Workspace in full. It shows its checkouts and their branches, its status, and the sessions in it that have not exited. Poll it after `hercule workspace provision` until its status is ready.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -711,19 +726,19 @@ export const CLI = {
   },
   "workspace.provision": {
     command: "workspace provision",
-    help: "Makes a repo's main workspace on one machine, which is the long-lived working copy threads share. Hercule clones it fresh under that machine's own storage; a folder you already have is never taken over. It answers at once with the workspace provisioning, and the machine reports when it stands; read it back with `hercule workspace read`.",
+    help: "Makes a repo's main workspace on one machine, which is the long-lived working copy threads share. Hercule clones it fresh under that machine's own storage; a folder you already have is never taken over. It returns at once with the workspace in provisioning, and the machine reports when it is ready; read it with `hercule workspace read`.",
     examples: [{ args: ["--resource", "1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       resourceId: {
         flag: "resource",
-        help: "The repo to check out; a folder or a mailbox is refused.",
+        help: "The repo to check out; a folder or a mailbox is not allowed.",
       },
       runnerId: { flag: "runner", help: "The machine to make it on." },
     },
     errors: {
       conflict: "that repo already has a main workspace on that machine",
-      // Restated rather than imported: the sentence the controller refuses with
-      // is the controller's, and this is the gloss beside the flag.
+      // Written here rather than imported: the controller owns its error
+      // message, and this is the short explanation shown beside the flag.
       invalid_state: "only a repo is checked out; a folder and a mailbox are records",
     },
   },
@@ -740,13 +755,13 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "a main workspace is never torn down, and one already gone has nothing left to tear down",
+        "a main workspace is never torn down, and a workspace that is already gone has nothing left to tear down",
     },
   },
 
   "event.query": {
     command: "event list",
-    help: "Reads the event log: external events and audit entries under one envelope, told apart by their kind. Reach for it to see what the system saw and what it did about it. Security entries - the secret, auth and user account kinds - need the event.audit grant; without it they are simply absent from the page, and filtering by one of those kinds returns nothing.",
+    help: "Reads the event log: external events and audit entries in one format, told apart by their kind. Use it to see what the system received and what it did about it. Security entries - the secret, auth and user account kinds - need the event.audit grant; without it they are simply absent from the page, and filtering by one of those kinds returns nothing.",
     examples: [{ args: ["--kind", "task.created"] }, { args: ["--since", "2026-09-15T00:00:00Z"] }],
     fields: {
       connectionId: {
@@ -763,7 +778,7 @@ export const CLI = {
   },
   "event.read": {
     command: "event read",
-    help: "Reads one event in full, its payload and the vendor original included. Find its id in `hercule event list`. A security entry - the secret, auth and user account kinds - needs the event.audit grant; without it the entry answers not-found.",
+    help: "Reads one event in full, its payload and the vendor original included. Find its id in `hercule event list`. A security entry - the secret, auth and user account kinds - needs the event.audit grant; without it, reading the entry fails with not_found.",
     examples: [{ args: ["4217"] }],
     fields: {
       id: {
@@ -773,12 +788,12 @@ export const CLI = {
     },
     errors: {
       not_found:
-        "no entry has that id, or it is a security entry and you do not hold event.audit; the two answer alike on purpose",
+        "no entry has that id, or it is a security entry and you do not hold event.audit; the two cases fail the same way on purpose",
     },
   },
   "event.emit": {
     command: "event emit",
-    help: "Posts one event into the pipeline by hand. Reach for it to test a subscription or a filter without waiting for the real thing to happen, or to tell Hercule about something no source watches. The kind must be one a plugin declared, and the payload must be what that kind's schema says; the core stamps the rest and answers with the new event's id.",
+    help: "Posts one event into the pipeline by hand. Use it to test a subscription or a filter without waiting for the real thing to happen, or to tell Hercule about something no source watches. The kind must be one a plugin declared, and the payload must match that kind's schema; the core fills in the rest and returns the new event's id.",
     examples: [
       {
         args: [
@@ -804,11 +819,11 @@ export const CLI = {
     fields: {
       kind: {
         flag: "kind",
-        help: "The declared event kind, such as github.issue.opened; an unregistered kind is refused by name.",
+        help: "The declared event kind, such as github.issue.opened; an unregistered kind is rejected, and the error includes it.",
       },
       payload: {
         flag: "payload",
-        help: "The event's payload as one JSON object, read against the kind's declared schema.",
+        help: "The event's payload as one JSON object, validated against the kind's declared schema.",
       },
       connectionId: {
         flag: "connection",
@@ -820,7 +835,7 @@ export const CLI = {
       },
       dedupKey: {
         flag: "dedup-key",
-        help: "The emitter's idempotency key: a second emit with the same key and Connection answers the first event's id instead of writing a second.",
+        help: "The emitter's idempotency key: a second emit with the same key and Connection returns the first event's id instead of writing a second event.",
       },
     },
     errors: {
@@ -831,7 +846,7 @@ export const CLI = {
   },
   "event.enrich": {
     command: "event enrich",
-    help: "Amends one event that is already in the log. What may be amended is the system it is about, where a person opens it, and the External Refs it carries. Reach for it after reading an event that arrived through one system and is really about another. What is named is overwritten, what is left out stays as it was, and refs are added to and never removed; the payload and the original are never touched.",
+    help: "Amends one event that is already in the log. What may be amended is the system it is about, where a person opens it, and the External Refs it carries. Use it after reading an event that arrived through one system and is really about another. A field you give is overwritten, a field you leave out is not changed, and refs are only ever added, never removed; the payload and the original are never changed.",
     examples: [
       {
         args: [
@@ -861,18 +876,18 @@ export const CLI = {
       },
       refs: {
         flag: "ref",
-        help: "An External Ref to add, written <system>:<kind>:<identity>; repeat the flag for several, and one already there is kept once.",
+        help: "An External Ref to add, written <system>:<kind>:<identity>; repeat the flag for several. A ref the event already has is not added twice.",
       },
     },
     errors: {
       not_found:
-        "no entry has that id, or it is an audit entry: the log's record of what Hercule itself did is never amended, and reads as absent here",
+        "no entry has that id, or it is an audit entry: the log's record of what Hercule itself did is never amended, so it is treated as missing here",
     },
   },
 
   "subscription.query": {
     command: "subscription list",
-    help: "Lists what a session is waiting on. Each row carries the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, naming the event that will not be delivered again. A session token that names no holder lists its own. Only live subscriptions are listed; a cancelled one is gone from here.",
+    help: "Lists what a session is waiting on. Each row shows the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, with the event that will not be delivered again. With a session token and no --holder, it lists that session's own. Only live subscriptions are listed; a cancelled one no longer appears.",
     examples: [
       { args: [] },
       { args: ["--holder", "session:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
@@ -880,13 +895,13 @@ export const CLI = {
     fields: {
       holder: {
         flag: "holder",
-        help: "Whose subscriptions to list, written session:<session id> with the full id; a session token that names none lists its own, and a user credential must name one.",
+        help: "Whose subscriptions to list, written session:<session id> with the full id. Without it, a session token lists its own; a user credential must give one.",
       },
     },
   },
   "subscription.create": {
     command: "subscription create",
-    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Reach for it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session may hold a subscription, and the session that calls is the holder.",
+    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can hold a subscription, and the calling session becomes the holder.",
     examples: [{ args: ["github:pr:o/r#87"] }, { args: ["gmail:thread:19b2c"] }],
     fields: {
       target: {
@@ -908,12 +923,12 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        help: "The subscription's full id, as `hercule subscription create` answered with it; a tail is not resolved here.",
+        help: "The subscription's full id, as `hercule subscription create` returned it; a tail is not resolved here.",
       },
     },
     errors: {
       not_found:
-        "nothing here to end: no subscription has that id, or it has ended already, or another session holds it; the three answer alike",
+        "nothing to end: no subscription has that id, or it has ended already, or another session holds it; the three cases fail the same way",
     },
   },
 
@@ -1119,16 +1134,16 @@ export const CLI = {
 
   "runner.query": {
     command: "runner list",
-    help: "Lists the fleet: every Runner enrolled with this controller, by name. Each row says how reachable the machine is and where it stands with its owner. Use it to find the id the other `hercule runner` commands take.",
+    help: "Lists the fleet: every Runner enrolled with this controller, by name. Each row shows whether the controller can reach the machine, and its lifecycle state. Use it to find the id the other `hercule runner` commands take.",
     examples: [{ args: [] }, { args: ["--connectivity", "online", "--lifecycle", "active"] }],
     fields: {
       connectivity: {
         flag: "connectivity",
-        help: "Whether the controller can reach the machine; written by the socket and by nobody else.",
+        help: "Whether the controller can reach the machine; only the runner's connection sets it.",
       },
       lifecycle: {
         flag: "lifecycle",
-        help: "Where the machine stands with its owner; it moves independently of reachability.",
+        help: "The machine's lifecycle state, set by its owner; it changes independently of connectivity.",
       },
       label: { flag: "label", help: "Only runners carrying this placement label." },
     },
@@ -1147,7 +1162,7 @@ export const CLI = {
   },
   "runner.update": {
     command: "runner update",
-    help: "Edits what the owner owns about a runner. That is its name, its labels, its session cap, its disk watermark and whether it is reserved; everything else on the row is the machine's own report and is refused rather than ignored.",
+    help: "Edits the parts of a runner its owner controls. These are its name, its labels, its session cap, its disk watermark and whether it is reserved. Everything else on the row is reported by the machine itself, and trying to set it is rejected rather than ignored.",
     examples: [
       { args: ["1f3a9c2e", "--max-sessions", "4"] },
       { args: ["1f3a9c2e", "--label", "macos", "--label", "gpu", "--reserved", "true"] },
@@ -1158,7 +1173,7 @@ export const CLI = {
         help: "The runner's id, or a tail of eight or more characters.",
         resolves: "runner.query",
       },
-      name: { flag: "name", help: "What the fleet listing calls this machine." },
+      name: { flag: "name", help: "The name `hercule runner list` shows for this machine." },
       labels: {
         flag: "label",
         help: "A placement label. The list is replaced whole, so send every label the machine is to keep.",
@@ -1173,13 +1188,13 @@ export const CLI = {
       },
       reserved: {
         flag: "reserved",
-        help: "true means placement never chooses it; only work that names it lands here.",
+        help: "true means placement never chooses it; only work that asks for this runner by id runs here.",
       },
     },
   },
   "runner.drain": {
     command: "runner drain",
-    help: "Stops new sessions landing on a runner while the ones already there finish. Reach for it before maintenance; `hercule runner undrain` puts the machine back in rotation.",
+    help: "Stops new sessions landing on a runner while the ones already there finish. Use it before maintenance; `hercule runner undrain` puts the machine back in rotation.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1219,7 +1234,7 @@ export const CLI = {
   },
   "runner.probe": {
     command: "runner probe",
-    help: "Probes one Provider Instance on a runner and answers with a fresh Capability Snapshot. The snapshot is its auth state, harness version and model catalog. Reach for it when a spawn was refused for want of a logged-in machine.",
+    help: "Probes one Provider Instance on a runner and returns a fresh Capability Snapshot. The snapshot holds its auth state, harness version and model catalog. Use it when a spawn failed because no machine was logged in.",
     examples: [{ args: ["1f3a9c2e", "--instance", "7b41d0a5"] }],
     fields: {
       id: {
@@ -1235,7 +1250,7 @@ export const CLI = {
   },
   "runner.refreshFacts": {
     command: "runner refresh-facts",
-    help: "Re-probes a runner's facts now instead of waiting for the hourly refresh. The facts are its OS, architecture, RAM, toolchains and which provider CLIs are on its PATH. Answers with the runner carrying what it just reported.",
+    help: "Re-probes a runner's facts now instead of waiting for the hourly refresh. The facts are its OS, architecture, RAM, toolchains and which provider CLIs are on its PATH. Returns the runner with the facts it just reported.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1247,7 +1262,7 @@ export const CLI = {
   },
   "runner.installHarness": {
     command: "runner install-harness",
-    help: "Installs a provider's harness binary on a runner. Reach for it when `hercule runner read` shows the provider missing from the machine's facts; the facts come back refreshed.",
+    help: "Installs a provider's harness binary on a runner. Use it when `hercule runner read` shows the provider missing from the machine's facts; the returned facts are refreshed.",
     examples: [{ args: ["1f3a9c2e", "--provider", "claude-code"] }],
     fields: {
       id: {
@@ -1263,7 +1278,7 @@ export const CLI = {
   },
   "runner.createJoinToken": {
     command: "runner join-token create",
-    help: "Mints the one-time token a new machine enrols with, shown here and nowhere else. Run it before starting the runner daemon on that machine; `hercule runner join-token list` afterwards says whether the invitation is still open.",
+    help: "Creates the one-time token a new machine enrols with, shown here and nowhere else. Run it before starting the runner daemon on that machine; `hercule runner join-token list` afterwards shows whether the invitation is still open.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -1288,29 +1303,29 @@ export const CLI = {
 
   "plugin.query": {
     command: "plugin list",
-    help: "Lists every plugin this binary was built with. Each row says what the user decided about the plugin and what this boot made of it. The set is fixed at build time, so this is the whole of it.",
+    help: "Lists every plugin this binary was built with. Each row shows whether the user enabled the plugin, and what happened to it when this controller started. The set is fixed at build time, so this is the whole of it.",
     examples: [{ args: [] }],
     fields: {},
   },
   "plugin.read": {
     command: "plugin read",
-    help: "Reads one plugin in full: its capabilities, contributions, stored config and config schema. A settings form is generated from that schema; a refused plugin has none, and its status says why it was refused.",
+    help: "Reads one plugin in full: its capabilities, contributions, stored config and config schema. A settings form is generated from that schema; a refused plugin has none, and its status gives the reason.",
     examples: [{ args: ["github"] }],
     fields: {
       id: {
         positional: true,
-        help: "The plugin's id as its manifest names it, such as github; a name, never a UUID and never a tail.",
+        help: "The plugin's id as its manifest declares it, such as github; a name, never a UUID and never a tail.",
       },
     },
   },
   "plugin.enable": {
     command: "plugin enable",
-    help: "Enables a plugin and starts it, so its contributions register. The decision is stored and survives a restart; the reply says what this process made of it.",
+    help: "Enables a plugin and starts it, so its contributions register. The decision is stored and survives a restart; the reply shows whether the plugin started.",
     examples: [{ args: ["github"] }],
     fields: {
       id: {
         positional: true,
-        help: "The plugin's id as its manifest names it, such as github; a name, never a UUID and never a tail.",
+        help: "The plugin's id as its manifest declares it, such as github; a name, never a UUID and never a tail.",
       },
     },
   },
@@ -1321,40 +1336,40 @@ export const CLI = {
     fields: {
       id: {
         positional: true,
-        help: "The plugin's id as its manifest names it, such as github; a name, never a UUID and never a tail.",
+        help: "The plugin's id as its manifest declares it, such as github; a name, never a UUID and never a tail.",
       },
     },
   },
   "plugin.retry": {
     command: "plugin retry",
-    help: "Starts an errored plugin over without restarting the controller. Only a plugin whose status is errored has anything to retry; anything else is refused.",
+    help: "Starts an errored plugin over without restarting the controller. Only a plugin whose status is errored can be retried; any other status is rejected.",
     examples: [{ args: ["github"] }],
     fields: {
       id: {
         positional: true,
-        help: "The plugin's id as its manifest names it, such as github; a name, never a UUID and never a tail.",
+        help: "The plugin's id as its manifest declares it, such as github; a name, never a UUID and never a tail.",
       },
     },
   },
   "plugin.resetState": {
     command: "plugin reset-state",
-    help: "Throws away everything a plugin stored and starts it over. Reach for it when leftover state is the plausible cause of a plugin sitting errored or inactive; what it stored is gone for good.",
+    help: "Throws away everything a plugin stored and starts it over. Use it when leftover state is the likely cause of a plugin stuck in errored or inactive; what it stored is deleted for good.",
     examples: [{ args: ["github"] }],
     fields: {
       id: {
         positional: true,
-        help: "The plugin's id as its manifest names it, such as github; a name, never a UUID and never a tail.",
+        help: "The plugin's id as its manifest declares it, such as github; a name, never a UUID and never a tail.",
       },
     },
   },
   "plugin.configure": {
     command: "plugin configure",
-    help: "Stores a plugin's config and restarts it on the new one. There is no hot reconfigure, so a plugin never sees its config change under it. The config is a JSON object, validated before anything restarts, so a rejected one leaves a running plugin running. Read the shape it must take from `hercule plugin read`.",
+    help: "Stores a plugin's config and restarts it on the new one. There is no hot reconfigure, so a plugin never sees its config change under it. The config is a JSON object, validated before anything restarts, so a rejected one leaves a running plugin running. `hercule plugin read` shows the schema it must match.",
     examples: [{ args: ["github"], stdin: '{"appId":"1234","pollSeconds":60}' }],
     fields: {
       id: {
         positional: true,
-        help: "The plugin's id as its manifest names it, such as github; a name, never a UUID and never a tail.",
+        help: "The plugin's id as its manifest declares it, such as github; a name, never a UUID and never a tail.",
       },
       config: {
         stdin: true,
@@ -1384,7 +1399,7 @@ export const CLI = {
   },
   "provider.create": {
     command: "provider create",
-    help: "Opens a Provider Instance: one account of one provider, with its own provider home on every runner. The config is a JSON object checked against the provider's own schema. Log the new instance in on a machine with `hercule provider login`.",
+    help: "Opens a Provider Instance: one account of one provider, with its own provider home on every runner. The config is a JSON object validated against the provider's own schema. Log the new instance in on a machine with `hercule provider login`.",
     examples: [{ args: ["--provider", "claude-code", "--name", "work"], stdin: "{}" }],
     fields: {
       providerId: {
@@ -1404,7 +1419,7 @@ export const CLI = {
   },
   "provider.update": {
     command: "provider update",
-    help: "Edits a Provider Instance; a field you do not name is left as it was. The config goes inline here as JSON, because it is one value beside the name rather than the whole payload.",
+    help: "Edits a Provider Instance; a field you leave out is not changed. The config goes inline here as JSON, because it is one value beside the name rather than the whole payload.",
     examples: [{ args: ["1f3a9c2e", "--name", "personal"] }],
     fields: {
       id: {
@@ -1415,7 +1430,7 @@ export const CLI = {
       name: { flag: "name", help: "A new name for the instance." },
       config: {
         flag: "config",
-        help: "A replacement config as inline JSON, against the provider's own schema.",
+        help: "A replacement config as inline JSON, validated against the provider's own schema.",
       },
     },
   },
@@ -1433,7 +1448,7 @@ export const CLI = {
   },
   "provider.login": {
     command: "provider login",
-    help: "Starts the vendor login for a Provider Instance on one machine. Answers with the URL to open, plus the code the harness printed when there is one. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. Finish it with `hercule provider submit-login-code`.",
+    help: "Starts the vendor login for a Provider Instance on one machine. Returns the URL to open, and the code the harness printed if there is one. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. Finish it with `hercule provider submit-login-code`.",
     examples: [{ args: ["1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       id: {
@@ -1449,7 +1464,7 @@ export const CLI = {
   },
   "provider.submitLoginCode": {
     command: "provider submit-login-code",
-    help: "Hands back the code the browser showed, finishing what `hercule provider login` started. Answers with a fresh Capability Snapshot for that machine, so the reply says whether the instance is usable there.",
+    help: "Sends the code the browser showed, finishing what `hercule provider login` started. Returns a fresh Capability Snapshot for that machine, which shows whether the instance is usable there.",
     examples: [{ args: ["1f3a9c2e", "--runner", "7b41d0a5", "--code", "ABCD-1234"] }],
     fields: {
       id: {
@@ -1464,7 +1479,7 @@ export const CLI = {
 
   "connection.query": {
     command: "connection list",
-    help: "Lists external-account connections Hercule acts through, with each status. Use it to find the id an event's connection names.",
+    help: "Lists external-account connections Hercule acts through, with each status. Use it to find the id that an event's connection refers to.",
     examples: [{ args: [] }, { args: ["--status", "needs-reauth"] }],
     fields: {
       type: {
@@ -1473,13 +1488,13 @@ export const CLI = {
       },
       status: {
         flag: "status",
-        help: "Where the account stands; needs-reauth is what to look for when events stopped arriving.",
+        help: "The account's status; look for needs-reauth when events stopped arriving.",
       },
     },
   },
   "connection.read": {
     command: "connection read",
-    help: "Reads one Connection in full: the account it names, where it stands, and its topics. The names of the secrets it owns come with it.",
+    help: "Reads one Connection in full: its account, its status and its topics. The names of the secrets it owns come with it.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1510,7 +1525,7 @@ export const CLI = {
       },
       config: {
         flag: "config",
-        help: "The connection's own config as inline JSON, against the type's declared schema.",
+        help: "The connection's own config as inline JSON, validated against the type's declared schema.",
       },
       credentials: {
         stdin: true,
@@ -1568,7 +1583,7 @@ export const CLI = {
   },
   "connection.startOAuth": {
     command: "connection start-oauth",
-    help: "Starts a redirect flow and answers with the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it has to come out byte for byte as what was registered with the provider. Name --connection to reconnect an account that already exists instead of making a second one.",
+    help: "Starts a redirect flow and returns the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it must match the one registered with the provider byte for byte. Give --connection to reconnect an existing account instead of creating a second one.",
     examples: [
       {
         args: [
@@ -1612,25 +1627,25 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the plugin that owns this type holds no OAuth client credentials; set them in settings first",
+        "the plugin that owns this type has no OAuth client credentials; set them in settings first",
     },
   },
 
   "agent.query": {
     command: "agent list",
-    help: "Lists the Agents sessions are spawned from. An Agent is a named, reusable configuration for unattended work. Use it to find the id `hercule session spawn --agent` names.",
+    help: "Lists the Agents sessions are spawned from. An Agent is a named, reusable configuration for unattended work. Use it to find the id that `hercule session spawn --agent` takes.",
     examples: [{ args: [] }, { args: ["--profile", "1f3a9c2e"] }],
     fields: {
       permissionProfileId: {
         flag: "profile",
-        help: "Only the Agents that spawn their sessions under this Permission Profile, by its id or a tail of eight or more characters; it says which Agents hold a profile a delete was refused for.",
+        help: "Only the Agents that spawn their sessions under this Permission Profile, by its id or a tail of eight or more characters; use it to find which Agents stop a profile from being deleted.",
         resolves: "profile.query",
       },
     },
   },
   "agent.read": {
     command: "agent read",
-    help: "Reads one Agent in full: its prompt, where it runs and what it may do. It also says which of those fields its provider will not enforce.",
+    help: "Reads one Agent in full: its prompt, where it runs and what it may do. It also shows which of those fields its provider does not enforce.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1697,17 +1712,17 @@ export const CLI = {
       },
       options: {
         flag: "options",
-        help: "The choices that model opens with, as inline JSON; refused without --model beside it, because a choice belongs to the model that offers it.",
+        help: "The choices that model opens with, as inline JSON; not allowed without --model, because a choice belongs to the model that offers it.",
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "A tool family to take away: edit, write, shell, web-search or web-fetch; repeatable. A provider that enforces none of them says so in the reply.",
+        help: "A tool family to take away: edit, write, shell, web-search or web-fetch; repeatable. If the provider enforces none of them, the reply shows that.",
       },
     },
   },
   "agent.update": {
     command: "agent update",
-    help: "Edits an Agent; a field you do not name is left as it was. Sessions already spawned keep the values they were given.",
+    help: "Edits an Agent; a field you leave out is not changed. Sessions already spawned keep the values they were given.",
     examples: [
       { args: ["1f3a9c2e", "--access-mode", "auto"] },
       { args: ["1f3a9c2e", "--model", "sonnet", "--options", '{"effort":"high"}'] },
@@ -1742,11 +1757,11 @@ export const CLI = {
       accessMode: { flag: "access-mode", help: "What its sessions may do unasked." },
       model: {
         flag: "model",
-        help: "The model its sessions open on instead, by its slug; it replaces the stored choices, so name --options beside it to keep any. `null` puts it back on the instance default.",
+        help: "The model its sessions open on instead, by its slug; it replaces the stored choices, so give --options with it to keep any. `null` puts it back on the instance default.",
       },
       options: {
         flag: "options",
-        help: "The choices to open that model with, replacing the ones set now, as inline JSON; refused without --model beside it, because a choice belongs to the model that offers it.",
+        help: "The choices to open that model with, replacing the ones set now, as inline JSON; not allowed without --model, because a choice belongs to the model that offers it.",
       },
       disallowedTools: {
         flag: "disallowed-tool",
@@ -1756,7 +1771,7 @@ export const CLI = {
   },
   "agent.delete": {
     command: "agent delete",
-    help: "Deletes an Agent. It is refused while a session it spawned is still running; sessions that have exited keep its id as the lineage it is.",
+    help: "Deletes an Agent. It fails while a session spawned from the agent is still running; sessions that have exited keep the agent's id as a record of where they came from.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1767,7 +1782,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "a session spawned from this agent has not exited yet; the message names it, and `hercule session stop` ends it",
+        "a session spawned from this agent has not exited yet; the message includes its id, and `hercule session stop` ends it",
     },
   },
 
@@ -1793,7 +1808,7 @@ export const CLI = {
       },
       permissionProfileId: {
         flag: "profile",
-        help: "Only the sessions carrying this Permission Profile, by its id or a tail of eight or more characters; it says which sessions hold a profile a delete was refused for.",
+        help: "Only the sessions carrying this Permission Profile, by its id or a tail of eight or more characters; use it to find which sessions stop a profile from being deleted.",
         resolves: "profile.query",
       },
       thread: {
@@ -1804,7 +1819,7 @@ export const CLI = {
   },
   "session.read": {
     command: "session read",
-    help: "Reads one session: where it stands, what it runs under, and whether it can be resumed. The Request it is parked on comes with it, if there is one; answer that Request with `hercule session respond`.",
+    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Request it is parked on comes with it, if there is one; answer that Request with `hercule session respond`.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1816,7 +1831,7 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a session, from an Agent or as a Thread the user drives by hand. With `--agent` every value comes from that Agent; without one it is a Thread and the values come from the user's thread settings. Either way a flag given here wins. Comes back with the session's id; watch what it does with `hercule transcript read` and send the next turn with `hercule session input`.",
+    help: "Starts a session, from an Agent or as a Thread the user drives by hand. With `--agent` every value comes from that Agent; without one it is a Thread and the values come from the user's thread settings. Either way, a flag given here takes precedence. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
       {
@@ -1860,12 +1875,12 @@ export const CLI = {
       prompt: { stdin: true, flag: "prompt", help: "The opening prompt." },
       agentId: {
         flag: "agent",
-        help: "The Agent to spawn from, by its id or a tail of eight or more characters; --instance and --profile are refused beside it, because those come from the Agent.",
+        help: "The Agent to spawn from, by its id or a tail of eight or more characters; --instance and --profile are not allowed with it, because those come from the Agent.",
         resolves: "agent.query",
       },
       outputSchema: {
         flag: "output-schema",
-        help: "What every turn must answer with, as an inline JSON Schema; a keyword outside the subset every harness agrees on is refused, saying which.",
+        help: "What every turn must return, as an inline JSON Schema; a keyword outside the subset every harness supports is rejected, and the error names the keyword.",
       },
       instanceId: {
         flag: "instance",
@@ -1875,11 +1890,11 @@ export const CLI = {
       model: { flag: "model", help: "The model to open with, in place of the thread default." },
       options: {
         flag: "options",
-        help: "The per-model choices as inline JSON; a choice the model does not offer is refused.",
+        help: "The per-model choices as inline JSON; a choice the model does not offer is rejected.",
       },
       accessMode: {
         flag: "access-mode",
-        help: "What the provider adapter enforces for this session. A mode the provider lacks is substituted downward, never upward, and the reply says which mode the session actually got.",
+        help: "What the provider adapter enforces for this session. A mode the provider does not support falls back to a less permissive one, never a more permissive one, and the reply shows which mode the session actually got.",
       },
       runnerId: {
         flag: "runner",
@@ -1893,23 +1908,23 @@ export const CLI = {
       },
       projectId: {
         flag: "project",
-        help: "The project the thread belongs to, by its id or a tail of eight or more characters; every repo it names has to be filed under it.",
+        help: "The project the thread belongs to, by its id or a tail of eight or more characters; every repo in --workspace must be filed under it.",
         resolves: "project.query",
       },
       workspace: {
         flag: "workspace",
-        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>","branch":"<branch>"} for the repo\'s main workspace, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that stands. Leave it off for a thread with no checkout.',
+        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>","branch":"<branch>"} for the repo\'s main workspace, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for a thread with no checkout.',
       },
     },
     errors: {
-      unauthenticated: "user credential only: a session token is refused",
+      unauthenticated: "user credential only: a session token is not allowed",
       invalid_state:
-        "nothing can host it: no connected runner is logged in to that provider instance, or the runner named is draining or retired; check with `hercule runner list` and `hercule provider login`",
+        "nothing can host it: no connected runner is logged in to that provider instance, or the runner you chose is draining or retired; check with `hercule runner list` and `hercule provider login`",
     },
   },
   "session.update": {
     command: "session update",
-    help: "Changes what a session runs under from here on: its model and the per-model options. Options merge over the ones it already runs with, unless --model names a different model, in which case the choices start empty, because they belong to the model that offered them.",
+    help: "Changes what a session runs under from here on: its model and the per-model options. Options are merged into the ones it already runs with, unless --model changes the model: then the choices start empty, because they belong to the model that offered them.",
     examples: [{ args: ["1f3a9c2e", "--model", "claude-opus-4"] }],
     fields: {
       id: {
@@ -1920,14 +1935,14 @@ export const CLI = {
       model: { flag: "model", help: "The model the session runs under from here on." },
       options: {
         flag: "options",
-        help: "The per-model choices as inline JSON; they merge over what is already set.",
+        help: "The per-model choices as inline JSON; they are merged into what is already set.",
       },
     },
     errors: { invalid_state: "that session has exited; there is nothing left to configure" },
   },
   "session.input": {
     command: "session input",
-    help: "Sends one turn's input to a session. It opens a turn on an idle session and is queued on any other, and a session whose process is gone but whose transcript is still on its runner is resumed in place by it. Comes back with the input's id and what became of it; while the row is still queued, `hercule input update` and `hercule input cancel` change it and `hercule input steer` folds it into the turn already running.",
+    help: "Sends one turn's input to a session. On an idle session it starts a turn; on any other it is queued. A session whose process is gone, but whose transcript is still on its runner, is resumed in place. Returns the input's id and what happened to it; while the row is still queued, `hercule input update` and `hercule input cancel` change it and `hercule input steer` folds it into the turn already running.",
     examples: [
       { args: ["1f3a9c2e"], stdin: "Carry on, and run the tests when you are done." },
       { args: ["1f3a9c2e", "--model", "claude-opus-4"], stdin: "Try that again with more care." },
@@ -1965,7 +1980,7 @@ export const CLI = {
   },
   "session.respond": {
     command: "session respond",
-    help: "Answers the Request a session is parked on with one of the four decisions. That is the only way an approval is resolved; free text never is. Read the open request first with `hercule session read`.",
+    help: "Answers the Request a session is parked on with one of the four decisions. This is the only way to resolve an approval; free text never does. Read the open request first with `hercule session read`.",
     examples: [{ args: ["1f3a9c2e", "--request", "req_9c2e4f18", "--decision", "allow"] }],
     fields: {
       id: {
@@ -1979,7 +1994,7 @@ export const CLI = {
       },
       decision: {
         flag: "decision",
-        help: "How the Request is answered: allow_always persists a rule for the rest of the session, and cancel denies and ends the turn with it.",
+        help: "The answer to the Request: allow_always keeps a rule for the rest of the session, and cancel denies the request and ends the turn.",
       },
     },
     errors: {
@@ -2001,7 +2016,7 @@ export const CLI = {
   },
   "session.continue": {
     command: "session continue",
-    help: "Forks a session: opens a second provider-native session off the one the parent left behind. The parent's own transcript is untouched. It lands on the parent's runner and Provider Instance, because that is where the native state is, and comes back as a new session with its own id. To carry the parent itself on instead, send it `hercule session input`.",
+    help: "Forks a session: opens a second provider-native session off the one the parent left behind. The parent's own transcript is untouched. It runs on the parent's runner and Provider Instance, because that is where the native state is, and returns a new session with its own id. To continue the parent itself instead, send it `hercule session input`.",
     examples: [
       {
         args: ["1f3a9c2e", "--mode", "fork"],
@@ -2022,7 +2037,7 @@ export const CLI = {
       },
     },
     errors: {
-      unauthenticated: "user credential only: a session token is refused",
+      unauthenticated: "user credential only: a session token is not allowed",
       invalid_state:
         "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
     },
@@ -2043,7 +2058,7 @@ export const CLI = {
   },
   "input.update": {
     command: "input update",
-    help: "Rewrites a Queued Input before the controller delivers it. An input already sent or delivered is refused, so read `hercule input list` if it fails.",
+    help: "Rewrites a Queued Input before the controller delivers it. An input already sent or delivered cannot be rewritten; if the command fails, check its status with `hercule input list`.",
     examples: [
       {
         args: ["1f3a9c2e", "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0"],
@@ -2064,7 +2079,8 @@ export const CLI = {
       text: { stdin: true, flag: "text", help: "The replacement text." },
     },
     errors: {
-      invalid_state: "that input has already gone to the machine, or was delivered or cancelled",
+      invalid_state:
+        "that input has already been sent to the runner, or was delivered or cancelled",
     },
   },
   "input.cancel": {
@@ -2084,7 +2100,8 @@ export const CLI = {
       },
     },
     errors: {
-      invalid_state: "that input has already gone to the machine, or was delivered or cancelled",
+      invalid_state:
+        "that input has already been sent to the runner, or was delivered or cancelled",
     },
   },
   "input.steer": {
@@ -2111,7 +2128,7 @@ export const CLI = {
 
   "transcript.read": {
     command: "transcript read",
-    help: "Reads what a session actually did: the normalized stream it left behind, one row per event. The rows are in order and carry their position. It is append-only and walked by position, so there is no filter and no search - the only choice is which end to start from.",
+    help: "Reads what a session actually did: the normalized stream it left behind, one row per event. The rows are in order, each with its position. The transcript is append-only and read by position, so there is no filter and no search - the only choice is which end to start from.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -2128,11 +2145,11 @@ export const CLI = {
     help: "Reads the controller's own identity: its id, its version and the public key runners verify against. The Runner a placement falls back to comes with it.",
     examples: [{ args: [] }],
     fields: {},
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
   "controller.update": {
     command: "controller update",
-    help: "Sets the Runner a placement lands on when nothing names one. Find the id with `hercule runner list`; `null` takes the default off again, leaving placement with no fallback.",
+    help: "Sets the Runner that placement falls back to when no runner is chosen. Find the id with `hercule runner list`; `null` removes the default, leaving placement with no fallback.",
     examples: [{ args: ["--default-runner", "1f3a9c2e"] }, { args: ["--default-runner", "null"] }],
     fields: {
       defaultRunnerId: {
@@ -2140,13 +2157,13 @@ export const CLI = {
         help: "The runner to fall back to, by its full id; `null` clears it.",
       },
     },
-    errors: { unauthenticated: "user credential only: a session token is refused" },
+    errors: { unauthenticated: "user credential only: a session token is not allowed" },
   },
 } as const satisfies Record<OperationId, CliRow>;
 
 /**
- * The root nouns, as the root help introduces them and the noun help opens.
- * One entry per root noun of a visible command.
+ * The root nouns, as the root help lists them and each noun's own help
+ * starts. One entry per root noun of a visible command.
  */
 export const NOUNS = {
   setup: { summary: "First-run setup: whether it is done, and finishing it." },
@@ -2158,11 +2175,11 @@ export const NOUNS = {
   settings: { summary: "The controller's operational settings and the user's own preferences." },
   profile: {
     summary: "Permission Profiles: the named grant bundles a session's token carries.",
-    flow: "hercule profile list to see what exists, hercule profile create for a new bundle, then name it at hercule session spawn.",
+    flow: "hercule profile list to see what exists, hercule profile create for a new bundle, then pass it to hercule session spawn.",
   },
   secret: {
     summary:
-      "Secret references owned by connections, plugins, runners and provider instances. Values never read back.",
+      "Secret references owned by connections, plugins, runners and provider instances. Values can never be read back.",
   },
   task: {
     summary: "Tasks: units of human intent, work-type-agnostic and never executions themselves.",
@@ -2173,15 +2190,15 @@ export const NOUNS = {
   },
   resource: {
     summary: "Resources: the repos, folders and mailboxes projects work with.",
-    flow: "hercule resource create records one, hercule resource list finds it again, then name it at hercule workspace provision or hercule session spawn.",
+    flow: "hercule resource create records one, hercule resource list finds it again, then pass it to hercule workspace provision or hercule session spawn.",
   },
   workspace: {
     summary: "Workspaces: the working areas on a machine that sessions do their work in.",
-    flow: "hercule workspace provision makes a repo's main workspace, hercule workspace list shows what stands, hercule workspace dispose tears an ephemeral one down.",
+    flow: "hercule workspace provision makes a repo's main workspace, hercule workspace list shows what exists, hercule workspace dispose tears an ephemeral one down.",
   },
   event: {
-    summary: "The event log: external events and audit entries, under one envelope.",
-    flow: "hercule event list to see what came in, hercule event read for one entry in full, hercule event emit to post one by hand, hercule event enrich to say what an entry is really about.",
+    summary: "The event log: external events and audit entries, in one format.",
+    flow: "hercule event list to see what came in, hercule event read for one entry in full, hercule event emit to post one by hand, hercule event enrich to record what an entry is really about.",
   },
   subscription: {
     summary:
@@ -2205,19 +2222,19 @@ export const NOUNS = {
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",
-    flow: "hercule runner join-token create mints the invitation, hercule runner list shows the machine once it dials in, hercule runner drain and hercule runner retire take it out again.",
+    flow: "hercule runner join-token create creates the invitation, hercule runner list shows the machine once it dials in, hercule runner drain and hercule runner retire take it out again.",
   },
   plugin: {
     summary:
-      "The plugins this binary was built with: what is enabled, and what this boot made of each.",
+      "The plugins this binary was built with: which are enabled, and what happened to each when the controller started.",
   },
   provider: {
     summary: "Provider Instances: the accounts of the coding harnesses sessions run on.",
-    flow: "hercule provider create opens an account, hercule provider login and hercule provider submit-login-code log it in on a machine, hercule runner probe says whether it is usable there.",
+    flow: "hercule provider create opens an account, hercule provider login and hercule provider submit-login-code log it in on a machine, hercule runner probe shows whether it is usable there.",
   },
   connection: {
     summary: "Connections: the named links to external accounts Hercule acts through.",
-    flow: "hercule connection create for a pasted credential or hercule connection start-oauth for a browser flow, then hercule connection list to watch its status and hercule connection set-credentials to rotate.",
+    flow: "hercule connection create for a pasted credential or hercule connection start-oauth for a browser flow, then hercule connection list to check its status and hercule connection set-credentials to rotate.",
   },
   agent: {
     summary: "Agents: the named configurations sessions are spawned from, to work unattended.",
@@ -2225,7 +2242,7 @@ export const NOUNS = {
   },
   session: {
     summary: "Sessions: conversations with provider-backed agents, resumable and forkable.",
-    flow: "hercule session spawn starts one, hercule transcript read watches it, hercule session input sends the next turn, hercule session respond answers what it is parked on, hercule session stop ends it.",
+    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond answers what it is parked on, hercule session stop ends it.",
   },
   input: {
     summary: "The inputs a session was given, and the queued ones that can still be changed.",
@@ -2233,6 +2250,6 @@ export const NOUNS = {
   },
   transcript: { summary: "What a session did: its normalized stream, read back in order." },
   controller: {
-    summary: "The controller's own identity, and the default runner placement falls back to.",
+    summary: "The controller's own identity, and the default runner that placement falls back to.",
   },
 } as const satisfies Record<string, NounRow>;

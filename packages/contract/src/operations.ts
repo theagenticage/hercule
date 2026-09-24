@@ -6,12 +6,13 @@
  * its explicit `{ method, path }`. Path nouns are plural although operation ids
  * are singular; that is the one place the two spellings differ.
  *
- * This table is load-bearing at request time, not documentation: the static
- * grant check runs in HTTP middleware before the payload is decoded, so
- * `unauthenticated` precedes `forbidden` precedes `validation`, the order the
- * error envelope requires. The middleware finds the row by joining the
- * group and endpoint identifiers with a dot. `api.test.ts` asserts the table
- * and the HttpApi declaration are one-to-one.
+ * The controller reads this table on every request; it is not documentation.
+ * The static grant check runs in HTTP middleware before the payload is
+ * decoded, so `unauthenticated` comes before `forbidden`, which comes before
+ * `validation`, the order the error envelope requires. The middleware finds
+ * the row by joining the group and endpoint identifiers with a dot.
+ * `api.test.ts` checks that the table and the HttpApi declaration match one
+ * to one.
  */
 import type { Grant } from "./grants";
 
@@ -127,8 +128,8 @@ const TABLE = {
   "event.query": { requires: "event.read", method: "GET", path: "/api/v1/events" },
   "event.read": { requires: "event.read", method: "GET", path: "/api/v1/events/:id" },
   "event.emit": { requires: "event.emit", method: "POST", path: "/api/v1/events/emit" },
-  // Amending an event is writing to the log, which is the one grant the log has
-  // for writing: there is no second verb for correcting what is already there.
+  // Enriching an event writes to the event log, and `event.emit` is the log's
+  // only write grant. There is no separate grant for amending an event.
   "event.enrich": { requires: "event.emit", method: "POST", path: "/api/v1/events/:id/enrich" },
 
   "subscription.query": {
@@ -335,8 +336,8 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/sessions/:id/stop",
   },
-  // Opening a second session against one native transcript, so it is spawning
-  // and not steering, whatever the id in the path says.
+  // Continuing opens a new session on the same native transcript. That is
+  // spawning, not steering, even though the path holds an existing session id.
   "session.continue": {
     requires: "session.spawn",
     method: "POST",
@@ -396,8 +397,8 @@ export const ALL_OPERATIONS: ReadonlyArray<Operation> = Object.entries(TABLE).ma
   ...row,
 }));
 
-/** True when the string names an operation. */
+/** Checks whether the string is an operation id. */
 export const isOperationId = (id: string): id is OperationId => id in TABLE;
 
-/** What a caller must hold to reach this operation. */
+/** Returns what a caller must hold to call the operation. */
 export const readRequirement = (id: OperationId): Requirement => TABLE[id].requires;

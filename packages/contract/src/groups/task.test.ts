@@ -12,7 +12,7 @@ const buildLabels = (count: number) =>
   Array.from({ length: count }, (_, index) => `label-${String(index)}`);
 
 describe("the bounds on a task's lists", () => {
-  it("takes a list at the cap and refuses the one past it", () => {
+  it("accepts a list at the cap, and rejects a list one longer", () => {
     expect(
       decodeOutcome(TaskCreateInput, {
         title: "t",
@@ -51,7 +51,7 @@ describe("the bounds on a task's lists", () => {
     ).toBe("Failure");
   });
 
-  it("bounds every any-of list a filter takes", () => {
+  it("bounds every list of values a filter takes", () => {
     expect(decodeOutcome(TaskFilter, { labels: buildLabels(MAX_FILTER_VALUES + 1) })).toBe(
       "Failure",
     );

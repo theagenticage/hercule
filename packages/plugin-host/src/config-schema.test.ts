@@ -21,7 +21,7 @@ const unsupported: ReadonlyArray<readonly [string, Schema.Top, string]> = [
   // Schema.Number emits an anyOf with the Infinity/NaN strings; Schema.Finite
   // is the one authors must use.
   ["Schema.Number", Schema.Struct({ ratio: Schema.Number }), "ratio"],
-  // Schema.optional adds a null branch; Schema.optionalKey is the clean one.
+  // Schema.optional adds a null branch; Schema.optionalKey does not.
   ["Schema.optional", Schema.Struct({ nickname: Schema.optional(Schema.String) }), "nickname"],
   ["an identified inner schema", Schema.Struct({ server: IdentifiedInner }), "server"],
 ];
@@ -43,22 +43,25 @@ describe("deriveConfigJsonSchema", () => {
       mode: { type: "string", enum: ["a", "b", "c"], title: "Mode" },
       tags: { type: "array", items: { type: "string" }, description: "Tags" },
     });
-    // The optional key is the one absent from `required`.
+    // The optional key is the one missing from `required`.
     expect(result.success.required).toEqual(["token", "ratio", "count", "enabled", "mode", "tags"]);
   });
 
-  it.each(unsupported)("refuses %s, naming the property", (_label, schema, property) => {
-    const result = deriveConfigJsonSchema(schema);
+  it.each(unsupported)(
+    "rejects %s, with the property in the message",
+    (_label, schema, property) => {
+      const result = deriveConfigJsonSchema(schema);
 
-    expect(Result.isFailure(result)).toBe(true);
-    if (!Result.isFailure(result)) return;
-    expect(result.failure._tag).toBe("UnsupportedConfigSchema");
-    expect(result.failure.message).toContain(property);
-  });
+      expect(Result.isFailure(result)).toBe(true);
+      if (!Result.isFailure(result)) return;
+      expect(result.failure._tag).toBe("UnsupportedConfigSchema");
+      expect(result.failure.message).toContain(property);
+    },
+  );
 
-  // The shape every plugin with nothing to configure ships, and the one effect
-  // derives as "an object or an array" rather than as an empty object schema.
-  it("takes a struct with no properties", () => {
+  // Every plugin with nothing to configure uses this shape, and Effect derives
+  // it as "an object or an array" rather than as an empty object schema.
+  it("accepts a struct with no properties", () => {
     const result = deriveConfigJsonSchema(Schema.Struct({}));
 
     expect(Result.isSuccess(result)).toBe(true);
@@ -71,7 +74,7 @@ describe("deriveConfigJsonSchema", () => {
     });
   });
 
-  it("takes an annotated struct with no properties", () => {
+  it("accepts an annotated struct with no properties", () => {
     const result = deriveConfigJsonSchema(
       Schema.Struct({}).annotate({ title: "Nothing to configure" }),
     );
@@ -79,7 +82,7 @@ describe("deriveConfigJsonSchema", () => {
     expect(Result.isSuccess(result)).toBe(true);
   });
 
-  it("refuses a union of an object and an array", () => {
+  it("rejects a union of an object and an array", () => {
     const result = deriveConfigJsonSchema(
       Schema.Union([Schema.Struct({ token: Schema.String }), Schema.Array(Schema.String)]),
     );
@@ -90,7 +93,7 @@ describe("deriveConfigJsonSchema", () => {
   it.each([
     ["numbers", Schema.Literals([1, 2])],
     ["booleans", Schema.Literals([true, false])],
-  ])("refuses an enum of %s", (_label, mode) => {
+  ])("rejects an enum of %s", (_label, mode) => {
     const result = deriveConfigJsonSchema(Schema.Struct({ mode }));
 
     expect(Result.isFailure(result)).toBe(true);
@@ -98,7 +101,7 @@ describe("deriveConfigJsonSchema", () => {
     expect(result.failure.message).toContain("mode");
   });
 
-  it("refuses a schema that is not an object", () => {
+  it("rejects a schema that is not an object", () => {
     const result = deriveConfigJsonSchema(Schema.String);
 
     expect(Result.isFailure(result)).toBe(true);
@@ -108,13 +111,13 @@ describe("deriveConfigJsonSchema", () => {
 });
 
 /**
- * A secret-valued config field. The plugin marks one with `secret`, the derived
- * JSON schema says so, and the form that renders it masks the input and never
- * reads a value back. Only a string can be one: everything else the form draws
- * is a widget with no masked equivalent.
+ * A secret config field. The plugin marks one with `secret`, the derived JSON
+ * Schema marks it too, and the form masks the input and never reads a value
+ * back. Only a string field can be secret: every other field the form shows is
+ * a widget with no masked version.
  */
 describe("a config field the plugin marked secret", () => {
-  it("derives as a string carrying the plugin's own words and the secret marker", () => {
+  it("derives as a string with the plugin's own title, description and the secret marker", () => {
     const result = deriveConfigJsonSchema(
       Schema.Struct({
         zaiApiKey: secret({
@@ -136,7 +139,7 @@ describe("a config field the plugin marked secret", () => {
     });
   });
 
-  it("leaves a field nobody marked unmarked", () => {
+  it("leaves an unmarked field unmarked", () => {
     const result = deriveConfigJsonSchema(Schema.Struct({ token: Schema.String }));
 
     expect(Result.isSuccess(result)).toBe(true);
@@ -148,7 +151,7 @@ describe("a config field the plugin marked secret", () => {
     ["a number", Schema.Finite.annotate({ secret: true })],
     ["a boolean", Schema.Boolean.annotate({ secret: true })],
     ["a list of strings", Schema.Array(Schema.String).annotate({ secret: true })],
-  ])("refuses %s marked secret, naming the property", (_label, marked) => {
+  ])("rejects %s marked secret, with the property in the message", (_label, marked) => {
     const result = deriveConfigJsonSchema(Schema.Struct({ zaiApiKey: marked }));
 
     expect(Result.isFailure(result)).toBe(true);

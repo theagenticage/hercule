@@ -11,7 +11,7 @@ import type {
   ConnectionTypeContribution,
 } from "./connections";
 
-/** A plugin's own failure, in the words its author chose. */
+/** A plugin's own failure, with a message its author wrote. */
 export class PluginError extends Schema.TaggedError<PluginError>()("PluginError", {
   message: Schema.String,
 }) {}
@@ -32,9 +32,10 @@ export interface WorkflowActionRegistration {
 }
 
 /**
- * What `register` may call. A surface is present only when the manifest asked
- * for its capability, so a plugin that did not request one has no way to reach
- * it. Registration surfaces only: `register` never sees a runtime one.
+ * The services `register` may call. A service is present only when the
+ * manifest requested its capability, so a plugin that did not request one has
+ * no way to reach it. These are registration services only: `register` never
+ * receives a runtime service.
  */
 export interface RegistrationHost {
   readonly providers?: ProviderRegistration;
@@ -51,7 +52,7 @@ export interface KeyValueStore {
   readonly list: () => Effect.Effect<ReadonlyArray<string>>;
 }
 
-/** The plugin's own rows in the one secrets table, and no one else's. */
+/** The plugin's own rows in the secrets table, and no one else's. */
 export interface PluginSecrets {
   readonly get: (name: string) => Effect.Effect<Option.Option<Redacted.Redacted<string>>>;
   readonly set: (name: string, value: Redacted.Redacted<string>) => Effect.Effect<void>;
@@ -60,8 +61,8 @@ export interface PluginSecrets {
 }
 
 /**
- * What `activate` receives: the stored config, already decoded against the
- * manifest's schema, and the runtime surface of each granted capability.
+ * What `activate` receives: the stored config, already decoded with the
+ * manifest's schema, and the runtime service of each granted capability.
  */
 export interface ActivationContext {
   readonly config: unknown;
@@ -83,10 +84,14 @@ export interface Plugin {
 }
 
 /**
- * Every surface on `RegistrationHost` is optional, because the host builds one
- * only for a capability the manifest lists. A plugin that did list it still has
- * to answer for the absent case, and the honest answer is always this one:
- * fail, with a message the user reads in Settings.
+ * Registers a provider through the host. Fails with a `PluginError` when the
+ * manifest did not request the `providers` capability.
+ *
+ * Every service on `RegistrationHost` is optional, because the host builds one
+ * only for a capability the manifest lists. A plugin still has to handle the
+ * missing case, and the right handling is always the same: fail, with a
+ * message the user reads in Settings. The three functions below do the same
+ * for the other registration services.
  */
 export const registerProvider = (
   host: RegistrationHost,

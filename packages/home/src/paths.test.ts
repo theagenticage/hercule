@@ -37,7 +37,7 @@ describe("buildHomePaths", () => {
     });
   });
 
-  it("takes a Data Root outside the home, and resolves a relative one against it", () => {
+  it("accepts a Data Root outside the home, and resolves a relative one against the home", () => {
     expect(buildHomePaths("/srv/hercule", "/mnt/state").dataDir).toBe("/mnt/state");
     expect(buildHomePaths("/srv/hercule", "state").databaseFile).toBe(
       "/srv/hercule/state/hercule.db",

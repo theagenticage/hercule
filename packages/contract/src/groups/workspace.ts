@@ -2,15 +2,15 @@
  * Workspaces: the provisioned working areas on a machine that sessions do their
  * work in, and the checkouts inside them.
  *
- * A workspace is a kind and a list of checkouts; every git word - the branch, a
- * subdirectory, how the copy was made - lives on a checkout. A primary is the
- * resource's own long-lived checkout on that machine, shared by whatever runs
- * in it and never torn down; an ephemeral one is made for a piece of work and
- * disposed of afterwards.
+ * A workspace is a kind and a list of checkouts; every git detail - the
+ * branch, a subdirectory, how the copy was made - is stored on a checkout. A
+ * primary workspace is the resource's own long-lived checkout on that machine,
+ * shared by whatever runs in it and never torn down. An ephemeral one is made
+ * for a piece of work and disposed of afterwards.
  *
- * The controller stores no path and takes none. Where the folder is is the
- * machine's own business: a primary is always a Hercule-managed clone under that
- * machine's own storage.
+ * The controller neither stores nor accepts a path. The machine decides where
+ * the folder is: a primary workspace is always a Hercule-managed clone under
+ * that machine's own storage.
  */
 import { Schema } from "effect";
 import { CheckoutForm, WorkspaceKind } from "@hercule/protocol";
@@ -30,26 +30,29 @@ import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 
-/** The kinds and the forms are the wire's; the API hands them out unchanged. */
+/** The kinds and forms come from the runner protocol; the API returns them unchanged. */
 export { CheckoutForm, WorkspaceKind };
 
 /** The longest branch name; git's own limit is the filesystem's. */
 export const MAX_BRANCH_LENGTH = 255;
 
 /**
- * A branch name git will take, checked here rather than on a machine: what a
- * caller writes ends up in `git checkout` and `git worktree add`, so a word
- * beginning with `-` would be read as an option, and the rest of these are what
- * `git check-ref-format` refuses - `..` and `@{` have meanings of their own, a
- * control character or a space is not a name, `~^:?*[\` are pattern and
- * revision syntax, and a trailing `/` or `.lock` is not a ref. A component
- * beginning with `.` is refused for the same reason git refuses it: `.hidden`
- * and `refs/heads/.git` are not ref components.
+ * A branch name git accepts, validated here rather than on a machine. What a
+ * caller writes is passed to `git checkout` and `git worktree add`, so a name
+ * beginning with `-` would be read as an option. The other rules match what
+ * `git check-ref-format` rejects:
+ *
+ * - `..` and `@{` have meanings of their own;
+ * - a control character or a space cannot be part of a name;
+ * - `~^:?*[\` are pattern and revision syntax;
+ * - a trailing `/` or `.lock` is not a valid ref;
+ * - a component beginning with `.`, such as `.hidden` or `refs/heads/.git`, is
+ *   not a valid ref component.
  */
 export const Branch = Schema.String.check(
   Schema.isLengthBetween(1, MAX_BRANCH_LENGTH),
-  // The control characters are the point: git refuses them in a ref name, and
-  // a name is checked here rather than by a command that half ran.
+  // The control characters are intended: git rejects them in a ref name, and
+  // the name is validated here rather than by a git command that fails halfway.
   Schema.isPattern(
     // eslint-disable-next-line no-control-regex
     /^(?!.*(?:^|\/)[-.])(?!.*\.\.)(?!.*@\{)(?!.*\.lock$)(?!.*\/$)[^\u0000-\u0020~^:?*[\\\u007f]+$/,
@@ -58,8 +61,8 @@ export const Branch = Schema.String.check(
 );
 
 /**
- * Where a workspace stands. `failed` and `lost` are both dead ends a machine
- * put it in: one could not be made, the other was on a machine that was
+ * The status of a workspace. `failed` and `lost` are both final: a `failed`
+ * workspace could not be made, and a `lost` one was on a machine that was
  * retired.
  */
 export const WORKSPACE_STATUSES = ["provisioning", "ready", "failed", "deleted", "lost"] as const;
@@ -76,10 +79,11 @@ export const Checkout = Schema.Struct({
   /** Where under the workspace it sits; null puts it at the root. */
   subdirectory: Schema.NullOr(Schema.String),
   /**
-   * What is checked out there, as the machine said it: null until it has, and
-   * null again where it could not read one. Not `Branch`, which is what a
-   * caller may ask for - this is a fact reported back, and a record that
-   * refused to carry what the machine found would be a record of nothing.
+   * The branch checked out there, as the machine reported it: null until the
+   * machine reports one, and null when it could not read one. Not `Branch`,
+   * which validates what a caller may ask for: this is a fact the machine
+   * reports, and a record that rejected what the machine found would be
+   * useless.
    */
   branch: Schema.NullOr(Schema.String),
   /** Every local branch the machine found, in its order. */
@@ -91,14 +95,14 @@ export type Checkout = Schema.Schema.Type<typeof Checkout>;
 
 export const Workspace = Schema.Struct({
   id: Id,
-  /** Pinned where it was made: a workspace never moves. */
+  /** The machine the workspace was made on. A workspace never moves. */
   runnerId: Id,
   kind: WorkspaceKind,
   status: WorkspaceStatus,
   checkouts: Schema.Array(Checkout),
-  /** The Connection its first checkout's resource names; null on a scratch one. */
+  /** The Connection of its first checkout's resource; null on a scratch workspace. */
   designatedConnectionId: Schema.NullOr(Id),
-  /** What the machine said when it could not make it. */
+  /** The error message the machine reported when it could not make the workspace. */
   message: Schema.NullOr(Schema.String),
   /** The sessions in it that have not exited. */
   sessionIds: Schema.Array(Id),
@@ -114,9 +118,9 @@ export type Workspace = Schema.Schema.Type<typeof Workspace>;
 export const WORKSPACE_SORT_FIELDS = ["createdAt"] as const;
 
 /**
- * Provisioning a primary: the resource's own checkout on one machine. An
- * ephemeral workspace is never provisioned on its own - it is made for the
- * session that asked for it, by `session.spawn`.
+ * The payload for provisioning a primary workspace: the resource's own checkout
+ * on one machine. An ephemeral workspace is never provisioned on its own;
+ * `session.spawn` makes it for the session that asked for it.
  */
 export const WorkspaceProvisionInput = closedStruct({
   resourceId: Id,

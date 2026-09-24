@@ -1,21 +1,23 @@
 /**
- * The whole journey of a non-interactive agent session, run out of the release
+ * Tests the whole flow of a non-interactive agent session through the release
  * binary: an Agent created through the CLI, a session spawned from that Agent
- * under an output schema, and the turn's answer read back from the transcript.
+ * under an output schema, and the turn's result read back from the
+ * transcript.
  *
  * The two schemas are imported from the protocol package's own testing module
- * rather than written again. A package reaches that module as
- * `@hercule/protocol/testing`, and this suite reaches it by relative path,
- * because the suite depends on no Hercule package. `live.test.ts` beside it
- * reaches client-core the same way. The module holds data only. Nothing else
+ * rather than written again. A package imports that module as
+ * `@hercule/protocol/testing`, and this suite imports it by relative path,
+ * because the suite depends on no Hercule package. `live.test.ts` imports
+ * client-core the same way. The module holds data only. Nothing else
  * of Hercule is imported here, and the binary under test knows nothing about
  * this process.
  *
- * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
- * and takes a couple of minutes. `HERCULE_LIVE_SESSION_TEST=1` asks for it.
+ * Opt-in, like `session.test.ts`: it spends the developer's tokens and takes a
+ * couple of minutes. Set `HERCULE_LIVE_SESSION_TEST=1` to run it.
  *
- * The login it runs on is lent for the run, by either of the two routes
- * `e2e/harness.ts` documents; with neither the case skips saying so.
+ * The login it runs on is provided for the run by either of the two routes
+ * `e2e/harness.ts` documents; with neither, the case is skipped with a
+ * message.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -49,7 +51,7 @@ import {
   type Session,
 } from "./harness";
 
-/** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
+/** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
 const state = createTemporaryHome();
@@ -59,10 +61,10 @@ let controller: Controller;
 let url: string;
 let apiKey: string;
 
-/** Long enough for a cold harness to start, connect and answer one prompt. */
+/** Long enough for a cold harness to start, connect and reply to one prompt. */
 const TURN_DEADLINE_MS = 180_000;
 
-/** An Agent as the agent operations answer it. */
+/** An Agent as the agent operations return it. */
 interface Agent {
   readonly id: string;
   readonly name: string;
@@ -76,12 +78,12 @@ interface Ready {
 let ready: Ready | undefined;
 
 /**
- * Everything that has to exist before a session can be spawned from an Agent:
- * a logged-in instance, the shipped profile its sessions carry, and the Agent
- * itself. Built once, because it is the same Agent both cases spawn from. The
- * Agent names no model, so its sessions run on whatever the instance offers by
- * default: a verdict is an instruction to follow, and the cheapest model on
- * offer has been seen to answer with its own.
+ * Prepares everything that has to exist before a session can be spawned from
+ * an Agent: a logged-in instance, the shipped profile its sessions carry, and
+ * the Agent itself. Built once, because both cases spawn from the same Agent.
+ * The Agent sets no model, so its sessions run on the instance's default: the
+ * verdict in the prompt is an instruction to follow, and the cheapest model
+ * available has been seen to give its own verdict instead.
  */
 const prepare = async (): Promise<Ready> => {
   const { instance } = await prepareLoggedInInstance({ home: state.home, binary, url, apiKey });
@@ -108,7 +110,7 @@ const prepare = async (): Promise<Ready> => {
   return { agentId: agent.id };
 };
 
-/** The turn's own row, which is where a session's answer is read off. */
+/** Returns the `turn.completed` row, which holds the session's result. */
 const findCompletedTurn = (rows: ReadonlyArray<Row>): Row => {
   const found = rows.find((row) => row.event._tag === "turn.completed");
   if (found === undefined) {
@@ -117,7 +119,7 @@ const findCompletedTurn = (rows: ReadonlyArray<Row>): Row => {
   return found;
 };
 
-/** What a turn answered under its session's schema, as the transcript carries it. */
+/** Returns what a turn returned under its session's schema, as the transcript holds it. */
 const readStructuredResult = (rows: ReadonlyArray<Row>): Readonly<Record<string, unknown>> => {
   const result = findCompletedTurn(rows).event["structuredResult"];
   if (typeof result !== "object" || result === null) {
@@ -128,7 +130,10 @@ const readStructuredResult = (rows: ReadonlyArray<Row>): Readonly<Record<string,
   return result as Readonly<Record<string, unknown>>;
 };
 
-/** One session spawned from the Agent under a schema, and the turn it answered. */
+/**
+ * Spawns one session from the Agent under a schema, and returns its transcript
+ * once the turn is over.
+ */
 const runSessionUnderSchema = async (
   schema: unknown,
   prompt: string,

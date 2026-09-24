@@ -3,19 +3,19 @@
  * folder, a mailbox.
  *
  * A repo is identified by its canonical remote (`host/owner/repo`), not by the
- * way it was spelled: the scheme, a `.git` suffix, ssh-versus-https and the
- * case of the host and the path all fall away, so one repository is one
+ * way it was written: the scheme, a `.git` suffix, ssh versus https and the
+ * case of the host and the path are all ignored, so one repository is one
  * resource however the user wrote it. A folder and a mailbox carry a label and
  * no remote; only a repo is checked out into a workspace.
  *
- * A resource joins any number of projects, and a project is a grouping and
- * nothing else, so the join is a list on the resource rather than a nested
- * record of its own.
+ * A resource joins any number of projects. A project is only a grouping, so
+ * the link is a list on the resource rather than a nested record of its own.
  *
- * The fields are per-kind, and the service refuses the ones a kind has no use
- * for rather than storing them where nothing would ever read them: a repo takes
- * a remote, a setup command and `workspaceInclude` and no label; a folder and a
- * mailbox take a label and none of the three.
+ * Each kind has its own fields, and the service rejects fields a kind has no
+ * use for, rather than storing values nothing would ever read:
+ *
+ * - a repo takes a remote, a setup command and `workspaceInclude`, and no label;
+ * - a folder and a mailbox take a label, and none of the other three.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -67,17 +67,17 @@ export const Resource = Schema.Struct({
   kind: ResourceKind,
   /** As the user wrote it; null on a folder and a mailbox. */
   remote: Schema.NullOr(Remote),
-  /** `host/owner/repo`, lowercased: the identity two spellings share. */
+  /** `host/owner/repo`, lowercased: the identity that two spellings of a remote share. */
   canonicalRemote: Schema.NullOr(Schema.String),
-  /** What a folder or a mailbox is called; always null on a repo, which its remote names. */
+  /** What a folder or a mailbox is called; always null on a repo, which its remote identifies. */
   label: Schema.NullOr(ResourceLabel),
   /** The Connection Hercule acts through for this resource. */
   connectionId: Schema.NullOr(Id),
-  /** Run in a fresh checkout once it stands; always null off a repo. */
+  /** Run in a fresh checkout once it is ready; always null for anything but a repo. */
   setupCommand: Schema.NullOr(SetupCommand),
   /**
    * Whether a fresh checkout takes what the main workspace's `.workspaceinclude`
-   * lists. False off a repo, which has no checkout to take anything into.
+   * lists. Always false for anything but a repo, because only a repo is checked out.
    */
   workspaceInclude: Schema.Boolean,
   projectIds: Schema.Array(Id),
@@ -90,10 +90,10 @@ export type Resource = Schema.Schema.Type<typeof Resource>;
 export const RESOURCE_SORT_FIELDS = ["createdAt"] as const;
 
 /**
- * What creating one takes. Which fields a kind takes is the service's to say: a
- * repo needs a remote and refuses a label, a folder and a mailbox the reverse
- * and refuse a setup command and `workspaceInclude` too, and a schema union
- * would make every field of it one opaque document on a command line.
+ * The payload of `resource.create`. The service, not the schema, checks which
+ * fields each kind takes (see the top of this file). A schema union per kind
+ * would turn the whole payload into one opaque JSON document on the command
+ * line.
  */
 export const ResourceCreateInput = closedStruct({
   kind: ResourceKind,
@@ -108,14 +108,14 @@ export const ResourceCreateInput = closedStruct({
 
 export type ResourceCreateInput = Schema.Schema.Type<typeof ResourceCreateInput>;
 
-/** What editing one takes. An absent field is left as it was; `null` clears one. */
+/** The payload of `resource.update`. A field left out is not changed; `null` clears a field. */
 export const RESOURCE_UPDATE_FIELDS = {
   remote: Schema.optionalKey(Remote),
   label: Schema.optionalKey(Schema.NullOr(ResourceLabel)),
   connectionId: Schema.optionalKey(Schema.NullOr(Id)),
   setupCommand: Schema.optionalKey(Schema.NullOr(SetupCommand)),
   workspaceInclude: Schema.optionalKey(Schema.Boolean),
-  /** The whole list, replaced: the join rows follow what it names. */
+  /** The whole list, which replaces the current one. */
   projectIds: Schema.optionalKey(ProjectIds),
 } as const;
 

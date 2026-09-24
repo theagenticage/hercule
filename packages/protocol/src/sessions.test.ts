@@ -30,7 +30,7 @@ const omitKey = (message: object, key: string) => {
 
 const SESSION_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c74";
 
-/** The three base fields no event may be without. */
+/** The three base fields every event must have. */
 const baseFields = {
   eventId: "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c75",
   sessionId: SESSION_ID,
@@ -50,10 +50,10 @@ const start = {
   sessionId: SESSION_ID,
   providerId: "claude-code",
   config: {},
-  /** `{}` rather than absent: an instance with no credential stored. */
+  /** `{}` rather than absent, for an instance with no credential stored. */
   secrets: {},
   spec,
-  /** The session's own credential on the public API, minted per start. */
+  /** The session's own credential for the public API, created for each start. */
   token: "a-session-token",
 } as const;
 
@@ -112,7 +112,7 @@ const events: ReadonlyArray<Event> = [
   { _tag: "request.resolved", ...baseFields, requestId: "r1", decision: "allow" },
 ];
 
-/** One detail per request kind: five closed structs, one vocabulary. */
+/** One detail per request kind: five closed structs in one vocabulary. */
 const requests = [
   { kind: "command_approval", detail: { command: "ls -la" } },
   { kind: "file_change_approval", detail: { paths: ["src/main.ts", "src/old.ts"] } },
@@ -145,11 +145,11 @@ describe("the normalized event taxonomy", () => {
     expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(encoded))).toEqual(event);
   });
 
-  it("holds exactly the members the round-trip cases cover", () => {
+  it("has exactly the members the round-trip cases cover", () => {
     expect(listTags(ProviderEvent)).toEqual(events.map((event) => event._tag));
   });
 
-  it.each(requests)("takes a $kind request with the detail that kind carries", (request) => {
+  it.each(requests)("accepts a $kind request with the detail that kind has", (request) => {
     const opened = {
       _tag: "request.opened",
       ...baseFields,
@@ -169,7 +169,7 @@ describe("the normalized event taxonomy", () => {
     }
   });
 
-  it("carries an unmapped vendor message whole, as an unknown item with its raw", () => {
+  it("keeps an unmapped vendor message whole, as an unknown item with its raw", () => {
     const passthrough = {
       _tag: "item.completed",
       ...baseFields,
@@ -184,7 +184,7 @@ describe("the normalized event taxonomy", () => {
     );
   });
 
-  it("refuses a kind, a reason, a state or a stream kind outside its vocabulary", () => {
+  it("rejects a kind, a reason, a state or a stream kind outside its vocabulary", () => {
     const item = {
       _tag: "item.started",
       ...baseFields,
@@ -210,8 +210,9 @@ describe("the normalized event taxonomy", () => {
       })._tag,
     ).toBe("Failure");
     expect(decode(ProviderEvent, { _tag: "request.opened", ...baseFields })._tag).toBe("Failure");
-    // A detail belonging to another kind: the pair is the vocabulary, not the
-    // kind on its own, so a surface reading the kind can trust the detail.
+    // A detail that belongs to another kind: the kind and its detail are
+    // validated as a pair, so a surface that reads the kind can trust the
+    // detail.
     expect(
       decode(ProviderEvent, {
         _tag: "request.opened",
@@ -227,7 +228,7 @@ describe("the normalized event taxonomy", () => {
     ).toBe("Failure");
   });
 
-  it("takes one to many structured questions, and refuses a request carrying none", () => {
+  it("accepts one or more structured questions, and rejects a request with none", () => {
     const decodeQuestionRequest = (questions: unknown) =>
       decode(ProviderEvent, {
         _tag: "request.opened",
@@ -248,11 +249,12 @@ describe("the normalized event taxonomy", () => {
     };
 
     expect(decodeQuestionRequest([one, { ...one, header: "Second" }])).toBe("Success");
-    // A question is the payload, so a request with none of them is a card with
-    // nothing on it; the adapter falls back rather than send this.
+    // The questions are the payload, so a request with none is a card with
+    // nothing on it; the adapter falls back to something else rather than send
+    // it.
     expect(decodeQuestionRequest([])).toBe("Failure");
-    // The struct carries no vendor extras: the Claude SDK's optional `preview`
-    // is dropped on the way in, so what the user reads never depends on which
+    // The struct has no vendor extras: the Claude SDK's optional `preview` is
+    // dropped when decoding, so what the user sees never depends on which
     // harness asked (ADR 0007).
     const withPreview = {
       _tag: "request.opened",
@@ -280,7 +282,7 @@ describe("the normalized event taxonomy", () => {
     expect(decodeQuestionRequest([{ ...one, header: "" }])).toBe("Failure");
   });
 
-  it("brackets a turn by an id neither end may omit", () => {
+  it("requires the turn id on both the start and the completion of a turn", () => {
     for (const tag of ["turn.started", "turn.completed"]) {
       const complete = { _tag: tag, ...baseFields, turnId: "t1", state: "completed" };
       expect(decode(ProviderEvent, complete)._tag, tag).toBe("Success");
@@ -288,11 +290,11 @@ describe("the normalized event taxonomy", () => {
     }
   });
 
-  it("takes a harness message far longer than a fact, and refuses only a document", () => {
+  it("accepts a harness message far longer than a fact, and rejects only a document", () => {
     const decodeWarning = (message: string) =>
       decode(ProviderEvent, { _tag: "runtime.warning", ...baseFields, message })._tag;
-    // A stack trace is what arrives here, and a refused frame costs the runner
-    // its socket, so the limit sits well above anything a fact may be.
+    // Stack traces arrive here, and a rejected frame costs the runner its
+    // socket, so the limit is well above a fact's.
     expect(decodeWarning("x".repeat(MAX_MESSAGE_LENGTH))).toBe("Success");
     expect(decodeWarning("x".repeat(MAX_MESSAGE_LENGTH + 1))).toBe("Failure");
   });
@@ -309,7 +311,7 @@ describe("the normalized event taxonomy", () => {
     expect(decode(ProviderEvent, delta)._tag).toBe("Success");
   });
 
-  it("refuses a negative or fractional token count", () => {
+  it("rejects a negative or fractional token count", () => {
     const decodeUsage = (value: unknown) =>
       decode(ProviderEvent, {
         _tag: "session.usage.updated",
@@ -322,7 +324,7 @@ describe("the normalized event taxonomy", () => {
   });
 });
 
-describe("what the controller authors for a session", () => {
+describe("what the controller sends for a session", () => {
   it("round-trips a spec, a binding and an input", () => {
     expect(Effect.runSync(Schema.encodeEffect(SessionSpec)(spec))).toEqual(spec);
     const binding = { sessionId: SESSION_ID, nativeSessionId: "native-1", instanceId: "inst-1" };
@@ -339,9 +341,9 @@ describe("what the controller authors for a session", () => {
     );
   });
 
-  it("carries both timeouts on the spec, so a runner never has to pick one", () => {
-    // The runner reads its two clocks off here and holds no default of its own,
-    // so a spec missing either half is a controller bug the wire refuses.
+  it("requires both timeouts on the spec, so a runner never has to pick one", () => {
+    // The runner reads its two time limits from here and has no default of its
+    // own, so a spec missing either one is a controller bug the schema rejects.
     expect(decode(SessionSpec, { ...spec, timeouts: { inactivityMs: 1 } })._tag).toBe("Failure");
     expect(decode(SessionSpec, { ...spec, timeouts: { absoluteMs: 1 } })._tag).toBe("Failure");
     expect(
@@ -349,9 +351,9 @@ describe("what the controller authors for a session", () => {
     ).toBe("Success");
   });
 
-  it("names a session ended by either of the runner's clocks", () => {
-    // The supervisor is the only thing that knows why it stopped a session, so
-    // the reason has to exist in the vocabulary the exit event carries.
+  it("has an exit reason for each of the runner's time limits", () => {
+    // Only the supervisor knows why it stopped a session, so the reason has to
+    // exist in the exit event's vocabulary.
     for (const reason of ["inactivity_timeout", "absolute_timeout"]) {
       expect(decode(ProviderEvent, { _tag: "session.exited", ...baseFields, reason })._tag).toBe(
         "Success",
@@ -359,19 +361,19 @@ describe("what the controller authors for a session", () => {
     }
   });
 
-  it("takes a workspace-less session as an explicit null, never as an absent key", () => {
+  it("accepts a session without a workspace as an explicit null, never as an absent key", () => {
     expect(decode(SessionSpec, { ...spec, workspaceId: "w1" })._tag).toBe("Success");
     expect(decode(SessionSpec, omitKey(spec, "workspaceId"))._tag).toBe("Failure");
   });
 
-  it("refuses an access mode the vocabulary does not have", () => {
+  it("rejects an access mode the vocabulary does not have", () => {
     expect(decode(SessionSpec, { ...spec, accessMode: "yolo" })._tag).toBe("Failure");
   });
 
-  it("refuses a session id a path could climb out of", () => {
-    // The runner makes the workspace-less session's scratch directory of this
-    // id and removes that directory when the session exits, so a traversal here
-    // is an `rm -rf` somewhere nobody chose.
+  it("rejects a session id that could escape its directory", () => {
+    // The runner names the scratch directory of a session without a workspace
+    // after this id, and removes that directory when the session exits, so a
+    // traversal here would be an `rm -rf` somewhere nobody chose.
     for (const sessionId of ["../../etc", "with/a/slash", ""]) {
       expect(decode(SessionStart, { ...start, sessionId })._tag, sessionId).toBe("Failure");
       expect(decode(SessionStop, { _tag: "sessionStop", sessionId })._tag, sessionId).toBe(
@@ -380,7 +382,7 @@ describe("what the controller authors for a session", () => {
     }
   });
 
-  it("carries a non-empty session token on every start", () => {
+  it("requires a non-empty session token on every start", () => {
     // The token is the session's own credential on the public API, and the
     // frame is the only place its plaintext ever appears: a start without one
     // would leave the agent inside that session unable to reach Hercule at all,
@@ -390,9 +392,9 @@ describe("what the controller authors for a session", () => {
     expect(decode(SessionStart, { ...start, token: "" })._tag).toBe("Failure");
   });
 
-  it("refuses an instance id a path could climb out of, on the spec and on the binding", () => {
-    // The runner makes a directory of this id, so a spec is where a traversal
-    // would arrive.
+  it("rejects an instance id that could escape its directory, on the spec and on the binding", () => {
+    // The runner uses this id as a directory name, so a traversal would arrive
+    // in a spec.
     expect(decode(SessionSpec, { ...spec, instanceId: "../../etc" })._tag).toBe("Failure");
     expect(
       decode(SessionBinding, {

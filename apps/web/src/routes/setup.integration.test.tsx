@@ -89,7 +89,7 @@ describe("the setup screen", () => {
     await fillIn("rogier", "short");
 
     expect((await screen.findByRole("alert")).textContent).toBe(
-      "A password is at least 8 characters.",
+      "A password must be at least 8 characters.",
     );
     expect(api.calls.some((call) => call.path === "/api/v1/setup/complete")).toBe(false);
   });

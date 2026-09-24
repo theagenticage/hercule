@@ -5,9 +5,9 @@ import { OPERATIONS } from "./operations";
 /**
  * The CLI table, read structurally.
  *
- * The test names the shape it depends on rather than importing the table's
- * own types, so what it asserts is the behaviour of the values: a row is
- * hidden, or it carries a spelling, help, examples and a line per field.
+ * The test declares the shape it depends on instead of importing the table's
+ * own types, so it checks what the values contain: a row is either hidden, or
+ * it has a command spelling, help, examples and a line per field.
  */
 interface FieldRow {
   readonly positional?: true;
@@ -39,8 +39,7 @@ const visible = rows.filter(([, row]) => row.hidden !== true);
 /**
  * Returns every field that a visible row puts on the command line, as
  * `[operation id, field name, row]`, so the name of a failing test includes the
- * field. Hidden
- * fields are left out, like hidden rows.
+ * field. Hidden fields are left out, like hidden rows.
  */
 const listVisibleFields = (): ReadonlyArray<[string, string, FieldRow]> =>
   visible.flatMap(([id, row]) =>
@@ -49,7 +48,7 @@ const listVisibleFields = (): ReadonlyArray<[string, string, FieldRow]> =>
       .map(([name, field]) => [id, name, field] as [string, string, FieldRow]),
   );
 
-/** The `resolves` every visible field declares, keyed `<operation> <field>`. */
+/** Returns the `resolves` value of every visible field, keyed `<operation> <field>`. */
 const collectResolvers = (): Record<string, string | undefined> =>
   Object.fromEntries(
     listVisibleFields().map(([id, name, field]) => [`${id} ${name}`, field.resolves]),
@@ -58,7 +57,7 @@ const collectResolvers = (): Record<string, string | undefined> =>
 /** The three operations a programmatic client calls and a terminal never does. */
 const HIDDEN = ["auth.login", "auth.logout", "auth.wsTicket"];
 
-/** The Command table of the SPEC, one line per visible operation. */
+/** The command spelling of every visible operation, as the spec's command table lists it. */
 const COMMANDS: Record<string, string> = {
   "setup.read": "setup read",
   "setup.complete": "setup complete",
@@ -219,7 +218,7 @@ const STDIN_FIELDS = [
   "workflow.validate source",
 ];
 
-/** Every field whose id tail is resolved, and the listing that resolves it. */
+/** Every field that accepts an id tail, and the list operation that resolves the tail to a full id. */
 const RESOLVES: Record<string, string> = {
   "apiKey.revoke id": "apiKey.query",
 
@@ -318,7 +317,7 @@ describe("the CLI table", () => {
   });
 });
 
-describe("what a visible row says", () => {
+describe("the contents of a visible row", () => {
   it("gives every row a non-empty purpose", () => {
     for (const [id, row] of visible) {
       expect(row.help?.trim(), `${id} has no help`).toBeTruthy();
@@ -339,9 +338,9 @@ describe("what a visible row says", () => {
     }
   });
 
-  it("opens every purpose with a sentence a verb line can carry whole", () => {
-    // The noun screen prints the first sentence under each verb, so a purpose
-    // that opens with a paragraph is unreadable there.
+  it("starts every purpose with a sentence of at most 100 characters", () => {
+    // The noun's help screen prints the first sentence of each verb's purpose,
+    // so a long first sentence is unreadable there.
     for (const [id, row] of visible) {
       const first = /^.*?[.!?](?=\s|$)/.exec(row.help ?? "")?.[0] ?? row.help ?? "";
       expect(
@@ -369,7 +368,7 @@ describe("the nouns", () => {
 });
 
 describe("the stdin fields", () => {
-  it("marks exactly the fields the spec names", () => {
+  it("marks exactly the fields the spec lists", () => {
     const marked = listVisibleFields()
       .filter(([id, , field]) => field.stdin === true && id !== "user.setPassword")
       .map(([id, name]) => `${id} ${name}`);
@@ -385,14 +384,14 @@ describe("the stdin fields", () => {
 });
 
 describe("the resolvers", () => {
-  it("names the listing every resolvable field resolves through", () => {
+  it("declares the list operation that resolves each field's id tail", () => {
     const named = Object.fromEntries(
       Object.entries(collectResolvers()).filter(([, target]) => target !== undefined),
     );
     expect(named).toEqual(RESOLVES);
   });
 
-  it("leaves an id with no listing of its own unresolved", () => {
+  it("leaves an id unresolved when no list operation returns it", () => {
     for (const name of [
       "event.read id",
       "event.enrich id",
@@ -406,8 +405,8 @@ describe("the resolvers", () => {
 });
 
 /**
- * What `hercule session spawn` has to spell out once a thread can be started in a
- * project and in a workspace.
+ * Checks that `hercule session spawn` documents the project and the workspace
+ * a thread can be started in.
  */
 describe("spawning a thread from a terminal", () => {
   it("documents the project and the workspace", () => {
@@ -422,14 +421,14 @@ describe("spawning a thread from a terminal", () => {
   });
 
   /**
-   * The workspace is one field of one shape, so its line has to carry every
-   * kind a caller can write: there is no second flag that spells one.
+   * The workspace is a single field, and no other flag selects its kind. So
+   * its help line has to mention every kind a caller can write.
    */
   it("shows every kind of workspace, in the line and in the examples", () => {
     const row = table["session.spawn"];
     const line = row?.fields?.["workspace"]?.help ?? "";
     for (const kind of ["primary", "ephemeral", "existing"]) {
-      expect(line, `the --workspace line says nothing about ${kind}`).toContain(kind);
+      expect(line, `the --workspace line does not mention ${kind}`).toContain(kind);
       expect(
         (row?.examples ?? []).some((example) => example.args.join(" ").includes(kind)),
         `no example spawns into a ${kind} workspace`,

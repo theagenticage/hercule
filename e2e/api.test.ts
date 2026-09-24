@@ -1,11 +1,12 @@
 /**
- * The walk an operator actually makes: start the controller, finish setup, log
- * in, and drive the API through the CLI under the key login minted.
+ * Tests the steps an operator actually takes: start the controller, finish
+ * setup, log in, and use the API through the CLI with the key login created.
  *
- * The steps are ordered and share one controller, because that is the property
- * under test - state carries from one command to the next. Raw `fetch` is used
- * only where no command expresses the case (a request with no credential, a
- * path no operation owns) and to check the CLI's `--json` against the wire.
+ * The steps run in order and share one controller, because that is what is
+ * being tested: state carries from one command to the next. Raw `fetch` is
+ * used only where no command covers the case (a request with no credential, a
+ * path no operation owns) and to compare the CLI's `--json` with the raw
+ * response.
  */
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -28,27 +29,27 @@ const bare = createTemporaryHome();
 let controller: Controller;
 let port: number;
 let url: string;
-/** The bearer `setup complete` handed back. */
+/** The bearer token `setup complete` returned. */
 let setupBearer: string;
-/** The API key `hercule login` minted and stored. */
+/** The API key `hercule login` created and stored. */
 let apiKey: string;
 
 const credentialsFile = join(state.home, "credentials.json");
 const setupUrlFile = join(state.home, "setup-url");
 
-/** The CLI under the credential file in the shared home. */
+/** Runs the CLI with the credential file in the shared home. */
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, stdin });
 
 /**
- * The CLI before a credential file exists. `setup read` and `setup complete`
- * carry no credential, so the only thing that can say which controller they
- * mean is `HERCULE_API_URL`.
+ * Runs the CLI before a credential file exists. `setup read` and `setup
+ * complete` send no credential, so `HERCULE_API_URL` is the only way to tell
+ * them which controller to use.
  */
 const runCliBeforeLogin = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, env: { HERCULE_API_URL: url }, stdin });
 
-/** The CLI with no credential file, carrying a token in the environment. */
+/** Runs the CLI with no credential file, and a token in the environment. */
 const runCliWithToken = (token: string, args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: bare.home, env: { HERCULE_TOKEN: token, HERCULE_API_URL: url }, stdin });
 
@@ -65,7 +66,7 @@ afterAll(async () => {
 });
 
 describe("the first run and everything after it", () => {
-  it("1. answers only setup.read before setup completes", async () => {
+  it("1. allows only setup.read before setup completes", async () => {
     const setup = await fetch(`${url}/api/v1/setup`);
     expect(setup.status).toBe(200);
     expect(await setup.json()).toEqual({ complete: false });
@@ -115,14 +116,14 @@ describe("the first run and everything after it", () => {
     setupBearer = (parseJsonOutput(completed) as { token: string }).token;
     expect(setupBearer).toBeTruthy();
 
-    // The one-time URL is spent, so the file it lived in is gone.
+    // The one-time URL has been used, so the file that held it is gone.
     expect(existsSync(setupUrlFile)).toBe(false);
 
     const read = await runCliBeforeLogin(["setup", "read", "--json"]);
     expect(parseJsonOutput(read)).toEqual({ complete: true });
 
-    // A second completion cannot get through: the token was cleared, so the
-    // setup gate answers before `invalid_state` is ever reached.
+    // A second completion fails: the token was cleared, so the setup gate
+    // rejects the request before `invalid_state` is ever reached.
     const again = await runCliBeforeLogin(
       [
         "setup",
@@ -179,7 +180,7 @@ describe("the first run and everything after it", () => {
     expect(json.stdout).not.toContain(PASSWORD);
   }, 15_000);
 
-  it("4a. lists the key login minted, without its token", async () => {
+  it("4a. lists the key login created, without its token", async () => {
     const keys = await runLoggedInCli(["api-key", "list", "--json"]);
     expect(keys.code).toBe(0);
     const items = (parseJsonOutput(keys) as { items: Array<Record<string, unknown>> }).items;
@@ -192,9 +193,9 @@ describe("the first run and everything after it", () => {
   });
 
   it("4b. reads the controller's identity and the timezone setup wrote", async () => {
-    // The runner the controller spawned joins moments after the listener comes
-    // up, and it is another process: under load the join can land after this
-    // step would otherwise have read the setting.
+    // The runner the controller started joins moments after the listener is
+    // up, and it is another process: under load, the join can finish after
+    // this step would otherwise have read the setting.
     let identity = await runLoggedInCli(["controller", "read", "--json"]);
     for (let waited = 0; waited < 10_000; waited += 100) {
       if (
@@ -209,8 +210,8 @@ describe("the first run and everything after it", () => {
       id: expect.any(String) as string,
       publicKey: expect.any(String) as string,
       version: expect.any(String) as string,
-      // The runner this controller spawned beside itself, which is the fleet's
-      // first member and so what a placement falls back to.
+      // The runner this controller started next to itself, which is the
+      // fleet's first member and so the one placement falls back to.
       defaultRunnerId: expect.any(String) as string,
     });
 
@@ -249,7 +250,7 @@ describe("the first run and everything after it", () => {
     expect((parseJsonOutput(byTail) as { id: string }).id).toBe(id);
   });
 
-  it("4d. refuses to delete a shipped profile, on stderr, with exit 1", async () => {
+  it("4d. fails to delete a shipped profile, on stderr, with exit 1", async () => {
     const assistant = (
       parseJsonOutput(await runLoggedInCli(["profile", "list", "--json"])) as {
         items: Array<{ id: string; name: string }>;
@@ -261,8 +262,8 @@ describe("the first run and everything after it", () => {
     expect(refused.stdout).toBe("");
     expect(refused.stderr).toContain("assistant");
 
-    // Under `--json` too: the envelope is on stderr, so a caller piping stdout
-    // into a parser is never handed an error where a result was expected.
+    // With `--json` too: the envelope is on stderr, so a caller piping stdout
+    // into a parser never gets an error where it expected a result.
     const asJson = await runLoggedInCli(["profile", "delete", assistant.id, "--json"]);
     expect(asJson.code).toBe(1);
     expect(asJson.stdout).toBe("");
@@ -313,13 +314,11 @@ describe("the first run and everything after it", () => {
     expect(parseJsonOutput(core)).toMatchObject({ error: { code: "validation" } });
   });
 
-  // 403 cannot be reached end to end yet: the only actor is the user, who holds
-  // every grant, and no session actor exists yet. The grant check is
-  // unit-tested against every operation in the contract instead
-  // (apps/controller/src/http/middleware.test.ts). Once session tokens exist,
-  // the case belongs here.
+  // 403 is not tested in this walk: the user holds every grant. A session
+  // token's 403 is tested in
+  // apps/controller/src/http/session-actor.integration.test.ts.
 
-  it("5. resolves credentials from the environment, and refuses the file in a session", async () => {
+  it("5. reads credentials from the environment, and does not use the file in a session", async () => {
     const inSession = await runCli(["controller", "read"], {
       home: state.home,
       env: { HERCULE_SESSION: "1" },
@@ -349,7 +348,7 @@ describe("the first run and everything after it", () => {
     });
   });
 
-  it("6. prints help at any position, naming the grant the operation needs", async () => {
+  it("6. prints help at any position, with the grant the operation needs", async () => {
     const help = await runLoggedInCli(["profile", "create", "--help"]);
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("permission.write");
@@ -368,10 +367,11 @@ describe("the first run and everything after it", () => {
     expect(parseJsonOutput(viaCli)).toEqual(await viaFetch.json());
   });
 
-  it("8. logs out a login bearer, and refuses to log out an API key", async () => {
-    // `auth.login` and `auth.logout` have no command at all: the CLI trades a
-    // password for an API key with `hercule login` and never holds a bearer. The
-    // endpoints are the web app's, so they are driven here over the wire.
+  it("8. logs out a login bearer token, and rejects logging out an API key", async () => {
+    // `auth.login` and `auth.logout` have no command at all: the CLI exchanges
+    // a password for an API key with `hercule login` and never holds a bearer
+    // token. The web app uses these endpoints, so this test calls them over
+    // HTTP.
     const post = (path: string, body: unknown, token?: string) =>
       fetch(`${url}/api/v1${path}`, {
         method: "POST",
@@ -404,8 +404,8 @@ describe("the first run and everything after it", () => {
     expect(key.status).toBe(400);
     expect(await key.json()).toMatchObject({ error: { code: "validation" } });
 
-    // The bearer setup handed back is a login token like any other, and it is
-    // still alive: logging out one credential leaves the others alone.
+    // The bearer token setup returned is a login token like any other, and it
+    // is still valid: logging out one credential leaves the others alone.
     const fromSetup = await fetch(`${url}/api/v1/settings`, {
       headers: { authorization: `Bearer ${setupBearer}` },
     });
@@ -414,8 +414,8 @@ describe("the first run and everything after it", () => {
 
   it("9. stops on SIGTERM, closing the database, and opens the same home again", async () => {
     const wal = join(state.home, "data", "hercule.db-wal");
-    // Under load the write-ahead log is not empty while the controller is up,
-    // so the checkpoint below is a real transition rather than a no-op.
+    // The write-ahead log is not empty while the controller is running, so the
+    // checkpoint below is a real change rather than a no-op.
     expect(statSync(wal).size).toBeGreaterThan(0);
 
     const code = await controller.stop();
@@ -424,10 +424,10 @@ describe("the first run and everything after it", () => {
 
     // Exit 0 alone would also follow from `process.exit()`: the kernel releases
     // SQLite's locks either way. Closing the database is what checkpoints the
-    // write-ahead log back into `hercule.db`, so an empty `-wal` is the
-    // observable that separates a clean close from a killed process. SQLite
-    // then removes the file where the platform lets it and truncates it to
-    // zero where it does not, so both outcomes mean checkpointed.
+    // write-ahead log back into `hercule.db`, so an empty `-wal` is what
+    // separates a clean close from a killed process. SQLite then removes the
+    // file where the platform lets it and truncates it to zero where it does
+    // not, so both outcomes mean checkpointed.
     expect(existsSync(wal) ? statSync(wal).size : 0).toBe(0);
 
     controller = await startController({ home: state.home, port });

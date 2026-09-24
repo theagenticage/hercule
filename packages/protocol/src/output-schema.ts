@@ -1,15 +1,15 @@
 /**
- * The output schema a session answers under, and the closed subset a schema may
- * be written in.
+ * The output schema a session's turns must match, and the closed subset of JSON
+ * Schema it may be written in.
  *
  * One schema must mean the same thing on every harness, and the three harnesses
  * agree on a small common core only. Outside that core, OpenAI's strict mode,
- * draft-07 and pi's strict transform each refuse or silently reshape different
- * things. The subset is therefore a closed set of keywords and not a best
- * effort, and `lintOutputSchema` below is the one place that says what is in
- * the set. The controller runs the lint when a session is spawned, and the
- * runner runs it again at session start, because the two are different
- * processes and only the schema crosses between them.
+ * draft-07 and pi's strict transform each reject or silently change different
+ * things. So the subset is a closed set of keywords, not a best effort, and
+ * `lintOutputSchema` below is the only place that defines what is in the set.
+ * The controller runs the lint when a session is spawned, and the runner runs
+ * it again at session start, because the two are different processes and only
+ * the schema crosses between them.
  */
 import { Schema } from "effect";
 
@@ -20,11 +20,11 @@ import { Schema } from "effect";
  * over the runner socket and, on pi, given to the harness in an environment
  * variable. An environment has a size a process cannot start past, so without a
  * bound a large schema would fail at launch instead of at the call that sent
- * it. 32 KiB is far more than the strict subset needs for any answer a turn can
- * give, and well under what each of the three harnesses takes, so the bound
- * refuses nothing anyone would write on purpose. The bound sits on the schema
- * itself, so both ends refuse it: the controller before it writes a row, the
- * runner before it starts a harness.
+ * it. 32 KiB is far more than the strict subset needs for any result a turn can
+ * return, and well under what each of the three harnesses accepts, so the
+ * limit rejects nothing anyone would write on purpose. The limit is part of
+ * the schema itself, so both sides enforce it: the controller before it writes
+ * a row, the runner before it starts a harness.
  */
 export const MAX_OUTPUT_SCHEMA_LENGTH = 32 * 1024;
 
@@ -60,7 +60,7 @@ export const OutputSchema = Schema.Record(Schema.String, Schema.Json).check(
     !isNestedWithin(schema, MAX_JSON_DEPTH)
       ? `an output schema can nest objects and arrays at most ${String(MAX_JSON_DEPTH)} levels deep`
       : JSON.stringify(schema).length > MAX_OUTPUT_SCHEMA_LENGTH
-        ? `an output schema is at most ${String(MAX_OUTPUT_SCHEMA_LENGTH)} characters of JSON`
+        ? `an output schema can be at most ${String(MAX_OUTPUT_SCHEMA_LENGTH)} characters of JSON`
         : undefined,
   ),
 );
@@ -68,10 +68,10 @@ export const OutputSchema = Schema.Record(Schema.String, Schema.Json).check(
 export type OutputSchema = Schema.Schema.Type<typeof OutputSchema>;
 
 /**
- * Every keyword the subset allows, and which node type the keyword may sit on.
- * An `object` keyword and an `array` keyword say nothing on any other type, so
- * a `properties` on a string node is a rule that would never be applied. Such
- * a rule is refused and not ignored.
+ * Every keyword the subset allows, and which node type the keyword may be used
+ * on. An `object` keyword and an `array` keyword have no effect on any other
+ * type, so `properties` on a string node is a rule that would never apply.
+ * Such a rule is rejected, not ignored.
  */
 const KEYWORDS: Record<string, "any" | "object" | "array"> = {
   $schema: "any",
@@ -89,23 +89,23 @@ const KEYWORDS: Record<string, "any" | "object" | "array"> = {
 /** The only types a node may declare. */
 const TYPES = new Set(["object", "array", "string", "number", "integer", "boolean", "null"]);
 
-/** The one dialect the subset is written in. */
+/** The only JSON Schema dialect the subset accepts. */
 const DRAFT_07 = "http://json-schema.org/draft-07/schema#";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Escapes a key as one step of a JSON Pointer: a pointer escapes two characters. */
+/** Escapes a key as one segment of a JSON Pointer, which escapes `~` and `/`. */
 const escapePointerStep = (key: string): string => key.replace(/~/g, "~0").replace(/\//g, "~1");
 
-/** Builds the pointer to a child of `path`. The root path is spelled `/`. */
+/** Builds the pointer to a child of `path`. The root path is written `/`. */
 const buildPointer = (path: string, ...keys: ReadonlyArray<string>): string =>
   `${path === "/" ? "" : path}/${keys.map(escapePointerStep).join("/")}`;
 
 /**
- * Reads the type a node declares. The subset spells a nullable type as
+ * Reads the type a node declares. The subset writes a nullable type as
  * `["<type>", "null"]`, and that form is read as the type it makes nullable.
- * `undefined` means the node declares no type the subset recognizes.
+ * Returns `undefined` when the node declares no type the subset recognizes.
  */
 const readDeclaredType = (node: Record<string, unknown>): string | undefined => {
   const declared = node["type"];
@@ -120,9 +120,9 @@ const isEnumValue = (value: unknown): boolean =>
   typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 
 /**
- * Whether the node's declared type can hold this value. A fixed value of
- * another type is a branch of the schema that nothing can satisfy. That
- * mistake is worth catching before a harness is held to the schema.
+ * Checks whether the node's declared type can hold this value. A fixed value
+ * of another type is a branch of the schema that nothing can satisfy, and that
+ * mistake is worth catching before a harness has to follow the schema.
  */
 const holdsValue = (type: string, value: unknown): boolean => {
   switch (type) {
@@ -134,21 +134,21 @@ const holdsValue = (type: string, value: unknown): boolean => {
       return typeof value === "number";
     case "boolean":
       return typeof value === "boolean";
-    // An object or an array named value by value is outside the subset, and
-    // `null` is spelled by the nullable type rather than by a value.
+    // An object or an array as a fixed value is outside the subset, and `null`
+    // is written with the nullable type rather than as a value.
     default:
       return false;
   }
 };
 
-/** Quotes one value the way a message says it back to the caller. */
+/** Quotes one value for an error message. */
 const quoteValue = (value: unknown): string => JSON.stringify(value) ?? String(value);
 
 /**
- * Lints one node and everything below it, and answers every issue it finds. A
- * node is reported at most once, and the walk does not enter a node it cannot
- * read. One mistake therefore reads as one issue, and not as the cascade of
- * issues it would otherwise cause below.
+ * Lints one node and everything below it, and returns every issue it finds. A
+ * node is reported at most once, and the lint does not descend into a node it
+ * cannot read. So one mistake is reported as one issue, and not as the
+ * cascade of issues it would otherwise cause below.
  */
 const lintNode = (node: unknown, path: string, isRoot: boolean): ReadonlyArray<string> => {
   if (!isRecord(node)) return [`${path}: a schema node must be an object`];
@@ -158,8 +158,8 @@ const lintNode = (node: unknown, path: string, isRoot: boolean): ReadonlyArray<s
     return [`${path}: $schema must be ${DRAFT_07}`];
   }
 
-  // `Object.hasOwn`, and not a plain lookup. A plain object answers
-  // `constructor` and `__proto__` from its prototype, so a lookup would read
+  // `Object.hasOwn`, and not a plain lookup. A plain object returns
+  // `constructor` and `__proto__` from its prototype, so a lookup would treat
   // both of those as keywords.
   const foreignKeyword = Object.keys(node).find((key) => !Object.hasOwn(KEYWORDS, key));
   if (foreignKeyword !== undefined) {
@@ -173,8 +173,8 @@ const lintNode = (node: unknown, path: string, isRoot: boolean): ReadonlyArray<s
         `or a two-element array of one of those and "null"`,
     ];
   }
-  // The root is the object the harness answers with. A nullable root would let
-  // a turn answer `null`, which satisfies the schema and says nothing.
+  // The root is the object the harness returns. A nullable root would let a
+  // turn return `null`, which satisfies the schema but carries no result.
   if (isRoot && node["type"] !== "object") return ["/: the root must be type object"];
 
   const misplacedKeyword = Object.keys(node).find((key) => {
@@ -182,7 +182,7 @@ const lintNode = (node: unknown, path: string, isRoot: boolean): ReadonlyArray<s
     return scope !== "any" && scope !== type;
   });
   if (misplacedKeyword !== undefined) {
-    return [`${path}: the keyword ${misplacedKeyword} says nothing on a ${type}`];
+    return [`${path}: the keyword ${misplacedKeyword} has no effect on a ${type}`];
   }
 
   const values = node["enum"];
@@ -217,16 +217,15 @@ const lintNode = (node: unknown, path: string, isRoot: boolean): ReadonlyArray<s
     if (notAKey !== undefined) {
       return [`${path}: required holds ${quoteValue(notAKey)}, which is not a property name`];
     }
-    // The check runs both ways round: every property is required, and nothing
-    // is required that the object does not have. A required key with no
-    // property is a document no value can satisfy, which is the same mistake
-    // as an optional field.
+    // The check runs both ways: every property is required, and nothing is
+    // required that the object does not have. A required key with no property
+    // makes a schema no value can satisfy.
     const requiredWithoutProperty = entries.find(
       (entry) => !Object.hasOwn(properties, entry as string),
     );
     if (requiredWithoutProperty !== undefined) {
       return [
-        `${path}: required names ${quoteValue(requiredWithoutProperty)}, ` +
+        `${path}: required lists ${quoteValue(requiredWithoutProperty)}, ` +
           "which is not one of its properties",
       ];
     }
@@ -249,9 +248,9 @@ const lintNode = (node: unknown, path: string, isRoot: boolean): ReadonlyArray<s
 };
 
 /**
- * Lints a schema against the subset. It answers one issue per mistake. Each
- * issue names where the mistake is, as a JSON Pointer, and which rule it broke.
- * An empty answer means the schema is accepted.
+ * Lints a schema against the subset. Returns one issue per mistake. Each issue
+ * gives where the mistake is, as a JSON Pointer, and which rule it broke. An
+ * empty list means the schema is accepted.
  */
 export const lintOutputSchema = (schema: unknown): ReadonlyArray<string> =>
   lintNode(schema, "/", true);

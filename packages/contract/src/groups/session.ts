@@ -1,9 +1,10 @@
 /**
- * Sessions: one provider-backed agent conversation, as the API sees it. Nothing
- * here is editable - a caller spawns a session, reads it, and sends it input.
+ * Sessions: one provider-backed agent conversation, as the API sees it. A
+ * caller spawns a session, reads it and sends it input; the only thing a
+ * caller can change is its model selection.
  *
  * `requestedAccessMode` and `accessMode` are both on the record because the
- * downward fallback of [06-providers section 8.4] must never be silent.
+ * access-mode fallback of [06-providers section 8.4] must never be silent.
  */
 import { Schema } from "effect";
 import {
@@ -32,19 +33,23 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 
-/** The request vocabulary is the protocol's; the API hands it out unchanged. */
+/** The request vocabulary comes from the runner protocol; the API returns it unchanged. */
 export { ApprovalDecision, OpenRequest };
 
-/** The longest prompt or turn input the API takes: it crosses the runner socket in one frame. */
+/** The longest prompt or turn input the API accepts: it is sent to the runner in one frame. */
 export const MAX_PROMPT_LENGTH = 64 * 1024;
 
 export const Prompt = bounded(1, MAX_PROMPT_LENGTH);
 
 /**
- * Where a session stands. `queued` is placement accepted with the runner full
- * or unreachable, `starting` is the start sent with no `session.started` back
- * yet, `busy` is a turn running, and `exited` is the process gone; an exited
- * session with `resumable` true is resumed in place by its next input.
+ * The status of a session:
+ *
+ * - `queued`: placement accepted it, but the runner is full or unreachable;
+ * - `starting`: the start was sent and no `session.started` has come back yet;
+ * - `idle`: running, with no turn in progress;
+ * - `busy`: a turn is running;
+ * - `exited`: the process is gone. An exited session with `resumable` true is
+ *   resumed in place by its next input.
  */
 export const SESSION_STATUSES = ["queued", "starting", "idle", "busy", "exited"] as const;
 
@@ -58,63 +63,63 @@ export const Session = Schema.Struct({
   title: Schema.String,
   status: SessionStatus,
   /**
-   * Derived at read, never stored: the session is `exited`, has a
-   * `nativeSessionId`, and its runner is not retired. True means the next
-   * `session.input` resumes it in place.
+   * Computed when the session is read, never stored: true when the session is
+   * `exited`, has a `nativeSessionId`, and its runner is not retired. True
+   * means the next `session.input` resumes it in place.
    */
   resumable: Schema.Boolean,
   permissionProfileId: Id,
-  /** The Agent this session was spawned from. `null` is a Thread. Lineage only. */
+  /** The Agent this session was spawned from; `null` for a Thread. Kept only as a record of origin. */
   agentId: Schema.NullOr(Id),
   instanceId: Id,
-  /** Pinned where the session started; a session never migrates. */
+  /** The runner the session started on. A session never moves to another runner. */
   runnerId: Id,
   workspaceId: Schema.NullOr(Id),
-  /** The project the thread belongs to; organisation only, nothing derives from it. */
+  /** The project the thread belongs to. It only groups the thread; nothing is derived from it. */
   projectId: Schema.NullOr(Id),
   requestedAccessMode: AccessMode,
-  /** What the session runs as, after the downward fallback. */
+  /** The mode the session actually runs in, after the access-mode fallback. */
   accessMode: AccessMode,
   /** The provider-native id, once the runner has reported its binding. */
   nativeSessionId: Schema.NullOr(Schema.String),
   /**
-   * What the session runs under now. It starts as the spec's and is rewritten
-   * by `session.update` and by an input that carries picks, so a resume or a
-   * fork carries the model the conversation ended on rather than the one it
-   * opened with.
+   * The model the session runs under now. It starts as the spec's and is
+   * updated by `session.update` and by an input that carries a model or
+   * options, so a resume or a fork uses the model the conversation ended on
+   * rather than the one it started with.
    */
   modelSelection: ModelSelection,
   /** Set where this session was forked off another one; null otherwise. */
   parentSessionId: Schema.NullOr(Id),
   /**
-   * The request the harness has parked on, if any: what the user has to answer
-   * before this turn goes any further. At most one is open at a time, and it is
+   * The request the harness is parked on, if any: what the user has to answer
+   * before this turn can continue. At most one is open at a time, and it is
    * cleared when the machine resolves it or when the turn or session it belongs
    * to ends.
    */
   openRequest: Schema.NullOr(OpenRequest),
   createdAt: Timestamp,
   startedAt: Schema.NullOr(Timestamp),
-  /** The last exit: kept while the session is resumed, rewritten when it exits again. */
+  /** The time of the last exit. Kept while the session is resumed, and overwritten when it exits again. */
   exitedAt: Schema.NullOr(Timestamp),
   lastActivityAt: Timestamp,
   /**
-   * Which of the fields this session was spawned with are fields its provider
-   * ignores. It is read from the instance's declared capabilities at every
-   * read.
+   * The fields this session was spawned with that its provider ignores.
+   * Computed from the instance's declared capabilities every time the session
+   * is read.
    */
   unenforced: Schema.Array(UnenforcedSpecField),
 });
 
 export type Session = Schema.Schema.Type<typeof Session>;
 
-/** The most repos one thread may open a workspace over at once. */
+/** The most repos one thread's workspace may hold. */
 export const MAX_SPAWN_CHECKOUTS = 32;
 
 /** One repo a fresh workspace gets a worktree of, and where that worktree starts. */
 export const SpawnCheckout = Schema.Struct({
   resourceId: Id,
-  /** What the thread's own branch starts from; absent takes the default branch. */
+  /** The branch the thread's own branch starts from; the default branch when absent. */
   baseBranch: Schema.optionalKey(Branch),
 });
 
@@ -131,15 +136,15 @@ export const PrimarySpawnWorkspace = Schema.Struct({
 /** A new workspace with a worktree for each repo in `checkouts`. */
 export const EphemeralSpawnWorkspace = Schema.Struct({
   kind: Schema.Literal("ephemeral"),
-  /** Empty makes a scratch workspace: a directory and no checkout at all. */
+  /** An empty list makes a scratch workspace: a directory with no checkout at all. */
   checkouts: atMost(SpawnCheckout, MAX_SPAWN_CHECKOUTS),
 });
 
 /**
  * The workspace a thread opens in: the repo's main workspace, a fresh worktree
- * of its own, or one that already stands. A workspace is a kind and a list of
- * checkouts; every git word rides a checkout. Leaving it off is a thread with
- * no checkout at all.
+ * of its own, or one that already exists. A workspace is a kind and a list of
+ * checkouts; every git detail is on a checkout. Without a workspace, the
+ * thread has no checkout at all.
  */
 export const SpawnWorkspace = Schema.Union([
   PrimarySpawnWorkspace,
@@ -150,45 +155,47 @@ export const SpawnWorkspace = Schema.Union([
 export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
 
 /**
- * What spawning a session takes. A spawn names an Agent, whose fields say what
- * the session runs under. A spawn with no `agentId` is a Thread, and a Thread
- * takes the user's `thread.*` settings instead. Either way, a value named here
- * overrides the Agent or the setting, for this session only.
+ * The payload of `session.spawn`. A spawn with an `agentId` takes its settings
+ * from that Agent. A spawn with no `agentId` is a Thread, and takes the user's
+ * `thread.*` settings instead. Either way, a value given here overrides the
+ * Agent or the setting, for this session only.
  */
 export const SessionSpawnInput = closedStruct({
   prompt: Prompt,
   /**
-   * The Agent to spawn from. Its fields stand in for the `thread.*` settings,
-   * in the same precedence chain. `instanceId` and `permissionProfileId`
-   * beside it are refused, because the Agent answers both.
+   * The Agent to spawn from. Its fields take the place of the `thread.*`
+   * settings, with the same precedence. `instanceId` and `permissionProfileId`
+   * are rejected with it, because the Agent sets both.
    */
   agentId: Schema.optionalKey(Id),
-  /** What every turn of this session must answer with. A schema outside the shared subset is refused. */
+  /** What every turn of this session must return. A schema outside the subset all harnesses support is rejected. */
   outputSchema: Schema.optionalKey(OutputSchema),
   instanceId: Schema.optionalKey(Id),
   model: Schema.optionalKey(Schema.NonEmptyString),
-  /** The per-model choices this session opens with; what the model does not offer is refused. */
+  /** The per-model choices this session opens with; a choice the model does not offer is rejected. */
   options: Schema.optionalKey(ModelSelection.fields.options),
   accessMode: Schema.optionalKey(AccessMode),
-  /** Names a runner directly, a reserved one included; placement is skipped. */
+  /** Chooses a runner directly, a reserved one included; placement is skipped. */
   runnerId: Schema.optionalKey(Id),
   /** The Permission Profile the session's token carries, in place of the thread default. */
   permissionProfileId: Schema.optionalKey(Id),
-  /** The project the thread belongs to; every resource it names must be in it. */
+  /** The project the thread belongs to; every resource in `workspace` must be in it. */
   projectId: Schema.optionalKey(Id),
-  /** Where it works; absent is a thread with no checkout. */
+  /** Where the session works; when absent, the thread has no checkout. */
   workspace: Schema.optionalKey(SpawnWorkspace),
 });
 
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
 
 /**
- * What a session is to run under from here on: the config picks a caller made
- * since the last time it said. `options` merges over the ones the session
- * already runs with, because a submission carries only what the user touched;
- * a call whose `model` differs from the stored one starts from `{}`, because
- * the choices belong to the model that offered them; and a call naming neither
- * changes nothing.
+ * What a session runs under from now on: the model and options a caller chose
+ * since its last call.
+ *
+ * - `options` is merged into the options the session already runs with,
+ *   because a submission carries only what the user changed;
+ * - a call whose `model` differs from the stored one starts from `{}`, because
+ *   the choices belong to the model that offered them;
+ * - a call with neither field changes nothing.
  */
 export const SESSION_SELECTION_FIELDS = {
   model: Schema.optionalKey(Schema.NonEmptyString),
@@ -200,9 +207,9 @@ export const SessionSelection = Schema.Struct(SESSION_SELECTION_FIELDS);
 export type SessionSelection = Schema.Schema.Type<typeof SessionSelection>;
 
 /**
- * One turn's input: the text, and the picks that ride with it. Declared apart
- * from the payload so a service can spread it beside the session id and hold an
- * in-process caller to the same bound.
+ * One turn's input: the text, and the model and options sent with it. Declared
+ * separately from the payload, so a service can spread these fields next to
+ * the session id and apply the same bounds to an in-process caller.
  */
 export const SESSION_INPUT_FIELDS = {
   text: Prompt,
@@ -220,13 +227,14 @@ export const SessionInputPayload = closedStruct(SESSION_INPUT_FIELDS);
 export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>;
 
 /**
- * What one input did. `inputId` names the row it was stored as, which is what a
- * caller edits or cancels while it is still `queued`.
+ * What happened to one input. `inputId` is the id of the row it was stored as,
+ * which a caller can edit or cancel while it is still `queued`.
  *
- * Folding input into a turn already running is steering, hence the
- * `session.steer` grant. `opened` and `steered` are the runner's own words for
- * what it did with it; `queued` is the controller's, for an input the session
- * cannot take yet - the input that resumes an exited session included.
+ * Adding input to a turn that is already running is steering, which is why it
+ * needs the `session.steer` grant. `opened` and `steered` are the runner's own
+ * words for what it did with the input. `queued` is the controller's word for
+ * an input the session cannot take yet, including the input that resumes an
+ * exited session.
  */
 export const SessionInputOutcome = Schema.Struct({
   inputId: Id,
@@ -236,9 +244,9 @@ export const SessionInputOutcome = Schema.Struct({
 export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
 
 /**
- * Answering the request a session is parked on. `requestId` is the open
- * request's own, so an answer that arrives after the harness moved on is
- * refused rather than applied to whatever is open now.
+ * The answer to the request a session is parked on. `requestId` is the open
+ * request's own id, so an answer that arrives after the harness moved on is
+ * rejected rather than applied to whatever request is open now.
  */
 export const SESSION_RESPOND_FIELDS = {
   requestId: Fact,
@@ -250,11 +258,12 @@ export const SessionRespondInput = closedStruct(SESSION_RESPOND_FIELDS);
 export type SessionRespondInput = Schema.Schema.Type<typeof SessionRespondInput>;
 
 /**
- * Branching a session: `fork` opens a second provider-native session off the
- * one the parent left behind, leaving the parent's own history untouched. It
- * lands on the parent's runner and provider instance, because that is where
- * the native state is. Carrying the parent itself on is not here: an exited
- * session that still has its transcript is resumed in place by its next input.
+ * Branching a session: `fork` opens a second provider-native session from the
+ * one the parent left behind, and leaves the parent's own history untouched.
+ * It runs on the parent's runner and provider instance, because that is where
+ * the native state is. Continuing the parent itself is not done here: an
+ * exited session that still has its transcript is resumed in place by its next
+ * input.
  */
 export const SESSION_CONTINUE_FIELDS = {
   mode: Schema.Literal("fork"),
@@ -266,9 +275,9 @@ export const SessionContinueInput = closedStruct(SESSION_CONTINUE_FIELDS);
 export type SessionContinueInput = Schema.Schema.Type<typeof SessionContinueInput>;
 
 /**
- * One status, or several - the runner page's "how full is this machine"
- * needs `starting | idle | busy` in one read, everything else names one. The
- * wire carries several as repeated `status` query keys.
+ * One status, or several. The runner page's "how full is this machine" view
+ * needs `starting | idle | busy` in one read; every other caller asks for one.
+ * The query string carries several as repeated `status` keys.
  */
 export const SessionStatusFilter = Schema.Union([
   SessionStatus,

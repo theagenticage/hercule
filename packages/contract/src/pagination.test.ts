@@ -10,31 +10,31 @@ const decode =
 const Sort = sortParam(["createdAt", "name"]);
 
 describe("the sort parameter", () => {
-  it("reads `<field>:<direction>` off the wire as a pair", () => {
+  it("decodes `<field>:<direction>` into a field and a direction", () => {
     expect(decode(Sort)("createdAt:asc")).toMatchObject({
       _tag: "Success",
       value: { field: "createdAt", direction: "asc" },
     });
   });
 
-  it("leaves the direction absent when the wire omits it, so the service defaults", () => {
+  it("leaves the direction out when the string has none, so the service default applies", () => {
     expect(decode(Sort)("name")).toMatchObject({ _tag: "Success", value: { field: "name" } });
   });
 
-  it("refuses a field the operation does not sort on", () => {
+  it("rejects a field the operation does not sort on", () => {
     expect(decode(Sort)("bogus:asc")._tag).toBe("Failure");
   });
 
-  it("refuses a direction that is neither asc nor desc", () => {
+  it("rejects a direction that is neither asc nor desc", () => {
     expect(decode(Sort)("createdAt:sideways")._tag).toBe("Failure");
   });
 
-  it("refuses an empty field", () => {
+  it("rejects an empty field", () => {
     expect(decode(Sort)(":asc")._tag).toBe("Failure");
     expect(decode(Sort)("")._tag).toBe("Failure");
   });
 
-  it("goes back out as the one string a URL query can carry", () => {
+  it("encodes back to a single string for the URL query", () => {
     expect(
       Effect.runSyncExit(Schema.encodeUnknownEffect(Sort)({ field: "name", direction: "desc" })),
     ).toMatchObject({ _tag: "Success", value: "name:desc" });
@@ -52,7 +52,7 @@ describe("pageParams", () => {
     expect(decode(Params)({})).toMatchObject({ _tag: "Success", value: {} });
   });
 
-  it("publishes the sortable fields, so a client can render them", () => {
+  it("exposes the sortable fields, so a client can show them", () => {
     expect(readSortFields(Params)).toEqual(["name"]);
     expect(readSortFields(pageParams(["createdAt"]))).toEqual(["createdAt"]);
     expect(readSortFields(Schema.Struct({}))).toEqual([]);

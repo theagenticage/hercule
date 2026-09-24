@@ -18,11 +18,11 @@ const buildProfile = (grants: ReadonlyArray<string>) => ({
 });
 
 describe("the bound on a profile's grant list", () => {
-  it("is the grant vocabulary itself", () => {
+  it("is the size of the grant vocabulary", () => {
     expect(MAX_PROFILE_GRANTS).toBe(ALL_GRANTS.length);
   });
 
-  it("takes every grant once and refuses the one past it", () => {
+  it("accepts every grant once, and rejects a list one longer", () => {
     expect(decodeOutcome(Profile, buildProfile(ALL_GRANTS))).toBe("Success");
     expect(decodeOutcome(Profile, buildProfile([...ALL_GRANTS, "task.read"]))).toBe("Failure");
   });

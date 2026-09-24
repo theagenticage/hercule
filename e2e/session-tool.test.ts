@@ -1,34 +1,38 @@
 /**
- * Hercule-as-a-tool, proved end to end through the release binary.
+ * Tests Hercule as a tool for agents, end to end through the release binary.
  *
  * A Thread is spawned under the shipped `worker` profile with a prompt that
  * asks for three things: create a task, update it, delete it. The first two are
  * grants `worker` holds, the third is not. Afterwards the user - a separate
- * credential, over the same public API - reads back that the task exists with
- * the edited description, that its provenance entry and its `task.created`
- * event log row are both stamped `session:<id>`, and that the session was told
- * `missing grant task.delete` rather than quietly getting its way.
+ * credential, over the same public API - checks that:
  *
- * Nothing here is arranged behind the agent's back: every one of those three
- * commands is the `hercule` binary the runner put on the session's PATH, called
- * by the model out of a bare process, against the token the runner injected.
+ * - the task exists with the edited description;
+ * - its provenance entry and its `task.created` event log row are both
+ *   stamped `session:<id>`;
+ * - the session got the error `missing grant task.delete` rather than
+ *   silently getting its way.
  *
- * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
- * and takes a couple of minutes. `HERCULE_LIVE_SESSION_TEST=1` asks for it.
+ * Nothing is done behind the agent's back: each of those three commands is the
+ * `hercule` binary the runner put on the session's PATH, run by the model from
+ * a bare process, with the token the runner injected.
  *
- * The login it runs on is lent for the run, by either of the two routes
- * `e2e/harness.ts` documents; with neither the case skips saying so.
+ * Opt-in, like `session.test.ts`: it spends the developer's tokens and takes a
+ * couple of minutes. Set `HERCULE_LIVE_SESSION_TEST=1` to run it.
+ *
+ * The login it runs on is provided for the run by either of the two routes
+ * `e2e/harness.ts` documents; with neither, the case is skipped with a
+ * message.
  *
  * ## What this test does not assert
  *
- * That the session's token is 401 after `hercule session stop`. The token is
- * deliberately unreachable from out here: it exists in the `SessionStart` frame
- * and in the session process's environment, and the one thing that could print
- * it - the agent - must never be asked to. Revocation on exit is proved instead
- * where the token is in hand, by the controller's own `withServer` test:
- * `apps/controller/src/http/session-actor.integration.test.ts`, "dies with the
- * session the machine reports has exited". What is asserted here is the
- * observable half: the session reads `exited` after the stop.
+ * That the session's token gets 401 after `hercule session stop`. The test
+ * deliberately cannot get the token: it exists only in the `SessionStart`
+ * frame and in the session process's environment, and the only thing that
+ * could print it - the agent - must never be asked to. Revocation on exit is
+ * tested instead where the token is available, in the controller's own
+ * `withServer` test: `apps/controller/src/http/session-actor.integration.test.ts`.
+ * What is checked here is the visible half: the session is `exited` after the
+ * stop.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -57,7 +61,7 @@ import {
   type Snapshot,
 } from "./harness";
 
-/** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
+/** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
 const state = createTemporaryHome();
@@ -74,10 +78,10 @@ let apiKey: string;
 const TURN_DEADLINE_MS = 240_000;
 
 /**
- * Long enough for the runner to answer a probe of a config directory it has
- * just been handed a credential for. The first probe of a fresh directory has
- * been seen to answer `unauthenticated`, so probes are repeated rather than
- * believed once.
+ * Long enough for the runner to probe a config directory it has just been
+ * given a credential for. The first probe of a fresh directory has been seen
+ * to return `unauthenticated`, so probes are repeated rather than trusted
+ * once.
  */
 const LOGIN_DEADLINE_MS = 120_000;
 
@@ -86,10 +90,10 @@ const MADE = "made by a session";
 const UPDATED = "updated by a session";
 
 /**
- * The provenance ref is spelled out because the field has a grammar
- * (`system:kind:id`) the model would otherwise have to discover by being
- * refused. Everything the criterion is about - who the entry is stamped for -
- * is untouched by naming it.
+ * The prompt spells out the provenance ref because the field has a format
+ * (`system:kind:id`) the model would otherwise have to discover through
+ * errors. Giving the ref does not affect what is tested: who the entry is
+ * stamped with.
  */
 const PROMPT =
   "Using the hercule CLI (run `hercule --help` first if needed): create a task titled " +
@@ -102,9 +106,9 @@ interface Page<A> {
 }
 
 /**
- * The controller's own runner, once it has enrolled and dialled in. It writes
- * `runner.json` and its storage directory on the way, which is what the login
- * is lent into, so nothing may read either before this answers.
+ * Waits for the controller's own runner to enrol and connect, and returns it.
+ * On the way, the runner writes `runner.json` and its storage directory, which
+ * the login is copied into, so nothing may read either before this returns.
  */
 const waitForOwnRunner = async (): Promise<string> => {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
@@ -115,7 +119,8 @@ const waitForOwnRunner = async (): Promise<string> => {
         ? parseJsonOutputOrFail<Page<{ readonly id: string }>>(ran).items[0]?.id
         : undefined;
     if (id !== undefined && existsSync(join(state.home, "runner", "runner.json"))) return id;
-    if (Date.now() > deadline) throw new Error(`no runner dialled the controller:\n${ran.stdout}`);
+    if (Date.now() > deadline)
+      throw new Error(`no runner connected to the controller:\n${ran.stdout}`);
     await Bun.sleep(500);
   }
 };
@@ -129,9 +134,10 @@ const findClaudeInstance = async (): Promise<Instance> => {
 };
 
 /**
- * Probes the instance until a machine says the lent login works, and answers
- * with that snapshot. Repeated rather than trusted once: a probe of a directory
- * that was empty a moment ago has been seen to answer `unauthenticated`.
+ * Probes the instance until a machine reports that the copied login works, and
+ * returns that snapshot. The probe is repeated rather than trusted once: a
+ * probe of a directory that was empty a moment ago has been seen to return
+ * `unauthenticated`.
  */
 const waitForLoggedInSnapshot = async (runnerId: string, instanceId: string): Promise<Snapshot> => {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
@@ -202,13 +208,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  // The lent credential lives in here, so this is not housekeeping.
+  // The copied credential is in here, so removing the home matters for
+  // security, not just tidiness.
   state.remove();
 });
 
 describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () => {
   it(
-    "creates and updates a task as itself, is refused the delete its profile withholds",
+    "creates and updates a task as itself, and fails to delete it because its profile lacks the grant",
     async (ctx) => {
       if (!isLoginAvailable()) {
         ctx.skip(
@@ -223,7 +230,7 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
       if (LENT_CREDENTIALS !== undefined) lendCredential(state.home, instance.id);
       const snapshot = await waitForLoggedInSnapshot(runnerId, instance.id);
 
-      // The cheapest model that answers, when this machine reported one.
+      // The cheapest model that works, when this machine reported one.
       const haiku = snapshot.models.find((model) => model.slug.includes("haiku"))?.slug;
 
       const worker = parseJsonOutputOrFail<Page<Profile>>(
@@ -239,8 +246,8 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
             "--profile",
             worker!.id,
             ...(haiku === undefined ? [] : ["--model", haiku]),
-            // The session runs unattended, and every one of its three commands
-            // is a command approval nobody is there to answer.
+            // The session runs unattended, and each of its three commands would
+            // otherwise wait for an approval nobody is there to give.
             "--access-mode",
             "full-access",
             "--json",
@@ -265,17 +272,17 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
         await runCli(["task", "list", "--json", "--all"], { home: state.home, binary }),
       ).items;
       const mine = tasks.find((task) => task.title === TITLE);
-      // Read after the turn, so a task that is here is a task the refused
-      // delete did not take away.
+      // Read after the turn, so a task found here is one the rejected delete
+      // did not remove.
       expect(
         mine,
         `no task titled ${TITLE}. What the session said was:\n${collectAssistantText(rows)}`,
       ).not.toBe(undefined);
-      // The update landed on the task the create made, not on a second one.
+      // The update changed the task the create made, not a second one.
       expect(mine!.description).toBe(UPDATED);
       expect(mine!.provenance.map((entry) => entry.actor)).toContain(actor);
 
-      // The event log says the same thing about who did it.
+      // The event log records the same actor.
       const created = parseJsonOutputOrFail<Page<Event>>(
         await runCli(["event", "list", "--kind", "task.created", "--json", "--all"], {
           home: state.home,
@@ -285,18 +292,19 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
       expect(created.length).toBeGreaterThan(0);
       expect(created.map((event) => event.actor)).toContain(actor);
 
-      // The delete was refused, and the refusal named the grant to ask for
-      // rather than failing anonymously.
+      // The delete was rejected, and the error named the missing grant rather
+      // than failing without a reason.
       const said = collectAssistantText(rows);
-      expect(said, `the session never reported a refused delete. It said:\n${said}`).toContain(
+      expect(said, `the session never reported a rejected delete. It said:\n${said}`).toContain(
         "missing grant task.delete",
       );
       const stopped = parseJsonOutputOrFail<Session>(
         await runCli(["session", "stop", session.id, "--json"], { home: state.home, binary }),
       );
       expect(stopped.id).toBe(session.id);
-      // The stop is a request to the runner, so the row reaches `exited` when
-      // the machine says the process went away, not when the command returns.
+      // The stop is a request to the runner, so the row becomes `exited` when
+      // the machine reports that the process ended, not when the command
+      // returns.
       const deadline = Date.now() + 60_000;
       let after = await readSession({ home: state.home, binary, id: session.id });
       while (after.status !== "exited" && Date.now() < deadline) {

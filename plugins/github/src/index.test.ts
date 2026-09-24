@@ -1,10 +1,10 @@
 /**
- * The github plugin: what it puts in the catalog, and what it makes of what
- * GitHub answers.
+ * Tests the github plugin: what it adds to the catalog, and how it handles
+ * GitHub's responses.
  *
- * `validate` needs an `HttpClient` and nothing else, so the whole of it is
- * exercised here against a stub client: the request it builds is asserted as it
- * was handed over, and every answer GitHub can give is played back.
+ * `validate` needs an `HttpClient` and nothing else, so it is tested in full
+ * against a stub client: the test checks the request it builds, and replays
+ * every kind of response GitHub can give.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Result } from "effect";
@@ -20,7 +20,7 @@ import type {
 } from "@hercule/plugin-host";
 import { github } from "./index";
 
-/** Runs `register` and hands back everything the plugin contributed. */
+/** Runs `register` and returns everything the plugin contributed. */
 const collectContributions = async (
   plugin: Plugin,
 ): Promise<{
@@ -47,7 +47,7 @@ const collectContributions = async (
   return { types, sources };
 };
 
-/** The requests the stub was handed, and what it answered them with. */
+/** The requests the stub received, and the response it returned. */
 interface Stub {
   readonly layer: Layer.Layer<HttpClient.HttpClient>;
   readonly requests: Array<HttpClientRequest.HttpClientRequest>;
@@ -66,7 +66,7 @@ const stubHttpClient = (
   return { layer: Layer.succeed(HttpClient.HttpClient, client), requests };
 };
 
-/** A stub that answers every request with this status and body. */
+/** Builds a stub that responds to every request with this status and body. */
 const stubAnswer = (status: number, body: unknown): Stub =>
   stubHttpClient((request) =>
     Effect.succeed(
@@ -89,7 +89,7 @@ const readConnectionType = async (): Promise<ConnectionTypeContribution> => {
   return contribution;
 };
 
-/** Runs `validate` against a stub and hands back what it answered, either way. */
+/** Runs `validate` against a stub and returns its result, success or failure. */
 const runValidate = async (
   of: Stub,
 ): Promise<Result.Result<{ readonly displayName: string }, { readonly message: string }>> => {
@@ -99,7 +99,7 @@ const runValidate = async (
   );
 };
 
-/** The message a refusal carries, for the tests about what it says. */
+/** Returns the message of a failed validation. */
 const readFailureMessage = (
   outcome: Result.Result<{ readonly displayName: string }, { readonly message: string }>,
 ): string => {
@@ -107,7 +107,7 @@ const readFailureMessage = (
   return outcome.failure.message;
 };
 
-/** The roster the pipeline spec pins, spelled out because the roster is the claim. */
+/** The kinds the pipeline spec lists, written out because the list itself is what is tested. */
 const KINDS = [
   "github.notification",
   "github.issue.opened",
@@ -127,7 +127,7 @@ const KINDS = [
 ] as const;
 
 describe("what the github plugin registers", () => {
-  it("asks for the connections capability and contributes one credentials-flow type", async () => {
+  it("requests the connections capability and contributes one credentials-flow type", async () => {
     expect(github.manifest).toMatchObject({
       id: "github",
       capabilities: ["connections", "event-sources"],
@@ -150,7 +150,7 @@ describe("what the github plugin registers", () => {
     expect(contributions[0]?.oauth).toBeUndefined();
   });
 
-  it("contributes one event source declaring the whole kind roster", async () => {
+  it("contributes one event source that declares every kind", async () => {
     const sources = (await collectContributions(github)).sources;
 
     expect(sources).toHaveLength(1);
@@ -163,8 +163,8 @@ describe("what the github plugin registers", () => {
   });
 });
 
-describe("what the github plugin makes of GitHub's answer", () => {
-  it("asks who the token belongs to, as GitHub requires the question to be asked", async () => {
+describe("how the github plugin handles GitHub's response", () => {
+  it("asks which account the token belongs to, with the headers GitHub requires", async () => {
     const of = stubAnswer(200, { login: "octocat" });
 
     const outcome = await runValidate(of);
@@ -178,19 +178,19 @@ describe("what the github plugin makes of GitHub's answer", () => {
     expect(request?.headers["user-agent"] ?? "").not.toBe("");
   });
 
-  it("says the token was rejected when GitHub says the credentials are bad", async () => {
+  it("reports the token as rejected when GitHub returns 401", async () => {
     const outcome = await runValidate(stubAnswer(401, { message: "Bad credentials" }));
 
     expect(readFailureMessage(outcome)).toContain("rejected");
   });
 
-  it("names the status when GitHub is broken", async () => {
+  it("includes the status in the message when GitHub fails", async () => {
     const outcome = await runValidate(stubAnswer(500, { message: "Server Error" }));
 
     expect(readFailureMessage(outcome)).toContain("500");
   });
 
-  it("fails, saying something, when the request never got there", async () => {
+  it("fails with a message when the request never reached GitHub", async () => {
     const of = stubHttpClient((request) =>
       Effect.fail(
         new HttpClientError.HttpClientError({

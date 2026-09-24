@@ -11,7 +11,7 @@ describe("the grant vocabulary", () => {
     }
   });
 
-  it("carries event.audit, the verb the security entries of the log sit behind", () => {
+  it("includes event.audit, the grant that the security entries of the event log require", () => {
     expect(GRANT_FAMILIES.event).toContain("audit");
     expect(ALL_GRANTS).toContain("event.audit");
     expect(Effect.runSync(Schema.decodeUnknownEffect(GrantSchema)("event.audit"))).toBe(

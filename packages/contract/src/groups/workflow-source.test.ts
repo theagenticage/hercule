@@ -548,7 +548,7 @@ edges:
     ]);
   });
 
-  it("reports an agent that is not an id at its path, and says how to find Agent ids", () => {
+  it("reports an agent that is not an id at its path, with a message on how to find Agent ids", () => {
     const issues = collectIssues(`name: agent by name
 steps:
   - id: file_task
@@ -848,7 +848,7 @@ ${ONE_STEP}`);
     expect(issues[0]!.message).toContain("line 2, column 1");
   });
 
-  it("rejects !!str, !!binary, !!omap and a custom tag, each at its own path, and says to quote the value", () => {
+  it("rejects !!str, !!binary, !!omap and a custom tag, each at its own path, with a message to quote the value", () => {
     const issues = collectIssues(`name: tagged
 description: !!str 2026-09-23
 steps:
@@ -1044,7 +1044,7 @@ steps:
     ]);
   });
 
-  it("says what to write when a step is not a mapping", () => {
+  it("explains what to write when a step is not a mapping", () => {
     const issues = collectIssues(`name: bare word\nsteps: [review]\n`);
     expect(listIssuePaths(issues)).toEqual([["steps", "0"]]);
     expect(issues[0]!.message).toContain("Write a mapping of fields here");

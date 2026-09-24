@@ -1,13 +1,13 @@
 /**
- * Tasks, projects, the event log and the shipped plugins out of the release
- * binary.
+ * Tests tasks, projects, the event log and the shipped plugins through the
+ * release binary.
  *
  * Tasks, projects and the event log add no CLI code of their own: the commands
  * are derived from the contract's CLI table, so the only way to know they are
- * really there is to run the thing a release ships. The plugin registry is compiled in the same way,
- * so what a release boots with is only visible from a release. This suite runs
- * `./hercule` as the controller and as the CLI, which is why it is out of
- * `pnpm test`: `pnpm build:binary` first, then `pnpm test:binary`.
+ * really there is to run what a release ships. The plugin registry is compiled
+ * in too, so what a release starts with is only visible from a release. This
+ * suite runs `./hercule` as the controller and as the CLI, which is why it is
+ * out of `pnpm test`: `pnpm build:binary` first, then `pnpm test:binary`.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -31,11 +31,14 @@ const binary = join(ROOT, "hercule");
 let controller: Controller;
 let url: string;
 
-/** The CLI, as the binary, under the credential file the login wrote. */
+/** Runs the CLI binary with the credential file the login wrote. */
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, binary, stdin });
 
-/** Fails with the command's own output rather than on an undefined field. */
+/**
+ * Parses a command's JSON output. Fails with the command's own output, rather
+ * than later on an undefined field.
+ */
 const expectJsonOutput = (ran: { code: number; stdout: string; stderr: string }): unknown => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
   return parseJsonOutput(ran);
@@ -106,8 +109,8 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       projectId: project.id,
     });
 
-    // A task that matches neither filter, so a listing that answers with both
-    // rows would fail here rather than pass by accident.
+    // A task that matches neither filter, so a list that returns both rows
+    // would fail here rather than pass by accident.
     expectJsonOutput(
       await runLoggedInCli(["task", "create", "--title", "unrelated", "--json"], ""),
     );
@@ -155,8 +158,8 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
   }, 30_000);
 
   it("lists the four shipped plugins, each one active", async () => {
-    // No CLI command for plugins, so the route is called the way the web app
-    // does: the key the login above minted, straight over the wire.
+    // There is no CLI command for this, so the route is called the way the
+    // web app calls it: over HTTP, with the key the login above created.
     const response = await fetch(`${url}/api/v1/plugins`, {
       headers: { authorization: `Bearer ${readApiKey(state.home)}` },
     });
@@ -172,7 +175,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
     // The three harnesses are providers; github is the connection type and
-    // the event source declaring the kinds a GitHub event can be.
+    // the event source that declares the GitHub event kinds.
     expect(plugins.at(-1)?.capabilities).toEqual(["connections", "event-sources"]);
   }, 30_000);
 
@@ -181,13 +184,13 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("usage: hercule task <verb>");
     for (const verb of ["list", "read", "create", "update", "delete"]) {
-      // Each verb in its positional shape, with the grant it needs: what the
-      // tree built from the contract's CLI table produced.
+      // Each verb with its positional arguments and the grant it needs, as the
+      // command tree built from the contract's CLI table shows it.
       expect(help.stdout).toMatch(new RegExp(`^ {2}${verb}( <id>)? +grant task\\.`, "m"));
     }
 
-    // `create` is the row the criterion names: its grant on the verb line, and
-    // one line of what it does under it.
+    // For `create`, check the grant on the verb line, and one line describing
+    // what it does under it.
     const lines = help.stdout.split("\n");
     const create = lines.findIndex((line) => /^ {2}create +grant task\.create$/.test(line));
     expect(create, help.stdout).toBeGreaterThanOrEqual(0);

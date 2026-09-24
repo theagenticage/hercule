@@ -29,13 +29,13 @@ const omitKey = (message: Record<string, unknown>, key: string) => {
 };
 
 /**
- * The tags a union really holds, read off the schema rather than off the list
- * of examples below it, so a member added without a case here is caught.
+ * Lists the tags a union actually holds, read from the schema rather than from
+ * the list of examples below, so a member added without a test case is caught.
  */
 const listTags = (union: typeof RunnerToController | typeof ControllerToRunner): Array<string> =>
   union.members.flatMap((member) =>
-    // A frame whose shape depends on what it carries is a union of its own, and
-    // each of its members is still that frame's tag.
+    // A frame whose shape depends on its content is a union of its own, and
+    // each of its members has that frame's tag.
     "members" in member
       ? (member.members as ReadonlyArray<{ fields: { _tag: { literal: string } } }>).map(
           (nested) => nested.fields._tag.literal,
@@ -243,7 +243,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     ],
   },
   { _tag: "workspaceDispose", workspaceId: WORKSPACE_ID },
-  // D-21 F5: the git identity rides on `sessionStart`, not on every credential.
+  // The git identity is sent once on `sessionStart`, not with every credential.
   { _tag: "credentialAnswer", requestId: REQUEST_ID, token: "ghp_a-token", username: "octocat" },
   { _tag: "credentialAnswer", requestId: REQUEST_ID, error: "no_connection" },
 ];
@@ -262,16 +262,16 @@ describe("the runner-to-controller catalogue", () => {
     );
   });
 
-  it("holds exactly the members the round-trip cases cover", () => {
+  it("has exactly the members the round-trip cases cover", () => {
     expect(listTags(RunnerToController)).toEqual(runnerMessages.map((message) => message._tag));
   });
 
   /**
-   * D-21 F2: a machine that could not read a branch - a detached HEAD, or a git
-   * that would not answer - says null rather than a word standing in for one,
-   * and the wire has to carry that rather than refuse the report.
+   * A machine that could not read a branch - a detached HEAD, or a git command
+   * that failed - reports null rather than a placeholder word, and the wire
+   * has to accept that rather than reject the report.
    */
-  it("round-trips a checkout the machine could read no branch for", () => {
+  it("round-trips a checkout the machine could not read a branch for", () => {
     const report = {
       _tag: "workspaceReport",
       workspaceId: WORKSPACE_ID,
@@ -282,7 +282,7 @@ describe("the runner-to-controller catalogue", () => {
     expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(encoded))).toEqual(report);
   });
 
-  it("refuses a tag outside the union, including one the other direction owns", () => {
+  it("rejects a tag outside the union, including one from the other direction", () => {
     expect(decodeFromRunner({ _tag: "hello" })._tag).toBe("Failure");
     expect(decodeFromRunner({ _tag: "ping" })._tag).toBe("Failure");
     expect(decodeFromRunner({})._tag).toBe("Failure");
@@ -297,11 +297,11 @@ describe("the controller-to-runner catalogue", () => {
     );
   });
 
-  it("holds exactly the members the round-trip cases cover", () => {
+  it("has exactly the members the round-trip cases cover", () => {
     expect(listTags(ControllerToRunner)).toEqual(controllerMessages.map((message) => message._tag));
   });
 
-  it("refuses a tag outside the union, including one the other direction owns", () => {
+  it("rejects a tag outside the union, including one from the other direction", () => {
     expect(decodeFromController({ _tag: "hello" })._tag).toBe("Failure");
     expect(decodeFromController({ _tag: "goodbye" })._tag).toBe("Failure");
     expect(decodeFromController({})._tag).toBe("Failure");
@@ -310,13 +310,13 @@ describe("the controller-to-runner catalogue", () => {
 
 describe("the runner hello", () => {
   it.each(["protocolVersion", "capabilities", "binaryVersion", "nonce", "facts"])(
-    "refuses a hello without %s",
+    "rejects a hello without %s",
     (key) => {
       expect(decodeFromRunner(omitKey(runnerHello, key))._tag).toBe("Failure");
     },
   );
 
-  it("decodes a version that is not ours, so the mismatch is answered rather than dropped", () => {
+  it("decodes a version that is not ours, so the mismatch gets a reply rather than being dropped", () => {
     expect(decodeFromRunner({ ...runnerHello, protocolVersion: PROTOCOL_VERSION + 1 })._tag).toBe(
       "Success",
     );
@@ -331,13 +331,13 @@ describe("the runner hello", () => {
 });
 
 describe("the watermark a runner reports", () => {
-  it.each(["diskFreeBytes", "availableMemoryBytes"])("refuses a report without %s", (key) => {
+  it.each(["diskFreeBytes", "availableMemoryBytes"])("rejects a report without %s", (key) => {
     expect(
       decodeFromRunner({ _tag: "watermarkReport", watermark: omitKey(watermark, key) })._tag,
     ).toBe("Failure");
   });
 
-  it("says nothing about placement: whether the machine may be given work is not the machine's", () => {
+  it("drops a placement field: the controller, not the machine, decides whether it gets work", () => {
     const decoded = Effect.runSync(
       Schema.decodeUnknownEffect(RunnerToController)({
         _tag: "watermarkReport",
@@ -352,14 +352,14 @@ describe("the watermark a runner reports", () => {
 
 describe("the controller hello", () => {
   it.each(["protocolVersion", "capabilities", "identityId", "publicKey", "nonce", "signature"])(
-    "refuses a hello without %s",
+    "rejects a hello without %s",
     (key) => {
       expect(decodeFromController(omitKey(controllerHello, key))._tag).toBe("Failure");
     },
   );
 
   it.each(["publicKey", "nonce", "signature"])(
-    "refuses a %s that is not standard base64",
+    "rejects a %s that is not standard base64",
     (key) => {
       // The URL-safe alphabet is the mistake to catch: it looks like base64,
       // decodes to different bytes, and would surface as a bad signature.
@@ -384,7 +384,7 @@ describe("the controller hello", () => {
 });
 
 describe("the runner facts", () => {
-  it("takes an identity port inside the port range and nothing outside it", () => {
+  it("accepts an identity port inside the port range and nothing outside it", () => {
     const withPort = (identityPort: unknown) =>
       decodeFromRunner({ _tag: "factsReport", facts: { ...facts, identityPort } })._tag;
     expect(withPort(4939)).toBe("Success");
@@ -393,7 +393,7 @@ describe("the runner facts", () => {
     expect(withPort(65536)).toBe("Failure");
   });
 
-  it("takes a toolchain version it could not parse, but not an empty one", () => {
+  it("accepts a toolchain version the runner could not parse, but not an empty one", () => {
     const withVersion = (version: string) =>
       decodeFromRunner({
         _tag: "factsReport",
@@ -405,18 +405,18 @@ describe("the runner facts", () => {
 });
 
 describe("sequence numbers", () => {
-  it("rides the one frame that extends the envelope, and is required there", () => {
+  it("is carried by the one frame that extends the envelope, and is required there", () => {
     const event = runnerMessages.find((message) => message._tag === "sessionEvent");
     expect(decodeFromRunner(omitKey(event as Record<string, unknown>, "seq"))._tag).toBe("Failure");
   });
 
-  it("takes an integer of at least one", () => {
+  it("accepts an integer of at least one", () => {
     expect(decodeSequenced({ seq: 1 })).toBe("Success");
     expect(decodeSequenced({ seq: 9007199254740991 })).toBe("Success");
     expect(decodeFromController({ _tag: "ack", lastAckedSeq: 1 })._tag).toBe("Success");
   });
 
-  it("refuses zero, a negative, a fraction and a string", () => {
+  it("rejects zero, a negative, a fraction and a string", () => {
     expect(decodeSequenced({ seq: 0 })).toBe("Failure");
     expect(decodeSequenced({ seq: -1 })).toBe("Failure");
     expect(decodeSequenced({ seq: 1.5 })).toBe("Failure");
@@ -435,14 +435,14 @@ const buildProvisionMessage = (overrides: Record<string, unknown>): Record<strin
   ...overrides,
 });
 
-describe("the ids a machine makes a directory of", () => {
-  it("takes the identifiers the controller mints", () => {
+describe("the ids a machine uses as directory names", () => {
+  it("accepts the identifiers the controller creates", () => {
     expect(decodeFromController(buildProvisionMessage({}))._tag).toBe("Success");
   });
 
-  it("refuses anything that could be a path rather than a name", () => {
-    // The runner joins these into paths under its storage directory and a
-    // dispose removes what they name.
+  it("rejects anything that could be a path rather than a name", () => {
+    // The runner joins these into paths under its storage directory, and a
+    // dispose removes those paths.
     for (const workspaceId of ["../../etc", "a/b", "", "with space", ".."]) {
       expect(decodeFromController(buildProvisionMessage({ workspaceId }))._tag).toBe("Failure");
     }
@@ -451,7 +451,7 @@ describe("the ids a machine makes a directory of", () => {
     ).toBe("Failure");
   });
 
-  it("refuses a checkout whose resource or subdirectory could climb out of the workspace", () => {
+  it("rejects a checkout whose resource or subdirectory could escape the workspace", () => {
     const buildProvisionWithCheckout = (
       checkout: Record<string, unknown>,
     ): Record<string, unknown> =>
@@ -519,7 +519,7 @@ describe("the join answer", () => {
   const decode = (input: unknown) =>
     Effect.runSyncExit(Schema.decodeUnknownEffect(JoinAnswer)(input));
 
-  it("round-trips what the controller hands a joining machine", () => {
+  it("round-trips what the controller returns to a joining machine", () => {
     const decoded = decode(answer);
     expect(decoded._tag).toBe("Success");
     expect(Effect.runSync(Schema.encodeEffect(JoinAnswer)(answer))).toEqual(answer);
@@ -531,9 +531,9 @@ describe("the join answer", () => {
     }
   });
 
-  it("refuses a public key that is not standard base64, and an unbounded string", () => {
+  it("rejects a public key that is not standard base64, and a string that is too long", () => {
     // The URL-safe alphabet is a different encoding, and a key in it would
-    // fail later as a signature that will not verify.
+    // fail later as a signature that does not verify.
     expect(
       decode({ ...answer, controllerPublicKey: "IH5nqcbHvGUYs1n9-0sBnPGSNVYA3ZfCpZKDvXH7pqA=" })
         ._tag,
@@ -543,25 +543,25 @@ describe("the join answer", () => {
   });
 });
 
-describe("what a controller and the runner it spawned say over their pipes", () => {
+describe("the messages a controller and the runner it started exchange over their pipes", () => {
   const decodeAnnouncement = (input: unknown) =>
     Effect.runSyncExit(Schema.decodeUnknownEffect(LocalAnnouncement)(input));
   const decodeEnrolment = (input: unknown) =>
     Effect.runSyncExit(Schema.decodeUnknownEffect(LocalEnrolment)(input));
 
-  it("carries the two things a child can be, and nothing between them", () => {
+  it("accepts the two things a child can announce, and nothing else", () => {
     const enrolled = { runnerId: "0199e0e7-1111-7000-8000-000000000000" };
     expect(decodeAnnouncement(enrolled)._tag).toBe("Success");
     expect(Effect.runSync(Schema.encodeEffect(LocalAnnouncement)(enrolled))).toEqual(enrolled);
     expect(decodeAnnouncement({ join: true })._tag).toBe("Success");
-    // A child that says nothing, says both, or says it is not joining is a
-    // child the controller cannot place: none of them is an answer.
+    // An empty announcement, `join: false` or an empty runner id leaves the
+    // controller unable to place the child, so none of them decodes.
     expect(decodeAnnouncement({})._tag).toBe("Failure");
     expect(decodeAnnouncement({ join: false })._tag).toBe("Failure");
     expect(decodeAnnouncement({ runnerId: "" })._tag).toBe("Failure");
   });
 
-  it("hands back where to join and the token to join with, both required", () => {
+  it("returns where to join and the token to join with, both required", () => {
     const enrolment = { controllerUrl: "http://127.0.0.1:4937", token: "a-join-token" };
     expect(decodeEnrolment(enrolment)._tag).toBe("Success");
     expect(Effect.runSync(Schema.encodeEffect(LocalEnrolment)(enrolment))).toEqual(enrolment);

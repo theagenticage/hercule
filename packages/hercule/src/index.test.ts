@@ -98,7 +98,7 @@ describe("dispatch", () => {
   });
 
   // git always names an action. A bare `hercule git-credential` must not read as
-  // `hercule runner` and start a daemon, so the word itself rides along.
+  // `hercule runner` and start a daemon, so the verb itself is passed along.
   it("keeps git-credential in the line when no action follows it", async () => {
     await dispatch(["git-credential"]);
     expect(run.runner).toHaveBeenCalledWith(["git-credential"]);

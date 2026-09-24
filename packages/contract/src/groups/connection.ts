@@ -1,10 +1,10 @@
 /**
  * Connections: one record per external account Hercule acts through.
  *
- * The type is a plugin contribution, so what a connection takes to set up - its
- * fields, its config schema - is read from the plugin catalog rather than from
- * here. What is here is the core-owned record: who the account is, where it
- * stands, and which secrets it owns.
+ * The type is a plugin contribution, so what a connection needs to be set up -
+ * its fields, its config schema - comes from the plugin catalog rather than
+ * from here. This file holds the record the core owns: which account it is,
+ * its status, and which secrets it owns.
  *
  * A `type` anywhere below is `<pluginId>/<word>`, as the catalog lists it. It
  * is one opaque string: a client passes back what the catalog gave it and never
@@ -32,14 +32,14 @@ import { Authenticated } from "../security";
 import { atMost, bounded, SecretValue } from "../strings";
 import { Label, MAX_TASK_LABELS } from "./task";
 
-/** Re-exported from the package plugins are written against: one list, two readers. */
+/** Re-exported from the package plugins are written against, so both use the same list. */
 export { ConnectionStatus } from "@hercule/plugin-host";
 
 /**
- * The shipped GitHub type, by the qualified id the host mints for it. A repo's
- * credential is a GitHub token, so a repo may act through no other account, and
- * every reader of that rule - the controller, the CLI, the web app's account
- * pickers - names it from here rather than spelling the id again.
+ * The qualified id of the shipped GitHub connection type. A repo's credential
+ * is a GitHub token, so a repo can act through no other kind of account. Every
+ * place that applies this rule - the controller, the CLI, the web app's
+ * account pickers - imports the id from here rather than writing it again.
  */
 export const GITHUB_CONNECTION_TYPE = "github/github";
 
@@ -55,22 +55,21 @@ const ConnectionLabel = bounded(1, MAX_CONNECTION_LABEL_LENGTH);
 const Topics = atMost(Label, MAX_TASK_LABELS).check(Schema.isMinLength(1));
 
 /**
- * Where the browser is, as an origin and nothing else: scheme and host, no path
- * and no trailing slash. The redirect URI is this with the callback path put
- * after it, and it has to come out byte for byte as what the user registered
- * with the provider, so the shape is pinned here rather than normalised on
- * either side.
+ * The browser's origin and nothing else: scheme and host, with no path and no
+ * trailing slash. The redirect URI is this origin followed by the callback
+ * path, and it must match what the user registered with the provider byte for
+ * byte, so the shape is fixed here rather than normalised on either side.
  */
 const Origin = Schema.String.check(
   Schema.isPattern(/^https?:\/\/[^/?#]+$/, {
-    message: "an origin is a scheme and a host with no path, like https://hercule.example",
+    message: "Write the origin as a scheme and a host with no path, like https://hercule.example.",
   }),
 );
 
-/** A connection's own plugin config, against the type's declared schema. */
+/** A connection's own plugin config, validated against the type's declared schema. */
 const Config = Schema.Record(Schema.String, Schema.Json);
 
-/** What the user pastes, by the field names the type declared. */
+/** The credential values the user pastes, keyed by the field names the type declared. */
 const Credentials = Schema.Record(Schema.String, SecretValue);
 
 /** One secret the connection owns. The name, and when it was last replaced. */
@@ -85,7 +84,7 @@ export const Connection = Schema.Struct({
   id: Id,
   type: Schema.String,
   label: ConnectionLabel,
-  /** The account name the type's own `validate` answered with. */
+  /** The account name the type's own `validate` returned. */
   displayName: Schema.String,
   status: ConnectionStatus,
   statusDetail: Schema.optionalKey(Schema.String),
@@ -111,7 +110,7 @@ export const ConnectionCreateInput = Schema.Struct({
 
 export type ConnectionCreateInput = Schema.Schema.Type<typeof ConnectionCreateInput>;
 
-/** What editing a connection takes: what the user chose, never the account. */
+/** The payload of `connection.update`: what the user chose, never the account. */
 export const ConnectionUpdateInput = Schema.Struct({
   label: Schema.optionalKey(ConnectionLabel),
   labels: Schema.optionalKey(Topics),
@@ -126,12 +125,13 @@ export const ConnectionCredentialsInput = Schema.Struct({ credentials: Credentia
 export type ConnectionCredentialsInput = Schema.Schema.Type<typeof ConnectionCredentialsInput>;
 
 /**
- * What starting a redirect flow takes. `origin` is where the browser is: the
- * controller cannot see it, and the redirect URI built from it is what the user
- * registered with the provider, so it has to be the browser's own.
+ * The payload for starting a redirect flow. `origin` is the browser's origin:
+ * the controller cannot see it, and the redirect URI built from it must match
+ * what the user registered with the provider, so it has to come from the
+ * browser.
  *
- * `label`, `labels` and `config` are optional because a reconnect already has
- * them on the connection it names.
+ * `label`, `labels` and `config` are optional because on a reconnect, the
+ * existing connection already has them.
  */
 export const ConnectionOAuthStartInput = Schema.Struct({
   type: Schema.String,
@@ -168,8 +168,8 @@ export const connection = HttpApiGroup.make("connection")
     }),
     HttpApiEndpoint.post("create", "/connections", {
       payload: ConnectionCreateInput,
-      // A connection that did not exist before the request, so `201` and not
-      // the `200` an edit answers with.
+      // The request creates a new connection, so it returns `201` rather than
+      // the `200` an edit returns.
       success: HttpApiSchema.status(201)(Connection),
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
@@ -177,8 +177,8 @@ export const connection = HttpApiGroup.make("connection")
       params: { id: Id },
       payload: ConnectionUpdateInput,
       success: Connection,
-      // `invalid_state`: the stored row names a type this build no longer
-      // defines, which is the build's to fix and not the request's.
+      // `invalid_state`: the stored row has a type this build no longer
+      // defines. A different build fixes that, not a different request.
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("delete", "/connections/:id", {
@@ -190,8 +190,8 @@ export const connection = HttpApiGroup.make("connection")
       params: { id: Id },
       payload: ConnectionCredentialsInput,
       success: Connection,
-      // `invalid_state`: as on `update`, a row whose type this build no longer
-      // defines.
+      // `invalid_state`: as on `update`, the row has a type this build no
+      // longer defines.
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     // Not under `/connections`: what it starts is a setup, and a setup is not a
@@ -199,9 +199,9 @@ export const connection = HttpApiGroup.make("connection")
     HttpApiEndpoint.post("startOAuth", "/oauth/start", {
       payload: ConnectionOAuthStartInput,
       success: ConnectionOAuthStart,
-      // `invalid_state`: the plugin that owns the type holds no client
-      // credentials, which is the user's to fix in Settings and not the
-      // request's.
+      // `invalid_state`: the plugin that owns the type has no client
+      // credentials. The user fixes that in Settings; a different request
+      // cannot.
       error: [Unauthenticated, Forbidden, Validation, InvalidState, Internal],
     }),
   )

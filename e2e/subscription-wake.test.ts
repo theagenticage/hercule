@@ -1,19 +1,20 @@
 /**
- * The long-wait pattern, end to end, out of the release binary: a real session
- * subscribes to an External Ref and ends its turn, a person emits an event
- * carrying that ref from a terminal, and the session's next turn opens with the
- * rendered event.
+ * Tests the long-wait pattern end to end through the release binary: a real
+ * session subscribes to an External Ref and ends its turn, a person emits an
+ * event with that ref from a terminal, and the session's next turn starts with
+ * the rendered event.
  *
- * Nothing is arranged behind the agent's back. The subscription is created by
- * the `hercule` binary the runner put on the session's PATH, called by the
- * model out of a bare process against the token the runner injected; the emit
- * is a separate credential over the same public API.
+ * Nothing is done behind the agent's back. The model creates the subscription
+ * by running the `hercule` binary the runner put on the session's PATH, from a
+ * bare process, with the token the runner injected; the emit uses a separate
+ * credential over the same public API.
  *
- * Opt-in, like `session.test.ts` beside it: it spends the developer's tokens
- * and takes a couple of minutes. `HERCULE_LIVE_SESSION_TEST=1` asks for it.
+ * Opt-in, like `session.test.ts`: it spends the developer's tokens and takes a
+ * couple of minutes. Set `HERCULE_LIVE_SESSION_TEST=1` to run it.
  *
- * The login it runs on is lent for the run, by either of the two routes
- * `e2e/harness.ts` documents; with neither the case skips saying so.
+ * The login it runs on is provided for the run by either of the two routes
+ * `e2e/harness.ts` documents; with neither, the case is skipped with a
+ * message.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -42,7 +43,7 @@ import {
   type Session,
 } from "./harness";
 
-/** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
+/** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
 const state = createTemporaryHome();
@@ -58,7 +59,7 @@ const TURN_DEADLINE_MS = 240_000;
 /** Long enough for one tick of the event pipeline, the delivery, and the woken turn. */
 const WAKE_DEADLINE_MS = 240_000;
 
-/** What the session waits for, and the event that arrives carrying it. */
+/** What the session waits for, and the event that arrives with it. */
 const REF = "github:pr:o/r#87";
 const KIND = "github.pr.merged";
 const TITLE = "Close the lid when the run ends";
@@ -68,9 +69,9 @@ const PAYLOAD = JSON.stringify({
 });
 
 /**
- * The command is spelled out because the point of the case is the wake-up, not
- * whether the model can find the command; what it does on its own is end the
- * turn instead of waiting, which is the whole pattern.
+ * The prompt spells out the command, because this case tests the wake-up, not
+ * whether the model can find the command. What the model has to do on its own
+ * is end the turn instead of waiting, which is the whole pattern.
  */
 const PROMPT =
   "Using the hercule CLI on your PATH, run exactly this command: " +
@@ -101,29 +102,29 @@ const prepare = async (): Promise<Ready> => {
   expect(worker, "the shipped worker profile is not seeded").not.toBe(undefined);
   return {
     profileId: worker!.id,
-    // The cheapest model that answers, when this machine reported one.
+    // The cheapest model that works, when this machine reported one.
     model: snapshot.models.find((one) => one.slug.includes("haiku"))?.slug,
   };
 };
 
-/** Waits until the session is idle, which is the turn ending for good. */
+/** Waits until the session is idle, which means the turn has ended for good. */
 const waitUntilIdle = async (id: string): Promise<void> => {
   const deadline = Date.now() + TURN_DEADLINE_MS;
   for (;;) {
     const session = await readSession({ home: state.home, binary, id });
     if (session.status === "idle") return;
     if (Date.now() > deadline) {
-      throw new Error(`the session read ${session.status} rather than idle`);
+      throw new Error(`the session is ${session.status} rather than idle`);
     }
     await Bun.sleep(1_000);
   }
 };
 
-/** How many turns the transcript holds, which is what a wake-up adds one to. */
+/** Counts the turns in the transcript; a wake-up adds one. */
 const countTurns = (rows: ReadonlyArray<Row>): number =>
   rows.filter((row) => row.event._tag === "turn.started").length;
 
-/** The transcript once a turn after `before` has started. */
+/** Waits until a turn after the first `before` turns has started, and returns the transcript. */
 const waitForAnotherTurn = async (id: string, before: number): Promise<ReadonlyArray<Row>> => {
   const deadline = Date.now() + WAKE_DEADLINE_MS;
   for (;;) {
@@ -166,7 +167,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await controller?.stop().catch(() => -1);
-  // The lent credential lives in here, so this is not housekeeping.
+  // The copied credential is in here, so removing the home matters for
+  // security, not just tidiness.
   state.remove();
 });
 
@@ -190,8 +192,8 @@ describe.skipIf(!wanted)("an event waking a session that subscribed to it", () =
             "--profile",
             ready.profileId,
             ...(ready.model === undefined ? [] : ["--model", ready.model]),
-            // The session runs unattended, and its one command is an approval
-            // nobody is there to answer.
+            // The session runs unattended, and its one command would otherwise
+            // wait for an approval nobody is there to give.
             "--access-mode",
             "full-access",
             "--json",
@@ -220,8 +222,8 @@ describe.skipIf(!wanted)("an event waking a session that subscribed to it", () =
 
       const woken = await waitForAnotherTurn(session.id, before);
 
-      // What the woken turn was opened with: the rendered event, carrying the
-      // kind, what happened, and where a person opens it.
+      // What the woken turn started with: the rendered event, with the kind,
+      // what happened, and where a person opens it.
       const delivered = JSON.stringify(woken.slice(first.length));
       expect(
         delivered,
