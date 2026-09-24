@@ -145,7 +145,8 @@ export function RunScreen({
               <StepTimeline timeline={buildTimeline(run, now)} isLive={isLive} now={now} />
             )}
           </section>
-          <section aria-labelledby="run-inputs" className="w-[340px] shrink-0">
+          {/* Wide enough for a quoted id beside a name of up to ten characters, so an id input shows whole. */}
+          <section aria-labelledby="run-inputs" className="w-[400px] shrink-0">
             <div className={SECTION_HEADING}>
               <LaneLabel id="run-inputs" className="mb-0">
                 Inputs
