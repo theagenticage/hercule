@@ -87,7 +87,9 @@ export const buildHolderEndedReason = (sessionId: string): string =>
 
 /** The reason each target kind that this version cannot wait on is rejected. */
 const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref">, string> = {
-  run: "no runs exist yet, so there is no run to wait on; wait on an External Ref instead",
+  run:
+    "no run.* platform events are emitted yet, so a run target would never match; " +
+    "follow the run with run.read, or wait on an External Ref instead",
   session:
     "no session.* platform events are emitted yet, so a session target would never match; " +
     "wait on an External Ref instead",

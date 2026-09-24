@@ -555,6 +555,7 @@ describe("the workflow action catalog", () => {
       "core task.create",
       "core task.query",
       "core task.update",
+      "core workflow.run",
       "notes notes/note.append",
     ]);
   });
@@ -584,6 +585,7 @@ describe("the workflow action catalog", () => {
       "task.create",
       "task.query",
       "task.update",
+      "workflow.run",
     ]);
   });
 });

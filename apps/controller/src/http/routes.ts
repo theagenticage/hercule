@@ -297,14 +297,21 @@ const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
       .handle("validate", ({ payload }) => withApiErrors(workflows.validate(payload)))
       .handle("run", ({ params, payload }) =>
         withApiErrors(engine.startWorkflowRun({ id: params.id, ...payload })),
-      );
+      )
+      .handle("submit", ({ payload }) => withApiErrors(engine.submitWorkflow(payload)));
   }),
 );
 
 const runRoutes = HttpApiBuilder.group(api, "run", (handlers) =>
   Effect.gen(function* () {
     const runs = yield* RunService;
-    return handlers.handle("read", ({ params }) => withApiErrors(runs.read(params)));
+    // Cancelling a run stops the fiber that executes it, which only the run
+    // engine holds.
+    const engine = yield* RunEngine;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(runs.query(query)))
+      .handle("read", ({ params }) => withApiErrors(runs.read(params)))
+      .handle("cancel", ({ params }) => withApiErrors(engine.cancelRun(params)));
   }),
 );
 

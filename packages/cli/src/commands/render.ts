@@ -6,12 +6,14 @@
  * single object becomes aligned key-value lines, and ids are shortened to the
  * tail the CLI accepts back as an argument.
  */
+import { formatAge } from "@hercule/client-core";
 import {
   truncateText,
   formatIssue,
   type Run,
   type RunOrigin,
   type RunStarted,
+  type RunSummary,
   type StepRecord,
   type StructuredResult,
   type Workflow,
@@ -108,9 +110,9 @@ const renderKeyValues = (
 };
 
 /**
- * Formats a value like `formatCell`, but keeps an id whole. A command whose
- * ids no list operation resolves from a tail prints them in full, so they can
- * be passed back.
+ * Formats a value like `formatCell`, but keeps an id whole. The run commands
+ * print a run's id in full, as `workflow run` prints the id it starts, so the
+ * id a reader copies from one run command is the same in every other.
  */
 const formatKeepingIds = (item: unknown): string =>
   typeof item === "string" ? item : formatCell(item);
@@ -244,9 +246,10 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
 };
 
 /**
- * Returns the lines printed after `workflow run`: the new run's full id, and
- * the command that shows how far it got. The id is printed in full because
- * `run read` takes only a full id.
+ * Returns the lines printed after `workflow run` and `workflow submit`: the
+ * new run's full id, and the command that shows how far it got. The hint
+ * points at `run read` rather than a subscription, because the controller
+ * does not accept a subscription on a run yet.
  */
 const renderRunStarted = (answer: RunStarted): ReadonlyArray<string> => [
   `run ${answer.runId} started`,
@@ -264,6 +267,36 @@ const describeOrigin = (origin: RunOrigin): string => {
       return `step ${origin.stepId} of run ${origin.parentRunId}`;
   }
 };
+
+/**
+ * Returns a run as a row of `run list`: its id, status, workflow, who started
+ * it, and its age. The failure reason follows the status of a failed run,
+ * because it is the first thing a reader of a failed run wants to know.
+ */
+const summarizeRun = (run: RunSummary, now: Date): Record<string, unknown> => ({
+  id: run.id,
+  status: run.failureReason === undefined ? run.status : `${run.status} (${run.failureReason})`,
+  workflow: run.workflowName,
+  startedBy: describeOrigin(run.origin),
+  age: formatAge(run.createdAt, now),
+});
+
+/** Returns the rows of `run list` as a table. */
+const renderRunList = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
+  const now = new Date();
+  return renderTable(rows.map((row) => summarizeRun(row as unknown as RunSummary, now)));
+};
+
+/**
+ * Returns the lines printed after `run cancel`: that the run is cancelled,
+ * and the command that shows what its steps did. The whole run is left to
+ * `run read`. The id is printed in full, as every run command prints it.
+ */
+const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
+  `run ${run.id} cancelled`,
+  "",
+  `see what its steps did with \`hercule run read ${run.id}\``,
+];
 
 /**
  * Returns how long a step took, such as `1.2s`, or nothing when it has not
@@ -311,7 +344,12 @@ const renderRun = (run: Run): ReadonlyArray<string> => [
 
 /** Returns the lines the CLI prints for a successful command without `--json`. */
 export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
-  const asLines = command.id === "transcript.read" ? renderTranscript : renderTable;
+  const asLines =
+    command.id === "transcript.read"
+      ? renderTranscript
+      : command.id === "run.query"
+        ? renderRunList
+        : renderTable;
 
   if (outcome.kind === "items") return asLines(outcome.items);
 
@@ -347,8 +385,11 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
       return renderWorkflowSaveResult(value as WorkflowSaveResult);
     }
     if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
-    if (command.id === "workflow.run") return renderRunStarted(value as RunStarted);
+    if (command.id === "workflow.run" || command.id === "workflow.submit") {
+      return renderRunStarted(value as RunStarted);
+    }
     if (command.id === "run.read") return renderRun(value as Run);
+    if (command.id === "run.cancel") return renderRunCancelled(value as Run);
     const lines = [...renderKeyValues(record)];
     // The only hint this build prints after a command. A caller who has just
     // spawned a session wants to watch it. The hint does not suggest a

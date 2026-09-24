@@ -762,7 +762,10 @@ export const CLI = {
   "event.query": {
     command: "event list",
     help: "Reads the event log: external events and audit entries in one format, told apart by their kind. Use it to see what the system received and what it did about it. Security entries - the secret, auth and user account kinds - need the event.audit grant; without it they are simply absent from the page, and filtering by one of those kinds returns nothing.",
-    examples: [{ args: ["--kind", "task.created"] }, { args: ["--since", "2026-09-15T00:00:00Z"] }],
+    examples: [
+      { args: ["--kind", "task.created"] },
+      { args: ["--since", "2026-09-15T00:00:00.000Z"] },
+    ],
     fields: {
       connectionId: {
         flag: "connection",
@@ -772,8 +775,14 @@ export const CLI = {
         flag: "kind",
         help: "One exact event kind, such as task.created or github.issue.opened.",
       },
-      since: { flag: "since", help: "Only events received at or after this RFC 3339 instant." },
-      until: { flag: "until", help: "Only events received at or before this RFC 3339 instant." },
+      since: {
+        flag: "since",
+        help: "Only events received at or after this UTC instant, with milliseconds: 2026-09-15T00:00:00.000Z.",
+      },
+      until: {
+        flag: "until",
+        help: "Only events received at or before this UTC instant, with milliseconds.",
+      },
     },
   },
   "event.read": {
@@ -1041,7 +1050,7 @@ export const CLI = {
   },
   "workflow.delete": {
     command: "workflow delete",
-    help: "Deletes a workflow and its triggers. Its source is deleted too, so save it first with `hercule workflow read` if you might need it again.",
+    help: "Deletes a workflow and its triggers. Its source is deleted too, so save it first with `hercule workflow read` if you might need it again. Its finished runs are kept, each with its own copy of the workflow.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -1049,6 +1058,10 @@ export const CLI = {
         help: "The workflow's id, or a tail of eight or more characters.",
         resolves: "workflow.query",
       },
+    },
+    errors: {
+      invalid_state:
+        "a run of the workflow is still pending or running; wait for it to finish, or cancel it with `hercule run cancel`",
     },
   },
   "workflow.validate": {
@@ -1108,6 +1121,48 @@ export const CLI = {
         "the workflow is no longer valid, or an input is unknown, missing or has the wrong value: each printed line gives the path and the problem; no run was started",
     },
   },
+  "workflow.submit": {
+    command: "workflow submit",
+    help: "Runs the workflow YAML read from stdin once, without storing it. Prints the run's id at once. The YAML is checked like `hercule workflow create` checks it, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. Use it to try a workflow once before saving it. Follow the run with `hercule run read <id>`.",
+    examples: [
+      {
+        args: ["--inputs", '{"title":"Fix login"}'],
+        stdin: [
+          "name: File a task",
+          "inputs:",
+          "  - name: title",
+          "    schema: { type: string }",
+          "    required: true",
+          "steps:",
+          "  - id: file_task",
+          "    kind: action",
+          "    action: task.create",
+          "    params:",
+          '      title: "{{ inputs.title }}"',
+          "      description: Filed by a submitted workflow.",
+        ].join("\n"),
+      },
+    ],
+    fields: {
+      source: {
+        stdin: true,
+        flag: "source",
+        help: "The workflow's YAML source. It is validated and run, and never stored.",
+        required: true,
+      },
+      // The `definition` object is for programs that build a workflow in code.
+      // On the command line a workflow is always YAML text read from stdin.
+      definition: { hidden: true },
+      inputs: {
+        flag: "inputs",
+        help: "A JSON object with a value for each input the workflow declares, by name; an input left out takes its default.",
+      },
+    },
+    errors: {
+      validation:
+        "the source is not a valid workflow, or an input is unknown, missing or has the wrong value: each printed line gives the path and the problem; no run was started",
+    },
+  },
 
   "trigger.query": {
     command: "trigger list",
@@ -1153,18 +1208,63 @@ export const CLI = {
     fields: {},
   },
 
+  "run.query": {
+    command: "run list",
+    help: "Lists runs, newest first. Each row shows the run's status, its workflow, who started it, and its age. Use it to find the id that `hercule run read` and `hercule run cancel` take.",
+    examples: [
+      { args: [] },
+      { args: ["--status", "failed"] },
+      { args: ["--workflow", "1f3a9c2e", "--since", "2026-09-24T00:00:00.000Z"] },
+    ],
+    fields: {
+      workflowId: {
+        flag: "workflow",
+        help: "Only the runs of this workflow, by its id or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      status: {
+        flag: "status",
+        help: "Only runs with this status: pending, running, completed, failed or cancelled.",
+      },
+      since: {
+        flag: "since",
+        help: "Only runs created at or after this UTC instant, with milliseconds: 2026-09-24T00:00:00.000Z.",
+      },
+      until: {
+        flag: "until",
+        help: "Only runs created at or before this UTC instant, with milliseconds.",
+      },
+      actor: {
+        flag: "actor",
+        help: "Only runs started by this actor: user, session:<id>, or run:<id> for the runs a run started.",
+      },
+    },
+  },
   "run.read": {
     command: "run read",
     help: "Shows one run: its status, why it failed if it did, and what each step did. The output lists the inputs the run started with, and one line per step with its status, how long it took and its error. --json prints the whole record, including the frozen workflow definition and every step's output.",
-    examples: [
-      { args: ["01a0d2b7-1f7b-74e7-b542-770eab27cb2a"] },
-      { args: ["01a0d2b7-1f7b-74e7-b542-770eab27cb2a", "--json"] },
-    ],
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--json"] }],
     fields: {
       id: {
         positional: true,
-        help: "The run's full id, as `hercule workflow run` printed it.",
+        help: "The run's id, or a tail of eight or more characters.",
+        resolves: "run.query",
       },
+    },
+  },
+  "run.cancel": {
+    command: "run cancel",
+    help: "Cancels a run that is pending or running. The step running now is cancelled with it, and no later step starts. What a finished step did stays done. Check the result with `hercule run read`.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The run's id, or a tail of eight or more characters.",
+        resolves: "run.query",
+      },
+    },
+    errors: {
+      invalid_state: "the run has already completed, failed or been cancelled",
     },
   },
 
@@ -2244,7 +2344,7 @@ export const NOUNS = {
   workflow: {
     summary:
       "Workflows: automations written as YAML - what starts them, the steps they run, and where those steps run.",
-    flow: "hercule workflow validate checks a source from stdin, hercule workflow create stores one, hercule workflow read prints its source, hercule workflow update replaces the source or enables the workflow, hercule workflow run starts a run of it, hercule workflow delete removes it.",
+    flow: "hercule workflow validate checks a source from stdin, hercule workflow create stores one, hercule workflow read prints its source, hercule workflow update replaces the source or enables the workflow, hercule workflow run starts a run of it, hercule workflow submit runs a source from stdin without storing it, hercule workflow delete removes it.",
   },
   trigger: {
     summary:
@@ -2259,7 +2359,7 @@ export const NOUNS = {
   run: {
     summary:
       "Runs: a workflow's steps carried out once, each run with a frozen copy of the workflow.",
-    flow: "hercule workflow run starts one, hercule run read shows how far it got.",
+    flow: "hercule workflow run starts one, hercule run list shows the latest, hercule run read shows how far one got, hercule run cancel stops one.",
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",

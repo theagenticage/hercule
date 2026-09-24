@@ -17,7 +17,8 @@
  * No runner is connected: action steps run on the controller.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
+import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
 import type { Task } from "@hercule/contract";
 import {
   collectMessages,
@@ -33,10 +34,12 @@ import { WAIT_DEADLINE_MS } from "../sessions/testing";
 import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../workflows/testing";
 import {
   buildCreateStep,
+  expectRefusedAt,
   FILE_AND_START_DEFINITION,
   findRecords,
   listTasks,
   readTask,
+  requestRun,
   runEffect,
   startRun,
   waitForRunToFinish,
@@ -126,6 +129,127 @@ describe("a run subscription", () => {
         }),
       );
     });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Executing a plugin's action.                                              */
+/* ------------------------------------------------------------------------ */
+
+/** A workflow whose one step calls the notes plugin's action, then files a task. */
+const NOTE_THEN_TASK_DEFINITION = {
+  name: "Append a note, then file a task",
+  steps: [
+    { id: "note", kind: "action", action: NOTE_APPEND_ACTION_ID, params: { text: "hi" } },
+    {
+      id: "create",
+      kind: "action",
+      action: "task.create",
+      params: { title: "Note {{ steps.note.output.noteId }}", description: "" },
+    },
+  ],
+  edges: [{ from: "note", to: "create" }],
+};
+
+/** Runs `NOTE_THEN_TASK_DEFINITION` with the notes action executing as `execute`, and returns the finished run. */
+const runNoteAction = async (
+  execute: WorkflowActionContribution["execute"],
+  check: (
+    run: Awaited<ReturnType<typeof waitForRunToFinish>>,
+    base: string,
+    token: string,
+  ) => Promise<void>,
+): Promise<void> =>
+  withSetUpController(
+    async ({ base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: NOTE_THEN_TASK_DEFINITION,
+      });
+      await check(
+        await waitForRunToFinish(base, token, await startRun(base, token, workflow.id)),
+        base,
+        token,
+      );
+    },
+    [buildActionPlugin("notes", { ...NOTE_APPEND_ACTION, execute })],
+  );
+
+describe("a run of a plugin's action", () => {
+  it("calls the action with the rendered params and the run, and the next step reads its output", async () => {
+    const calls: Array<{ input: unknown; run: unknown }> = [];
+    await runNoteAction(
+      (input, context) =>
+        Effect.sync(() => {
+          calls.push({ input, run: context.run });
+          return { noteId: "n-7" };
+        }),
+      async (run, base, token) => {
+        expect(run.status, JSON.stringify(run)).toBe("completed");
+        expect(findRecords(run, "note")[0]?.output).toEqual({ noteId: "n-7" });
+        expect(calls).toEqual([{ input: { text: "hi" }, run: { runId: run.id, stepId: "note" } }]);
+        expect((await listTasks(base, token)).map((task) => task.title)).toEqual(["Note n-7"]);
+      },
+    );
+  });
+
+  it("fails the step with the code and message of the action's ActionError", async () => {
+    await runNoteAction(
+      () => Effect.fail(new ActionError({ code: "rate_limited", message: "Too many notes." })),
+      async (run, base, token) => {
+        expect(run.status, JSON.stringify(run)).toBe("failed");
+        expect(run.failureReason).toBe("step-failed");
+        expect(run.failedStepId).toBe("note");
+        expect(findRecords(run, "note")[0]?.error).toEqual({
+          code: "rate_limited",
+          message: "Too many notes.",
+        });
+        expect(findRecords(run, "create")).toEqual([]);
+        expect(await listTasks(base, token)).toEqual([]);
+      },
+    );
+  });
+
+  it("fails the step with unexpected when the action throws, or returns a value its output schema refuses", async () => {
+    for (const execute of [
+      () =>
+        Effect.sync((): unknown => {
+          throw new Error("the plugin broke");
+        }),
+      () => Effect.succeed({ noteId: 7 }),
+    ] as ReadonlyArray<WorkflowActionContribution["execute"]>) {
+      await runNoteAction(execute, async (run, base, token) => {
+        expect(run.status, JSON.stringify(run)).toBe("failed");
+        expect(run.failedStepId).toBe("note");
+        expect(findRecords(run, "note")[0]?.error?.code).toBe("unexpected");
+        expect(findRecords(run, "create")).toEqual([]);
+        expect(await listTasks(base, token)).toEqual([]);
+      });
+    }
+  });
+
+  it("is refused at start when the action acts through a Connection", async () => {
+    const connectionAction = buildActionPlugin("notes", {
+      ...NOTE_APPEND_ACTION,
+      connection: { type: "notes/notes" },
+      input: Schema.Struct({ text: Schema.String }),
+    });
+    await withSetUpController(
+      async ({ harness, base, token }) => {
+        const workflow = await createWorkflowOrFail(base, token, {
+          definition: {
+            name: "Append a note",
+            steps: [
+              { id: "note", kind: "action", action: NOTE_APPEND_ACTION_ID, params: { text: "hi" } },
+            ],
+          },
+        });
+
+        await expectRefusedAt(harness, await requestRun(base, token, workflow.id), [
+          ["steps", "0", "action"],
+        ]);
+      },
+      [connectionAction],
+    );
   });
 });
 

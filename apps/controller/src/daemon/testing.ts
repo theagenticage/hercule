@@ -18,13 +18,17 @@
  * sample workflows.
  */
 import { expect } from "vitest";
-import { Duration, Effect, Layer } from "effect";
+import { Duration, Effect, Layer, Schema } from "effect";
 import type { ModelDescriptor, RunnerFacts, SessionInput } from "@hercule/protocol";
-import type { Plugin } from "@hercule/plugin-host";
+import type { ActionContext, Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
-import type { Issue, Run, RunStatus, StepRecord, Task } from "@hercule/contract";
+import type { Issue, Run, RunStatus, RunSummary, StepRecord, Task } from "@hercule/contract";
 import { get, post, type ServerHarness } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import {
+  buildActionPlugin,
+  createPluginFixture,
+  buildProviderDefinition,
+} from "../plugins/testing";
 import { EvaluationErrorNotifier } from "../subscriptions";
 import {
   spawnAgentWithGrants,
@@ -648,3 +652,160 @@ export const buildCreateStep = (id: string, extra: Record<string, unknown> = {})
   params: { title: `File the ${id} task`, description: "" },
   ...extra,
 });
+
+/* ------------------------------------------------------------------------ */
+/* Submitting, listing and cancelling runs.                                  */
+/* ------------------------------------------------------------------------ */
+
+export const requestSubmit = (base: string, token: string, body: unknown) =>
+  post(base, "/api/v1/workflows/submit", body, token);
+
+/**
+ * Submits a workflow and returns the new run's id. Fails the test if the
+ * request is refused, or if the response holds anything but the run id.
+ */
+export const submitRun = async (base: string, token: string, body: unknown): Promise<string> => {
+  const response = await requestSubmit(base, token, body);
+  expect(response.status, await response.clone().text()).toBe(200);
+  const started = (await response.json()) as Record<string, unknown>;
+  expect(Object.keys(started)).toEqual(["runId"]);
+  return started["runId"] as string;
+};
+
+/** One page of the run list. */
+export interface RunPage {
+  readonly items: ReadonlyArray<RunSummary>;
+  readonly nextCursor?: string;
+}
+
+/**
+ * Reads one page of the run list. `query` is the query string without the
+ * `?`, such as `status=failed&limit=2`. Fails the test if the request is
+ * refused.
+ */
+export const queryRuns = async (base: string, token: string, query = ""): Promise<RunPage> => {
+  const response = await get(base, `/api/v1/runs${query === "" ? "" : `?${query}`}`, token);
+  expect(response.status, `${query}: ${await response.clone().text()}`).toBe(200);
+  return (await response.json()) as RunPage;
+};
+
+export const requestCancel = (base: string, token: string, id: string) =>
+  post(base, `/api/v1/runs/${id}/cancel`, {}, token);
+
+/**
+ * A plugin action that does not return until the test releases it or its run
+ * is cancelled. A run with a step of this action stays `running` for as long
+ * as the test needs, so the test can act on a run it knows is unfinished.
+ */
+export interface HeldAction {
+  readonly plugin: Plugin;
+  /** The qualified id a step uses to call the action. */
+  readonly actionId: string;
+  /** The context of every execution so far, in the order they started. */
+  readonly contexts: ReadonlyArray<ActionContext>;
+  /** Ends every execution that is waiting, and makes every later one return at once. */
+  readonly release: () => void;
+}
+
+/**
+ * Builds a plugin `hold` with one action `hold/wait`. The action takes a
+ * `label` and returns `{ released: true }` once the test calls `release`, or
+ * once its cancel signal aborts.
+ *
+ * It returns normally on abort, rather than failing, so a test can check that
+ * a cancelled run ignores what an action returns after the cancel.
+ */
+export const buildHeldAction = (): HeldAction => {
+  const contexts: Array<ActionContext> = [];
+  const waiting: Array<() => void> = [];
+  let released = false;
+  const release = (): void => {
+    released = true;
+    for (const finish of waiting.splice(0)) finish();
+  };
+  const plugin = buildActionPlugin("hold", {
+    id: "wait",
+    displayName: "Wait",
+    description: "Waits until the test releases it, or until its run is cancelled.",
+    input: Schema.Struct({ label: Schema.String }),
+    output: Schema.Struct({ released: Schema.Boolean }),
+    execute: (_input, context) =>
+      Effect.callback<{ released: boolean }>((resume) => {
+        contexts.push(context);
+        let done = false;
+        const finish = (): void => {
+          if (done) return;
+          done = true;
+          resume(Effect.succeed({ released: true }));
+        };
+        if (released) return finish();
+        waiting.push(finish);
+        context.signal.addEventListener("abort", finish);
+      }),
+  });
+  return { plugin, actionId: "hold/wait", contexts, release };
+};
+
+/** Builds a step that calls the held action. */
+export const buildHeldStep = (held: HeldAction, id: string) => ({
+  id,
+  kind: "action",
+  action: held.actionId,
+  params: { label: id },
+});
+
+/** Waits until the held action has started `count` executions, and returns their contexts. */
+export const waitForHeldExecutions = (
+  held: HeldAction,
+  count: number,
+): Promise<ReadonlyArray<ActionContext>> =>
+  waitUntil(`started ${String(count)} held action(s)`, () =>
+    held.contexts.length >= count ? held.contexts : undefined,
+  );
+
+/**
+ * Runs `body` against a controller with one connected runner, so sessions can
+ * be spawned with the grants a test needs, and with `plugins` installed next
+ * to the agent provider.
+ */
+export const withRunFleet = (
+  body: (arranged: Arranged) => Promise<void>,
+  plugins: ReadonlyArray<Plugin> = [],
+): Promise<void> =>
+  sharedWithFleet(body, {
+    plugins: [createPluginFixture({ id: "providers", definitions: [PROVIDER] }).plugin, ...plugins],
+    facts: FACTS,
+    models: MODELS,
+  });
+
+/**
+ * Inserts a run of `workflowId` with the status `pending` and one pending
+ * step record for `stepId`, the rows a run has between its start request and
+ * the moment the engine picks it up. No request can hold a run at `pending`,
+ * so the rows are written directly.
+ */
+export const insertPendingRun = (
+  harness: ServerHarness,
+  fields: {
+    readonly id: string;
+    readonly workflowId: string;
+    readonly plan: unknown;
+    readonly stepId: string;
+  },
+): Promise<void> => {
+  const createdAt = new Date().toISOString();
+  return runEffect(
+    Effect.andThen(
+      harness.sql`
+        INSERT INTO runs (id, workflow_id, plan, inputs, origin, status, created_at)
+        VALUES
+          (unhex(replace(${fields.id}, '-', '')),
+           unhex(replace(${fields.workflowId}, '-', '')),
+           ${JSON.stringify(fields.plan)}, ${JSON.stringify({})},
+           ${JSON.stringify({ kind: "manual", actor: "user" })}, 'pending', ${createdAt})`,
+      harness.sql`
+        INSERT INTO run_steps (run_id, step_id, iteration, status, created_at)
+        VALUES (unhex(replace(${fields.id}, '-', '')), ${fields.stepId}, 1, 'pending', ${createdAt})`,
+    ),
+  ).then(() => undefined);
+};

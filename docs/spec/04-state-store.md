@@ -68,6 +68,8 @@ There is no Redis, no broker, no in-process-only queue. Every piece of "what hap
 
 The scheduler and every consumer start from these rows on boot. A crash between committing an effect row and performing the effect is recovered by re-reading the row, which is why effects are at-least-once (next section).
 
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* Runs follow this rule, with one exception. A run and its step records are rows, and when the controller starts it resumes every run that is `pending` or `running` from them. Nothing waits for placement yet, because a run executes action steps only, on the controller. A built-in action commits its effect and the end of its step record in one transaction, so it is executed again only when that transaction never committed. A plugin action reaches outside the database and is not an outbox row: a step record found `running` at boot fails with the code `interrupted` and the action is not called again. A plugin action in a run is therefore performed at most once, not at least once, because runs never retry ([./07-workflows.md](./07-workflows.md) sections 7.2 and 7.5).
+
 ## Side-effect consumers: durable cursors, at-least-once
 
 Every consumer of committed events reads from a **durable cursor** stored in the database and advances it in the same transaction that records its output. The rejected alternative is an in-memory pub/sub bridge between the log and side effects, which loses effects on crash ([ADR 0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md), [ADR 0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md)).

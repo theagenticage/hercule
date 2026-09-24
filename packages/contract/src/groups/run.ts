@@ -12,16 +12,25 @@
  *   its action is being called, and then `completed`, `failed` or
  *   `cancelled`.
  *
- * `workflow.run` starts a run of a stored workflow and returns its id at once.
- * It never waits for a step, so a caller reads the run with `run.read` to see
- * how far it got.
+ * `workflow.run` starts a run of a stored workflow, and `workflow.submit` a
+ * run of a workflow sent with the request and never stored. Both return the
+ * run's id at once. They never wait for a step, so a caller reads the run with
+ * `run.read` to see how far it got.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
-import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Forbidden,
+  Internal,
+  InvalidState,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Actor, Id, Timestamp } from "../ids";
+import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { WorkflowDefinition } from "./workflow-definition";
 
@@ -122,12 +131,55 @@ export const Run = Schema.Struct({
 export type Run = Schema.Schema.Type<typeof Run>;
 
 /**
- * The input of `workflow.run`, besides the workflow id in the path: a value
- * for each input the workflow declares, by name. The controller checks the
- * values against the declarations.
+ * One run in the run list: the run without its plan and step records, which
+ * are long. `run.read` returns them.
  */
+export const RunSummary = Schema.Struct({
+  id: Id,
+  /** The workflow the run was started from, or null for a submitted workflow. */
+  workflowId: Schema.NullOr(Id),
+  /** The workflow's name as it was when the run started, from the run's plan. */
+  workflowName: Schema.String,
+  origin: RunOrigin,
+  status: RunStatus,
+  failureReason: Schema.optionalKey(FailureReason),
+  failedStepId: Schema.optionalKey(Schema.String),
+  createdAt: Timestamp,
+  startedAt: Schema.optionalKey(Timestamp),
+  finishedAt: Schema.optionalKey(Timestamp),
+});
+
+export type RunSummary = Schema.Schema.Type<typeof RunSummary>;
+
+/** Filters for the run list. Every filter given must hold. */
+export const RunFilter = Schema.Struct({
+  workflowId: Schema.optionalKey(Id),
+  status: Schema.optionalKey(RunStatus),
+  /** Only runs created at or after this instant. */
+  since: Schema.optionalKey(Timestamp),
+  /** Only runs created at or before this instant. */
+  until: Schema.optionalKey(Timestamp),
+  /**
+   * Only runs started by this actor: `user`, `session:<id>`, or `run:<id>`
+   * for the runs a run's `workflow.run` steps started.
+   */
+  actor: Schema.optionalKey(Actor),
+});
+
+export type RunFilter = Schema.Schema.Type<typeof RunFilter>;
+
+/** The fields the run list can be sorted by. */
+export const RUN_SORT_FIELDS = ["createdAt"] as const;
+
+/**
+ * The values a run starts with: one for each input the workflow declares, by
+ * name. The controller checks them against the declarations.
+ */
+export const RunInputs = Schema.Record(Schema.String, Schema.Json);
+
+/** The input of `workflow.run`, besides the workflow id in the path. */
 const WorkflowRunInput = closedStruct({
-  inputs: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
+  inputs: Schema.optionalKey(RunInputs),
 });
 
 /** The response to starting a run: the id to read it by. */
@@ -148,10 +200,28 @@ export const workflowRunEndpoint = HttpApiEndpoint.post("run", "/workflows/:id/r
 
 export const run = HttpApiGroup.make("run")
   .add(
+    HttpApiEndpoint.get("query", "/runs", {
+      query: Schema.Struct({
+        ...RunFilter.fields,
+        ...pageParams(RUN_SORT_FIELDS).fields,
+      }),
+      success: page(RunSummary),
+      error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
     HttpApiEndpoint.get("read", "/runs/:id", {
       params: { id: Id },
       success: Run,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    /**
+     * Cancels a pending or running run and returns it. Its step records that
+     * had not ended are cancelled, and no step starts after it. Fails with
+     * `invalid_state` for a run that has already ended.
+     */
+    HttpApiEndpoint.post("cancel", "/runs/:id/cancel", {
+      params: { id: Id },
+      success: Run,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

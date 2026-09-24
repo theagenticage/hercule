@@ -19,13 +19,28 @@ import type {
   FailureReason,
   Run,
   RunOrigin,
+  RunFilter,
   RunStatus,
+  RunSummary,
   StepError,
   StepRecord,
   StepStatus,
   WorkflowDefinition,
 } from "@hercule/contract";
-import { announce, mintUuid, uuidFromString, uuidToString } from "../db";
+import {
+  announce,
+  buildKeyset,
+  buildPage,
+  decodeCursor,
+  encodeCursor,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  type CursorError,
+  type CursorScope,
+  type Page,
+  type PageRequest,
+} from "../db";
 
 /** A run to insert, before it has an id. */
 export interface NewRun {
@@ -45,6 +60,7 @@ export type StepEnding =
 /** How a run ends. */
 export type RunEnding =
   | { readonly status: "completed" }
+  | { readonly status: "cancelled" }
   | {
       readonly status: "failed";
       readonly failureReason: FailureReason;
@@ -53,10 +69,10 @@ export type RunEnding =
     };
 
 /**
- * A step record was asked to end, but it had already ended, for example
- * because its run was cancelled while its action ran. A caller that ends a
- * step together with the action's effect fails its transaction with this, so
- * the effect rolls back too.
+ * A step record was asked to start or to end, but it had already ended, for
+ * example because its run was cancelled. A caller that ends a step together
+ * with the action's effect fails its transaction with this, so the effect
+ * rolls back too.
  */
 export class StepRecordEnded extends Data.TaggedError("StepRecordEnded")<{
   readonly runId: string;
@@ -76,6 +92,30 @@ interface RunRow {
   readonly started_at: string | null;
   readonly finished_at: string | null;
 }
+
+/** One page of the run list: how many, where to start, and the filters. */
+export interface RunPageRequest extends PageRequest, RunFilter {}
+
+interface SummaryRow {
+  readonly id: Uint8Array;
+  readonly workflow_id: Uint8Array | null;
+  readonly workflow_name: string;
+  readonly origin: string;
+  readonly status: RunStatus;
+  readonly failure_reason: FailureReason | null;
+  readonly failed_step_id: string | null;
+  readonly created_at: string;
+  readonly started_at: string | null;
+  readonly finished_at: string | null;
+}
+
+/**
+ * The actor that started a run, as SQL over the `origin` column: the origin's
+ * actor, or `run:<id>` for a run that a step of another run started.
+ */
+const STARTING_ACTOR = `CASE json_extract(origin, '$.kind')
+  WHEN 'action' THEN 'run:' || json_extract(origin, '$.parentRunId')
+  ELSE json_extract(origin, '$.actor') END`;
 
 interface StepRow {
   readonly step_id: string;
@@ -115,6 +155,20 @@ const toRun = (row: RunRow, steps: ReadonlyArray<StepRow>): Run => ({
   ...(row.failure_reason === null ? {} : { failureReason: row.failure_reason }),
   ...(row.failed_step_id === null ? {} : { failedStepId: row.failed_step_id }),
   steps: steps.map(toStepRecord),
+  createdAt: row.created_at,
+  ...(row.started_at === null ? {} : { startedAt: row.started_at }),
+  ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
+});
+
+/** Maps a summary row to a `RunSummary`. A NULL column becomes an absent field, not `null`. */
+const toSummary = (row: SummaryRow): RunSummary => ({
+  id: uuidToString(row.id),
+  workflowId: row.workflow_id === null ? null : uuidToString(row.workflow_id),
+  workflowName: row.workflow_name,
+  origin: JSON.parse(row.origin) as RunOrigin,
+  status: row.status,
+  ...(row.failure_reason === null ? {} : { failureReason: row.failure_reason }),
+  ...(row.failed_step_id === null ? {} : { failedStepId: row.failed_step_id }),
   createdAt: row.created_at,
   ...(row.started_at === null ? {} : { startedAt: row.started_at }),
   ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
@@ -178,6 +232,63 @@ const make = Effect.gen(function* () {
         }),
       ),
 
+    /**
+     * Returns one page of runs, without their plans and step records, sorted
+     * by when they were created. Every filter given must hold; `since` and
+     * `until` are inclusive.
+     */
+    list: (request: RunPageRequest): Effect.Effect<Page<RunSummary>, CursorError | SqlError> =>
+      Effect.gen(function* () {
+        const scope: CursorScope = {
+          op: "run.query",
+          field: "createdAt",
+          direction: request.direction,
+        };
+        const after =
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeCursor(request.cursor, scope, "string");
+        const { keyset, order } = buildKeyset(
+          sql,
+          ["created_at", "id"],
+          after === undefined ? undefined : [after[0], uuidFromString(after[1])],
+          request.direction,
+        );
+        const clauses = [keyset];
+        if (request.workflowId !== undefined) {
+          clauses.push(sql`workflow_id = ${uuidFromString(request.workflowId)}`);
+        }
+        if (request.status !== undefined) clauses.push(sql`status = ${request.status}`);
+        if (request.since !== undefined) clauses.push(sql`created_at >= ${request.since}`);
+        if (request.until !== undefined) clauses.push(sql`created_at <= ${request.until}`);
+        if (request.actor !== undefined) {
+          clauses.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
+        }
+        const rows = yield* sql<SummaryRow>`
+          SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, status,
+                 failure_reason, failed_step_id, created_at, started_at, finished_at
+          FROM runs WHERE ${sql.and(clauses)} ${order}
+          LIMIT ${request.limit + 1}
+        `;
+        return yield* buildPage(
+          rows,
+          request.limit,
+          (page) => Effect.succeed(page.map(toSummary)),
+          (last) => encodeCursor(scope, last.createdAt, last.id),
+        );
+      }),
+
+    /** Checks whether a run of the workflow is pending or running. */
+    hasUnfinishedRunOf: (workflowId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`
+          SELECT 1 FROM runs
+          WHERE workflow_id = ${uuidFromString(workflowId)} AND status IN ('pending', 'running')
+          LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
     /** Returns the ids of every run that is pending or running, the oldest first. */
     listUnfinished: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
@@ -207,18 +318,26 @@ const make = Effect.gen(function* () {
         ? Effect.void
         : Effect.andThen(insertSteps(runId, stepIds, at), announceChange(runId, "updated")),
 
-    /** Moves a pending step record to running. Does nothing to a record that is not pending. */
+    /**
+     * Moves a pending step record to running. Fails with `StepRecordEnded` if
+     * the record is not pending any more, so the caller does not call the
+     * step's action for a run that has been cancelled.
+     */
     startStep: (
       runId: string,
       step: { readonly stepId: string; readonly iteration: number },
       at: string,
-    ): Effect.Effect<void, SqlError> =>
+    ): Effect.Effect<void, SqlError | StepRecordEnded> =>
       Effect.gen(function* () {
-        yield* sql`
+        const started = yield* sql`
           UPDATE run_steps SET status = 'running', started_at = ${at}
           WHERE run_id = ${uuidFromString(runId)} AND step_id = ${step.stepId}
             AND iteration = ${step.iteration} AND status = 'pending'
+          RETURNING step_id
         `;
+        if (started.length === 0) {
+          return yield* Effect.fail(new StepRecordEnded({ runId, stepId: step.stepId }));
+        }
         yield* announceChange(runId, "updated");
       }),
 

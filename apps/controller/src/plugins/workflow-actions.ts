@@ -25,6 +25,8 @@ import {
   MAX_PLUGIN_MESSAGE_LENGTH,
   page,
   refuseEmptyTaskUpdate,
+  RunInputs,
+  RunStarted,
   Task,
   TaskCreateInput,
   TaskFilter,
@@ -63,6 +65,16 @@ export interface RegisteredWorkflowAction {
   readonly inputSchema: JsonSchema.JsonSchema;
   /** The same schema as an Effect schema, used to decode literal params. */
   readonly input: Schema.Top;
+  /** The schema of what the action returns, used to check a plugin action's result. */
+  readonly output: Schema.Top;
+  /** The qualified type of the Connection the action acts through, if it uses one. */
+  readonly connection?: { readonly type: string };
+  /**
+   * Carries out a plugin's action. A built-in action has none: the run engine
+   * calls the operation's service method itself, because the catalog sits
+   * below the domains those methods belong to.
+   */
+  readonly execute?: WorkflowActionContribution["execute"];
 }
 
 /**
@@ -97,6 +109,7 @@ interface DeclaredWorkflowAction {
   readonly input: Schema.Top;
   readonly output: Schema.Top;
   readonly connection?: { readonly type: string };
+  readonly execute?: WorkflowActionContribution["execute"];
 }
 
 /**
@@ -132,6 +145,9 @@ const addWorkflowAction = (
     description: action.description,
     inputSchema,
     input: action.input,
+    output: action.output,
+    ...(action.connection === undefined ? {} : { connection: action.connection }),
+    ...(action.execute === undefined ? {} : { execute: action.execute }),
   });
 };
 
@@ -140,9 +156,6 @@ const addWorkflowAction = (
  * qualified id is `<pluginId>/<word>`. Fails with a `PluginError` if a field
  * is invalid, the id is already registered, or the input schema is not a
  * struct.
- *
- * `execute` is not stored here: nothing calls it until runs execute action
- * steps.
  */
 export const registerWorkflowActionContribution = (
   pluginId: string,
@@ -192,6 +205,7 @@ export const registerWorkflowActionContribution = (
         input: contribution.input,
         output: contribution.output,
         ...(header.connection === undefined ? {} : { connection: header.connection }),
+        execute: contribution.execute,
       },
       declared,
       actions,
@@ -235,6 +249,16 @@ const BUILT_IN_WORKFLOW_ACTIONS: ReadonlyArray<
     // the event already exists. The first page is enough for that.
     input: TaskFilter,
     output: page(Task),
+  },
+  {
+    id: "workflow.run",
+    displayName: "Run a workflow",
+    description:
+      "Starts a run of the stored workflow with the id workflowId, and does not wait for it to finish. The output holds the new run's id.",
+    // The operation's input, with the workflow id as a param, because an API
+    // request sends it in the path and a step has no path.
+    input: Schema.Struct({ workflowId: Id, inputs: Schema.optionalKey(RunInputs) }),
+    output: RunStarted,
   },
 ];
 

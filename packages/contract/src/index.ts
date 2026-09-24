@@ -307,6 +307,7 @@ export {
   WorkflowSummary,
   WorkflowUpdateInput,
   WorkflowValidateInput,
+  WorkflowSubmitInput,
 } from "./groups/workflow";
 export {
   ANY_CONNECTION,
@@ -327,9 +328,13 @@ export { STARTER_WORKFLOW_SOURCE } from "./groups/workflow-starter";
 export {
   FailureReason,
   Run,
+  RUN_SORT_FIELDS,
+  RunFilter,
+  RunInputs,
   RunOrigin,
   RunStarted,
   RunStatus,
+  RunSummary,
   StepError,
   StepRecord,
   StepStatus,

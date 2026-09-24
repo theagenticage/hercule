@@ -29,6 +29,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createDecodeValidationError,
+  createInvalidStateError,
   createNotFoundError,
   createValidationError,
   decodeWorkflowDefinition,
@@ -44,6 +45,7 @@ import {
   WorkflowFilter,
   WorkflowValidateInput,
   type Forbidden,
+  type InvalidState,
   type Issue,
   type NotFound,
   type SortDirection,
@@ -62,6 +64,7 @@ import { connectionRepository } from "../connections";
 import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog, EventKinds } from "../events";
 import { PluginHost } from "../plugins";
+import { runRepository } from "../runs";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
 import {
   listReferencedAgentIds,
@@ -226,6 +229,7 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const host = yield* PluginHost;
   const eventKinds = yield* EventKinds;
+  const runs = yield* runRepository;
 
   /**
    * Reads from the database and the plugin host what validating the definition
@@ -282,6 +286,22 @@ const make = Effect.gen(function* () {
      */
     validateDefinition: (definition: WorkflowDefinition): Effect.Effect<WorkflowIssues, SqlError> =>
       readReferencesAndValidate(definition),
+
+    /**
+     * Parses a workflow a request sent as `source` or `definition`, and
+     * returns its definition. Fails with a `Validation` error that lists
+     * every schema error, or if the request sent neither or both. Checks no
+     * grant and nothing the definition refers to: the run engine calls it for
+     * `workflow.submit`, then validates the definition itself.
+     */
+    parseDefinition: (input: {
+      readonly source?: string;
+      readonly definition?: unknown;
+    }): Effect.Effect<WorkflowDefinition, Validation> =>
+      Effect.map(
+        Effect.flatMap(chooseRequiredContent(input), parseContentOrFail),
+        (parsed) => parsed.definition,
+      ),
 
     /** Returns one page of workflows, the most recently changed first. */
     query: (input: QueryInput): Effect.Effect<WorkflowPage, CallError> =>
@@ -409,14 +429,29 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** Deletes a workflow and its trigger rows. */
-    delete: (input: Identified): Effect.Effect<Record<string, never>, CallError | NotFound> =>
+    /**
+     * Deletes a workflow and its trigger rows. Fails with `InvalidState` while
+     * a run of the workflow is pending or running: like every entity that
+     * something live references, a workflow is not deleted from under a run
+     * that is still acting. A finished run keeps the workflow's id and its own
+     * copy of the definition.
+     */
+    delete: (
+      input: Identified,
+    ): Effect.Effect<Record<string, never>, CallError | NotFound | InvalidState> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.delete");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            if (yield* runs.hasUnfinishedRunOf(id)) {
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  "a run of this workflow is still pending or running; wait for it to finish, or cancel it, then delete the workflow",
+                ),
+              );
+            }
             const deletedAt = yield* nowIso;
             const name = yield* failIfWorkflowNotFound(workflows.delete(id));
             yield* audit.append({

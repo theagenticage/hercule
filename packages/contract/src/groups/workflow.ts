@@ -11,11 +11,19 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
-import { Forbidden, Internal, Issue, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Forbidden,
+  Internal,
+  InvalidState,
+  Issue,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { workflowRunEndpoint } from "./run";
+import { RunInputs, RunStarted, workflowRunEndpoint } from "./run";
 import { WorkflowDefinition } from "./workflow-definition";
 
 /** A stored workflow: its YAML source exactly as written, plus the stored row's fields. */
@@ -124,6 +132,18 @@ export const WorkflowValidateInput = closedStruct(WORKFLOW_CONTENT_FIELDS);
 export type WorkflowValidateInput = Schema.Schema.Type<typeof WorkflowValidateInput>;
 
 /**
+ * The input of `workflow.submit`: a workflow as `source` or `definition`, as
+ * for a create, and the values its run starts with. The workflow is validated
+ * like a stored one and is never stored.
+ */
+export const WorkflowSubmitInput = closedStruct({
+  ...WORKFLOW_CONTENT_FIELDS,
+  inputs: Schema.optionalKey(RunInputs),
+});
+
+export type WorkflowSubmitInput = Schema.Schema.Type<typeof WorkflowSubmitInput>;
+
+/**
  * The result of validating a workflow. Saving the same workflow would fail
  * with the same `errors`, in the same order, or succeed and return the same
  * `warnings`. Both lists are empty when a save would succeed with no warnings.
@@ -171,10 +191,15 @@ export const workflow = HttpApiGroup.make("workflow")
       success: WorkflowSaveResult,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
+    /**
+     * Deletes a workflow. Fails with `invalid_state` while one of its runs is
+     * pending or running. A finished run keeps the workflow's id and its own
+     * copy of the workflow.
+     */
     HttpApiEndpoint.delete("delete", "/workflows/:id", {
       params: { id: Id },
       success: Schema.Struct({}),
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**
      * Validates a workflow the same way a save does, but stores nothing. A
@@ -188,5 +213,15 @@ export const workflow = HttpApiGroup.make("workflow")
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     workflowRunEndpoint,
+    /**
+     * Starts a run of a workflow sent with the request, and returns the run's
+     * id at once. The workflow is validated like a save and is never stored,
+     * so the run's `workflowId` is null.
+     */
+    HttpApiEndpoint.post("submit", "/workflows/submit", {
+      payload: WorkflowSubmitInput,
+      success: RunStarted,
+      error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
   )
   .middleware(Authenticated);
