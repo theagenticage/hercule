@@ -48,7 +48,7 @@ const make = Effect.sync(() => {
     /**
      * Implements `auth.wsTicket`: returns a new ticket for the calling user.
      * Fails with unauthenticated when there is no credential, or the caller
-     * is a session. The actor is stored with the ticket, so the socket it
+     * is not the user, such as a session. The actor is stored with the ticket, so the socket it
      * opens belongs to that caller.
      */
     issue: (): Effect.Effect<string, Unauthenticated> =>
@@ -62,11 +62,11 @@ const make = Effect.sync(() => {
         if (actor._tag === "none") {
           return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
         }
-        // The socket serves the user's screens. A session reads what it needs
-        // through the API and has no live topics yet. Also, the connection
-        // sweep can re-check only a user credential, so a socket opened by a
-        // session could never be closed by it.
-        if (actor._tag === "session") {
+        // The socket serves the user's screens. Any other actor, such as a
+        // session, reads what it needs through the API and has no live topics
+        // yet. Also, the connection sweep can re-check only a user credential,
+        // so a socket opened by another actor could never be closed by it.
+        if (actor._tag !== "user") {
           return yield* Effect.fail(createUnauthenticatedError(SESSION_HAS_NO_SOCKET));
         }
         const now = yield* Clock.currentTimeMillis;

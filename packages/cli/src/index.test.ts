@@ -96,14 +96,21 @@ const findLastLine = (out: ReadonlyArray<string>): string =>
 const startsWithWord = (line: string, word: string): boolean =>
   new RegExp(`^${word}\\b`).test(line.trim());
 
+/**
+ * Checks whether a root help line is the line that names a noun. A noun is
+ * indented by two spaces, and the wrapped summary lines under it by more, so
+ * a summary line that happens to start with a noun's word (`run, and where
+ * those steps run.`) is not taken for the noun.
+ */
+const isNounLine = (line: string, noun: string): boolean => new RegExp(`^  ${noun}\\s`).test(line);
+
 /** Returns the root help's block for one noun: its line, and every line before the next noun. */
 const readNounBlock = (out: ReadonlyArray<string>, noun: string): string => {
-  const from = out.findIndex((line) => startsWithWord(line, noun));
+  const from = out.findIndex((line) => isNounLine(line, noun));
   expect(from, `the root help has no ${noun} noun`).toBeGreaterThan(-1);
   const next = out.findIndex(
     (line, index) =>
-      index > from &&
-      Object.keys(NOUNS).some((other) => other !== noun && startsWithWord(line, other)),
+      index > from && Object.keys(NOUNS).some((other) => other !== noun && isNounLine(line, other)),
   );
   return out.slice(from, next === -1 ? out.length : next).join("\n");
 };

@@ -17,16 +17,10 @@ import * as Layer from "effect/Layer";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import {
   api,
-  CapExceeded,
-  Conflict,
-  Forbidden,
   createInternalError,
-  Internal,
-  InvalidState,
-  NotFound,
-  Unauthenticated,
-  Validation,
+  isApiError,
   type ApiError,
+  type Internal,
 } from "@hercule/contract";
 import { AgentService, AgentServiceLayer } from "../agents";
 import { Auth, AuthLayer } from "../auth";
@@ -52,6 +46,8 @@ import {
   ProvisioningLayer,
   Retirement,
   RetirementLayer,
+  RunEngine,
+  RunEngineLayer,
 } from "../daemon";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
@@ -64,24 +60,11 @@ import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
 import { ProviderService } from "../providers";
 import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
+import { RunService, RunServiceLayer } from "../runs";
 import { Setup, SetupLayer } from "../setup";
 import { TaskService, TaskServiceLayer } from "../tasks";
 import { User, UserLayer } from "../users";
 import { WorkflowService, WorkflowServiceLayer } from "../workflows";
-
-const API_ERRORS = [
-  Unauthenticated,
-  Forbidden,
-  Validation,
-  NotFound,
-  Conflict,
-  InvalidState,
-  CapExceeded,
-  Internal,
-];
-
-const isApiError = (error: unknown): error is ApiError =>
-  API_ERRORS.some((constructor) => error instanceof constructor);
 
 /**
  * Wraps a handler's service call: the contract's errors pass through, and
@@ -299,6 +282,10 @@ const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) 
 const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
   Effect.gen(function* () {
     const workflows = yield* WorkflowService;
+    // Starting a run reads the workflow, checks its inputs against other
+    // domains' rows, and executes the steps afterwards, so it is a controller
+    // daemon use case.
+    const engine = yield* RunEngine;
     return handlers
       .handle("query", ({ query }) => withApiErrors(workflows.query(query)))
       .handle("read", ({ params }) => withApiErrors(workflows.read(params)))
@@ -307,7 +294,17 @@ const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
         withApiErrors(workflows.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(workflows.delete(params)))
-      .handle("validate", ({ payload }) => withApiErrors(workflows.validate(payload)));
+      .handle("validate", ({ payload }) => withApiErrors(workflows.validate(payload)))
+      .handle("run", ({ params, payload }) =>
+        withApiErrors(engine.startWorkflowRun({ id: params.id, ...payload })),
+      );
+  }),
+);
+
+const runRoutes = HttpApiBuilder.group(api, "run", (handlers) =>
+  Effect.gen(function* () {
+    const runs = yield* RunService;
+    return handlers.handle("read", ({ params }) => withApiErrors(runs.read(params)));
   }),
 );
 
@@ -525,7 +522,6 @@ export const operationLayers = Layer.mergeAll(
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
-  TaskServiceLayer,
   AgentServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
@@ -557,9 +553,19 @@ export const operationLayers = Layer.mergeAll(
   ProvisioningLayer,
   SubscriptionServiceLayer,
   EventKindsOperationLayer,
-  // The workflow service validates each trigger against the same list of event
-  // kinds that `eventKind.query` returns.
-  WorkflowServiceLayer.pipe(Layer.provide(EventKindsOperationLayer)),
+  // The run engine reads workflows and calls the task service from its steps,
+  // so both are provided to it rather than merged next to it. The workflow
+  // service validates each trigger against the same list of event kinds that
+  // `eventKind.query` returns. The engine executes runs on fibers of its own,
+  // so the live topics' listener is provided to it as well: the same instance
+  // as the one merged below, because a layer is built once however many times
+  // it is provided.
+  RunEngineLayer.pipe(
+    Layer.provideMerge(WorkflowServiceLayer.pipe(Layer.provide(EventKindsOperationLayer))),
+    Layer.provideMerge(TaskServiceLayer),
+    Layer.provide(LiveTopicsLayer),
+  ),
+  RunServiceLayer,
   LiveTopicsLayer,
   WsTicketsLayer,
 );
@@ -586,6 +592,7 @@ export const handlerLayers = Layer.mergeAll(
   triggerRoutes,
   workflowActionRoutes,
   eventKindRoutes,
+  runRoutes,
   runnerRoutes,
   pluginRoutes,
   providerRoutes,

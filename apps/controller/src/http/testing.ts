@@ -43,6 +43,7 @@ import {
   cancelStrandedInputsAndReportLostWakeUps,
   EventRoutingInterval,
   LostRunnerSweepInterval,
+  resumeUnfinishedRuns,
   SessionInputDeadline,
   WorkspaceSweepInterval,
 } from "../daemon";
@@ -285,7 +286,11 @@ export const withServer = (
           yield* ensureProviderInstances;
         });
         yield* bootSteps;
-        const reboot: RebootArranger = yield* makeRepeatable(bootSteps);
+        // A restart also resumes the unfinished runs, which the real
+        // controller does as it starts serving (`serve`), after these steps.
+        const reboot: RebootArranger = yield* makeRepeatable(
+          Effect.andThen(bootSteps, resumeUnfinishedRuns),
+        );
         let listening = serve(bundle);
         const provideIfSet = <A>(key: Context.Reference<A>, value: A | undefined): void => {
           if (value !== undefined) listening = Effect.provideService(listening, key, value);

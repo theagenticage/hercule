@@ -117,6 +117,7 @@ const COMMANDS: Record<string, string> = {
   "workflow.read": "workflow read",
   "workflow.create": "workflow create",
   "workflow.update": "workflow update",
+  "workflow.run": "workflow run",
   "workflow.delete": "workflow delete",
   "workflow.validate": "workflow validate",
 
@@ -126,6 +127,7 @@ const COMMANDS: Record<string, string> = {
 
   "eventKind.query": "event-kind list",
 
+  "run.read": "run read",
   "runner.query": "runner list",
   "runner.read": "runner read",
   "runner.update": "runner update",
@@ -242,6 +244,7 @@ const RESOLVES: Record<string, string> = {
   "workspace.dispose id": "workspace.query",
 
   "workflow.read id": "workflow.query",
+  "workflow.run id": "workflow.query",
   "workflow.update id": "workflow.query",
   "workflow.delete id": "workflow.query",
 

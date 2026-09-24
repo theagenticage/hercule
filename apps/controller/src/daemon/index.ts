@@ -31,3 +31,4 @@ export { Placement, PlacementLayer } from "./placement";
 export { ProfileRemoval, ProfileRemovalLayer } from "./profile-removal";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./provisioning";
 export { Retirement, RetirementLayer } from "./retirement";
+export { resumeUnfinishedRuns, RunEngine, RunEngineLayer } from "./run-engine";

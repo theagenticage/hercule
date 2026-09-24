@@ -12,12 +12,17 @@
  * Two things are read straight from the tables, because no operation returns
  * them: the router's cursor row, and the subscription and event an input row
  * was written for.
+ *
+ * The helpers for the run engine's tests are at the bottom: starting a run,
+ * waiting for it to finish, the checks every finished run must pass, and
+ * sample workflows.
  */
 import { expect } from "vitest";
 import { Duration, Effect, Layer } from "effect";
 import type { ModelDescriptor, RunnerFacts, SessionInput } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
+import type { Issue, Run, RunStatus, StepRecord, Task } from "@hercule/contract";
 import { get, post, type ServerHarness } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import { EvaluationErrorNotifier } from "../subscriptions";
@@ -36,6 +41,7 @@ import {
   type Agent,
   type Arranged,
 } from "../sessions/testing";
+import { readIssues } from "../workflows/testing";
 
 /** The tick interval in tests: short enough to wait several ticks without a long sleep. */
 const TICK = Duration.millis(10);
@@ -396,3 +402,249 @@ export const listFramesCarrying = (arranged: Arranged, text: string): ReadonlyAr
 
 export const waitForFrameCarrying = (arranged: Arranged, text: string): Promise<SessionInput> =>
   waitUntil(`sent a frame carrying ${text}`, () => listFramesCarrying(arranged, text)[0]);
+
+/* ------------------------------------------------------------------------ */
+/* Runs: helpers to start runs, wait for them to finish, and check what a   */
+/* finished run keeps.                                                       */
+/* ------------------------------------------------------------------------ */
+
+const FINAL_STATUSES: ReadonlyArray<RunStatus> = ["completed", "failed", "cancelled"];
+
+/**
+ * How far along a status is. A run or a step record may only move to a status
+ * with a higher rank, and once final it never changes again.
+ */
+const STATUS_RANK: Record<RunStatus, number> = {
+  pending: 0,
+  running: 1,
+  completed: 2,
+  failed: 2,
+  cancelled: 2,
+};
+
+export const requestRun = (base: string, token: string, workflowId: string, body: unknown = {}) =>
+  post(base, `/api/v1/workflows/${workflowId}/run`, body, token);
+
+/**
+ * Starts a run of a stored workflow and returns its id. Fails the test if the
+ * request is refused, or if the response holds anything but the run id.
+ */
+export const startRun = async (
+  base: string,
+  token: string,
+  workflowId: string,
+  body: unknown = {},
+): Promise<string> => {
+  const response = await requestRun(base, token, workflowId, body);
+  expect(response.status, await response.clone().text()).toBe(200);
+  const started = (await response.json()) as Record<string, unknown>;
+  expect(Object.keys(started)).toEqual(["runId"]);
+  expect(started["runId"]).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  return started["runId"] as string;
+};
+
+export const readRun = async (base: string, token: string, id: string): Promise<Run> => {
+  const response = await get(base, `/api/v1/runs/${id}`, token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as Run;
+};
+
+/** Fails the test if any status moved backwards between two reads of the same run. */
+const expectMovedForward = (earlier: Run, later: Run): void => {
+  const describeMove = (what: string, from: RunStatus, to: RunStatus) =>
+    `${what} went from ${from} to ${to}`;
+  expect(
+    STATUS_RANK[later.status],
+    describeMove("the run", earlier.status, later.status),
+  ).toBeGreaterThanOrEqual(STATUS_RANK[earlier.status]);
+  if (FINAL_STATUSES.includes(earlier.status)) {
+    expect(later.status, describeMove("the finished run", earlier.status, later.status)).toBe(
+      earlier.status,
+    );
+  }
+  for (const before of earlier.steps) {
+    const what = `step record ${before.stepId}#${String(before.iteration)}`;
+    const after = later.steps.find(
+      (record) => record.stepId === before.stepId && record.iteration === before.iteration,
+    );
+    expect(after, `${what} disappeared`).toBeDefined();
+    expect(
+      STATUS_RANK[after!.status],
+      describeMove(what, before.status, after!.status),
+    ).toBeGreaterThanOrEqual(STATUS_RANK[before.status]);
+    if (FINAL_STATUSES.includes(before.status)) {
+      expect(after!.status, describeMove(what, before.status, after!.status)).toBe(before.status);
+    }
+  }
+};
+
+/**
+ * Checks what every finished run keeps true:
+ * - its status is final, it has `finishedAt`, and it has a failure reason
+ *   exactly when it failed;
+ * - none of its step records is still `pending` or `running`;
+ * - the first record of every step has iteration 1;
+ * - every timestamp is at or after the one before it.
+ */
+const expectFinishedRun = (run: Run): void => {
+  const where = `run ${run.id}: ${JSON.stringify(run)}`;
+  expect(FINAL_STATUSES, where).toContain(run.status);
+  expect(run.finishedAt, where).toBeDefined();
+  expect(run.failureReason !== undefined, where).toBe(run.status === "failed");
+  if (run.startedAt !== undefined) {
+    expect(run.startedAt >= run.createdAt, where).toBe(true);
+    expect(run.finishedAt! >= run.startedAt, where).toBe(true);
+  }
+  for (const record of run.steps) {
+    expect(["pending", "running"], where).not.toContain(record.status);
+    if (record.startedAt !== undefined && record.finishedAt !== undefined) {
+      expect(record.finishedAt >= record.startedAt, where).toBe(true);
+    }
+  }
+  const stepIds = new Set(run.steps.map((record) => record.stepId));
+  for (const stepId of stepIds) {
+    const iterations = run.steps
+      .filter((record) => record.stepId === stepId)
+      .map((record) => record.iteration);
+    expect(Math.min(...iterations), `${stepId} in ${where}`).toBe(1);
+  }
+};
+
+/**
+ * Reads the run over and over until its status is final, and returns the
+ * final read. Every read is compared with the read before it, and the final
+ * read is checked with `expectFinishedRun`.
+ */
+export const waitForRunToFinish = async (base: string, token: string, id: string): Promise<Run> => {
+  let previous: Run | undefined;
+  const finished = await waitUntil(`finished run ${id}`, async () => {
+    const run = await readRun(base, token, id);
+    if (previous !== undefined) expectMovedForward(previous, run);
+    previous = run;
+    return FINAL_STATUSES.includes(run.status) ? run : undefined;
+  });
+  expectFinishedRun(finished);
+  return finished;
+};
+
+/** Returns how many runs the database holds. No operation lists runs yet, so the table is read directly. */
+export const countRuns = async (harness: ServerHarness): Promise<number> => {
+  const rows = await runEffect(
+    harness.sql<{ readonly count: number }>`SELECT count(*) AS count FROM runs`,
+  );
+  return rows[0]!.count;
+};
+
+/**
+ * Checks that the run request was refused with `validation`, with one issue
+ * whose path starts with each of `prefixes` and no other issue, and that no
+ * run was created. Returns the issues.
+ */
+export const expectRefusedAt = async (
+  harness: ServerHarness,
+  response: Response,
+  prefixes: ReadonlyArray<ReadonlyArray<string>>,
+  description = "the run request",
+): Promise<ReadonlyArray<Issue>> => {
+  const issues = await readIssues(response);
+  const shown = `${description}: ${JSON.stringify(issues)}`;
+  expect(issues, shown).toHaveLength(prefixes.length);
+  for (const prefix of prefixes) {
+    const matching = issues.filter((issue) =>
+      prefix.every((segment, index) => issue.path[index] === segment),
+    );
+    expect(matching, `one issue under ${JSON.stringify(prefix)} in ${shown}`).toHaveLength(1);
+  }
+  expect(await countRuns(harness), description).toBe(0);
+  return issues;
+};
+
+export const readTask = async (base: string, token: string, id: string): Promise<Task> => {
+  const response = await get(base, `/api/v1/tasks/${id}`, token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as Task;
+};
+
+export const listTasks = async (base: string, token: string): Promise<ReadonlyArray<Task>> => {
+  const response = await get(base, "/api/v1/tasks", token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { items: ReadonlyArray<Task> }).items;
+};
+
+/** Returns the step records of one step, in the order the run created them. */
+export const findRecords = (run: Run, stepId: string): ReadonlyArray<StepRecord> =>
+  run.steps.filter((record) => record.stepId === stepId);
+
+/* ------------------------------------------------------------------------ */
+/* Workflow definitions for the run tests.                                   */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Two steps: the first creates a task titled from the `title` input, the
+ * second moves that task to in-progress. The second step reads the task id
+ * from the first step's output.
+ */
+export const FILE_AND_START_DEFINITION = {
+  name: "File and start a task",
+  inputs: [{ name: "title", schema: { type: "string", minLength: 1 }, required: true }],
+  steps: [
+    {
+      id: "create",
+      kind: "action",
+      action: "task.create",
+      params: {
+        title: "{{ inputs.title }}",
+        description: "Filed by a run.",
+        provenance: [{ ref: "test:ticket:79" }],
+      },
+    },
+    {
+      id: "update",
+      kind: "action",
+      action: "task.update",
+      params: { taskId: "{{ steps.create.output.id }}", status: "in-progress" },
+    },
+  ],
+  edges: [{ from: "create", to: "update" }],
+};
+
+/**
+ * One step that creates a task, with an input of every kind a run resolves:
+ * - `title`: required, with a JSON Schema;
+ * - `priority`: optional, with a default;
+ * - `note`: optional, with no default, so it is absent when not given;
+ * - `repo`: optional, a GitHub Connection.
+ */
+export const INPUTS_DEFINITION = {
+  name: "File a task from inputs",
+  inputs: [
+    { name: "title", schema: { type: "string", minLength: 1 }, required: true },
+    {
+      name: "priority",
+      schema: { type: "string", enum: ["urgent", "high", "normal", "low"] },
+      required: false,
+      default: "high",
+    },
+    { name: "note", schema: { type: "string" }, required: false },
+    { name: "repo", connection: { type: "github/github" }, required: false },
+  ],
+  steps: [
+    {
+      id: "create",
+      kind: "action",
+      action: "task.create",
+      params: { title: "{{ inputs.title }}", description: "", priority: "{{ inputs.priority }}" },
+    },
+  ],
+};
+
+/** Builds an action step that creates a task, for definitions that only need some step to exist. */
+export const buildCreateStep = (id: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  kind: "action",
+  action: "task.create",
+  params: { title: `File the ${id} task`, description: "" },
+  ...extra,
+});

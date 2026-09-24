@@ -9,6 +9,10 @@
 import {
   truncateText,
   formatIssue,
+  type Run,
+  type RunOrigin,
+  type RunStarted,
+  type StepRecord,
   type StructuredResult,
   type Workflow,
   type WorkflowAction,
@@ -87,14 +91,29 @@ const flatten = (
       : [[name, item] as const];
   });
 
-const renderKeyValues = (value: Record<string, unknown>): ReadonlyArray<string> => {
+/**
+ * Returns an object as aligned `key  value` lines. `formatValue` formats each
+ * value; by default an id is shortened to its tail.
+ */
+const renderKeyValues = (
+  value: Record<string, unknown>,
+  formatValue: (item: unknown) => string = formatCell,
+): ReadonlyArray<string> => {
   const entries = flatten(value);
   if (entries.length === 0) return ["ok"];
   const width = Math.max(...entries.map(([key]) => key.length));
   // Trim like the table's lines, so a key with an empty value has no trailing
   // padding.
-  return entries.map(([key, item]) => `${key.padEnd(width)}  ${formatCell(item)}`.trimEnd());
+  return entries.map(([key, item]) => `${key.padEnd(width)}  ${formatValue(item)}`.trimEnd());
 };
+
+/**
+ * Formats a value like `formatCell`, but keeps an id whole. A command whose
+ * ids no list operation resolves from a tail prints them in full, so they can
+ * be passed back.
+ */
+const formatKeepingIds = (item: unknown): string =>
+  typeof item === "string" ? item : formatCell(item);
 
 const isPage = (
   value: unknown,
@@ -224,6 +243,72 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
   };
 };
 
+/**
+ * Returns the lines printed after `workflow run`: the new run's full id, and
+ * the command that shows how far it got. The id is printed in full because
+ * `run read` takes only a full id.
+ */
+const renderRunStarted = (answer: RunStarted): ReadonlyArray<string> => [
+  `run ${answer.runId} started`,
+  "",
+  `see how far it got with \`hercule run read ${answer.runId}\``,
+];
+
+/** Describes who or what started a run, in a few words. */
+const describeOrigin = (origin: RunOrigin): string => {
+  switch (origin.kind) {
+    case "manual":
+    case "api":
+      return origin.actor;
+    case "action":
+      return `step ${origin.stepId} of run ${origin.parentRunId}`;
+  }
+};
+
+/**
+ * Returns how long a step took, such as `1.2s`, or nothing when it has not
+ * both started and ended.
+ */
+const describeDuration = (record: StepRecord): string => {
+  if (record.startedAt === undefined || record.finishedAt === undefined) return "";
+  const millis = Date.parse(record.finishedAt) - Date.parse(record.startedAt);
+  return millis < 1000 ? `${String(millis)}ms` : `${(millis / 1000).toFixed(1)}s`;
+};
+
+/**
+ * Returns the lines printed for `run read`: a summary of the run, the inputs
+ * it started with, and a table with one row per step record. The plan and the
+ * steps' outputs are left out, because they are long; `--json` prints them.
+ */
+const renderRun = (run: Run): ReadonlyArray<string> => [
+  ...renderKeyValues(
+    {
+      id: run.id,
+      workflow: run.plan.name,
+      status: run.status,
+      ...(run.failureReason === undefined ? {} : { failureReason: run.failureReason }),
+      ...(run.failedStepId === undefined ? {} : { failedStep: run.failedStepId }),
+      startedBy: describeOrigin(run.origin),
+      createdAt: run.createdAt,
+      ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
+      ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
+    },
+    formatKeepingIds,
+  ),
+  "",
+  "inputs",
+  ...(Object.keys(run.inputs).length === 0 ? ["none"] : renderKeyValues(run.inputs)),
+  "",
+  ...renderTable(
+    run.steps.map((record) => ({
+      step: record.stepId,
+      status: record.status,
+      took: describeDuration(record),
+      error: record.error === undefined ? "" : `${record.error.code}: ${record.error.message}`,
+    })),
+  ),
+];
+
 /** Returns the lines the CLI prints for a successful command without `--json`. */
 export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
   const asLines = command.id === "transcript.read" ? renderTranscript : renderTable;
@@ -262,6 +347,8 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
       return renderWorkflowSaveResult(value as WorkflowSaveResult);
     }
     if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
+    if (command.id === "workflow.run") return renderRunStarted(value as RunStarted);
+    if (command.id === "run.read") return renderRun(value as Run);
     const lines = [...renderKeyValues(record)];
     // The only hint this build prints after a command. A caller who has just
     // spawned a session wants to watch it. The hint does not suggest a

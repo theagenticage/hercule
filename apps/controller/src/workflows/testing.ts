@@ -82,6 +82,29 @@ const localGithubPlugin: Plugin = {
   activate: () => Effect.succeed(Effect.void),
 };
 
+/**
+ * A plugin with a second Connection type, `mail/mail`, and no event source.
+ * The tests use a mail Connection where a GitHub Connection is required, to
+ * check that a Connection of the wrong type is rejected.
+ */
+export const localMailPlugin: Plugin = {
+  manifest: {
+    id: "mail",
+    displayName: "Mail",
+    hostApi: HOST_API,
+    capabilities: ["connections"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    registerConnectionType(host, {
+      type: "mail",
+      displayName: "Mail",
+      setup: [{ kind: "credentials", fields: [{ name: "password", label: "App password" }] }],
+      validate: () => Effect.succeed({ displayName: "me@example.com" }),
+    }),
+  activate: () => Effect.succeed(Effect.void),
+};
+
 /** A controller that has completed first-run setup, and the user's token for it. */
 export interface SetUpController {
   readonly harness: ServerHarness;
@@ -291,4 +314,10 @@ export const createConnection = async (
   );
   expect(response.status, await response.clone().text()).toBe(201);
   return ((await response.json()) as { id: string }).id;
+};
+
+/** Disables a plugin through the API, or fails the test if the controller refuses. */
+export const disablePlugin = async (base: string, token: string, id: string): Promise<void> => {
+  const response = await post(base, `/api/v1/plugins/${id}/disable`, {}, token);
+  expect(response.status, await response.clone().text()).toBe(200);
 };

@@ -51,6 +51,7 @@ export {
   formatIssue,
   listDecodeIssues,
   listSchemaIssues,
+  isApiError,
   type ApiError,
   type CapDetails,
   type ErrorCode,
@@ -323,6 +324,16 @@ export {
   convertKeyToPathSegment,
 } from "./groups/workflow-source";
 export { STARTER_WORKFLOW_SOURCE } from "./groups/workflow-starter";
+export {
+  FailureReason,
+  Run,
+  RunOrigin,
+  RunStarted,
+  RunStatus,
+  StepError,
+  StepRecord,
+  StepStatus,
+} from "./groups/run";
 export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
 export { WorkflowAction } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";

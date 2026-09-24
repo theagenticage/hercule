@@ -170,6 +170,14 @@ const TABLE = {
     path: "/api/v1/workflows/validate",
   },
 
+  "workflow.run": {
+    requires: "workflow.run",
+    method: "POST",
+    path: "/api/v1/workflows/:id/run",
+  },
+
+  "run.read": { requires: "run.read", method: "GET", path: "/api/v1/runs/:id" },
+
   // Every trigger belongs to a workflow, so listing triggers needs the workflow
   // read grant. Triggers have no grant family of their own.
   "trigger.query": { requires: "workflow.read", method: "GET", path: "/api/v1/triggers" },

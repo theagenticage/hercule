@@ -24,14 +24,12 @@
  * - A notes plugin that declares one workflow action.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect, Schema } from "effect";
 import {
   STARTER_WORKFLOW_SOURCE,
   type Issue,
   type WorkflowIssues,
   type WorkflowSaveResult,
 } from "@hercule/contract";
-import { HOST_API, registerConnectionType, type Plugin } from "@hercule/plugin-host";
 import { lintOutputSchema } from "@hercule/protocol";
 import { get, post, readErrorBody } from "../http/testing";
 import { NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID, notesPlugin } from "../plugins/testing";
@@ -49,9 +47,11 @@ import {
   createAgent,
   createConnection,
   createWorkflow,
+  disablePlugin,
   DUPLICATE_STEP_ID_SOURCE,
   expectNothingStored,
   KEBAB_CASE_STEP_ID_SOURCE,
+  localMailPlugin,
   readIssues,
   SYNTAX_ERROR_SOURCE,
   updateWorkflow,
@@ -65,29 +65,6 @@ import {
  * agent fleet to be ready, and once for each of the two sessions it starts.
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
-
-/**
- * A plugin with a second Connection type, `mail/mail`, and no event source.
- * The tests use a mail Connection where a GitHub Connection is required, to
- * check that a Connection of the wrong type is rejected.
- */
-const localMailPlugin: Plugin = {
-  manifest: {
-    id: "mail",
-    displayName: "Mail",
-    hostApi: HOST_API,
-    capabilities: ["connections"],
-    configSchema: Schema.Struct({}),
-  },
-  register: (host) =>
-    registerConnectionType(host, {
-      type: "mail",
-      displayName: "Mail",
-      setup: [{ kind: "credentials", fields: [{ name: "password", label: "App password" }] }],
-      validate: () => Effect.succeed({ displayName: "me@example.com" }),
-    }),
-  activate: () => Effect.succeed(Effect.void),
-};
 
 /** The ids of the built-in actions. A step can use them with no plugin enabled. */
 const BUILT_IN_ACTION_IDS = ["task.create", "task.query", "task.update"];
@@ -203,11 +180,6 @@ const findIssueAt = (issues: ReadonlyArray<Issue>, path: ReadonlyArray<string>):
   const found = issues.find((issue) => JSON.stringify(issue.path) === JSON.stringify(path));
   expect(found, `an issue at ${JSON.stringify(path)} in ${JSON.stringify(issues)}`).toBeDefined();
   return found!;
-};
-
-const disablePlugin = async (base: string, token: string, id: string): Promise<void> => {
-  const response = await post(base, `/api/v1/plugins/${id}/disable`, {}, token);
-  expect(response.status, await response.clone().text()).toBe(200);
 };
 
 /** The smallest valid workflow: one step that creates a task. */

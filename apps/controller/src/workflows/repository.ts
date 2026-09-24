@@ -181,6 +181,22 @@ const make = Effect.gen(function* () {
   return {
     read,
 
+    /**
+     * Returns the stored definition of a workflow: the parsed form of its
+     * source. Returns `None` if no workflow has the id.
+     */
+    readDefinition: (id: string): Effect.Effect<Option.Option<WorkflowDefinition>, SqlError> =>
+      Effect.map(
+        sql<{ readonly definition: string }>`
+          SELECT definition FROM workflows WHERE id = ${uuidFromString(id)}
+        `,
+        (rows) =>
+          Option.map(
+            Option.fromNullishOr(rows[0]),
+            (row) => JSON.parse(row.definition) as WorkflowDefinition,
+          ),
+      ),
+
     /** Inserts a new workflow, disabled, and returns it. */
     insert: (parsedSource: ParsedSource, savedAt: string): Effect.Effect<Workflow, SqlError> =>
       Effect.gen(function* () {

@@ -402,3 +402,140 @@ export const evaluateExpression = (
       }),
     );
   });
+
+/**
+ * Converts a value an expression returned into JSON. Returns `undefined` when
+ * the value has no JSON form.
+ *
+ * The evaluator returns an integer as a `BigInt`, for an integer literal and
+ * for what a function such as `size` returns, even inside a list or a map.
+ * `JSON.stringify` rejects a `BigInt`, and a schema for a number does not
+ * accept one, so an integer becomes a number here. An integer too large to be
+ * an exact number has no JSON form. So have bytes, durations, timestamps and
+ * the other values that are not plain data.
+ */
+const convertToJson = (value: unknown): unknown => {
+  switch (typeof value) {
+    case "string":
+    case "boolean":
+      return value;
+    case "number":
+      return Number.isFinite(value) ? value : undefined;
+    case "bigint":
+      return Number.isSafeInteger(Number(value)) ? Number(value) : undefined;
+    case "object": {
+      if (value === null) return null;
+      if (Array.isArray(value)) {
+        const items = value.map(convertToJson);
+        return items.includes(undefined) ? undefined : items;
+      }
+      if (Object.getPrototypeOf(value) !== Object.prototype) return undefined;
+      const entries = Object.entries(value).map(([key, item]) => [key, convertToJson(item)]);
+      return entries.some(([, item]) => item === undefined)
+        ? undefined
+        : Object.fromEntries(entries);
+    }
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Renders a template against a run's context (`inputs` and `steps`). Fails
+ * with `ExpressionError` if an expression cannot be evaluated, or returns a
+ * value with no JSON form.
+ *
+ * A template that is exactly one `{{ expr }}`, with no other text, renders to
+ * the expression's value with its own JSON type. So `{{ inputs.count }}`
+ * renders to the number 3, and can fill a field that takes a number. Any
+ * other template renders to text: each expression is replaced by its value,
+ * a string as it is and any other value as JSON.
+ */
+export const renderTemplate = (
+  template: string,
+  context: Record<string, unknown>,
+): Effect.Effect<unknown, ExpressionError> =>
+  Effect.gen(function* () {
+    const parsed = parseTemplateExpressions(template);
+    if (Result.isFailure(parsed)) {
+      return yield* Effect.fail(
+        new ExpressionError({
+          message: `The {{ at character ${String(countCharactersBefore(template, parsed.failure) + 1)} has no closing }}.`,
+        }),
+      );
+    }
+    const values: Array<unknown> = [];
+    for (const expression of parsed.success) {
+      const describeSite = (): string =>
+        `The expression that starts with the {{ at character ${String(countCharactersBefore(template, expression.offset) + 1)}`;
+      const value = yield* Effect.mapError(
+        evaluateExpression(expression.source, context),
+        (error) => new ExpressionError({ message: `${describeSite()}: ${error.message}` }),
+      );
+      const json = convertToJson(value);
+      if (json === undefined) {
+        return yield* Effect.fail(
+          new ExpressionError({
+            message: `${describeSite()} returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp or an integer too large for a JSON number. Convert it with string(), or read another value.`,
+          }),
+        );
+      }
+      values.push(json);
+    }
+    /** Returns the index just past the `}}` that closes an expression. */
+    const findEnd = (expression: TemplateExpression): number =>
+      expression.offset + TEMPLATE_OPEN.length + expression.source.length + TEMPLATE_CLOSE.length;
+    const [first] = parsed.success;
+    if (parsed.success.length === 1 && first!.offset === 0 && findEnd(first!) === template.length) {
+      return values[0];
+    }
+    let rendered = "";
+    let from = 0;
+    parsed.success.forEach((expression, index) => {
+      const value = values[index];
+      rendered +=
+        template.slice(from, expression.offset) +
+        (typeof value === "string" ? value : JSON.stringify(value));
+      from = findEnd(expression);
+    });
+    return rendered + template.slice(from);
+  });
+
+/**
+ * Renders every template in a JSON value, at any depth: each string that is a
+ * template (see `isTemplate`) is replaced by what `renderTemplate` renders it
+ * to. Every other value is returned as it is. Fails with `ExpressionError` for
+ * the first template that cannot be rendered; the message names the template's
+ * path in the value, such as `labels.0`.
+ */
+export const renderTemplates = (
+  value: unknown,
+  context: Record<string, unknown>,
+  path: ReadonlyArray<string> = [],
+): Effect.Effect<unknown, ExpressionError> => {
+  if (typeof value === "string") {
+    return isTemplate(value)
+      ? Effect.mapError(
+          renderTemplate(value, context),
+          (error) =>
+            new ExpressionError({
+              message: `The template in ${path.length === 0 ? "the value" : path.join(".")} could not be rendered. ${error.message}`,
+            }),
+        )
+      : Effect.succeed(value);
+  }
+  if (Array.isArray(value)) {
+    return Effect.forEach(value, (item, index) =>
+      renderTemplates(item, context, [...path, String(index)]),
+    );
+  }
+  if (typeof value === "object" && value !== null) {
+    return Effect.map(
+      Effect.forEach(Object.entries(value), ([key, item]) =>
+        Effect.map(renderTemplates(item, context, [...path, key]), (rendered) => [key, rendered]),
+      ),
+      Object.fromEntries,
+    );
+  }
+  return Effect.succeed(value);
+};

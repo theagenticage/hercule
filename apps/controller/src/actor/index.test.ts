@@ -11,6 +11,11 @@ const user: Actor = {
 
 const nobody: Actor = { _tag: "none" };
 
+const RUN_ID = "0199f0b7-0004-7000-8000-000000000000";
+
+/** A run while its step `file_task` executes. */
+const run: Actor = { _tag: "run", runId: RUN_ID, stepId: "file_task" };
+
 const SESSION_ID = "0199f0b7-0002-7000-8000-000000000000";
 
 /** A session on a profile that reads and creates tasks, and nothing else. */
@@ -35,6 +40,10 @@ describe("buildActorStamp", () => {
 
   it("is session:<id> for a session, so a reader can trace a change back to it", () => {
     expect(buildActorStamp(agent)).toBe(`session:${SESSION_ID}`);
+  });
+
+  it("is run:<id> for a run, whichever of its steps is executing", () => {
+    expect(buildActorStamp(run)).toBe(`run:${RUN_ID}`);
   });
 });
 
@@ -61,6 +70,12 @@ describe("checkGrant", () => {
   it("lets the user actor call every operation", () => {
     for (const operation of ALL_OPERATIONS) {
       expect(checkGrant(operation.id, user)).toBeUndefined();
+    }
+  });
+
+  it("lets a run call every operation, because its steps act for the user", () => {
+    for (const operation of ALL_OPERATIONS) {
+      expect(checkGrant(operation.id, run)).toBeUndefined();
     }
   });
 

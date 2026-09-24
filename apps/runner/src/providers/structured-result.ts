@@ -9,49 +9,14 @@
  * harness reports it as valid, because a harness validating its own answer
  * would be marking its own work.
  */
-import { Validator, type OutputUnit } from "@cfworker/json-schema";
 import { MAX_MESSAGE_LENGTH, type OutputSchema, type StructuredResult } from "@hercule/protocol";
+import { findJsonSchemaViolation } from "@hercule/protocol/json-schema";
 
 /**
  * What the harness produced: a value, or the reason it produced none. The
  * reason is in the adapter's own words, and the failure result includes it.
  */
 export type HarnessAnswer = { readonly value: unknown } | { readonly missing: string };
-
-/**
- * The JSON Schema draft of the supported subset. The schema arrives as plain JSON, so the validator
- * is told.
- */
-const DRAFT = "7";
-
-/**
- * Returns how deep in the value an error unit is. The root is the shallowest, a leaf the deepest.
- */
-const measureDepth = (unit: OutputUnit): number => unit.instanceLocation.split("/").length;
-
-/**
- * Returns the error unit about the value itself, not about the objects that
- * contain it. The validator reports one unit per level on the way down, for
- * example "property x does not match schema" above "expected a number". Only
- * the deepest unit names the field the reader has to fix.
- */
-const findDeepestUnit = (units: ReadonlyArray<OutputUnit>): OutputUnit | undefined =>
-  units.reduce<OutputUnit | undefined>(
-    (deepest, unit) =>
-      deepest === undefined || measureDepth(unit) > measureDepth(deepest) ? unit : deepest,
-    undefined,
-  );
-
-/**
- * Formats an error unit as `<location>: <message>`. A closed object rejects an
- * undeclared key through a `false` boolean schema, whose own message is only
- * "false boolean schema". The real problem is that the key is not allowed, and
- * the location already names the key.
- */
-const describeError = (unit: OutputUnit): string =>
-  unit.keyword === "false"
-    ? `${unit.instanceLocation}: the schema does not allow this key`
-    : `${unit.instanceLocation}: ${unit.error}`;
 
 /**
  * Checks a harness answer against the session's output schema and returns the
@@ -63,22 +28,12 @@ export const judgeAnswer = (schema: OutputSchema, answer: HarnessAnswer): Struct
   if ("missing" in answer) {
     return { outcome: "schema-failure", reason: answer.missing.slice(0, MAX_MESSAGE_LENGTH) };
   }
-  // The validator short-circuits: it stops at the first branch that fails.
-  // Every unit it returns describes that one failure, reported again at each
-  // level above it, so the reason comes from the deepest unit.
-  const checked = new Validator(schema, DRAFT, true).validate(answer.value);
-  if (checked.valid) {
+  const violation = findJsonSchemaViolation(schema, answer.value);
+  if (violation === undefined) {
     return {
       outcome: "ok",
       value: answer.value as Extract<StructuredResult, { outcome: "ok" }>["value"],
     };
   }
-  const unit = findDeepestUnit(checked.errors);
-  return {
-    outcome: "schema-failure",
-    reason: (unit === undefined
-      ? "the value does not satisfy the schema"
-      : describeError(unit)
-    ).slice(0, MAX_MESSAGE_LENGTH),
-  };
+  return { outcome: "schema-failure", reason: violation.slice(0, MAX_MESSAGE_LENGTH) };
 };

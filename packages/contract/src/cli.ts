@@ -1088,6 +1088,27 @@ export const CLI = {
     },
   },
 
+  "workflow.run": {
+    command: "workflow run",
+    help: "Starts a run of a stored workflow and prints the run's id at once, without waiting for any step. The workflow is checked again first, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. A disabled workflow can still be run by hand. Follow the run with `hercule run read <id>`.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--inputs", '{"title":"Fix login"}'] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The workflow's id, or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      inputs: {
+        flag: "inputs",
+        help: "A JSON object with a value for each input the workflow declares, by name; an input left out takes its default.",
+      },
+    },
+    errors: {
+      validation:
+        "the workflow is no longer valid, or an input is unknown, missing or has the wrong value: each printed line gives the path and the problem; no run was started",
+    },
+  },
+
   "trigger.query": {
     command: "trigger list",
     help: "Lists the triggers of every workflow, newest first. Each row shows the event kind the trigger listens for, and whether a start trigger is active or paused. Triggers are defined in their workflow's source, so change one with `hercule workflow update`.",
@@ -1130,6 +1151,21 @@ export const CLI = {
     help: "Lists every event kind a workflow trigger can listen for right now. A kind that needs a Connection comes from a plugin, and a trigger on it sets a Connection id or any; a trigger on a core kind sets no Connection. A plugin's kinds are listed only while the plugin is running.",
     examples: [{ args: [] }],
     fields: {},
+  },
+
+  "run.read": {
+    command: "run read",
+    help: "Shows one run: its status, why it failed if it did, and what each step did. The output lists the inputs the run started with, and one line per step with its status, how long it took and its error. --json prints the whole record, including the frozen workflow definition and every step's output.",
+    examples: [
+      { args: ["01a0d2b7-1f7b-74e7-b542-770eab27cb2a"] },
+      { args: ["01a0d2b7-1f7b-74e7-b542-770eab27cb2a", "--json"] },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The run's full id, as `hercule workflow run` printed it.",
+      },
+    },
   },
 
   "runner.query": {
@@ -2208,7 +2244,7 @@ export const NOUNS = {
   workflow: {
     summary:
       "Workflows: automations written as YAML - what starts them, the steps they run, and where those steps run.",
-    flow: "hercule workflow validate checks a source from stdin, hercule workflow create stores one, hercule workflow read prints its source, hercule workflow update replaces the source or enables the workflow, hercule workflow delete removes it.",
+    flow: "hercule workflow validate checks a source from stdin, hercule workflow create stores one, hercule workflow read prints its source, hercule workflow update replaces the source or enables the workflow, hercule workflow run starts a run of it, hercule workflow delete removes it.",
   },
   trigger: {
     summary:
@@ -2219,6 +2255,11 @@ export const NOUNS = {
   },
   "event-kind": {
     summary: "Event kinds: the events a workflow trigger can listen for.",
+  },
+  run: {
+    summary:
+      "Runs: a workflow's steps carried out once, each run with a frozen copy of the workflow.",
+    flow: "hercule workflow run starts one, hercule run read shows how far it got.",
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",

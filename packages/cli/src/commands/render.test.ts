@@ -252,3 +252,88 @@ describe("a catalog query that returns a plain array", () => {
     ]);
   });
 });
+
+describe("hercule run", () => {
+  const RUN = "0199e0e7-3333-7000-8000-0000000000bb";
+
+  it("prints the new run's full id after workflow run, and the command that shows it", () => {
+    expect(
+      renderHuman({ kind: "value", value: { runId: RUN } }, lookUpCommand("workflow", "run")),
+    ).toEqual([`run ${RUN} started`, "", `see how far it got with \`hercule run read ${RUN}\``]);
+  });
+
+  it("prints a run as a summary with its full id, its inputs and one row per step, without the plan or the outputs", () => {
+    const failed = {
+      id: RUN,
+      workflowId: null,
+      plan: { name: "File a task", steps: [] },
+      inputs: { title: "Fix login", count: 3 },
+      origin: { kind: "manual", actor: "user" },
+      status: "failed",
+      failureReason: "step-failed",
+      failedStepId: "start_task",
+      steps: [
+        {
+          stepId: "file_task",
+          iteration: 1,
+          status: "completed",
+          startedAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.040Z",
+          output: { id: "t_1" },
+        },
+        {
+          stepId: "start_task",
+          iteration: 1,
+          status: "failed",
+          startedAt: "2026-09-24T10:00:00.040Z",
+          finishedAt: "2026-09-24T10:00:01.540Z",
+          error: { code: "not_found", message: "no such task" },
+        },
+        { stepId: "notify", iteration: 1, status: "cancelled" },
+      ],
+      createdAt: "2026-09-24T10:00:00.000Z",
+      startedAt: "2026-09-24T10:00:00.000Z",
+      finishedAt: "2026-09-24T10:00:01.540Z",
+    };
+    expect(renderHuman({ kind: "value", value: failed }, lookUpCommand("run", "read"))).toEqual([
+      `id             ${RUN}`,
+      "workflow       File a task",
+      "status         failed",
+      "failureReason  step-failed",
+      "failedStep     start_task",
+      "startedBy      user",
+      "createdAt      2026-09-24T10:00:00.000Z",
+      "startedAt      2026-09-24T10:00:00.000Z",
+      "finishedAt     2026-09-24T10:00:01.540Z",
+      "",
+      "inputs",
+      "title  Fix login",
+      "count  3",
+      "",
+      "step        status     took  error",
+      "file_task   completed  40ms",
+      "start_task  failed     1.5s  not_found: no such task",
+      "notify      cancelled",
+    ]);
+  });
+
+  it("says so when a run has no inputs", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: { name: "Nothing", steps: [] },
+          inputs: {},
+          origin: { kind: "api", actor: `session:${RUN}` },
+          status: "pending",
+          steps: [],
+          createdAt: "2026-09-24T10:00:00.000Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(lines.indexOf("inputs"))).toEqual(["inputs", "none", "", "no results"]);
+  });
+});

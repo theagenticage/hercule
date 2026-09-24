@@ -264,6 +264,25 @@ const make = Effect.gen(function* () {
     );
 
   return {
+    /**
+     * Returns the definition of a stored workflow, the parsed form of its
+     * source, or `None` if no workflow has the id. Checks no grant: this is
+     * not an operation, and the run engine checks the grant of the operation
+     * that reads it.
+     */
+    readDefinition: (id: string): Effect.Effect<Option.Option<WorkflowDefinition>, SqlError> =>
+      workflows.readDefinition(id),
+
+    /**
+     * Validates a parsed definition with the same rules as a save, against
+     * what exists on the controller now. Returns every error and warning.
+     * Checks no grant: the run engine calls it to check a definition again
+     * before it starts a run, because what the definition refers to may have
+     * changed since it was saved.
+     */
+    validateDefinition: (definition: WorkflowDefinition): Effect.Effect<WorkflowIssues, SqlError> =>
+      readReferencesAndValidate(definition),
+
     /** Returns one page of workflows, the most recently changed first. */
     query: (input: QueryInput): Effect.Effect<WorkflowPage, CallError> =>
       Effect.gen(function* () {

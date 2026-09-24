@@ -15,6 +15,7 @@ import { Forbidden, Internal, Issue, NotFound, Unauthenticated, Validation } fro
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
+import { workflowRunEndpoint } from "./run";
 import { WorkflowDefinition } from "./workflow-definition";
 
 /** A stored workflow: its YAML source exactly as written, plus the stored row's fields. */
@@ -186,5 +187,6 @@ export const workflow = HttpApiGroup.make("workflow")
       success: WorkflowIssues,
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
+    workflowRunEndpoint,
   )
   .middleware(Authenticated);

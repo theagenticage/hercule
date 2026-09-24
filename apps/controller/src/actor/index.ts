@@ -9,8 +9,10 @@
  *
  * v1 authenticates two kinds of caller: the user, through a login bearer token
  * or an API key, and a session, through the token the controller created for
- * it. Run and plugin actors will be added to this union later, without
- * restructuring anything here.
+ * it. A third kind never arrives over the transport: the run engine calls the
+ * services as a run while one of the run's action steps executes. Plugin
+ * actors will be added to this union later, without restructuring anything
+ * here.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -61,12 +63,27 @@ export interface SessionActor {
   readonly grants: ReadonlyArray<Grant>;
 }
 
+/**
+ * A run, while one of its built-in action steps executes. The step calls the
+ * same service method its operation does, as this actor.
+ *
+ * A run passes every grant check, because the user gave the workflow its
+ * steps by saving it, and the steps only do what the user could do. The
+ * grants of whoever started the run do not apply to its steps.
+ */
+export interface RunActor {
+  readonly _tag: "run";
+  readonly runId: string;
+  /** The step that is executing, for code that records which step made a change. */
+  readonly stepId: string;
+}
+
 /** No caller was resolved: an unauthenticated route, or an in-process caller. */
 export interface NoActor {
   readonly _tag: "none";
 }
 
-export type Actor = UserActor | SessionActor | NoActor;
+export type Actor = UserActor | SessionActor | RunActor | NoActor;
 
 const NONE: NoActor = { _tag: "none" };
 
@@ -94,18 +111,27 @@ export const USER_ACTOR = "user";
 export const SYSTEM_ACTOR = "system";
 
 /**
- * Returns the actor stamp for an actor: `session:<id>` for a session, and the
- * bare word `user` for the user. The session id lets a reader of the event log
- * or of a task's provenance trace a change back to the session that made it.
+ * Returns the actor stamp for an actor: `session:<id>` for a session,
+ * `run:<id>` for a run, and the bare word `user` for the user. The id lets a
+ * reader of the event log or of a task's provenance trace a change back to the
+ * session or run that made it.
  *
  * `NoActor` has no stamp, which is why the parameter type leaves it out. Every
  * operation that mutates anything requires a grant, and `requireGrant` rejects
- * a caller with no actor, so only the user and a session can reach a write
- * through a request. A write with no request behind it uses `SYSTEM_ACTOR`
- * explicitly instead of calling this function.
+ * a caller with no actor, so only an actor with an identity can reach a write.
+ * A write with no request behind it uses `SYSTEM_ACTOR` explicitly instead of
+ * calling this function.
  */
-export const buildActorStamp = (actor: UserActor | SessionActor): string =>
-  actor._tag === "session" ? `session:${actor.sessionId}` : USER_ACTOR;
+export const buildActorStamp = (actor: UserActor | SessionActor | RunActor): string => {
+  switch (actor._tag) {
+    case "user":
+      return USER_ACTOR;
+    case "session":
+      return `session:${actor.sessionId}`;
+    case "run":
+      return `run:${actor.runId}`;
+  }
+};
 
 /**
  * Returns the actor stamp for the actor behind the current request. This is
@@ -141,9 +167,10 @@ const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
  * Checks whether an actor may call an operation. Returns `undefined` when it
  * may, and the `Forbidden` error to fail with when it may not.
  *
- * The user actor passes every grant, because no profile applies to it. A
- * session passes exactly the grants its permission profile holds. Run and
- * plugin actors do not exist yet; each will be one more case here.
+ * The user actor passes every grant, because no profile applies to it, and so
+ * does a run, which acts for the user (see `RunActor`). A session passes
+ * exactly the grants its permission profile holds. Plugin actors do not exist
+ * yet; they will be one more case here.
  *
  * It returns the whole error rather than only the missing grant, so the caller
  * is told what it lacks. It takes the operation rather than the operation's
@@ -166,6 +193,7 @@ export const checkGrant = (id: OperationId, actor: Actor): Forbidden | undefined
   if (grant === undefined) return undefined;
   switch (actor._tag) {
     case "user":
+    case "run":
       return undefined;
     case "session":
       return actor.grants.includes(grant) ? undefined : createForbiddenError(grant);
@@ -199,9 +227,9 @@ const USER_ONLY = "only the user may make this call; no grant confers it";
  *
  * Fails with:
  *
- * - `Forbidden` (403) for a session, even one that holds the grant. The
- *   credential is valid and the profile allows the grant, so the error must
- *   not be a 401, which would tell an agent its token had expired.
+ * - `Forbidden` (403) for a session or a run, even one that holds the grant.
+ *   The credential is valid and the profile allows the grant, so the error
+ *   must not be a 401, which would tell an agent its token had expired.
  * - `Unauthenticated` (401) for a caller with no actor. That only happens
  *   when the operation's requirement is `authenticated` rather than a grant,
  *   because otherwise `requireGrant` has already rejected the caller.
@@ -213,7 +241,7 @@ export const requireUserActor = (
     if (actor._tag === "user") return Effect.succeed(actor);
     const grant = findRequiredGrant(OPERATIONS[id].requires);
     return Effect.fail(
-      actor._tag === "session" && grant !== undefined
+      actor._tag !== "none" && grant !== undefined
         ? createForbiddenError(grant, USER_ONLY)
         : createUnauthenticatedError(NO_CREDENTIAL),
     );
