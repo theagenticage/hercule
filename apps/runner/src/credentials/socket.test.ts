@@ -1,8 +1,8 @@
 /**
- * The runner's credential channel: a Unix socket that resolves
- * nothing itself. It turns git's question into a request for the controller and
- * relays the answer back; anything else is an empty answer, which is what lets
- * git fall through to the machine's own helpers.
+ * Tests the runner's credential socket. The socket does not look up
+ * credentials itself: it turns git's request into a request to the controller
+ * and returns the answer. In every other case it replies empty, which lets git
+ * move on to the machine's own helpers.
  */
 import { existsSync, statSync } from "node:fs";
 import { createConnection } from "node:net";
@@ -17,7 +17,7 @@ afterAll(cleanTemporaries);
 const createSocketPath = (): string =>
   join(createTemporaryDir("hercule-credentials-"), "daemon.sock");
 
-/** D-21 F5: an answer is a credential or a refusal, never a struct of maybes. */
+/** Builds a credential answer: either a credential or an error, never a mix of optional fields. */
 const buildCredentialAnswer = (
   fields:
     | { readonly token: string; readonly username: string }
@@ -28,7 +28,7 @@ const buildCredentialAnswer = (
   ...fields,
 });
 
-/** One question down the socket, one line back, the way the helper asks it. */
+/** Sends one request over the socket the way the helper does, and returns the reply line. */
 const askOverSocket = (path: string, request: Record<string, string>): Promise<string> =>
   new Promise((resolve, reject) => {
     const socket = createConnection({ path });
@@ -64,8 +64,8 @@ const startCredentialSocket = async (
   return { path, close: () => server.close() };
 };
 
-describe("what the socket relays", () => {
-  it("asks the controller for the remote git named, on behalf of the session that asked", async () => {
+describe("what the socket forwards", () => {
+  it("asks the controller for git's remote, with the session's token", async () => {
     asked.length = 0;
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ token: "the-token", username: "octocat" })),
@@ -78,13 +78,13 @@ describe("what the socket relays", () => {
       sessionToken: "the-session-token",
     });
 
-    // The remote is what the controller canonicalises; the token is the claim.
+    // The controller normalizes the remote; the token identifies the session.
     expect(asked).toEqual([{ remote: "github.com/acme/web", sessionToken: "the-session-token" }]);
     expect(JSON.parse(reply.trim())).toEqual({ username: "octocat", password: "the-token" });
     await served.close();
   });
 
-  it("carries a workspace id instead, for the runner's own git while it provisions", async () => {
+  it("sends a workspace id instead for the runner's own git while it provisions", async () => {
     asked.length = 0;
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ token: "the-token", username: "octocat" })),
@@ -104,8 +104,8 @@ describe("what the socket relays", () => {
   });
 });
 
-describe("when no credential is coming", () => {
-  it("answers empty on a refusal, so git falls through to the machine's helpers", async () => {
+describe("when there is no credential", () => {
+  it("replies empty when the controller denies the request, so git tries the next helper", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ error: "unauthorized" })),
     );
@@ -121,7 +121,7 @@ describe("when no credential is coming", () => {
     await served.close();
   });
 
-  it("answers empty, and asks nobody, when the request proves nothing", async () => {
+  it("replies empty and asks nothing when the request has no token or workspace id", async () => {
     asked.length = 0;
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ token: "the-token", username: "octocat" })),
@@ -138,7 +138,7 @@ describe("when no credential is coming", () => {
     await served.close();
   });
 
-  it("answers empty when the controller cannot be reached", async () => {
+  it("replies empty when the controller cannot be reached", async () => {
     const served = await startCredentialSocket(() =>
       Promise.reject(new Error("the controller is disconnected")),
     );
@@ -156,10 +156,10 @@ describe("when no credential is coming", () => {
   });
 });
 
-describe("an answer git could not read as one", () => {
-  it("is not passed on when a field carries a line break", async () => {
+describe("an answer git would misread", () => {
+  it("is not passed on when a field contains a line break", async () => {
     const served = await startCredentialSocket(() =>
-      // A second line would be a second answer, and git reads every line.
+      // git reads every line, so the extra line would be read as part of the answer.
       Promise.resolve(buildCredentialAnswer({ token: "the-token\nquit=1", username: "octocat" })),
     );
 
@@ -175,25 +175,25 @@ describe("an answer git could not read as one", () => {
   });
 });
 
-describe("a peer that is not asking a question", () => {
-  it("is cut off rather than buffered, and nobody is asked", async () => {
+describe("a peer that sends no request line", () => {
+  it("is disconnected instead of buffered, and the controller is not asked", async () => {
     asked.length = 0;
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ token: "the-token", username: "octocat" })),
     );
 
-    // How the cut-off reaches the peer is the kernel's choice, not ours. Where
-    // the socket buffer is smaller than the write (macOS) the peer's own write
-    // fails with ECONNRESET; where it is larger (Linux) the write completes and
-    // the peer sees the close instead. Both are the same cut-off, so this waits
-    // for either, and reads - a peer that never reads never reaches a close.
+    // How the peer notices the disconnect depends on the kernel. Where the
+    // socket buffer is smaller than the write (macOS), the peer's write fails
+    // with ECONNRESET. Where it is larger (Linux), the write completes and the
+    // peer sees the close. The test waits for either. It also reads, because a
+    // peer that never reads never sees the close.
     const cutOff = await new Promise<string>((resolve, reject) => {
       const socket = createConnection({ path: served.path });
       let received = "";
       socket.setEncoding("utf8");
       socket.on("connect", () => {
-        // A hundred kilobytes and not one newline: nothing git sends, and
-        // nothing this end should hold on to.
+        // 100 KB with no newline: git never sends this, and the socket should
+        // not keep it in memory.
         socket.write("x".repeat(100 * 1024));
       });
       socket.on("data", (chunk: string) => {
@@ -204,7 +204,7 @@ describe("a peer that is not asking a question", () => {
       setTimeout(() => reject(new Error("the socket kept reading")), 5_000).unref();
     });
 
-    // Cut off, not answered: the peer asked nothing, so it is told nothing.
+    // The peer is disconnected without a reply, because it sent no request.
     expect(cutOff).toBe("");
     expect(asked).toEqual([]);
     await served.close();
@@ -212,34 +212,34 @@ describe("a peer that is not asking a question", () => {
 });
 
 describe("the socket itself", () => {
-  it("is reachable by this user alone", async () => {
+  it("can be opened only by this OS user", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ error: "no_connection" })),
     );
 
-    // A same-user process is at parity with the runner anyway, but no other
-    // OS user reaches this.
+    // A process of the same user can already do anything the runner can, but
+    // no other OS user can open the socket.
     expect(statSync(served.path).mode & 0o777).toBe(0o600);
     await served.close();
   });
 
-  it("refuses to take over a socket another daemon is answering on", async () => {
+  it("fails to start when another daemon is already listening on the socket", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ error: "no_connection" })),
     );
 
-    // Two daemons on one home would answer this machine's helpers with two
-    // different controllers' credentials.
+    // Two daemons on one Hercule Home could answer this machine's helpers with
+    // credentials from two different controllers.
     await expect(
       serveCredentialSocket({ path: served.path, ask: () => Promise.reject(new Error("never")) }),
     ).rejects.toThrow("already listening");
 
-    // And the one that was there is untouched.
+    // The existing daemon's socket is left in place.
     expect(existsSync(served.path)).toBe(true);
     await served.close();
   });
 
-  it("is gone once it is closed", async () => {
+  it("removes the socket file when it is closed", async () => {
     const served = await startCredentialSocket(() =>
       Promise.resolve(buildCredentialAnswer({ error: "no_connection" })),
     );

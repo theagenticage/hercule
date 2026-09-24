@@ -1,15 +1,18 @@
 /**
- * What the app-server asks this client between turns, in the one vocabulary
- * every surface renders: which question the user sees, and what each of the
- * four answers writes back. One table, because the mapping is the whole
- * subject - a request answered in a shape Codex does not take is a turn that
- * never ends, with nothing said anywhere.
+ * The requests the app-server sends to this client during a turn, mapped to
+ * Hercule's requests: what the user is shown, and what each of the four
+ * decisions sends back to Codex. The mapping is one table because getting it
+ * right is the whole job here: a reply in a shape Codex does not accept leaves
+ * the turn hanging forever, with no error anywhere.
  *
- * Three answers are stretches, because the harness cannot express what Hercule
- * offers. A permissions request has no decision enum, so a refusal is an empty
- * grant; an elicitation has no for-session accept, so `allow_always` is not
- * offered; and a question has no refusal shape at all, so a refusal is a
- * JSON-RPC error reply.
+ * Three mappings are approximate, because Codex cannot express everything
+ * Hercule offers:
+ *
+ * - A permissions request has no decision enum, so a deny is an empty grant.
+ * - An MCP elicitation has no "accept for this session", so `allow_always` is
+ *   not offered.
+ * - A question has no way to decline in its reply, so a decline is a
+ *   JSON-RPC error reply.
  */
 import type { ApprovalDecision, OpenRequest } from "@hercule/protocol";
 import { ensureId } from "../events";
@@ -31,32 +34,33 @@ import type {
   ToolRequestUserInputParams,
 } from "./types";
 
-/** What the adapter knows when a request arrives and the request itself does not. */
+/** What the adapter knows about an arriving request that is not in the request's params. */
 export interface Arrival {
   readonly requestId: string;
-  /** The thread it arrived on, which is the only id some requests can be filed under. */
+  /** The thread the request arrived on. Some requests have no other id to be filed under. */
   readonly threadId: string;
-  /** The paths of the item a file change is about; they are not in its params. */
+  /** Returns the paths of a file change item. A file change request does not include them. */
   readonly paths: (itemId: string) => ReadonlyArray<string>;
 }
 
 export interface Asked {
-  /** The question as a surface reads it. */
+  /** Builds the request that surfaces show to the user. */
   readonly opens: (params: unknown, arrival: Arrival) => OpenRequest;
   /**
-   * What Codex is told. Only a decision the row offers arrives here, with one
-   * exception: an interrupt cancels a park whose row offers no cancel, and the
-   * permissions row answers that with its deny.
+   * Builds the reply sent to Codex for a decision. Only a decision the row
+   * offers is passed here, with one exception: an interrupt cancels a request
+   * even when its row offers no cancel, and the permissions row replies to
+   * that cancel as it does to a deny.
    */
   readonly replies: (decision: ApprovalDecision, params: unknown) => RpcReply;
-  /** The answers Codex cannot express, so the turn is ended for it. */
+  /** The decisions Codex's reply cannot express, so the adapter interrupts the turn instead. */
   readonly endsTurn: ReadonlyArray<ApprovalDecision>;
 }
 
 /**
- * One row, written against its own params type. The cast is the codec's
- * `unknown` narrowed at the one point the method is known, and it is here
- * rather than in five row bodies.
+ * Builds one row of the table, typed against its own params type. The codec
+ * hands over params as `unknown`; the cast narrows them here, once, rather
+ * than in each of the five rows.
  */
 const buildAsked = <P>(row: {
   readonly opens: (params: P, arrival: Arrival) => OpenRequest;
@@ -69,8 +73,9 @@ type Decisions = OpenRequest["decisions"];
 const EVERY_ANSWER: Decisions = ["allow", "allow_always", "deny", "cancel"];
 
 /**
- * Both approval enums name the same four answers; the command one additionally
- * has policy-amendment arms Hercule never sends, so the narrower type covers both.
+ * Both Codex approval enums have the same four decisions. The command enum
+ * also has policy-amendment variants that Hercule never sends, so the narrower
+ * file change type works for both.
  */
 const APPROVED: Readonly<Record<ApprovalDecision, FileChangeApprovalDecision>> = {
   allow: "accept",
@@ -79,14 +84,15 @@ const APPROVED: Readonly<Record<ApprovalDecision, FileChangeApprovalDecision>> =
   cancel: "cancel",
 };
 
-/** JSON-RPC's own: this client will not do what was asked. */
+/** The standard JSON-RPC internal error code, used here to decline a request. */
 const INTERNAL_ERROR = -32603;
 
 const DECLINED: RpcReply = { error: { code: INTERNAL_ERROR, message: "declined by the user" } };
 
 /**
- * The profile the agent asked for, as a grant. A half the request left null is
- * a half nothing was asked for, which is the same grant as leaving it out.
+ * Converts the requested permission profile into a grant of exactly that
+ * profile. A part the request left `null` was not asked for, so it is left out
+ * of the grant.
  */
 const buildGrantedProfile = ({
   network,
@@ -96,16 +102,19 @@ const buildGrantedProfile = ({
   ...(fileSystem === null ? {} : { fileSystem }),
 });
 
-/** Named, because an elicitation that did not name its server is named after it. */
+/** A constant, because an elicitation whose server has no name is labelled with this method. */
 const ELICITATION = "mcpServer/elicitation/request";
 
-/** What the ask is called where nothing decodable was asked through it. */
+/**
+ * The tool name shown when a question request has no questions that can be
+ * parsed, and is shown as a tool approval instead.
+ */
 const USER_INPUT_TOOL = "requestUserInput";
 
 /**
- * Every server-to-client request this build maps, by method. A method not in
- * here is answered `-32601` by the adapter, which is an answer: an unanswered
- * request is the one failure nobody upstream can see.
+ * Every server-to-client request this build handles, by method. The adapter
+ * replies `-32601` (method not found) to any other method. That is still a
+ * reply: a request with no reply is the one failure nobody upstream can see.
  */
 export const ASKED: Readonly<Record<string, Asked>> = {
   "item/commandExecution/requestApproval": buildAsked<CommandExecutionRequestApprovalParams>({
@@ -114,8 +123,8 @@ export const ASKED: Readonly<Record<string, Asked>> = {
       itemId: ensureId(params.itemId),
       kind: "command_approval",
       decisions: EVERY_ANSWER,
-      // A command the harness did not name leaves the card with nothing to
-      // read, which is still the honest report of what it asked.
+      // If Codex sends no command, the card shows an empty command. That is
+      // still an accurate report of what Codex asked.
       detail: { command: truncateMessage(params.command ?? "") },
     }),
     replies: (decision) => ({
@@ -141,13 +150,13 @@ export const ASKED: Readonly<Record<string, Asked>> = {
       requestId,
       itemId: ensureId(params.itemId),
       kind: "tool_approval",
-      // The answer is a grant, not a decision, so there is no cancel in it: a
-      // button for one would be a stop this adapter would have to invent.
+      // The reply is a grant, not a decision, so it cannot express a cancel.
+      // Offering a cancel button would mean inventing a way to stop.
       decisions: ["allow", "allow_always", "deny"],
       detail: { toolName: "permissions" },
     }),
-    // A refusal is the empty grant and nothing else. Codex ends the turn itself
-    // after one, so a `turn/interrupt` from here would be a second, racing stop.
+    // A deny is the empty grant and nothing else. Codex ends the turn itself
+    // after an empty grant, so a `turn/interrupt` from here would race it.
     replies: (decision, params) => ({
       result: {
         permissions:
@@ -162,24 +171,24 @@ export const ASKED: Readonly<Record<string, Asked>> = {
   [ELICITATION]: buildAsked<McpServerElicitationRequestParams>({
     opens: (params, { requestId, threadId }) => ({
       requestId,
-      // An elicitation is about no item, so it is filed under the turn it
-      // interrupted, and under the thread where the server could not name one.
+      // An elicitation belongs to no item, so it is filed under its turn, or
+      // under the thread when the request has no turn id.
       itemId: ensureId(params.turnId ?? threadId),
       kind: "tool_approval",
-      // The answer has no for-session accept, so offering one would be offering
-      // an answer this adapter would have to substitute for.
+      // The reply has no "accept for this session", so `allow_always` is not
+      // offered: the adapter would have to replace it with something else.
       decisions: ["allow", "deny", "cancel"],
-      // A server that did not name itself is named by what it asked through.
+      // A server with an empty name is labelled with the request method.
       detail: {
         toolName: params.serverName === "" ? ELICITATION : truncateFact(params.serverName),
       },
     }),
     replies: (decision) => ({
       result: {
-        // Only the three answers the row offers ever arrive here.
+        // Only the three decisions this row offers are passed here.
         action: decision === "allow" ? "accept" : decision === "deny" ? "decline" : "cancel",
-        // Answering a server's form is not built, so an accept carries the
-        // user's assent and nothing they filled in.
+        // Filling in a server's form is not supported yet, so an accept sends
+        // the user's consent and no form content.
         content: null,
         _meta: null,
       } satisfies McpServerElicitationRequestResponse,
@@ -193,8 +202,8 @@ export const ASKED: Readonly<Record<string, Asked>> = {
         USER_INPUT_TOOL,
         params.questions,
       ),
-    // Answering with content is not built, and the answer shape has no refusal
-    // in it, so the only thing this client can say is that it will not answer.
+    // Sending answers is not supported yet, and the reply has no way to
+    // decline, so the only possible reply is an error.
     replies: () => DECLINED,
     endsTurn: ["cancel"],
   }),

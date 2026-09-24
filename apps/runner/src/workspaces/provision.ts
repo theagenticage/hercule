@@ -1,10 +1,11 @@
 /**
- * Making a workspace on this machine: a primary cloned fresh under this
- * machine's own storage, and an ephemeral worktree per repository.
+ * Provisions workspaces on this runner. A primary is a fresh clone in the
+ * runner's storage directory, and an ephemeral workspace is one worktree per
+ * repository.
  *
- * Nothing here ever touches a folder the user already has. A primary is Hercule's
- * own clone, in a directory Hercule made, so no directory outside the storage
- * directory is read or written.
+ * Nothing here touches a directory the user already has. A primary is
+ * Hercule's own clone, in a directory Hercule created, so nothing outside the
+ * storage directory is read or written.
  */
 import { cpSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join as joinPath, resolve as resolvePath, sep } from "node:path";
@@ -28,10 +29,13 @@ import {
 import { isStillOnDisk, type RegisteredCheckout, type RegisteredWorkspace } from "./registry";
 import type { Substrate } from "./substrate";
 
-/** The most of a setup command's output the user is shown: the tail says why. */
+/**
+ * How many of the last lines of a setup command's output the user is shown.
+ * The end of the output usually shows why the command failed.
+ */
 const SETUP_OUTPUT_LINES = 20;
 
-/** The most of a setup command's output held while it runs, per workspace. */
+/** The most output of one setup command kept in memory while it runs. */
 const SETUP_OUTPUT_BYTES = 64 * 1024;
 
 const buildFailedReport = (workspaceId: string, message: string): WorkspaceReport => ({
@@ -70,7 +74,11 @@ const registerWorkspace = (substrate: Substrate, entry: RegisteredWorkspace): Pr
     entry,
   ]);
 
-/** A primary this machine makes for itself: hardlinked off the cache, pointed at the real remote. */
+/**
+ * Creates a primary: a clone of the cache that shares its objects through
+ * hardlinks, with `origin` pointed at the real remote. Returns a ready report,
+ * or a failed report with git's error output.
+ */
 const cloneFresh = async (
   substrate: Substrate,
   workspaceId: string,
@@ -86,18 +94,18 @@ const cloneFresh = async (
   if (cache.failure !== undefined) return buildFailedReport(workspaceId, cache.failure);
   const dir = joinPath(substrate.storageDir, "primaries", one.resourceId);
   mkdirSync(dirname(dir), { recursive: true, mode: 0o700 });
-  // Nothing is registered here, so whatever stands in that directory is what an
-  // earlier attempt left behind, and git will not clone into it.
+  // This workspace is not registered, so anything already in that directory was
+  // left by an earlier attempt, and git will not clone into it.
   rmSync(dir, { recursive: true, force: true });
   const cloned = await runGit(["clone", "--local", "--", cache.path, dir], { env });
   if (!cloned.ok) return buildFailedReport(workspaceId, cloned.stderr);
-  // Fetching and pushing have to reach the real remote, not this machine's cache.
+  // Fetching and pushing have to reach the real remote, not this runner's cache.
   const pointed = await runGit(["-C", dir, "remote", "set-url", "origin", one.remote], { env });
   if (!pointed.ok) return buildFailedReport(workspaceId, pointed.stderr);
-  // The cache's branches are as old as the cache; the remote's are current, and
-  // this clone is seconds old with nothing in it to lose by taking them. A clone
-  // that came up on no branch at all - an empty repository - has nothing to
-  // bring forward.
+  // The clone's branches come from the cache's own branches, which are only as
+  // new as the cache's first clone. The remote's branches are current, and the
+  // clone is seconds old, so resetting it to them loses nothing. A clone that
+  // is on no branch (an empty repository) has nothing to update.
   const branch = await readCurrentBranch(dir, env);
   if (branch !== null && (await runGit(["-C", dir, "fetch", "--no-tags", "origin"], { env })).ok) {
     await runGit(["-C", dir, "reset", "--hard", `refs/remotes/origin/${branch}`], { env });
@@ -115,11 +123,15 @@ const cloneFresh = async (
 };
 
 /**
- * What the primary's `.workspaceinclude` lists, copied in: the untracked files
- * an agent needs to run the project. One relative path per line, `#` comments;
- * a line that climbs out of the primary is not a path in it. Symlinks are
- * followed rather than copied, because a link into the primary would be an
- * agent editing the user's own files.
+ * Copies the files listed in the primary's `.workspaceinclude` into `dir`.
+ * These are untracked files an agent needs to run the project. Does nothing if
+ * the primary has no `.workspaceinclude`.
+ *
+ * - The file has one relative path per line, and lines starting with `#` are
+ *   comments.
+ * - A path that points outside the primary is skipped.
+ * - Symlinks are followed and their targets copied, because a link into the
+ *   primary would let an agent edit the primary's files.
  */
 const copyIncludedFiles = (primaryRoot: string, dir: string): void => {
   let listed: string;
@@ -142,10 +154,10 @@ const copyIncludedFiles = (primaryRoot: string, dir: string): void => {
 };
 
 /**
- * Everything a pipe produces, capped: an install log can run to megabytes and
- * only its tail is ever read, so the head is dropped as it arrives rather than
- * held. Both pipes feed one buffer, so the tail reads in the order the command
- * printed it.
+ * Reads a stream to its end into `held.text`, keeping only the last
+ * `SETUP_OUTPUT_BYTES`. An install log can run to megabytes and only its end is
+ * ever read, so older output is dropped as it arrives. Both pipes write into
+ * the same buffer, so the output stays in the order it arrived.
  */
 const drainInto = async (
   stream: ReadableStream<Uint8Array>,
@@ -158,10 +170,11 @@ const drainInto = async (
 };
 
 /**
- * The whole process group, not the shell alone: a setup command that starts a
- * watcher or a server leaves children behind, and killing the shell would leave
- * those holding the workspace this is giving up on. The child leads a group of
- * its own, which is what makes the negative pid safe to signal.
+ * Kills the setup command's whole process group, not just the shell. A setup
+ * command that starts a watcher or a server leaves child processes behind, and
+ * killing only the shell would leave them running in the workspace. The child
+ * was started as the leader of its own process group, which is what makes
+ * signalling the negative pid safe.
  */
 const stopGroup = (child: Bun.Subprocess): void => {
   try {
@@ -172,9 +185,10 @@ const stopGroup = (child: Bun.Subprocess): void => {
 };
 
 /**
- * The tail of what a setup command printed, which is the part that says why it
- * stopped, or nothing at all when it succeeded. A command that never returns is
- * killed at the deadline: provisioning is what a session is waiting on.
+ * Runs a repository's setup command in `dir`. Returns undefined if it
+ * succeeds. Otherwise returns a message that says why it failed, followed by
+ * the last lines of its output. A command still running at the deadline is
+ * killed, because a session is waiting for provisioning to finish.
  */
 const runSetup = async (
   command: string,
@@ -183,10 +197,11 @@ const runSetup = async (
 ): Promise<string | undefined> => {
   const child = Bun.spawn(["/bin/sh", "-c", command], {
     cwd: dir,
-    // The clean environment, without the provisioning claim: a setup command is
-    // repository code and gets no credential of its own (D-16).
+    // The scrubbed environment, without the workspace id that provisioning adds
+    // for git: a setup command is repository code, so it gets no credential of
+    // its own.
     env: { ...substrate.gitEnv },
-    // A group of its own, so the deadline can reach everything it started.
+    // Its own process group, so the deadline can kill everything it started.
     detached: true,
     stdout: "pipe",
     stderr: "pipe",
@@ -194,9 +209,9 @@ const runSetup = async (
   const held = { text: "" };
   let timedOut = false;
   let deadline: ReturnType<typeof setTimeout> | undefined;
-  // Not joined with the command's own end: what a setup command left running
-  // behind it holds the pipes open, and waiting for those would be waiting for
-  // the very thing the deadline is there to stop waiting for.
+  // The deadline races the command instead of waiting for the command to end:
+  // a process the setup command left running keeps the pipes open, so waiting
+  // for the pipes could take forever, which is what the deadline prevents.
   const stopped = new Promise<undefined>((resolve) => {
     deadline = setTimeout(() => {
       timedOut = true;
@@ -214,7 +229,7 @@ const runSetup = async (
   const lines = held.text.split("\n").filter((line) => line.length > 0);
   const why = timedOut
     ? `the setup command was still running after ${String(Math.round(substrate.setupDeadlineMs / 1000))}s and was stopped:`
-    : `the setup command exited ${String(code)}:`;
+    : `the setup command failed with exit code ${String(code)}:`;
   return [why, ...lines.slice(-SETUP_OUTPUT_LINES)].join("\n");
 };
 
@@ -230,22 +245,22 @@ const makeEphemeral = async (
   const checkouts: Array<CheckoutReport> = [];
   const warnings: Array<string> = [];
   /**
-   * A workspace that could not be made leaves no half of one behind: every
-   * worktree already added is removed, and with it the cache's belief that a
-   * directory over there is one of its own. A setup command that failed is the
-   * exception the spec names: its files stay for the user to look at.
+   * Fails the provisioning and removes what it created: every worktree added
+   * so far, the workspace directory, and the caches' records of those
+   * worktrees. A failed setup command is the exception the spec names: it does
+   * not call this, so its files stay for the user to inspect.
    */
   const giveUp = async (message: string): Promise<WorkspaceReport> => {
     await tearDown(substrate.storageDir, root, held, env);
     return buildFailedReport(workspaceId, message);
   };
 
-  // Every working copy first, so the workspace is a whole one before anything
-  // runs in it.
+  // Create every checkout first, so the workspace is complete before any setup
+  // command runs in it.
   for (const one of frame.checkouts) {
     const dir = one.subdirectory === null ? root : joinPath(root, one.subdirectory);
     if (one.branch === null) {
-      return await giveUp(`${one.remote} was asked for a worktree on no branch`);
+      return await giveUp(`no branch was given for the worktree of ${one.remote}`);
     }
     const cache = await ensureCache({
       storageDir: substrate.storageDir,
@@ -254,8 +269,8 @@ const makeEphemeral = async (
       env,
     });
     if (cache.failure !== undefined) return await giveUp(cache.failure);
-    // The cache just said what the default branch is; asking git again here
-    // would be a second derivation of the one answer.
+    // Use the default branch `ensureCache` returned: asking git again could
+    // give a different answer.
     const base = one.baseBranch ?? cache.defaultBranch ?? "";
     const start = await findStartPoint(cache.path, base, env);
     if (start === undefined) return await giveUp(`${one.remote} has no branch ${base}`);
@@ -273,26 +288,28 @@ const makeEphemeral = async (
       path: dir,
     });
   }
-  // Registered before a setup command runs, and before the report goes out: the
-  // branch is made and the directory is the workspace, so a frame the
-  // controller resends - to a runner that dialled in again, or because the
-  // report was lost - must find this and re-report it. Making it again would
-  // fail on the branch that now exists and throw away what is in there.
+  // Register the workspace before any setup command runs and before the report
+  // is sent. The branches now exist, so a frame the controller resends (to a
+  // runner that reconnected, or because the report was lost) must find this
+  // entry and report it again. Creating the workspace a second time would fail
+  // on the existing branch and throw away what is in the directory.
   await registerWorkspace(substrate, { workspaceId, kind: "ephemeral", root, checkouts: held });
 
   for (const [at, one] of frame.checkouts.entries()) {
     const dir = held[at]!.path;
     if (one.workspaceInclude) {
       const primary = substrate.registry.primaryOf(one.resourceId);
-      // Before the setup command, which is the thing that reads what was copied.
+      // Copy before the setup command runs, because it may need the copied files.
       if (primary === undefined) {
-        warnings.push(`no primary of ${one.resourceId} on this runner; .workspaceinclude skipped`);
+        warnings.push(
+          `.workspaceinclude skipped: this runner has no main workspace for resource ${one.resourceId} to copy the files from`,
+        );
       } else copyIncludedFiles(primary.root, dir);
     }
     if (one.setupCommand !== null) {
       const wrong = await runSetup(one.setupCommand, dir, substrate);
-      // Left in place, worktree and all: the user is the one who decides to
-      // throw away what an install got half way through.
+      // The workspace and its worktrees are left in place: the user decides
+      // whether to throw away a half-finished install.
       if (wrong !== undefined) return buildFailedReport(workspaceId, wrong);
     }
     checkouts.push(await buildCheckoutReport(one.checkoutId, dir, env));
@@ -307,8 +324,9 @@ const makeEphemeral = async (
 };
 
 /**
- * What a workspace this machine already holds is worth: a re-report, unless the
- * directory it named is gone, which is a workspace nobody can be placed in.
+ * Reports again on a workspace this runner already has. Returns a ready
+ * report, or a failed report if its directory is gone. In that case the entry
+ * is also removed from the registry, because no session can be placed there.
  */
 export const reprovision = async (
   substrate: Substrate,
@@ -325,13 +343,17 @@ export const provisionWorkspace = async (
   substrate: Substrate,
   frame: WorkspaceProvision,
 ): Promise<WorkspaceReport> => {
-  // The machine proves itself to the controller as the workspace it is making,
-  // for as long as it is making it.
+  // While provisioning, the runner's git carries the workspace id, so the
+  // credential helper can prove to the controller which workspace it is
+  // creating and get a credential for it.
   const env = { ...substrate.gitEnv, HERCULE_WORKSPACE_PROVISIONING: frame.workspaceId };
   if (frame.kind === "ephemeral") return makeEphemeral(substrate, frame, env);
   const one = frame.checkouts[0];
   if (one === undefined) {
-    return buildFailedReport(frame.workspaceId, "a primary is one checkout of a repository");
+    return buildFailedReport(
+      frame.workspaceId,
+      "a main workspace needs exactly one checkout, but none was given",
+    );
   }
   return cloneFresh(substrate, frame.workspaceId, one, env);
 };

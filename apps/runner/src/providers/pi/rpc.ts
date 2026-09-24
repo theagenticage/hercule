@@ -1,13 +1,12 @@
 /**
- * The line-framed JSON protocol pi speaks over stdio: a command per line in,
- * a response or an event per line out. Hercule owns the codec because pi answers
- * a command with a `response` frame carrying the command's own name and an
- * `id` it echoes, and writes everything else - events and its own complaints -
- * down the same pipe.
+ * The client for pi's RPC mode: JSON over stdio, one command per line in, one
+ * response or event per line out. pi replies to a command with a `response`
+ * frame that echoes the command's `id`, and writes everything else - events
+ * and its own error output - to the same pipe. This module matches responses
+ * to the commands waiting for them and passes every other line on.
  *
- * A line that is not a response is handed on raw rather than decoded: what a
- * line means is the normalizer's business, and a line that is not JSON at all
- * is one of the cases it reports.
+ * Other lines are passed on without being interpreted: the normalizer decides
+ * what they mean, and it also reports lines that are not JSON at all.
  */
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -15,42 +14,46 @@ import * as Effect from "effect/Effect";
 import type { FramedChild } from "../process";
 
 /**
- * pi's stdio, framed: one item per line, because a frame split over two reads
- * is not a frame. `end` closes stdin, which is pi's own cue to flush its
- * transcript and leave.
+ * pi's stdio, split into lines, because a frame split across two reads cannot
+ * be parsed. `end` closes stdin, which tells pi to flush its transcript and
+ * exit.
  */
 export type PiChild = FramedChild;
 
 export type PiSpawn = (
   command: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
-  /** The session's own directory: pi reads and writes files relative to it. */
+  /** The session's working directory: pi resolves relative file paths against it. */
   cwd: string | null,
 ) => PiChild;
 
 export interface PiRpc {
   /**
-   * Sends one command and waits for the response pi files under its id,
-   * failing with what pi said when it refused.
+   * Sends one command and waits for pi's response with the same id. Returns
+   * the response frame. Fails with pi's error message when pi rejects the
+   * command, and with a message of its own when pi exits or does not respond
+   * in time.
    */
   readonly send: (
     command: Record<string, unknown>,
   ) => Effect.Effect<Record<string, unknown>, string>;
-  /** Reads pi until it stops talking; nothing is answered before it runs. */
+  /**
+   * Reads pi's stdout until it closes. No response reaches `send` until this
+   * is running.
+   */
   readonly pump: Effect.Effect<void>;
 }
 
 /**
- * How long a command to pi waits. Five seconds, which is short because every
- * command here is local: a write to a process on this machine and its answer
- * off the same pipe, never a request to a model. The runner handles session
- * frames in the order they arrived rather than concurrently, so one pi that
- * stops answering would otherwise hold up every session on the machine, pings
- * included.
+ * How long `send` waits for pi's response. Five seconds is enough because every
+ * command is local: a write to a process on this machine and a response on the
+ * same pipe, never a request to a model. The runner handles session frames one
+ * at a time, in order, so a pi that stops responding would otherwise block
+ * every session on the machine, pings included.
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 
-const GONE = "pi stopped talking";
+const GONE = "pi exited or closed its output";
 
 const describeError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -58,9 +61,10 @@ const describeError = (error: unknown): string =>
 export const makeRpc = (
   child: PiChild,
   /**
-   * One line that was not an answer to a command, decoded where it could be:
-   * the reader would otherwise decode every line a second time, and a turn is
-   * thousands of them. A line that is not JSON at all arrives undecoded.
+   * Called with each line that is not a response to a command, together with
+   * the parsed JSON. Passing the parsed value saves the caller from parsing
+   * every line a second time, and a turn has thousands of lines. For a line
+   * that is not JSON, `frame` is undefined.
    */
   onLine: (line: string, frame: unknown) => void,
 ): PiRpc => {
@@ -77,7 +81,11 @@ export const makeRpc = (
       waiting,
       frame["success"] === true
         ? Effect.succeed(frame)
-        : Effect.fail(typeof frame["error"] === "string" ? frame["error"] : GONE),
+        : Effect.fail(
+            typeof frame["error"] === "string"
+              ? frame["error"]
+              : "pi rejected the command without giving a reason",
+          ),
     );
   };
 
@@ -89,9 +97,8 @@ export const makeRpc = (
       onLine(line, undefined);
       return;
     }
-    // A bare `null` is valid JSON and no frame at all: read on as one, it is an
-    // event with no type, and the reader would die on the line rather than
-    // skip it.
+    // A bare `null` is valid JSON but not a frame. Reading `type` from it on
+    // the next line would throw and stop the reader, so skip it.
     if (frame === null) return;
     if (typeof frame !== "object" || (frame as Record<string, unknown>)["type"] !== "response") {
       onLine(line, frame);
@@ -114,8 +121,8 @@ export const makeRpc = (
         if (gone) return Effect.fail(GONE);
         const id = `hercule-${next++}`;
         const settled = Deferred.makeUnsafe<Record<string, unknown>, string>();
-        // Registered before the write, because pi can answer inside it, and
-        // taken back out again when the write is what failed.
+        // Register the waiter before writing, because pi can respond before
+        // `write` returns. Remove it again if the write itself fails.
         pending.set(id, settled);
         try {
           child.write(`${JSON.stringify({ ...command, id })}\n`);
@@ -143,8 +150,8 @@ export const makeRpc = (
             if (line.trim() !== "") deliver(line);
           }
         } catch {
-          // A pipe that threw mid-read is a peer that has gone, same as one
-          // that ended, and the commands waiting on it must hear so either way.
+          // A pipe that throws while reading means pi is gone, just like a pipe
+          // that ends. Either way, the commands still waiting must fail.
         }
         if (signal.aborted) return;
         abandon();

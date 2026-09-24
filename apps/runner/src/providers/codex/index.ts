@@ -1,7 +1,7 @@
 /**
- * The Codex adapter, as the rest of the runner sees it: the adapter itself, the
- * id it is registered under, and the child shape the process seam spawns for it.
- * Nothing else in this folder is anyone else's business.
+ * The public face of the Codex adapter: the adapter itself, the provider id it
+ * is registered under, and the types of the child process the process seam
+ * spawns for it. Everything else in this folder is internal.
  */
 export { CODEX, codex } from "./adapter";
 export type { AppServerChild, AppServerSpawn } from "./rpc";

@@ -1,11 +1,11 @@
 /**
- * What the runner puts on the machine once, at start, so that every session it
- * hosts can reach Hercule: the `hercule` binary on a directory it prepends to
- * PATH (spec 15 section 2) and the Claude plugin directory the skill is
- * materialized into (spec 06 section 9.3).
+ * Tests what the runner prepares on the machine at start, so that every session
+ * it hosts can reach Hercule: the `hercule` binary in a directory it puts at the
+ * front of PATH (spec 15 section 2), and the Claude plugin directory that holds
+ * the skill (spec 06 section 9.3).
  *
- * Both are refreshed rather than written once, because an upgraded binary must
- * take over an older build's symlink and an older build's skill text.
+ * Both are rewritten at every start, because an upgraded binary must replace an
+ * older build's symlink and an older build's skill text.
  */
 import {
   existsSync,
@@ -37,7 +37,7 @@ const createRoot = (): string => {
 
 const SKILL = "# hercule\n\nCall `hercule --help` to find out what this controller can do.\n";
 
-/** A home and a storage directory of one runner, with a binary to point at. */
+/** Creates a Hercule Home, a runner storage directory, and a fake binary for the symlink to point at. */
 const createMachine = (): {
   readonly home: string;
   readonly storageDir: string;
@@ -58,8 +58,8 @@ describe("the hercule binary a session calls", () => {
 
     const { binDir } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
-    // The very path spec 15 section 2 names, because the PATH prepend and this
-    // are two halves of one promise: `which hercule` works inside a session.
+    // The exact path spec 15 section 2 names. Together with the PATH change, it
+    // makes `which hercule` work inside a session.
     expect(binDir).toBe(join(home, "runner", "bin"));
     const link = join(binDir, "hercule");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
@@ -74,22 +74,23 @@ describe("the hercule binary a session calls", () => {
 
     prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
-    // Refreshed at every runner start, so an upgrade follows rather than
-    // leaving every session calling the build that was replaced.
+    // The link is rewritten at every runner start, so after an upgrade the
+    // sessions call the new build, not the one it replaced.
     expect(readlinkSync(join(binDir, "hercule"))).toBe(execPath);
   });
 });
 
-describe("the Claude plugin directory the skill is materialized into", () => {
-  it("is a loadable plugin under the runner's own storage, carrying the skill", () => {
+describe("the Claude plugin directory that holds the skill", () => {
+  it("is a loadable plugin under the runner's storage directory, and contains the skill", () => {
     const { home, storageDir, execPath } = createMachine();
 
     const {
       herculeTool: { claudePluginDir },
     } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
-    // Under the runner's storage, so re-enlisting the machine takes it with
-    // the identity it belonged to, and never in a Thread's own `.claude/`.
+    // It lives under the runner's storage directory, so it goes away with the
+    // identity when the machine is enlisted again. It is never written into a
+    // Thread's own `.claude/`.
     expect(claudePluginDir.startsWith(storageDir)).toBe(true);
     // The two files the SDK needs to load a local plugin and find its skill.
     const manifest = join(claudePluginDir, ".claude-plugin", "plugin.json");
@@ -119,8 +120,8 @@ describe("the Claude plugin directory the skill is materialized into", () => {
       herculeTool: { claudePluginDir },
     } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
 
-    // Stale skill text teaches an agent commands this build may no longer
-    // spell that way, and nothing else on the machine ever rewrites it.
+    // Stale skill text could teach an agent commands this build no longer has,
+    // and nothing else on the machine rewrites it.
     const written = readFileSync(join(claudePluginDir, "skills", "hercule", "SKILL.md"), "utf8");
     expect(written).toContain(SKILL);
     expect(written).not.toContain("what the previous build said");

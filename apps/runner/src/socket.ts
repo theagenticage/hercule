@@ -1,13 +1,19 @@
 /**
- * The runner's end of one connection. Holding one open again is `./reconnect.ts`.
+ * The runner's end of one connection to the controller. `./reconnect.ts`
+ * opens a new one when it ends.
  *
- * The credential rides the upgrade request, because a runner owns its HTTP
- * client and can put a header on a handshake where a browser cannot.
+ * The credential is sent in a header on the WebSocket upgrade request. The
+ * runner controls its own HTTP client, so it can set that header, which a
+ * browser cannot.
  *
- * A controller is a logical identity, not an address, so the runner sends a
- * fresh nonce and requires the id, the public key and a signature over that
- * nonce and its own id, all three: an id it recognises is not licence to trust
- * whatever key arrives beside it.
+ * A controller is a logical identity, not an address. So the runner sends a
+ * fresh nonce, and the controller's hello must match all three of:
+ *
+ * - the pinned identity id;
+ * - the pinned public key;
+ * - a valid signature over the nonce and this runner's id.
+ *
+ * A known id alone is not enough to trust whatever key comes with it.
  */
 import { mkdirSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -65,17 +71,21 @@ const ED25519 = { name: "Ed25519" } as const;
 /** The RFC 6455 protocol-error close code. */
 const PROTOCOL_ERROR = 1002;
 
-/** Until the proof arrives this connection has passed no check, so waiting buys nothing. */
+/**
+ * How long the controller has to prove its identity after the connection
+ * opens. Until then the connection has passed no check, so there is no reason
+ * to wait long.
+ */
 export const PROOF_DEADLINE: Duration.Duration = Duration.seconds(10);
 
-/** What `runner.json` says about the controller this runner belongs to. */
+/** The fields of `runner.json` that identify the controller this runner belongs to. */
 export interface ControllerPin {
-  /** Who this machine is to that controller, and part of what the answer signs. */
+  /** This runner's id at that controller. The controller's hello signs it together with the nonce. */
   readonly runnerId: string;
   readonly controllerUrl: string;
   readonly credential: string;
   readonly controllerIdentityId: string;
-  /** Standard base64 over raw SPKI bytes. */
+  /** The raw SPKI bytes, in standard base64. */
   readonly controllerPublicKey: string;
 }
 
@@ -85,33 +95,35 @@ export interface ConnectOptions {
   readonly probe: Effect.Effect<RunnerFacts>;
   readonly headroom: Effect.Effect<RunnerWatermark, Cause.UnknownError>;
   /**
-   * Where provider instances keep their own config directories on this machine.
-   * One per instance, so two accounts of one harness never read each other's
-   * credential, and never the user's own.
+   * The directory that holds one config directory per provider instance on
+   * this machine. Each instance has its own, so two accounts of one harness
+   * never read each other's credentials, or the user's own.
    */
   readonly providersDir: string;
   /**
-   * Where a workspace-less session gets its empty scratch cwd, one directory
-   * per session, removed when the session exits (spec 06 section 9.1).
+   * The directory that holds the empty working directory of each session
+   * without a workspace. Each one is removed when its session exits
+   * (spec 06 section 9.1).
    */
   readonly scratchDir: string;
-  /** The workspaces this machine holds, and makes when the controller asks. */
+  /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
-  /** Where this machine's credential helper asks for a token. */
+  /** The socket this machine's credential helper asks for tokens on. */
   readonly socketPath: string;
-  /** Carries a helper's question to the controller and the answer back. */
+  /** Forwards a credential helper's request to the controller, and the response back. */
   readonly credentials: CredentialRelay;
   /** `<home>/runner/bin`, holding the `hercule` symlink every session gets on `PATH`. */
   readonly binDir: string;
-  /** hercule-as-a-tool, resolved once at runner start (spec 06 section 9.3). */
+  /** How sessions call Hercule as a tool, resolved once at runner start (spec 06 section 9.3). */
   readonly herculeTool: ProviderRunnerContext["herculeTool"];
-  /** The shipped deadline unless a test says otherwise. */
+  /** Defaults to `PROOF_DEADLINE`. Tests set a shorter one. */
   readonly proofDeadline?: Duration.Duration;
 }
 
 /**
- * Its own error because retrying will not fix it: the runner is impersonated,
- * misdirected, or holding a `runner.json` that describes nothing.
+ * The peer did not prove it is the controller this runner joined. This is its
+ * own error because retrying will not fix it: something is impersonating the
+ * controller, the URL points at the wrong one, or `runner.json` is invalid.
  */
 export class ControllerNotRecognised extends Schema.TaggedError<ControllerNotRecognised>()(
   "ControllerNotRecognised",
@@ -119,17 +131,21 @@ export class ControllerNotRecognised extends Schema.TaggedError<ControllerNotRec
 ) {}
 
 /**
- * Its own error because dialling again is exactly the wrong answer: the
- * controller has retired this machine and revoked its credential, so the loop
- * stops and the daemon says what the operator has to do about it.
+ * The controller has retired this runner and revoked its credential. This is
+ * its own error because reconnecting is exactly the wrong response: the
+ * reconnect loop stops, and the daemon tells the operator what to do.
  */
 export class RunnerRetired extends Schema.TaggedError<RunnerRetired>()("RunnerRetired", {
   message: Schema.String,
 }) {}
 
-export const RETIRED_MESSAGE = "this runner was retired; run `hercule runner join` to re-enlist";
+export const RETIRED_MESSAGE =
+  "this runner was retired; run `hercule runner join` to join the fleet again";
 
-/** Its own error because an operator can act on it: upgrade the runner. */
+/**
+ * The controller uses another protocol version. This is its own error because
+ * the operator can fix it by running the same Hercule version on both sides.
+ */
 export class ProtocolMismatch extends Schema.TaggedError<ProtocolMismatch>()("ProtocolMismatch", {
   message: Schema.String,
 }) {}
@@ -137,13 +153,13 @@ export class ProtocolMismatch extends Schema.TaggedError<ProtocolMismatch>()("Pr
 const decodeFrame = Schema.decodeUnknownEffect(ControllerToRunner);
 const decodePeerVersion = Schema.decodeUnknownEffect(PeerVersion);
 
-const UNREADABLE = "the controller sent something this build cannot read";
+const UNREADABLE = "the controller sent a message this version of the runner cannot parse";
 const encodeFrame = Schema.encodeUnknownSync(RunnerToController);
 
 const encodeFrameText = (message: typeof RunnerToController.Type): string =>
   JSON.stringify(encodeFrame(message));
 
-/** In the buffer WebCrypto's types ask for, which a Node `Buffer` is not. */
+/** Decodes base64 into the `Uint8Array<ArrayBuffer>` WebCrypto's types require. A Node `Buffer` does not fit that type. */
 const decodeBase64 = (encoded: string): Uint8Array<ArrayBuffer> => {
   const decoded = Buffer.from(encoded, "base64");
   const bytes = new Uint8Array(decoded.byteLength);
@@ -165,7 +181,12 @@ const buildSocketUrl = (controllerUrl: string): string => {
   return url.toString();
 };
 
-/** The signature is checked last: the key is only the runner's once the ids match. */
+/**
+ * Checks that a controller hello matches the pinned identity id and public key
+ * and carries a valid signature over the nonce and this runner's id. The
+ * signature is checked last, because the key is only trusted once the id and
+ * the key match the pin.
+ */
 const isOurs = (
   hello: ControllerHello,
   pin: ControllerPin,
@@ -188,11 +209,20 @@ const isOurs = (
           encodeChallengeBytes(pin.runnerId, nonce),
         );
       }).pipe(
-        // A key the runner cannot even import cannot have signed anything.
+        // A pinned key that cannot be imported cannot verify anything.
         Effect.catchCause(() => Effect.succeed(false)),
       );
 
-/** Even an ordinary close is a failure here: a disconnected runner must dial again. */
+/**
+ * Opens one connection to the controller, checks its identity, and serves it
+ * until it ends. Every ending is a failure, even a normal close, because a
+ * disconnected runner must reconnect. Fails with:
+ *
+ * - `ControllerNotRecognised` when the peer does not prove it is this runner's controller;
+ * - `ProtocolMismatch` when the controller uses another protocol version;
+ * - `RunnerRetired` when the controller has retired this runner;
+ * - `SocketError` for any other ending.
+ */
 export const connect = (
   options: ConnectOptions,
 ): Effect.Effect<
@@ -210,10 +240,11 @@ export const connect = (
               headers: { authorization: `Bearer ${pin.credential}` },
             } as unknown as string[]),
         ),
-        // Still open at the end of this scope means this runner is walking away
-        // rather than losing it, and saying so is what tells the controller
-        // `offline` from silence. The frame goes out on the socket itself
-        // because everything above it is already being torn down.
+        // A socket still open when this scope closes means the runner is
+        // leaving on purpose, not losing the connection. The goodbye frame lets
+        // the controller tell a clean shutdown from a lost connection. It is
+        // sent on the raw socket, because everything above it is already
+        // shutting down.
         (ws) =>
           Effect.sync(() => {
             if (ws.readyState === WebSocket.OPEN) ws.send(encodeFrameText({ _tag: "goodbye" }));
@@ -222,20 +253,22 @@ export const connect = (
       ),
     );
     const write = yield* socket.writer;
-    // A probe or an install outlives the frame that asked for it, so it is
-    // forked into the connection's scope, not the transport's per-frame fiber.
+    // A probe or an install runs longer than the handling of the frame that
+    // asked for it, so it is forked into the connection's scope, not the
+    // transport's per-frame fiber.
     const connection = yield* Effect.scope;
 
     const nonce = encodeBase64(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
     let greeted = false;
-    // The machine as this connection last described it. An install changes what
-    // is on it, and the probe that follows has to reach the binary that was
-    // just put there rather than the one the hello knew about.
+    // The machine's facts as this connection last reported them. An install
+    // changes the machine, and the probe after it must find the binary that
+    // was just installed, not the one listed in the hello.
     let facts = options.facts;
     const proven = Latch.makeUnsafe(false);
-    // The deadline below is the peer's time to answer, not the network's time
-    // to connect: a dial that took most of it would otherwise leave a
-    // perfectly good controller no room to say who it is.
+    // The proof deadline starts when the socket opens. It limits how long the
+    // peer takes to respond, not how long the network takes to connect.
+    // Otherwise a slow connect could leave a valid controller no time to
+    // prove its identity.
     const opened = Latch.makeUnsafe(false);
     let impostor: ControllerNotRecognised | undefined;
 
@@ -254,7 +287,11 @@ export const connect = (
     const findBinaryPath = (binaryName: string): string | undefined =>
       facts.providers.find((provider) => provider.name === binaryName && provider.present)?.path;
 
-    /** The instance's private directory: where the harness keeps its credential. */
+    /**
+     * Builds the context for a probe, login or install of one provider
+     * instance. Creates the instance's private directory, where the harness
+     * keeps its credentials.
+     */
     const buildContext = (
       adapter: ProviderAdapter,
       instanceId: string,
@@ -262,22 +299,24 @@ export const connect = (
     ): ProviderRunnerContext => {
       const home = joinPath(options.providersDir, instanceId);
       mkdirSync(home, { recursive: true, mode: 0o700 });
-      // Probes, logins and installs run nowhere: a cwd is a session's, and the
-      // session supervisor builds its own context (spec 06 section 4.2).
+      // Probes, logins and installs have no working directory. Only sessions
+      // have one, and the session supervisor builds its own context
+      // (spec 06 section 4.2).
       return {
         cwd: null,
         home,
         binary: findBinaryPath(adapter.binaryName),
         env: process.env,
         secrets,
-        // Carried because the context type is one: a probe, an install and a
-        // login never load the skill.
+        // Required by the shared context type, although a probe, an install and
+        // a login never load the skill.
         herculeTool: options.herculeTool,
       };
     };
 
-    // The connection lends the supervisor a way to write and the paths this
-    // machine resolved; the sessions themselves are the process's.
+    // The connection gives the supervisor a way to send frames and the paths
+    // this machine resolved. The sessions themselves belong to the process,
+    // not to this connection.
     const supervisor = sessions.forConnection({
       send: (frame) => write(encodeFrameText(frame)),
       machine: {
@@ -293,15 +332,16 @@ export const connect = (
       },
     });
 
-    // The helper's questions go out on this connection for as long as it is up;
-    // with none up there is no credential, which git reads as "try the next
-    // helper" rather than as a failure.
+    // Credential requests go out on this connection while it is up. With no
+    // connection there is no credential, which git treats as "try the next
+    // helper", not as a failure.
     yield* options.credentials.attached((frame) => write(encodeFrameText(frame)));
 
     /**
-     * Making a workspace takes as long as a clone does, so it is forked and the
-     * report goes out when it is done. The controller is waiting on one for
-     * every frame it sent, which is why even a crash answers.
+     * Runs a workspace operation and sends its report. Provisioning takes as
+     * long as a clone, so the caller forks this and the report is sent when
+     * it is done. The controller waits for a report for every workspace frame
+     * it sent, so even a crash sends a failed report.
      */
     const answerWorkspace = (
       workspaceId: string,
@@ -345,23 +385,24 @@ export const connect = (
               ),
         );
       }).pipe(
-        // The encoding is inside the catch: a result `encodeFrameText` cannot carry must
-        // reach the controller as an error, not as silence. The fallback is
-        // bounded, so it always encodes.
+        // The encoding happens inside the catch, so a result that cannot be
+        // encoded reaches the controller as an error, not as silence. The
+        // fallback message is truncated, so it always encodes.
         Effect.catchCause((cause) =>
           Effect.ignore(
             sendProbeReport(buildFailedProbe(null, describeCause(cause, MAX_FACT_LENGTH))),
           ),
         ),
-        // The connection is going if the write itself failed, and there is
-        // nowhere left to report that to.
+        // If the write itself failed, the connection is closing and there is
+        // nowhere left to report to.
         Effect.ignore,
       );
     };
 
     /**
-     * The facts go first, so a controller reading the row after an `ok` reads
-     * the machine with the harness on it rather than as it was.
+     * Runs an install and sends its result. After a successful install, the
+     * new facts are sent first, so a controller that reads the runner row
+     * after the `ok` sees the machine with the harness installed.
      */
     const answerInstall = (request: InstallRequest) => {
       const sendInstallResult = (outcome: InstallOutcome) =>
@@ -397,8 +438,9 @@ export const connect = (
     };
 
     /**
-     * One half of a login. The child holding both belongs to the runner, not
-     * this connection, so a socket dropping in between does not end it.
+     * Sends the response to one step of a login: the start or the code. The
+     * login process belongs to the runner, not to this connection, so a
+     * connection that drops between the two steps does not end it.
      */
     const answerLogin = (requestId: string, answering: Effect.Effect<LoginAnswer>) => {
       const sendLoginAnswer = (answer: LoginAnswer) =>
@@ -428,7 +470,7 @@ export const connect = (
               request.instanceId,
               adapter,
               // A login is the harness writing its own credential on this
-              // machine; the instance's stored ones have no part in it.
+              // machine, so the instance's stored secrets are not passed in.
               buildContext(adapter, request.instanceId, {}),
             );
       });
@@ -440,13 +482,14 @@ export const connect = (
           Effect.try({ try: () => JSON.parse(raw) as unknown, catch: () => undefined }),
         );
         if (Option.isNone(parsed)) return yield* disown(UNREADABLE);
-        // Read before the frame, because a later controller's hello will not
-        // decode here, and the version is what an operator can act on.
+        // Read the version before decoding the frame, because a newer
+        // controller's hello may not decode here, and a version mismatch is
+        // an error the operator can act on.
         const version = yield* Effect.option(decodePeerVersion(parsed.value));
         if (Option.isSome(version) && version.value.protocolVersion !== PROTOCOL_VERSION) {
           return yield* Effect.fail(
             new ProtocolMismatch({
-              message: `the controller speaks runner protocol version ${String(version.value.protocolVersion)}, this runner speaks ${String(PROTOCOL_VERSION)}`,
+              message: `the controller uses runner protocol version ${String(version.value.protocolVersion)}, but this runner uses version ${String(PROTOCOL_VERSION)}. Install the same Hercule version here as on the controller.`,
             }),
           );
         }
@@ -454,29 +497,31 @@ export const connect = (
         if (Option.isNone(frame)) return yield* disown(UNREADABLE);
         const message = frame.value;
         if (message._tag === "controllerHello") {
-          // A second hello can only weaken what the first settled.
+          // Ignore a second hello: it could only undo the proof the first one gave.
           if (greeted) return;
           if (!(yield* isOurs(message, pin, nonce))) {
-            return yield* disown("that is not the controller this runner joined");
+            return yield* disown(
+              "the controller's identity does not match the controller this runner joined",
+            );
           }
           greeted = true;
           proven.openUnsafe();
           return;
         }
-        // A peer that has not proved who it is gets no evidence this runner is alive.
+        // Send nothing to a peer that has not proved its identity, not even a sign that this runner is alive.
         if (!greeted) return;
         switch (message._tag) {
           case "ping":
             return yield* write(encodeFrameText({ _tag: "pong" }));
           case "factsRequest":
-            // Sent whatever the probe finds, unlike the hourly report: the
-            // controller asked because somebody is waiting for an answer.
+            // Unlike the hourly report, this is sent even when nothing changed,
+            // because someone is waiting for the response.
             return yield* write(
               encodeFrameText({ _tag: "factsReport", facts: yield* reportFacts }),
             );
           case "probeRequest":
-            // Forked: a probe takes seconds, and the connection has to keep
-            // answering pings and further requests while it runs.
+            // Forked, because a probe takes seconds, and the connection must keep
+            // handling pings and other requests while it runs.
             return yield* Effect.asVoid(Effect.forkIn(answerProbe(message), connection));
           case "installRequest":
             return yield* Effect.asVoid(Effect.forkIn(answerInstall(message), connection));
@@ -494,8 +539,8 @@ export const connect = (
                 connection,
               ),
             );
-          // Sessions run in the frame order they arrived in, unforked: input for
-          // a session started one frame ago must not overtake the start.
+          // Session frames are handled in arrival order, without forking, so
+          // input for a session cannot overtake the frame that started it.
           case "sessionStart":
             return yield* supervisor.start(message);
           case "sessionInput":
@@ -507,7 +552,7 @@ export const connect = (
           case "sessionStop":
             return yield* supervisor.stop(message);
           case "ack":
-            // Acks belong to the replayable events nothing sends yet.
+            // Acks are for replayable events, which nothing sends yet.
             return;
           case "workspaceProvision":
             return yield* Effect.asVoid(
@@ -524,24 +569,26 @@ export const connect = (
               ),
             );
           case "credentialAnswer":
-            // Whoever asked is holding git open on it; nothing is kept past
-            // that reply.
+            // A git process is waiting for this response. Nothing is kept after
+            // it is delivered.
             return yield* Effect.sync(() => options.credentials.deliver(message));
         }
-        // Every frame the protocol declares is answered above. A new one that
-        // reaches here would otherwise be dropped in silence.
+        // Every frame the protocol defines is handled above. This fails to
+        // compile when a new frame is added, so it cannot be dropped silently.
         return message satisfies never;
       });
 
-    // The transport forks a fiber per frame, so two frames arriving together
-    // would otherwise run the exchange twice over the same three flags.
+    // The transport forks a fiber per frame. Without this lock, two frames
+    // arriving together could run the hello check at the same time over the
+    // same shared state.
     const frames = yield* Semaphore.make(1);
     const receive = (raw: string) => frames.withPermits(1)(handleFrame(raw));
 
     /**
-     * The deadline is only ever the answer before the proof arrives: one that
-     * could still fire on a proven connection would hang a healthy runner up
-     * every ten seconds for the life of the process.
+     * Waits for the proof, then starts the session relay and the periodic
+     * reports. The deadline applies only until the proof arrives. A deadline
+     * that could fire on a proven connection would disconnect a healthy
+     * runner every ten seconds.
      */
     const reporting = Effect.gen(function* () {
       yield* opened.await;
@@ -549,12 +596,12 @@ export const connect = (
         Effect.as(proven.await, true),
         Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), false),
       );
-      if (!proved) return yield* disown("the controller did not say who it is");
-      // Not a moment earlier: a session this runner kept across a reconnect can
-      // produce events at once, and a peer that has not proved who it is reads
-      // none of them. Running the relay is what subscribes it, so anything
-      // published before this point is lost - the same gap as everything
-      // produced while the socket was down (spec 03 section 2.3).
+      if (!proved) return yield* disown("the controller did not prove its identity in time");
+      // Start the relay only now. A session that survived a reconnect can
+      // produce events at once, and a peer that has not proved its identity
+      // must not receive any of them. The relay subscribes when it starts, so
+      // events published before this point are lost, like everything produced
+      // while the socket was down (spec 03 section 2.3).
       yield* Effect.forkIn(supervisor.relay, connection);
       yield* supervisor.report;
       yield* Effect.all(
@@ -574,7 +621,7 @@ export const connect = (
     });
 
     // `raceFirst`, not `race`: the connection ending is a failure, and `race`
-    // would wait out the deadline rather than take it as the answer.
+    // would ignore that failure and keep waiting for the other side.
     yield* Effect.raceFirst(
       socket.runString(receive, {
         onOpen: write(
@@ -590,11 +637,11 @@ export const connect = (
       }),
       reporting,
     ).pipe(
-      // However the connection ended, being hung up on by an impostor is the
-      // more useful answer than the close that followed it.
+      // When the runner closed the connection on an impostor, report that
+      // instead of the close error that followed.
       Effect.catch((error) => (impostor === undefined ? Effect.fail(error) : Effect.void)),
-      // The one close reason this end reads: it says the credential is gone,
-      // which no amount of dialling again will bring back.
+      // The only close reason the runner checks. It means the credential is
+      // revoked, and reconnecting will not bring it back.
       Effect.catch((error) =>
         Effect.fail(
           isRetiredClose(error) ? new RunnerRetired({ message: RETIRED_MESSAGE }) : error,

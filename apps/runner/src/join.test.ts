@@ -1,9 +1,9 @@
 /**
- * The join, as the one function both entry points call.
+ * Tests `join`, the one function both entry points call.
  *
- * The controller is a stub `fetch`: this package must reach no controller code,
- * so what is proved here is what the join leaves on disk and hands back, given
- * an answer of the shape the controller sends.
+ * The controller is a stub `fetch`, because this package must not import any
+ * controller code. So these tests check what the join writes to disk and
+ * returns, given a response of the shape the controller sends.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,14 +19,14 @@ afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-/** An empty Hercule Home, as a machine that has never joined has. */
+/** Creates an empty Hercule Home, like the one on a machine that has never joined. */
 const createTemporaryHome = (): string => {
   const home = mkdtempSync(pathJoin(tmpdir(), "hercule-join-"));
   homes.push(home);
   return home;
 };
 
-/** What the controller answers a join with. */
+/** Builds the response the controller sends to a join. */
 const buildJoinAnswer = (runnerId: string, name: string) => ({
   runnerId,
   name,
@@ -35,7 +35,7 @@ const buildJoinAnswer = (runnerId: string, name: string) => ({
   controllerPublicKey: "IH5nqcbHvGUYs1n9y0sBnPGSNVYA3ZfCpZKDvXH7pqA=",
 });
 
-/** A controller that answers every join with the same row. */
+/** Returns a stub `fetch` that responds to every join with the same body. */
 const stubFetch = (body: unknown): typeof fetch =>
   Object.assign(
     () =>
@@ -63,7 +63,7 @@ const runJoin = (options: {
     }),
   );
 
-/** The six fields `runner.json` holds, and nothing else. */
+/** The six fields in `runner.json`. The file has no others. */
 const RUNNER_JSON_FIELDS = [
   "controllerIdentityId",
   "controllerPublicKey",
@@ -73,8 +73,8 @@ const RUNNER_JSON_FIELDS = [
   "storageDirectory",
 ];
 
-describe("the join", () => {
-  it("writes runner.json readable by nobody else, holding exactly what a runner needs", async () => {
+describe("join", () => {
+  it("writes runner.json with exactly the fields a runner needs, readable only by its owner", async () => {
     const home = createTemporaryHome();
     const body = buildJoinAnswer("0199e0e7-2222-7000-8000-000000000000", "hercule-thalia");
 
@@ -85,7 +85,8 @@ describe("the join", () => {
     expect(result.configPath).toBe(pathJoin(home, "runner", "runner.json"));
     expect(existsSync(result.configPath)).toBe(true);
 
-    // A bearer credential on a shared machine: the file is the runner's alone.
+    // The file holds a bearer credential, so on a shared machine only the
+    // runner's user may read it.
     expect(statSync(result.configPath).mode & 0o777).toBe(0o600);
 
     const written = JSON.parse(readFileSync(result.configPath, "utf8")) as Record<string, unknown>;
@@ -98,17 +99,17 @@ describe("the join", () => {
       controllerPublicKey: body.controllerPublicKey,
     });
 
-    // The file names the directory; the answer says where it is.
+    // The file holds the directory name; the result holds the full path.
     expect(result.storageDirectory).toBe(
       pathJoin(home, "runner", String(written["storageDirectory"])),
     );
     expect(statSync(result.storageDirectory).isDirectory()).toBe(true);
-    // Workspaces and provider homes live in here, so it is the runner's alone
-    // for the same reason the file is.
+    // Workspaces and provider homes live in this directory, so only the
+    // runner's user may open it, for the same reason as the file.
     expect(statSync(result.storageDirectory).mode & 0o777).toBe(0o700);
   });
 
-  it("gives a second enrolment its own runner and its own directory, leaving the first in place", async () => {
+  it("gives a second join its own runner and its own directory, and leaves the first directory in place", async () => {
     const home = createTemporaryHome();
 
     const first = await runJoin({
@@ -123,13 +124,14 @@ describe("the join", () => {
     expect(second.runnerId).not.toBe(first.runnerId);
     expect(second.storageDirectory).not.toBe(first.storageDirectory);
 
-    // A re-enlisted machine never adopts a previous life's folders, and never
-    // deletes them either: they stay for manual recovery.
+    // A machine that joins again never reuses the folders of its previous
+    // registration, and never deletes them either: they stay for manual
+    // recovery.
     expect(statSync(first.storageDirectory).isDirectory()).toBe(true);
     expect(statSync(second.storageDirectory).isDirectory()).toBe(true);
 
-    // The replacement is the runner's alone too: a second enrolment must not
-    // inherit whatever mode the first file happened to end up at.
+    // The new file is private too: a second join must not inherit whatever
+    // mode the first file happened to have.
     expect(statSync(second.configPath).mode & 0o777).toBe(0o600);
 
     const written = JSON.parse(readFileSync(second.configPath, "utf8")) as Record<string, unknown>;
@@ -141,11 +143,11 @@ describe("the join", () => {
 });
 
 /**
- * The `--reserved` flag, through the runner role's `run(argv)`: the flag is
- * argv, so the parsing and the request body it produces are one behaviour.
+ * Tests the `--reserved` flag through the runner role's `run(argv)`, so the
+ * argument parsing and the request body it produces are tested together.
  */
 describe("hercule runner join --reserved", () => {
-  /** The body of the one join request `run(argv)` made. */
+  /** Runs `run(argv)` and returns the body of the single join request it made. */
   const captureJoinBody = async (argv: ReadonlyArray<string>): Promise<unknown> => {
     const bodies: Array<unknown> = [];
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -193,7 +195,7 @@ describe("hercule runner join --reserved", () => {
     ).toEqual({ reserved: true });
   });
 
-  it("sends reserved: false without it", async () => {
+  it("sends reserved: false without the flag", async () => {
     const home = createTemporaryHome();
     expect(
       await captureJoinBody([

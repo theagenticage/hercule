@@ -1,11 +1,11 @@
 /**
- * What the pi adapter's probe reports about a machine, over a fake pi:
- * nothing vendor-supplied runs. The probe is reached through the adapter,
- * because that is how the runner reaches it.
+ * Tests what the pi adapter's probe reports about a machine, using a fake pi,
+ * so no vendor code runs. The tests call the probe through the adapter,
+ * because that is how the runner calls it.
  *
- * The one-shot commands and their output are pi 0.85.1's own - `pi --version`
- * printing the bare version, `pi auth check --provider zai --json` printing a
- * status object and exiting 1 when no credential is configured.
+ * The one-shot commands and their output match pi 0.85.1: `pi --version`
+ * prints the bare version, and `pi auth check --provider zai --json` prints a
+ * status object and exits with code 1 when no key is configured.
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -26,8 +26,8 @@ afterAll(cleanupHomes);
 const runProbe = (
   behaviour: FakePiBehaviour = {},
   secrets: Readonly<Record<string, string>> = { zaiApiKey: TEST_ZAI_KEY },
-  // Collected rather than defaulted: a default would take the `undefined` the
-  // machine-without-pi case passes for "not given" and hand it a pi anyway.
+  // A rest parameter, not a default: a default would replace the explicit
+  // `undefined` that the no-pi test passes, and give that test a pi anyway.
   ...binary: ReadonlyArray<string | undefined>
 ): {
   readonly result: Promise<ProbeResult>;
@@ -54,8 +54,8 @@ const listChoiceValues = (option: Record<string, unknown> | undefined): Readonly
     (choice) => choice.value,
   );
 
-describe("what the pi adapter reports about a machine", () => {
-  it("reports the version the binary itself prints", async () => {
+describe("the pi adapter's probe", () => {
+  it("reports the version the binary prints", async () => {
     const { result, runs } = runProbe();
 
     const probed = await result;
@@ -63,13 +63,13 @@ describe("what the pi adapter reports about a machine", () => {
     expect(runs.map((run) => run.command.slice(1))).toContainEqual(["--version"]);
   });
 
-  it("reports a machine whose auth check says ready as logged in, naming nobody", async () => {
+  it("reports a ready auth check as logged in, with no identity", async () => {
     const { result, runs } = runProbe();
 
     const probed = await result;
     expect(probed.auth.status).toBe("ok");
-    // pi's Z.ai upstream is an API key: there is no account to name, and a
-    // made-up identity would be a name the user never entered.
+    // Z.ai uses an API key, so there is no account name to report, and a
+    // made-up identity would show a name the user never entered.
     expect(probed.auth.identity).toBeUndefined();
     expect(probed.auth.message).toBeUndefined();
     expect(runs.map((run) => run.command.slice(1))).toContainEqual([
@@ -81,7 +81,7 @@ describe("what the pi adapter reports about a machine", () => {
     ]);
   });
 
-  it("puts the Z.ai key it was given where pi looks for it", async () => {
+  it("passes the instance's Z.ai key in the environment variable pi reads", async () => {
     const { result, runs } = runProbe();
 
     await result;
@@ -93,13 +93,13 @@ describe("what the pi adapter reports about a machine", () => {
     const { result } = runProbe({}, {});
 
     const probed = await result;
-    // Not `error`: nobody has entered a key yet, and telling that apart from a
-    // broken harness is what the Fleet row is read for.
+    // Not `error`: nobody has entered a key yet. The Fleet row must tell that
+    // apart from a broken pi.
     expect(probed.auth.status).toBe("unauthenticated");
     expect(probed.auth.identity).toBeUndefined();
   });
 
-  it("reports a machine with no pi on it as an error that says so", async () => {
+  it("reports an error with a message when pi is not installed", async () => {
     const { result } = runProbe({}, { zaiApiKey: TEST_ZAI_KEY }, undefined);
 
     const probed = await result;
@@ -107,7 +107,7 @@ describe("what the pi adapter reports about a machine", () => {
     expect(probed.auth.message ?? "").not.toBe("");
   });
 
-  it("reports what a failing command said, rather than that something failed", async () => {
+  it("reports a failing command's own error output", async () => {
     const { result } = runProbe({
       ran: () => ({ code: 127, stdout: "", stderr: "pi: command not found" }),
     });
@@ -117,7 +117,7 @@ describe("what the pi adapter reports about a machine", () => {
     expect(probed.auth.message).toContain("command not found");
   });
 
-  it("offers the models pi lists for Z.ai, and no other provider's", async () => {
+  it("offers the Z.ai models pi lists, and no other provider's", async () => {
     const { result } = runProbe();
 
     const probed = await result;
@@ -141,12 +141,12 @@ describe("what the pi adapter reports about a machine", () => {
     ]);
   });
 
-  it("offers only the thinking levels the model maps to something", async () => {
+  it("offers only the thinking levels each model supports", async () => {
     const { result } = runProbe();
 
     const probed = await result;
-    // GLM 5.3 maps `off`, `minimal`, `medium` and `xhigh` to null: it cannot be
-    // asked for those, and offering one would be a turn Z.ai refuses.
+    // GLM 5.3 maps `off`, `minimal`, `medium` and `xhigh` to null: it does not
+    // support them, and Z.ai would reject a turn at one of those levels.
     expect(listChoiceValues(findModelOption(probed.models, "glm-5.3", "thinking"))).toEqual([
       "low",
       "high",
@@ -157,8 +157,8 @@ describe("what the pi adapter reports about a machine", () => {
       "high",
       "max",
     ]);
-    // The 5.2 line takes `off` where the 5.3 line cannot, and the two models
-    // with no map at all offer no choice rather than an empty one.
+    // The 5.2 models support `off` and the 5.3 models do not. The two models
+    // with no thinking map offer no thinking option, not an empty one.
     expect(listChoiceValues(findModelOption(probed.models, "glm-5.2", "thinking"))).toEqual([
       "off",
       "high",

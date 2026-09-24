@@ -1,7 +1,7 @@
 /**
- * The pi adapter, as the rest of the runner sees it: the adapter itself, the id
- * it is registered under, and the child shape the process seam spawns for it.
- * Nothing else in this folder is anyone else's business.
+ * The public surface of the pi adapter: the adapter, the provider id it is
+ * registered under, and the types of the child process it spawns. The rest of
+ * the runner imports only these; everything else in this folder is internal.
  */
 export { PI, pi, makePiAdapter, type PiSeam } from "./adapter";
 export type { PiChild, PiSpawn } from "./rpc";

@@ -1,36 +1,40 @@
 /**
- * A fake model that always does the same thing, so the real pi binary can be driven
- * without a paid key and without a model's free will. It speaks the slice of
- * OpenAI's streaming chat-completions API pi's `openai-completions` client
- * sends: one SSE `data:` line per chunk, `data: [DONE]` at the end.
+ * A fake model server with fixed replies, so tests can drive the real pi
+ * binary without a paid key and without depending on what a real model says.
+ * It implements the part of OpenAI's streaming chat-completions API that pi's
+ * `openai-completions` client uses: one SSE `data:` line per chunk, and
+ * `data: [DONE]` at the end.
  *
- * What it answers is by request number, not by what was asked: the first
- * completion calls `bash` - and, where the test asks for a batch, a `write`
- * beside it - while every one after it answers in words and stops. That is the
- * shape the park needs: a tool call to stop, and a turn that can finish once
- * the tool has run.
+ * The reply depends only on the request number, not on the request content:
  *
- * It listens on an ephemeral port on the loopback interface and is stopped by
- * the test that started it.
+ * - the first completion calls `bash`, plus a `write` before it when the test
+ *   asks for a batch;
+ * - every later completion replies with text and stops.
+ *
+ * That is what a park test needs: a tool call for pi to hold, and a turn that
+ * can finish once the tool has run.
+ *
+ * The server listens on a random free port on the loopback interface. The test
+ * that starts it also stops it.
  */
 
-/** What the first completion asks for, where a test needs more than the default. */
+/** Options for the first completion's tool calls, for tests that need more than the default. */
 export interface FakeModelFirstTurn {
-  /** What the shell call runs, for a test that watches for its side effect. */
+  /** The command the `bash` call runs, for a test that checks its side effect. */
   readonly command?: string;
-  /** A file written in the same batch as the shell call, asked for first. */
+  /** A file path for a `write` call in the same batch, placed before the `bash` call. */
   readonly writes?: string;
 }
 
 export interface FakeModelServer {
-  /** What `models.json` points a provider's `baseUrl` at. */
+  /** The URL to put in a provider's `baseUrl` in `models.json`. */
   readonly baseUrl: string;
-  /** How many completions pi has asked for, which is what the turns are counted by. */
+  /** Returns how many completions pi has requested so far. */
   readonly asked: () => number;
   readonly stop: () => void;
 }
 
-/** The command the fake model always calls, and what it prints. */
+/** The default command the fake model runs, and the text it prints. */
 export const PARKED_COMMAND = "echo parked";
 
 export const PARKED_OUTPUT = "parked";

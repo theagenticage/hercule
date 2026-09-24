@@ -1,29 +1,30 @@
 /**
- * The local channel git's credential helper asks down: a Unix socket under the
- * runner's storage directory, readable by this OS user alone.
+ * The Unix socket that git's credential helper connects to. It lives in the
+ * runner's storage directory and only this OS user can open it.
  *
- * This end resolves nothing. It turns git's question into the remote the
- * controller canonicalises, passes on the claim the asker made, and relays the
- * answer. Anything else - a claim nobody made, a refusal, a controller that
- * cannot be reached - is an empty answer, which is git's signal to try the next
- * helper rather than to fail.
+ * The socket does not look up credentials itself. It builds the remote from
+ * git's request, passes on the helper's session token or workspace id, and
+ * returns the controller's answer. In every other case it returns an empty
+ * reply, which tells git to try the next helper instead of failing. That
+ * includes a request with no token or workspace id, a denied credential, and a
+ * controller that cannot be reached.
  */
 import { chmodSync, rmSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import type { CredentialAnswer } from "@hercule/protocol";
 
-/** Long enough for a controller round trip, short enough that git is never hung on it. */
+/** Long enough for a round trip to the controller, short enough that git never hangs on it. */
 export const CREDENTIAL_DEADLINE_MS = 10_000;
 
-/** The most one question may be. git's own are a few hundred bytes. */
+/** The largest request the socket reads. git's requests are a few hundred bytes. */
 const MAX_QUESTION_BYTES = 64 * 1024;
 
-/** Who is asking, beside what they are asking for. Exactly one of the two. */
+/** A credential request: the remote, plus exactly one of a session token or a workspace id. */
 export type CredentialAsk = { readonly remote: string } & (
   { readonly sessionToken: string } | { readonly workspaceId: string }
 );
 
-/** One JSON line in, one JSON line out. */
+/** The helper's request: one JSON line. The reply is also one JSON line. */
 interface HelperQuestion {
   readonly protocol?: string;
   readonly host?: string;
@@ -35,21 +36,22 @@ interface HelperQuestion {
 const EMPTY = "{}\n";
 
 /**
- * A credential git can be handed. Git reads a helper's answer as lines, so a
- * value carrying a newline would let whoever chose it add a line of its own -
- * another host's credential, or a `quit=1` that stops git asking anyone else.
+ * Checks that a credential value is safe to give to git. git reads a helper's
+ * answer as lines, so a value with a newline could add a line of its own, such
+ * as another host's credential or a `quit=1` that stops git asking any other
+ * helper.
  */
 export const isSpeakable = (value: string): boolean => !/[\n\r\0]/.test(value);
 
-/** `<host>/<path>`, the way spec 13 section 9 names the thing git is talking to. */
+/** Returns the remote as `<host>/<path>`, the form spec 13 section 9 uses. */
 const formatRemote = (question: HelperQuestion): string =>
   [question.host, question.path].filter((part) => part !== undefined && part.length > 0).join("/");
 
 const buildCredentialAsk = (question: HelperQuestion): CredentialAsk | undefined => {
   const remote = formatRemote(question);
   if (remote.length === 0) return undefined;
-  // A session's own token is the stronger claim, and the runner never makes one
-  // on a session's behalf.
+  // A session token takes precedence over a workspace id: the token proves
+  // which session is asking, and the runner never sends one itself.
   if (question.sessionToken !== undefined) {
     return { remote, sessionToken: question.sessionToken };
   }
@@ -72,19 +74,22 @@ const answerQuestionLine = async (
   if (asking === undefined) return EMPTY;
   try {
     const answer = await ask(asking);
-    // A refusal is an answer with no credential in it, which is an empty reply
-    // to git: it falls through to whatever helper comes next.
+    // A denial is an answer with no credential in it. It becomes an empty reply,
+    // and git moves on to the next helper.
     if (!("token" in answer)) return EMPTY;
     const { token, username } = answer;
     if (!isSpeakable(token) || !isSpeakable(username)) return EMPTY;
     return `${JSON.stringify({ username, password: token })}\n`;
   } catch {
-    // A controller that is not there is not an error git can act on.
+    // git cannot do anything about an unreachable controller, so reply empty.
     return EMPTY;
   }
 };
 
-/** Whether a daemon is already listening there, which is not a path to unlink. */
+/**
+ * Checks whether a daemon is already listening at `path`, in which case the socket file must not be
+ * removed.
+ */
 const isDaemonListening = (path: string): Promise<boolean> =>
   new Promise((resolve) => {
     const probe = createConnection({ path });
@@ -115,35 +120,35 @@ export const serveCredentialSocket = async (options: {
       received += chunk;
       const newline = received.indexOf("\n");
       if (newline < 0) {
-        // One question is one line; a peer that sends no newline is not asking,
-        // and is not read any further either.
+        // A request is one line. Keep reading until the newline arrives, but
+        // stop once the peer has sent more than a request can be.
         if (received.length > MAX_QUESTION_BYTES) {
-          // Nothing is written back. An unread reply sits in the peer's receive
-          // buffer ahead of the close, and a peer that is not reading - which
-          // this one, mid-write, is not - would never reach the close behind it
-          // on a kernel whose socket buffer swallowed its whole write. The
-          // cut-off is the only thing it is told.
+          // Close without a reply. A peer that is still writing is not reading,
+          // so a reply would sit unread in its receive buffer ahead of the
+          // close. If the kernel buffered the peer's whole write, the peer would
+          // then never see the close. Closing alone is the one signal it is
+          // sure to get.
           connection.removeAllListeners("data");
           connection.destroy();
         }
         return;
       }
       const line = received.slice(0, newline);
-      // One question per connection: what follows the first line is nobody's.
+      // One request per connection: anything after the first line is ignored.
       connection.removeAllListeners("data");
       void answerQuestionLine(line, options.ask).then((reply) => connection.end(reply));
     });
-    // A helper that went away mid-question leaves nothing to clean up.
+    // A helper that disconnects mid-request leaves nothing to clean up.
     connection.on("error", () => connection.destroy());
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    // A socket file left by a daemon that was killed would refuse the bind, and
-    // nothing answers at it: that has just been checked.
+    // A socket file left behind by a killed daemon would make the bind fail.
+    // No daemon is listening at it (checked above), so it is safe to remove.
     rmSync(options.path, { force: true });
     server.listen(options.path, () => {
-      // The directory already keeps other users out; this keeps them out of the
-      // socket itself, wherever the directory's mode came from.
+      // The directory already keeps other users out. This also keeps them out of
+      // the socket itself, whatever the directory's mode is.
       chmodSync(options.path, 0o600);
       resolve({
         close: () =>

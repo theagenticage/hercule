@@ -1,28 +1,30 @@
 /**
- * The environment git is given on this machine: which helper to ask, and who to
- * say it is.
+ * Builds the environment variables git runs with on this machine: which
+ * credential helper to use, and which name and email to commit as.
  *
- * `GIT_CONFIG_COUNT` and its pairs are how configuration reaches git without a
- * file: nothing Hercule sets is written to disk, and nothing it sets outlives the
- * process it was given to.
+ * `GIT_CONFIG_COUNT` and its key/value pairs pass configuration to git without
+ * a config file. Nothing is written to disk, and the settings last only as long
+ * as the process that receives them.
  */
 import { join as joinPath } from "node:path";
 
-/** Bun's own marker for an entry script that lives inside a compiled binary. */
+/** The path prefix Bun gives an entry script embedded in a compiled binary. */
 const EMBEDDED = "/$bunfs/";
 
-/** A word the shell git runs the helper through would read as more than a word. */
+/** Matches a word that the shell would not read as one plain word, so it needs quoting. */
 const QUOTABLE = /[^A-Za-z0-9_@%+=:,./-]/;
 
 const quoteShellWord = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'`;
 
 /**
- * The helper, as an absolute command. git runs a `credential.helper` that looks
- * like a path through a shell, so the arguments are quoted; the interpreter's
- * own path leads the line, because that is what makes it absolute.
+ * Returns the command line git runs as the credential helper. It starts with
+ * the absolute path of the running executable, so git treats it as a command
+ * rather than a helper name. git runs such a command through a shell, so the
+ * arguments are quoted where needed.
  *
- * Uncompiled, the interpreter is Bun and the script has to be named: that is
- * what makes the helper work from a checkout as well as from the binary.
+ * When running from source rather than the compiled binary, the executable is
+ * Bun, so the entry script is passed as well. That way the helper also works
+ * from a checkout.
  */
 const buildHelperCommand = (): string =>
   [process.execPath, ...(Bun.main.startsWith(EMBEDDED) ? [] : [Bun.main]), "git-credential"]
@@ -35,10 +37,14 @@ export interface GitIdentity {
 }
 
 /**
- * The empty `credential.helper` comes first: git reads helpers in order, and an
- * inherited one would otherwise answer with the machine owner's credential, for
- * any repository. `credential.useHttpPath` is what keeps one repository's token
- * from being sent to another on the same host.
+ * Returns the environment variables that point git at the runner's credential
+ * helper and socket, and set the commit identity when one is given.
+ *
+ * The empty `credential.helper` comes first because it clears the helpers git
+ * inherited from the machine's own config. Otherwise one of those could supply
+ * the machine owner's credential for any repository. `credential.useHttpPath`
+ * stops one repository's token from being sent to another repository on the
+ * same host.
  */
 export const buildGitCredentialEnv = (options: {
   readonly socketPath: string;
@@ -67,5 +73,5 @@ export const buildGitCredentialEnv = (options: {
   };
 };
 
-/** Where the daemon listens, under the runner's own storage directory. */
+/** Returns the path of the daemon's Unix socket inside the runner's storage directory. */
 export const buildSocketPath = (storageDir: string): string => joinPath(storageDir, "daemon.sock");

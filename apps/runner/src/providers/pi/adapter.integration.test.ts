@@ -1,8 +1,8 @@
 /**
- * Proves the pi adapter drives the real binary against the real models Hercule
- * runs GLM on. Opt-in twice over: it skips without `pi` on PATH, and without a
- * `ZAI_API_KEY` in the environment, because the alternative is that `pnpm test`
- * on any machine quietly spends a paid Coding Plan.
+ * Tests that the pi adapter works with the real binary and the real Z.ai GLM
+ * models. The tests are skipped unless `pi` is on PATH and `ZAI_API_KEY` is
+ * set. Otherwise `pnpm test` on any machine would quietly spend a paid Coding
+ * Plan.
  *
  * The key is read from the environment and handed to the adapter as the
  * instance's secret. It is never printed, never written to the scratch home by
@@ -36,10 +36,10 @@ const createScratchDir = (): string => createScratchHome("pi-live");
 
 const BUDGET_MS = 180_000;
 
-/** Long enough for a model to answer, short enough to leave the budget room. */
+/** Long enough for a model to answer, and short enough to leave room in the budget. */
 const PATIENCE_MS = BUDGET_MS / 2;
 
-/** The real binary, the real key, and a directory of this run's own. */
+/** Builds a context with the real binary, the given secrets, and fresh directories for this run. */
 const buildLiveContext = (secrets: Readonly<Record<string, string>>): ProviderRunnerContext => ({
   ...buildContext(createScratchDir(), createScratchDir(), secrets),
   binary: binary!,
@@ -49,7 +49,7 @@ const buildLiveContext = (secrets: Readonly<Record<string, string>>): ProviderRu
 const buildSpec = (model: string): SessionSpec => ({
   ...SPEC,
   modelSelection: { model, options: { thinking: "low" } },
-  // No approvals to answer: this case is about the models runTurnUnderSchema at all.
+  // No approvals to answer: these tests only check that the models work at all.
   accessMode: "full-access",
 });
 
@@ -84,7 +84,7 @@ const listCompletedItems = (
 describe.skipIf(binary === undefined || key === "")("a real pi session on a real GLM model", () => {
   for (const model of ["glm-5.3", "glm-5.3-flash"]) {
     it(
-      `answers a prompt and runs a shell command on ${model}, and prices the turn`,
+      `answers a prompt and runs a shell command on ${model}, and reports the turn's cost`,
       async () => {
         const ctx = buildLiveContext({ zaiApiKey: key });
         const sessionId = crypto.randomUUID();
@@ -110,7 +110,7 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
         expect(readAssistantText(seen).toUpperCase()).toContain("OK");
         const first = listCompletedTurns(seen)[0]!;
         expect(first.state).toBe("completed");
-        // A priced turn is what the session view reads to show what it cost.
+        // The session view shows the turn's cost from this field.
         expect(first.costUsd ?? 0).toBeGreaterThan(0);
 
         await Effect.runPromise(
@@ -136,13 +136,14 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
   }
 });
 
-/** The model these cases run on: the cheapest of the two this adapter drives. */
+/** The model these tests use: the cheaper of the two tested above. */
 const STRUCTURED_MODEL = "glm-5.3-flash";
 
 /**
- * A session's answer under one schema: start, ask, wait the turn out, stop.
- * Every run gets its own session and its own directories, so the second case
- * is never answered out of the first one's transcript.
+ * Runs one turn with an output schema: starts a session, sends the prompt,
+ * waits for the turn to complete, and stops the session. Returns the
+ * `turn.completed` event. Every run gets its own session and directories, so
+ * one test can never answer from another test's transcript.
  */
 const runTurnUnderSchema = async (
   outputSchema: OutputSchema,
@@ -199,7 +200,7 @@ describe.skipIf(binary === undefined || key === "")(
         );
         const failure = turn.structuredResult as { outcome: "schema-failure"; reason: string };
         expect(failure.reason).not.toBe("");
-        // Never hung: the turn ended and the session is no longer this adapter's.
+        // Nothing hung: the turn ended and the adapter no longer hosts the session.
         expect(await Effect.runPromise(pi.listSessions)).toEqual([]);
       },
       BUDGET_MS,
@@ -208,12 +209,12 @@ describe.skipIf(binary === undefined || key === "")(
 );
 
 /**
- * The probe makes no API call: pi reads the credential out of the environment
- * and its catalog out of its own installed providers, so a key that would
- * buy nothing is enough to prove what a Fleet row will say.
+ * The probe makes no API call: pi reads the key from the environment and the
+ * catalog from its installed providers. So a fake key is enough to test what
+ * a Fleet row will show.
  */
-describe.skipIf(binary === undefined)("what a probe reads off a real pi", () => {
-  /** What the binary on this machine says it is, which is what a probe reports. */
+describe.skipIf(binary === undefined)("probing a real pi", () => {
+  /** Returns the version the installed binary prints, which the probe should report. */
   const readInstalledVersion = (): string =>
     Bun.spawnSync([binary!, "--version"]).stdout.toString().trim();
 
@@ -230,8 +231,8 @@ describe.skipIf(binary === undefined)("what a probe reads off a real pi", () => 
       pi.probe(buildLiveContext({ zaiApiKey: "not-a-key-and-never-sent-anywhere" }), {}),
     );
 
-    // The installed version, whatever it is: pinning one here would fail on
-    // the next release rather than on anything this adapter got wrong.
+    // Whatever version is installed: pinning one here would fail on the next
+    // pi release, not on a bug in this adapter.
     expect(probed.harnessVersion).toMatch(/^\d+\.\d+\.\d+/);
     expect(probed.harnessVersion).toBe(readInstalledVersion());
     expect(probed.auth.status).toBe("ok");
@@ -247,7 +248,7 @@ describe.skipIf(binary === undefined)("what a probe reads off a real pi", () => 
     ]);
   }, 60_000);
 
-  it("reports a machine nobody has entered a key on as unauthenticated", async () => {
+  it("reports a machine with no key as unauthenticated", async () => {
     const probed = await Effect.runPromise(pi.probe(buildLiveContext({}), {}));
 
     expect(probed.harnessVersion).toBe(readInstalledVersion());

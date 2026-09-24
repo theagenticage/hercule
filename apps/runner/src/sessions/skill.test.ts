@@ -1,13 +1,14 @@
 /**
- * The skill text an agent reads inside a session, checked against the command
- * tree it points at.
+ * Checks the skill text an agent reads inside a session against the CLI's
+ * command tree.
  *
- * Progressive disclosure (spec 11 section 6.3): the skill is a skeleton that
- * names the three help forms and sends the agent to `--help` for everything
- * else. So the rule held here is not "every command it spells exists" but the
- * stricter one the spec asks for: the only invocations it spells are help.
- * A worked command would be a second copy of the contract to keep true, and
- * nothing else would catch it going stale - the skill text is written by hand.
+ * Following progressive disclosure (spec 11 section 6.3), the skill is a
+ * skeleton: it names the three help forms and sends the agent to `--help` for
+ * everything else. So the test does not only check that every command in the
+ * text exists. It checks the stricter rule the spec asks for: the only commands
+ * in the text are help commands. A worked example command would be a second
+ * copy of the contract, and because the skill text is written by hand, nothing
+ * else would catch it going stale.
  */
 import { describe, expect, it } from "vitest";
 import { CLI } from "@hercule/contract";
@@ -18,19 +19,20 @@ const COMMANDS: ReadonlyArray<ReadonlyArray<string>> = Object.values(CLI).flatMa
   "command" in row ? [row.command.split(" ")] : [],
 );
 
-/** A noun the build has, or the placeholder the skill stands one in with. */
+/** Checks that a word is a noun this build has, or the `<noun>` placeholder. */
 const isNoun = (word: string): boolean =>
   word === "<noun>" || COMMANDS.some((command) => command[0] === word);
 
-/** A verb that noun has, or the placeholder; under `<noun>`, any noun's verb. */
+/** Checks that a word is a verb of `noun`, or the `<verb>` placeholder. Under `<noun>`, any noun's verb counts. */
 const isVerb = (noun: string, word: string): boolean =>
   word === "<verb>" ||
   COMMANDS.some((command) => (noun === "<noun>" || command[0] === noun) && command[1] === word);
 
 /**
- * The three forms spec 11 section 6.3 lets the skill name: the root help, a
- * noun's, and a verb's. Anything else - a bare `hercule`, or a worked command -
- * is content the CLI's own help owns.
+ * Checks that the words after `hercule` are one of the three help forms spec 11
+ * section 6.3 allows: the root help, a noun's help, and a verb's help. Anything
+ * else, such as a bare `hercule` or a worked command, belongs in the CLI's own
+ * help.
  */
 const isHelpForm = (rest: string): boolean => {
   const words = rest.split(" ").filter((word) => word !== "");
@@ -43,17 +45,19 @@ const isHelpForm = (rest: string): boolean => {
 };
 
 describe("the hercule skill", () => {
-  it("spells nothing but the three help forms, with nouns and verbs this build has", () => {
+  it("contains only the three help forms, with nouns and verbs this build has", () => {
     const text: string = HERCULE_SKILL;
     const spelled: ReadonlyArray<string> = [...text.matchAll(/`(hercule(?:\s[^`]*)?)`/g)].map(
       (found) => found[1]!.trim().replace(/\s+/g, " "),
     );
 
-    // A skill that names nothing at all would pass the check below while
-    // teaching an agent nothing: the help forms are the whole of its content.
+    // A skill with no commands at all would pass the check below while
+    // teaching an agent nothing, because the help forms are all it contains.
     expect(spelled.length).toBeGreaterThan(0);
 
     const wrong = spelled.filter((command) => !isHelpForm(command.slice("hercule".length).trim()));
-    expect(wrong, `the skill spells something that is not one of the three help forms`).toEqual([]);
+    expect(wrong, `the skill contains a command that is not one of the three help forms`).toEqual(
+      [],
+    );
   });
 });

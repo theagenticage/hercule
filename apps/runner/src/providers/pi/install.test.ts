@@ -1,7 +1,7 @@
 /**
- * Putting pi on a machine, over a stubbed process seam: nothing is downloaded
- * and nothing is run. The vendor ships one install script and no release pin,
- * so the command is the script and nothing else.
+ * Tests the pi install over a stubbed process seam: nothing is downloaded and
+ * nothing runs. The vendor ships one install script and no way to pin a
+ * release, so the install command is just that script.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -21,8 +21,8 @@ const stubInstall = (answer: {
   const commands: Array<ReadonlyArray<string>> = [];
   const envs: Array<Readonly<Record<string, string | undefined>>> = [];
   const seam: PiSeam = {
-    // An install hosts nothing: a pi spawned here would be one this case never
-    // asked for, so it says so rather than starting.
+    // An install must not start a pi process, so the stub fails if one is
+    // spawned.
     spawn: () => {
       throw new Error("an install spawns no pi");
     },
@@ -50,7 +50,7 @@ describe("installing the pi harness", () => {
     expect(envs).toEqual([ENV]);
   });
 
-  it("says what the installer said when it failed, rather than that it failed", async () => {
+  it("reports the installer's own error output when it fails", async () => {
     const { install } = stubInstall({ code: 1, stderr: "install.sh: nothing was installed" });
 
     const outcome = await Effect.runPromise(install);

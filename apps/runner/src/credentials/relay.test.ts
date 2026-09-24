@@ -1,9 +1,11 @@
 /**
- * Carrying one helper's question to the controller and finding its answer
- * again. What matters is that an answer reaches the question that asked it, and
- * that a question nobody answered is absent rather than refused: the socket
- * turns an absent answer into an empty one, which git reads as "ask the next
- * helper", where a refusal would tell the user they were denied.
+ * Tests how the relay sends a helper's request to the controller and matches
+ * the answer back to it. Two things matter:
+ *
+ * - each answer reaches the request it belongs to;
+ * - a request with no answer fails with an error instead of being reported as
+ *   a denial. The socket turns that error into an empty reply, which git reads
+ *   as "try the next helper". A denial would tell the user they were refused.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -17,7 +19,7 @@ const buildCredentialAnswer = (requestId: string, token: string): CredentialAnsw
   username: "octocat",
 });
 
-/** A connection that records what went out, held open for the body of a test. */
+/** Attaches a fake connection that records every sent request, and keeps it while `body` runs. */
 const withConnectedRelay = async (
   relay: ReturnType<typeof makeCredentialRelay>,
   sent: Array<CredentialRequest>,
@@ -38,7 +40,7 @@ const withConnectedRelay = async (
 };
 
 describe("what the relay does with an answer", () => {
-  it("gives each question the answer that names it, however they interleave", async () => {
+  it("matches each answer to its request by id, even when answers arrive out of order", async () => {
     const relay = makeCredentialRelay();
     const sent: Array<CredentialRequest> = [];
 
@@ -46,7 +48,7 @@ describe("what the relay does with an answer", () => {
       const first = relay.ask({ remote: "github.com/acme/web", sessionToken: "one" });
       const second = relay.ask({ remote: "github.com/acme/api", sessionToken: "two" });
       await Promise.resolve();
-      // Answered out of order: only the request id says which is which.
+      // Answer out of order, so only the request id can tell them apart.
       relay.deliver(buildCredentialAnswer(sent[1]!.requestId, "for-the-api"));
       relay.deliver(buildCredentialAnswer(sent[0]!.requestId, "for-the-web"));
 
@@ -62,7 +64,7 @@ describe("what the relay does with an answer", () => {
     ]);
   });
 
-  it("ignores an answer to a question nobody is waiting on", async () => {
+  it("ignores an answer to a request that is not pending", async () => {
     const relay = makeCredentialRelay();
 
     await withConnectedRelay(relay, [], async () => {
@@ -72,8 +74,8 @@ describe("what the relay does with an answer", () => {
   });
 });
 
-describe("when nothing answers", () => {
-  it("gives up on a controller that says nothing, rather than reporting a refusal", async () => {
+describe("when no answer arrives", () => {
+  it("fails with an error, not a denial, when the controller does not answer in time", async () => {
     const relay = makeCredentialRelay({ deadlineMs: 5 });
 
     await withConnectedRelay(relay, [], async () => {
@@ -83,14 +85,14 @@ describe("when nothing answers", () => {
     });
   });
 
-  it("gives up on every question still open when the connection ends", async () => {
+  it("fails every pending request when the connection ends", async () => {
     const relay = makeCredentialRelay();
     let asking: Promise<CredentialAnswer> | undefined;
 
     await withConnectedRelay(relay, [], async () => {
       asking = relay.ask({ remote: "github.com/acme/web", sessionToken: "one" });
-      // Caught here so the rejection that arrives with the scope's close is not
-      // an unhandled one.
+      // Catch here so the rejection that arrives when the scope closes is not
+      // reported as unhandled.
       asking.catch(() => undefined);
       await Promise.resolve();
     });
@@ -98,7 +100,7 @@ describe("when nothing answers", () => {
     await expect(asking).rejects.toThrow("connection to the controller ended");
   });
 
-  it("has nobody to ask before a connection is up", async () => {
+  it("fails a request made before any connection is attached", async () => {
     await expect(
       makeCredentialRelay().ask({ remote: "github.com/acme/web", sessionToken: "one" }),
     ).rejects.toThrow("no controller connection");

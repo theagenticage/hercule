@@ -1,16 +1,18 @@
 /**
- * The one place a harness's answer becomes a `StructuredResult`. Every adapter
- * hands this function what its harness produced - a value, or the reason there
- * is none - and this decides whether the session answered its schema.
+ * Tests `judgeAnswer`, the one place a harness's answer becomes a
+ * `StructuredResult`. Every adapter passes it what its harness produced (a
+ * value, or the reason there is none), and it decides whether the answer
+ * satisfies the session's schema.
  */
 import { describe, expect, it } from "vitest";
 import { MAX_MESSAGE_LENGTH, type OutputSchema } from "@hercule/protocol";
 import { judgeAnswer } from "./structured-result";
 
 /**
- * Inside the subset `lintOutputSchema` accepts: a closed object, every property
- * required, one string enum. Small on purpose - what is tested here is the
- * verdict and what it says, not the validator's coverage of draft-07.
+ * A schema within the subset `lintOutputSchema` accepts: a closed object,
+ * every property required, one string enum. It is small on purpose: these
+ * tests cover the result and its reason, not the validator's coverage of
+ * draft-07.
  */
 const SCHEMA: OutputSchema = {
   type: "object",
@@ -25,36 +27,36 @@ const SCHEMA: OutputSchema = {
 
 const VALID = { verdict: "accept", confidence: 0.9, summary: "a typo fix" };
 
-describe("a value a harness produced under an output schema", () => {
-  it("is the result itself when it satisfies the schema", () => {
+describe("checking a harness's value against an output schema", () => {
+  it("returns ok with the value when it satisfies the schema", () => {
     expect(judgeAnswer(SCHEMA, { value: VALID })).toEqual({
       outcome: "ok",
       value: VALID,
     });
   });
 
-  it("is a schema failure naming the field whose type is wrong", () => {
+  it("fails with a reason that names the field whose type is wrong", () => {
     expect(judgeAnswer(SCHEMA, { value: { ...VALID, confidence: "high" } })).toEqual({
       outcome: "schema-failure",
       reason: expect.stringContaining("confidence") as string,
     });
   });
 
-  it("is a schema failure naming the required key that is missing", () => {
+  it("fails with a reason that names the missing required key", () => {
     expect(judgeAnswer(SCHEMA, { value: { verdict: "accept", confidence: 0.9 } })).toEqual({
       outcome: "schema-failure",
       reason: expect.stringContaining("summary") as string,
     });
   });
 
-  it("is a schema failure naming the key the closed object does not allow", () => {
+  it("fails with a reason that names the key the closed object does not allow", () => {
     expect(judgeAnswer(SCHEMA, { value: { ...VALID, rationale: "because" } })).toEqual({
       outcome: "schema-failure",
       reason: expect.stringContaining("rationale") as string,
     });
   });
 
-  it("is a schema failure naming the field whose value is outside its enum", () => {
+  it("fails with a reason that names the field whose value is not in its enum", () => {
     expect(judgeAnswer(SCHEMA, { value: { ...VALID, verdict: "maybe" } })).toEqual({
       outcome: "schema-failure",
       reason: expect.stringContaining("verdict") as string,
@@ -62,8 +64,8 @@ describe("a value a harness produced under an output schema", () => {
   });
 });
 
-describe("a value that broke the schema deep inside itself", () => {
-  /** Two levels, so the path a reason names is not the one a root error gives. */
+describe("a value with an error in a nested field", () => {
+  /** Two levels deep, so the path in the reason differs from the path of an error at the root. */
   const NESTED: OutputSchema = {
     type: "object",
     additionalProperties: false,
@@ -78,18 +80,18 @@ describe("a value that broke the schema deep inside itself", () => {
     },
   };
 
-  it("is a schema failure naming the path down to the field itself", () => {
+  it("fails with a reason that names the full path to the field", () => {
     expect(judgeAnswer(NESTED, { value: { outer: { inner: "deep" } } })).toEqual({
       outcome: "schema-failure",
-      // Not the enclosing object: "outer does not match schema" leaves a reader
-      // to find which field of it is wrong.
+      // Name the field, not the enclosing object: "outer does not match schema"
+      // would leave the reader to find which field is wrong.
       reason: expect.stringContaining("/outer/inner") as string,
     });
   });
 });
 
-describe("a schema whose own message is longer than an event may carry", () => {
-  /** Four hundred values, so the validator's message runs past the cap. */
+describe("a validator message longer than an event allows", () => {
+  /** 400 enum values, so the validator's message is longer than the limit. */
   const WORDY: OutputSchema = {
     type: "object",
     additionalProperties: false,
@@ -102,7 +104,7 @@ describe("a schema whose own message is longer than an event may carry", () => {
     },
   };
 
-  it("cuts the reason to what the protocol carries", () => {
+  it("truncates the reason to the maximum message length", () => {
     const result = judgeAnswer(WORDY, { value: { choice: "none of them" } });
 
     expect(result.outcome).toBe("schema-failure");
@@ -111,16 +113,16 @@ describe("a schema whose own message is longer than an event may carry", () => {
 });
 
 describe("a harness that produced no value at all", () => {
-  it("is a schema failure carrying the adapter's own reason, unchanged", () => {
+  it("fails with the adapter's own reason, unchanged", () => {
     expect(
-      judgeAnswer(SCHEMA, { missing: "the agent settled without calling record_verdict" }),
+      judgeAnswer(SCHEMA, { missing: "the agent finished without calling record_verdict" }),
     ).toEqual({
       outcome: "schema-failure",
-      reason: "the agent settled without calling record_verdict",
+      reason: "the agent finished without calling record_verdict",
     });
   });
 
-  it("cuts a reason the protocol would not carry", () => {
+  it("truncates a reason longer than the maximum message length", () => {
     const result = judgeAnswer(SCHEMA, { missing: "x".repeat(5000) });
 
     expect(result).toEqual({

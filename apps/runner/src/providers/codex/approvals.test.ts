@@ -1,20 +1,21 @@
 /**
- * Every server-to-client request codex 0.154.0 declares, driven one at a time
- * against the scripted app-server: what the user is asked, what is written back
- * for each answer, and what happens to a request nobody answers. A request left
- * hanging is a turn that never ends with nothing said anywhere, so the absence
- * of an answer is asserted as hard as its content.
+ * Tests for every server-to-client request codex 0.154.0 declares, each sent
+ * to the scripted app-server: what the user is shown, what is sent back for
+ * each decision, and what happens to a request the user never resolves. A
+ * request with no reply leaves the turn hanging forever with no error, so the
+ * tests check that a reply is sent as carefully as what it contains.
  *
- * Two mappings are stretches the SPEC names rather than hides. An
- * `item/permissions/requestApproval` has no decision enum, so a refusal is an
- * empty grant and nothing else - no `turn/interrupt`. An
- * `item/tool/requestUserInput` has no refusal shape at all, so a refusal is a
- * JSON-RPC error reply.
+ * Two mappings are approximate:
  *
- * ASSUMPTION, stated because the SPEC does not: `interrupt` on a session parked
- * on a permissions request answers it with that row's `deny` mapping, since the
- * row offers no `cancel`. `request.resolved` still carries `cancel` - that is
- * what ended the park.
+ * - `item/permissions/requestApproval` has no decision enum, so a deny is an
+ *   empty grant and nothing else: no `turn/interrupt`.
+ * - `item/tool/requestUserInput` has no way to decline in its reply, so a
+ *   decline is a JSON-RPC error reply.
+ *
+ * An `interrupt` on a session parked on a permissions request replies with
+ * that row's deny mapping, because the row offers no `cancel`. The spec does
+ * not cover this case. `request.resolved` still reports `cancel`, because the
+ * interrupt is what ended the request.
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -41,17 +42,17 @@ const ITEM = "0199e0e7-0000-7000-8000-0000000000e1";
 
 const FILE_ITEM = "0199e0e7-0000-7000-8000-0000000000e2";
 
-/** Codex types a request id as a string or a number; both shapes arrive. */
+/** Codex uses both string and number request ids; both kinds are tested. */
 const ID = 7;
 
-/** The second request of a turn, which Codex asks without waiting for the first. */
+/** The id of a second request in the same turn, which Codex sends without waiting for the first. */
 const SECOND_ID = 8;
 
 const STARTED_AT = 1789373122124;
 
 type Run = Awaited<ReturnType<typeof startBusySession>>;
 
-/** A session with a turn in flight, and one server request pushed into it. */
+/** Starts a session with a running turn, and sends it one server request. */
 const pushServerRequest = async (
   method: string,
   params: unknown,
@@ -74,7 +75,7 @@ const awaitAnswer = async (run: Run, id: string | number = ID): Promise<Answered
   return run.answered.find((written) => written.id === id)!;
 };
 
-/** Opens the request, answers it as the user did, and hands back both. */
+/** Sends a request, resolves it with `decision`, and returns the run and the adapter's reply. */
 const openAndAnswer = async (
   method: string,
   params: unknown,
@@ -109,8 +110,8 @@ const COMMAND_ANSWERS: ReadonlyArray<readonly [ApprovalDecision, string]> = [
   ["cancel", "cancel"],
 ];
 
-describe("a command Codex wants run", () => {
-  it("asks with the command itself, and takes all four answers", async () => {
+describe("a command Codex wants to run", () => {
+  it("shows the command and offers all four decisions", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
 
     const opened = await awaitOpenedRequest(run);
@@ -122,7 +123,7 @@ describe("a command Codex wants run", () => {
   });
 
   for (const [decision, mapped] of COMMAND_ANSWERS) {
-    it(`writes ${mapped} back for ${decision}, and says the park is over`, async () => {
+    it(`replies ${mapped} for ${decision}, and reports the request as resolved`, async () => {
       const { run, answered } = await openAndAnswer(COMMAND, COMMAND_PARAMS, decision);
 
       expect(answered.result).toEqual({ decision: mapped });
@@ -149,8 +150,8 @@ const FILE_CHANGE_PARAMS = {
 };
 
 /**
- * The paths are not in the approval params at 0.154.0; they are in the item the
- * approval is about, which arrives first.
+ * At 0.154.0 the paths are not in the request params. They are in the file
+ * change item, which arrives before the request.
  */
 const FILE_ITEM_STARTED = {
   method: "item/started",
@@ -176,8 +177,8 @@ const FILE_ANSWERS: ReadonlyArray<readonly [ApprovalDecision, string]> = [
   ["cancel", "cancel"],
 ];
 
-describe("a file change Codex wants written", () => {
-  it("asks with the paths off the item, because the request carries none", async () => {
+describe("a file change Codex wants to write", () => {
+  it("shows the paths from the item, because the request has none", async () => {
     const run = await startBusySession();
     run.server.push(FILE_ITEM_STARTED);
     await waitUntil("reported the item", () => filterByTag(run.seen, "item.started").length === 1);
@@ -191,7 +192,7 @@ describe("a file change Codex wants written", () => {
   });
 
   for (const [decision, mapped] of FILE_ANSWERS) {
-    it(`writes ${mapped} back for ${decision}`, async () => {
+    it(`replies ${mapped} for ${decision}`, async () => {
       const { run, answered } = await openAndAnswer(FILE_CHANGE, FILE_CHANGE_PARAMS, decision);
 
       expect(answered.result).toEqual({ decision: mapped });
@@ -204,7 +205,7 @@ describe("a file change Codex wants written", () => {
 
 const PERMISSIONS = "item/permissions/requestApproval";
 
-/** Both halves are set, so "the requested profile" has one honest reading. */
+/** Both parts are set, so "the requested profile" has only one meaning. */
 const PROFILE = {
   network: { enabled: true },
   fileSystem: { read: ["/tmp/work"], write: ["/tmp/work"] },
@@ -222,7 +223,7 @@ const PERMISSIONS_PARAMS = {
 };
 
 describe("the permissions Codex asks to be granted", () => {
-  it("asks as a tool approval, offering no cancel, because the answer cannot express one", async () => {
+  it("shows a tool approval with no cancel, because the reply cannot express one", async () => {
     const run = await pushServerRequest(PERMISSIONS, PERMISSIONS_PARAMS);
 
     const opened = await awaitOpenedRequest(run);
@@ -237,19 +238,19 @@ describe("the permissions Codex asks to be granted", () => {
     expect(answered.result).toEqual({ permissions: PROFILE, scope: "turn" });
   });
 
-  it("grants the same profile for the session when the answer is always", async () => {
+  it("grants the same profile for the whole session on allow_always", async () => {
     const { answered } = await openAndAnswer(PERMISSIONS, PERMISSIONS_PARAMS, "allow_always");
 
     expect(answered.result).toEqual({ permissions: PROFILE, scope: "session" });
   });
 
-  it("grants nothing on a deny, and does not also stop the turn", async () => {
+  it("grants nothing on a deny, and does not also interrupt the turn", async () => {
     const { run, answered } = await openAndAnswer(PERMISSIONS, PERMISSIONS_PARAMS, "deny");
 
     expect(answered.result).toEqual({ permissions: {}, scope: "turn" });
     await settle();
-    // Codex ends the turn itself after a refused permission: a `turn/interrupt`
-    // from here would be a second, racing stop.
+    // Codex ends the turn itself after a denied permission, so a
+    // `turn/interrupt` from here would race it.
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
     expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
       "deny",
@@ -276,19 +277,19 @@ const ELICITATION_ANSWERS: ReadonlyArray<readonly [ApprovalDecision, unknown]> =
 ];
 
 describe("an MCP server asking its own question", () => {
-  it("asks as a tool approval named after the server, with no always to give", async () => {
+  it("shows a tool approval named after the server, with no allow_always", async () => {
     const run = await pushServerRequest(ELICITATION, ELICITATION_PARAMS);
 
     const opened = await awaitOpenedRequest(run);
     expect(opened.request.kind).toBe("tool_approval");
     expect(opened.request.detail).toEqual({ toolName: "linear" });
-    // The elicitation answer has no for-session accept, so offering one would
-    // be offering an answer this adapter would have to substitute for.
+    // The elicitation reply has no "accept for this session", so offering
+    // allow_always would mean replacing it with something else.
     expect(opened.request.decisions).toEqual(["allow", "deny", "cancel"]);
   });
 
   for (const [decision, mapped] of ELICITATION_ANSWERS) {
-    it(`answers the server with ${JSON.stringify(mapped)} for ${decision}`, async () => {
+    it(`replies ${JSON.stringify(mapped)} for ${decision}`, async () => {
       const { run, answered } = await openAndAnswer(ELICITATION, ELICITATION_PARAMS, decision);
 
       expect(answered.result).toMatchObject(mapped as Record<string, unknown>);
@@ -325,7 +326,7 @@ const USER_INPUT_PARAMS = {
 const DECLINED = { code: -32603, message: "declined by the user" };
 
 describe("a question the agent asks the user", () => {
-  it("asks it as a question, offering only the two answers Hercule can express", async () => {
+  it("shows it as a question, offering only the two decisions Hercule can send", async () => {
     const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
 
     const opened = await awaitOpenedRequest(run);
@@ -344,24 +345,24 @@ describe("a question the agent asks the user", () => {
         },
       ],
     });
-    // Answering with content is not built: a surface may only refuse.
+    // Sending answers is not supported yet, so a surface can only decline.
     expect(opened.request.decisions).toEqual(["deny", "cancel"]);
   });
 
-  it("refuses with an error reply, because the answer shape has no refusal in it", async () => {
+  it("replies with an error on deny, because the reply has no way to decline", async () => {
     const { run, answered } = await openAndAnswer(USER_INPUT, USER_INPUT_PARAMS, "deny");
 
     expect(answered.error).toEqual(DECLINED);
     expect(answered.result).toBeUndefined();
     await settle();
-    // A deny refuses this question; the turn goes on.
+    // A deny declines this question only; the turn goes on.
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([]);
     expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
       "deny",
     ]);
   });
 
-  it("refuses and then ends the turn when the answer is a cancel", async () => {
+  it("replies with an error and then interrupts the turn on cancel", async () => {
     const { run, answered } = await openAndAnswer(USER_INPUT, USER_INPUT_PARAMS, "cancel");
 
     expect(answered.error).toEqual(DECLINED);
@@ -390,7 +391,7 @@ const TOOL_CALL_PARAMS = {
 };
 
 describe("a dynamic tool Codex wants this client to run", () => {
-  it("declines it on the spot, without asking anybody", async () => {
+  it("declines it immediately, without asking the user", async () => {
     const run = await pushServerRequest(TOOL_CALL, TOOL_CALL_PARAMS);
 
     const answered = await awaitAnswer(run);
@@ -399,7 +400,7 @@ describe("a dynamic tool Codex wants this client to run", () => {
       success: false,
     });
     await settle();
-    // Hercule hosts no tools for Codex, so there is nothing a user could decide.
+    // Hercule provides no dynamic tools to Codex, so there is nothing for a user to decide.
     expect(filterByTag(run.seen, "request.opened")).toEqual([]);
     expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
   });
@@ -409,13 +410,13 @@ const INVENTED = "codex/somethingThisBuildHasNeverSeen";
 
 const METHOD_NOT_FOUND = -32601;
 
-describe("a request this build has no mapping for", () => {
-  it("refuses it by its own id and names it once, rather than leaving the turn hanging", async () => {
+describe("a request this build does not handle", () => {
+  it("replies with an error under the request's own id and warns once, rather than leaving the turn hanging", async () => {
     const run = await pushServerRequest(INVENTED, { threadId: THREAD }, "req-a");
 
     const answered = await awaitAnswer(run, "req-a");
-    // The id is echoed verbatim: Codex types it as a string or a number, and an
-    // answer under a reshaped id answers nothing.
+    // The id is sent back unchanged: Codex uses both string and number ids,
+    // and a reply under a converted id would not match the request.
     expect(answered.id).toBe("req-a");
     expect(answered.error?.code).toBe(METHOD_NOT_FOUND);
     expect(answered.result).toBeUndefined();
@@ -426,7 +427,7 @@ describe("a request this build has no mapping for", () => {
     expect(filterByTag(run.seen, "request.opened")).toEqual([]);
   });
 
-  it("refuses the four declared methods it maps nothing to", async () => {
+  it("rejects the four declared methods it does not handle", async () => {
     for (const method of [
       "account/chatgptAuthTokens/refresh",
       "attestation/generate",
@@ -451,7 +452,7 @@ const MODE_ROWS = [
 
 describe("the access mode a thread is opened in", () => {
   for (const [mode, approvalPolicy, sandbox, approvalsReviewer] of MODE_ROWS) {
-    it(`opens a ${mode} thread on ${approvalPolicy} and ${sandbox}`, async () => {
+    it(`opens a ${mode} thread with ${approvalPolicy} and ${sandbox}`, async () => {
       const run = createDriving();
 
       await Effect.runPromise(
@@ -465,8 +466,8 @@ describe("the access mode a thread is opened in", () => {
   }
 });
 
-describe("an approval answered while the turn is still running", () => {
-  it("answers it, says the park is over, and leaves the turn where it was", async () => {
+describe("an approval resolved while the turn is still running", () => {
+  it("replies to Codex, reports the request as resolved, and leaves the turn running", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     const opened = await awaitOpenedRequest(run);
 
@@ -482,25 +483,25 @@ describe("an approval answered while the turn is still running", () => {
     expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
       "allow",
     ]);
-    // The turn the approval was about is still the turn in flight: an input now
-    // steers it rather than opening a second one beside it.
+    // The turn is still running: an input now steers it rather than starting
+    // a second turn beside it.
     const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "carry on" }));
     expect(sent).toEqual({ turnId: TURN, delivery: "steered" });
     expect(filterByTag(run.seen, "turn.completed")).toEqual([]);
   });
 });
 
-describe("a second request Codex asks before the first is answered", () => {
+describe("a second request Codex sends before the first is resolved", () => {
   const SECOND_PARAMS = { ...COMMAND_PARAMS, itemId: FILE_ITEM, command: "rm -rf dist" };
 
-  it("opens them one at a time, and answers each under its own id", async () => {
+  it("opens them one at a time, and replies to each under its own id", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     run.server.push({ id: SECOND_ID, method: COMMAND, params: SECOND_PARAMS });
     await settle();
 
-    // A session has one open request, so announcing the second now would take
-    // the first off every surface with nobody left able to answer it - and
-    // Codex is waiting for both.
+    // A session has one open request. Opening the second now would remove the
+    // first from every surface with no way to resolve it, and Codex is
+    // waiting for both.
     const first = await awaitOpenedRequest(run);
     expect(first.request.detail).toEqual({ command: "rm -rf build" });
     expect(run.answered).toEqual([]);
@@ -528,7 +529,7 @@ describe("a second request Codex asks before the first is answered", () => {
     ]);
   });
 
-  it("cancels the one still waiting when the session is interrupted", async () => {
+  it("cancels the waiting request too when the session is interrupted", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     run.server.push({ id: SECOND_ID, method: COMMAND, params: SECOND_PARAMS });
     await settle();
@@ -538,7 +539,7 @@ describe("a second request Codex asks before the first is answered", () => {
 
     expect((await awaitAnswer(run, ID)).result).toEqual({ decision: "cancel" });
     expect((await awaitAnswer(run, SECOND_ID)).result).toEqual({ decision: "cancel" });
-    // Only the open park was ever reported, so only it has an end to report.
+    // Only the open request was ever reported as opened, so only it is reported as resolved.
     const resolved = filterByTag(run.seen, "request.resolved");
     expect(resolved).toHaveLength(1);
     expect(resolved[0]).toMatchObject({ requestId: first.request.requestId, decision: "cancel" });
@@ -547,7 +548,7 @@ describe("a second request Codex asks before the first is answered", () => {
 });
 
 describe("interrupting a session that is parked on a request", () => {
-  it("cancels the request, says so, and ends the turn", async () => {
+  it("cancels the request, reports it as cancelled, and interrupts the turn", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     const opened = await awaitOpenedRequest(run);
 
@@ -562,7 +563,7 @@ describe("interrupting a session that is parked on a request", () => {
     ]);
   });
 
-  it("refuses a question it cannot answer, and ends the turn", async () => {
+  it("replies to a question with an error, and interrupts the turn", async () => {
     const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
     const opened = await awaitOpenedRequest(run);
 
@@ -578,14 +579,14 @@ describe("interrupting a session that is parked on a request", () => {
     ]);
   });
 
-  it("grants nothing on a permissions request, which is the only refusal it takes", async () => {
+  it("grants nothing on a permissions request, which is the only way to decline it", async () => {
     const run = await pushServerRequest(PERMISSIONS, PERMISSIONS_PARAMS);
     await awaitOpenedRequest(run);
 
     await Effect.runPromise(run.adapter.interrupt(SESSION));
 
-    // No `cancel` exists in a permissions answer, so the deny mapping is what a
-    // cancel writes; the park is still reported as cancelled.
+    // A permissions reply has no `cancel`, so a cancel sends the deny reply;
+    // the request is still reported as cancelled.
     expect((await awaitAnswer(run)).result).toEqual({ permissions: {}, scope: "turn" });
     expect(filterByTag(run.seen, "request.resolved").map((event) => event.decision)).toEqual([
       "cancel",
@@ -596,16 +597,16 @@ describe("interrupting a session that is parked on a request", () => {
   });
 });
 
-/** JSON-RPC's own, and what Codex refuses a request it cannot read with. */
+/** The standard JSON-RPC code for an invalid request, which Codex also uses. */
 const INVALID_REQUEST = -32600;
 
-describe("a mapped request this build could not read", () => {
-  it("refuses that one and goes on reading the connection", async () => {
+describe("a handled request this build could not read", () => {
+  it("rejects that request and keeps reading the connection", async () => {
     const run = await startBusySession();
 
-    // A file change approval naming no item: the mapping reads a field the
-    // server did not send, and a reader that died on it would drop every frame
-    // after it with nothing said anywhere.
+    // A file change request with no item id: the mapping reads a field the
+    // server did not send. If the reader crashed on it, every later frame
+    // would be dropped with no error anywhere.
     run.server.push({
       id: "req-b",
       method: FILE_CHANGE,
@@ -621,8 +622,8 @@ describe("a mapped request this build could not read", () => {
 
 const OTHER_THREAD = "0199e0e7-0000-7000-8000-0000000000e9";
 
-describe("a request about a thread nobody here holds", () => {
-  it("refuses it without telling the sessions it is not about", async () => {
+describe("a request about a thread no session here holds", () => {
+  it("rejects it without warning a session it is not about", async () => {
     const run = await startBusySession();
 
     run.server.push({
@@ -633,14 +634,14 @@ describe("a request about a thread nobody here holds", () => {
 
     expect((await awaitAnswer(run, "req-c")).error?.code).toBe(INVALID_REQUEST);
     await settle();
-    // There is no session it belongs to, so there is nobody it is news for.
+    // No session holds the thread, so no session is warned.
     expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
     expect(filterByTag(run.seen, "request.opened")).toEqual([]);
   });
 });
 
-describe("a park the turn outran", () => {
-  it("cannot be answered once the turn it belonged to has ended", async () => {
+describe("a request whose turn ends before it is resolved", () => {
+  it("ignores a decision that arrives after its turn has ended", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     const opened = await awaitOpenedRequest(run);
     run.server.push({
@@ -657,15 +658,15 @@ describe("a park the turn outran", () => {
     );
 
     await settle();
-    // The park ended with its turn: Codex was told so at the end of the turn,
-    // because every request it asks is answered, and the user's answer arrives
-    // at a park that is no longer there. The controller closed the open request
-    // on `turn.completed`, so there is no resolution to report either way.
+    // The request ended with its turn. Codex got a cancel reply when the turn
+    // ended, because every request gets a reply, so the user's decision
+    // arrives for a request that no longer exists. The controller closed the
+    // open request on `turn.completed`, so no resolution is reported either.
     expect(run.answered).toEqual([{ id: ID, result: { decision: "cancel" } }]);
     expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
   });
 
-  it("answers the ones still waiting too, so nothing is left hanging", async () => {
+  it("replies to the waiting requests too, so none is left without a reply", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     run.server.push({
       id: SECOND_ID,

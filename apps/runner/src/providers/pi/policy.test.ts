@@ -1,15 +1,14 @@
 /**
- * Which tools each access mode parks, and which it lets through. The table is
- * the whole criterion: a wrong entry here is a shell command run that the user
- * asked to review first, which is the one failure in this adapter that costs
- * something. What a parked call is then asked as is the adapter's, and is
- * covered in `approvals.test.ts`.
+ * Tests which tools each access mode parks and which it lets run. The table
+ * below is the whole rule set. A wrong entry means a shell command runs that
+ * the user wanted to review first, which is the one mistake in this adapter
+ * that does real harm. The request kind a parked call opens is tested in
+ * `approvals.test.ts`.
  *
- * The second half - that a full-access session runs with no approval hook at
- * all - is only partly reachable from a test. What is asserted is what the
- * adapter does with the mode: it tells the launched pi which mode it is under,
- * and a full-access session that runs a shell command is never parked. That the
- * extension's full-access branch registers no `tool_call` handler is left to a
+ * That a full-access session runs with no approval hook at all can only partly
+ * be tested. These tests check that the adapter passes the mode to pi, and
+ * that a shell command on a full-access session is never parked. That the
+ * extension registers no `tool_call` handler under full access is left to a
  * reviewer reading the extension source.
  */
 import { afterAll, describe, expect, it } from "vitest";
@@ -21,9 +20,8 @@ import { cleanupHomes, settle, SPEC, startTestSession, filterByTag, waitUntil } 
 afterAll(cleanupHomes);
 
 /**
- * pi 0.85.1's own built-ins, Hercule's own tool for a session's answer, and one
- * name from no built-in at all: an MCP tool or a tool a later pi adds is the
- * case the catch-all rows are about.
+ * pi 0.85.1's built-in tools, Hercule's `submit_result` tool, and one tool that
+ * is not built in: it stands for an MCP tool or a tool a later pi adds.
  */
 type Tool =
   | "read"
@@ -37,7 +35,7 @@ type Tool =
   | "submit_result"
   | "mcp__jira__create";
 
-/** True is a call the approval hook holds and asks about; false is one it lets run. */
+/** True means the approval hook holds the call and asks; false means it lets the call run. */
 const TABLE: Readonly<
   Record<"approval-required" | "auto-accept-edits" | "full-access", Readonly<Record<Tool, boolean>>>
 > = {
@@ -47,12 +45,12 @@ const TABLE: Readonly<
     find: false,
     ls: false,
     bash: true,
-    // The same shell on another machine, and the same question to the user.
+    // PowerShell is a shell like bash, so the user is asked the same way.
     powershell: true,
     write: true,
     edit: true,
-    // Hercule's own: recording the answer the session was asked for touches
-    // nothing, and an unattended session has nobody to approve it.
+    // Hercule's own tool: recording the session's answer changes nothing, and
+    // an unattended session has nobody to approve it.
     submit_result: false,
     mcp__jira__create: true,
   },
@@ -63,7 +61,7 @@ const TABLE: Readonly<
     ls: false,
     bash: true,
     powershell: true,
-    // The mode's whole point: edits land without being asked about.
+    // The point of this mode: edits run without asking.
     write: false,
     edit: false,
     submit_result: false,
@@ -83,7 +81,7 @@ const TABLE: Readonly<
   },
 };
 
-describe("which tools an access mode parks", () => {
+describe("which tools each access mode parks", () => {
   for (const [mode, tools] of Object.entries(TABLE)) {
     for (const [tool, parks] of Object.entries(tools)) {
       it(`${parks ? "parks" : "runs"} ${tool} under ${mode}`, () => {
@@ -93,21 +91,20 @@ describe("which tools an access mode parks", () => {
   }
 });
 
-describe("Hercule's own tool for a session's answer", () => {
+describe("the submit_result tool", () => {
   for (const mode of Object.keys(TABLE) as ReadonlyArray<AccessMode>) {
-    it(`runs it unasked under ${mode}`, () => {
-      // The name is spelled a second time inside `requiresApproval`, which
-      // closes over nothing so that it can be interpolated into the extension;
-      // this is what holds that spelling to the one the tool is registered
-      // under. An unattended session has nobody to approve its own answer.
+    it(`runs without asking under ${mode}`, () => {
+      // `requiresApproval` spells the tool name out itself, because it is
+      // copied into the extension as source and cannot import anything. This
+      // test checks that its spelling matches the registered tool name.
       expect(requiresApproval(mode, SUBMIT_RESULT_TOOL)).toBe(false);
     });
   }
 });
 
-describe("what a launched pi is told about its access mode", () => {
+describe("the access mode a launched pi is given", () => {
   for (const mode of ["approval-required", "auto-accept-edits", "full-access"] as const) {
-    it(`launches a ${mode} session under that mode`, async () => {
+    it(`passes ${mode} to pi in its environment`, async () => {
       const run = await startTestSession({}, { ...SPEC, accessMode: mode });
 
       expect(run.child.env["HERCULE_ACCESS_MODE"]).toBe(mode);
@@ -130,7 +127,7 @@ describe("what a launched pi is told about its access mode", () => {
     );
     await settle();
 
-    // No hook runs, so pi asks nothing and nothing is docked on the composer.
+    // No hook runs, so pi asks nothing and no card is docked on the composer.
     expect(filterByTag(run.seen, "request.opened")).toEqual([]);
   });
 });

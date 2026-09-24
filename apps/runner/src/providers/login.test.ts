@@ -1,7 +1,7 @@
 /**
- * Logging a provider instance in, over a stubbed spawn seam. The vendor's
- * `claude auth login` prints a URL, then blocks on stdin for the code the user
- * pastes back from the browser.
+ * Tests logging a provider instance in, with a stubbed spawn function. The
+ * vendor's `claude auth login` prints a URL, then waits on stdin for the code
+ * the user pastes back from the browser.
  */
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +30,7 @@ const CONTEXT: ProviderRunnerContext = {
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
   secrets: {},
-  // Never read by a probe, an install or a login; the context type carries it
+  // Not read by a probe, an install or a login. The context type requires it
   // for the sessions this adapter also hosts.
   herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
 };
@@ -70,7 +70,7 @@ interface Fake {
   readonly child: LoginChild;
   readonly command: ReadonlyArray<string>;
   readonly env: Readonly<Record<string, string | undefined>>;
-  /** What the child printed to stdout, and to stderr. */
+  /** Makes the child print to stdout (`says`) or to stderr (`complains`). */
   readonly says: (line: string) => void;
   readonly complains: (line: string) => void;
   readonly stdin: ReadonlyArray<string>;
@@ -98,9 +98,9 @@ const createMachine = () => {
       stdout: out.stream,
       stderr: err.stream,
       write: (text) => stdin.push(text),
-      // A killed child's pipes may not end before its exit, so this fake never
-      // ends them - that is what makes the driver's wait on the exit
-      // load-bearing.
+      // A killed child's pipes may not close before it exits, so this fake
+      // never closes them. That checks the login code does not rely on the
+      // pipes closing after a kill.
       kill: () => {
         killed = true;
         settle(143);
@@ -152,7 +152,7 @@ describe("starting a login", () => {
     expect(started.env["BROWSER"]).toBe("false");
   });
 
-  it("answers with the first URL and ignores whatever the child prints after it", async () => {
+  it("returns the first URL and ignores anything the child prints after it", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -170,7 +170,7 @@ describe("starting a login", () => {
     expect(answer).toEqual({ _tag: "loginUrl", url: URL_ONE });
   });
 
-  it("takes the address out of the terminal hyperlink the vendor prints it in", async () => {
+  it("extracts the URL from the terminal hyperlink the vendor prints it in", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -179,7 +179,7 @@ describe("starting a login", () => {
         const starting = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
-          // OSC 8: the target sits inside the escape, beside a visible copy.
+          // OSC 8 hyperlink: the target URL is inside the escape sequence, next to a visible copy.
           children[0]!.says(`\u001b]8;;${URL_ONE}\u0007${URL_ONE}\u001b]8;;\u0007\n`);
         });
         return yield* Fiber.join(starting);
@@ -189,7 +189,7 @@ describe("starting a login", () => {
     expect(answer).toEqual({ _tag: "loginUrl", url: URL_ONE });
   });
 
-  it("kills the login it was already holding for that instance", async () => {
+  it("kills the previous login for the same instance", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -207,13 +207,13 @@ describe("starting a login", () => {
       }),
     );
 
-    // The code a user pastes is only good for the URL of the child that printed
-    // it, so two logins for one instance cannot both be waiting.
+    // A pasted code only works with the URL of the child that printed it, so
+    // only one login per instance can be waiting.
     expect(children[0]!.killed()).toBe(true);
     expect(second).toEqual({ _tag: "loginUrl", url: URL_TWO });
   });
 
-  it("says what the child said when it ended without printing a URL", async () => {
+  it("fails with the child's stderr output when it exits without printing a URL", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -243,7 +243,7 @@ describe("submitting a login code", () => {
       yield* Fiber.join(starting);
     });
 
-  it("writes the code to the child's stdin and reports the login it finished", async () => {
+  it("writes the code to the child's stdin and reports success when the child exits with 0", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -257,13 +257,13 @@ describe("submitting a login code", () => {
       }),
     );
 
-    // A newline, because the CLI is reading a line: without it the child waits
-    // for ever on a code it has already been given.
+    // The code ends with a newline because the CLI reads a whole line. Without
+    // it the child would wait forever for a code it has already been given.
     expect(children[0]!.stdin.join("")).toBe("the-pasted-code\n");
     expect(answer).toEqual({ _tag: "loginResult", ok: true });
   });
 
-  it("hands back the CLI's own complaint and keeps the child for another try", async () => {
+  it("returns the CLI's error message and keeps the child running for another try", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -274,7 +274,8 @@ describe("submitting a login code", () => {
         const first = yield* Effect.forkChild(driver.submit(INSTANCE, "half-a-code"));
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[0]!.complains(`${INVALID}\n`));
-        // A complaint is a refusal once the child has proved it is staying.
+        // A stderr line counts as a rejected code once the child is still running after the grace
+        // period.
         yield* TestClock.adjust(COMPLAINT_GRACE);
         const refused = yield* Fiber.join(first);
 
@@ -292,7 +293,7 @@ describe("submitting a login code", () => {
     expect(accepted).toEqual({ _tag: "loginResult", ok: true });
   });
 
-  it("has nothing to hand a code to when no login is in progress", async () => {
+  it("fails a submit when no login is in progress", async () => {
     const { spawn, children } = createMachine();
 
     const answer = await run(makeLogins(spawn).submit(INSTANCE, "a-code"));
@@ -302,7 +303,7 @@ describe("submitting a login code", () => {
     expect(children).toEqual([]);
   });
 
-  it("kills a login nobody ever finished, and has nothing to submit to after", async () => {
+  it("kills a login left idle too long, and fails a later submit", async () => {
     expect(Duration.toMinutes(LOGIN_IDLE)).toBe(10);
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
@@ -310,8 +311,8 @@ describe("submitting a login code", () => {
     const answer = await run(
       Effect.gen(function* () {
         yield* startLogin(driver, children);
-        // A tab closed on the URL leaves the CLI blocked on stdin for the life
-        // of the daemon.
+        // Without the idle timeout, a browser tab closed on the URL would leave
+        // the CLI blocked on stdin for as long as the daemon runs.
         yield* TestClock.adjust(LOGIN_IDLE);
         return yield* driver.submit(INSTANCE, "a-code-from-yesterday");
       }),
@@ -323,12 +324,12 @@ describe("submitting a login code", () => {
 });
 
 describe("more than one login at a time", () => {
-  it("does not let a replaced login take the one that replaced it down", async () => {
+  it("does not let a replaced login kill the login that replaced it", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
-    // Two tabs, or the Sessions button and the Fleet row: the first start is
-    // still waiting for a URL when the second arrives.
+    // For example two tabs, or the Sessions button and the Fleet row: the first
+    // start is still waiting for a URL when the second arrives.
     const [first, second] = await run(
       Effect.gen(function* () {
         const one = yield* Effect.forkChild(driver.start(INSTANCE, claudeCode, CONTEXT));
@@ -366,8 +367,8 @@ describe("more than one login at a time", () => {
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
         yield* Fiber.join(starting);
-        // A vendor blocked on stdin does not notice the daemon is gone, and it
-        // is holding a prompt for a credential.
+        // A vendor blocked on stdin does not notice that the daemon has stopped,
+        // and it would keep waiting for a credential.
         yield* driver.stopAll;
       }),
     );
@@ -375,7 +376,7 @@ describe("more than one login at a time", () => {
     expect(children[0]!.killed()).toBe(true);
   });
 
-  it("has nothing to paste into once the vendor has given up on its own", async () => {
+  it("fails a submit after the vendor has exited on its own", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -395,7 +396,7 @@ describe("more than one login at a time", () => {
     expect((answer as { message: string }).message).toContain("no login in progress");
   });
 
-  it("reads a login that finished as one that worked, whatever it said on the way out", async () => {
+  it("reports success for a login that exits with 0, even if it wrote to stderr while exiting", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -408,7 +409,7 @@ describe("more than one login at a time", () => {
 
         const submitting = yield* Effect.forkChild(driver.submit(INSTANCE, "the-whole-code"));
         yield* TestClock.adjust(Duration.zero);
-        // A vendor writes to stderr on its way out for reasons of its own.
+        // Vendors sometimes write warnings to stderr as they exit.
         yield* Effect.sync(() => {
           children[0]!.complains("\n(node:412) ExperimentalWarning: something\n");
           children[0]!.exit(0);
@@ -423,21 +424,21 @@ describe("more than one login at a time", () => {
 });
 
 /**
- * A device-code login is the first of the two calls and nothing else: the
- * vendor prints an address *and* a one-time code, reads nothing, and the
- * browser finishes the exchange with the vendor. Nobody submits to it; its
- * child is waited out by its own clock and forgotten.
+ * A device-code login uses only the first of the two calls. The vendor prints
+ * a URL *and* a one-time code, reads nothing, and the browser completes the
+ * login with the vendor. Nothing is submitted to it; its child runs until its
+ * own timer ends it, and is then forgotten.
  */
 describe("a device-code login", () => {
-  // A real directory: the adapter lays out the instance's Codex and neutral
-  // homes when it builds the command, exactly as it does for a session.
+  // A real directory, because the adapter creates the instance's Codex home and
+  // neutral home when it builds the command, just as it does for a session.
   const CODEX_CONTEXT: ProviderRunnerContext = {
     cwd: null,
     home: mkdtempSync(join(tmpdir(), "hercule-login-")),
     binary: "/usr/local/bin/codex",
     env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
     secrets: {},
-    // Never read by a probe, an install or a login; the context type carries it
+    // Not read by a probe, an install or a login. The context type requires it
     // for the sessions this adapter also hosts.
     herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
   };
@@ -449,24 +450,25 @@ describe("a device-code login", () => {
   const DEVICE_URL = "https://auth.openai.com/codex/device";
   const USER_CODE = "CH61-0FI2N";
 
-  /** What `codex login --device-auth` printed, out of the recording of it. */
+  /** The lines `codex login --device-auth` printed, taken from a recording. */
   const RECORDED = ((): ReadonlyArray<string> => {
     const lines = readFileSync(
       new URL("./codex/device-auth.sample.txt", import.meta.url),
       "utf8",
     ).split("\n");
-    // The file opens with what it is and where it came from; the capture is
-    // everything after the blank line that ends that.
+    // The file starts with a header that describes the recording. The captured
+    // output is everything after the first blank line.
     return lines.slice(lines.indexOf("") + 1);
   })();
 
   /**
-   * The recording notes that the vendor colours this output, which a text
-   * capture cannot keep, so the colour goes back on: the driver reads the line
-   * a terminal would have carried, not a cleaned-up one.
+   * Makes the child print the recorded lines. The recording notes that the
+   * vendor colours this output, which a text file cannot keep, so the colour
+   * codes are added back: the login code must handle the line a terminal would
+   * really receive, not a cleaned-up one.
    */
   const printRecordedLogin = (children: ReadonlyArray<Fake>): void => {
-    // A driver that spawned nothing has to fail on its answer, not in here.
+    // If the driver spawned nothing, the test should fail on its assertion, not here.
     for (const line of RECORDED) children[0]?.says(`\u001b[36m${line}\u001b[0m\n`);
   };
 
@@ -478,7 +480,7 @@ describe("a device-code login", () => {
       return yield* Fiber.join(starting);
     });
 
-  it("reads both the address and the one-time code out of what the vendor printed", async () => {
+  it("reads both the URL and the one-time code from the vendor's output", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -487,7 +489,7 @@ describe("a device-code login", () => {
     expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
   });
 
-  it("answers the address only once the code beside it has been read too", async () => {
+  it("returns the URL only once the code has been read too", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
     let early: LoginAnswer | undefined;
@@ -502,7 +504,7 @@ describe("a device-code login", () => {
           ),
         );
         yield* TestClock.adjust(Duration.zero);
-        // Two reads, as a pipe hands them over: the address, then the code.
+        // Two separate chunks, as a pipe may deliver them: the URL, then the code.
         yield* Effect.sync(() => children[0]?.says(`Open this link\n${DEVICE_URL}\n`));
         yield* TestClock.adjust(Duration.zero);
         const pending = yield* Effect.sync(() => early);
@@ -515,7 +517,7 @@ describe("a device-code login", () => {
     expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
   });
 
-  it("answers what the vendor printed when its output ends on the code", async () => {
+  it("returns the URL and code when the output ends right after the code", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -525,7 +527,7 @@ describe("a device-code login", () => {
         yield* TestClock.adjust(Duration.zero);
         yield* Effect.sync(() => {
           printRecordedLogin(children);
-          // Nothing more is coming: the pipe closes on the last line printed.
+          // The child exits right after the last line, which closes the pipe.
           children[0]?.exit(0);
         });
         return yield* Fiber.join(starting);
@@ -535,7 +537,7 @@ describe("a device-code login", () => {
     expect(answer).toStrictEqual({ _tag: "loginUrl", url: DEVICE_URL, userCode: USER_CODE });
   });
 
-  it("says what the machine said when the address came with no code to type", async () => {
+  it("fails with the child's stderr output when it prints a URL but no code", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -552,14 +554,14 @@ describe("a device-code login", () => {
       }),
     );
 
-    // An address with no code is a page the user cannot get past, so it is a
-    // failure rather than half an answer - and what it says comes off stderr,
-    // never off the stdout the code itself was printed on.
+    // A URL with no code leads to a page the user cannot get past, so this is a
+    // failure, not a partial answer. The message comes from stderr, not from
+    // stdout, where the code would have been printed.
     expect(answer).toMatchObject({ _tag: "loginFailed" });
     expect((answer as { message: string }).message).toContain("not enabled for this account");
   });
 
-  it("says the code is what was missing when the machine said nothing", async () => {
+  it("reports the missing code when the child prints a URL and nothing on stderr", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -575,15 +577,15 @@ describe("a device-code login", () => {
       }),
     );
 
-    // A silent child leaves the reason to us, and the address did arrive: the
-    // half that is missing is the code, which is what the user is told.
+    // The child wrote no error, and the URL did arrive, so the message says the
+    // code is what is missing.
     expect(answer).toStrictEqual({
       _tag: "loginFailed",
       message: "the login printed no code to type",
     });
   });
 
-  it("leaves a paste login's answer exactly as it was", async () => {
+  it("returns no user code for a paste login", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -599,7 +601,7 @@ describe("a device-code login", () => {
     expect(answer).toStrictEqual({ _tag: "loginUrl", url: URL_ONE });
   });
 
-  it("takes no code: a submit writes nothing and says so", async () => {
+  it("fails a submit and writes nothing to the child", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
@@ -610,25 +612,28 @@ describe("a device-code login", () => {
       }),
     );
 
-    expect(answer).toMatchObject({ _tag: "loginFailed", message: "this login takes no code" });
-    // The browser finishes this exchange; the code is shown, never typed back.
+    expect(answer).toMatchObject({
+      _tag: "loginFailed",
+      message: "this login does not accept a code here; type the code it showed into the browser",
+    });
+    // The browser completes this login; the code is shown to the user, never written to the child.
     expect(children[0]!.stdin).toEqual([]);
-    // Nothing was relayed, so nothing was ended either: the child polls on.
+    // Nothing was written, so the child is not killed and keeps polling.
     expect(children[0]!.killed()).toBe(false);
   });
 
-  it("keeps a child that is still polling past the idle clock, and ends it with the code", async () => {
+  it("keeps a device login past the idle timeout, and kills it when its code expires", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);
 
     const [early, answer] = await run(
       Effect.gen(function* () {
         yield* startLogin(driver, children);
-        // A device login shows no sign of life between the code and the exit,
-        // so the clock that kills an abandoned paste must not reach it.
+        // A device login shows no activity between printing the code and
+        // exiting, so the idle timeout for paste logins must not kill it.
         yield* TestClock.adjust(LOGIN_IDLE);
         const early = yield* Effect.sync(() => children[0]!.killed());
-        // The code it printed is dead by now, and so is what it was polling for.
+        // By now the printed code has expired, so the login cannot succeed.
         yield* TestClock.adjust(Duration.subtract(LOGIN_CODE_LIFETIME, LOGIN_IDLE));
         return [early, yield* driver.submit(INSTANCE, USER_CODE)] as const;
       }),
@@ -636,7 +641,7 @@ describe("a device-code login", () => {
 
     expect(early).toBe(false);
     expect(children[0]!.killed()).toBe(true);
-    // Killed and forgotten: nothing is holding the instance any more.
+    // The login was killed and forgotten, so no login is held for the instance.
     expect(answer).toMatchObject({ _tag: "loginFailed", message: "no login in progress" });
   });
 });

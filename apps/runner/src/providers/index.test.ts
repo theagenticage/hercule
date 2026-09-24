@@ -1,7 +1,8 @@
 /**
- * What this runner build carries, and what the session supervisor is handed.
- * The registry is the one place a provider id becomes an adapter, so a provider
- * missing from it reads to the whole product as "no adapter in this build".
+ * Tests which adapters this runner build includes, and which the session
+ * supervisor receives. The registry is the only place a provider id becomes an
+ * adapter, so a provider missing from it shows up everywhere in the product as
+ * "no adapter in this build".
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -11,25 +12,26 @@ import { makeWorkspaces } from "../workspaces";
 import { makeSupervising } from "../sessions/supervisor";
 import { ADAPTER_IDS, findAdapter, adapters } from "./index";
 
-describe("the adapters this runner build carries", () => {
-  it("answers for Codex, by the id and the binary name the plugin declares", () => {
+describe("the adapters in this runner build", () => {
+  it("finds Codex by the provider id and binary name its plugin declares", () => {
     const codex = findAdapter("codex");
 
     expect(codex?.providerId).toBe("codex");
     expect(codex?.binaryName).toBe("codex");
     expect(ADAPTER_IDS).toContain("codex");
-    // The adapter that was there before it is still there.
+    // The existing Claude Code adapter is still registered.
     expect(ADAPTER_IDS).toContain("claude-code");
   });
 
-  it("puts the Codex adapter on the stream the supervisor relays", async () => {
+  it("includes the Codex adapter in the events the supervisor forwards", async () => {
     const codex = findAdapter("codex");
-    // `supervising` merges the events of every adapter it is given, and the
-    // runner gives it this array: an adapter outside it publishes to nobody.
+    // `makeSupervising` merges the events of every adapter it is given, and the
+    // runner gives it this array. An adapter missing from the array would have
+    // no subscriber.
     expect(adapters).toContain(codex);
 
     const sent: Array<RunnerToController> = [];
-    // Nothing is started here, so nothing under these paths is made.
+    // Nothing is started, so none of these paths are created.
     const machine: Machine = {
       providersDir: "/var/hercule/runner/providers",
       scratchDir: "/var/hercule/runner/scratch",
@@ -46,27 +48,27 @@ describe("the adapters this runner build carries", () => {
       send: (frame) => Effect.sync(() => void sent.push(frame)),
     });
 
-    // Reaches every adapter in the array, Codex included, for what it hosts.
+    // The report asks every adapter in the array, Codex included, for its sessions.
     await Effect.runPromise(supervisor.report);
     expect(sent).toHaveLength(1);
   });
 });
 
-describe("the pi adapter this runner build carries", () => {
-  it("answers for pi, by the id and the binary name the plugin declares", () => {
+describe("the pi adapter in this runner build", () => {
+  it("finds pi by the provider id and binary name its plugin declares", () => {
     const pi = findAdapter("pi");
 
     expect(pi?.providerId).toBe("pi");
     expect(pi?.binaryName).toBe("pi");
     expect(ADAPTER_IDS).toContain("pi");
-    // The adapters that were there before it are still there.
+    // The existing adapters are still registered.
     expect(ADAPTER_IDS).toContain("claude-code");
     expect(ADAPTER_IDS).toContain("codex");
-    // An adapter outside this array publishes its events to nobody.
+    // An adapter missing from this array would have no subscriber for its events.
     expect(adapters).toContain(pi);
   });
 
-  it("can put the harness on a machine that has none", () => {
+  it("can install the harness on a machine that does not have it", () => {
     expect(findAdapter("pi")?.install).toBeDefined();
   });
 });

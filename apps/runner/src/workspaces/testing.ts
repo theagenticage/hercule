@@ -1,9 +1,10 @@
 /**
- * Real git in temp directories: what the workspace tests are written against.
+ * Test helpers that set up real git repositories in temporary directories for
+ * the workspace tests.
  *
  * Nothing here fakes git or the module under test. A "remote" is a bare
  * repository on disk reached over `file://`, which needs no credential, so a
- * provisioning test proves the git substrate and never the token path.
+ * provisioning test covers the git code and never the credential path.
  */
 import { createHash } from "node:crypto";
 import {
@@ -36,7 +37,7 @@ const GIT_ENV: Record<string, string> = {
   GIT_COMMITTER_EMAIL: "author@example.invalid",
 };
 
-/** Runs git and fails the test with git's own words when it is unhappy. */
+/** Runs git and returns its trimmed output. Throws with git's error output if git fails. */
 export const runGitOrThrow = (cwd: string, ...args: ReadonlyArray<string>): string => {
   const done = Bun.spawnSync(["git", ...args], { cwd, env: GIT_ENV });
   if (done.exitCode !== 0) {
@@ -53,20 +54,20 @@ export const createTemporaryDir = (prefix: string): string => {
   return made;
 };
 
-/** Called from each suite's `afterAll`. */
+/** Deletes every temporary directory created so far. Called from each suite's `afterAll`. */
 export const cleanTemporaries = (): void => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 };
 
 export interface Remote {
-  /** The bare repository, as the runner is told to fetch it. */
+  /** The bare repository's `file://` URL, which the runner is given as the remote. */
   readonly url: string;
   readonly path: string;
-  /** A working copy of it the test commits through. */
+  /** A working copy of the remote that the test commits through. */
   readonly work: string;
 }
 
-/** A bare "remote" with one commit on `main`, and a working copy to grow it. */
+/** Creates a bare "remote" with one commit on `main`, and a working copy for adding more. */
 export const makeRemote = (): Remote => {
   const under = createTemporaryDir("hercule-remote-");
   const work = join(under, "work");
@@ -93,7 +94,10 @@ export const addBranch = (remote: Remote, branch: string, content = "on a branch
   return sha;
 };
 
-/** A checkout the user already has: cloned from the remote, origin set to it. */
+/**
+ * Creates a checkout like one the user already has: cloned from the remote and
+ * on `branch`. Returns its path.
+ */
 export const cloneUserCheckout = (remote: Remote, branch = "main"): string => {
   const under = createTemporaryDir("hercule-user-checkout-");
   const path = join(under, "checkout");
@@ -102,7 +106,10 @@ export const cloneUserCheckout = (remote: Remote, branch = "main"): string => {
   return path;
 };
 
-/** Every byte under a directory, so "nothing was written here" is checkable. */
+/**
+ * Returns a hash of every path, file mode, file and symlink under a directory,
+ * so a test can check that nothing there changed.
+ */
 export const hashContents = (dir: string): string => {
   const entries = readdirSync(dir, { recursive: true, encoding: "utf8" }).sort();
   const hash = createHash("sha256");

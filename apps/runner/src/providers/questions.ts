@@ -1,28 +1,30 @@
 /**
- * The question a harness parks a session on, in the one shape every surface
- * renders. One module, because two adapters reading a vendor's questions into
- * two slightly different shapes is a card whose content depends on which
- * harness asked (ADR 0007), and because the fallback below is the difference
- * between a refusable park and a frame the controller drops.
+ * Converts the question a harness parks a session on into the one shape every
+ * surface renders. It lives in one module for two reasons:
  *
- * Every field is read defensively: what arrives here is whatever a vendor put
- * on the wire, and one field of the wrong type would otherwise be a frame the
- * runner drops, which loses the event and leaves the park hanging.
+ * - two adapters reading a vendor's questions into slightly different shapes
+ *   would give a card whose content depends on the harness (ADR 0007);
+ * - the fallback in `buildQuestionRequest` is the difference between a request
+ *   the user can deny and a frame the controller drops.
+ *
+ * Every field is read defensively. The input is whatever the vendor sent, and
+ * one field of the wrong type would otherwise produce a frame the runner
+ * drops. That loses the event and leaves the session parked with no way out.
  */
 import type { OpenRequest } from "@hercule/protocol";
 import { truncateFact, truncateMessage } from "./text";
 
-/** One question as the protocol carries it: the vendor's shape mapped over. */
+/** One question as the protocol carries it, mapped from the vendor's shape. */
 type Question = Extract<OpenRequest, { readonly kind: "question" }>["detail"]["questions"][number];
 
 /**
- * The options of one question, read-only for now: until an answer can travel
- * back with the decision there is no button for them to be. They are carried
- * anyway, because what each answer would have meant is what the question is
- * about, and a user reading only the prose cannot see it.
+ * Parses the options of one question. For now they are display only: until an
+ * answer can be sent back with the decision, no button can use them. They are
+ * still included, because the meaning of each option is part of the question,
+ * and a user who reads only the question text cannot see it.
  *
- * An option the protocol has no field for - the Claude SDK's `preview` - is
- * left behind, and one with no label has nothing to show, so it is dropped.
+ * Fields the protocol has no place for, such as the Claude SDK's `preview`,
+ * are dropped. So is an option with no label or with no description string.
  */
 const parseOptions = (given: unknown): ReadonlyArray<Question["options"][number]> => {
   if (!Array.isArray(given)) return [];
@@ -38,10 +40,11 @@ const parseOptions = (given: unknown): ReadonlyArray<Question["options"][number]
 };
 
 /**
- * Each question of an ask, field by field. One missing what the card reads it
- * by - its prose or its chip - is dropped rather than guessed at: an invented
- * header is a word the agent never wrote. A harness with no field for
- * `multiSelect` asks for one answer, which is what its absence reads as.
+ * Parses each question of an ask, field by field. A question without its text
+ * or its header (the chip) is dropped rather than filled in, because an
+ * invented header would show words the agent never wrote. A missing
+ * `multiSelect` means one answer, because a harness with no such field always
+ * asks for one.
  */
 const parseQuestions = (given: unknown): ReadonlyArray<Question> => {
   if (!Array.isArray(given)) return [];
@@ -67,14 +70,14 @@ const parseQuestions = (given: unknown): ReadonlyArray<Question> => {
 };
 
 /**
- * The ask as a request the user can answer. Answering a question with its
- * answers is not built, so an allow would run the tool with no answer in it:
- * the two refusals are the only honest offers either way.
+ * Builds the open request for an ask. The only decisions offered are deny and
+ * cancel. Sending the user's answers back is not built yet, so allowing would
+ * run the tool with no answer in it.
  *
- * Where nothing decodable was asked the request is a `tool_approval` named
- * after the ask instead: a `question` request carrying no question is a frame
- * the controller refuses, which the runner drops, leaving the park hanging,
- * while the ask under it is still refusable.
+ * When no question in the ask can be parsed, returns a `tool_approval` request
+ * named after the tool instead. The controller rejects a `question` request
+ * with no questions, and the runner would drop it, leaving the session parked.
+ * A `tool_approval` request can still be denied.
  */
 export const buildQuestionRequest = (
   identity: { readonly requestId: string; readonly itemId: string },

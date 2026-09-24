@@ -1,14 +1,14 @@
 /**
- * `hercule runner --local`: the supervised child, driven the only way its
- * contract can be driven - as a process, with its stdout read a byte at a time
- * and its stdin held by whoever spawned it.
+ * Tests `hercule runner --local`, the child process the controller supervises.
+ * The tests run it as a real process, read its stdout as it arrives, and hold
+ * its stdin the way the controller does.
  *
- * The whole of what makes this entry point different from `hercule runner` is the
- * handshake on those two pipes, so the test spawns the real dispatcher rather
- * than calling into a function: a first line that is one byte off, or a line
- * printed after something else, is a controller that cannot tell what it
- * spawned. The controller it talks to is a stub listener, because none of this
- * is about what a controller answers.
+ * The only thing that sets this entry point apart from `hercule runner` is the
+ * handshake on those two pipes. So the test spawns the real dispatcher instead
+ * of calling a function: if the first line is one byte off, or something is
+ * printed before it, the controller cannot tell what it spawned. The
+ * controller is a stub HTTP server, because these tests are not about the
+ * controller's responses.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { locateRunnerDir } from "@hercule/home";
 
-/** The dispatcher, run from source: `hercule` before it is compiled. */
+/** The dispatcher's source entry point, which runs `hercule` without compiling it. */
 const HERCULE = join(
   dirname(import.meta.dirname),
   "..",
@@ -41,7 +41,7 @@ const createTemporaryHome = (): string => {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** A home this machine has already joined from, pointed at this address. */
+/** Creates a Hercule Home that has already joined the controller at `controllerUrl`. */
 const createEnrolledHome = (controllerUrl: string, runnerId: string): string => {
   const home = createTemporaryHome();
   mkdirSync(locateRunnerDir(home), { recursive: true });
@@ -59,15 +59,15 @@ const createEnrolledHome = (controllerUrl: string, runnerId: string): string => 
   return home;
 };
 
-/** What the stub controller was asked for, in the order it was asked. */
+/** A request the stub controller received. */
 interface Asked {
   readonly path: string;
   readonly authorization: string | null;
 }
 
-/** The child, with its pipes held the way the controller holds them. */
+/** The child process, with its pipes held the way the controller holds them. */
 interface Child {
-  /** Everything it has written to stdout so far. */
+  /** Everything the child has written to stdout so far. */
   readonly out: () => string;
   readonly err: () => string;
   readonly write: (text: string) => void;
@@ -109,13 +109,13 @@ const spawnLocalRunner = (home: string): Child => {
   };
 };
 
-/** Waits for a condition, or gives up and lets the assertion say what it saw. */
+/** Waits until `ready` returns true, or until `within` ms pass. Never fails: the assertion after it reports what went wrong. */
 const waitUntil = async (ready: () => boolean, within = 10_000): Promise<void> => {
   for (let waited = 0; waited < within && !ready(); waited += 20) await delay(20);
 };
 
 describe("hercule runner --local", () => {
-  it("says who it is on its first line, and says nothing else before it dials", async () => {
+  it("prints its runner id as its first line, and prints nothing else before it connects", async () => {
     const runnerId = "0199e0e7-0000-7000-8000-000000000000";
     const asked: Array<Asked> = [];
     const server = Bun.serve({
@@ -135,8 +135,8 @@ describe("hercule runner --local", () => {
 
     try {
       await waitUntil(() => asked.length > 0);
-      // Whatever it has printed by the time it dials is all it prints before
-      // dialing, and it is one line, with no room in it for anything else.
+      // By the time it connects, it has printed exactly one line: the
+      // announcement, with nothing else in it.
       expect(child.out()).toBe(`{"runnerId":"${runnerId}"}\n`);
       expect(asked[0]?.path).toBe("/api/v1/runners/socket");
     } finally {
@@ -145,7 +145,7 @@ describe("hercule runner --local", () => {
     }
   }, 30_000);
 
-  it("asks to join when it has not, and joins with the token it is handed", async () => {
+  it("asks to join when it has not joined, and joins with the token it receives", async () => {
     const token = "a-single-use-join-token";
     const asked: Array<Asked> = [];
     const server = Bun.serve({
@@ -174,7 +174,7 @@ describe("hercule runner --local", () => {
     try {
       await waitUntil(() => child.out() !== "");
       expect(child.out()).toBe('{"join":true}\n');
-      // The token never touches argv or the environment; it arrives here.
+      // The token never goes through argv or the environment, only stdin.
       child.write(
         `${JSON.stringify({ controllerUrl: `http://127.0.0.1:${String(server.port)}`, token })}\n`,
       );
@@ -182,7 +182,7 @@ describe("hercule runner --local", () => {
 
       await waitUntil(() => asked.some((one) => one.path === "/api/v1/runners/join"));
       const join = asked.find((one) => one.path === "/api/v1/runners/join");
-      expect(join, `it never joined; it said ${JSON.stringify(child.err())}`).toBeDefined();
+      expect(join, `it never joined; stderr: ${JSON.stringify(child.err())}`).toBeDefined();
       expect(join?.authorization).toBe(`Bearer ${token}`);
     } finally {
       child.kill();
@@ -192,8 +192,8 @@ describe("hercule runner --local", () => {
 
   it("keeps trying to join a controller that is not listening yet", async () => {
     const token = "a-single-use-join-token";
-    // The controller spawns its runner before it binds, so the address it hands
-    // over answers nothing for the first moments of the child's life.
+    // The controller spawns its runner before it binds its port, so nothing
+    // listens on the address for the first moments of the child's life.
     const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });
     const port = Number(server.port);
     await server.stop(true);
@@ -210,7 +210,7 @@ describe("hercule runner --local", () => {
       );
       child.closeStdin();
 
-      // Long enough for the first attempts to fail against nothing at all.
+      // Long enough for the first attempts to fail with nothing listening.
       await delay(300);
       listener = Bun.serve({
         hostname: "127.0.0.1",
@@ -234,20 +234,20 @@ describe("hercule runner --local", () => {
       });
 
       await waitUntil(() => asked > 0);
-      expect(asked, `it gave up before the controller was there; it said ${child.err()}`).toBe(1);
+      expect(asked, `it gave up before the controller started; stderr: ${child.err()}`).toBe(1);
     } finally {
       child.kill();
       await listener?.stop(true);
     }
   }, 30_000);
 
-  it("gives up, saying so, when nobody hands it a token", async () => {
+  it("exits with an error when stdin closes without a token", async () => {
     const child = spawnLocalRunner(createTemporaryHome());
 
     await waitUntil(() => child.out() !== "");
     expect(child.out()).toBe('{"join":true}\n');
-    // The controller closed the pipe without writing: there is nothing this
-    // runner can do and nothing it should sit waiting for.
+    // The controller closed the pipe without writing anything, so the runner
+    // cannot join and has nothing to wait for.
     child.closeStdin();
 
     const code = await child.exited;

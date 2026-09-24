@@ -1,13 +1,13 @@
 /**
- * The park against the real pi binary: that a tool call the user has not
- * answered really does stop, and that answering it really does let it run. A
- * fake pi proves what the adapter writes; only the binary proves that
- * the extension is loaded, that its dialog reaches Hercule, and that pi holds the
- * tool until the answer comes back.
+ * Tests approvals against the real pi binary: a tool call the user has not
+ * answered really waits, and answering it really lets it run. A fake pi can
+ * only check what the adapter writes. Only the real binary proves that the
+ * extension loads, that its dialog reaches Hercule, and that pi holds the tool
+ * call until the answer comes back.
  *
  * No paid key and no real model: `models.json` in the throwaway agent directory
- * points the `zai` provider at a local server that answers one fake tool
- * call. The developer's own `~/.pi` is never read or written, and the only
+ * points the `zai` provider at a local server that replies with fake tool
+ * calls. The developer's own `~/.pi` is never read or written, and the only
  * process stopped is the one the adapter started.
  *
  * Skips without `pi` on PATH, like the other integration tests here.
@@ -41,13 +41,13 @@ const createScratchDir = (): string => createScratchHome("pi-park");
 
 const BUDGET_MS = 120_000;
 
-/** Long enough that a tool call that was going to run would have run. */
+/** Long enough that a tool call that was going to run anyway would have run. */
 const UNANSWERED_MS = 2_000;
 
 /**
- * The fake model, standing in for `zai` so the adapter's own
- * `--model zai/<slug>` reaches it. Built-in models stay; `fake-model` is added
- * beside them.
+ * Writes a `models.json` that points the `zai` provider at the fake model
+ * server, so the adapter's `--model zai/<slug>` reaches it. The built-in
+ * models stay; `fake-model` is added beside them.
  */
 const pointAtFakeModel = (home: string, baseUrl: string): void => {
   writeFileSync(
@@ -75,7 +75,7 @@ const pointAtFakeModel = (home: string, baseUrl: string): void => {
   );
 };
 
-/** The session under test: the fake model, on whichever mode is asked for. */
+/** Builds the session spec under test: the fake model, with the given access mode. */
 const buildSpec = (accessMode: AccessMode): SessionSpec => ({
   ...SPEC,
   modelSelection: { model: "fake-model", options: { thinking: "low" } },
@@ -84,7 +84,7 @@ const buildSpec = (accessMode: AccessMode): SessionSpec => ({
 
 interface Live {
   readonly sessionId: string;
-  /** The session's own directory, which is where its files are meant to land. */
+  /** The session's working directory, where its files should be written. */
   readonly cwd: string;
   readonly seen: Array<ProviderEvent>;
   readonly stop: () => Promise<void>;
@@ -99,8 +99,8 @@ const startLiveSession = async (
   const home = createScratchDir();
   pointAtFakeModel(home, upstream.baseUrl);
   const cwd = createScratchDir();
-  // The fake upstream reads no credential, and the real binary's own PATH
-  // is what finds the shell it runs the command with.
+  // The fake server checks no key. The real PATH is passed so pi can find
+  // the shell it runs the command with.
   const ctx = {
     ...buildContext(home, cwd, { zaiApiKey: TEST_ZAI_KEY }),
     binary: binary!,
@@ -127,7 +127,7 @@ const startLiveSession = async (
   };
 };
 
-/** Waits on the real binary, and says what the session had reported when it gave up. */
+/** Waits for `ready`, and on timeout lists the events the session had reported. */
 const waitReportingEvents = (live: Live, what: string, ready: () => boolean): Promise<void> =>
   waitUntil(
     `${what}, having reported ${live.seen.map((event) => event._tag).join(", ")}`,
@@ -162,7 +162,7 @@ const readCommandOutput = (live: Live, itemId: string): string =>
     .map((event) => event.delta)
     .join("");
 
-describe.skipIf(binary === undefined)("a real pi parked on a real tool call", () => {
+describe.skipIf(binary === undefined)("a real pi parked on a tool call", () => {
   it(
     "holds the command until the user allows it, then runs it",
     async () => {
@@ -175,7 +175,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
       const request = findOpenedRequest(live)!;
 
       expect(request.request.kind).toBe("command_approval");
-      // Nothing may happen to the tool while the question stands.
+      // The tool call must not run while the approval is open.
       await new Promise((resolve) => setTimeout(resolve, UNANSWERED_MS));
       expect(
         hasFinishedCommand(live, request.request.itemId),
@@ -222,8 +222,8 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
       );
       // The user's own answer, not something that went wrong with the command.
       expect(findItemEnd(live, request.request.itemId)?.status).toBe("declined");
-      // Not merely unreported: the command's own side effect is what proves it
-      // did not run.
+      // Checking the command's side effect, not just the events, proves it did
+      // not run.
       expect(existsSync(marker), "the denied command ran anyway").toBe(false);
       await live.stop();
     },
@@ -231,7 +231,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
   );
 
   it(
-    "asks about each call of a batch on that call's own terms",
+    "asks about each call in a batch separately, with that call's own details",
     async () => {
       const file = join(createScratchDir(), "written.txt");
       const live = await startLiveSession({ writes: file });
@@ -244,8 +244,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
 
       expect(first.kind).toBe("file_change_approval");
       expect(first.detail).toEqual({ paths: [file] });
-      // The call is held open for as long as the question stands, which is the
-      // item the card overlays.
+      // The call the card is shown on stays held while the approval is open.
       expect(hasFinishedCommand(live, first.itemId)).toBe(false);
       // One card is docked at a time; the call behind it has not run yet.
       expect(listOpenedRequests(live)).toHaveLength(1);
@@ -258,7 +257,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
       );
       const second = listOpenedRequests(live)[1]!.request;
 
-      // Each question carries its own call, not whatever ran most recently.
+      // Each approval is about its own call, not the most recent one.
       expect(second.itemId).not.toBe(first.itemId);
       expect(second.kind).toBe("command_approval");
       expect(second.detail).toEqual({ command: PARKED_COMMAND });
@@ -290,10 +289,10 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
       );
       const request = findOpenedRequest(live)!;
 
-      // The mode's whole point: the file change was never docked, and the
-      // shell command beside it in the same batch still is the user's to
-      // answer. pi holds a whole batch before it runs any of it, so the change
-      // itself lands once the command it was batched with is answered.
+      // The point of this mode: the file change is never asked about, while
+      // the shell command in the same batch still is. pi holds a whole batch
+      // before running any of it, so the file change lands only once the
+      // command is answered.
       expect(listOpenedRequests(live)).toHaveLength(1);
       expect(request.request.kind).toBe("command_approval");
       await Effect.runPromise(
@@ -307,7 +306,7 @@ describe.skipIf(binary === undefined)("a real pi parked on a real tool call", ()
   );
 
   it(
-    "cancels the question and ends the turn when the session is interrupted",
+    "cancels the approval and ends the turn when the session is interrupted",
     async () => {
       const live = await startLiveSession();
       await waitReportingEvents(

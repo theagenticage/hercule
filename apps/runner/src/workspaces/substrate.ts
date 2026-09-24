@@ -1,31 +1,38 @@
 /**
- * What the git substrate runs against: where it keeps things, what it remembers,
- * and the environment it hands to git and to a repository's own setup command.
+ * The shared state the workspace code runs with: the storage directory, the
+ * registry, and the environment passed to git and to a repository's setup
+ * command.
  *
- * The environment is built rather than inherited: the daemon's own `GIT_*` are
- * dropped, so a `GIT_CONFIG_*` or an askpass the user exported for themselves
- * cannot reach into a workspace and answer for the agent.
+ * The environment is built, not inherited. The runner's own `GIT_*` variables
+ * are dropped, so a `GIT_CONFIG_*` or an askpass program the user exported for
+ * their own shell cannot reach into a workspace and supply credentials for the
+ * agent.
  */
 import type { Registry } from "./registry";
 import type { GitEnv } from "./git";
 
-/** How long a repository's setup command may run before the machine stops it. */
+/** How long a repository's setup command may run before the runner stops it. */
 export const SETUP_DEADLINE_MS = 10 * 60 * 1000;
 
 export interface Substrate {
   readonly storageDir: string;
   readonly registry: Registry;
   /**
-   * What the runner's own git runs with, before the workspace id is added, and
-   * what a repository's setup command runs with - which is this without the
-   * claim, so it is this (D-16: a setup command is repository code and asks for
-   * no credential of its own).
+   * The environment for the runner's own git and for a repository's setup
+   * command. While provisioning, the runner adds the workspace id to it for
+   * git, so the credential helper can get a credential. A setup command gets
+   * this environment without the workspace id: it is repository code, so it
+   * gets no credential of its own.
    */
   readonly gitEnv: GitEnv;
   readonly setupDeadlineMs: number;
 }
 
-/** What a machine's git must never take from whoever started the daemon. */
+/**
+ * Checks whether a variable is passed on from the runner's own environment.
+ * `GIT_*` and `SSH_ASKPASS` are not: git must never take them from whoever
+ * started the runner.
+ */
 const isInherited = (name: string): boolean => !name.startsWith("GIT_") && name !== "SSH_ASKPASS";
 
 export const buildSubstrateEnv = (
@@ -34,7 +41,7 @@ export const buildSubstrateEnv = (
 ): GitEnv => ({
   ...Object.fromEntries(Object.entries(base).filter(([name]) => isInherited(name))),
   ...gitEnv,
-  // A machine's git never has a person at it: a prompt would hang provisioning
-  // rather than fail it.
+  // Nobody is at a terminal to answer git on a runner, so a prompt would hang
+  // provisioning instead of failing it.
   GIT_TERMINAL_PROMPT: "0",
 });

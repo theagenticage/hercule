@@ -1,16 +1,17 @@
 /**
- * Who is on this machine? Nothing in a fleet listing says which member the
- * person is sitting at, so the runner serves its own id on loopback and the page
- * asks 127.0.0.1 directly.
+ * Serves this runner's id on loopback, so the web app can tell which runner is
+ * on the machine the user is sitting at. The fleet list cannot show that, so
+ * the page asks 127.0.0.1 directly.
  *
- * A name that resolves to 127.0.0.1 is loopback too, so a page on any website
- * could reach this listener through the visitor's browser and be answered as if
- * it were same-origin. The `Host` header is what tells the two apart.
+ * Any DNS name that resolves to 127.0.0.1 also reaches this listener. So a
+ * page on any website could query it through the visitor's browser, and would
+ * get a response as if it were same-origin. The server checks the `Host`
+ * header to reject those requests.
  *
- * The port is a preference: two runners on one machine must not stop either from
- * starting. A browser may only ask a small fixed set of ports, so the search
- * walks that set before it takes anything free, and a runner outside it still
- * runs without being recognisable in a page.
+ * The port is a preference, because two runners on one machine must both be
+ * able to start. The web app only tries a small fixed set of ports, so the
+ * server tries those first and then takes any free port. A runner on a port
+ * outside the set still runs, but the web app cannot recognise it.
  */
 import * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
@@ -19,29 +20,33 @@ const LOOPBACK = "127.0.0.1";
 
 const IDENTITY_PATH = "/identity";
 
-/** `localhost` is here because a person diagnosing this by hand will type it. */
+/** Includes `localhost` because a person debugging this by hand will type it. */
 const LOOPBACK_HOSTS = new Set([LOOPBACK, "localhost"]);
 
 export interface IdentityOptions {
   readonly runnerId: string;
-  /** Its origin is who may read the answer. */
+  /** Only pages from this URL's origin may read the response. */
   readonly controllerUrl: string;
-  /** The first port to try; the next few will do when it is taken. */
+  /** The first port to try. When it is taken, the next few ports are tried. */
   readonly port: number;
 }
 
 const isLoopbackRequest = (request: Request): boolean => {
   const host = request.headers.get("host");
   if (host === null) return false;
-  // Read as a URL rather than split on the last colon, so the port comes off
-  // whatever shape the host is and the name arrives lower-cased.
+  // Parse the header as a URL instead of splitting on the last colon. That
+  // strips the port from any host shape and lower-cases the name.
   const parsed = URL.parse(`http://${host}`);
   return parsed !== null && LOOPBACK_HOSTS.has(parsed.hostname);
 };
 
 /**
- * The CORS header names the controller's origin because that is where the asking
- * page comes from, and a plain GET needs no preflight, so it is all a browser wants.
+ * Returns the request handler for `GET /identity`. Any other request gets a
+ * 404.
+ *
+ * The CORS header allows the controller's origin, because the web app is
+ * served from there. A plain GET needs no preflight, so this one header is all
+ * a browser needs.
  */
 const buildIdentityHandler =
   (runnerId: string, allowOrigin: string) =>
@@ -52,7 +57,7 @@ const buildIdentityHandler =
       ? Response.json({ runnerId }, { headers: { "access-control-allow-origin": allowOrigin } })
       : new Response(null, { status: 404 });
 
-/** Serves `GET /identity` while the scope is open, and says which port it got. */
+/** Serves `GET /identity` while the scope is open. Returns the port the server bound. */
 export const serveIdentity = (
   options: IdentityOptions,
 ): Effect.Effect<number, never, Scope.Scope> =>
@@ -65,20 +70,22 @@ export const serveIdentity = (
           const port = options.port + offset;
           const bound = yield* Effect.result(Effect.try(() => serve(port)));
           if (bound._tag === "Success") return bound.success;
-          // Not a failure, but it moves where the browser looks, so never quiet.
-          yield* Effect.logWarning(`cannot answer on port ${String(port)}`, bound.failure);
+          // Not a failure, but the web app may now miss this runner, so log it.
+          yield* Effect.logWarning(`cannot listen on port ${String(port)}`, bound.failure);
         }
-        // Past the ports a browser may ask, this is only good to a person with
-        // `curl`. Better that than a runner that will not start.
+        // The web app does not try ports outside the set, so a random port is
+        // only useful to a person with `curl`. That is still better than a
+        // runner that does not start.
         yield* Effect.logWarning(
-          `no port from ${String(options.port)} on was free; ` +
-            "this machine cannot be recognised in a browser",
+          `none of the ${String(IDENTITY_PORT_COUNT)} ports from ${String(options.port)} was free; ` +
+            "the web app cannot recognise this machine",
         );
-        // A machine that will give up no port at all cannot host sessions either.
+        // A machine with no free port at all cannot host sessions either, so
+        // the runner stops here with a defect.
         return yield* Effect.orDie(Effect.try(() => serve(0)));
       }),
       (server) => Effect.promise(() => server.stop(true)),
     ),
-    // A server has no port only when it was asked for a unix socket.
+    // A server has no port only when it listens on a unix socket.
     (server) => server.port!,
   );

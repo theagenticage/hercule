@@ -1,6 +1,7 @@
 /**
- * The Claude Code adapter's probe, with the vendor SDK stubbed. The fixtures
- * are shapes captured from the real CLI at 2.1.263, not shapes invented here.
+ * Tests the Claude Code adapter's probe and sessions, with the vendor SDK
+ * stubbed. The fixtures were captured from the real CLI, version 2.1.263; they
+ * are not invented.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -27,7 +28,7 @@ import { makeClaudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
 
-/** What the runner resolved once, at start, for hercule-as-a-tool. */
+/** The hercule-as-a-tool files, which the runner prepares once at startup. */
 const HERCULE_TOOL = {
   skill: "# hercule\n\nCall `hercule --help`.\n",
   claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
@@ -51,7 +52,7 @@ const AUTHENTICATED = {
 
 const UNAUTHENTICATED = { tokenSource: "none", apiProvider: "firstParty" };
 
-/** Three rows of the six the CLI reported, chosen for the three option shapes. */
+/** Three of the six models the CLI listed, one for each combination of options. */
 const MODELS = [
   {
     value: "default",
@@ -139,8 +140,8 @@ const findModelOption = (
 ): Record<string, unknown> | undefined =>
   models.find((model) => model.slug === slug)?.options.find((option) => option.id === id);
 
-describe("what the Claude adapter reports about a machine that is logged in", () => {
-  it("names the account, its plan and its backend", async () => {
+describe("probing a machine that is logged in", () => {
+  it("reports the account, its plan and its backend", async () => {
     const { result } = probeWith({});
 
     const probed = await result;
@@ -176,7 +177,7 @@ describe("what the Claude adapter reports about a machine that is logged in", ()
       default: false,
     });
 
-    // The composer must offer only what the harness accepts for that model.
+    // The composer must offer only the options the harness accepts for that model.
     expect(probed.models[1]?.options).toEqual([]);
     expect(probed.models[2]?.options.map((option) => option.id)).toEqual(["fastMode"]);
     // The CLI reports adaptive thinking as a fact about the model, not as a
@@ -195,7 +196,7 @@ describe("what the Claude adapter reports about a machine that is logged in", ()
     expect(probed.models).toHaveLength(MODELS.length + legacy.length);
   });
 
-  it("leaves a slug the CLI still lists out of the overlay, keeping the probed row", async () => {
+  it("keeps the listed model and drops the legacy entry when the CLI still lists a legacy slug", async () => {
     const { result } = probeWith({
       supportedModels: () =>
         Promise.resolve([
@@ -218,26 +219,26 @@ describe("what the Claude adapter reports about a machine that is logged in", ()
   });
 });
 
-describe("what the Claude adapter reports about a machine that is not logged in", () => {
-  it("says so, and names nobody", async () => {
+describe("probing a machine that is not logged in", () => {
+  it("reports unauthenticated, with no identity", async () => {
     const { result } = probeWith({ accountInfo: () => Promise.resolve(UNAUTHENTICATED) });
 
     const probed = await result;
     expect(probed.auth.status).toBe("unauthenticated");
     expect(probed.auth.identity).toBeUndefined();
-    // Not an error: an empty config directory is an ordinary machine, and the
-    // version and the catalogue are still facts about it.
+    // Not an error: an empty config directory is normal, and the version and
+    // the model catalog are still reported.
     expect(probed.auth.message).toBeUndefined();
     expect(probed.harnessVersion).toBe("9.9.9");
   });
 });
 
-describe("what the Claude adapter reports about a credential from the environment", () => {
-  // The two shapes the SDK 0.3.263 really answers with when the config
-  // directory holds no login but the environment carries a credential. Neither
-  // names an account, and both run: spec 06 section 3.2 asks whether there is a
-  // usable login, not whether the harness can name whose it is.
-  it("counts an OAuth token as a login, with nobody to name", async () => {
+describe("probing a machine with a credential in the environment", () => {
+  // These are the two account shapes SDK 0.3.263 really returns when the
+  // config directory has no login but the environment has a credential.
+  // Neither includes an account, and both work: spec 06 section 3.2 asks
+  // whether there is a usable login, not whose login it is.
+  it("counts an OAuth token as a login, with no identity", async () => {
     const { result } = probeWith({
       accountInfo: () =>
         Promise.resolve({ tokenSource: "CLAUDE_CODE_OAUTH_TOKEN", apiProvider: "firstParty" }),
@@ -249,7 +250,7 @@ describe("what the Claude adapter reports about a credential from the environmen
     expect(probed.auth.backend).toBe("firstParty");
   });
 
-  it("does not count a machine with neither source as a login", async () => {
+  it("does not count a machine with no token and no API key as a login", async () => {
     const { result } = probeWith({
       accountInfo: () => Promise.resolve({ tokenSource: "none", apiKeySource: "none" }),
     });
@@ -258,7 +259,7 @@ describe("what the Claude adapter reports about a credential from the environmen
     expect(probed.auth.status).toBe("unauthenticated");
   });
 
-  it("counts a third-party backend as a login, authenticated outside the harness", async () => {
+  it("counts a third-party backend as a login, because it authenticates outside the harness", async () => {
     const { result } = probeWith({
       accountInfo: () => Promise.resolve({ apiProvider: "bedrock" }),
     });
@@ -284,8 +285,8 @@ describe("what the Claude adapter reports about a credential from the environmen
   });
 });
 
-describe("what the Claude adapter reports when the probe did not finish", () => {
-  it("says what the SDK threw, so the user reads why rather than a blank row", async () => {
+describe("probing when the probe does not finish", () => {
+  it("reports the error the SDK threw, so the user sees why instead of a blank row", async () => {
     const { result } = probeWith({
       accountInfo: () => Promise.reject(new Error("spawn /usr/local/bin/claude ENOENT")),
     });
@@ -297,7 +298,7 @@ describe("what the Claude adapter reports when the probe did not finish", () => 
     expect(probed.models).toEqual([]);
   });
 
-  it("gives the SDK fifteen seconds and then says it did not answer", async () => {
+  it("gives the SDK fifteen seconds, then reports an error", async () => {
     expect(Duration.toSeconds(PROBE_DEADLINE)).toBe(15);
 
     const { seam } = buildStubSeam({ accountInfo: () => new Promise<never>(() => undefined) });
@@ -318,15 +319,15 @@ describe("what the Claude adapter reports when the probe did not finish", () => 
   });
 });
 
-describe("how the Claude adapter asks the SDK", () => {
+describe("the SDK query a probe runs", () => {
   it("runs a query with no prompt, no settings and no session left behind", async () => {
     const { result, calls } = probeWith({});
     await result;
 
     expect(calls).toHaveLength(1);
     const params = calls[0]!.params;
-    // A prompt that yields makes a real API call at the same instant as the
-    // init message; a probe must make none.
+    // A prompt that yields a message makes a real API call as soon as the
+    // query starts, and a probe must not make any.
     expect("prompt" in params).toBe(false);
     expect(params.options).toMatchObject({
       pathToClaudeCodeExecutable: CONTEXT.binary,
@@ -352,18 +353,18 @@ describe("how the Claude adapter asks the SDK", () => {
 
     const env = calls[0]!.params.options["env"] as Record<string, string>;
     expect(env["CLAUDE_CONFIG_DIR"]).toBe(CONTEXT.home);
-    // A probe that let the harness update itself would install a version
-    // nobody chose in the middle of answering a question about versions.
+    // Without this, the harness could update itself during a probe and install
+    // a version nobody chose, while the probe is reporting which version it has.
     expect(env["DISABLE_AUTOUPDATER"]).toBe("1");
-    // The one thing that must never move: with `HOME` overridden the CLI reads
-    // and writes the wrong account's credential and reports it as this one's.
+    // `HOME` must never be overridden: the CLI would then read and write the
+    // wrong account's credential and report it as this instance's.
     expect(Object.keys(env)).not.toContain("HOME");
     expect(env["PATH"]).toBe(CONTEXT.env["PATH"]);
   });
 });
 
-describe("the CLI version this build talks to", () => {
-  it("is the one the SDK beside it was built against", () => {
+describe("the pinned CLI version", () => {
+  it("matches the version the installed SDK was built against", () => {
     const manifest = JSON.parse(
       readFileSync(
         fileURLToPath(
@@ -376,8 +377,8 @@ describe("the CLI version this build talks to", () => {
       ),
     ) as { readonly claudeCodeVersion: string };
 
-    // Baked at build rather than read at runtime: a compiled binary has no
-    // manifest on disk to read.
+    // The version is fixed at build time rather than read at runtime, because a
+    // compiled binary has no package.json on disk to read.
     expect(CLAUDE_CODE_VERSION).toBe(manifest.claudeCodeVersion);
   });
 });
@@ -393,7 +394,7 @@ const SPEC: SessionSpec = {
 
 const WORKING: ProviderRunnerContext = { ...CONTEXT, cwd: "/var/hercule/runner/scratch/one" };
 
-/** The harness end of a session, driven by the test one message at a time. */
+/** A fake harness for a session. The test sends it messages one at a time. */
 interface Driving {
   readonly adapter: ProviderAdapter;
   readonly options: Array<Options>;
@@ -405,9 +406,9 @@ interface Driving {
   readonly models: Array<string>;
   readonly closed: () => number;
   readonly interrupted: () => number;
-  /** A harness that will not take the model it was asked for. */
+  /** When true, `setModel` rejects the model. */
   refusesModel: boolean;
-  /** A harness that takes its time over it, so a stop can land while it does. */
+  /** When true, `setModel` waits for `releaseModel`, so a stop can happen in the meantime. */
   holdsModel: boolean;
   readonly releaseModel: () => void;
 }
@@ -432,8 +433,8 @@ const createDriving = (): Driving => {
     },
     stream: (params) => {
       options.push(params.options);
-      // Reading the adapter's input is what a real harness does with it, and
-      // it is the only way to see the turns it was handed.
+      // A real harness reads the adapter's input, and reading it is the only
+      // way for the test to see the turns the adapter sent.
       void (async () => {
         for await (const message of params.input) sent.push(message);
       })();
@@ -531,18 +532,19 @@ const RESULT = {
 };
 
 /**
- * How long a wait on the adapter's pump is given. The adapter reads the harness
- * off the event loop and publishes what it read, so how many turns of the loop
- * that takes is a property of how busy the machine is - which is why the wait is
- * for the event, and not for a tick.
+ * How long a test waits for an event from the adapter. The adapter reads the
+ * harness asynchronously and publishes what it read, so how many event-loop
+ * ticks that takes depends on how busy the machine is. That is why the tests
+ * wait for the event itself, not for a fixed number of ticks.
  */
 const WAIT_DEADLINE_MS = 10_000;
 
 /**
- * Vitest's own budget, set from the waits rather than left at its default five
- * seconds: a test whose waits can outlast the timeout never gets to give up,
- * and the failure names the test rather than the event that never came. Two,
- * because the longest case here waits for one turn to close and the next to open.
+ * Vitest's test timeout, set from the wait limit instead of the default five
+ * seconds. If a wait could outlast the test timeout, the wait would never get
+ * to fail, and the failure would name the test instead of the missing event.
+ * It allows two waits, because the longest test waits for one turn to close
+ * and the next one to open.
  */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 5_000 });
 
@@ -561,7 +563,7 @@ const awaitSessionEnd = (seen: ReadonlyArray<ProviderEvent>): Promise<void> =>
 const listEventTags = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
   seen.map((event) => event._tag);
 
-/** The item events of one kind, in the order they were published. */
+/** Returns the item events of one kind, in the order they were published. */
 const filterItems = (
   seen: ReadonlyArray<ProviderEvent>,
   kind: string,
@@ -575,25 +577,25 @@ const listOpenedTurns = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<stri
   seen.flatMap((event) => (event._tag === "turn.started" ? [event.turnId] : []));
 
 describe("a Claude Code session", () => {
-  it("names the native session itself, hands back the binding and says it started", async () => {
+  it("creates the native session id itself, returns the binding and emits session.started", async () => {
     const run = createDriving();
     const binding = await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     expect(binding.sessionId).toBe(SESSION);
     expect(binding.instanceId).toBe(SPEC.instanceId);
-    // Hercule names the native session rather than waiting to be told: in
-    // streaming-input mode the CLI says nothing at all until a first turn.
+    // Hercule creates the native session id instead of waiting for it: in
+    // streaming-input mode the CLI sends nothing until the first turn.
     expect(binding.nativeSessionId).not.toBe(SESSION);
     expect(run.options[0]?.sessionId).toBe(binding.nativeSessionId);
     await waitUntil("said it started", () => run.seen.length === 1);
     expect(listEventTags(run.seen)).toEqual(["session.started"]);
-    // The only place the controller can learn the native id: the report of what
-    // this runner holds is sent once, at hello.
+    // This event is the only way the controller learns the native id: the
+    // report of this runner's sessions is sent only once, at hello.
     expect(run.seen[0]?.providerRefs).toEqual({ nativeSessionId: binding.nativeSessionId });
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([binding]);
   });
 
-  it("runs in the session's cwd, with the instance's home and no settings of the machine's", async () => {
+  it("runs in the session's cwd, with the instance's home and none of the machine's settings", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -604,29 +606,29 @@ describe("a Claude Code session", () => {
     expect(options?.includePartialMessages).toBe(true);
     expect(options?.model).toBe(SPEC.modelSelection.model);
     expect(options?.effort).toBe("high");
-    // Spec 06 section 8.1, normative.
+    // The access mode mapping is defined by spec 06 section 8.1.
     expect(options?.permissionMode).toBe("acceptEdits");
     expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(WORKING.home);
     expect(options?.env?.["CLAUDE_CODE_DISABLE_AUTO_MEMORY"]).toBe("1");
     expect(Object.keys(options?.env ?? {})).not.toContain("HOME");
   });
 
-  it("loads hercule-as-a-tool as a local plugin, and no settings of the machine's", async () => {
+  it("loads hercule-as-a-tool as a local plugin, and none of the machine's settings", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     const [options] = run.options;
-    // The one plugin Hercule owns, loaded from the directory the runner wrote it
-    // into, so nothing is copied per session and a Thread's own `.claude/` is
-    // never collided with (spec 06 section 9.3).
+    // Hercule's own plugin, loaded from the directory the runner wrote it to,
+    // so nothing is copied per session and it never clashes with a Thread's own
+    // `.claude/` directory (spec 06 section 9.3).
     expect(options?.plugins).toEqual([{ type: "local", path: HERCULE_TOOL.claudePluginDir }]);
-    // Explicitly beside it: the skill has to be discovered with no setting
-    // source at all, which is what makes this the Hercule-owned channel rather
-    // than whatever files happen to sit on this runner (spec 06 section 10.1).
+    // Checked together with the plugin: the skill must be found with no setting
+    // sources at all, so it comes from Hercule and not from whatever files
+    // happen to be on this runner (spec 06 section 10.1).
     expect(options?.settingSources).toEqual([]);
   });
 
-  // Spec 06 section 8.1 is normative, and full-access is the row that matters.
+  // The mapping is defined by spec 06 section 8.1; the full-access row matters most.
   const MODES: ReadonlyArray<readonly [SessionSpec["accessMode"], string, boolean | undefined]> = [
     ["approval-required", "default", undefined],
     ["auto-accept-edits", "acceptEdits", undefined],
@@ -641,43 +643,43 @@ describe("a Claude Code session", () => {
 
       expect(run.options[0]?.permissionMode).toBe(permissionMode);
       expect(run.options[0]?.allowDangerouslySkipPermissions).toBe(dangerous);
-      // In every mode but full-access, not only in `approval-required`: the
-      // harness decides whether it asks, and a mode that asks about nothing
-      // simply never calls back. With permissions skipped the SDK ignores the
-      // callback and warns once per session, so it is not supplied there.
+      // The callback is passed in every mode except full-access, not only in
+      // `approval-required`: the harness decides whether to ask, and a mode
+      // that asks about nothing never calls it. When permissions are skipped
+      // the SDK ignores the callback and logs a warning, so it is left out.
       expect(typeof run.options[0]?.canUseTool).toBe(
         accessMode === "full-access" ? "undefined" : "function",
       );
     });
   }
 
-  it("opens a turn on an idle session, and says so on its own authority", async () => {
+  it("opens a turn on an idle session, and reports the delivery as opened", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
 
-    // The delivery is the adapter's answer, not something the controller infers
-    // from the order events arrive in (ADR 0007).
+    // The adapter reports the delivery itself; the controller does not infer
+    // it from the order the events arrive in (ADR 0007).
     expect(sent.delivery).toBe("opened");
     await waitUntil(
       "published the user's own message",
       () => filterItems(run.seen, "user_message").length === 2,
     );
-    // The turn it named is the turn it opened.
+    // The returned turn id is the id of the turn that was opened.
     expect(listOpenedTurns(run.seen)).toEqual([sent.turnId]);
     const [started, completed] = filterItems(run.seen, "user_message");
     expect(started?._tag).toBe("item.started");
     expect(completed?._tag).toBe("item.completed");
     // No `steered` key at all: an input that opened a turn did not steer one,
-    // and `steered: false` would be a third state nothing in the spec has.
+    // and `steered: false` would be a third state that the spec does not define.
     expect(started?.detail).toEqual({ text: "hello" });
     expect(completed?.detail).toEqual({ text: "hello" });
     expect(started?.turnId).toBe(sent.turnId);
     expect(run.sent.map((message) => message.message.content)).toEqual(["hello"]);
   });
 
-  it("steers a busy one, folding the input into the turn already running", async () => {
+  it("steers input on a busy session into the turn already running", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -689,7 +691,7 @@ describe("a Claude Code session", () => {
       "published both user messages",
       () => filterItems(run.seen, "user_message").length === 4 && run.sent.length === 2,
     );
-    // One turn, opened once: steering folds into the turn that is running.
+    // Only one turn was opened: the steered input joined the running turn.
     expect(listOpenedTurns(run.seen)).toEqual([first.turnId]);
     const [, , started, completed] = filterItems(run.seen, "user_message");
     expect(started?.detail).toEqual({ text: "and this", steered: true });
@@ -697,7 +699,7 @@ describe("a Claude Code session", () => {
     expect(run.sent.map((message) => message.message.content)).toEqual(["hello", "and this"]);
   });
 
-  it("does not say the same thing twice when the harness echoes the input back", async () => {
+  it("does not report the user's message twice when the harness repeats the input back", async () => {
     const run = createDriving();
     const binding = await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -707,14 +709,15 @@ describe("a Claude Code session", () => {
       () => filterItems(run.seen, "user_message").length === 2,
     );
 
-    // What the CLI sends back on its own: its echo of the turn it was handed.
+    // The CLI sends back a copy of the input it was given.
     run.say({
       type: "user",
       session_id: binding.nativeSessionId,
       parent_tool_use_id: null,
       message: { role: "user", content: "hello" },
     });
-    // The result is the marker: it can only be read after the echo before it was.
+    // Waiting for the result proves the repeated input was processed, because it
+    // arrives after it.
     run.say(RESULT);
     await waitUntil("closed the turn", () =>
       run.seen.some((event) => event._tag === "turn.completed"),
@@ -723,7 +726,7 @@ describe("a Claude Code session", () => {
     expect(filterItems(run.seen, "user_message")).toHaveLength(2);
   });
 
-  it("opens a second turn once the result closed the first", async () => {
+  it("opens a second turn after the result closed the first", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -742,12 +745,12 @@ describe("a Claude Code session", () => {
     expect(listOpenedTurns(run.seen)[1]).toBe(again.turnId);
   });
 
-  it("ends the running turn when asked, and asks nothing where no turn is running", async () => {
+  it("interrupts the running turn, and sends nothing to the harness when no turn is running", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    // Idle: the harness is not asked at all, because a control request waits on
-    // it and the connection handles session frames one at a time.
+    // Idle: nothing is sent to the harness, because a control request waits
+    // for a reply and the connection handles session frames one at a time.
     await Effect.runPromise(run.adapter.interrupt(SESSION));
     expect(run.interrupted()).toBe(0);
 
@@ -759,7 +762,7 @@ describe("a Claude Code session", () => {
     expect(run.interrupted()).toBe(1);
   });
 
-  it("resumes the native session it was given, naming nothing of its own", async () => {
+  it("resumes the given native session under its existing id", async () => {
     const run = createDriving();
     const carried = {
       nativeSessionId: "0199e0e7-0000-7000-8000-0000000000ab",
@@ -769,14 +772,14 @@ describe("a Claude Code session", () => {
       run.adapter.startSession(SESSION, { ...SPEC, continue: carried }, WORKING),
     );
 
-    // A resume continues that native session, so there is nothing to name.
+    // A resume continues that native session, so no new id is needed.
     expect(binding.nativeSessionId).toBe(carried.nativeSessionId);
     expect(run.options[0]?.resume).toBe(carried.nativeSessionId);
     expect(run.options[0]?.forkSession).toBeUndefined();
     expect(run.options[0]?.sessionId).toBeUndefined();
   });
 
-  it("forks off the native session it was given, under a name of its own", async () => {
+  it("forks the given native session under a new id", async () => {
     const run = createDriving();
     const carried = {
       nativeSessionId: "0199e0e7-0000-7000-8000-0000000000ab",
@@ -789,12 +792,13 @@ describe("a Claude Code session", () => {
     expect(binding.nativeSessionId).not.toBe(carried.nativeSessionId);
     expect(run.options[0]?.resume).toBe(carried.nativeSessionId);
     expect(run.options[0]?.forkSession).toBe(true);
-    // The fork is named for the same reason a fresh session is: the CLI says
-    // nothing at all until a first turn, so a binding cannot wait to be told.
+    // The adapter creates the fork's id for the same reason as for a new
+    // session: the CLI sends nothing until the first turn, so the binding
+    // cannot wait for the CLI's id.
     expect(run.options[0]?.sessionId).toBe(binding.nativeSessionId);
   });
 
-  it("refuses the input where the session was stopped while the model was changing", async () => {
+  it("fails the input when the session was stopped while the model was changing", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
     run.holdsModel = true;
@@ -811,13 +815,13 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
     run.releaseModel();
 
-    // The session the input was checked against is gone; saying it was
-    // delivered would be a message the user believes was sent and was not.
+    // The session is gone. Reporting the input as delivered would make the
+    // user believe a message was sent when it was not.
     expect(await sending).toBe(`session ${SESSION} is not running here`);
     expect(run.sent).toEqual([]);
   });
 
-  it("exits as stopped when it was asked to, and forgets the session", async () => {
+  it("exits as stopped when stopped, and removes the session", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -856,7 +860,7 @@ describe("a Claude Code session", () => {
     expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe("process_exit");
   });
 
-  it("says the harness crashed, and why, when its stream throws", async () => {
+  it("reports a crash and its error message when the harness's stream throws", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -882,7 +886,7 @@ describe("a Claude Code session", () => {
     expect(listEventTags(run.seen)).toEqual(["session.started", "session.exited"]);
   });
 
-  it("refuses input for a session it is not hosting", async () => {
+  it("fails input for a session it is not hosting", async () => {
     const run = createDriving();
     const said = await Effect.runPromise(
       Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
@@ -890,7 +894,7 @@ describe("a Claude Code session", () => {
     expect(said).toBe(`session ${SESSION} is not running here`);
   });
 
-  it("refuses input the moment a stop was asked for, rather than dropping it", async () => {
+  it("fails input as soon as a stop was requested, instead of dropping it", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -902,7 +906,7 @@ describe("a Claude Code session", () => {
     expect(said).toBe(`session ${SESSION} is not running here`);
   });
 
-  it("will not start a second harness under a session id it already holds", async () => {
+  it("fails to start a second harness under a session id it already hosts", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -911,12 +915,12 @@ describe("a Claude Code session", () => {
     );
 
     expect(said).toBe(`session ${SESSION} is already running here`);
-    // The one that was already running is untouched: one harness, one stream.
+    // The session that was already running is untouched: one harness, one stream.
     expect(run.options.length).toBe(1);
     expect(run.closed()).toBe(0);
   });
 
-  it("will not start without a harness on this machine", async () => {
+  it("fails to start when the harness is not installed on this machine", async () => {
     const run = createDriving();
     const said = await Effect.runPromise(
       Effect.flip(run.adapter.startSession(SESSION, SPEC, { ...WORKING, binary: undefined })),
@@ -926,12 +930,12 @@ describe("a Claude Code session", () => {
 });
 
 /**
- * `sendInput` calls `setModel` only when the model an opening input asks for
- * differs from the one last applied to the harness, which starts as the
- * spec's own model from `startSession`.
+ * `sendInput` calls `setModel` only when an input that opens a turn asks for a
+ * different model from the one last applied to the harness. That starts as the
+ * session spec's model from `startSession`.
  */
-describe("the model the adapter last applied to the harness", () => {
-  it("calls setModel before the input is pushed, and answers opened", async () => {
+describe("changing the model", () => {
+  it("calls setModel before the input is pushed, and reports the delivery as opened", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
     run.holdsModel = true;
@@ -943,8 +947,8 @@ describe("the model the adapter last applied to the harness", () => {
       }),
     );
     await waitUntil("asked the harness for the model", () => run.models.length === 1);
-    // The harness has not been told what to say yet - it is still deciding
-    // whether it will even take the model.
+    // The input has not been sent yet, because the harness has not yet
+    // accepted the model.
     expect(run.sent).toEqual([]);
     run.releaseModel();
 
@@ -963,8 +967,8 @@ describe("the model the adapter last applied to the harness", () => {
     );
     expect(run.models).toEqual(["claude-opus-4-8"]);
 
-    // The turn closes, so the next input opens a turn of its own rather than
-    // folding into the one already running.
+    // Close the turn, so the next input opens a new turn instead of joining
+    // the running one.
     run.say(RESULT);
     await waitUntil("closed the first turn", () =>
       run.seen.some((event) => event._tag === "turn.completed"),
@@ -974,16 +978,16 @@ describe("the model the adapter last applied to the harness", () => {
       run.adapter.sendInput(SESSION, { text: "again", modelSelection: selection }),
     );
 
-    // Still the model last applied, so the harness is not asked a second time.
+    // The model is the one last applied, so setModel is not called again.
     expect(run.models).toEqual(["claude-opus-4-8"]);
     expect(second.delivery).toBe("opened");
   });
 
-  it("does not call setModel when the first opening input names the spawn's own model", async () => {
+  it("does not call setModel when the first input asks for the model the session started with", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    // What the harness was started under, so this asks for no change at all.
+    // The harness already runs this model, so there is nothing to change.
     const result = await Effect.runPromise(
       run.adapter.sendInput(SESSION, {
         text: "hello",
@@ -995,7 +999,7 @@ describe("the model the adapter last applied to the harness", () => {
     expect(result.delivery).toBe("opened");
   });
 
-  it("does not call setModel mid-turn, whatever model the input names, and steers", async () => {
+  it("does not call setModel during a turn, whatever model the input asks for, and steers", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -1007,9 +1011,9 @@ describe("the model the adapter last applied to the harness", () => {
     );
     expect(run.models).toEqual(["claude-opus-4-8"]);
 
-    // The harness is already answering under the first model, so a second one
-    // named mid-turn folds into the turn already running rather than asking
-    // the harness for anything.
+    // The running turn already uses the first model, so input that asks for
+    // another model during the turn joins the running turn, and nothing is
+    // sent to the harness.
     const second = await Effect.runPromise(
       run.adapter.sendInput(SESSION, {
         text: "and this",
@@ -1021,7 +1025,7 @@ describe("the model the adapter last applied to the harness", () => {
     expect(second).toEqual({ turnId: first.turnId, delivery: "steered" });
   });
 
-  it("fails the input when setModel rejects, naming the model, and never pushes it", async () => {
+  it("fails the input with the model in the error when setModel rejects, and does not send it", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
     run.refusesModel = true;
@@ -1037,12 +1041,12 @@ describe("the model the adapter last applied to the harness", () => {
 
     expect(said).toContain("claude-opus-4-8");
     expect(run.sent).toEqual([]);
-    // Delivering it under the old model would answer for a turn nobody asked
-    // for, and the caller would never hear that the model did not take.
+    // Sending it under the old model would run a turn nobody asked for, and
+    // the caller would never learn that the model change failed.
     expect(listEventTags(run.seen)).toEqual(["session.started"]);
 
-    // The refusal left nothing applied, so the very next input asks again
-    // rather than treating the rejected model as though it had taken.
+    // The failed change applied nothing, so the next input tries again instead
+    // of treating the rejected model as applied.
     run.refusesModel = false;
     const retried = await Effect.runPromise(
       run.adapter.sendInput(SESSION, {
@@ -1056,13 +1060,13 @@ describe("the model the adapter last applied to the harness", () => {
 });
 
 /**
- * The park. `options.canUseTool` is the seam the harness asks through, so a
- * test reaches it the way the CLI does: it calls the callback the adapter
- * supplied and watches what the session's stream says about it.
+ * Tests for the park. The harness asks for approval through
+ * `options.canUseTool`, so a test does what the CLI does: it calls the
+ * callback the adapter passed, and checks the events the session emits.
  */
 const TOOL_USE = "toolu_0199e0e70000700080000000000001";
 
-/** What the CLI offers to persist for an "always allow", in its own shape. */
+/** The rules the CLI suggests saving for "allow always", in the SDK's format. */
 const SUGGESTIONS: ReadonlyArray<PermissionUpdate> = [
   {
     type: "addRules",
@@ -1072,11 +1076,11 @@ const SUGGESTIONS: ReadonlyArray<PermissionUpdate> = [
   },
 ];
 
-/** One tool call the harness is asking about, and what came of the ask. */
+/** A tool call the harness asked about, and how the request ended. */
 interface Park {
-  /** What the callback resolved to, or `undefined` while the session is parked. */
+  /** Returns what the callback resolved to, or `undefined` while the park is open. */
   readonly settled: () => PermissionResult | null | undefined;
-  /** The CLI withdrawing the question, which it does by aborting the signal. */
+  /** Withdraws the request the way the CLI does, by aborting the signal. */
   readonly abort: () => void;
 }
 
@@ -1104,7 +1108,7 @@ const parkToolCall = (
   return { settled: () => settled, abort: () => aborting.abort() };
 };
 
-/** The adapter's own answer channel for a park, named through one helper. */
+/** Sends the user's decision on a request to the adapter. */
 const respond = (run: Driving, requestId: string, decision: ApprovalDecision): Promise<void> =>
   Effect.runPromise(run.adapter.respondToRequest(SESSION, requestId, decision));
 
@@ -1120,15 +1124,16 @@ const listResolutions = (
       : [],
   );
 
-/** What an allow persisted; nothing at all is what a non-allow persisted. */
+/** Returns the rules an allow saved, or an empty list for any other result. */
 const readPersisted = (settled: PermissionResult | null | undefined): ReadonlyArray<unknown> =>
   settled !== null && settled !== undefined && settled.behavior === "allow"
     ? (settled.updatedPermissions ?? [])
     : [];
 
 /**
- * How a deny was worded and whether it ended the turn. A non-deny reads as an
- * empty message that did end the turn, so either assertion fails on one.
+ * Returns a deny's message and whether it ended the turn. Any other result
+ * returns an empty message with `interrupt: true`, so an assertion on either
+ * field fails for it.
  */
 const readDenial = (
   settled: PermissionResult | null | undefined,
@@ -1137,7 +1142,10 @@ const readDenial = (
     ? { message: settled.message, interrupt: settled.interrupt ?? false }
     : { message: "", interrupt: true };
 
-/** A session in `approval-required` with a turn open, ready to be asked. */
+/**
+ * Starts a session in `approval-required` with a turn open, ready for a tool
+ * call to be asked about.
+ */
 const startApprovalSession = async (): Promise<Driving> => {
   const run = createDriving();
   await Effect.runPromise(
@@ -1147,7 +1155,7 @@ const startApprovalSession = async (): Promise<Driving> => {
   return run;
 };
 
-/** Parks on one tool call and answers with the request the stream carried. */
+/** Parks on one tool call and returns the park and the request the adapter emitted. */
 const parkAndAwaitRequest = async (
   run: Driving,
   toolName: string,
@@ -1160,8 +1168,8 @@ const parkAndAwaitRequest = async (
   return { park, request: listOpenedRequests(run.seen)[before]! };
 };
 
-describe("a tool call the harness has to ask about", () => {
-  it("parks the call and says what is being asked, against the item it is about", async () => {
+describe("a tool call that needs approval", () => {
+  it("parks the call and emits a request for the tool call's item", async () => {
     const run = await startApprovalSession();
 
     const { park, request } = await parkAndAwaitRequest(
@@ -1171,29 +1179,29 @@ describe("a tool call the harness has to ask about", () => {
       { suggestions: SUGGESTIONS },
     );
 
-    // Parked: nothing has been decided, so the harness is still waiting.
+    // Nothing has been decided yet, so the harness is still waiting.
     expect(park.settled()).toBeUndefined();
     expect(request.kind).toBe("command_approval");
     expect(request.decisions).toEqual(["allow", "allow_always", "deny", "cancel"]);
     expect(request.detail).toEqual({ command: "ls -la" });
-    // The tool-use id, so a surface can overlay the item the ask is about.
+    // The tool-use id, so a client can show the request on the item it is about.
     expect(request.itemId).toBe(TOOL_USE);
     expect(request.requestId).not.toBe("");
     expect(listResolutions(run.seen)).toEqual([]);
   });
 
-  it("leaves allow always off a question no rule may be persisted for", async () => {
+  it("does not offer allow always when the harness suggested no rules to save", async () => {
     const run = await startApprovalSession();
 
-    // The harness hands over no rules to persist for an ask it will not let a
-    // host make permanent, and a button that had to invent one would grant
-    // more than the user clicked.
+    // The harness suggests no rules for a request it does not allow to be
+    // saved. A button that had to invent a rule could allow more than the
+    // user meant.
     const { request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
     expect(request.decisions).toEqual(["allow", "deny", "cancel"]);
   });
 
-  it("lets the call run on an allow, and says the park is over", async () => {
+  it("lets the call run on an allow, and emits request.resolved", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
@@ -1206,7 +1214,7 @@ describe("a tool call the harness has to ask about", () => {
     ]);
   });
 
-  it("persists an allow-always rule against the session, never the user's settings files", async () => {
+  it("saves an allow-always rule to the session, never to the user's settings files", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(
       run,
@@ -1237,7 +1245,7 @@ describe("a tool call the harness has to ask about", () => {
     ]);
   });
 
-  it("persists the harness's own rule on an allow always", async () => {
+  it("saves the harness's suggested rule on allow always", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(
       run,
@@ -1253,7 +1261,7 @@ describe("a tool call the harness has to ask about", () => {
     await waitUntil("resolved the park", () => park.settled() !== undefined);
     const settled = park.settled();
     expect(settled).toMatchObject({ behavior: "allow", decisionClassification: "user_permanent" });
-    // Something to persist, so the same command is not asked about again.
+    // A rule is saved, so the harness does not ask about the same command again.
     expect(readPersisted(settled).length).toBeGreaterThan(0);
     expect(listResolutions(run.seen)).toEqual([
       { requestId: request.requestId, decision: "allow_always" },
@@ -1269,7 +1277,7 @@ describe("a tool call the harness has to ask about", () => {
     await waitUntil("resolved the park", () => park.settled() !== undefined);
     const settled = park.settled();
     expect(settled).toMatchObject({ behavior: "deny" });
-    // Required by the vendor, and it is what the harness tells the model.
+    // The SDK requires a message, and the harness passes it to the model.
     expect(readDenial(settled).message).not.toBe("");
     expect(readDenial(settled).interrupt).toBe(false);
     expect(listResolutions(run.seen)).toEqual([{ requestId: request.requestId, decision: "deny" }]);
@@ -1289,10 +1297,10 @@ describe("a tool call the harness has to ask about", () => {
   });
 
   /**
-   * Spec 06 section 8.2: the CLI withdraws a pending prompt after the turn was
-   * interrupted, and it does so by aborting the signal it handed the callback.
+   * The CLI withdraws a pending request after the turn is interrupted, by
+   * aborting the signal it passed to the callback (spec 06 section 8.2).
    */
-  it("answers a withdrawn ask as a deny, and reports the park cancelled", async () => {
+  it("answers a withdrawn request with a deny, and reports it as cancelled", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
@@ -1305,7 +1313,7 @@ describe("a tool call the harness has to ask about", () => {
     ]);
   });
 
-  it("does nothing at all for a request it is not holding, or holds no longer", async () => {
+  it("ignores an answer to an unknown request or to one that has already ended", async () => {
     const run = await startApprovalSession();
     const { request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
@@ -1314,27 +1322,27 @@ describe("a tool call the harness has to ask about", () => {
 
     await respond(run, request.requestId, "deny");
     await waitUntil("resolved the park", () => listResolutions(run.seen).length === 1);
-    // Answered twice: the second answer has nothing left to resolve, and must
-    // not report a second outcome for a park that is already over.
+    // A second answer finds nothing to resolve, and must not report a second
+    // outcome for a park that has already ended.
     await respond(run, request.requestId, "allow");
     expect(listResolutions(run.seen)).toEqual([{ requestId: request.requestId, decision: "deny" }]);
   });
 
-  it("refuses an answer the request never offered", async () => {
+  it("ignores a decision the request did not offer", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
       questions: [{ question: "Which one?", header: "One", options: [], multiSelect: false }],
     });
 
-    // There is no answer for an allow to carry, so an allow must not reach the
-    // harness however it got this far.
+    // An allow cannot carry the user's answer to the question, so it must not
+    // reach the harness, however it got this far.
     await respond(run, request.requestId, "allow");
 
     expect(park.settled()).toBeUndefined();
     expect(listResolutions(run.seen)).toEqual([]);
   });
 
-  it("holds one question at a time, and tells the harness to ask the rest again", async () => {
+  it("holds one request at a time, and tells the harness to ask again later", async () => {
     const run = await startApprovalSession();
     const { park: first } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
@@ -1347,12 +1355,12 @@ describe("a tool call the harness has to ask about", () => {
 
     await waitUntil("answered the second ask", () => second.settled() !== undefined);
     expect(second.settled()).toMatchObject({ behavior: "deny" });
-    // The card the user is looking at stays the one that is open.
+    // The card the user is looking at stays open.
     expect(first.settled()).toBeUndefined();
     expect(listOpenedRequests(run.seen)).toHaveLength(1);
   });
 
-  it("cuts a command to what the protocol carries, and says where it cut", async () => {
+  it("truncates a long command to the protocol's limit, ending it with an ellipsis", async () => {
     const run = await startApprovalSession();
 
     const { request } = await parkAndAwaitRequest(run, "Bash", {
@@ -1364,7 +1372,7 @@ describe("a tool call the harness has to ask about", () => {
     expect(command.endsWith("\u2026")).toBe(true);
   });
 
-  it("opens the turn the park belongs to where the harness asked before one was open", async () => {
+  it("opens a turn for the park when the harness asks before a turn is open", async () => {
     const run = createDriving();
     await Effect.runPromise(
       run.adapter.startSession(SESSION, { ...SPEC, accessMode: "approval-required" }, WORKING),
@@ -1372,14 +1380,14 @@ describe("a tool call the harness has to ask about", () => {
 
     const { request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
-    // The SDK can call back before the assistant message that opened the turn
-    // has been read off its stream, so the park opens the turn it belongs to
-    // rather than reporting a request no turn is waiting on.
+    // The SDK can call the callback before the assistant message that starts
+    // the turn has been read from its stream. So the park opens its turn,
+    // instead of reporting a request that no turn is waiting on.
     expect(listEventTags(run.seen)).toEqual(["session.started", "turn.started", "request.opened"]);
     expect(request.itemId).toBe(TOOL_USE);
   });
 
-  it("names an item of its own where the harness named no tool-use id", async () => {
+  it("creates an item id when the harness gives no tool-use id", async () => {
     const run = await startApprovalSession();
 
     const { request } = await parkAndAwaitRequest(
@@ -1389,13 +1397,13 @@ describe("a tool call the harness has to ask about", () => {
       { toolUseID: "" },
     );
 
-    // An empty id is a frame the protocol refuses, and the event would be lost
-    // with the park still held.
+    // The protocol rejects an empty id, so the event would be lost while the
+    // park stays open.
     expect(request.itemId).not.toBe("");
   });
 });
 
-describe("what kind of question each tool is", () => {
+describe("the request kind for each tool", () => {
   const KINDS: ReadonlyArray<
     readonly [string, Record<string, unknown>, OpenRequest["kind"], ReadonlyArray<string>]
   > = [
@@ -1425,7 +1433,7 @@ describe("what kind of question each tool is", () => {
   ];
 
   for (const [toolName, input, kind, paths] of KINDS) {
-    it(`asks about ${toolName} as a ${kind}`, async () => {
+    it(`asks about ${toolName} with a ${kind}`, async () => {
       const run = await startApprovalSession();
 
       const { request } = await parkAndAwaitRequest(run, toolName, input);
@@ -1439,10 +1447,10 @@ describe("what kind of question each tool is", () => {
   }
 
   /**
-   * Answering carries a decision and nothing else, so there
-   * is no answer an allow could run the tool with.
+   * A response to a request holds only a decision, not the user's answer to
+   * the question, so an allow would give the tool nothing to run with.
    */
-  it("records an AskUserQuestion as a question it cannot answer, offering deny and cancel", async () => {
+  it("reports AskUserQuestion as a question, offering only deny and cancel", async () => {
     const run = await startApprovalSession();
 
     const { request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
@@ -1461,8 +1469,8 @@ describe("what kind of question each tool is", () => {
 
     expect(request.kind).toBe("question");
     expect(request.decisions).toEqual(["deny", "cancel"]);
-    // Structured, not flattened to text: the card shows the chip, the prose and
-    // what each answer would have meant.
+    // Structured, not flattened to text: the card shows the header chip, the
+    // question and the description of each option.
     expect(request.kind === "question" ? request.detail.questions : []).toEqual([
       {
         question: "Which database should this use?",
@@ -1476,13 +1484,13 @@ describe("what kind of question each tool is", () => {
     ]);
   });
 
-  it("asks all the questions an ask carries, dropping a malformed one and its unlabelled options", async () => {
+  it("includes every question, but drops a malformed question and options without a label", async () => {
     const run = await startApprovalSession();
 
     const { request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
       questions: [
-        // No header: the SDK's own schema requires one, and a chip cannot be
-        // invented, so this question is dropped rather than guessed at.
+        // No header: the SDK's own schema requires one, and a header chip
+        // cannot be invented, so this question is dropped.
         { question: "Which one?", options: [], multiSelect: false },
         {
           question: "Which features?",
@@ -1501,7 +1509,7 @@ describe("what kind of question each tool is", () => {
       {
         question: "Which features?",
         header: "Features",
-        // The vendor's `preview` has no field in the protocol, so it is gone.
+        // The protocol has no field for the SDK's `preview`, so it is dropped.
         options: [{ label: "Rules", description: "persisted rules" }],
         multiSelect: true,
       },
@@ -1509,11 +1517,11 @@ describe("what kind of question each tool is", () => {
   });
 
   /**
-   * A `question` request with no question on it is an undecodable frame, which
-   * costs the runner its socket; a tool call the user can refuse is the honest
-   * card.
+   * A `question` request with no questions is a frame nobody can decode, which
+   * costs the runner its connection. A tool approval the user can deny is the
+   * correct fallback.
    */
-  it("falls back to a tool approval when no question survives the mapping", async () => {
+  it("falls back to a tool approval when no valid question is left", async () => {
     const run = await startApprovalSession();
 
     const { request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
@@ -1526,9 +1534,9 @@ describe("what kind of question each tool is", () => {
   });
 
   /**
-   * The plan is an item of its own - the one the harness's own tool call
-   * opened - and the ask is against it, so the surface overlays the plan the
-   * user is being asked to approve rather than a second copy of it.
+   * The plan is its own item, opened by the harness's tool call, and the
+   * request points at that item. So the client shows the request on the plan
+   * the user is asked to approve, not on a second copy of it.
    */
   it("asks about the plan item the tool call already opened", async () => {
     const run = await startApprovalSession();
@@ -1544,8 +1552,8 @@ describe("what kind of question each tool is", () => {
 
     const { request } = await parkAndAwaitRequest(run, "ExitPlanMode", plan);
 
-    // Exactly one: a second plan item would leave one of them never closed,
-    // since only the harness's own `tool_result` closes the one it opened.
+    // Exactly one: a second plan item would never be closed, because only the
+    // harness's `tool_result` closes a plan item, and it closes only its own.
     expect(filterItems(run.seen, "plan")).toHaveLength(1);
     const started = filterItems(run.seen, "plan")[0]!;
     expect(JSON.stringify(started.detail)).toContain("read it");
@@ -1555,12 +1563,12 @@ describe("what kind of question each tool is", () => {
 });
 
 describe("a park that is still open when the turn or the session ends", () => {
-  it("is cancelled first, and the cancellation is reported before the turn closes", async () => {
+  it("is cancelled on an interrupt, and the cancellation is reported before the turn completes", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
     await Effect.runPromise(run.adapter.interrupt(SESSION));
-    // The CLI's own answer to an interrupt: the turn ends as aborted.
+    // The CLI responds to an interrupt by ending the turn as aborted.
     run.say({ ...RESULT, terminal_reason: "aborted_by_user" });
     await waitUntil("closed the turn", () =>
       run.seen.some((event) => event._tag === "turn.completed"),
@@ -1571,8 +1579,8 @@ describe("a park that is still open when the turn or the session ends", () => {
     expect(listResolutions(run.seen)).toEqual([
       { requestId: request.requestId, decision: "cancel" },
     ]);
-    // In that order: a turn reported as over while a request still reads as
-    // open leaves a card on screen for a turn that has ended.
+    // In this order: if the turn completed while the request was still open,
+    // the card would stay on screen for a turn that has ended.
     const closing = listEventTags(run.seen).filter(
       (tag) => tag === "request.resolved" || tag === "turn.completed",
     );
@@ -1581,7 +1589,7 @@ describe("a park that is still open when the turn or the session ends", () => {
     expect(completed?._tag === "turn.completed" ? completed.state : undefined).toBe("interrupted");
   });
 
-  it("says nothing about a park where there was none to cancel", async () => {
+  it("emits no request events on an interrupt when there is no park", async () => {
     const run = await startApprovalSession();
 
     await Effect.runPromise(run.adapter.interrupt(SESSION));
@@ -1591,17 +1599,17 @@ describe("a park that is still open when the turn or the session ends", () => {
     expect(listOpenedRequests(run.seen)).toEqual([]);
   });
 
-  it("is withdrawn when the session is stopped, and the exit still says why it stopped", async () => {
+  it("is withdrawn when the session is stopped, and the exit still reports the stop reason", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "inactivity_timeout"));
     await awaitSessionEnd(run.seen);
 
-    // A park left hanging is a promise the harness waits on for ever.
+    // A park left open is a promise the harness would wait on for ever.
     await waitUntil("resolved the park", () => park.settled() !== undefined);
     expect(park.settled()).toMatchObject({ behavior: "deny" });
-    // A stop ends the turn, so the stream reads the same as an interrupt's.
+    // A stop ends the turn, so the events are the same as for an interrupt.
     expect(listResolutions(run.seen)).toEqual([
       { requestId: request.requestId, decision: "cancel" },
     ]);
@@ -1611,26 +1619,26 @@ describe("a park that is still open when the turn or the session ends", () => {
     );
   });
 
-  it("is withdrawn once when the harness stops talking on its own, before the exit", async () => {
+  it("is withdrawn once, before the exit, when the harness's stream ends on its own", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
-    // Nobody asked: the harness simply reached the end of its stream with the
-    // question still open.
+    // Nobody stopped the session: the harness's stream simply ended while the
+    // request was still open.
     run.end();
     await awaitSessionEnd(run.seen);
 
     await waitUntil("resolved the park", () => park.settled() !== undefined);
-    // The harness gets a plain deny - there is no turn left to interrupt - and
-    // the stream says the question was cancelled rather than refused.
+    // The harness gets a plain deny, because there is no turn left to
+    // interrupt, and the request is reported as cancelled, not denied.
     expect(park.settled()).toMatchObject({ behavior: "deny" });
     expect(readDenial(park.settled()).interrupt).toBe(false);
     expect(listResolutions(run.seen)).toEqual([
       { requestId: request.requestId, decision: "cancel" },
     ]);
-    // Every exit passes through one place, so the park is ended once, and
-    // before the exit: a request still reading as open on a session that is
-    // gone leaves a card nothing can answer.
+    // Every exit passes through one place, so the park is ended once, before
+    // the exit. A request still open on a session that is gone would leave a
+    // card nobody can answer.
     const closing = listEventTags(run.seen).filter(
       (tag) => tag === "request.resolved" || tag === "session.exited",
     );
@@ -1639,8 +1647,9 @@ describe("a park that is still open when the turn or the session ends", () => {
 });
 
 /**
- * What an Agent puts on a session: instructions of its own, tool families taken
- * away, and a schema every turn has to answer under (spec 06 section 7).
+ * The fields an Agent adds to a session spec: its own instructions, disallowed
+ * tool families, and a schema every turn's output must match (spec 06 section
+ * 7).
  */
 const OUTPUT_SCHEMA: OutputSchema = {
   type: "object",
@@ -1663,7 +1672,7 @@ const STRUCTURED: SessionSpec = {
 
 const ANSWER = { verdict: "accept", confidence: 0.9 };
 
-/** Runs one turn that the scripted result closes, and answers its `turn.completed`. */
+/** Runs one turn that `result` closes, and returns its `turn.completed` event. */
 const runTurnToCompletion = async (
   spec: SessionSpec,
   result: unknown,
@@ -1683,8 +1692,8 @@ const runTurnToCompletion = async (
   return completed!;
 };
 
-describe("a session the controller spawned from an Agent", () => {
-  it("appends the agent's instructions to the harness's own preset, never replacing it", async () => {
+describe("a session the controller started for an Agent", () => {
+  it("appends the agent's instructions to the harness's preset, never replacing it", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, WORKING));
 
@@ -1695,14 +1704,14 @@ describe("a session the controller spawned from an Agent", () => {
     });
   });
 
-  it("names every Claude tool in each family the spec took away", async () => {
+  it("disallows every Claude tool in each disallowed tool family", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, WORKING));
 
     expect(run.options[0]?.disallowedTools).toEqual(["Edit", "NotebookEdit", "Bash", "WebFetch"]);
   });
 
-  it("hands the schema to the SDK as the one output format the session runs under", async () => {
+  it("passes the schema to the SDK as the session's output format", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, WORKING));
 
@@ -1712,13 +1721,13 @@ describe("a session the controller spawned from an Agent", () => {
     });
   });
 
-  it("carries none of the three keys for a Thread, which has none of the three fields", async () => {
+  it("sets none of the three options for a Thread, whose spec has none of the three fields", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    // Both keys are absent, and neither is empty. An empty `disallowedTools`,
-    // or a preset with nothing appended, would make this adapter say something
-    // the spec never said.
+    // All three keys are absent, not empty. An empty `disallowedTools`, or a
+    // preset with nothing appended, would add a setting the spec never asked
+    // for.
     expect(run.options[0], "the session was never started").toBeDefined();
     const keys = Object.keys(run.options[0]!);
     expect(keys).not.toContain("systemPrompt");
@@ -1727,8 +1736,8 @@ describe("a session the controller spawned from an Agent", () => {
   });
 });
 
-describe("what a turn under an output schema answers with", () => {
-  it("reports the harness's structured output as the turn's result when it satisfies the schema", async () => {
+describe("the structured result of a turn with an output schema", () => {
+  it("reports the harness's structured output as the result when it matches the schema", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       structured_output: ANSWER,
@@ -1738,7 +1747,7 @@ describe("what a turn under an output schema answers with", () => {
     expect(completed.structuredResult).toEqual({ outcome: "ok", value: ANSWER });
   });
 
-  it("reports a schema failure naming the field when the harness's output violates the schema", async () => {
+  it("reports a schema failure that names the field when the output does not match the schema", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       structured_output: { verdict: "maybe", confidence: 0.9 },
@@ -1750,7 +1759,7 @@ describe("what a turn under an output schema answers with", () => {
     });
   });
 
-  it("reports a schema failure naming the subtype when the harness ran out of retries", async () => {
+  it("reports a schema failure that names the subtype when the harness ran out of retries", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       subtype: "error_max_structured_output_retries",
@@ -1758,8 +1767,8 @@ describe("what a turn under an output schema answers with", () => {
       errors: [],
     });
 
-    // The turn keeps the state the harness reported. The result is a separate
-    // answer, about the schema.
+    // The turn keeps the state the harness reported. The structured result is
+    // reported separately, and is only about the schema.
     expect(completed.state).toBe("failed");
     expect(completed.structuredResult).toEqual({
       outcome: "schema-failure",
@@ -1767,34 +1776,33 @@ describe("what a turn under an output schema answers with", () => {
     });
   });
 
-  it("reports a schema failure when a successful turn carried no structured output at all", async () => {
+  it("reports a schema failure when a successful turn has no structured output", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, RESULT);
 
     expect(completed.state).toBe("completed");
-    // The adapter chooses the wording. The test only asserts that a reason is
-    // present: a turn that answered nothing must say so, and must not answer
-    // an empty `ok`.
+    // The adapter chooses the wording, so the test only checks that there is a
+    // reason. A turn with no output must be reported as a failure, not as an
+    // empty `ok`.
     expect(completed.structuredResult).toEqual({
       outcome: "schema-failure",
       reason: expect.stringMatching(/\S/) as string,
     });
   });
 
-  it("says nothing about the schema when the turn failed for a reason of its own", async () => {
+  it("reports no structured result when the turn failed for another reason", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       is_error: true,
       errors: ["the API refused the request"],
     });
 
-    // The failure is about the turn and not about the schema. A
-    // `schema-failure` here would claim that an answer was judged and
-    // rejected.
+    // The failure is about the turn, not about the schema. A `schema-failure`
+    // here would claim that an output was checked and rejected.
     expect(completed.state).toBe("failed");
     expect("structuredResult" in completed).toBe(false);
   });
 
-  it("says nothing about the schema on a turn the user interrupted", async () => {
+  it("reports no structured result for a turn the user interrupted", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       terminal_reason: "aborted_tools",
@@ -1804,7 +1812,7 @@ describe("what a turn under an output schema answers with", () => {
     expect("structuredResult" in completed).toBe(false);
   });
 
-  it("says nothing about the schema when the retries ran out on a turn that was interrupted", async () => {
+  it("reports no structured result for an interrupted turn, even when the retries ran out", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, {
       ...RESULT,
       subtype: "error_max_structured_output_retries",
@@ -1817,12 +1825,12 @@ describe("what a turn under an output schema answers with", () => {
     expect("structuredResult" in completed).toBe(false);
   });
 
-  it("says nothing about a result on a session that was never given a schema", async () => {
+  it("reports no structured result for a session without a schema", async () => {
     const completed = await runTurnToCompletion(SPEC, { ...RESULT, structured_output: ANSWER });
 
-    // The key is absent, and is not an `ok` over no schema. A Thread answers
-    // prose, and a key on every turn of every session would give "ok" a second
-    // meaning.
+    // The key is absent, not an `ok` with no schema. A Thread replies in free
+    // text, and adding the key to every turn of every session would give "ok"
+    // a second meaning.
     expect("structuredResult" in completed).toBe(false);
   });
 });

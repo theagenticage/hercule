@@ -1,16 +1,15 @@
 /**
- * The approval hook pi actually runs. The extension carries `requiresApproval`
- * as interpolated source rather than a call into the runner - nothing it reaches
- * for exists on the machine pi runs on - and source that was interpolated wrong
- * is a hook that throws on every tool call, or one that holds nothing. So the source is
- * lifted back out of the extension, evaluated on its own, and asked the same
- * questions as the function it was written from: the two agreeing is the whole
- * property, and it is checked without pi.
+ * Tests the extension source that pi actually runs. The extension contains the
+ * source of `requiresApproval` instead of calling into the runner, because
+ * nothing in the runner exists inside pi. If that source were pasted in wrong,
+ * the hook would throw on every tool call, or hold nothing. So these tests
+ * take the source back out of the extension, evaluate it, and check that it
+ * gives the same results as the original function, without running pi.
  *
- * One thing is not checked here: whether pi's own loader resolves the typebox
- * import the source opens with. This repository does not have that package, so
- * the test drops the import and hands `Type` in. Only the live test proves that
- * a real pi loads the file.
+ * One thing is not checked here: whether pi's loader resolves the typebox
+ * import at the top of the source. This repository does not have that package,
+ * so the test drops the import and passes `Type` in. Only the live test proves
+ * that a real pi loads the file.
  */
 import { describe, expect, it } from "vitest";
 import type { AccessMode } from "@hercule/protocol";
@@ -22,7 +21,7 @@ import {
 } from "./extension";
 import { requiresApproval } from "./policy";
 
-/** Every mode a session can reach a runner under, plus one from no build. */
+/** Every mode a session can reach a runner with, plus one no build knows. */
 const MODES: ReadonlyArray<string> = [
   "approval-required",
   "auto-accept-edits",
@@ -31,7 +30,7 @@ const MODES: ReadonlyArray<string> = [
   "a mode from a newer controller",
 ];
 
-/** pi 0.85.1's built-ins, plus a name from no built-in at all. */
+/** pi 0.85.1's built-in tools, `submit_result`, and one tool that is not built in. */
 const TOOLS: ReadonlyArray<string> = [
   "read",
   "grep",
@@ -46,9 +45,9 @@ const TOOLS: ReadonlyArray<string> = [
 ];
 
 /**
- * The approval hook's own copy of the function, off the source the extension
- * carries. `new Function` rather than an import: what pi loads is text, and text
- * is what has to be shown to work.
+ * Evaluates the `requiresApproval` source found in the extension, and returns
+ * the resulting function. It uses `new Function` instead of an import, because
+ * pi loads the extension as text, and it is the text that must work.
  */
 const buildRequiresApprovalFromSource = (): ((mode: string, toolName: string) => boolean) => {
   const source = EXTENSION_SOURCE.split("const requiresApproval = ")[1]?.split(
@@ -61,25 +60,25 @@ const buildRequiresApprovalFromSource = (): ((mode: string, toolName: string) =>
   return new Function(`return (${source!});`)() as (mode: string, toolName: string) => boolean;
 };
 
-describe("the deciding function the extension carries", () => {
+describe("the requiresApproval copy inside the extension", () => {
   const fromSource = buildRequiresApprovalFromSource();
 
   for (const mode of MODES) {
     for (const tool of TOOLS) {
-      it(`decides ${tool} under ${mode} the way the adapter does`, () => {
+      it(`gives the same result as the adapter for ${tool} under ${mode}`, () => {
         expect(fromSource(mode, tool)).toBe(requiresApproval(mode as AccessMode, tool));
       });
     }
   }
 });
 
-describe("what the extension reads its mode out of", () => {
-  it("reads the variable the adapter sets, spelled once", () => {
+describe("where the extension reads the access mode from", () => {
+  it("reads the environment variable the adapter sets", () => {
     expect(EXTENSION_SOURCE).toContain(`process.env.${ACCESS_MODE_VARIABLE}`);
   });
 });
 
-/** The schema a session under an Agent answers under (spec 06 section 7). */
+/** An output schema like the one an Agent gives a session (spec 06 section 7). */
 const OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -90,7 +89,7 @@ const OUTPUT_SCHEMA = {
   },
 };
 
-/** One tool the extension registered, as far as pi reads a definition. */
+/** The fields of a registered tool that pi reads. */
 interface RegisteredTool {
   readonly name: string;
   readonly parameters: unknown;
@@ -98,17 +97,19 @@ interface RegisteredTool {
 }
 
 /**
- * `Type.Unsafe` does nothing to a JSON Schema, which is why the extension
- * calls it. typebox is pi's own dependency and not the runner's, so this test
- * drops the extension's import and passes in what the import named.
+ * A stand-in for typebox's `Type`. `Type.Unsafe` returns a JSON Schema
+ * unchanged, which is why the extension uses it. typebox is pi's dependency,
+ * not the runner's, so this test drops the extension's import and passes this
+ * object in its place.
  */
 const TYPE = { Unsafe: (schema: unknown) => schema };
 
 /**
- * Loads the extension the way pi loads it. The test evaluates the source and
- * runs its default export against a pi that records what was registered. The
- * environment is the whole input, because the adapter tells the extension
- * about the session through the environment.
+ * Loads the extension the way pi loads it, and returns the tools it
+ * registered. It evaluates the source and runs the default export against a
+ * fake pi that records registrations. The environment is the only input,
+ * because the adapter tells the extension about the session through the
+ * environment.
  */
 const listRegisteredTools = (
   env: Readonly<Record<string, string | undefined>>,
@@ -130,10 +131,10 @@ const listRegisteredTools = (
   return tools;
 };
 
-describe("the tool a session under an output schema answers through", () => {
+describe("the submit_result tool of a session with an output schema", () => {
   const SCHEMA_ENV = { [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(OUTPUT_SCHEMA) };
 
-  it("registers it under the schema the adapter handed the session", () => {
+  it("is registered with the schema the adapter passed to the session", () => {
     const tools = listRegisteredTools(SCHEMA_ENV);
 
     expect(tools.map((tool) => tool.name)).toEqual([SUBMIT_RESULT_TOOL]);
@@ -142,19 +143,19 @@ describe("the tool a session under an output schema answers through", () => {
     expect(tools[0]!.parameters).toMatchObject(OUTPUT_SCHEMA);
   });
 
-  it("ends the agent's run on the call that answered", async () => {
+  it("ends the agent's run when it is called", async () => {
     const tools = listRegisteredTools(SCHEMA_ENV);
 
-    // Without this the agent carries on after it answers, and the turn's
-    // result waits for a settle that has nothing left to say.
+    // Without this, the agent keeps working after it answers, and the turn's
+    // result has to wait until the agent stops on its own.
     expect(await tools[0]!.execute({ verdict: "accept", confidence: 0.9 }, {})).toMatchObject({
       terminate: true,
     });
   });
 
-  it("registers no tool for a session that was given no schema", () => {
-    // A Thread answers prose. A `submit_result` on every session would be a
-    // tool the model can call, and nothing would validate the call.
+  it("is not registered for a session without a schema", () => {
+    // A Thread answers in prose. A `submit_result` tool on every session
+    // would be a tool the model can call with nothing to validate the call.
     expect(listRegisteredTools({})).toEqual([]);
   });
 });

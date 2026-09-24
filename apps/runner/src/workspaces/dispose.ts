@@ -1,7 +1,8 @@
 /**
- * Tearing an ephemeral workspace down. The branch the agent worked on stays in
- * the cache, so nothing it committed is thrown away with the directory, and a
- * primary is refused outright: that directory is the user's own.
+ * Tears down an ephemeral workspace. The branch the agent worked on stays in
+ * the cache, so nothing the agent committed is lost with the directory. A
+ * primary is never torn down: it is the long-lived main workspace that
+ * sessions share.
  */
 import { readdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -12,12 +13,16 @@ import type { RegisteredCheckout } from "./registry";
 import type { Substrate } from "./substrate";
 
 /**
- * Taking a workspace off the disk: the worktrees first, then the directory, and
- * only then the caches' belief that those directories are theirs. That order is
- * the whole of it - a prune that ran before the directories were gone would
- * leave registered whatever was removed after it - which is why the workspace
- * that is being torn down and the one whose making failed share this rather
- * than each spelling the order out.
+ * Removes a workspace from disk, in this order:
+ *
+ * 1. Removes each checkout's worktree.
+ * 2. Deletes the workspace directory.
+ * 3. Prunes each checkout's cache, so git forgets the worktrees.
+ *
+ * The order matters: a prune only forgets worktrees whose directories are
+ * already gone, so pruning earlier would leave git with records of
+ * directories deleted afterwards. Disposing a workspace and cleaning up after
+ * a failed provisioning both call this, so the order is written only once.
  */
 export const tearDown = async (
   storageDir: string,
@@ -35,10 +40,10 @@ export const tearDown = async (
 };
 
 /**
- * Every cache on this machine, pruned. What this is for is the workspace whose
- * making failed: it left a worktree registered in a cache and no entry saying
- * which, and a cache that believes in a directory that is gone refuses to make
- * another one there.
+ * Prunes every cache on this runner. This cleans up after a failed
+ * provisioning, which can leave a worktree recorded in a cache without a
+ * registry entry that says which cache. While a cache still records a worktree
+ * whose directory is gone, git fails to create another worktree at that path.
  */
 const pruneEveryCache = async (substrate: Substrate): Promise<void> => {
   let caches: ReadonlyArray<string>;
@@ -63,19 +68,21 @@ export const disposeWorkspace = async (
       _tag: "workspaceReport",
       workspaceId,
       status: "failed",
-      message: "a primary is never torn down",
+      message: "a main workspace is never torn down",
     };
   }
   await tearDown(
     substrate.storageDir,
-    // Derived from the id rather than from the entry: a workspace whose making
-    // failed left a directory behind and no entry, and this is what removes it.
+    // The path is built from the id, not read from the entry: a failed
+    // provisioning can leave a directory behind with no entry, and this call
+    // must still remove it.
     joinPath(substrate.storageDir, "workspaces", workspaceId),
     entry?.checkouts ?? [],
     substrate.gitEnv,
   );
-  // With no entry there is no cache to name, so every one of them is asked -
-  // after the directories are gone, like the prunes inside the teardown.
+  // With no entry we do not know which caches the workspace used, so prune all
+  // of them. This runs after the directories are gone, like the prunes inside
+  // `tearDown`.
   if (entry === undefined) await pruneEveryCache(substrate);
   await substrate.registry.update((entries) =>
     entries.filter((held) => held.workspaceId !== workspaceId),

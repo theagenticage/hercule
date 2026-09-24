@@ -1,16 +1,17 @@
 /**
- * pi's event lines turned into the one normalized taxonomy (spec 06 section
- * 6): one raw line off stdout plus a small mutable per-session state in,
- * events out. It reads no process, no clock but the wall one, and no socket.
+ * Converts pi's event lines into normalized provider events (spec 06 section
+ * 6). The input is one raw line from pi's stdout and a small mutable state per
+ * session; the output is a list of events. Nothing here touches a process or a
+ * socket, and the only clock read is the wall clock.
  *
- * The line arrives raw rather than decoded, because a line that is not JSON is
- * one of the things reported here: pi writes its own complaints down the same
- * pipe as its events, and one of them must not pass for silence.
+ * The line arrives raw, not parsed, because a line that is not JSON must be
+ * reported too: pi writes its own error output to the same pipe as its events,
+ * and that output must not be silently dropped.
  *
- * The state is a running position. pi names neither its turns nor its content
- * blocks, so the ids every surface brackets a turn by are minted here; and a
- * tool's progress arrives as the whole output so far, so what was already sent
- * is held to turn the next snapshot into the piece that is new.
+ * The state tracks the session's progress. pi gives no ids to its turns or its
+ * content blocks, so the ids that surfaces group a turn's events by are
+ * created here. A tool's progress arrives as the whole output so far, so the
+ * state keeps what was already sent and reports only the new part.
  */
 import type * as Schema from "effect/Schema";
 import type {
@@ -28,10 +29,10 @@ import { judgeAnswer } from "../structured-result";
 import { truncateFact, truncateMessage } from "../text";
 import { SUBMIT_RESULT_TOOL } from "./extension";
 
-/** The one channel every raw payload from this adapter is filed under. */
+/** The channel name every raw payload from this adapter is reported under. */
 const PI_EVENT = "pi.rpc.event";
 
-/** Token counts and cost as pi reports them on a message. */
+/** The token counts and cost pi reports on a message. */
 interface PiUsage {
   readonly input?: number;
   readonly output?: number;
@@ -40,7 +41,7 @@ interface PiUsage {
   readonly cost?: { readonly total?: number };
 }
 
-/** One assistant message, as far as anything here reads it. */
+/** The fields of an assistant message that this module reads. */
 interface PiMessage {
   readonly role?: unknown;
   readonly usage?: PiUsage;
@@ -48,7 +49,7 @@ interface PiMessage {
   readonly errorMessage?: unknown;
 }
 
-/** What a tool call produced so far, in the shape pi's tools answer with. */
+/** A tool call's output so far, in the shape pi's tools return it. */
 interface PiToolResult {
   readonly content?: ReadonlyArray<{ readonly type?: string; readonly text?: string }>;
 }
@@ -68,14 +69,14 @@ interface PiEvent {
   readonly args?: Record<string, unknown>;
   readonly partialResult?: PiToolResult;
   readonly isError?: unknown;
-  /** What pi's own retry ended as, and which extension threw what. */
+  /** How pi's automatic retry ended, and which extension threw which error. */
   readonly success?: unknown;
   readonly finalError?: unknown;
   readonly error?: unknown;
   readonly extensionPath?: unknown;
 }
 
-/** What one item of a turn is, once it has been started. */
+/** An item of the turn that has started and not yet completed. */
 interface Running {
   readonly itemId: string;
   readonly kind: ItemKind;
@@ -83,10 +84,10 @@ interface Running {
 }
 
 /**
- * A tool item, and the output already reported for it. It keeps pi's own name
- * for the tool and the arguments it was called with, because a call the approval
- * hook holds is asked about after it started: what the question is called and what
- * the card shows are read off the call that is waiting.
+ * A running tool item, with the output already reported for it. It keeps pi's
+ * tool name and the call's arguments, because the approval hook asks about a
+ * call after the call has started: the adapter builds the approval request
+ * from the waiting call's name and arguments.
  */
 export interface RunningTool extends Running {
   readonly toolName: string;
@@ -104,70 +105,70 @@ interface Totals {
 
 export interface Normalizing {
   readonly sessionId: string;
-  /** The native session, named on every event so a surface can join the two. */
+  /** The native session id, put on every event so a surface can link the two sessions. */
   readonly nativeSessionId: string;
   /**
-   * The model the session is running on. pi's events carry none until a
-   * message ends, and the adapter is the party that chose it.
+   * The model the session is running on. pi's events include no model until a
+   * message ends, so the adapter, which chose the model, sets this.
    */
   model: string | undefined;
   /**
-   * The turn in flight. The adapter mints one for the input it sends, so the
-   * user's own message and everything pi says about it share an id.
+   * The id of the turn in flight. The adapter creates it when it sends an
+   * input, so the user's message and every event pi emits for it share one id.
    */
   turnId: string | undefined;
-  /** The assistant's content blocks, by the index pi streams them under. */
+  /** The assistant's open content blocks, by the index pi streams them under. */
   readonly blocks: Map<number, Running>;
   /** The tool calls in flight, by pi's own call id. */
   readonly tools: Map<string, RunningTool>;
   /**
-   * The calls the user refused, by pi's own call id. pi reports a blocked call
-   * as an ordinary error, and a refusal read as a failure is the user's own
-   * answer shown back to them as something that went wrong.
+   * The calls the user declined, by pi's own call id. pi reports a blocked call
+   * as an ordinary error, and without this set the user's own decision would
+   * be shown back to them as a failure.
    */
   readonly declined: Set<string>;
-  /** Summed over the pi turns of this Hercule turn, and of the session. */
+  /** Usage summed over the pi turns of the current Hercule turn, and of the whole session. */
   readonly turnTotals: Totals;
   readonly sessionTotals: Totals;
   /**
-   * How the last assistant message stopped, which is how the turn ends: pi
-   * reports an abort and a failure on the message, not on the settle.
+   * How the last assistant message stopped, which decides how the turn ends:
+   * pi reports an abort or a failure on the message, not on the settle.
    */
   stopped: { readonly state: TurnState; readonly error?: string };
   /**
-   * Why the system ended this turn, if the system ended it. The system here is
-   * the runner, not pi.
+   * Why the runner ended this turn, if it did. The runner, not pi, is "the
+   * system" here.
    *
-   * pi reports an abort that arrives while a tool runs as an error on the
-   * message that was in flight: "The operation was aborted". That message does
-   * not say how the turn ended. A stop the user asked for is an interrupt. A
-   * turn the system stopped asking for an answer ran to its end, and its
-   * result reports what happened.
+   * pi reports an abort during a tool call as an error on the message in
+   * flight ("The operation was aborted"), which does not say why the turn
+   * ended. So the reason is recorded here:
+   *
+   * - `interrupt`: the user stopped the turn;
+   * - `schema`: the runner ended the turn after too many rejected answers.
+   *   The turn counts as completed, and its result reports the schema failure.
    */
   endedBySystem: "interrupt" | "schema" | undefined;
   /**
-   * Whether this turn has been announced. pi opens a run again for a retry, a
-   * compaction and a queued message, all inside one turn, so the second and
-   * third are not a turn of their own and their cost adds to the same total.
+   * Whether `turn.started` has been emitted for this turn. pi starts a new run
+   * for a retry, a compaction or a queued message, all inside one turn, so
+   * later runs do not start a new turn and their cost adds to the same total.
    */
   announced: boolean;
-  /** The failure already reported for this run, so it is not reported twice. */
+  /** The error already reported for this run, so it is not reported twice. */
   reported: string | undefined;
-  /** The schema every turn of this session answers under, if there is one. */
+  /** The output schema every turn of this session must answer with, if any. */
   readonly outputSchema: OutputSchema | undefined;
   /**
-   * What the turn answered with: the arguments of the call to the answer tool,
-   * if the turn made that call. A turn that settles with no answer is asked
-   * again.
+   * The turn's answer: the arguments of its `submit_result` call, if it made
+   * one. A turn that settles with no answer is re-prompted.
    */
   answer: Record<string, unknown> | undefined;
-  /** How often this turn has been asked again for the tool. */
+  /** How many times this turn has been re-prompted to call `submit_result`. */
   reprompts: number;
   /**
-   * How many of this turn's answers pi refused because the arguments do not
-   * satisfy the schema. A model that cannot satisfy the schema answers the
-   * validator's complaint for as long as it is allowed to, so the asking has
-   * a bound.
+   * How many of this turn's answers pi rejected because the arguments do not
+   * match the schema. A model that cannot satisfy the schema keeps retrying
+   * for as long as it is allowed to, so the adapter limits the retries.
    */
   refusedAnswers: number;
 }
@@ -207,12 +208,13 @@ export const buildNormalizingState = (
 const buildSessionEnvelope = (state: Normalizing): Envelope =>
   buildEnvelope(state.sessionId, { nativeSessionId: state.nativeSessionId });
 
-/** The line the event was read off, under the channel this adapter files. */
+/** Returns the `raw` field for an event: the pi payload it came from, under this adapter's channel. */
 const buildLineRaw = (payload: unknown): ReturnType<typeof buildRaw> => buildRaw(PI_EVENT, payload);
 
 /**
- * The turn everything is filed under. pi opens a run without naming it, so an
- * event that arrives before the adapter sent anything still belongs to a turn.
+ * Returns the id of the turn in flight, creating one if there is none. pi
+ * starts runs without an id, and an event that arrives before the adapter sent
+ * an input still has to belong to a turn.
  */
 const ensureTurnId = (state: Normalizing): string => (state.turnId ??= crypto.randomUUID());
 
@@ -242,7 +244,7 @@ const resetTotals = (totals: Totals): void => {
   totals.cost = 0;
 };
 
-/** The message that ended the run: pi's own last assistant one. */
+/** Returns the message that ended the run: the last assistant message in the event. */
 const findLastAssistant = (event: PiEvent): PiMessage | undefined => {
   const messages = event.messages ?? [];
   for (let at = messages.length - 1; at >= 0; at -= 1) {
@@ -253,8 +255,9 @@ const findLastAssistant = (event: PiEvent): PiMessage | undefined => {
 };
 
 /**
- * How a turn ends, read off the message that ended it. Anything else - a stop,
- * a tool call, a length cap - is a turn that ran to its end.
+ * Returns how a turn ends, based on the stop reason of its last message:
+ * interrupted for an abort, failed with pi's error message for an error, and
+ * completed for anything else (a normal stop, a tool call, a length limit).
  */
 const classifyStop = (message: PiMessage | undefined): Normalizing["stopped"] => {
   const reason = message?.stopReason;
@@ -268,9 +271,9 @@ const classifyStop = (message: PiMessage | undefined): Normalizing["stopped"] =>
 };
 
 /**
- * Something went wrong that the turn does not end on: pi's own words, under
- * the name pi gave the thing that failed, so a class this build has not heard
- * of still reaches the user.
+ * Builds a `runtime.error` event for a failure that does not end the turn. It
+ * uses pi's own error message and a class name for what failed, so an error
+ * type this build does not know still reaches the user.
  */
 const buildRuntimeError = (state: Normalizing, name: string, message: string): ProviderEvent => ({
   _tag: "runtime.error",
@@ -282,20 +285,21 @@ const buildRuntimeError = (state: Normalizing, name: string, message: string): P
 
 const readText = (value: unknown): string => (typeof value === "string" ? value : "");
 
-/** How a turn the system ended reads, whatever pi says about the message. */
+/** How a turn the runner ended is reported, whatever pi says about the message. */
 const SYSTEM_ENDINGS: Readonly<
   Record<NonNullable<Normalizing["endedBySystem"]>, Normalizing["stopped"]>
 > = {
   interrupt: { state: "interrupted" },
-  // The turn ran to its end and it answered. The answer is what failed, and
-  // the result on the turn reports that.
+  // The turn ran to its end and answered. The answer is what failed, and the
+  // turn's result reports that.
   schema: { state: "completed" },
 };
 
 /**
- * Keeps the worst of the reasons that ended the run. An abort or an error is
- * announced on the message that carried it. Without this, a later message that
- * only stopped would report the turn as finished normally.
+ * Records how the run stopped, keeping the worst outcome seen so far. pi
+ * reports an abort or an error only on the message it happened to. Without
+ * this, a later message that stopped normally would make the turn look
+ * completed.
  */
 const recordStop = (state: Normalizing, message: PiMessage | undefined): void => {
   const ended =
@@ -303,7 +307,10 @@ const recordStop = (state: Normalizing, message: PiMessage | undefined): void =>
   if (ended.state !== "completed" || state.stopped.state === "completed") state.stopped = ended;
 };
 
-/** An answer pi cut at the model's output limit, which is not a failure. */
+/**
+ * Returns a warning when the model's message was cut off at its output limit.
+ * This is not a failure, so the turn still completes.
+ */
 const warnIfCutOff = (
   state: Normalizing,
   message: PiMessage | undefined,
@@ -324,7 +331,7 @@ const buildRuntimeWarning = (state: Normalizing, message: string): ProviderEvent
   message: truncateMessage(message),
 });
 
-/** The two streamed kinds of assistant content, and the item each one is. */
+/** The two kinds of streamed assistant content, and the item kind and stream kind of each. */
 const BLOCKS: Readonly<
   Record<string, { readonly kind: ItemKind; readonly streamKind: StreamKind }>
 > = {
@@ -332,7 +339,7 @@ const BLOCKS: Readonly<
   thinking: { kind: "reasoning", streamKind: "reasoning_text" },
 };
 
-/** pi's built-in tools in the taxonomy's vocabulary; everything else is a call. */
+/** The item kinds of pi's built-in tools. Any other tool is a `tool_call`. */
 const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   bash: "command_execution",
   powershell: "command_execution",
@@ -341,8 +348,8 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
 };
 
 /**
- * The one field of a tool item a reader wants in a row: what the command ran,
- * what the patch touched, what the tool was called. `raw` holds the rest.
+ * Builds the one detail field a row shows for a tool item: the command, the
+ * file path, or else the tool name. The full arguments are in `raw`.
  */
 const buildToolDetail = (
   toolName: string,
@@ -355,7 +362,7 @@ const buildToolDetail = (
   return { name: truncateFact(toolName) };
 };
 
-/** What a tool has produced so far, as one piece of text. */
+/** Returns a tool's output so far as one string. */
 const readToolOutput = (result: PiToolResult | undefined): string =>
   (result?.content ?? []).map((part) => part.text ?? "").join("");
 
@@ -411,8 +418,8 @@ const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<Provider
   const callId = typeof event.toolCallId === "string" ? event.toolCallId : "";
   const kind = TOOL_KINDS[toolName] ?? "tool_call";
   const item: RunningTool = {
-    // A call pi named nothing gets an id of its own: filing two of them under
-    // one id would make the second's output land on the first's row.
+    // A call with no id from pi gets a new one. Giving two such calls the same
+    // id would put the second call's output on the first call's row.
     itemId: callId === "" ? crypto.randomUUID() : ensureId(callId),
     kind,
     detail: buildToolDetail(toolName, event.args),
@@ -420,8 +427,8 @@ const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<Provider
     args: event.args,
     seen: "",
   };
-  // Held under the id it was given, or the one minted for it: an entry under
-  // the empty string would be every unnamed call's entry.
+  // Store the item under pi's call id, or under the new id when pi gave none.
+  // Otherwise every call without an id would share the "" key.
   state.tools.set(callId === "" ? item.itemId : callId, item);
   return [
     {
@@ -440,10 +447,10 @@ const onToolUpdate = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
   const item = state.tools.get(typeof event.toolCallId === "string" ? event.toolCallId : "");
   if (item === undefined) return [];
   const output = readToolOutput(event.partialResult);
-  // pi's snapshot is the whole output so far, so only the piece past what was
-  // already reported is new: sending the snapshot would print it all again. A
-  // snapshot that is not a continuation of the last one is sent whole, because
-  // there is nothing to append it to.
+  // pi sends the whole output so far, so only the part after what was already
+  // reported is new; sending the whole snapshot would repeat it. A snapshot
+  // that does not continue the previous one is sent whole, because there is
+  // nothing to append it to.
   const delta = output.startsWith(item.seen) ? output.slice(item.seen.length) : output;
   item.seen = output;
   return delta === ""
@@ -465,15 +472,14 @@ const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEv
   const item = state.tools.get(callId);
   if (item === undefined) return [];
   state.tools.delete(callId);
-  // This is the call the session answers through, and its arguments are the
-  // turn's answer. The extension registered the tool under this same schema.
-  // The arguments are read from the started call and not from this frame,
-  // because pi carries a call's arguments when the call starts, not when it
-  // ends.
+  // This is the `submit_result` call, and its arguments are the turn's
+  // answer. The extension registered the tool with this same schema. The
+  // arguments come from the call's start event, not this end event, because
+  // pi only includes a call's arguments when the call starts.
   if (state.outputSchema !== undefined && item.toolName === SUBMIT_RESULT_TOOL) {
     state.answer = item.args ?? {};
-    // pi validates a call against the same schema it registered the tool
-    // under, and gives a refusal back to the model as the call's own result.
+    // pi validates the call against the tool's schema, and returns a
+    // validation error to the model as the call's result.
     if (event.isError === true) state.refusedAnswers += 1;
   }
   const refused = state.declined.delete(callId);
@@ -492,15 +498,16 @@ const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEv
 };
 
 /**
- * The items that were still running when the turn ended. An item nobody closes
- * is a row that spins for the rest of the session, so a block pi stopped
- * mid-stream and a tool whose result never came are reported as failed.
+ * Completes, as failed, every item still running when the turn ends: a block
+ * pi stopped mid-stream, or a tool whose result never came. Returns the
+ * `item.completed` events. An item nobody completes would show a spinner for
+ * the rest of the session.
  */
 const failOpenItems = (state: Normalizing, turnId: string): ReadonlyArray<ProviderEvent> => {
   const open = [...state.blocks.values(), ...state.tools.values()];
   state.blocks.clear();
   state.tools.clear();
-  // A call nobody will report the end of takes its answer with it.
+  // These calls will never report an end, so their declined marks are dropped too.
   state.declined.clear();
   return open.map((item) => ({
     _tag: "item.completed",
@@ -514,10 +521,11 @@ const failOpenItems = (state: Normalizing, turnId: string): ReadonlyArray<Provid
 };
 
 /**
- * Judges the turn: the verdict it carries about the schema, if it carries one.
- * A turn that ran to its end is judged on what it answered, or on the absence
- * of an answer. An interrupt and a failure are about the turn itself, and a
- * schema verdict there would claim that an answer was judged and rejected.
+ * Returns the turn's structured result, or undefined when there is none. Only
+ * a completed turn of a session with an output schema has one: its answer, or
+ * the lack of one, is validated against the schema. An interrupted or failed
+ * turn gets no result, because a schema failure there would wrongly suggest
+ * that an answer was checked and rejected.
  */
 const judgeTurn = (state: Normalizing, ended: TurnState): StructuredResult | undefined => {
   const schema = state.outputSchema;
@@ -525,15 +533,17 @@ const judgeTurn = (state: Normalizing, ended: TurnState): StructuredResult | und
   return judgeAnswer(
     schema,
     state.answer === undefined
-      ? { missing: `the agent settled without calling ${SUBMIT_RESULT_TOOL}` }
+      ? { missing: `the agent finished without calling ${SUBMIT_RESULT_TOOL}` }
       : { value: state.answer },
   );
 };
 
 /**
- * Ends the turn in flight, with everything still running under it. Exported
- * because a pi that died mid-turn ends it too, and the adapter is the only
- * party that hears the process go.
+ * Ends the turn in flight and every item still running in it, and resets the
+ * turn state. `ended` overrides how the turn ended. Returns the closing
+ * events, or none when no turn is in flight. Exported because the adapter
+ * also ends the turn when pi exits mid-turn, and only the adapter sees the
+ * process exit.
  */
 export const endTurn = (
   state: Normalizing,
@@ -550,8 +560,8 @@ export const endTurn = (
   state.reported = undefined;
   state.stopped = { state: "completed" };
   state.endedBySystem = undefined;
-  // The answer and the asking belong to this turn. The next turn is asked from
-  // the start.
+  // The answer and the retry counts belong to this turn. The next turn starts
+  // from zero.
   state.answer = undefined;
   state.reprompts = 0;
   state.refusedAnswers = 0;
@@ -579,9 +589,9 @@ export const normalize = (
   state: Normalizing,
   line: string,
   /**
-   * The line already decoded, where the caller had to decode it anyway. A
-   * caller with nothing to hand over leaves it out and the line is decoded
-   * here, which is also how a line that is not JSON arrives.
+   * The line already parsed as JSON, when the caller has parsed it. When it
+   * is left out, the line is parsed here; a line that is not JSON also
+   * arrives without it.
    */
   decoded?: unknown,
 ): ReadonlyArray<ProviderEvent> => {
@@ -590,14 +600,14 @@ export const normalize = (
     try {
       event = JSON.parse(line) as PiEvent;
     } catch {
-      // One unreadable line must not take the session down: pi writes its own
-      // complaints down this pipe too, and a silent skip would hide them.
-      // Reported by its size rather than its content: a line pi could not
-      // frame is as likely to be a credential in a stack trace as a complaint.
+      // One unreadable line must not end the session, and skipping it silently
+      // would hide pi's own error output, which goes to this pipe too. The
+      // warning gives only the line's length, not its content, because the
+      // line could just as well contain a credential in a stack trace.
       return [
         buildRuntimeWarning(
           state,
-          `pi wrote a line of ${line.length} characters that is not an event`,
+          `pi wrote a line of ${line.length} characters that is not a valid event`,
         ),
       ];
     }
@@ -606,10 +616,10 @@ export const normalize = (
   }
   switch (event.type) {
     case "agent_start": {
-      // pi runs again for a retry, for a compaction and for a queued message,
-      // all under the turn it is already on: announcing it again would bracket
-      // one episode twice, and clearing the totals would throw away what the
-      // earlier attempts already cost.
+      // pi starts a new run for a retry, a compaction or a queued message, all
+      // within the current turn. Emitting `turn.started` again would split one
+      // turn in two, and resetting the totals would lose what the earlier
+      // runs already cost.
       if (state.announced) return [];
       state.announced = true;
       resetTotals(state.turnTotals);
@@ -624,38 +634,39 @@ export const normalize = (
       ];
     }
     case "turn_end":
-      // One assistant message and its tools, which is where pi prices its
-      // work: both the turn's own cost and the session's run through here.
+      // pi reports usage per assistant message and its tool calls, so both the
+      // turn's cost and the session's are summed here.
       addUsage(state.turnTotals, event.message?.usage);
       addUsage(state.sessionTotals, event.message?.usage);
       recordStop(state, event.message);
       return warnIfCutOff(state, event.message);
     case "agent_end":
-      // pi is about to run again under the same turn, so ending it here would
-      // report an episode as over while it is still going.
+      // pi is about to run again in the same turn, so ending the turn here
+      // would report it as over while it is still going.
       if (event.willRetry === true) {
-        return [buildRuntimeWarning(state, "pi hit an error it is retrying by itself")];
+        return [buildRuntimeWarning(state, "pi hit an error and is retrying by itself")];
       }
       recordStop(state, findLastAssistant(event));
-      // A run pi will not retry, that ended on an error: the turn carries the
-      // state, and this is what went wrong under it.
+      // pi will not retry this run. If it ended on an error, the turn records
+      // the failed state, and this event reports the error itself.
       if (state.stopped.state !== "failed") return warnIfCutOff(state, findLastAssistant(event));
       state.reported = state.stopped.error ?? "";
       return [buildRuntimeError(state, "agent_error", state.reported)];
     case "agent_settled":
       return endTurn(state);
     case "auto_retry_end":
-      // pi gave up retrying, which is the end of the attempts rather than of
-      // the turn: the settle that follows is what ends that. pi emits this
-      // after the `agent_end` carrying the same message, so a failure already
-      // reported off that message is not reported a second time.
+      // pi gave up retrying. That ends the attempts, not the turn: the settle
+      // that follows ends the turn. pi emits this after the `agent_end` with
+      // the same error, so an error already reported there is not reported
+      // again.
       if (event.success !== false) return [];
       return readText(event.finalError) === state.reported
         ? []
         : [buildRuntimeError(state, "auto_retry_failed", readText(event.finalError))];
     case "extension_error":
-      // Hercule's own extension is the only one a session loads, so this is a
-      // hook that threw: the user hears it rather than reading a quiet allow.
+      // Hercule's extension is the only one a session loads, so this means the
+      // approval hook threw. Report it, so the user does not mistake it for a
+      // silent allow.
       return [buildRuntimeError(state, "extension_error", readText(event.error))];
     case "message_update":
       return onBlockEvent(state, event);
@@ -666,8 +677,8 @@ export const normalize = (
     case "tool_execution_end":
       return onToolEnd(state, event);
     default:
-      // pi grows events between releases, and a live session must survive one
-      // this build has not heard of.
+      // New pi releases add event types, and a live session must survive one
+      // this build does not know.
       return [];
   }
 };

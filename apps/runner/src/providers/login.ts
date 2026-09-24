@@ -1,11 +1,13 @@
 /**
- * Driving a vendor's headless login: it prints a URL, then blocks on stdin for a
- * code the user pastes back. A pasted code is only good for the URL its own
- * child printed, so nothing is stored and a second login replaces the first.
+ * Runs a vendor's headless login. The login prints a URL, then waits on stdin
+ * for a code the user pastes back from the browser. A pasted code only works
+ * with the URL its own child process printed, so nothing is stored and a
+ * second login replaces the first.
  *
- * Every hold is acted on by identity, never by instance id: a caller that was
- * waiting when its child was replaced would otherwise kill the login the user is
- * halfway through.
+ * Every operation on a held login checks that it is the same login object,
+ * not just the same instance id. Otherwise a caller that was still waiting
+ * when its login was replaced would kill the login the user is halfway
+ * through.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -23,7 +25,7 @@ import { truncateFact } from "./text";
 export interface LoginChild {
   readonly stdout: AsyncIterable<string>;
   readonly stderr: AsyncIterable<string>;
-  /** Written to the child's stdin verbatim. */
+  /** Writes text to the child's stdin unchanged. */
   readonly write: (text: string) => void;
   readonly kill: () => void;
   readonly exited: Promise<number>;
@@ -48,21 +50,32 @@ export interface LoginCommand {
 export type LoginAnswer =
   Omit<LoginUrl, "requestId"> | Omit<LoginFailed, "requestId"> | Omit<LoginResult, "requestId">;
 
-/** A tab closed on the URL would otherwise block the vendor on stdin for ever. */
+/**
+ * How long a login may sit idle before it is killed. Without a limit, a
+ * browser tab closed on the URL would leave the vendor blocked on stdin forever.
+ */
 export const LOGIN_IDLE: Duration.Duration = Duration.minutes(10);
 
 /**
- * A device login is silent from its code to its exit, so the idle clock
- * cannot reach it; what bounds it is how long the code it printed is good for.
+ * How long a device login may run. A device login prints nothing between its
+ * code and its exit, so the idle timeout does not apply to it. The limit is how
+ * long the printed code stays valid.
  */
 export const LOGIN_CODE_LIFETIME: Duration.Duration = Duration.minutes(15);
 
-/** A vendor writes to stderr on its way out too, so a complaint may be overtaken. */
+/**
+ * How long to wait after a stderr line before treating it as a rejected code.
+ * A vendor also writes to stderr as it exits, so the exit may follow closely.
+ */
 export const COMPLAINT_GRACE: Duration.Duration = Duration.seconds(2);
 
 const NO_LOGIN = "no login in progress";
 
-/** The tail, not the head: the failure prints last, the vendor's banner first. */
+/**
+ * Returns the end of `value`, cut to the length the protocol allows, or
+ * `whenSilent` when `value` is blank. The end rather than the start, because
+ * the vendor prints its banner first and the failure last.
+ */
 const readTail = (value: string, whenSilent: string): string =>
   value.trim() === "" ? whenSilent : value.trim().slice(-MAX_FACT_LENGTH);
 
@@ -72,8 +85,9 @@ const buildLoginFailed = (message: string): LoginAnswer => ({
 });
 
 /**
- * Vendors print the URL inside an OSC 8 hyperlink, so read raw one address
- * becomes two with a control byte between them.
+ * Matches terminal escape sequences and control characters. Vendors print the
+ * URL inside an OSC 8 hyperlink, so the raw line holds the address twice with
+ * control bytes between the copies.
  */
 const CONTROL =
   // eslint-disable-next-line no-control-regex
@@ -107,20 +121,26 @@ interface Printed {
 interface Held {
   readonly child: LoginChild;
   /**
-   * The address, with the code beside it where the vendor prints one, or
-   * nothing when the child ended before it had printed both.
+   * The URL, plus the code when the vendor prints one. Resolves to `undefined`
+   * when the child stops printing before both have appeared.
    */
   readonly printed: Promise<Printed | undefined>;
-  /** A login that prints a code reads nothing back: nobody submits to it. */
+  /**
+   * Whether this is a device login. It prints a code and reads nothing, so nothing can be submitted
+   * to it.
+   */
   readonly device: boolean;
-  /** The address on its own, which is what tells a half-printed login from a silent one. */
+  /**
+   * The URL on its own. It tells a login that printed only the URL apart from one that printed
+   * nothing.
+   */
   readonly address: () => string | undefined;
-  /** Gives up on `printed`, for a child that was killed before it printed. */
+  /** Resolves `printed` with `undefined`, for a child that was killed before it printed. */
   readonly abandon: () => void;
   /** Resolves with the child's next complaint, and never when it ends first. */
   readonly nextComplaint: () => Promise<string>;
   readonly transcript: () => string;
-  /** Absent only between the spawn and the first turn of the clock. */
+  /** The expiry timer. Undefined only between the spawn and the first call to `armExpiry`. */
   idle: Fiber.Fiber<void> | undefined;
 }
 
@@ -147,16 +167,16 @@ export const makeLogins = (
   const stopLogin = (instanceId: string, login: Held): Effect.Effect<void> =>
     Effect.suspend(() => {
       login.child.kill();
-      // A killed child's pipes do not always end, so the reader cannot be the
-      // one to say this login has nothing more to print.
+      // A killed child's pipes do not always close, so the stdout reader cannot
+      // be relied on to resolve `printed`.
       login.abandon();
       return forgetLogin(instanceId, login);
     });
 
   /**
-   * Restarts the clock on a login that just showed a sign of life. A device
-   * login shows none - it is read from, never written to - so its clock is the
-   * lifetime of the code it printed, armed once here and never restarted.
+   * Restarts the expiry timer of a login that just showed activity. A device
+   * login shows none, because nothing is ever written to it. Its timer is the
+   * lifetime of the code it printed, started once and never restarted.
    */
   const armExpiry = (instanceId: string, login: Held): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -182,9 +202,9 @@ export const makeLogins = (
         settle = resolve;
       });
       /**
-       * Both halves or neither: an address answered before the code beside it
-       * has been read would send the user to a page they cannot get past. A
-       * command that names no pattern is complete at the address.
+       * Returns the URL and code only once both have been read. Returning the
+       * URL before its code would send the user to a page they cannot get past.
+       * For a command with no code pattern, the URL alone is complete.
        */
       const buildPrinted = (): Printed | undefined =>
         url === undefined || (pattern !== undefined && userCode === undefined)
@@ -202,15 +222,16 @@ export const makeLogins = (
         const found = buildPrinted();
         if (found !== undefined) settle(found);
       }).catch(() => undefined);
-      // The reader, not the exit, is what says a child has stopped printing: a
-      // child that exits on the line after its code has still printed both.
+      // Treat the end of stdout, not the process exit, as the end of the
+      // output: a child that exits right after printing its code has still
+      // printed both.
       void spent.then(() => {
         settle(buildPrinted());
       });
       void readLines(child.stderr, (line) => {
         transcript = `${transcript}${line}\n`.slice(-MAX_TRANSCRIPT);
-        // A blank line is the vendor's formatting, not a complaint, and the
-        // protocol will not carry it as one.
+        // A blank line is formatting, not an error message, and the protocol
+        // does not accept an empty message.
         if (line.trim() === "") return;
         for (const waiting of complaints.splice(0)) waiting(line);
       }).catch(() => undefined);
@@ -230,7 +251,7 @@ export const makeLogins = (
         idle: undefined,
       };
       held.set(instanceId, login);
-      // A vendor that gave up on its own is not a login anyone can still finish.
+      // Once the vendor exits on its own, nobody can finish this login.
       void child.exited
         .then(() => Effect.runPromise(forgetLogin(instanceId, login)))
         .catch(() => undefined);
@@ -247,16 +268,16 @@ export const makeLogins = (
         if (ctx.binary === undefined) {
           return buildLoginFailed(`no ${adapter.binaryName} on this machine`);
         }
-        // The code a user pastes is only good for the URL of the child that
-        // printed it, so two logins for one instance cannot both be waiting.
+        // A pasted code only works with the URL of the child that printed it,
+        // so only one login per instance can be waiting.
         const previous = held.get(instanceId);
         if (previous !== undefined) yield* stopLogin(instanceId, previous);
         const login = yield* openLogin(instanceId, adapter.login(ctx, ctx.binary));
         const printed = yield* Effect.promise(() => login.printed);
         if (printed === undefined) {
           yield* stopLogin(instanceId, login);
-          // A device login that printed its address and stopped is a login with
-          // no code to show, which is not the same as one that printed nothing.
+          // A device login that printed its URL but no code fails for a
+          // different reason than one that printed nothing, so the messages differ.
           return buildLoginFailed(
             readTail(
               login.transcript(),
@@ -266,11 +287,11 @@ export const makeLogins = (
             ),
           );
         }
-        // Cutting it would hand the browser an address that cannot complete the
-        // login, which is worse than saying the vendor printed something odd.
+        // A truncated URL cannot complete the login in the browser, so fail with
+        // a clear message instead.
         if (printed.url.length > MAX_AUTHORIZE_URL_LENGTH) {
           yield* stopLogin(instanceId, login);
-          return buildLoginFailed("the login printed an address too long to relay");
+          return buildLoginFailed("the login printed a URL that is too long to pass on");
         }
         return {
           _tag: "loginUrl",
@@ -283,14 +304,17 @@ export const makeLogins = (
       Effect.gen(function* () {
         const login = held.get(instanceId);
         if (login === undefined) return buildLoginFailed(NO_LOGIN);
-        // The user types this login's code into the browser, and the browser
-        // finishes it with the vendor: there is nothing here to hand a code to
-        // and nothing to wait for.
-        if (login.device) return buildLoginFailed("this login takes no code");
+        // For a device login the user types the code into the browser, and the
+        // browser completes the login with the vendor. The child reads nothing,
+        // so there is nothing to submit and nothing to wait for.
+        if (login.device)
+          return buildLoginFailed(
+            "this login does not accept a code here; type the code it showed into the browser",
+          );
         yield* armExpiry(instanceId, login);
         yield* Effect.sync(() => {
-          // The newline is what makes it a line: the vendor is reading one, and
-          // without it the child waits for ever on a code it already has.
+          // Add a newline: the vendor reads a whole line, and without it the
+          // child would wait forever for a code it already has.
           login.child.write(`${code}\n`);
         });
         const ended = Effect.promise(() => login.child.exited);
@@ -301,12 +325,13 @@ export const makeLogins = (
           ]),
         );
         if ("complaint" in outcome) {
-          // The vendor writes to stderr on its way out too, so a complaint only
-          // means a refused code once the child has proved it is staying.
+          // The vendor also writes to stderr as it exits, so a stderr line only
+          // means the code was rejected if the child is still running after the
+          // grace period.
           const after = yield* Effect.timeoutOption(ended, COMPLAINT_GRACE);
           if (after._tag === "None") {
-            // It re-prompts rather than giving up, so the child stays and the
-            // user gets another go at the same URL.
+            // The vendor asks again rather than exiting, so keep the child: the
+            // user can try again with the same URL.
             return { _tag: "loginResult", ok: false, message: truncateFact(outcome.complaint) };
           }
           yield* forgetLogin(instanceId, login);
@@ -316,8 +341,8 @@ export const makeLogins = (
         return buildLoginResult(outcome.exit, login.transcript());
       }),
 
-    // Suspended: the map is read when shutdown runs, not when this object is
-    // built, which is before any login exists.
+    // Suspend, so the map is read when shutdown runs rather than when this
+    // object is built, which is before any login exists.
     stopAll: Effect.suspend(() =>
       Effect.forEach([...held], ([instanceId, login]) => stopLogin(instanceId, login), {
         discard: true,

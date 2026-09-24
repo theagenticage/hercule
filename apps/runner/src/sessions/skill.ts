@@ -1,13 +1,13 @@
 /**
- * What an agent inside a session is told about Hercule: one provider-agnostic
- * text, materialized into each harness's own channel by its adapter (spec 06
- * section 9.3).
+ * The text that tells an agent inside a session about Hercule. The text is the
+ * same for every provider; each adapter delivers it to its harness in the way
+ * that harness reads skills (spec 06 section 9.3).
  *
- * A skeleton on purpose (spec 11 section 6.3, "Progressive disclosure"): the
- * CLI's own help is generated from the contract and is therefore always
- * current, while anything spelled out here is a second copy to keep true. It
- * names the three help forms and nothing else, and the test beside it holds it
- * to that against the contract's CLI table.
+ * The text is kept minimal on purpose (spec 11 section 6.3, "Progressive
+ * disclosure"). The CLI's own help is generated from the contract, so it is
+ * always current, while anything written out here is a second copy that can go
+ * stale. So the skill names the three help forms and nothing else, and
+ * `skill.test.ts` checks that against the contract's CLI table.
  */
 export const HERCULE_SKILL = `# hercule
 

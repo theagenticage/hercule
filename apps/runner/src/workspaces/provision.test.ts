@@ -1,10 +1,10 @@
 /**
- * What the runner makes when the controller asks for a workspace.
+ * Tests for provisioning workspaces.
  *
  * Every repository here is real: a bare "remote" on disk, reached over
- * `file://` so no credential is in play, and real clones and worktrees made by
- * real git. The assertions are on what a user would find afterwards - a branch,
- * a file, an untouched folder - not on how the runner got there.
+ * `file://` so no credential is needed, and real clones and worktrees made by
+ * real git. The assertions check what a user would find afterwards (a branch,
+ * a file, an untouched folder), not how the runner got there.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -30,7 +30,10 @@ const createStorageDir = (): string => createTemporaryDir("hercule-storage-");
 const buildCacheDir = (storageDir: string, resourceId: string): string =>
   join(storageDir, "cache", `${resourceId}.git`);
 
-/** Whether a process is gone, given the moment it takes a signal to land. */
+/**
+ * Checks whether a process exits within `within` milliseconds. It polls,
+ * because a signal takes a moment to land.
+ */
 const isGoneWithin = async (pid: number, within: number): Promise<boolean> => {
   const until = Date.now() + within;
   while (Date.now() < until) {
@@ -75,9 +78,9 @@ describe("a primary cloned fresh", () => {
   });
 
   /**
-   * AD-5, under D-20a: adopting in place is not built, so what must be proved
-   * is the other half of the same promise - a checkout of this repository that
-   * the user already has on this machine is not read, written or moved.
+   * Hercule never takes over a folder the user already has. This checks that a
+   * checkout of the same repository that the user already has on this machine
+   * is left unchanged.
    */
   it("leaves a checkout of the same repository the user already has untouched", async () => {
     const remote = makeRemote();
@@ -107,7 +110,7 @@ describe("a primary cloned fresh", () => {
 });
 
 describe("an ephemeral workspace", () => {
-  it("is a worktree on a new branch, from the base branch that was asked for", async () => {
+  it("is a worktree on a new branch, created from the requested base branch", async () => {
     const remote = makeRemote();
     const base = addBranch(remote, "release");
     const storageDir = createStorageDir();
@@ -193,8 +196,8 @@ describe("an ephemeral workspace", () => {
   });
 });
 
-describe("a cache that has seen the branches agents made", () => {
-  it("still provisions once an agent's branch is on the remote too", async () => {
+describe("provisioning from a shared cache", () => {
+  it("still provisions after an agent has pushed its branch to the remote", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const resourceId = createId();
@@ -209,7 +212,7 @@ describe("a cache that has seen the branches agents made", () => {
         ],
       }),
     );
-    // What an agent does with its worktree: it commits and pushes the branch.
+    // What an agent does in its worktree: it commits and pushes the branch.
     const directory = join(storageDir, "workspaces", first);
     writeFileSync(join(directory, "work.txt"), "what the agent did\n");
     runGitOrThrow(directory, "add", ".");
@@ -225,13 +228,14 @@ describe("a cache that has seen the branches agents made", () => {
       }),
     );
 
-    // The branch is checked out here and now exists on the remote: a refresh
-    // that fetched over it would refuse, and every later workspace with it.
+    // The agent's branch is checked out in a worktree and now also exists on
+    // the remote. A fetch into `refs/heads` would fail on it, and so would
+    // every later workspace.
     expect(second.status).toBe("ready");
     expect(second.checkouts?.[0]?.branch).toBe("hercule/run-bbbbbbbb");
   });
 
-  it("gives a worktree off the primary's cache the repository's own remote", async () => {
+  it("points a worktree created from the primary's cache at the real remote", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const resourceId = createId();
@@ -260,11 +264,11 @@ describe("a cache that has seen the branches agents made", () => {
     expect(
       runGitOrThrow(join(storageDir, "workspaces", workspaceId), "remote", "get-url", "origin"),
     ).toBe(remote.url);
-    // And the branch it was told to start from is the repository's own default.
+    // And the reported default branch is the repository's own.
     expect(report.checkouts?.[0]?.defaultBranch).toBe("main");
   });
 
-  it("removes the worktrees it made when a later repository cannot be", async () => {
+  it("removes the worktrees it created when a later repository fails", async () => {
     const web = makeRemote();
     const api = makeRemote();
     const storageDir = createStorageDir();
@@ -296,7 +300,7 @@ describe("a cache that has seen the branches agents made", () => {
     expect(report.status).toBe("failed");
     const root = join(storageDir, "workspaces", workspaceId);
     expect(existsSync(root)).toBe(false);
-    // And no cache is left believing a worktree of its own lives over there.
+    // And no cache still lists a worktree there.
     expect(runGitOrThrow(buildCacheDir(storageDir, webResource), "worktree", "list")).not.toContain(
       root,
     );
@@ -333,7 +337,7 @@ describe("the setup command", () => {
     expect(readFileSync(ran, "utf8")).toBe("/tmp/hercule-test.sock\n");
   });
 
-  it("fails the workspace with its last 20 lines, leaving the directory in place", async () => {
+  it("fails the workspace with the last 20 lines of output, and leaves the directory in place", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
@@ -354,17 +358,17 @@ describe("the setup command", () => {
     );
 
     expect(report.status).toBe("failed");
-    // The tail is what says why; the head of a long install log is noise.
+    // The end of the output usually shows why; the start of a long install log is noise.
     expect(report.message ?? "").toContain("line30");
     expect(report.message ?? "").toContain("line11");
     expect(report.message ?? "").not.toContain("line10");
-    // Left in place: the user is the one who decides to throw the work away.
+    // Left in place: the user decides whether to throw the work away.
     expect(existsSync(join(storageDir, "workspaces", workspaceId))).toBe(true);
   });
 });
 
 describe("a setup command that will not finish", () => {
-  it("is stopped at the deadline and reported, rather than left to hold the session", async () => {
+  it("is stopped at the deadline and reported as failed, so the session does not wait forever", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
@@ -386,14 +390,14 @@ describe("a setup command that will not finish", () => {
 
     expect(report.status).toBe("failed");
     expect(report.message ?? "").toContain("still running");
-    // What it managed to say before it was stopped is what tells the user where
-    // it got stuck.
+    // The output printed before it was stopped shows the user where it got
+    // stuck.
     expect(report.message ?? "").toContain("installing");
   });
 });
 
 describe("a workspace whose setup command failed", () => {
-  it("is re-reported when the frame comes again, rather than made a second time", async () => {
+  it("is reported again when the frame is resent, instead of created a second time", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
@@ -414,12 +418,12 @@ describe("a workspace whose setup command failed", () => {
     const directory = join(storageDir, "workspaces", workspaceId);
     writeFileSync(join(directory, "half-done.txt"), "what the install got through\n");
 
-    // The controller resends what it did not see answered, or what a runner
-    // that dialled in again still owes it.
+    // The controller resends a frame it got no report for, and resends frames
+    // to a runner that reconnects.
     const again = await makeWorkspaces({ storageDir }).provision(frame);
 
-    // Making it again would fail on the branch that already exists and take the
-    // directory the user was told they could look at with it.
+    // Creating it again would fail on the branch that already exists, and would
+    // remove the directory the user was told they could inspect.
     expect(again.status).toBe("ready");
     expect(again.checkouts?.[0]?.branch).toBe("hercule/run-7c7c7c7c");
     expect(readFileSync(join(directory, "half-done.txt"), "utf8")).toBe(
@@ -427,7 +431,7 @@ describe("a workspace whose setup command failed", () => {
     );
   });
 
-  it("takes everything the setup command started down with it at the deadline", async () => {
+  it("kills every process the setup command started when the deadline passes", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
 
@@ -439,8 +443,8 @@ describe("a workspace whose setup command failed", () => {
             resourceId: createId(),
             remote: remote.url,
             branch: "hercule/run-8e8e8e8e",
-            // A watcher of its own, which is what an install that hangs looks
-            // like: the shell waits on a child that holds the pipes open.
+            // A background process, like an install that hangs: the shell
+            // waits on a child that holds the pipes open.
             setupCommand: "sleep 60 & echo grandchild=$!; wait",
           }),
         ],
@@ -450,8 +454,8 @@ describe("a workspace whose setup command failed", () => {
     expect(report.status).toBe("failed");
     const started = Number(/grandchild=(\d+)/.exec(report.message ?? "")?.[1]);
     expect(started).toBeGreaterThan(0);
-    // Killing the shell alone would leave this running, holding the workspace
-    // the machine is about to give up on.
+    // Killing only the shell would leave this process running in the
+    // workspace.
     expect(await isGoneWithin(started, 2_000)).toBe(true);
   });
 });
@@ -464,7 +468,7 @@ describe(".workspaceinclude", () => {
     writeFileSync(join(folder, "config", "local.json"), "{}\n");
   };
 
-  it("copies what the primary lists into the worktree", async () => {
+  it("copies the files the primary lists into the worktree", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const resourceId = createId();
@@ -475,7 +479,7 @@ describe(".workspaceinclude", () => {
         checkouts: [buildCheckout({ resourceId, remote: remote.url })],
       }),
     );
-    // The primary is Hercule's own clone, so what it lists is written there.
+    // The primary is Hercule's own clone, so the test writes the list and files there.
     writeWorkspaceInclude(
       join(storageDir, "primaries", resourceId),
       "# what the agent needs\n\n.env\nconfig/local.json\n",
@@ -501,12 +505,12 @@ describe(".workspaceinclude", () => {
     const directory = join(storageDir, "workspaces", workspaceId);
     expect(readFileSync(join(directory, ".env"), "utf8")).toBe("SECRET=local\n");
     expect(readFileSync(join(directory, "config", "local.json"), "utf8")).toBe("{}\n");
-    // A comment and a blank line are neither paths nor a failure.
+    // Comment lines and blank lines are skipped, not treated as paths or errors.
     expect(existsSync(join(directory, "# what the agent needs"))).toBe(false);
     expect(report.warnings ?? []).toEqual([]);
   });
 
-  it("warns rather than fails when this machine holds no primary of the repository", async () => {
+  it("warns instead of failing when this runner has no primary for the repository", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
@@ -529,7 +533,7 @@ describe(".workspaceinclude", () => {
     // The workspace is usable; the user is told what it does not have.
     expect(report.status).toBe("ready");
     expect(report.warnings?.length).toBe(1);
-    expect(report.warnings?.[0] ?? "").toContain("no primary");
+    expect(report.warnings?.[0] ?? "").toContain("no main workspace");
     expect(report.warnings?.[0] ?? "").toContain(".workspaceinclude skipped");
     expect(
       runGitOrThrow(

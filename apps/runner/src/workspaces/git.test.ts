@@ -1,8 +1,8 @@
 /**
- * The git calls a workspace is made of, against real repositories.
+ * Tests the git helpers against real repositories.
  *
- * What is asserted here is what a user would find afterwards: an edit they had
- * not committed, a branch that is still theirs.
+ * The assertions check what a user would find afterwards: an edit they had not
+ * committed is still there, and a branch is still theirs.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -32,7 +32,7 @@ describe("switching a checkout to a branch", () => {
     expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
   });
 
-  it("refuses a name that is a file rather than a branch, and keeps the edit under it", async () => {
+  it("fails on a name that is a file rather than a branch, and keeps the uncommitted edit to that file", async () => {
     const remote = makeRemote();
     const folder = cloneUserCheckout(remote);
     // The user's uncommitted work, in a file whose name could be read as a

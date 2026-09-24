@@ -1,19 +1,15 @@
 /**
- * The Codex normalizer: one decoded app-server notification plus a per-session
- * running state in, normalized events out. Nothing here starts a process.
+ * Tests for the Codex normalizer, which takes one decoded app-server
+ * notification and a per-session state, and returns normalized events.
+ * Nothing here starts a process.
  *
  * The frames are trimmed from the generated types of codex 0.154.0 under
- * `generated/v2/` - `TurnStartedNotification`, `ItemCompletedNotification`,
- * `ThreadItem`, the four delta notifications, `ThreadTokenUsageUpdatedNotification`
- * and `ErrorNotification` - keeping the fields a normalizer could read and
- * dropping the rest, never reshaping one.
+ * `generated/v2/`: `TurnStartedNotification`, `ItemCompletedNotification`,
+ * `ThreadItem`, the four delta notifications,
+ * `ThreadTokenUsageUpdatedNotification` and `ErrorNotification`. They keep the
+ * fields a normalizer could read and drop the rest; no field is reshaped.
  *
- * Assumed surface, because the module is the implementer's to name: the two
- * exports mirror `claude-code-normalize.ts`, `buildNormalizingState(sessionId, threadId)`
- * builds the running state and `normalize(state, notification)` takes one
- * decoded `{ method, params }` frame off the wire. Event ids and the `at`
- * instant are the module's own business and nothing below reads them. Rename
- * either export and these tests follow.
+ * Event ids and the `at` timestamp are not checked here.
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderEvent } from "@hercule/protocol";
@@ -24,10 +20,10 @@ const THREAD = "0199e0e7-0000-7000-8000-0000000000fe";
 const TURN = "0199e0e7-0000-7000-8000-0000000000fd";
 const ITEM = "item_0";
 
-/** The one channel every raw payload from this adapter is filed under. */
+/** The channel name every raw payload from this adapter is filed under. */
 const SOURCE = "codex.app-server.notification";
 
-/** A frame as the codec hands it over: the method, and the params verbatim. */
+/** A notification as the codec passes it on: the method, and the params unchanged. */
 interface Note {
   readonly method: string;
   readonly params: unknown;
@@ -42,7 +38,7 @@ const normalizeNotes = (
   notes: ReadonlyArray<Note>,
 ): ReadonlyArray<ProviderEvent> => notes.flatMap((frame) => normalize(running, frame));
 
-/** A whole sequence against a state of its own, which is the common case. */
+/** Normalizes a sequence of notifications against a fresh state, which is the common case. */
 const normalizeFromStart = (notes: ReadonlyArray<Note>): ReadonlyArray<ProviderEvent> =>
   normalizeNotes(buildTestState(), notes);
 
@@ -55,7 +51,7 @@ const filterByTag = <Tag extends ProviderEvent["_tag"]>(
 ): ReadonlyArray<Extract<ProviderEvent, { _tag: Tag }>> =>
   events.filter((event): event is Extract<ProviderEvent, { _tag: Tag }> => event._tag === tag);
 
-/** A turn as `Turn` shapes it, trimmed to what a normalizer could read. */
+/** Builds a `Turn`, trimmed to the fields a normalizer could read. */
 const buildTurn = (status: string) => ({
   id: TURN,
   items: [],
@@ -135,7 +131,7 @@ describe("what a whole Codex turn normalizes to", () => {
     });
   });
 
-  it("files every event under the app-server channel and names the native thread", () => {
+  it("files every event under the app-server channel and includes the native thread id", () => {
     const events = normalizeFromStart([
       TURN_STARTED,
       ITEM_STARTED,
@@ -146,16 +142,16 @@ describe("what a whole Codex turn normalizes to", () => {
 
     expect(events).not.toEqual([]);
     for (const event of events) {
-      // Without the thread id nothing joins the event to the native thread.
+      // Without the thread id, nothing links the event to the native thread.
       expect(event.providerRefs?.["threadId"]).toBe(THREAD);
-      // A delta carries no copy of its own frame: a turn is thousands of them,
-      // and the payload is the delta the event already holds. Everything else
-      // says whose payload it is holding.
+      // A delta has no copy of its frame: a turn has thousands of deltas, and
+      // the event already holds the delta itself. Every other event names the
+      // channel of the payload it holds.
       expect(event.raw?.source).toBe(event._tag === "content.delta" ? undefined : SOURCE);
     }
   });
 
-  it("carries each way a turn can end into the state the taxonomy names", () => {
+  it("maps each Codex end status to the matching turn state", () => {
     const ends: ReadonlyArray<readonly [string, string]> = [
       ["completed", "completed"],
       ["failed", "failed"],
@@ -169,9 +165,9 @@ describe("what a whole Codex turn normalizes to", () => {
     }
   });
 
-  it("says nothing about a turn that is still running", () => {
-    // `inProgress` is a status the notification may carry; a turn that has not
-    // ended is not a boundary, and reporting one would close it downstream.
+  it("emits no turn.completed for a turn that is still running", () => {
+    // The notification may carry `inProgress`. Reporting that as a completion
+    // would mark the turn as ended downstream.
     const events = normalizeFromStart([TURN_STARTED, buildTurnCompleted("inProgress")]);
 
     expect(filterByTag(events, "turn.completed")).toEqual([]);
@@ -179,13 +175,13 @@ describe("what a whole Codex turn normalizes to", () => {
 });
 
 /**
- * One `ThreadItem` per union member, trimmed, with the kind it maps to - or
- * `null` where it is reported as nothing at all.
+ * One trimmed `ThreadItem` per union member, with the kind it maps to, or
+ * `null` when it is not reported at all.
  */
 const ITEMS: ReadonlyArray<readonly [Record<string, unknown>, string | null]> = [
   // `userMessage` is Codex echoing back what Hercule sent. The adapter reports
-  // that input itself, with whether it steered - which an echo cannot say - so
-  // the echo is dropped rather than reported as a second item.
+  // that input itself, including whether it steered the turn, which the echo
+  // does not include. So the echo is dropped rather than reported twice.
   [{ type: "userMessage", id: "i1", clientId: null, content: [] }, null],
   [{ type: "agentMessage", id: "i2", text: "hi" }, "assistant_message"],
   [{ type: "reasoning", id: "i3", summary: ["thought"], content: [] }, "reasoning"],
@@ -239,7 +235,7 @@ const ITEMS: ReadonlyArray<readonly [Record<string, unknown>, string | null]> = 
   [{ type: "imageGeneration", id: "i17" }, "unknown"],
   [{ type: "enteredReviewMode", id: "i18", review: "r" }, "unknown"],
   [{ type: "exitedReviewMode", id: "i19", review: "r" }, "unknown"],
-  // Not a member of the union at 0.154.0: the forward-compatible case.
+  // Not in the union at 0.154.0: an item type added by a later release.
   [{ type: "somethingCodexGrew", id: "i20" }, "unknown"],
 ];
 
@@ -252,7 +248,7 @@ const buildItemCompleted = (item: Record<string, unknown>): Note =>
   });
 
 describe("the kind each Codex item is reported as", () => {
-  it("maps every item type this release has, and calls the rest unknown", () => {
+  it("maps every item type in this release, and reports any other type as unknown", () => {
     for (const [item, kind] of ITEMS) {
       const events = normalizeFromStart([buildItemCompleted(item)]);
 
@@ -263,7 +259,7 @@ describe("the kind each Codex item is reported as", () => {
     }
   });
 
-  it("keeps the payload of an item it has no kind for, so nothing is lost", () => {
+  it("keeps the payload of an unknown item type in raw, so nothing is lost", () => {
     const item = { type: "somethingCodexGrew", id: "i20", note: "kept" };
 
     const events = normalizeFromStart([buildItemCompleted(item)]);
@@ -274,9 +270,9 @@ describe("the kind each Codex item is reported as", () => {
     expect(JSON.stringify(reported?.raw?.payload)).toContain("somethingCodexGrew");
   });
 
-  it("reports a command and a patch the user refused as declined, not as failed", () => {
-    // A declined item is the user's answer, and a surface that read it as a
-    // failure would show the agent as broken rather than as refused.
+  it("reports a command and a patch the user declined as declined, not as failed", () => {
+    // A declined item is the user's decision. A surface that showed it as a
+    // failure would make the agent look broken.
     const command = normalizeFromStart([
       buildItemCompleted({
         type: "commandExecution",
@@ -325,15 +321,15 @@ describe("which reasoning channel a session streams", () => {
     ]);
   });
 
-  it("streams raw reasoning only, once raw came first", () => {
+  it("streams only raw reasoning when raw arrives first", () => {
     const running = buildTestState();
 
     const first = normalizeNotes(running, [buildRawDelta("Because ")]);
     const second = normalizeNotes(running, [buildSummaryDelta("Weighing the options")]);
 
     expect(listStreamedDeltas(first)).toEqual([["reasoning_text", "Because "]]);
-    // The summary is the same thinking said twice: emitting both would double
-    // the item's text, and there is no third stream kind to put it on.
+    // The summary repeats the same reasoning: emitting both would double the
+    // item's text, and there is no separate stream kind for summaries.
     expect(listStreamedDeltas(second)).toEqual([]);
   });
 
@@ -352,7 +348,7 @@ describe("which reasoning channel a session streams", () => {
     expect(listStreamedDeltas(after)).toEqual([["reasoning_text", "it is faster"]]);
   });
 
-  it("streams an assistant message as text and a command's output", () => {
+  it("streams an assistant message as assistant text and a command's output as command output", () => {
     const message = normalizeFromStart([
       buildDeltaNote("item/agentMessage/delta", { delta: "Hello" }),
     ]);
@@ -400,11 +396,11 @@ const buildErrorNote = (
     turnId: TURN,
   });
 
-describe("what a session reports about its usage and its failures", () => {
-  it("reports the running total, not what the last turn cost", () => {
+describe("what a session reports about its usage and its errors", () => {
+  it("reports the running total, not the last turn's usage", () => {
     const events = normalizeFromStart([USAGE]);
 
-    // `last` is one turn's; the taxonomy's snapshot is cumulative, and
+    // `last` covers one turn, but the usage snapshot is cumulative:
     // reporting `last` would make the session look like it never grew.
     expect(filterByTag(events, "session.usage.updated")[0]?.usage).toMatchObject({
       inputTokens: 1200,
@@ -413,7 +409,7 @@ describe("what a session reports about its usage and its failures", () => {
     });
   });
 
-  it("names the error class Codex named, whichever shape it named it in", () => {
+  it("reports Codex's error class, whether it is a string or an object key", () => {
     const string = normalizeFromStart([buildErrorNote("usageLimitExceeded")]);
     const object = normalizeFromStart([
       buildErrorNote({ httpConnectionFailed: { httpStatusCode: 503 } }),
@@ -422,11 +418,11 @@ describe("what a session reports about its usage and its failures", () => {
 
     expect(filterByTag(string, "runtime.error")[0]?.class).toBe("usageLimitExceeded");
     expect(filterByTag(object, "runtime.error")[0]?.class).toBe("httpConnectionFailed");
-    // An error with no class is still an error: reporting nothing would lose it.
+    // An error with no class is still reported, so it is not lost.
     expect(filterByTag(absent, "runtime.error")[0]?.class).toBe("unknown");
   });
 
-  it("warns rather than fails when Codex says it is retrying by itself", () => {
+  it("emits a warning, not an error, when Codex is retrying by itself", () => {
     const events = normalizeFromStart([buildErrorNote("serverOverloaded", { willRetry: true })]);
 
     expect(listEventTags(events)).toEqual(["runtime.warning"]);
@@ -437,8 +433,8 @@ describe("what a session reports about its usage and its failures", () => {
 const readItemDetail = (events: ReadonlyArray<ProviderEvent>): unknown =>
   filterByTag(events, "item.completed")[0]?.detail;
 
-describe("what a surface reads off an item without opening it", () => {
-  it("names the command a shell item ran and the path a patch touched", () => {
+describe("the detail a surface shows for an item without opening it", () => {
+  it("includes the command a shell item ran and the paths a patch touched", () => {
     const command = normalizeFromStart([
       buildItemCompleted({
         type: "commandExecution",
@@ -471,14 +467,14 @@ describe("what a surface reads off an item without opening it", () => {
 
     expect(readItemDetail(command)).toEqual({ command: "pnpm test" });
     expect(readItemDetail(one)).toEqual({ path: "/tmp/work/a.ts" });
-    // The first path is the row; the rest are there for a reader who opens it.
+    // The row shows the first path; the full list is for a reader who opens the item.
     expect(readItemDetail(many)).toEqual({
       path: "/tmp/work/a.ts",
       paths: ["/tmp/work/a.ts", "/tmp/work/b.ts"],
     });
   });
 
-  it("names the tool a call reached for, and says whose tool it was", () => {
+  it("includes the name of the tool called, and whether it is an MCP or a native tool", () => {
     const mcp = normalizeFromStart([
       buildItemCompleted({
         type: "mcpToolCall",
@@ -510,7 +506,7 @@ describe("what a surface reads off an item without opening it", () => {
     expect(readItemDetail(output)).toEqual({ name: "lookup", kind: "native" });
   });
 
-  it("names what a search looked for and which collab tool a subagent used", () => {
+  it("includes a web search's query and the collab tool a subagent used", () => {
     const search = normalizeFromStart([
       buildItemCompleted({ type: "webSearch", id: "i10", query: "codex app-server" }),
     ]);
@@ -529,9 +525,9 @@ describe("what a surface reads off an item without opening it", () => {
     expect(readItemDetail(collab)).toEqual({ name: "spawnAgent" });
   });
 
-  it("says nothing about an item whose own text is the whole of it", () => {
-    // A row for a plan or an assistant message reads the item's text, and a
-    // detail repeating it would be a second copy to keep in step.
+  it("has no detail for an item that is shown by its own text", () => {
+    // A row for a plan or an assistant message shows the item's text, and a
+    // detail repeating it would be a second copy to keep in sync.
     for (const item of [
       { type: "plan", id: "i12", text: "1. look" },
       { type: "agentMessage", id: "i13", text: "hi" },
@@ -546,7 +542,7 @@ describe("what a surface reads off an item without opening it", () => {
     }
   });
 
-  it("reports an item Codex opens with the same detail it closes it with", () => {
+  it("includes the same detail on item.started as on item.completed", () => {
     const opened = normalizeFromStart([
       buildNote("item/started", {
         item: {

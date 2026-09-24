@@ -1,8 +1,11 @@
 /**
- * The one file that imports the vendor SDK. The probe runs with no prompt and
- * asks the control protocol instead: a prompt that yields would bill the user's
- * account for opening a Fleet page. It touches only the instance's config
- * directory, never the user's `~/.claude`.
+ * The Claude Code provider adapter, and the only file that imports the vendor
+ * SDK.
+ *
+ * The probe sends no prompt and uses the SDK's control requests instead,
+ * because a real prompt would bill the user's account just for opening a Fleet
+ * page. The adapter uses only the instance's own config directory, never the
+ * user's `~/.claude`.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -60,10 +63,10 @@ export const CLAUDE_CODE = "claude-code";
 const CLAUDE_BINARY = "claude";
 
 /**
- * How long a control request is given. It is a write to the harness child and a
- * wait for its answer, and the runner handles session frames in the order they
- * arrived rather than concurrently, so one child that stops answering would
- * otherwise hold up every session on the machine - pings included.
+ * How long a control request may take. A control request writes to the harness
+ * child process and waits for its reply. The runner handles session frames one
+ * at a time, in order, so without a time limit one child that stops responding
+ * would hold up every session on the machine, pings included.
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
 
@@ -75,9 +78,10 @@ export interface ClaudeSession {
 }
 
 /**
- * One long-lived streaming `query()`: the messages it yields, and the way to
- * end it. Its input is the stream the adapter pushes turns into, which is what
- * makes the control methods and steering available at all (spec 06 section 10.1).
+ * A long-lived streaming `query()`: the messages it yields, and the methods to
+ * control and end it. Its input is a stream the adapter pushes turns into. The
+ * SDK offers control methods and steering only in this streaming-input mode
+ * (spec 06 section 10.1).
  */
 export interface ClaudeStream extends AsyncIterable<SDKMessage> {
   /** Ends the turn that is running; the session stays up for the next one. */
@@ -101,9 +105,9 @@ interface Account {
   readonly email?: string;
   readonly subscriptionType?: string;
   readonly apiProvider?: string;
-  /** Where the harness took its token from; `"none"` when it has none. */
+  /** Where the harness got its token from; `"none"` when it has no token. */
   readonly tokenSource?: string;
-  /** The variable an API key came from, when that is what it runs on. */
+  /** The environment variable the API key came from, when the harness uses an API key. */
   readonly apiKeySource?: string;
 }
 
@@ -117,16 +121,23 @@ interface Model {
 
 const SEMVER = /\d+\.\d+\.\d+\S*/;
 
-/** The effort level the CLI starts on when nothing chose one. */
+/** The effort level the CLI uses when none is chosen. */
 const DEFAULT_EFFORT = "medium";
 
-/** `Fact` refuses an empty string, and an `Error` can carry an empty message. */
+/**
+ * Returns the error's message, truncated to fit a `Fact`. An `Error` can have an
+ * empty message, which a `Fact` does not accept, so an empty message is
+ * replaced with a fixed one.
+ */
 const describeError = (error: unknown): string => {
   const said = truncateFact(error instanceof Error ? error.message : String(error));
-  return said === "" ? "the harness failed without saying why" : said;
+  return said === "" ? "the harness failed with an empty error message" : said;
 };
 
-/** Only ever called with levels the CLI listed, or with the overlay's own. */
+/**
+ * Builds the effort option from a list of effort levels. The levels come from
+ * the CLI's model list, or from the legacy models below.
+ */
 function buildEffortOption([first, ...rest]: readonly [
   string,
   ...ReadonlyArray<string>,
@@ -152,8 +163,8 @@ const FAST_MODE: ModelOption = {
 };
 
 /**
- * Models the CLI no longer lists but still forwards to the API. Options are
- * hand-authored because no row describes them any more.
+ * Models the CLI no longer lists but still sends to the API. Their options are
+ * written by hand, because the CLI's model list no longer describes them.
  */
 const LEGACY_MODELS: ReadonlyArray<ModelDescriptor> = [
   {
@@ -170,7 +181,10 @@ const LEGACY_MODELS: ReadonlyArray<ModelDescriptor> = [
   },
 ];
 
-/** Adaptive thinking is a property of the model, not a choice, so it is no option. */
+/**
+ * Converts a model from the CLI's list into a model descriptor. Adaptive
+ * thinking is a property of the model, not a choice, so it is not an option.
+ */
 const buildModelDescriptor = (model: Model): ModelDescriptor => {
   const options: Array<ModelOption> = [];
   const levels = model.supportedEffortLevels ?? [];
@@ -188,11 +202,13 @@ const buildModelDescriptor = (model: Model): ModelDescriptor => {
 };
 
 /**
- * A probed row wins over the overlay: it is what this machine will really offer.
- * Cut to what the protocol carries, or the whole report fails to encode.
+ * Returns the model catalog: the models the CLI listed, then the legacy models
+ * it did not list. A listed model replaces a legacy one with the same slug,
+ * because the list is what this machine really offers. The catalog is cut to
+ * the size the protocol accepts, or the whole report would fail to encode.
  */
 const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor> => {
-  // The protocol will not carry an empty slug or name.
+  // The protocol does not accept an empty slug or name.
   const probed = models
     .filter((model) => model.value !== "" && model.displayName !== "")
     .map(buildModelDescriptor);
@@ -203,28 +219,32 @@ const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescript
   );
 };
 
-/** `"none"` is what the harness says where it has no credential of that kind. */
+/**
+ * Checks whether a credential source is set. The harness reports `"none"` when
+ * it has no credential of that kind.
+ */
 const hasCredentialSource = (source: string | undefined): boolean =>
   source !== undefined && source !== "none";
 
 /**
- * Whether the harness has a usable login, which spec 06 §3.2 makes the
- * question, and which is not the same as an account it can name. A login held
- * in the instance's own config directory reports an email; a credential handed
- * to it on the environment - an OAuth token or an API key - reports only where
- * it came from, and runs just as well.
+ * Checks whether the harness has a usable login (spec 06 §3.2). That is not the
+ * same as knowing the account. A login stored in the instance's own config
+ * directory reports an email. A credential passed in through the environment,
+ * an OAuth token or an API key, reports only where it came from, and works
+ * just as well.
  */
 const hasCredential = (account: Account): boolean =>
   account.email !== undefined ||
   hasCredentialSource(account.tokenSource) ||
   hasCredentialSource(account.apiKeySource) ||
-  // A third-party backend - bedrock, vertex, foundry - authenticates outside
-  // the harness, so it names no token source of its own and still runs.
+  // A third-party backend (Bedrock, Vertex, Foundry) authenticates outside the
+  // harness, so the harness reports no token source, and it still works.
   (account.apiProvider !== undefined && account.apiProvider !== "firstParty");
 
 /**
- * One field of the report, dropped when the account left it blank: an empty
- * string is not a `Fact`, and the whole report would fail to encode over it.
+ * Returns `{ [key]: value }` with the value truncated to fit a `Fact`, or an
+ * empty object when the value is missing or empty. An empty string is not a
+ * valid `Fact`, and one would make the whole report fail to encode.
  */
 const buildOptionalFact = <K extends string>(
   key: K,
@@ -244,19 +264,24 @@ const buildAuth = (account: Account): ProbeResult["auth"] => {
   };
 };
 
-/** `HOME` is left alone: overriding it makes the CLI report another account's login. */
+/**
+ * Returns the environment for the CLI, pointed at the instance's config
+ * directory. `HOME` is not changed, because overriding it makes the CLI report
+ * the login of a different account.
+ */
 const buildEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined> => ({
   ...ctx.env,
   CLAUDE_CONFIG_DIR: ctx.home,
-  // A probe that let the harness update itself would install a version nobody
-  // chose in the middle of answering a question about versions.
+  // Without this, the harness could update itself during a probe and install
+  // a version nobody chose, while the probe is reporting which version it has.
   DISABLE_AUTOUPDATER: "1",
 });
 
 /**
- * The user's own settings and MCP servers stay out of a run that only reads two
- * facts. The CLI writes into the config directory regardless, which is why that
- * directory is the instance's own.
+ * Returns the SDK options for a probe. The user's own settings and MCP servers
+ * are not loaded, because a probe only reads the account and the model list.
+ * The CLI still writes into its config directory, which is why the probe uses
+ * the instance's own directory.
  */
 const buildProbeOptions = (ctx: ProviderRunnerContext, binary: string): Options => ({
   pathToClaudeCodeExecutable: binary,
@@ -266,7 +291,7 @@ const buildProbeOptions = (ctx: ProviderRunnerContext, binary: string): Options 
   env: buildEnv(ctx),
 });
 
-/** The prompt the SDK insists on, yielding nothing, so the run costs nothing. */
+/** Returns an empty prompt. The SDK requires a prompt, and an empty one costs nothing. */
 const buildEmptyPrompt = (): AsyncIterable<never> => ({
   [Symbol.asyncIterator]: () => ({
     next: () => Promise.resolve({ done: true, value: undefined as never }),
@@ -274,10 +299,10 @@ const buildEmptyPrompt = (): AsyncIterable<never> => ({
 });
 
 /**
- * The input side of a live session: an async iterable the adapter pushes turns
- * into and closes when the session ends. The SDK's `query()` takes the prompt
- * as an iterable, so this is what makes a session long-lived rather than one
- * shot (spec 06 section 10.1).
+ * The input of a live session: an async iterable the adapter pushes turns into,
+ * and ends when the session ends. The SDK's `query()` takes its prompt as an
+ * iterable, and passing this one keeps the session open for many turns instead
+ * of one (spec 06 section 10.1).
  */
 interface Pushable<A> extends AsyncIterable<A> {
   readonly push: (value: A) => void;
@@ -310,11 +335,11 @@ const createPushable = <A>(): Pushable<A> => {
 };
 
 /**
- * Spec 06 section 8.1, normative. `approval-required` is the SDK's default
- * mode, whose park-and-resume seam is `canUseTool`. The callback is supplied in
- * every mode but `full-access`: which actions a mode asks about is the
- * harness's own judgement, and a mode that asks about nothing simply never
- * calls back.
+ * The SDK permission mode for each access mode (spec 06 section 8.1).
+ * `approval-required` maps to the SDK's default mode, which asks for approval
+ * through `canUseTool`. The callback is passed in every mode except
+ * `full-access`: the harness decides which actions a mode asks about, and a
+ * mode that asks about nothing never calls it.
  */
 const PERMISSION_MODES: Readonly<Record<AccessMode, PermissionMode>> = {
   "approval-required": "default",
@@ -324,16 +349,16 @@ const PERMISSION_MODES: Readonly<Record<AccessMode, PermissionMode>> = {
 };
 
 /**
- * Which tools a read is asked about. The command and file-change families come
- * off the item kind the normalizer already gives a tool, so the two never
- * disagree; reading has no item kind of its own to read it from.
+ * The tools that get a file read approval. Command and file-change approvals
+ * are chosen by the item kind from `classifyTool`, so the two cannot disagree,
+ * but reading has no item kind of its own, so it needs this list.
  */
 const FILE_READ_TOOLS: ReadonlySet<string> = new Set(["Read", "Glob", "Grep"]);
 
 /**
- * The input fields a tool names a path in. A tool may name none of them - a
- * `Glob` without a directory searches the workspace - so an empty list is an
- * honest answer, not a failure to look.
+ * The tool input fields that can hold a path. A tool may have none of them (a
+ * `Glob` without a directory searches the workspace), so an empty path list is
+ * a correct result, not a failure.
  */
 const PATH_KEYS: ReadonlyArray<string> = ["file_path", "notebook_path", "path"];
 
@@ -344,9 +369,10 @@ const readInputPaths = (input: Record<string, unknown>): ReadonlyArray<string> =
   });
 
 /**
- * One tool call turned into the question a user answers. Every field is cut to
- * what the protocol carries: an over-long command or path would be a frame
- * nobody can decode, which loses the event and leaves the park hanging.
+ * Builds the request the user answers for one tool call. Every field is
+ * truncated to what the protocol accepts: a command or path that is too long
+ * would make a frame nobody can decode, which loses the event and leaves the
+ * park waiting for ever.
  */
 const buildOpenRequest = (
   requestId: string,
@@ -358,9 +384,9 @@ const buildOpenRequest = (
   if (toolName === "AskUserQuestion") {
     return buildQuestionRequest({ requestId, itemId }, toolName, input["questions"]);
   }
-  // `allow always` is offered only where the harness handed over rules to
-  // persist: a button that would have to invent one grants more than the user
-  // clicked, and an empty set has nothing in it to persist anyway.
+  // "Allow always" is offered only when the harness suggested rules to save.
+  // Without them the button would have to invent a rule, which could allow
+  // more than the user meant, and an empty set has nothing to save anyway.
   const common = {
     requestId,
     itemId,
@@ -373,7 +399,7 @@ const buildOpenRequest = (
   };
   const kind = classifyTool(toolName);
   const command = input["command"];
-  // A command the harness did not name has nothing for a command card to show.
+  // Without a command string, a command card has nothing to show.
   if (kind === "command_execution" && typeof command === "string") {
     return { ...common, kind: "command_approval", detail: { command: truncateMessage(command) } };
   }
@@ -386,16 +412,19 @@ const buildOpenRequest = (
   return { ...common, kind: "tool_approval", detail: { toolName: truncateFact(toolName) } };
 };
 
-/** What the model is told when the user refuses; the vendor requires a reason. */
+/** The message the model gets when the user denies a tool call; the SDK requires one. */
 const REFUSED = "the user did not allow this";
 
 const CANCELLED = "the user cancelled this turn";
 
 /**
- * A decision in the vendor's own terms. `interrupt` is what makes a cancel more
- * than a deny: the turn ends with it rather than the model trying something
- * else. `decisionClassification` is how the harness reports who decided, and
- * a persisted rule is the harness's own suggestion handed straight back.
+ * Converts a user's decision into the SDK's permission result.
+ *
+ * - `cancel` is a deny with `interrupt: true`, so the turn ends instead of the
+ *   model trying something else.
+ * - `decisionClassification` tells the harness who decided.
+ * - `allow_always` returns the rules the harness suggested, unchanged apart
+ *   from where they are saved.
  */
 const buildPermissionResult = (
   decision: ApprovalDecision,
@@ -424,29 +453,33 @@ const buildPermissionResult = (
 
 const EFFORTS: ReadonlyArray<EffortLevel> = ["low", "medium", "high", "xhigh", "max"];
 
-/** The one per-model choice the SDK's options carry; `fastMode` has no field. */
+/**
+ * Returns the chosen effort level, or `undefined` when none was chosen or the
+ * value is not a known level. Effort is the only model option the SDK's options
+ * have a field for; `fastMode` has none.
+ */
 const readEffort = (options: SessionSpec["modelSelection"]["options"]): EffortLevel | undefined => {
   const chosen = options["effort"];
   return EFFORTS.find((level) => level === chosen);
 };
 
 /**
- * hercule-as-a-tool on Claude: the one plugin Hercule owns, loaded by path from the
- * directory the runner wrote it into at start (spec 06 section 9.3). The whole
- * of what this adapter knows about the skill.
+ * Returns the plugins for a session: only Hercule's own plugin, which gives the
+ * agent Hercule as a tool (spec 06 section 9.3). The runner writes the plugin
+ * into a directory at startup, and it is loaded from there by path. This is all
+ * this adapter knows about the skill.
  *
- * Loaded independently of `settingSources`, which stays empty: the plugin is
- * named here, not discovered among whatever settings sit on this runner.
+ * The plugin is loaded by path, independently of `settingSources`, which stays
+ * empty, so no other settings on this runner are picked up.
  */
 const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
 ];
 
 /**
- * Which Claude tools each tool family is made of. A family is the coarse word
- * the spec is written in, and this table is the only place a family becomes
- * tool names. A family whose tools this harness does not have contributes no
- * name.
+ * The Claude tools in each tool family. The spec talks about tool families,
+ * and this table is the only place a family is converted to tool names. A
+ * family whose tools Claude does not have maps to an empty list.
  */
 const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>> = {
   edit: ["Edit", "NotebookEdit"],
@@ -457,11 +490,12 @@ const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<stri
 };
 
 /**
- * A session, unlike a probe, runs the user's work: it gets the workspace as its
- * cwd and the instance's home as its config directory. Auto memory is off and
- * `settingSources` is empty because a Hercule session's context is Hercule's to
- * author, never whatever files happen to sit on this runner (spec 06 section 4.2,
- * section 10.1).
+ * Returns the SDK options for a session. Unlike a probe, a session runs the
+ * user's work, so it gets the workspace as its working directory and the
+ * instance's home as its config directory. Auto memory is off and
+ * `settingSources` is empty because Hercule decides what context a session
+ * gets, not whatever files happen to be on this runner (spec 06 sections 4.2
+ * and 10.1).
  */
 const buildSessionOptions = (
   ctx: ProviderRunnerContext,
@@ -477,9 +511,9 @@ const buildSessionOptions = (
   return {
     pathToClaudeCodeExecutable: binary,
     ...native,
-    // Each of the three fields is sent only where the spec carries it. An
-    // empty list, or a preset with nothing appended, would make this adapter
-    // say something nobody asked for.
+    // Each of these three fields is set only when the session spec has it. An
+    // empty list, or a preset with nothing appended, would add a setting nobody
+    // asked for.
     ...(spec.systemPrompt === undefined
       ? {}
       : { systemPrompt: { type: "preset", preset: "claude_code", append: spec.systemPrompt } }),
@@ -494,8 +528,8 @@ const buildSessionOptions = (
     model: spec.modelSelection.model,
     ...(effort === undefined ? {} : { effort }),
     permissionMode: PERMISSION_MODES[spec.accessMode],
-    // Every mode but the one that asks about nothing: with permissions skipped
-    // the SDK ignores the callback and warns once per session about it.
+    // Pass the callback in every mode except `full-access`. When permissions
+    // are skipped, the SDK ignores the callback and logs a warning about it.
     ...(spec.accessMode === "full-access"
       ? { allowDangerouslySkipPermissions: true }
       : { canUseTool }),
@@ -505,12 +539,12 @@ const buildSessionOptions = (
 };
 
 /**
- * Which native session a start lands on, and what the CLI has to be told to get
- * there. A resume continues the parent's own session, so there is nothing to
- * name. A fork and a fresh start are named by Hercule rather than by the harness:
- * in streaming-input mode the CLI says nothing at all, `init` included, until a
- * first turn arrives, so a binding that waited for it would make `startSession`
- * block until somebody sent input.
+ * Returns the native session id a start uses, and the SDK options that select
+ * it. A resume continues the parent's own session under its existing id. A fork
+ * or a fresh start gets an id that Hercule creates rather than the harness: in
+ * streaming-input mode the CLI sends nothing, not even `init`, until the first
+ * turn arrives, so waiting for its id would block `startSession` until someone
+ * sent input.
  */
 const resolveNativeSession = (
   spec: SessionSpec,
@@ -533,21 +567,26 @@ const resolveNativeSession = (
 };
 
 /**
- * The question this adapter is holding an answer open for. The promise the
- * harness is waiting on is inside the closure; all anyone else needs is its
- * id, the answers it takes, and the way to end the wait.
+ * An open request the harness is waiting on for an answer. The promise the
+ * harness awaits is hidden in the closures; everything else only needs the
+ * request id, the allowed decisions, and a way to end the wait.
  */
 interface Park {
   readonly requestId: string;
   readonly decisions: ReadonlyArray<ApprovalDecision>;
-  /** The harness is told the answer in its own terms and resumes. */
+  /** Sends the decision to the harness in the SDK's terms, and the harness continues. */
   readonly answer: (decision: ApprovalDecision) => void;
   /**
-   * The question stops existing before anyone answered it: the turn was
-   * interrupted, the session stopped, the harness withdrew the ask, or the
-   * harness simply stopped talking. The stream reports it cancelled, because
-   * nothing the user did refused it, and the harness is told a plain deny,
-   * because there is no turn left to interrupt.
+   * Ends the request without an answer from the user. This happens when:
+   *
+   * - the turn was interrupted;
+   * - the session stopped;
+   * - the harness withdrew the request;
+   * - the harness's stream ended.
+   *
+   * The event stream reports the request as cancelled, because the user did
+   * not deny it. The harness gets a plain deny, because there is no turn left
+   * to interrupt.
    */
   readonly withdraw: () => void;
 }
@@ -559,22 +598,23 @@ interface Live {
   readonly stream: ClaudeStream;
   readonly state: Normalizing;
   /**
-   * The question this session is parked on, if any. One at a time: a park
-   * serializes the tool batch, and the surfaces show one card. On the entry
-   * rather than beside it: a park is a promise inside the harness's own call,
-   * so it must die with the session that is waiting on it.
+   * The request this session is waiting on, if any. There is at most one at a
+   * time: the harness waits on a park before it runs more tools, and the
+   * clients show one approval card. The park is stored on the session entry,
+   * not in a separate map, because it is a promise inside the harness's own
+   * call, so it must go away with the session that waits on it.
    */
   park: Park | undefined;
-  /** Set by `stopSession` to the reason it was given, so the exit says why. */
+  /** Set by `stopSession` to its reason, so the `session.exited` event can report it. */
   stopping: ExitReason | undefined;
-  /** The model the harness is running under, starting as the spec's. */
+  /** The model the harness is using. It starts as the model in the session spec. */
   model: string;
 }
 
 export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
-  // Creating an unbounded PubSub allocates and nothing more, so it is safe to
-  // run here and keeps `findAdapter` the synchronous lookup every other caller
-  // already treats it as.
+  // Creating an unbounded PubSub only allocates memory, so it is safe to run
+  // synchronously here. That keeps `findAdapter` a synchronous lookup, which is
+  // how every caller already uses it.
   const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
   const live = new Map<string, Live>();
 
@@ -583,8 +623,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   };
 
   /**
-   * One control request, bounded. Answers with why it did not go through, or
-   * `undefined` where it did.
+   * Sends one control request with a time limit. Returns why it failed, or
+   * `undefined` when it succeeded. Never fails itself.
    */
   const sendControlRequest = (request: Promise<void>): Effect.Effect<string | undefined> =>
     Effect.map(
@@ -595,36 +635,44 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         }),
         CONTROL_DEADLINE,
       ),
-      Option.getOrElse(() => `it did not answer within ${Duration.format(CONTROL_DEADLINE)}`),
+      Option.getOrElse(
+        () => `the harness did not answer within ${Duration.format(CONTROL_DEADLINE)}`,
+      ),
     );
 
   /**
-   * The seam the harness asks through (spec 06 section 8.2). The promise
-   * returned here is the park: it stays open until an answer arrives, until the
-   * harness withdraws the question by aborting the signal, or until the session
-   * goes. Held by the session's own entry, under the id the adapter mints,
-   * which is the id every answer comes back under.
+   * Builds the `canUseTool` callback the harness calls to ask for approval
+   * (spec 06 section 8.2). The promise the callback returns is the park. It
+   * stays open until one of these happens:
+   *
+   * - the user answers;
+   * - the harness withdraws the request by aborting the signal;
+   * - the session ends.
+   *
+   * The park is stored on the session's entry, under a request id the adapter
+   * creates. Every answer comes back with that request id.
    */
   const buildCanUseTool =
     (sessionId: string): CanUseTool =>
     (toolName, input, options) =>
       new Promise<PermissionResult>((settle) => {
         const held = live.get(sessionId);
-        // Fail closed, on the same test that refuses input: with no entry, or
-        // one on its way out, nobody is left to answer and the park would hold
-        // the harness for ever.
+        // Deny by default, using the same check that rejects input: when the
+        // session is gone or stopping, nobody is left to answer, and the park
+        // would hold the harness for ever.
         if (held === undefined || held.stopping !== undefined) {
           settle(buildPermissionResult("deny", []));
           return;
         }
-        // Withdrawn before it was ever asked: the turn is already being
-        // interrupted, so there is nothing to put in front of the user.
+        // Already withdrawn before it was shown: the turn is being
+        // interrupted, so there is nothing to show the user.
         if (options.signal.aborted) {
           settle(buildPermissionResult("deny", []));
           return;
         }
-        // One at a time. A second question while one is held would replace the
-        // card the user is looking at, so the harness is told to wait instead.
+        // One request at a time. A second request would replace the card the
+        // user is looking at, so the second request is denied, with a message
+        // that tells the model to ask again once the first is answered.
         if (held.park !== undefined) {
           settle({
             behavior: "deny",
@@ -634,33 +682,32 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           });
           return;
         }
-        // An "allow always" is an answer about this thread, not about the
-        // user's machine: whatever the harness offered to persist is rewritten
-        // to the session so no click here edits a settings file on disk.
+        // "Allow always" applies to this thread, not to the user's machine.
+        // Every rule the harness suggested saving is redirected to the session,
+        // so no click here edits a settings file on disk.
         const persists = (options.suggestions ?? []).map((rule) => ({
           ...rule,
           destination: "session" as const,
         }));
         const requestId = crypto.randomUUID();
-        // A park belongs to a turn: it is what the turn is waiting on, and the
-        // supervisor pauses the inactivity clock of an open turn for it. The
-        // SDK can ask before the assistant message that opened the turn has
-        // been read off its stream, so the turn is opened here where there is
-        // none yet.
+        // A park belongs to a turn: the turn is waiting on it, and the
+        // supervisor pauses an open turn's inactivity timer while it waits. The
+        // SDK can ask before the assistant message that starts the turn has
+        // been read from its stream, so open the turn here if none is open yet.
         const { events } = openTurn(held.state);
         for (const event of events) emit(event);
         const request = buildOpenRequest(
           requestId,
-          // An id the protocol will not carry is a frame nobody can decode,
-          // which would lose the event and leave a park nothing can see.
+          // An id the protocol does not accept would make a frame nobody can
+          // decode, which loses the event and leaves a park no client can see.
           options.toolUseID === "" ? held.state.mint() : truncateFact(options.toolUseID),
           toolName,
           input,
           persists.length > 0,
         );
         const endPark = (decision: ApprovalDecision, told: PermissionResult): void => {
-          // The park is this session's only one, and only while it is still
-          // this one: a second answer has nothing left to end.
+          // End the park only if it is still this request's park, so a
+          // second answer does nothing.
           if (held.park?.requestId !== requestId) return;
           held.park = undefined;
           options.signal.removeEventListener("abort", withdraw);
@@ -674,9 +721,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           });
           settle(told);
         };
-        // Every way this question can stop existing without an answer, in one
-        // place: the harness's own withdrawal, an interrupt, a stop, and the
-        // harness reaching the end of its stream.
+        // Handles every way the request can end without an answer: the harness
+        // withdraws it, the turn is interrupted, the session stops, or the
+        // harness's stream ends.
         const withdraw = (): void => endPark("cancel", buildPermissionResult("deny", []));
         options.signal.addEventListener("abort", withdraw, { once: true });
         held.park = {
@@ -694,7 +741,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         });
       });
 
-  /** The session this adapter is hosting, refusing one already on its way out. */
+  /** Returns the hosted session. Fails when there is none, or when it is stopping. */
   const getHostedSession = (sessionId: string): Effect.Effect<Live, string> =>
     Effect.suspend(() => {
       const held = live.get(sessionId);
@@ -703,7 +750,10 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         : Effect.succeed(held);
     });
 
-  /** Reads the session until the harness stops talking, and says why it did. */
+  /**
+   * Reads the harness's messages until its stream ends, and emits their events.
+   * Then emits `session.exited` with the reason. Never rejects.
+   */
   const pumpEvents = async (sessionId: string, held: Live): Promise<void> => {
     let reason: ExitReason = "process_exit";
     try {
@@ -712,8 +762,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       }
     } catch (error) {
       reason = "crash";
-      // Ending the query rejects whatever was in flight, and an ordinary stop
-      // is not something to report as a runtime error.
+      // Ending the query rejects whatever was in progress, and a normal stop
+      // should not be reported as a runtime error.
       if (held.stopping === undefined) {
         emit({
           _tag: "runtime.error",
@@ -725,13 +775,13 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         });
       }
     } finally {
-      // The one place every exit passes through, and before the exit is
-      // reported: a park left hanging is a promise the harness waits on for
-      // ever, and one still reading as open on a session that is gone leaves a
-      // card nothing can answer.
+      // Every exit passes through here, so end the park here, before the exit
+      // is reported. A park left open is a promise the harness waits on for
+      // ever, and it leaves an approval card on a session that is gone, which
+      // nobody can answer.
       held.park?.withdraw();
-      // By identity: a session started again under the same id has its own
-      // entry, and this pump is not the one that owns it.
+      // Compare by identity: a session started again under the same id has a
+      // new entry, and that entry belongs to a different pump.
       if (live.get(sessionId) === held) live.delete(sessionId);
       emit({
         _tag: "session.exited",
@@ -746,7 +796,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   const readVersion = (ctx: ProviderRunnerContext, binary: string): Effect.Effect<string | null> =>
     Effect.map(seam.run([binary, "--version"], buildEnv(ctx)), (ran) => {
       if (ran.code !== 0) return null;
-      // An unrecognisable version goes raw; an empty one the protocol will not carry.
+      // Report an unrecognised version as printed. The protocol does not
+      // accept an empty one, so that becomes null.
       const printed = truncateFact(SEMVER.exec(ran.stdout)?.[0] ?? ran.stdout.trim());
       return printed === "" ? null : printed;
     });
@@ -788,8 +839,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         if (binary === undefined) {
           return Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
         }
-        // Two harnesses under one Hercule session id would report their events,
-        // and their exit, as each other's. The second start is the mistake.
+        // Two harnesses under one Hercule session id would mix up their events
+        // and their exits, so the second start fails.
         if (live.has(sessionId)) {
           return Effect.fail(`session ${sessionId} is already running here`);
         }
@@ -832,9 +883,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
             };
             live.set(sessionId, held);
             void pumpEvents(sessionId, held);
-            // The native id rides the event, because the controller has no
-            // other way to learn it: `sessionsReport` is sent once, at hello,
-            // and a session started after that would never be named again.
+            // The event carries the native id because the controller has no
+            // other way to learn it: `sessionsReport` is sent only once, at
+            // hello, so it never includes a session started after that.
             emit({
               _tag: "session.started",
               eventId: crypto.randomUUID(),
@@ -851,12 +902,12 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       Effect.gen(function* () {
         const model = turn.modelSelection?.model;
         const before = yield* getHostedSession(sessionId);
-        // A model change lands only where a turn is about to open: mid-turn the
-        // harness is already answering under the model it started with. Asked
-        // only where it differs from what was last applied, so a session with
-        // no change to make never waits on the harness for one. A model the
-        // harness will not take fails the input: delivering it under the old
-        // one would answer for a turn the caller did not ask for.
+        // Change the model only when a new turn is about to open: during a
+        // turn, the harness keeps the model the turn started with. Only ask
+        // when the model differs from the one last applied, so a session with
+        // nothing to change never waits on the harness. If the harness rejects
+        // the model, the input fails: sending it under the old model would run
+        // a turn the caller did not ask for.
         if (model !== undefined && model !== before.model && before.state.turnId === undefined) {
           const refused = yield* sendControlRequest(before.stream.setModel(model));
           if (refused !== undefined) {
@@ -864,14 +915,15 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           }
           before.model = model;
         }
-        // Asked again, because `setModel` waits on the harness and the turn may
-        // have opened, ended or the whole session gone while it did.
+        // Look the session up again: `setModel` waits on the harness, and in
+        // the meantime a turn may have opened or ended, or the session may have
+        // stopped.
         const held = yield* getHostedSession(sessionId);
         const { turnId, events } = openTurn(held.state);
         for (const event of events) emit(event);
-        // Steering is implicit: a turn the adapter did not have to open is a
-        // turn already running, so the input folds into it. Read off what
-        // `openTurn` just did rather than remembered from before the wait.
+        // Steering is implicit: if `openTurn` did not open a new turn, a turn
+        // is already running, and the input joins it. Decide from what
+        // `openTurn` just did, not from what was true before the wait.
         const steered = events.length === 0;
         for (const event of buildUserMessage({ sessionId, turnId, text: turn.text, steered })) {
           emit(event);
@@ -888,35 +940,33 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     interrupt: (sessionId: string): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = live.get(sessionId);
-        // Nothing to end, so nothing is asked of the harness: a control request
-        // waits on it, and this frame is handled in the connection's own order.
+        // No turn is running, so do not send the harness a control request: it
+        // would wait on the harness and hold up the connection's other frames.
         if (held === undefined || held.state.turnId === undefined) return Effect.void;
-        // Before the harness is asked, not after: the CLI withdraws a pending
-        // question once the turn is interrupted, and a request still reading as
-        // open when the turn closes leaves a card on screen for a turn that is
-        // over.
+        // End the park before sending the interrupt, not after. The CLI
+        // withdraws a pending request once the turn is interrupted, and a
+        // request still open when the turn completes leaves a card on screen
+        // for a turn that is over.
         held.park?.withdraw();
-        // The turn completing as `interrupted` is the whole report; a refusal
-        // means the harness is already gone, which is the same outcome.
+        // The turn completing as `interrupted` is the only report. If the
+        // request fails, the harness is already gone, which has the same result.
         return Effect.asVoid(sendControlRequest(held.stream.interrupt()));
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
       Effect.sync(() => {
         const held = live.get(sessionId);
-        // Idempotent, and the first reason wins: a second stop (a timer racing
-        // an explicit one, say) is the harness already on its way out, and the
-        // exit should say why that first ask was made, not why the second one
-        // was.
+        // Stopping twice is harmless, and the first reason wins. A second stop
+        // (a timer racing an explicit stop, for example) finds the harness
+        // already stopping, and the exit should report the first reason.
         if (held === undefined || held.stopping !== undefined) return;
-        // The entry stays until the pump winds up, so `live` remains the one
-        // register of what this adapter holds and a start under the same id is
-        // refused while the old harness is still going. `stopping` is what
-        // refuses input in the meantime, and what the exit event's reason
-        // comes from.
+        // The entry stays in `live` until the pump finishes, so `live` remains
+        // the single list of what this adapter hosts, and a new start under the
+        // same id fails while the old harness is still running. Until then,
+        // `stopping` makes input fail, and gives the exit event its reason.
         held.stopping = reason;
-        // The park is not ended here: closing the stream winds the pump up,
-        // and its `finally` is where every exit ends one.
+        // Do not end the park here: closing the stream ends the pump, and the
+        // pump's `finally` ends the park on every exit.
         held.input.end();
         held.stream.close();
       }),
@@ -929,9 +979,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       Effect.sync(() => {
         const park = live.get(sessionId)?.park;
         if (park === undefined || park.requestId !== requestId) return;
-        // The request said which answers it takes, and it is the authority on
-        // that here too: an answer it did not offer is one the harness would
-        // have to substitute for.
+        // Ignore a decision the request did not offer: the harness would have
+        // to replace it with something else.
         if (!park.decisions.includes(decision)) return;
         park.answer(decision);
       }),
@@ -939,7 +988,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
 
     // Every shipped provider's config schema is empty, so the Claude adapter
-    // takes nothing from it and does not name the argument.
+    // does not read the config and leaves out that parameter.
     probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> => {
       const binary = ctx.binary;
       if (binary === undefined) {
@@ -968,8 +1017,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     },
 
     /**
-     * `BROWSER` fails on purpose: a successful launch makes the CLI switch to a
-     * `localhost` callback, which a browser on another machine cannot reach.
+     * Returns the login command. `BROWSER` is set to a command that fails on
+     * purpose: if a browser opened, the CLI would switch to a `localhost`
+     * callback, which a browser on another machine cannot reach.
      */
     login: (ctx: ProviderRunnerContext, binary: string): LoginCommand => ({
       command: [binary, "auth", "login"],
@@ -977,8 +1027,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     }),
 
     /**
-     * Pinned to the CLI this build's SDK talks to. The script needs the network
-     * even so.
+     * Installs the CLI version this build's SDK expects. The install script
+     * still needs network access.
      */
     install: makeInstall(seam.run, [
       "bash",
@@ -996,8 +1046,8 @@ export const claudeCode: ProviderAdapter = makeClaudeCodeAdapter({
       interrupt: () => running.interrupt().then(() => undefined),
       setModel: (model) => running.setModel(model),
       close: () => {
-        // The child may already be gone, and the rejection would take the
-        // daemon down over one session ending.
+        // The child may already be gone, and an unhandled rejection would take
+        // the whole daemon down just because one session ended.
         running.return(undefined).catch(() => undefined);
       },
     };
@@ -1008,8 +1058,8 @@ export const claudeCode: ProviderAdapter = makeClaudeCodeAdapter({
       accountInfo: () => session.accountInfo(),
       supportedModels: () => session.supportedModels(),
       close: () => {
-        // The child is usually already gone when close runs, and the rejection
-        // would take the daemon down over one bad probe.
+        // The child is usually already gone when close runs, and an unhandled
+        // rejection would take the whole daemon down because of one bad probe.
         session.return(undefined).catch(() => undefined);
       },
     };

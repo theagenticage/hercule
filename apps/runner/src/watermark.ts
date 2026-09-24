@@ -1,7 +1,9 @@
 /**
- * The headroom a runner has left. Unlike the facts this moves, so it is reported
- * every minute whether it changed or not, and never buffered: only the latest
- * reading is worth anything. The disk is handed in because a test cannot fill one.
+ * Reports the headroom a runner has left: free disk and available memory.
+ * Unlike the runner's facts, headroom changes all the time. So it is reported
+ * every minute whether it changed or not, and never buffered, because only the
+ * latest reading matters. The reading is passed in so a test can fake a full
+ * disk.
  */
 import { freemem } from "node:os";
 import { statfs } from "node:fs/promises";
@@ -13,14 +15,15 @@ import type { RunnerWatermark } from "@hercule/protocol";
 
 export const WATERMARK_INTERVAL: Duration.Duration = Duration.seconds(60);
 
-/** For the filesystem the given path sits on. */
+/** Reads the free disk space of the filesystem that holds `path`, and the available memory. Fails when `path` cannot be read. */
 export const readMachineHeadroom = (
   path: string,
 ): Effect.Effect<RunnerWatermark, Cause.UnknownError> =>
   Effect.map(
     Effect.tryPromise(() => statfs(path)),
     (stats) => ({
-      // What an ordinary user may still write, which is what a session is.
+      // `bavail` counts the blocks an unprivileged user may still write, and
+      // sessions run as an unprivileged user.
       diskFreeBytes: stats.bavail * stats.bsize,
       availableMemoryBytes: freemem(),
     }),
@@ -32,20 +35,21 @@ export interface WatermarkCheck<E> {
 }
 
 /**
- * Reports at once, which keeps a runner that has just said hello from looking
- * like a machine with an unknown disk for a minute. A reading nobody could take
- * is skipped: sending zero free bytes would retire the machine over one call.
+ * Sends a headroom reading at once, then every minute, until interrupted.
+ * Sending the first reading at once means a runner that has just connected does
+ * not spend a minute with an unknown disk. A reading that fails is logged and
+ * skipped: sending zero free bytes instead would take the machine out of
+ * service because of one failed call.
  *
- * Whether a reading means the machine can take work is the controller's to
- * decide, against the watermark it holds; the runner only reports what the
- * machine has left.
+ * The controller decides whether a reading means the machine can take work,
+ * by comparing it with the watermark it holds. The runner only reports.
  */
 export const reportWatermark = <E>(check: WatermarkCheck<E>): Effect.Effect<never, E> =>
   Effect.gen(function* () {
     while (true) {
       const headroom = yield* Effect.option(
         Effect.tapCause(check.read, (cause) =>
-          Effect.logWarning("A runner could not read what its machine has left", cause),
+          Effect.logWarning("The runner could not read its free disk space and memory", cause),
         ),
       );
       if (Option.isSome(headroom)) yield* check.send(headroom.value);

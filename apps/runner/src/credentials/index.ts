@@ -1,7 +1,10 @@
 /**
- * Git credentials on this machine: the socket the helper asks down, the helper
- * itself, the relay that carries a question to the controller, and the
- * environment that points git at all three (spec 13 section 9).
+ * Git credentials on this machine (spec 13 section 9):
+ *
+ * - the Unix socket that git's credential helper connects to;
+ * - the helper itself;
+ * - the relay that forwards a request to the controller;
+ * - the environment that tells git to use the helper.
  */
 export { buildGitCredentialEnv, buildSocketPath } from "./env";
 export { answerCredentialQuestion, runCredentialAction } from "./helper";

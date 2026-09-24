@@ -1,8 +1,8 @@
 /**
- * The Codex adapter's probe, its install and the isolation it spawns an
- * app-server under, over a scripted app-server: nothing vendor-supplied runs.
- * The frames the script answers with are the shapes captured from codex 0.154.0,
- * not shapes invented here.
+ * Tests for the Codex adapter's probe, install, sessions and the isolation it
+ * starts an app-server with, run against a scripted app-server. No Codex code
+ * runs. The scripted replies use the shapes captured from codex 0.154.0, not
+ * invented ones.
  */
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -78,35 +78,34 @@ const listChoiceValues = (option: Record<string, unknown> | undefined): Readonly
   );
 
 describe("what the Codex adapter reports about a machine", () => {
-  it("takes the harness version out of the user agent, because initialize carries none", async () => {
+  it("parses the harness version from the user agent, because initialize has no version field", async () => {
     const { result } = runProbe();
 
     const probed = await result;
     expect(probed.harnessVersion).toBe("0.154.0");
   });
 
-  it("says nothing about a user agent it cannot read a version out of", async () => {
+  it("reports no version when the user agent has none", async () => {
     const { result } = runProbe({ initialize: () => ({ ...INITIALIZE, userAgent: "codex" }) });
 
     const probed = await result;
-    // Null rather than a guess: `computeVersionVerdict` reads that as "unknown".
+    // Null rather than a guess: `computeVersionVerdict` treats null as "unknown".
     expect(probed.harnessVersion).toBeNull();
     expect(probed.auth.status).toBe("unauthenticated");
   });
 
-  it("reports a logged-out machine as unauthenticated, naming nobody", async () => {
+  it("reports a logged-out machine as unauthenticated, with no identity", async () => {
     const { result } = runProbe();
 
     const probed = await result;
     expect(probed.auth.status).toBe("unauthenticated");
     expect(probed.auth.identity).toBeUndefined();
     expect(probed.auth.message).toBeUndefined();
-    // The catalogue is still a fact about the machine: `model/list` answers
-    // while logged out.
+    // The model list is still reported: `model/list` works while logged out.
     expect(probed.models).not.toEqual([]);
   });
 
-  it("names the ChatGPT account, its plan and its backend", async () => {
+  it("reports the ChatGPT account's email, plan and backend", async () => {
     const { result } = runProbe({ "account/read": () => CHATGPT });
 
     const probed = await result;
@@ -118,7 +117,7 @@ describe("what the Codex adapter reports about a machine", () => {
     });
   });
 
-  it("reports an API key as logged in with no identity to name", async () => {
+  it("reports an API key login as logged in, with no identity", async () => {
     const { result } = runProbe({ "account/read": () => API_KEY });
 
     const probed = await result;
@@ -152,10 +151,10 @@ describe("what the Codex adapter reports about a machine", () => {
     // A model the server lists no efforts for offers no effort choice.
     expect(findModelOption(probed.models, "gpt-5.6-sol", "effort")).toBeUndefined();
 
-    // `serviceTiers` lists only the tiers beyond the standard one and
-    // `defaultServiceTier: null` means that one, so the
-    // standard tier is a choice of Hercule's own and the default where Codex
-    // names none - otherwise every turn would run on a paid tier nobody chose.
+    // `serviceTiers` lists only the extra tiers, and `defaultServiceTier: null`
+    // means the standard one. So Hercule adds the standard tier as a choice,
+    // and makes it the default when Codex gives none. Otherwise every turn
+    // would run on a paid tier nobody chose.
     expect(findModelOption(probed.models, "gpt-6-astra", "serviceTier")).toMatchObject({
       kind: "select",
       default: "standard",
@@ -169,11 +168,11 @@ describe("what the Codex adapter reports about a machine", () => {
       "priority",
       "ultrafast",
     ]);
-    // Offered only where the server named tiers: an empty select is a dead control.
+    // Offered only when the server lists tiers: an empty select would be useless.
     expect(findModelOption(probed.models, "gpt-5.5", "serviceTier")).toBeUndefined();
   });
 
-  it("reports an app-server that never answers initialize as an error, not as a blank row", async () => {
+  it("reports an app-server that exits before replying to initialize as an error, not as a blank row", async () => {
     const { result } = runProbe({ initialize: SILENT }, { dies: true });
 
     const probed = await result;
@@ -183,10 +182,10 @@ describe("what the Codex adapter reports about a machine", () => {
     expect(probed.models).toEqual([]);
   });
 
-  it("gives up on an app-server that answers nothing, and names the deadline", async () => {
+  it("fails the probe of an app-server that never replies, and includes the timeout in the message", async () => {
     const home = createCodexHome();
-    // A live child that simply never answers, which is what the deadline is
-    // there for: a dead one is already reported by its stream ending.
+    // A running child that never replies, which is what the timeout is for:
+    // a child that exits is already reported when its stream ends.
     const { seam, spawns } = buildScriptedSeam({ initialize: SILENT });
 
     const probed = await Effect.runPromise(
@@ -206,13 +205,13 @@ describe("what the Codex adapter reports about a machine", () => {
     expect(probed.auth.status).toBe("error");
     expect(probed.auth.message ?? "").toContain(Duration.format(PROBE_DEADLINE));
     expect(probed.models).toEqual([]);
-    // The child is the probe's own, so giving up on it means ending it.
+    // The child belongs to the probe, so the probe kills it when it gives up.
     expect(spawns[0]?.kills()).toBe(1);
   });
 });
 
 describe("the process a probe runs on", () => {
-  it("kills its own app-server, so a probe leaves nothing hosting", async () => {
+  it("kills its own app-server, so a probe leaves nothing running", async () => {
     const { result, spawns } = runProbe();
     await result;
 
@@ -220,7 +219,7 @@ describe("the process a probe runs on", () => {
     expect(spawns[0]?.kills()).toBe(1);
   });
 
-  it("spawns a fresh app-server for a second probe and for a session after one", async () => {
+  it("starts a new app-server for a second probe, and for a session after a probe", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
     const adapter = makeCodexAdapter(seam);
@@ -235,12 +234,12 @@ describe("the process a probe runs on", () => {
       () => undefined,
     );
     await waitUntil("spawned a third app-server", () => spawns.length === 3);
-    // A session's host is never the process a probe ran on: that one is dead.
+    // A session never uses a probe's app-server, which has already been killed.
     expect(spawns[2]?.kills()).toBe(0);
     await started;
   });
 
-  it("keeps no host an app-server refused to initialize, and ends its child", async () => {
+  it("does not keep a host whose initialize failed, and kills its child", async () => {
     const home = createCodexHome();
     let attempts = 0;
     const { seam, spawns } = buildScriptedSeam({
@@ -260,8 +259,8 @@ describe("the process a probe runs on", () => {
     expect(spawns).toHaveLength(1);
     expect(spawns[0]?.kills()).toBe(1);
 
-    // A host kept under the instance id would be one every later session talks
-    // to and none of them can.
+    // If the failed host were kept under the session id, the next start
+    // would reuse a host that cannot be used.
     const binding = await Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx));
     expect(binding.nativeSessionId).toBe(THREAD);
     expect(spawns).toHaveLength(2);
@@ -269,8 +268,8 @@ describe("the process a probe runs on", () => {
   });
 });
 
-describe("the home a session's app-server is given", () => {
-  it("spawns the app-server with the updater off and its own Codex and HOME directories", async () => {
+describe("the home directories a session's app-server gets", () => {
+  it("starts the app-server with the updater off and its own Codex and HOME directories", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
     const ctx = buildContext(home);
@@ -293,7 +292,7 @@ describe("the home a session's app-server is given", () => {
     const codexHome = join(home, "codex");
     const neutral = join(home, "home");
     expect(spawn.env["CODEX_HOME"]).toBe(codexHome);
-    // Relocated, because CODEX_HOME alone does not isolate skills: Codex reads
+    // Moved, because CODEX_HOME alone does not isolate skills: Codex reads
     // them from the user's own `~/.agents/skills`.
     expect(spawn.env["HOME"]).toBe(neutral);
     expect(existsSync(codexHome)).toBe(true);
@@ -309,8 +308,8 @@ describe("the home a session's app-server is given", () => {
   });
 });
 
-describe("the thread a session is given", () => {
-  it("opens one in the session's directory, on its model and in its access mode", async () => {
+describe("the thread a session gets", () => {
+  it("starts a thread in the session's directory, with its model and access mode", async () => {
     const { adapter, ctx, requests, seen } = createDriving();
 
     const binding = await Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx));
@@ -325,7 +324,7 @@ describe("the thread a session is given", () => {
       cwd: CWD,
       model: "gpt-5.5",
       ephemeral: false,
-      // What `approval-required` is on a Codex thread.
+      // The Codex settings for `approval-required`.
       approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
@@ -338,7 +337,7 @@ describe("the thread a session is given", () => {
     expect(filterByTag(seen, "session.started")).toHaveLength(1);
   });
 
-  it("carries on a native thread by resuming it, naming the thread it was given", async () => {
+  it("continues a native thread by resuming it by id", async () => {
     const { adapter, ctx, requests } = createDriving();
     const spec: SessionSpec = { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } };
 
@@ -351,7 +350,7 @@ describe("the thread a session is given", () => {
     expect(binding.nativeSessionId).toBe(RESUMED);
   });
 
-  it("branches off a native thread by forking it, and takes the new thread's id", async () => {
+  it("forks a native thread, and uses the new thread's id", async () => {
     const { adapter, ctx, requests } = createDriving();
     const spec: SessionSpec = { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } };
 
@@ -361,12 +360,12 @@ describe("the thread a session is given", () => {
       expect.objectContaining({ threadId: PRIOR }),
     ]);
     expect(listSentParams(requests, "thread/start")).toEqual([]);
-    // The fork is a thread of its own: taking the id it was asked to fork from
-    // would point the session at the thread it just left alone.
+    // The fork is a new thread: using the original thread's id would point
+    // the session at the thread it forked from.
     expect(binding.nativeSessionId).toBe(FORKED);
   });
 
-  it("fails with what the server said when a thread cannot be opened, and says nothing else", async () => {
+  it("fails with the server's error message when a thread cannot be opened, and emits no events", async () => {
     const { adapter, ctx, seen } = createDriving({
       "thread/start": () => buildRefusal("no rollout found for thread id 00000000-0000"),
     });
@@ -375,15 +374,15 @@ describe("the thread a session is given", () => {
 
     expect(refused).toContain("no rollout found");
     await settle();
-    // A session that never started has not started: the supervisor reads
-    // `session.started` as the session being live.
+    // No `session.started` for a session that never started: the supervisor
+    // treats that event as meaning the session is live.
     expect(seen).toEqual([]);
     expect(await Effect.runPromise(adapter.listSessions)).toEqual([]);
   });
 });
 
 describe("what an input does to a Codex session", () => {
-  it("opens a turn with the text when nothing is running", async () => {
+  it("starts a turn with the text when no turn is running", async () => {
     const run = await startTestSession();
 
     const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
@@ -396,7 +395,7 @@ describe("what an input does to a Codex session", () => {
     expect(listSentParams(run.requests, "turn/steer")).toEqual([]);
   });
 
-  it("steers the running turn, naming the turn it expects to be steering", async () => {
+  it("steers the running turn, sending the turn id it expects", async () => {
     const run = await startBusySession();
 
     const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and the tests" }));
@@ -406,11 +405,11 @@ describe("what an input does to a Codex session", () => {
     expect(steered).toHaveLength(1);
     expect(steered[0]).toMatchObject({ threadId: THREAD, expectedTurnId: TURN });
     expect(JSON.stringify(steered[0])).toContain("and the tests");
-    // The first turn is the one the session opened; steering opened no second.
+    // The only `turn/start` is the session's first turn; steering started no second one.
     expect(listSentParams(run.requests, "turn/start")).toHaveLength(1);
   });
 
-  it("opens a turn instead when the turn it meant to steer has moved on", async () => {
+  it("starts a new turn instead when the turn it meant to steer is no longer active", async () => {
     const NEXT = "0199e0e7-0000-7000-8000-0000000000f9";
     let turns = 0;
     const run = await startBusySession({
@@ -424,13 +423,13 @@ describe("what an input does to a Codex session", () => {
 
     const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "carry on" }));
 
-    // Never bounced: the input reaches the harness one way or the other, and
-    // the adapter is the only authority on which way it went.
+    // Input is never rejected: it reaches the harness one way or the other,
+    // and only the adapter knows which way it went.
     expect(sent).toEqual({ turnId: NEXT, delivery: "opened" });
     expect(listSentParams(run.requests, "turn/start")).toHaveLength(2);
   });
 
-  it("opens a turn instead when the running turn cannot be steered at all", async () => {
+  it("starts a new turn instead when the running turn cannot be steered", async () => {
     const NEXT = "0199e0e7-0000-7000-8000-0000000000f8";
     let turns = 0;
     const run = await startBusySession({
@@ -450,8 +449,8 @@ describe("what an input does to a Codex session", () => {
   });
 });
 
-describe("an app-server that stops answering a control request", () => {
-  it("gives up on the interrupt rather than holding up every session on the machine", async () => {
+describe("an app-server that stops replying to a control request", () => {
+  it("stops waiting for the interrupt after the timeout, rather than holding up every session on the machine", async () => {
     const { adapter, ctx, seen } = createDriving({ "turn/interrupt": SILENT });
 
     await Effect.runPromise(
@@ -460,8 +459,8 @@ describe("an app-server that stops answering a control request", () => {
           yield* adapter.startSession(SESSION, SPEC, ctx);
           yield* adapter.sendInput(SESSION, { text: "look around" });
           const stopping = yield* Effect.forkChild(adapter.stopSession(SESSION, "stopped"));
-          // The runner handles session frames in the order they arrived, so a
-          // stop that waited out the request deadline would stall the machine.
+          // The runner handles session frames one at a time, so a stop that
+          // waited for the full request timeout would stall every session.
           yield* TestClock.adjust(CONTROL_DEADLINE);
           return yield* Fiber.join(stopping);
         }),
@@ -472,7 +471,7 @@ describe("an app-server that stops answering a control request", () => {
     expect(filterByTag(seen, "session.exited").map((event) => event.reason)).toEqual(["stopped"]);
   });
 
-  it("reports one end when the thread closes while the stop is waiting", async () => {
+  it("reports the session's exit once when the thread closes while the stop is waiting", async () => {
     const run = createDriving({ "turn/interrupt": SILENT });
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
@@ -490,9 +489,9 @@ describe("an app-server that stops answering a control request", () => {
     await Effect.runPromise(Fiber.join(stopping));
 
     await settle();
-    // The thread the server closed is the end that happened: the stop was
-    // waiting on the harness while it came, and a second exit would be a second
-    // row for one session's end.
+    // The thread closing is what actually ended the session: it happened while
+    // the stop was waiting on the harness. A second exit would record the same
+    // end twice.
     expect(filterByTag(run.seen, "session.exited").map((event) => event.reason)).toEqual([
       "idle_unload",
     ]);
@@ -500,7 +499,7 @@ describe("an app-server that stops answering a control request", () => {
 });
 
 describe("a thread the server unloads by itself", () => {
-  it("ends the session as an idle unload and holds it no longer", async () => {
+  it("ends the session as an idle unload and stops listing it", async () => {
     const run = await startTestSession();
     expect(await Effect.runPromise(run.adapter.listSessions)).toHaveLength(1);
 
@@ -511,12 +510,12 @@ describe("a thread the server unloads by itself", () => {
       () => filterByTag(run.seen, "session.exited").length === 1,
     );
     // `idle_unload` is the one exit that leaves the native thread on disk, so
-    // it is the one a later session can carry on from.
+    // it is the one a later session can continue from.
     expect(filterByTag(run.seen, "session.exited")[0]?.reason).toBe("idle_unload");
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
   });
 
-  it("says nothing more when the supervisor stops a session that is already gone", async () => {
+  it("emits nothing more when the supervisor stops a session that has already exited", async () => {
     const run = await startTestSession();
     run.server.push({ method: "thread/closed", params: { threadId: THREAD } });
     await waitUntil(
@@ -528,7 +527,7 @@ describe("a thread the server unloads by itself", () => {
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
 
     await settle();
-    // A second exit would be a second row for one session's end.
+    // A second exit would record the same end twice.
     expect(run.seen).toHaveLength(reported);
     expect(filterByTag(run.seen, "session.exited")).toHaveLength(1);
   });
@@ -538,10 +537,10 @@ const OTHER_SESSION = "0199e0e7-0000-7000-8000-0000000000f7";
 
 const OTHER_THREAD = "0199e0e7-0000-7000-8000-0000000000f6";
 
-/** The token the runner put in each session's environment; they never match. */
+/** The token the runner puts in each session's environment; each session has a different one. */
 const TOKENS = { [SESSION]: "token-of-the-first", [OTHER_SESSION]: "token-of-the-second" };
 
-/** Two sessions of one instance, each with its own token and its own app-server. */
+/** Starts two sessions of one instance, each with its own token and its own app-server. */
 const startSessionPair = async (): Promise<ReturnType<typeof createDriving>> => {
   let opened = 0;
   const run = createDriving({
@@ -567,28 +566,28 @@ const listExitReasons = (
     .filter((event) => event.sessionId === sessionId)
     .map((event) => event.reason);
 
-describe("the app-server one session of an instance gets to itself", () => {
-  it("is its own process, spawned with its own session token", async () => {
+describe("each session's own app-server", () => {
+  it("is a separate process, started with that session's token", async () => {
     const run = await startSessionPair();
 
-    // Every shell command a Codex session runs is a child of its app-server and
-    // inherits that process's environment. Two sessions on one process means
-    // the second acting as the first: its credential, its grants, its stamp -
-    // and a 401 for both the moment the first session's token is revoked (spec
-    // 06 section 9.3).
+    // Every shell command a Codex session runs is a child of its app-server
+    // and inherits that process's environment. If two sessions shared one
+    // process, the second would act as the first, with its credential, grants
+    // and actor stamp, and both would get a 401 as soon as the first session's
+    // token is revoked (spec 06 section 9.3).
     expect(run.spawns).toHaveLength(2);
     expect(run.spawns[0]?.env["HERCULE_TOKEN"]).toBe(TOKENS[SESSION]);
     expect(run.spawns[1]?.env["HERCULE_TOKEN"]).toBe(TOKENS[OTHER_SESSION]);
     expect(await Effect.runPromise(run.adapter.listSessions)).toHaveLength(2);
   });
 
-  it("dies with the session that held it, and takes no other with it", async () => {
+  it("is killed when its session stops, and no other app-server is", async () => {
     const run = await startSessionPair();
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
 
-    // Killed, because a process left running holds a token that is already
-    // dead; and only that one, because the other session has not ended.
+    // Killed, because a process left running would hold a revoked token; and
+    // only that one, because the other session has not ended.
     expect(run.spawns[0]?.kills()).toBe(1);
     expect(run.spawns[1]?.kills()).toBe(0);
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([
@@ -600,14 +599,14 @@ describe("the app-server one session of an instance gets to itself", () => {
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
   });
 
-  it("ends the turn a stopped session was running and leaves the other alone", async () => {
+  it("interrupts the turn of a stopped session and leaves the other session alone", async () => {
     const run = await startSessionPair();
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
 
-    // A turn left running would go on working in the workspace, with every
-    // notification about it arriving for a session that is gone.
+    // A turn left running would keep working in the workspace, and its
+    // notifications would arrive for a session that no longer exists.
     expect(listSentParams(run.requests, "turn/interrupt")).toEqual([
       { threadId: THREAD, turnId: TURN },
     ]);
@@ -618,7 +617,7 @@ describe("the app-server one session of an instance gets to itself", () => {
     ]);
   });
 
-  it("reports the session on an app-server that stopped by itself, and only that one", async () => {
+  it("reports only the session whose app-server exited on its own as exited", async () => {
     const run = await startSessionPair();
 
     run.spawns[0]!.crash();
@@ -634,14 +633,14 @@ describe("the app-server one session of an instance gets to itself", () => {
     ]);
   });
 
-  it("says nothing about a thread no session on it holds", async () => {
+  it("ignores a notification about a thread no session on it holds", async () => {
     const run = await startTestSession();
     const reported = run.seen.length;
 
     run.server.push({ method: "thread/closed", params: { threadId: OTHER_THREAD } });
 
     await settle();
-    // A thread this runner never opened is not this runner's to report on.
+    // This runner never opened that thread, so it has nothing to report about it.
     expect(run.seen).toHaveLength(reported);
     expect(await Effect.runPromise(run.adapter.listSessions)).toHaveLength(1);
   });
@@ -652,15 +651,15 @@ const SELECTED = {
   options: { effort: "high", serviceTier: "priority" },
 } as const;
 
-describe("the model a turn runs under", () => {
-  it("carries the session's whole selection on the turn it opens", async () => {
+describe("the model a turn runs with", () => {
+  it("sends the session's whole model selection when it starts a turn", async () => {
     const run = await startTestSession();
 
     await Effect.runPromise(
       run.adapter.sendInput(SESSION, { text: "hello", modelSelection: SELECTED }),
     );
 
-    // Sent every time rather than only where it changed: Codex takes all three
+    // Sent every time rather than only when it changed: Codex takes all three
     // per turn, and a selection changed and changed back is still a change.
     expect(listSentParams(run.requests, "turn/start")[0]).toMatchObject({
       model: "gpt-6-astra",
@@ -669,21 +668,21 @@ describe("the model a turn runs under", () => {
     });
   });
 
-  it("names no model on a turn the caller chose none for", async () => {
+  it("sends no model when the input has no model selection", async () => {
     const run = await startTestSession();
 
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
 
     const opened = listSentParams(run.requests, "turn/start")[0] as Record<string, unknown>;
-    // The thread's own model stands: naming one here would be Hercule choosing.
+    // The thread keeps its own model: sending one here would mean Hercule chose it.
     expect(opened["model"]).toBeUndefined();
     expect(opened["effort"]).toBeUndefined();
     expect(opened["serviceTier"]).toBeUndefined();
   });
 
-  it("sends no service tier for a selection of the standard one, and sends a chosen one", async () => {
-    // "standard" is Hercule's name for the tier Codex runs on when it is told
-    // none, so choosing it means leaving the field off.
+  it("sends no service tier when the standard tier is selected, and sends any other tier", async () => {
+    // "standard" is Hercule's name for the tier Codex uses when no tier is
+    // given, so selecting it means leaving the field out.
     const sendWithServiceTier = async (tier: string): Promise<Record<string, unknown>> => {
       const run = await startTestSession();
       await Effect.runPromise(
@@ -699,7 +698,7 @@ describe("the model a turn runs under", () => {
     expect((await sendWithServiceTier("priority"))["serviceTier"]).toBe("priority");
   });
 
-  it("opens the thread on the model and the tier the session was given", async () => {
+  it("starts the thread with the session's model and service tier", async () => {
     const run = createDriving();
 
     await Effect.runPromise(
@@ -713,17 +712,17 @@ describe("the model a turn runs under", () => {
   });
 });
 
-/** The code spec 06 section 10.2 names for an overloaded server. */
+/** The error code for an overloaded server (spec 06 section 10.2). */
 const OVERLOADED = -32001;
 
 const TURN_ANSWER = { turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" } };
 
 /**
- * Walks the three backoff steps on a test clock, one attempt at a time, and
- * checks nothing retried before the clock said it could. 750, 1250 and 2250 ms
- * are the spec's 500, 1000 and 2000 with the whole 250 ms of jitter allowed and
- * not a millisecond more: a step that advanced further would pass on a base
- * nobody chose.
+ * Steps a test clock through the three backoff delays, one attempt at a time,
+ * and checks that no retry happens before its delay has passed. Each step
+ * advances 750, 1250 and 2250 ms: the spec's 500, 1000 and 2000 ms plus the
+ * full 250 ms of jitter, and not a millisecond more. A larger step would let
+ * a wrong base delay pass.
  */
 const expectBackoff = (attempts: () => number) =>
   Effect.gen(function* () {
@@ -735,8 +734,8 @@ const expectBackoff = (attempts: () => number) =>
     }
   });
 
-describe("a turn the server is too busy to open", () => {
-  it("retries it on the spec's backoff and keeps the input", async () => {
+describe("a turn the server is too busy to start", () => {
+  it("retries it with the spec's backoff and keeps the input", async () => {
     let attempts = 0;
     const { adapter, ctx, requests } = createDriving({
       "turn/start": () => {
@@ -761,7 +760,7 @@ describe("a turn the server is too busy to open", () => {
     expect(listSentParams(requests, "turn/start")).toHaveLength(4);
   });
 
-  it("gives up after the third retry, and fails with what the server said", async () => {
+  it("gives up after the third retry, and fails with the server's error message", async () => {
     let attempts = 0;
     const { adapter, ctx, requests } = createDriving({
       "turn/start": () => {
@@ -785,7 +784,7 @@ describe("a turn the server is too busy to open", () => {
     );
 
     expect(refused).toContain("overloaded");
-    // Three retries, not four: the send is bounded.
+    // One attempt plus three retries, and no more.
     expect(listSentParams(requests, "turn/start")).toHaveLength(4);
   });
 
@@ -800,8 +799,8 @@ describe("a turn the server is too busy to open", () => {
     );
 
     expect(refused).toContain("thread not found");
-    // Retrying a request the server refused on its merits would just refuse
-    // three more times, four seconds later.
+    // A request the server rejected for its content would just be rejected
+    // three more times.
     expect(listSentParams(requests, "turn/start")).toHaveLength(1);
   });
 });
@@ -838,7 +837,7 @@ const stubInstall = (
 };
 
 describe("installing the Codex harness", () => {
-  it("runs the vendor's install script pinned to the release this build talks to", async () => {
+  it("runs the vendor's install script, pinned to the release this build supports", async () => {
     const { install, commands, envs } = stubInstall({ code: 0, stdout: "Installed codex" });
 
     const outcome = await Effect.runPromise(install);
@@ -854,7 +853,7 @@ describe("installing the Codex harness", () => {
     expect(envs).toEqual([ENV]);
   });
 
-  it("says what the installer said when it failed, rather than that it failed", async () => {
+  it("reports the installer's own output when it fails, not just that it failed", async () => {
     const stderr = [
       "resolving the release",
       "  % Total    % Received",
@@ -869,12 +868,12 @@ describe("installing the Codex harness", () => {
 
     expect(outcome.ok).toBe(false);
     expect(outcome.message ?? "").toContain("install.sh: nothing was installed");
-    // The last five lines, so the banner above them is not what the user reads.
+    // Only the last five lines, so the user does not read the banner above them.
     expect(outcome.message ?? "").toContain("  % Total    % Received");
     expect(outcome.message ?? "").not.toContain("resolving the release");
   });
 
-  it("gives up on an installer that outlives the deadline, and names it", async () => {
+  it("fails an installer that runs past the timeout, and includes the timeout in the message", async () => {
     const { install } = stubInstall({ code: 0 }, { hangs: true });
 
     const outcome = await Effect.runPromise(
@@ -894,7 +893,11 @@ describe("installing the Codex harness", () => {
   });
 });
 
-/** Built rather than written, so the literals are not in this file for it to find. */
+/**
+ * Greps the runner's source for `pattern`, skipping generated files. Callers
+ * build the pattern from pieces, so the literal does not appear in this file
+ * and the grep does not find itself.
+ */
 const grepSource = (pattern: string): string =>
   Bun.spawnSync({
     cmd: ["bash", "-c", `grep -rn '${pattern}' apps/runner/src --include=*.ts || true`],
@@ -905,29 +908,29 @@ const grepSource = (pattern: string): string =>
     .filter((line) => line !== "" && !line.includes("/generated/"))
     .join("\n");
 
-describe("the two Codex surfaces this adapter must never reach for", () => {
-  it("calls neither the shell-command method nor the process one", () => {
-    // A runner that let a harness spawn its own processes would host work
-    // outside every session boundary Hercule places.
+describe("the two Codex features this adapter must never use", () => {
+  it("calls neither the shell-command method nor the process method", () => {
+    // If a harness could start its own processes through the runner, that
+    // work would run outside every session boundary Hercule sets.
     expect(grepSource(["thread/shell", "Command", "\\|process/", "spawn"].join(""))).toBe("");
   });
 
-  it("never names the user's own Codex home", () => {
+  it("never refers to the user's own Codex home", () => {
     // The only Codex home a runner may touch is the one built from `ctx.home`.
     expect(grepSource(["~/\\", ".codex\\|$HOME/\\", ".codex"].join(""))).toBe("");
   });
 });
 
-/** What the runner resolved once, at start, for every adapter. */
+/** The hercule tool the runner resolves once, at start, for every adapter. */
 const TOOL = {
   skill: "# hercule\n\nCall `hercule --help` to find out what this controller can do.\n",
   claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
 };
 
 /**
- * What an Agent puts on a Codex session: instructions of its own and a schema
- * every turn has to answer under (spec 06 section 7). `disallowedTools` rides
- * along on the spec too, and Codex enforces none of it.
+ * What an Agent adds to a Codex session: its own instructions, and a schema
+ * every turn must answer with (spec 06 section 7). The spec can also carry
+ * `disallowedTools`, which Codex does not enforce.
  */
 const OUTPUT_SCHEMA: OutputSchema = {
   type: "object",
@@ -950,7 +953,7 @@ const STRUCTURED: SessionSpec = {
 const ANSWER = { verdict: "accept", confidence: 0.9 };
 
 describe("hercule-as-a-tool on a Codex thread", () => {
-  /** The Agent's instructions above the skill, as one text. */
+  /** The Agent's instructions followed by the skill, as one string. */
   const INSTRUCTED = `${SYSTEM_PROMPT}\n\n${TOOL.skill}`;
 
   const OPENINGS: ReadonlyArray<readonly [string, SessionSpec, string]> = [
@@ -975,37 +978,39 @@ describe("hercule-as-a-tool on a Codex thread", () => {
   ];
 
   it.each(OPENINGS)(
-    "carries the session's own instructions as %s's developer instructions",
+    "sends the session's instructions as the developer instructions of %s",
     async (method, spec, instructions) => {
       const { adapter, ctx, requests } = createDriving();
 
       await Effect.runPromise(adapter.startSession(SESSION, spec, { ...ctx, herculeTool: TOOL }));
 
-      // The channel #73 found, and the only one: a session that cannot be told
-      // the CLI exists never calls it (spec 06 section 9.1). An Agent's own
-      // prompt shares it, and a thread continued from one carries both.
+      // Developer instructions are the only way to tell the session the CLI
+      // exists, and a session that is not told never calls it (spec 06 section
+      // 9.1). An Agent's own prompt goes in the same field, and a continued
+      // thread gets both.
       expect(listSentParams(requests, method)).toEqual([
         expect.objectContaining({ developerInstructions: instructions }),
       ]);
     },
   );
 
-  it("writes no AGENTS.md into the scratch directory it runs in", async () => {
+  it("writes no AGENTS.md into the session's scratch directory", async () => {
     const scratch = createCodexHome();
     const { adapter, ctx } = createDriving({}, scratch);
 
     await Effect.runPromise(adapter.startSession(SESSION, SPEC, { ...ctx, herculeTool: TOOL }));
     await settle();
 
-    // The retired channel (spec 06 section 9.1, amended 2026-09-14): a file
-    // here is instructions the harness reads out of a directory Hercule says is
-    // empty, and one more copy of the skill to keep current.
+    // An `AGENTS.md` was the old way to send instructions (spec 06 section 9.1,
+    // amended 2026-09-14). A file here would be instructions the harness reads
+    // from a directory Hercule says is empty, and one more copy of the skill
+    // to keep up to date.
     expect(existsSync(join(scratch, "AGENTS.md"))).toBe(false);
     expect(readdirSync(scratch)).toEqual([]);
   });
 });
 
-/** A turn's final agent message, which is where a Codex answer is read off. */
+/** Builds an agent message item. A Codex answer is read from the turn's final agent message. */
 const buildAgentMessage = (text: string): Record<string, unknown> => ({
   type: "agentMessage",
   id: "0199e0e7-0000-7000-8000-0000000000e1",
@@ -1025,9 +1030,9 @@ const COMMAND: Record<string, unknown> = {
 };
 
 /**
- * Ends the running turn, with its items announced one by one and carried on
- * the completion as well: the app-server does both, so an adapter may read the
- * final message off either and this script never decides which.
+ * Ends the running turn. The items are sent one by one as `item/completed`
+ * and also listed on `turn/completed`, as the app-server does, so the script
+ * does not decide which one an adapter reads the final message from.
  */
 const completeTurn = (
   run: ReturnType<typeof createDriving>,
@@ -1047,7 +1052,7 @@ const completeTurn = (
   });
 };
 
-/** Runs one turn that ends with these items, and answers its `turn.completed`. */
+/** Runs one turn that ends with these items, and returns its `turn.completed` event. */
 const runTurnToCompletion = async (
   spec: SessionSpec,
   items: ReadonlyArray<Record<string, unknown>>,
@@ -1064,15 +1069,15 @@ const runTurnToCompletion = async (
 };
 
 describe("a Codex session the controller spawned from an Agent", () => {
-  it("carries the agent's instructions above the skill as the thread's developer instructions", async () => {
+  it("sends the Agent's instructions followed by the skill as the thread's developer instructions", async () => {
     const { adapter, ctx, requests } = createDriving();
 
     await Effect.runPromise(
       adapter.startSession(SESSION, STRUCTURED, { ...ctx, herculeTool: TOOL }),
     );
 
-    // Both, in that order, and nothing else: the skill is how a session learns
-    // the CLI exists (spec 06 section 9.1) and dropping it for the Agent's
+    // Both, in that order, and nothing else. The skill is how a session learns
+    // the CLI exists (spec 06 section 9.1), so replacing it with the Agent's
     // prompt would take the tool away from every session an Agent spawns.
     expect(listSentParams(requests, "thread/start")).toEqual([
       expect.objectContaining({
@@ -1081,7 +1086,7 @@ describe("a Codex session the controller spawned from an Agent", () => {
     ]);
   });
 
-  it("opens every turn of the session under the schema, not just the first", async () => {
+  it("sends the schema on every turn of the session, not just the first", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
 
@@ -1093,27 +1098,26 @@ describe("a Codex session the controller spawned from an Agent", () => {
     );
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "And this one." }));
 
-    // Codex takes the schema per turn, so a session that sent it once would
-    // answer prose from its second turn on.
+    // Codex takes the schema per turn, so a session that sent it only once
+    // would answer in prose from its second turn on.
     const opened = listSentParams(run.requests, "turn/start");
     expect(opened).toHaveLength(2);
     expect(opened[0]).toMatchObject({ outputSchema: OUTPUT_SCHEMA });
     expect(opened[1]).toMatchObject({ outputSchema: OUTPUT_SCHEMA });
   });
 
-  it("names no schema on a turn of a session that was given none", async () => {
+  it("sends no schema on the turns of a session without one", async () => {
     const run = await startTestSession();
 
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
 
-    // The field is absent, and is not null. A Thread answers prose, and a
-    // schema field on every turn would make this adapter say something the
-    // spec never said.
+    // The field is absent, not null. A Thread answers in prose, and a schema
+    // field on every turn would send something the spec does not contain.
     const opened = listSentParams(run.requests, "turn/start")[0] as Record<string, unknown>;
     expect("outputSchema" in opened).toBe(false);
   });
 
-  it("sends exactly what it sends without them when the spec takes tool families away", async () => {
+  it("sends the same requests whether or not the spec has disallowedTools", async () => {
     const startAndSend = async (spec: SessionSpec): Promise<ReadonlyArray<unknown>> => {
       const run = createDriving();
       await Effect.runPromise(
@@ -1126,16 +1130,16 @@ describe("a Codex session the controller spawned from an Agent", () => {
       ];
     };
 
-    // Codex declares `disallowedTools: unsupported` (#224), and the record the
-    // caller reads already says so: an adapter that invented an enforcement
-    // here would be the silent substitution the spec forbids.
+    // Codex declares `disallowedTools` as unsupported, and the record the
+    // caller reads already says so. Inventing some enforcement here would be
+    // the silent substitution the spec forbids.
     expect(await startAndSend({ ...STRUCTURED, disallowedTools: ["edit", "shell"] })).toEqual(
       await startAndSend(STRUCTURED),
     );
   });
 });
 
-describe("what a Codex turn under an output schema answers with", () => {
+describe("the structured result of a Codex turn with an output schema", () => {
   it("reports the final agent message as the turn's result when it satisfies the schema", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, [
       buildAgentMessage(JSON.stringify(ANSWER)),
@@ -1158,7 +1162,7 @@ describe("what a Codex turn under an output schema answers with", () => {
     });
   });
 
-  it("reports a schema failure naming the field when the message is JSON the schema refuses", async () => {
+  it("reports a schema failure naming the field when the message is JSON the schema rejects", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, [
       buildAgentMessage(JSON.stringify({ verdict: "maybe", confidence: 0.9 })),
     ]);
@@ -1169,36 +1173,36 @@ describe("what a Codex turn under an output schema answers with", () => {
     });
   });
 
-  it("reports a schema failure saying there was no final message when the turn ended on another item", async () => {
+  it("reports a schema failure when the turn ended on an item that is not an agent message", async () => {
     const completed = await runTurnToCompletion(STRUCTURED, [
       buildAgentMessage(JSON.stringify(ANSWER)),
       COMMAND,
     ]);
 
-    // Answered at once rather than retried: a retry is optional in spec 06
-    // section 7 and this feature does not build one. An earlier message is not
-    // the answer either - the turn went on working after it.
+    // Reported at once rather than retried: a retry is optional in spec 06
+    // section 7 and is not built. An earlier message is not the answer
+    // either, because the turn kept working after it.
     expect(completed.structuredResult).toEqual({
       outcome: "schema-failure",
       reason: expect.stringMatching(/\S/) as string,
     });
   });
 
-  it("says nothing about a result on a session that was never given a schema", async () => {
+  it("has no structured result on a session without a schema", async () => {
     const completed = await runTurnToCompletion(SPEC, [buildAgentMessage(JSON.stringify(ANSWER))]);
 
-    // The key is absent, and is not an `ok` over no schema. A Thread answers
-    // prose, and a key on every turn of every session would give "ok" a second
-    // meaning.
+    // The key is absent, rather than an `ok` with no schema. A Thread answers
+    // in prose, and a result on every turn of every session would give "ok" a
+    // second meaning.
     expect("structuredResult" in completed).toBe(false);
   });
 
-  it("says nothing about the schema on a turn that failed or was interrupted", async () => {
+  it("has no structured result on a turn that failed or was interrupted", async () => {
     const failed = await runTurnToCompletion(STRUCTURED, [COMMAND], "failed");
     const interrupted = await runTurnToCompletion(STRUCTURED, [COMMAND], "interrupted");
 
-    // The end is about the turn and not about the schema. A `schema-failure`
-    // here would claim that an answer was judged and rejected.
+    // The turn ended for a reason unrelated to the schema. A `schema-failure`
+    // here would claim that an answer was checked and rejected.
     expect("structuredResult" in failed).toBe(false);
     expect("structuredResult" in interrupted).toBe(false);
   });
@@ -1227,8 +1231,8 @@ describe("what a Codex turn under an output schema answers with", () => {
       () => filterByTag(run.seen, "turn.completed").length === 2,
     );
 
-    // An answer that outlived its turn would report the first turn's value as
-    // the second turn's answer. Nobody could tell that stale result from a
+    // If the first turn's answer were kept, it would be reported as the
+    // second turn's answer, and nobody could tell that stale result from a
     // fresh one.
     expect(filterByTag(run.seen, "turn.completed")[1]!.structuredResult).toEqual({
       outcome: "schema-failure",
@@ -1236,14 +1240,13 @@ describe("what a Codex turn under an output schema answers with", () => {
     });
   });
 
-  it("reads the answer off the items the turn announced, not off the completion's own list", async () => {
+  it("reads the answer from the item/completed notifications, not from the turn/completed item list", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
 
-    // This completion carries a partial view of its items, which the
-    // app-server states itself. A list the app-server never promised was
-    // complete is not a turn's answer.
+    // This completion lists only some of its items, as its `itemsView` says.
+    // A list that may be incomplete cannot be trusted for the turn's answer.
     run.spawns[0]!.push({
       method: "turn/completed",
       params: {
@@ -1266,10 +1269,9 @@ describe("what a Codex turn under an output schema answers with", () => {
 });
 
 /**
- * What the API answers when the schema itself cannot be constrained on,
- * captured from codex 0.154.0 against the impossible fixture: the turn fails
- * before the model is sampled, and the name Codex gives the response format is
- * in the message.
+ * The API's error when it cannot enforce the schema itself, captured from
+ * codex 0.154.0 with the impossible fixture. The turn fails before the model
+ * runs, and the message includes the name Codex gives the response format.
  */
 const REFUSED = [
   '{\n  "type": "error",\n  "error": {\n    "type": "invalid_request_error",',
@@ -1280,8 +1282,8 @@ const REFUSED = [
   '\n  "status": 400\n}',
 ].join("");
 
-describe("a Codex turn the harness refused the schema of", () => {
-  it("reports the refusal as the schema failure, on the turn's own end state", async () => {
+describe("a Codex turn whose schema the API rejected", () => {
+  it("reports the API's error message as the schema failure, and keeps the turn's failed state", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, run.ctx));
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Answer." }));
@@ -1301,10 +1303,10 @@ describe("a Codex turn the harness refused the schema of", () => {
     });
     await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
 
-    // The sentence the harness wrote, and the state the harness reported: a
-    // turn that never reached the model failed, and it failed over the schema.
-    // The envelope around the sentence - a status, a param, a type - is the
-    // transport's, and a transcript line showing it would say nothing.
+    // The reason is the API's own message, and the state is the one Codex
+    // reported: the turn never reached the model, and it failed because of the
+    // schema. The rest of the error body (status, param, type) is left out,
+    // because it would mean nothing to a reader of the transcript.
     const completed = filterByTag(run.seen, "turn.completed")[0]!;
     expect(completed.state).toBe("failed");
     expect(completed.structuredResult).toEqual({

@@ -1,9 +1,10 @@
 /**
- * `hercule runner set-controller <url>`, through the runner role's `run(argv)`.
+ * Tests `hercule runner set-controller <url>` through the runner role's
+ * `run(argv)`.
  *
- * The verb re-points an already enrolled machine at a moved controller, so what
- * is proved here is what it leaves in `runner.json` and what it says - and that
- * it reaches no controller to do it.
+ * The command points a machine that has already joined at a controller that
+ * has moved. These tests check what it writes to `runner.json`, what it
+ * prints, and that it makes no network call.
  */
 import {
   existsSync,
@@ -40,8 +41,8 @@ beforeEach(() => {
   fetches = 0;
   vi.spyOn(console, "log").mockImplementation(collectInto(logged));
   vi.spyOn(console, "error").mockImplementation(collectInto(errored));
-  // The verb makes no network call, which is only a claim until something
-  // watches the one function that could make one.
+  // Spy on `fetch`, the only function that could make a network call, to
+  // prove the command makes none.
   vi.spyOn(globalThis, "fetch").mockImplementation(() => {
     fetches += 1;
     throw new Error("set-controller reached the network");
@@ -62,7 +63,7 @@ const createTemporaryHome = (): string => {
 
 const buildRunnerFilePath = (home: string): string => pathJoin(home, "runner", "runner.json");
 
-/** A home a machine has already joined from, at the mode the join leaves. */
+/** Creates a Hercule Home that has already joined, with `runner.json` at the mode a join sets. */
 const createEnrolledHome = (
   controllerUrl: string = ORIGINAL_URL,
 ): {
@@ -86,7 +87,7 @@ const createEnrolledHome = (
 };
 
 describe("hercule runner set-controller", () => {
-  it("repairs a file whose controller URL no longer reads as one", async () => {
+  it("repairs a file whose controller URL does not parse", async () => {
     const { home, path } = createEnrolledHome("127.0.0.1:4937");
 
     await run(["--home", home, "set-controller", NEW_URL]);
@@ -96,7 +97,7 @@ describe("hercule runner set-controller", () => {
     expect(readFileSync(path, "utf8")).toContain(NEW_URL);
   });
 
-  it("rewrites only controllerUrl, keeps the file the runner's alone, prints the new URL", async () => {
+  it("rewrites only controllerUrl, keeps the file private, and prints the new URL", async () => {
     const { home, path, before } = createEnrolledHome();
 
     await run(["--home", home, "set-controller", NEW_URL]);
@@ -105,9 +106,8 @@ describe("hercule runner set-controller", () => {
     expect(errored).toEqual([]);
     expect(logged.join("\n")).toContain(NEW_URL);
 
-    // Byte for byte the file it was, with the one address swapped: the
-    // credential and the identity it was issued against survive a re-point, and
-    // so does the storage directory naming a previous life's folders.
+    // The file is byte for byte the same apart from the URL. The credential,
+    // the controller identity and the storage directory name all stay.
     const after = readFileSync(path, "utf8");
     expect(after).toContain(NEW_URL);
     expect(after.replace(NEW_URL, ORIGINAL_URL)).toBe(before);
@@ -116,7 +116,7 @@ describe("hercule runner set-controller", () => {
     expect(fetches).toBe(0);
   });
 
-  it("refuses a malformed URL, writes nothing and exits non-zero", async () => {
+  it("rejects a malformed URL, writes nothing and exits non-zero", async () => {
     const { home, path, before } = createEnrolledHome();
 
     await run(["--home", home, "set-controller", "not a url"]);
@@ -127,7 +127,7 @@ describe("hercule runner set-controller", () => {
     expect(fetches).toBe(0);
   });
 
-  it("refuses a home that has never joined, naming the file, and exits non-zero", async () => {
+  it("fails for a home that has never joined, prints the file path, and exits non-zero", async () => {
     const home = createTemporaryHome();
 
     await run(["--home", home, "set-controller", NEW_URL]);

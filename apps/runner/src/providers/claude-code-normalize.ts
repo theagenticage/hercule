@@ -1,15 +1,18 @@
 /**
- * The Claude Agent SDK's message stream turned into the one normalized taxonomy
- * (spec 06 section 6). It takes a message and a small mutable state, and
- * answers with events; it talks to neither the SDK nor the clock.
+ * Converts the Claude Agent SDK's message stream into the normalized event
+ * taxonomy (spec 06 section 6). `normalize` takes one message and a small
+ * mutable state, and returns events. It does not call the SDK or read the clock
+ * itself.
  *
- * The state exists because the taxonomy brackets what the SDK reports flat: a
- * turn spans many messages and ends on the one `result`, a text item runs from
- * `content_block_start` to `content_block_stop`, and a tool item is closed by
- * the `tool_result` that comes back one message later.
+ * The state is needed because the taxonomy groups what the SDK reports as a
+ * flat sequence of messages:
  *
- * Nothing throws. A message shape this build has not heard of becomes an
- * `unknown` item carrying its raw payload (spec 06 section 6.7).
+ * - a turn spans many messages and ends at the `result` message;
+ * - a text item runs from `content_block_start` to `content_block_stop`;
+ * - a tool item is closed by the `tool_result` that arrives one message later.
+ *
+ * Nothing throws. A message this build does not recognise becomes an `unknown`
+ * item that carries the raw payload (spec 06 section 6.7).
  */
 import type * as Schema from "effect/Schema";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -25,48 +28,52 @@ import {
 } from "@hercule/protocol";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 
-/** The channel name every raw payload from this adapter is filed under. */
+/** The `source` name on every raw payload from this adapter. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";
 
-/** One open text or reasoning block, while its deltas are arriving. */
+/** An open text or reasoning block whose deltas are still arriving. */
 interface Block {
   readonly itemId: string;
   readonly kind: ItemKind;
   readonly streamKind: StreamKind;
 }
 
-/** One agent's assistant message in flight: the main loop's, or a subagent's. */
+/** The assistant message an agent is streaming: the main loop's or a subagent's. */
 interface Streaming {
   messageId: string;
   readonly blocks: Map<number, Block>;
 }
 
-/** What one session's normalization remembers between messages: a running position, not a value. */
+/** The state `normalize` keeps for one session between messages. */
 export interface Normalizing {
   readonly sessionId: string;
-  /** Minted ids: event ids, and the turn and item ids the SDK does not name. */
+  /** Creates a new id: for events, and for turns and items the SDK gives no id. */
   readonly mint: () => string;
   /** The runner's own clock, as an ISO-8601 instant. */
   readonly now: () => string;
-  /** What every turn of this session must answer with. Absent means prose. */
+  /** The schema every turn's output must match. `undefined` means free text. */
   readonly outputSchema: OutputSchema | undefined;
   /** The open turn, or `undefined` between turns. The adapter opens the first. */
   turnId: string | undefined;
   /**
-   * What is streaming right now, per agent. Keyed by `parent_tool_use_id`:
-   * subagents stream alongside the main loop and their content-block indexes
-   * are their own, so one map would have them overwriting each other.
+   * The message each agent is streaming right now, keyed by
+   * `parent_tool_use_id`. Subagents stream at the same time as the main loop,
+   * and each numbers its content blocks on its own, so a single block map would
+   * let them overwrite each other.
    */
   readonly streams: Map<string, Streaming>;
   /**
-   * Assistant messages whose blocks arrived as stream events. With
-   * `includePartialMessages` the complete message that follows is an echo, so
-   * only a message that never streamed has anything left to say. Matching by
-   * index is not on: a block's position in the message is not its position in
-   * the stream.
+   * The ids of assistant messages whose blocks arrived as stream events. With
+   * `includePartialMessages`, the complete message that follows repeats what
+   * was already streamed, so only a message that never streamed still needs
+   * its text reported. Messages are matched by id, not by block index, because
+   * a block's position in the message is not its position in the stream.
    */
   readonly streamed: Set<string>;
-  /** Open tool items by `tool_use` id, so the `tool_result` completes the kind. */
+  /**
+   * The kind of each open tool item, by `tool_use` id, so its `tool_result`
+   * completes it with the same kind.
+   */
   readonly tools: Map<string, ItemKind>;
 }
 
@@ -87,8 +94,8 @@ export const buildNormalizingState = (
 });
 
 /**
- * Claude names tools; the taxonomy names kinds. Only the families spec 06
- * section 6.3 pins are inferred; the rest is an honest `tool_call`.
+ * The item kind for each Claude tool name. Only the families that spec 06
+ * section 6.3 defines are mapped; every other tool is a plain `tool_call`.
  */
 const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   Bash: "command_execution",
@@ -106,19 +113,21 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
 };
 
 /**
- * Exported because the request kinds are read off it too: which family a tool
- * belongs to is one judgement, and two tables of tool names would disagree.
+ * Returns the item kind for a Claude tool name, or `tool_call` for a tool with
+ * no specific kind. The adapter also uses it to pick the approval request kind,
+ * so one table decides both and the two cannot disagree.
  */
 export const classifyTool = (name: string): ItemKind => TOOL_KINDS[name] ?? "tool_call";
 
-/** The naming the SDK gives an MCP tool, and the only way to tell one apart. */
+/** Checks whether a tool is an MCP tool. The name prefix is the only way to tell. */
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
 
 /**
- * Claude's informational tail, trimmed on purpose (spec 06 section 6.7).
- * Rate-limit and auth pushes are snapshot material, not session events, and
- * progress chatter says nothing a transcript reader wants. Everything outside
- * this list still becomes an `unknown` item rather than disappearing.
+ * Informational messages from Claude that are dropped on purpose (spec 06
+ * section 6.7). Rate-limit and auth updates belong in the snapshot, not in
+ * session events, and progress messages hold nothing a transcript reader
+ * wants. A message type that is neither in this list nor handled below still
+ * becomes an `unknown` item rather than disappearing.
  */
 const TRIMMED: ReadonlySet<string> = new Set([
   // Top-level message types.
@@ -127,7 +136,7 @@ const TRIMMED: ReadonlySet<string> = new Set([
   "tool_use_summary",
   "prompt_suggestion",
   "tool_progress",
-  // `system` subtypes, under the prefix the switch below asks with.
+  // `system` subtypes, with the `system:` prefix that `onSystem` looks them up with.
   "system:status",
   "system:session_state_changed",
   "system:thinking_tokens",
@@ -139,26 +148,34 @@ const TRIMMED: ReadonlySet<string> = new Set([
   "system:files_persisted",
 ]);
 
-/** Cuts text to the length one protocol message may carry. */
+/** Truncates text to the longest message the protocol accepts. */
 const cutToMessageLength = (value: string): string => value.slice(0, MAX_MESSAGE_LENGTH);
 
 /**
- * A real round-trip, not a cast: one `undefined` property anywhere in a vendor
- * payload would be a frame the protocol refuses to encode, which costs the
- * runner its socket and every session on it.
+ * Converts a value to JSON by serializing and parsing it, not by a cast. A
+ * single `undefined` property anywhere in a vendor payload would make a frame
+ * the protocol cannot encode, and that costs the runner its connection and
+ * every session on it.
  */
 const toJson = (value: unknown): Schema.Json =>
   JSON.parse(JSON.stringify(value ?? null)) as Schema.Json;
 
-/** A count the protocol will carry: a whole number, never negative. */
+/**
+ * Converts a count to a whole number that is never negative, as the protocol
+ * requires. Anything else becomes 0.
+ */
 const clampCount = (value: number | null | undefined): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 
 type Emit = Array<ProviderEvent>;
 
 /**
- * Unsolicited output arrives outside any turn Hercule opened. The taxonomy has no
- * home for an item without a turn, so one is opened (spec 06 section 6.2).
+ * Opens a turn if none is open. Returns the turn id and the events to emit:
+ * one `turn.started`, or none when a turn was already open.
+ *
+ * Besides turns for user input, this also covers output the harness sends
+ * outside any turn Hercule opened, because every item must belong to a turn
+ * (spec 06 section 6.2).
  */
 export const openTurn = (
   state: Normalizing,
@@ -188,8 +205,9 @@ const ensureOpenTurn = (state: Normalizing, out: Emit): string => {
 };
 
 /**
- * Ends the turn and the streaming it was tracking. Open tool calls are kept: an
- * interrupted turn's `tool_result` still arrives, needing the kind it was given.
+ * Emits `turn.completed` and clears the turn's streaming state. Open tool items
+ * are kept, because an interrupted turn's `tool_result` still arrives later and
+ * needs the kind its item started with.
  */
 const closeTurn = (
   state: Normalizing,
@@ -273,7 +291,7 @@ const buildContentDelta = (
   delta: text,
 });
 
-/** A whole item in one go: what a complete message reports that never streamed. */
+/** Returns the events for a whole item at once, for a complete message that never streamed. */
 const buildWholeItem = (
   state: Normalizing,
   turnId: string,
@@ -287,7 +305,10 @@ const buildWholeItem = (
   buildItemCompleted(state, turnId, itemId, kind, "completed"),
 ];
 
-/** The forward-compatible catch-all: an unmapped vendor message, with its raw. */
+/**
+ * Emits an `unknown` item for a vendor message this adapter does not map.
+ * `normalize` attaches the raw payload.
+ */
 const emitUnknownItem = (state: Normalizing, out: Emit): void => {
   const turnId = ensureOpenTurn(state, out);
   const itemId = state.mint();
@@ -308,8 +329,8 @@ const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: 
     case "content_block_start": {
       const block = event.content_block;
       // A `tool_use` block streams only partial JSON arguments, which the
-      // taxonomy has no kind for; the assistant message carries the call
-      // complete (spec 06 section 6.3).
+      // taxonomy has no kind for. The complete assistant message carries the
+      // whole call later (spec 06 section 6.3).
       const kind: ItemKind | undefined =
         block.type === "text"
           ? "assistant_message"
@@ -330,7 +351,7 @@ const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: 
     case "content_block_delta": {
       const block = open?.blocks.get(event.index);
       if (block === undefined) return;
-      // Signature and partial-JSON deltas are not text and carry no output.
+      // Signature and partial-JSON deltas are not text, so they produce no event.
       const text =
         event.delta.type === "text_delta"
           ? event.delta.text
@@ -359,8 +380,8 @@ const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: 
       return;
     }
     default:
-      // `message_delta`, `message_stop` and pings say nothing the taxonomy
-      // carries; the deltas already did.
+      // `message_delta`, `message_stop` and pings hold nothing the taxonomy
+      // needs; the content deltas already carried the text.
       return;
   }
 };
@@ -371,8 +392,8 @@ const onAssistant = (
   out: Emit,
 ): void => {
   const turnId = ensureOpenTurn(state, out);
-  // Text and reasoning that streamed are already on the wire; this message is
-  // their echo. Only one that never streamed has them left to report.
+  // Text and reasoning that streamed were already emitted, and this message
+  // repeats them. Only a message that never streamed still needs them reported.
   const echo = state.streamed.has(sdk.message.id);
   for (const block of sdk.message.content) {
     if (block.type === "tool_use") {
@@ -421,11 +442,12 @@ const onAssistant = (
 };
 
 /**
- * A user message the harness sends back is its echo of what Hercule pushed, and
- * an echo cannot say which input it echoes - which is what `user_message`
- * carries as `steered` (spec 06 section 6.3). The adapter holds both, so it
- * reports the user's own messages and nothing is read out of the echo. What is
- * left here is the `tool_result` that closes the tool item one message later.
+ * Handles a user message from the harness. The harness repeats back the input
+ * Hercule sent, but the repeated message does not show whether that input was
+ * steered into a running turn, which `user_message` must report as `steered`
+ * (spec 06 section 6.3). So the adapter reports user messages itself, and this
+ * function ignores their text. It only handles `tool_result` blocks, each of
+ * which closes a tool item.
  */
 const onUser = (
   state: Normalizing,
@@ -448,7 +470,7 @@ const onUser = (
           kind,
           block.is_error === true ? "failed" : "completed",
           {
-            // Cut because a `Read` of a big file comes back whole; `raw` keeps it.
+            // Truncated because a `Read` of a big file returns it whole; `raw` keeps all of it.
             ...(block.content === undefined
               ? {}
               : {
@@ -464,17 +486,22 @@ const onUser = (
   }
 };
 
-/** Aborts are the one terminal reason that is neither success nor failure. */
+/**
+ * Returns the state a turn ended in. An abort is `interrupted`, which is
+ * neither success nor failure.
+ */
 const readTurnState = (sdk: Extract<SDKMessage, { type: "result" }>): TurnState => {
   if (sdk.terminal_reason?.startsWith("aborted") === true) return "interrupted";
   return sdk.subtype === "success" && !sdk.is_error ? "completed" : "failed";
 };
 
 /**
- * `modelUsage`, not `usage`: the SDK documents `usage` as the main agent loop
- * only and per-turn in a streaming-input session, which every Hercule session is.
- * `modelUsage` and `total_cost_usd` are cumulative across turns, which is what
- * the snapshot is pinned to be (spec 06 section 6.6).
+ * Returns the session's usage so far, summed over every model. It reads
+ * `modelUsage`, not `usage`: the SDK documents `usage` as covering only the
+ * main agent loop, and only the current turn in a streaming-input session,
+ * which every Hercule session is. `modelUsage` and `total_cost_usd` add up
+ * across turns, which is what the usage snapshot must hold (spec 06 section
+ * 6.6).
  */
 const readUsage = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
   const models = Object.values(sdk.modelUsage);
@@ -492,8 +519,10 @@ const readUsage = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
 };
 
 /**
- * Only a failure has an error: an interrupted turn ends on `subtype: "success"`
- * carrying what the model had written, which is not why the turn stopped.
+ * Returns the error message for a failed turn: the SDK's errors, else the
+ * result text, else the subtype. Call it only for a failed turn: an interrupted
+ * turn ends with `subtype: "success"` and the text the model had written so
+ * far, which is not the reason the turn stopped.
  */
 const describeFailure = (sdk: Extract<SDKMessage, { type: "result" }>): string => {
   if (sdk.subtype !== "success" && sdk.errors.length > 0)
@@ -503,25 +532,28 @@ const describeFailure = (sdk: Extract<SDKMessage, { type: "result" }>): string =
 };
 
 /**
- * The SDK's own word for this state: it re-prompted the model to its limit and
- * got no value that fits the schema.
+ * The SDK's result subtype for a turn where it re-prompted the model as many
+ * times as allowed and still got no value that matches the schema.
  */
 const RETRIES_EXHAUSTED = "error_max_structured_output_retries";
 
 /**
- * Reads what the harness produced under the schema. It answers `undefined`
- * where this result says nothing about the schema. Two results say something:
- * a turn that ran to its end, and a turn the harness abandoned because of the
- * schema. An interrupt and every other failure are about the turn itself. A
- * schema verdict on such a turn would claim that an answer was judged, and no
- * answer was judged.
+ * Reads the structured output the harness produced for the schema. Returns
+ * `undefined` when the result has nothing to do with the schema. Only two
+ * results do:
+ *
+ * - a turn that ran to its end;
+ * - a turn the harness gave up on because no output matched the schema.
+ *
+ * An interrupt or any other failure is about the turn itself. Checking the
+ * schema for such a turn would report on an output that was never produced.
  */
 const readHarnessAnswer = (
   sdk: Extract<SDKMessage, { type: "result" }>,
   turnState: TurnState,
 ): HarnessAnswer | undefined => {
-  // The interrupt is checked first, whatever the subtype is. The user ended
-  // this turn, so nobody asked for a verdict on it, with or without retries.
+  // Check for an interrupt first, whatever the subtype is. The user ended this
+  // turn, so there is no output to check, even if the retries ran out.
   if (turnState === "interrupted") return undefined;
   if (sdk.subtype === RETRIES_EXHAUSTED) {
     return { missing: `the harness gave up on the schema: ${RETRIES_EXHAUSTED}` };
@@ -532,7 +564,10 @@ const readHarnessAnswer = (
     : { value: sdk.structured_output };
 };
 
-/** Judges the turn: the verdict this result carries about the schema, if any. */
+/**
+ * Checks the turn's output against the session's schema. Returns `undefined`
+ * when there is no schema or nothing to check.
+ */
 const judgeTurn = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "result" }>,
@@ -574,7 +609,8 @@ const onSystem = (
 ): void => {
   switch (sdk.subtype) {
     case "init":
-      // The adapter emits `session.started` off it; nothing else to say.
+      // The adapter emits `session.started` itself when it starts the session,
+      // so `init` adds nothing.
       return;
     case "compact_boundary": {
       const turnId = ensureOpenTurn(state, out);
@@ -609,23 +645,23 @@ const onSystem = (
 };
 
 /**
- * The message classes that arrive between turns. Claude's informational tail
- * follows the `result` that closed the last turn, so a turn opened for one
- * would wait for a `result` that is never coming and the session would read
- * busy for the rest of its life. A turn opened for one of these is therefore
- * closed by the same message (spec 06 section 6.2, synthetic turns).
- * `assistant` and `stream_event` are model output: their `result` ends them.
+ * The message types that can arrive between turns. Claude sends informational
+ * messages after the `result` that closed the last turn. A turn opened for one
+ * of them would wait for a `result` that never comes, and the session would
+ * look busy for good. So a turn opened for one of these messages is closed
+ * after that same message (spec 06 section 6.2, synthetic turns). `assistant`
+ * and `stream_event` messages are model output, and a `result` ends their turn.
  */
 const SELF_CONTAINED: ReadonlySet<string> = new Set(["user", "system"]);
 
 /**
- * One SDK message in, the events it means out. Raw rides the first event that
- * is not the turn the message had to open, so the vendor payload is always
- * reachable without every delta carrying a copy of it.
+ * Converts one SDK message into normalized events and returns them. The raw
+ * payload is attached to the first event that is not a `turn.started`, so the
+ * vendor message is always available without every delta carrying a copy.
  *
- * Nothing here throws: the guard covers a message whose tag is known but whose
- * fields have moved, because the CLI ships weekly and a `TypeError` in here
- * would take a live session down with it.
+ * Never throws. A message with a known type but changed fields becomes an
+ * `unknown` item, because the CLI ships weekly and a `TypeError` here would
+ * take a live session down.
  */
 export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<ProviderEvent> => {
   const out: Emit = [];
@@ -638,16 +674,16 @@ export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<Pr
   }
   if (unsolicited && state.turnId !== undefined) {
     if (out.every((event) => event._tag === "turn.started")) {
-      // The message said nothing the taxonomy carries, so the turn it opened on
-      // the way in is not a turn at all.
+      // The message produced no events apart from the turn it opened, so drop
+      // that turn.
       out.length = 0;
       state.turnId = undefined;
     } else if (SELF_CONTAINED.has(sdk.type)) {
       closeTurn(state, out, state.turnId, "completed");
     }
   }
-  // There are thousands of deltas; a copy of the message on each would double
-  // the stream, and the delta already carries its text.
+  // There are thousands of deltas. A copy of the message on each one would
+  // double the stream, and each delta already carries its text.
   if (sdk.type === "stream_event") return out;
   const at = out.findIndex((event) => event._tag !== "turn.started");
   const found = out[at];

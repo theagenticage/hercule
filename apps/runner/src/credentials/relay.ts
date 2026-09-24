@@ -1,16 +1,17 @@
 /**
- * The runner's half of a credential exchange: a question from the socket goes
- * out on whichever connection is up, and the answer is found again by its
- * request id.
+ * The runner's side of a credential request: a request from the socket is sent
+ * to the controller on the current connection, and the answer is matched back
+ * to it by request id.
  *
- * One relay per daemon rather than one per connection, because the socket
- * outlives any one of them: the helper asks the daemon, not the connection.
- * Nothing is held beyond the reply it belongs to.
+ * There is one relay per daemon rather than one per connection, because the
+ * socket outlives any single connection to the controller. A pending request
+ * is forgotten as soon as it is answered or given up on.
  *
- * A question nobody answered - no connection, a connection that dropped, a
- * controller that took too long - is an absent answer and never a refusal: a
- * refusal is something the controller decided, and reporting one nobody made
- * would tell the user their credential was denied when it was never asked for.
+ * A request that gets no answer (no connection, a dropped connection, or a
+ * controller that took too long) fails with an error, and is never reported as
+ * a denial. Only the controller can deny a credential; reporting a denial it
+ * never made would tell the user their credential was refused when the
+ * controller was never asked.
  */
 import * as Effect from "effect/Effect";
 import * as Scope from "effect/Scope";
@@ -22,13 +23,13 @@ type Send = (frame: CredentialRequest) => Effect.Effect<void, unknown>;
 
 export interface CredentialRelay {
   /**
-   * Holds the connection for as long as its scope is open. Whatever was waiting
-   * when it closes is given up on rather than left hanging.
+   * Sends requests through `send` for as long as the scope is open. When the
+   * scope closes, every pending request fails instead of waiting forever.
    */
   readonly attached: (send: Send) => Effect.Effect<void, never, Scope.Scope>;
-  /** What the socket calls. Rejects when nothing answered. */
+  /** Sends a request to the controller and returns its answer. Rejects when no answer arrives. */
   readonly ask: (request: CredentialAsk) => Promise<CredentialAnswer>;
-  /** What the connection calls when the controller answers. */
+  /** Resolves the pending request that an answer from the controller belongs to. */
   readonly deliver: (answer: CredentialAnswer) => void;
 }
 
@@ -68,8 +69,8 @@ export const makeCredentialRelay = (
 
     ask: async (request) => {
       const send = sending;
-      // No connection, no answer: the socket turns this into an empty one, and
-      // git falls through to the machine's own helpers.
+      // The socket turns this error into an empty reply, and git moves on to
+      // the machine's own helpers.
       if (send === undefined) throw new Error("no controller connection to ask");
       const requestId = crypto.randomUUID();
       const answer = new Promise<CredentialAnswer>((resolve, reject) => {
