@@ -6,7 +6,7 @@
  * single object becomes aligned key-value lines, and ids are shortened to the
  * tail the CLI accepts back as an argument.
  */
-import { formatAge } from "@hercule/client-core";
+import { describeStepDuration, formatAge } from "@hercule/client-core";
 import {
   truncateText,
   formatIssue,
@@ -14,7 +14,6 @@ import {
   type RunOrigin,
   type RunStarted,
   type RunSummary,
-  type StepRecord,
   type StructuredResult,
   type Workflow,
   type WorkflowAction,
@@ -110,12 +109,17 @@ const renderKeyValues = (
 };
 
 /**
- * Formats a value like `formatCell`, but keeps an id whole. The run commands
- * print a run's id in full, as `workflow run` prints the id it starts, so the
- * id a reader copies from one run command is the same in every other.
+ * Formats a value like `formatCell`, but keeps every id whole, in a list too.
+ * The run commands print ids in full, as `workflow run` prints the id it
+ * starts, so an id a reader copies from `run read`, such as a Connection an
+ * input names, works in every other command.
  */
 const formatKeepingIds = (item: unknown): string =>
-  typeof item === "string" ? item : formatCell(item);
+  typeof item === "string"
+    ? item
+    : Array.isArray(item)
+      ? item.map(formatKeepingIds).join(",")
+      : formatCell(item);
 
 const isPage = (
   value: unknown,
@@ -299,21 +303,11 @@ const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
 ];
 
 /**
- * Returns how long a step took, such as `1.2s`, or nothing when it has not
- * both started and ended.
- */
-const describeDuration = (record: StepRecord): string => {
-  if (record.startedAt === undefined || record.finishedAt === undefined) return "";
-  const millis = Date.parse(record.finishedAt) - Date.parse(record.startedAt);
-  return millis < 1000 ? `${String(millis)}ms` : `${(millis / 1000).toFixed(1)}s`;
-};
-
-/**
  * Returns the lines printed for `run read`: a summary of the run, the inputs
  * it started with, and a table with one row per step record. The plan and the
  * steps' outputs are left out, because they are long; `--json` prints them.
  */
-const renderRun = (run: Run): ReadonlyArray<string> => [
+const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...renderKeyValues(
     {
       id: run.id,
@@ -330,13 +324,15 @@ const renderRun = (run: Run): ReadonlyArray<string> => [
   ),
   "",
   "inputs",
-  ...(Object.keys(run.inputs).length === 0 ? ["none"] : renderKeyValues(run.inputs)),
+  ...(Object.keys(run.inputs).length === 0
+    ? ["none"]
+    : renderKeyValues(run.inputs, formatKeepingIds)),
   "",
   ...renderTable(
     run.steps.map((record) => ({
       step: record.stepId,
       status: record.status,
-      took: describeDuration(record),
+      took: describeStepDuration(record, now),
       error: record.error === undefined ? "" : `${record.error.code}: ${record.error.message}`,
     })),
   ),
@@ -388,7 +384,7 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
     if (command.id === "workflow.run" || command.id === "workflow.submit") {
       return renderRunStarted(value as RunStarted);
     }
-    if (command.id === "run.read") return renderRun(value as Run);
+    if (command.id === "run.read") return renderRun(value as Run, Date.now());
     if (command.id === "run.cancel") return renderRunCancelled(value as Run);
     const lines = [...renderKeyValues(record)];
     // The only hint this build prints after a command. A caller who has just

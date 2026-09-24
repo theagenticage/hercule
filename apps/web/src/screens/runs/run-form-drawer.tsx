@@ -4,9 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   hasConnectionField,
   queryKeys,
-  readRunForm,
-  readRunFormLoadIssues,
-  readRunInputIssues,
+  buildRunForm,
+  decideRunFormIssues,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { RunInputs } from "@hercule/contract";
@@ -56,7 +55,7 @@ export function RunFormDrawer({
   const form =
     workflow.data === undefined
       ? undefined
-      : readRunForm(workflow.data.source, connections.data?.items ?? []);
+      : buildRunForm(workflow.data.source, connections.data?.items ?? []);
   const readFields = form !== undefined && "fields" in form ? form.fields : undefined;
   // Only a form with a Connection field needs the Connections, and it waits
   // for them, so its choice never shows empty and then fills in.
@@ -64,16 +63,7 @@ export function RunFormDrawer({
   const fields = needsConnections && connections.data === undefined ? undefined : readFields;
   const loadError =
     workflows.error ?? workflow.error ?? (needsConnections ? connections.error : null);
-  // A refused start is what the user asked about last, so it is shown before
-  // a read that failed since.
-  const issues =
-    start.error !== null
-      ? readRunInputIssues(start.error, fields ?? [])
-      : loadError !== null
-        ? readRunFormLoadIssues(loadError)
-        : form !== undefined && "refusal" in form
-          ? readRunFormLoadIssues(form.refusal)
-          : readRunInputIssues(null, []);
+  const issues = decideRunFormIssues({ startError: start.error, loadError, form });
 
   const title = fixedId === undefined ? "Run a workflow" : "Run this workflow";
 

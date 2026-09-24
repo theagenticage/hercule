@@ -42,7 +42,7 @@ const SECTION_HEADING = "mb-2 flex h-8 items-center justify-between gap-4";
  * the graph and the steps count the same time. The page owns Cancel and the
  * question it asks first.
  */
-export function RunPage({
+export function RunScreen({
   client,
   run,
   timezone,

@@ -34,9 +34,8 @@ import {
 import {
   abbreviateEdgeCondition,
   describeStepState,
-  formatElapsed,
+  describeStepDuration,
   isRunLive,
-  measureElapsed,
   type EdgeTravel,
   type RunGraph,
   type StepProgress,
@@ -354,7 +353,7 @@ function RunStepCard({
 }): JSX.Element {
   const { state } = progress;
   const isUnreached = state === "unreached";
-  const elapsed = measureElapsed(progress.startedAt, progress.finishedAt, run.now);
+  const duration = describeStepDuration(progress, run.now);
   return (
     <div
       role="group"
@@ -385,11 +384,11 @@ function RunStepCard({
         aria-hidden="true"
         className={cn(
           "ml-2 w-[46px] shrink-0 text-right text-fine whitespace-nowrap tabular-nums",
-          elapsed !== undefined && "font-mono",
+          duration !== "" && "font-mono",
           WORK_STATE_HUES[state] ?? "text-faint",
         )}
       >
-        {elapsed !== undefined ? formatElapsed(elapsed) : state === "pending" ? "pending" : ""}
+        {duration !== "" ? duration : state === "pending" ? "pending" : ""}
       </span>
     </div>
   );

@@ -276,7 +276,7 @@ const pushRunUpdate = async (live: LiveStub, id: string): Promise<void> => {
 };
 
 /* ------------------------------------------------------------------------ */
-/* AC-15: a run's page.                                                      */
+/* A run's page.                                                            */
 /* ------------------------------------------------------------------------ */
 
 describe("A run's page > the header", () => {
@@ -434,7 +434,7 @@ describe("A run's page > the steps", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {
 });
 
 /* ------------------------------------------------------------------------ */
-/* AC-17: the run graph shows where the run is.                              */
+/* The run graph shows where the run is.                                    */
 /* ------------------------------------------------------------------------ */
 
 describe("A run's page > the run graph", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {

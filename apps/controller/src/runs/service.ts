@@ -22,7 +22,9 @@ import {
   type Forbidden,
   type NotFound,
   type Run,
+  type RunStatus,
   type RunSummary,
+  type StepRecord,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
@@ -49,7 +51,23 @@ export const Identified = Schema.Struct({ id: Id });
 
 export type Identified = Schema.Schema.Type<typeof Identified>;
 
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
+/** Decodes the input of an operation on one run, for the operations that did not come through a transport. */
+export const decodeIdentified = Schema.decodeUnknownEffect(Identified);
+
+/**
+ * Checks whether a run or a step record can still change: it is pending or
+ * running. Only such a run is executed, cancelled or resumed at boot. A step
+ * record's statuses are a run's, so this one check serves both.
+ */
+export const isUnfinished = (status: RunStatus): boolean =>
+  status === "pending" || status === "running";
+
+/**
+ * Returns the step record a run is at: the first that has not ended, or
+ * `undefined` when every record has.
+ */
+export const findCurrentRecord = (steps: ReadonlyArray<StepRecord>): StepRecord | undefined =>
+  steps.find((record) => isUnfinished(record.status));
 
 const make = Effect.gen(function* () {
   const runs = yield* runRepository;

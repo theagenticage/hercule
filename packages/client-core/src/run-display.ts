@@ -7,7 +7,6 @@
  */
 import type { FailureReason, RunOrigin, RunStatus, StepStatus } from "@hercule/contract";
 import { describeActor, type ActorReading } from "./actor-display";
-import { toIdTail } from "./id-tail";
 import { formatDuration } from "./threads/duration";
 
 /**
@@ -39,7 +38,7 @@ export interface RunOriginReading {
    * How the run was started when that was not by hand: "through the API",
    * or "at step <id>" for a run another run's step started.
    */
-  readonly channel: string | undefined;
+  readonly via: string | undefined;
 }
 
 /**
@@ -50,17 +49,14 @@ export interface RunOriginReading {
 export const describeRunOrigin = (origin: RunOrigin): RunOriginReading => {
   switch (origin.kind) {
     case "manual":
-      return { starter: describeActor(origin.actor), channel: undefined };
+      return { starter: describeActor(origin.actor), via: undefined };
     case "api":
-      return { starter: describeActor(origin.actor), channel: "through the API" };
+      return { starter: describeActor(origin.actor), via: "through the API" };
     case "action":
+      // The run that started this one stamps its writes `run:<id>`.
       return {
-        starter: {
-          label: `run ${toIdTail(origin.parentRunId)}`,
-          sessionId: undefined,
-          runId: origin.parentRunId,
-        },
-        channel: `at step ${origin.stepId}`,
+        starter: describeActor(`run:${origin.parentRunId}`),
+        via: `at step ${origin.stepId}`,
       };
   }
 };
@@ -90,6 +86,20 @@ export const formatElapsed = (ms: number): string => {
   if (ms < 1000) return `${String(Math.floor(ms))}ms`;
   if (ms < 60_000) return `${(Math.floor(ms / 100) / 10).toFixed(1)}s`;
   return formatDuration(Math.floor(ms / 1000) * 1000);
+};
+
+/**
+ * Returns how long a step record ran, or has run up to `now` while it runs,
+ * such as `40ms` or `1m 15s`, or an empty string for a record that has not
+ * started. The web app and the CLI both show a step's duration with it, so
+ * the two never disagree about the same record.
+ */
+export const describeStepDuration = (
+  record: { readonly startedAt?: string; readonly finishedAt?: string },
+  now: number,
+): string => {
+  const elapsed = measureElapsed(record.startedAt, record.finishedAt, now);
+  return elapsed === undefined ? "" : formatElapsed(elapsed);
 };
 
 /**
@@ -130,6 +140,18 @@ export const describeFailureReason = (reason: FailureReason): string => {
       return "template error";
   }
 };
+
+/**
+ * Returns what the timeline says where a step with no bar would be: "pending"
+ * for a step waiting to start, "cancelled before it started" for one the run's
+ * cancel reached first, and nothing for any other step.
+ */
+export const describeUnstartedStep = (state: WorkState): string | undefined =>
+  state === "pending"
+    ? "pending"
+    : state === "cancelled"
+      ? "cancelled before it started"
+      : undefined;
 
 /**
  * Returns the word for a step's state: its status as the contract spells it,

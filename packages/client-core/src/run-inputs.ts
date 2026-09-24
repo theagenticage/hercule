@@ -15,6 +15,7 @@ import {
 } from "@hercule/contract";
 import { readValidationIssues } from "./errors";
 import { parseWorkflowSourceWithRanges } from "./workflow-source";
+import { readJsonObject, readStringList } from "./json-shape";
 
 type InputDeclaration = NonNullable<WorkflowDefinition["inputs"]>[number];
 
@@ -78,14 +79,6 @@ export type RunInputValue = string | boolean | undefined | typeof UNREADABLE_NUM
 /** The whole form, keyed by input name. */
 export type RunInputDraft = Readonly<Record<string, RunInputValue>>;
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-
-const asStrings = (value: unknown): ReadonlyArray<string> | undefined =>
-  Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
-
 /** Converts a default to the text a text widget shows, or returns empty text when there is none. */
 const toText = (value: unknown, isJson: boolean): string =>
   value === undefined ? "" : typeof value === "string" && !isJson ? value : JSON.stringify(value);
@@ -95,7 +88,7 @@ const buildField = (
   declaration: InputDeclaration,
   connections: ReadonlyArray<Connection>,
 ): RunInputField => {
-  const schema = asRecord(declaration.schema) ?? {};
+  const schema = readJsonObject(declaration.schema) ?? {};
   const schemaDescription = schema["description"];
   const base = {
     name: declaration.name,
@@ -120,7 +113,7 @@ const buildField = (
     };
   }
   const type = schema["type"];
-  const options = asStrings(schema["enum"]);
+  const options = readStringList(schema["enum"]);
   if (type === "string" && options !== undefined) {
     return { ...base, kind: "enum", options, initial: toText(declaration.default, false) };
   }
@@ -150,7 +143,7 @@ export type RunFormReading =
  * parse as a workflow, such as one a newer contract rejects, has no fields
  * the form can trust, so the reading says why instead.
  */
-export const readRunForm = (
+export const buildRunForm = (
   source: string,
   connections: ReadonlyArray<Connection>,
 ): RunFormReading => {
@@ -178,7 +171,7 @@ export const hasConnectionField = (fields: ReadonlyArray<RunInputField>): boolea
  * connection to the controller: "The form could not be read: <message>." It
  * says nothing about starting, because nothing was started.
  */
-export const readRunFormLoadIssues = (reason: unknown): RunInputIssues => ({
+export const buildRunFormLoadIssues = (reason: unknown): RunInputIssues => ({
   perField: {},
   summary: `The form could not be read: ${readMessage(reason).replace(/\.$/, "")}.`,
   general: [],
@@ -269,7 +262,7 @@ const buildSummary = (message: string): string => `Not started: ${message.replac
  * error that lists no issues, such as an unknown workflow or a lost
  * connection, has only its summary.
  */
-export const readRunInputIssues = (
+export const buildRunInputIssues = (
   error: unknown,
   fields: ReadonlyArray<RunInputField>,
 ): RunInputIssues => {
@@ -294,4 +287,32 @@ export const readRunInputIssues = (
   // any other refusal does, or the form would show nothing.
   const isAllOnFields = general.length === 0 && Object.keys(perField).length > 0;
   return { perField, summary: isAllOnFields ? undefined : buildSummary(message), general };
+};
+
+/**
+ * Returns the errors the run form shows, from everything that can go wrong
+ * with it, most recent concern first:
+ * - a refused start, because it is what the user asked about last;
+ * - a read that failed, such as the workflow or, for a form with a Connection
+ *   field, the Connections;
+ * - a stored workflow that does not parse.
+ */
+export const decideRunFormIssues = ({
+  startError,
+  loadError,
+  form,
+}: {
+  readonly startError: unknown;
+  readonly loadError: unknown;
+  readonly form: RunFormReading | undefined;
+}): RunInputIssues => {
+  if (startError !== null && startError !== undefined) {
+    return buildRunInputIssues(
+      startError,
+      form !== undefined && "fields" in form ? form.fields : [],
+    );
+  }
+  if (loadError !== null && loadError !== undefined) return buildRunFormLoadIssues(loadError);
+  if (form !== undefined && "refusal" in form) return buildRunFormLoadIssues(form.refusal);
+  return buildRunInputIssues(null, []);
 };

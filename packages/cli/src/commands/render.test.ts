@@ -255,6 +255,7 @@ describe("a catalog query that returns a plain array", () => {
 
 describe("hercule run", () => {
   const RUN = "0199e0e7-3333-7000-8000-0000000000bb";
+  const CONNECTION = "0199e0e7-4444-7000-8000-0000000000cc";
 
   it("prints the new run's full id after workflow run, and the command that shows it", () => {
     expect(
@@ -267,7 +268,7 @@ describe("hercule run", () => {
       id: RUN,
       workflowId: null,
       plan: { name: "File a task", steps: [] },
-      inputs: { title: "Fix login", count: 3 },
+      inputs: { title: "Fix login", count: 3, account: CONNECTION, reviewers: [CONNECTION] },
       origin: { kind: "manual", actor: "user" },
       status: "failed",
       failureReason: "step-failed",
@@ -286,7 +287,7 @@ describe("hercule run", () => {
           iteration: 1,
           status: "failed",
           startedAt: "2026-09-24T10:00:00.040Z",
-          finishedAt: "2026-09-24T10:00:01.540Z",
+          finishedAt: "2026-09-24T10:01:15.040Z",
           error: { code: "not_found", message: "no such task" },
         },
         { stepId: "notify", iteration: 1, status: "cancelled" },
@@ -307,12 +308,14 @@ describe("hercule run", () => {
       "finishedAt     2026-09-24T10:00:01.540Z",
       "",
       "inputs",
-      "title  Fix login",
-      "count  3",
+      "title      Fix login",
+      "count      3",
+      `account    ${CONNECTION}`,
+      `reviewers  ${CONNECTION}`,
       "",
-      "step        status     took  error",
+      "step        status     took    error",
       "file_task   completed  40ms",
-      "start_task  failed     1.5s  not_found: no such task",
+      "start_task  failed     1m 15s  not_found: no such task",
       "notify      cancelled",
     ]);
   });

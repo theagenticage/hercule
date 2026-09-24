@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE, toIdTail, isSupportedTimezone, queryKeys } from "@hercule/client-core";
+import { toIdTail, resolveDisplayTimezone, queryKeys } from "@hercule/client-core";
 import type { TaskCreateInput } from "@hercule/contract";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { projectsQuery, settingsQuery, tasksQuery } from "../../../app/queries";
@@ -35,8 +35,7 @@ function Tasks(): JSX.Element {
   useLiveInvalidation(live, queryClient, "task");
 
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
-  const timezone = isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE;
+  const timezone = resolveDisplayTimezone(settings.user.timezone);
 
   const [filters, setFilters] = useState(NO_FILTERS);
   const [composing, setComposing] = useState(false);

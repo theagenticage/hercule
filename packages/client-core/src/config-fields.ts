@@ -10,6 +10,7 @@
  */
 import type { PluginConfigureInput } from "@hercule/contract";
 import { readValidationIssues } from "./errors";
+import { readJsonObject, readStringList } from "./json-shape";
 
 /** The type of a setting, which decides the widget that renders it. */
 export type ConfigFieldKind = "string" | "number" | "integer" | "boolean" | "enum" | "stringList";
@@ -32,14 +33,6 @@ export type ConfigValue = string | boolean | ReadonlyArray<string>;
 /** The whole form, keyed by field name. */
 export type ConfigDraft = Readonly<Record<string, ConfigValue>>;
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-
-const asStrings = (value: unknown): ReadonlyArray<string> | undefined =>
-  Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
-
 /** Returns the field kind for a schema property. */
 const decideFieldKind = (property: Record<string, unknown>): ConfigFieldKind => {
   const type = property["type"];
@@ -52,13 +45,13 @@ const decideFieldKind = (property: Record<string, unknown>): ConfigFieldKind => 
 export const buildConfigFields = (
   schema: Record<string, unknown> | undefined,
 ): ReadonlyArray<ConfigField> => {
-  const properties = asRecord(schema?.["properties"]);
+  const properties = readJsonObject(schema?.["properties"]);
   if (properties === undefined) return [];
-  const required = new Set(asStrings(schema?.["required"]) ?? []);
+  const required = new Set(readStringList(schema?.["required"]) ?? []);
 
   const fields: ConfigField[] = [];
   for (const [name, raw] of Object.entries(properties)) {
-    const property = asRecord(raw) ?? {};
+    const property = readJsonObject(raw) ?? {};
     const kind = decideFieldKind(property);
 
     const title = property["title"];
@@ -69,7 +62,7 @@ export const buildConfigFields = (
       label: typeof title === "string" ? title : name,
       ...(typeof description === "string" ? { description } : {}),
       required: required.has(name),
-      ...(kind === "enum" ? { options: asStrings(property["enum"]) ?? [] } : {}),
+      ...(kind === "enum" ? { options: readStringList(property["enum"]) ?? [] } : {}),
     });
   }
   return fields;
@@ -77,7 +70,7 @@ export const buildConfigFields = (
 
 const toDraftValue = (field: ConfigField, stored: unknown): ConfigValue => {
   if (field.kind === "boolean") return stored === true;
-  if (field.kind === "stringList") return asStrings(stored) ?? [];
+  if (field.kind === "stringList") return readStringList(stored) ?? [];
   if (typeof stored === "number" || typeof stored === "string") return String(stored);
   return "";
 };
@@ -90,7 +83,7 @@ export const buildConfigDraft = (
   fields: ReadonlyArray<ConfigField>,
   config: unknown,
 ): ConfigDraft => {
-  const stored = asRecord(config) ?? {};
+  const stored = readJsonObject(config) ?? {};
   return Object.fromEntries(
     fields.map((field) => [field.name, toDraftValue(field, stored[field.name])]),
   );
@@ -120,14 +113,14 @@ export const buildConfigPayload = (
   draft: ConfigDraft,
   config: unknown,
 ): Readonly<Record<string, ConfigJson>> => {
-  const stored = asRecord(config) ?? {};
+  const stored = readJsonObject(config) ?? {};
   const payload: Record<string, ConfigJson> = {};
   for (const field of fields) {
     const value = draft[field.name];
     if (field.kind === "boolean") {
       if (!isUnfilled(field, stored, value !== true)) payload[field.name] = value === true;
     } else if (field.kind === "stringList") {
-      const list = [...(asStrings(value) ?? [])];
+      const list = [...(readStringList(value) ?? [])];
       if (!isUnfilled(field, stored, list.length === 0)) payload[field.name] = list;
     } else if (typeof value === "string" && value !== "") {
       payload[field.name] =

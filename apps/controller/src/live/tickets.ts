@@ -30,7 +30,8 @@ interface Held {
 }
 
 /**
- * The error message when a session actor asks for a ticket.
+ * The error message when any actor but the user, such as a session or a
+ * run, asks for a ticket.
  *
  * This is a 401, although other user-only operations reject a session actor
  * with a 403. `auth.wsTicket` requires only that a credential resolved, so
@@ -38,8 +39,8 @@ interface Held {
  * needs one. The message tells this case apart from a caller that sent no
  * credential.
  */
-const SESSION_HAS_NO_SOCKET =
-  "only the user can open a live connection; a session reads what it needs through the API";
+const ONLY_THE_USER_HAS_A_SOCKET =
+  "only the user can open a live connection; a session or a run reads what it needs through the API";
 
 const make = Effect.sync(() => {
   const held = new Map<string, Held>();
@@ -48,8 +49,8 @@ const make = Effect.sync(() => {
     /**
      * Implements `auth.wsTicket`: returns a new ticket for the calling user.
      * Fails with unauthenticated when there is no credential, or the caller
-     * is not the user, such as a session. The actor is stored with the ticket, so the socket it
-     * opens belongs to that caller.
+     * is not the user, such as a session. The actor is stored with the
+     * ticket, so the socket it opens belongs to that caller.
      */
     issue: (): Effect.Effect<string, Unauthenticated> =>
       Effect.gen(function* () {
@@ -67,7 +68,7 @@ const make = Effect.sync(() => {
         // yet. Also, the connection sweep can re-check only a user credential,
         // so a socket opened by another actor could never be closed by it.
         if (actor._tag !== "user") {
-          return yield* Effect.fail(createUnauthenticatedError(SESSION_HAS_NO_SOCKET));
+          return yield* Effect.fail(createUnauthenticatedError(ONLY_THE_USER_HAS_A_SOCKET));
         }
         const now = yield* Clock.currentTimeMillis;
         for (const [value, entry] of held) {

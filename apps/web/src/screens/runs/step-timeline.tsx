@@ -1,5 +1,10 @@
 import type { CSSProperties, JSX } from "react";
-import { formatElapsed, measureElapsed, type Timeline } from "@hercule/client-core";
+import {
+  describeStepDuration,
+  describeUnstartedStep,
+  formatElapsed,
+  type Timeline,
+} from "@hercule/client-core";
 import { WORK_STATE_HUES, cn, type WorkState } from "@hercule/ui";
 import { StepCells, StepErrorLine } from "./step-parts";
 
@@ -88,7 +93,6 @@ export function StepTimeline({
       <div className="relative">
         <ul>
           {timeline.rows.map(({ row, bar }) => {
-            const elapsed = measureElapsed(row.record?.startedAt, row.record?.finishedAt, now);
             return (
               <li key={row.key} className="border-t border-line-soft">
                 <div style={GRID} className="grid min-h-10 items-center">
@@ -102,14 +106,14 @@ export function StepTimeline({
                       />
                     ))}
                     {bar === undefined ? (
-                      row.state === "pending" || row.state === "cancelled" ? (
+                      describeUnstartedStep(row.state) === undefined ? null : (
                         <span
                           style={{ left: toPercent(timeline.now) }}
                           className="absolute top-1/2 ml-2 -translate-y-1/2 text-fine whitespace-nowrap text-faint"
                         >
-                          {row.state === "pending" ? "pending" : "cancelled before it started"}
+                          {describeUnstartedStep(row.state)}
                         </span>
-                      ) : null
+                      )
                     ) : (
                       <span
                         // A bar is at least as wide as its round ends, so a step
@@ -131,7 +135,7 @@ export function StepTimeline({
                       WORK_STATE_HUES[row.state] ?? "text-muted",
                     )}
                   >
-                    {elapsed === undefined ? "" : formatElapsed(elapsed)}
+                    {row.record === undefined ? "" : describeStepDuration(row.record, now)}
                   </span>
                 </div>
                 {row.record?.error === undefined ? null : (

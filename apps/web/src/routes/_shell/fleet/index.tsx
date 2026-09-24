@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Group, LaneLabel } from "@hercule/ui";
-import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hercule/client-core";
+import { resolveDisplayTimezone } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
   controllerQuery,
@@ -34,8 +34,9 @@ function Fleet(): JSX.Element {
 
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const controller = useSuspenseQuery(controllerQuery(client)).data;
-  const stored = useSuspenseQuery(settingsQuery(client)).data.user.timezone ?? FALLBACK_TIMEZONE;
-  const timezone = isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE;
+  const timezone = resolveDisplayTimezone(
+    useSuspenseQuery(settingsQuery(client)).data.user.timezone,
+  );
   const local = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
 
   return (

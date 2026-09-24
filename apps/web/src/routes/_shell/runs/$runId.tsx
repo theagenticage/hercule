@@ -1,11 +1,11 @@
 import type { JSX } from "react";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE, isNotFound, isSupportedTimezone } from "@hercule/client-core";
+import { isNotFound, resolveDisplayTimezone } from "@hercule/client-core";
 import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { runQuery, settingsQuery } from "../../../app/queries";
-import { RunPage, type StepsView } from "./-page";
+import { RunScreen, type StepsView } from "./-screen";
 
 export const Route = createFileRoute("/_shell/runs/$runId")({
   // The page draws its own header with the workflow's name, so the shell
@@ -40,16 +40,18 @@ function StoredRun(): JSX.Element {
   useLiveInvalidation(live, queryClient, "run");
 
   const run = useSuspenseQuery(runQuery(client, runId)).data;
-  const stored = useSuspenseQuery(settingsQuery(client)).data.user.timezone ?? FALLBACK_TIMEZONE;
+  const timezone = resolveDisplayTimezone(
+    useSuspenseQuery(settingsQuery(client)).data.user.timezone,
+  );
 
   return (
-    <RunPage
+    <RunScreen
       // Keyed by id, so moving to another run mounts a fresh page, without the
       // previous run's open rows or its question.
       key={runId}
       client={client}
       run={run}
-      timezone={isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE}
+      timezone={timezone}
       stepsView={steps}
       onStepsViewChange={(next) =>
         void navigate({ search: next === "list" ? {} : { steps: next }, replace: true })

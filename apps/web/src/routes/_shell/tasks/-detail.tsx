@@ -1,5 +1,4 @@
 import { useState, type FormEvent, type JSX } from "react";
-import { Link } from "@tanstack/react-router";
 import {
   describeActor,
   formatStamp,
@@ -15,6 +14,7 @@ import {
   type TaskUpdateInput,
 } from "@hercule/contract";
 import { Button, Drawer, Input, LaneLabel, PriorityGlyph, Row, Select } from "@hercule/ui";
+import { ActorLink } from "../../../screens/actor-link";
 
 const NO_PROJECT = "";
 
@@ -197,25 +197,7 @@ export function TaskDetail({
                       {describeProvenanceTarget(entry)}
                     </span>
                     <span className="flex items-baseline gap-2 font-mono text-fine">
-                      {actor.sessionId !== undefined ? (
-                        <Link
-                          to="/threads/$sessionId"
-                          params={{ sessionId: actor.sessionId }}
-                          className="text-ink underline decoration-line underline-offset-[3px]"
-                        >
-                          {actor.label}
-                        </Link>
-                      ) : actor.runId !== undefined ? (
-                        <Link
-                          to="/runs/$runId"
-                          params={{ runId: actor.runId }}
-                          className="text-ink underline decoration-line underline-offset-[3px]"
-                        >
-                          {actor.label}
-                        </Link>
-                      ) : (
-                        <span className="text-faint">{actor.label}</span>
-                      )}
+                      <ActorLink actor={actor} plainClassName="text-faint" />
                       <span className="shrink-0 text-faint tabular-nums">
                         {formatStamp(new Date(entry.at), timezone) ?? entry.at}
                       </span>

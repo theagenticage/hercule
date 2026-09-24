@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE, isSupportedTimezone } from "@hercule/client-core";
+import { resolveDisplayTimezone } from "@hercule/client-core";
 import {
   localRunnerQuery,
   projectsQuery,
@@ -54,8 +54,7 @@ function ThreadRoute(): JSX.Element {
   const { client, live } = Route.useRouteContext();
   const { sessionId } = Route.useParams();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const stored = settings.user.timezone ?? FALLBACK_TIMEZONE;
-  const timezone = isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE;
+  const timezone = resolveDisplayTimezone(settings.user.timezone);
 
   // The key is the session id. The router does not remount this component
   // when only the param changes, and the screen holds per-thread state (the

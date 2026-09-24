@@ -5,18 +5,15 @@ import {
   describeRunStatus,
   formatPreciseStamp,
   toIdTail,
-  type ActorReading,
 } from "@hercule/client-core";
 import type { Run } from "@hercule/contract";
 import { WORK_STATE_HUES, WorkStateMark, cn } from "@hercule/ui";
+import { ActorLink } from "../actor-link";
 import { FailureText } from "./step-parts";
 
-/** The quiet link style of the header: the breadcrumb and the one who started the run. */
+/** The quiet link style of the breadcrumb back to the run list. */
 const QUIET_LINK =
   "-mx-1 rounded-control px-1 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live";
-
-/** The style of a link to the session or run that started this run, as in a task's provenance. */
-const STARTER_LINK = cn("text-ink underline decoration-line underline-offset-[3px]", QUIET_LINK);
 
 /**
  * The header of a run's page. The first line is a breadcrumb back to the run
@@ -79,8 +76,8 @@ export function RunHeader({
         <Dot />
         <span>
           {"started by "}
-          <Starter starter={origin.starter} />
-          {origin.channel === undefined ? null : ` ${origin.channel}`}
+          <ActorLink actor={origin.starter} plainClassName="text-ink" />
+          {origin.via === undefined ? null : ` ${origin.via}`}
         </span>
         <Dot />
         <span className="font-mono text-fine tabular-nums">
@@ -104,29 +101,6 @@ export function RunHeader({
       </p>
     </header>
   );
-}
-
-/** Who started the run: a link to the session's thread or the parent run, or plain words. */
-function Starter({ starter }: { readonly starter: ActorReading }): JSX.Element {
-  if (starter.sessionId !== undefined) {
-    return (
-      <Link
-        to="/threads/$sessionId"
-        params={{ sessionId: starter.sessionId }}
-        className={STARTER_LINK}
-      >
-        {starter.label}
-      </Link>
-    );
-  }
-  if (starter.runId !== undefined) {
-    return (
-      <Link to="/runs/$runId" params={{ runId: starter.runId }} className={STARTER_LINK}>
-        {starter.label}
-      </Link>
-    );
-  }
-  return <span className="text-ink">{starter.label}</span>;
 }
 
 /** The separator between the facts of the status line. */

@@ -4,10 +4,11 @@ import { ApiError } from "./errors";
 import {
   buildRunInputDraft,
   buildRunInputs,
+  decideRunFormIssues,
   hasConnectionField,
-  readRunForm,
-  readRunFormLoadIssues,
-  readRunInputIssues,
+  buildRunForm,
+  buildRunFormLoadIssues,
+  buildRunInputIssues,
   UNREADABLE_NUMBER,
   type RunInputDraft,
   type RunInputField,
@@ -73,12 +74,12 @@ ${STEPS}`;
 
 /** Reads the form of `SOURCE`, which parses, so the reading has fields. */
 const readFields = (): ReadonlyArray<RunInputField> => {
-  const reading = readRunForm(SOURCE, CONNECTIONS);
+  const reading = buildRunForm(SOURCE, CONNECTIONS);
   if (!("fields" in reading)) throw new Error(reading.refusal);
   return reading.fields;
 };
 
-describe("readRunForm", () => {
+describe("buildRunForm", () => {
   it("gives each input the widget of its type, in declaration order", () => {
     const fields = readFields();
     assert.deepStrictEqual(
@@ -107,11 +108,11 @@ describe("readRunForm", () => {
   });
 
   it("has no fields for a workflow with no inputs", () => {
-    assert.deepStrictEqual(readRunForm(`name: x\n${STEPS}`, []), { fields: [] });
+    assert.deepStrictEqual(buildRunForm(`name: x\n${STEPS}`, []), { fields: [] });
   });
 
   it("says why when the stored source does not parse", () => {
-    const reading = readRunForm("name: [unclosed", []);
+    const reading = buildRunForm("name: [unclosed", []);
     assert.isTrue("refusal" in reading);
   });
 });
@@ -163,7 +164,7 @@ describe("buildRunInputs", () => {
   });
 });
 
-describe("readRunInputIssues", () => {
+describe("buildRunInputIssues", () => {
   it("puts an issue at inputs.<name> on its field and every other issue under a summary", () => {
     const error = new ApiError("validation", "the inputs are not valid", {
       issues: [
@@ -172,7 +173,7 @@ describe("readRunInputIssues", () => {
         { path: ["steps", "0", "action"], message: "Unknown action." },
       ],
     });
-    assert.deepStrictEqual(readRunInputIssues(error, readFields()), {
+    assert.deepStrictEqual(buildRunInputIssues(error, readFields()), {
       perField: { title: "Required." },
       summary: "Not started: the inputs are not valid.",
       general: ["steps.0.action: Unknown action."],
@@ -183,16 +184,19 @@ describe("readRunInputIssues", () => {
     const error = new ApiError("validation", "the inputs are not valid", {
       issues: [{ path: ["inputs", "title"], message: "Required." }],
     });
-    assert.strictEqual(readRunInputIssues(error, readFields()).summary, undefined);
+    assert.strictEqual(buildRunInputIssues(error, readFields()).summary, undefined);
   });
 
   it("has only a summary for an error that lists no issues, and nothing without an error", () => {
-    assert.deepStrictEqual(readRunInputIssues(new ApiError("not_found", "no such workflow."), []), {
-      perField: {},
-      summary: "Not started: no such workflow.",
-      general: [],
-    });
-    assert.deepStrictEqual(readRunInputIssues(null, []), {
+    assert.deepStrictEqual(
+      buildRunInputIssues(new ApiError("not_found", "no such workflow."), []),
+      {
+        perField: {},
+        summary: "Not started: no such workflow.",
+        general: [],
+      },
+    );
+    assert.deepStrictEqual(buildRunInputIssues(null, []), {
       perField: {},
       summary: undefined,
       general: [],
@@ -207,12 +211,44 @@ describe("hasConnectionField", () => {
   });
 });
 
-describe("readRunFormLoadIssues", () => {
+describe("buildRunFormLoadIssues", () => {
   it("says the form could not be read, not that a run was not started", () => {
-    assert.deepStrictEqual(readRunFormLoadIssues(new Error("cannot reach the controller")), {
+    assert.deepStrictEqual(buildRunFormLoadIssues(new Error("cannot reach the controller")), {
       perField: {},
       summary: "The form could not be read: cannot reach the controller.",
       general: [],
     });
+  });
+});
+
+describe("decideRunFormIssues", () => {
+  const refused = new ApiError("validation", "the inputs are not valid", {
+    issues: [{ path: ["inputs", "title"], message: "Required." }],
+  });
+
+  it("shows a refused start before a read that failed since", () => {
+    const issues = decideRunFormIssues({
+      startError: refused,
+      loadError: new Error("cannot reach the controller"),
+      form: { fields: readFields() },
+    });
+    assert.deepStrictEqual(issues.perField, { title: "Required." });
+  });
+
+  it("says a read failed, or the workflow does not parse, before anything was started", () => {
+    assert.strictEqual(
+      decideRunFormIssues({ startError: null, loadError: new Error("lost"), form: undefined })
+        .summary,
+      "The form could not be read: lost.",
+    );
+    assert.match(
+      decideRunFormIssues({ startError: null, loadError: null, form: { refusal: "no parse" } })
+        .summary ?? "",
+      /^The form could not be read: no parse\.$/,
+    );
+    assert.strictEqual(
+      decideRunFormIssues({ startError: null, loadError: null, form: { fields: [] } }).summary,
+      undefined,
+    );
   });
 });

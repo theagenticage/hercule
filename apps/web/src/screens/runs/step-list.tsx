@@ -1,10 +1,5 @@
 import { useState, type JSX } from "react";
-import {
-  describeStepState,
-  formatElapsed,
-  measureElapsed,
-  type StepRow,
-} from "@hercule/client-core";
+import { describeStepState, describeStepDuration, type StepRow } from "@hercule/client-core";
 import type { RunStatus } from "@hercule/contract";
 import { WORK_STATE_HUES, cn } from "@hercule/ui";
 import { StepCells, StepErrorLine } from "./step-parts";
@@ -30,7 +25,6 @@ export function StepList({
       {rows.map((row) => {
         const output = row.record?.output;
         const isOpen = openKey === row.key && output !== undefined;
-        const elapsed = measureElapsed(row.record?.startedAt, row.record?.finishedAt, now);
         const cells = (
           <>
             <StepCells row={row} />{" "}
@@ -43,7 +37,7 @@ export function StepList({
                 WORK_STATE_HUES[row.state] ?? "text-muted",
               )}
             >
-              {elapsed === undefined ? "" : formatElapsed(elapsed)}
+              {row.record === undefined ? "" : describeStepDuration(row.record, now)}
             </span>{" "}
             <span className="flex justify-end text-faint" aria-hidden="true">
               {output === undefined ? null : <Chevron isOpen={isOpen} />}

@@ -533,7 +533,10 @@ export const waitForRunToFinish = async (base: string, token: string, id: string
   return finished;
 };
 
-/** Returns how many runs the database holds. No operation lists runs yet, so the table is read directly. */
+/**
+ * Returns how many runs the database holds, read from the table directly:
+ * `run.query` pages its answer, and a refusal test needs the whole count.
+ */
 export const countRuns = async (harness: ServerHarness): Promise<number> => {
   const rows = await runEffect(
     harness.sql<{ readonly count: number }>`SELECT count(*) AS count FROM runs`,

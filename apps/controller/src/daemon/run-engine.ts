@@ -99,7 +99,14 @@ import { connectionRepository } from "../connections";
 import { AfterCommit, afterCommit, nowIso, withTransaction } from "../db";
 import { renderTemplates } from "../expressions";
 import { PluginHost, type RegisteredWorkflowAction } from "../plugins";
-import { Identified, runRepository, StepRecordEnded } from "../runs";
+import {
+  decodeIdentified,
+  findCurrentRecord,
+  Identified,
+  isUnfinished,
+  runRepository,
+  StepRecordEnded,
+} from "../runs";
 import { TaskService } from "../tasks";
 import { WorkflowService } from "../workflows";
 import { absorbFailures } from "./absorbing";
@@ -116,11 +123,15 @@ const StartInput = Schema.Struct({
 
 type StartInput = Schema.Schema.Type<typeof StartInput>;
 
+/** The error of a step whose action is not in the catalog, or has nothing to call. */
+const actionUnavailable = (action: string): StepError => ({
+  code: "not_found",
+  message: `The action ${action} is not available.`,
+});
+
 const decodeStartInput = Schema.decodeUnknownEffect(StartInput);
 
 const decodeSubmitInput = Schema.decodeUnknownEffect(WorkflowSubmitInput);
-
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 type Step = WorkflowDefinition["steps"][number];
 
@@ -557,23 +568,8 @@ const make = Effect.gen(function* () {
         const catalogEntry = (yield* host.listActiveWorkflowActions()).find(
           (action) => action.id === step.action,
         );
-        // A built-in action is called through the engine's own map, and a
-        // plugin's action through the `execute` its plugin registered.
-        const builtIn = builtInActions.get(step.action);
-        const execute = catalogEntry?.execute;
-        const call =
-          builtIn !== undefined
-            ? ({ kind: "built-in", builtIn } as const)
-            : execute !== undefined
-              ? ({ kind: "plugin", execute } as const)
-              : undefined;
-        if (catalogEntry === undefined || call === undefined) {
-          return yield* failRun(
-            run.id,
-            record,
-            { code: "not_found", message: `The action ${step.action} is not available.` },
-            "step-failed",
-          );
+        if (catalogEntry === undefined) {
+          return yield* failRun(run.id, record, actionUnavailable(step.action), "step-failed");
         }
         const decoded = Schema.decodeUnknownResult(catalogEntry.input as Schema.Codec<unknown>)(
           rendered.success,
@@ -620,12 +616,15 @@ const make = Effect.gen(function* () {
               )
             : Effect.succeed(described);
         };
-        if (call.kind === "built-in") {
+        // A built-in action is called through the engine's own map, and a
+        // plugin's action through the `execute` its plugin registered.
+        const builtIn = builtInActions.get(step.action);
+        if (builtIn !== undefined) {
           const failure = yield* Effect.catchCause(
             Effect.as(
               commitUninterruptibly(
                 Effect.flatMap(
-                  Effect.provideService(call.builtIn(decoded.success), CurrentActor, actor),
+                  Effect.provideService(builtIn(decoded.success), CurrentActor, actor),
                   completeStep,
                 ),
               ),
@@ -636,9 +635,13 @@ const make = Effect.gen(function* () {
           if (failure !== undefined) yield* failRun(run.id, record, failure, "step-failed");
           return;
         }
+        const execute = catalogEntry.execute;
+        if (execute === undefined) {
+          return yield* failRun(run.id, record, actionUnavailable(step.action), "step-failed");
+        }
         const executed = yield* Effect.catchCause(
           Effect.map(
-            executePluginAction(catalogEntry, call.execute, decoded.success, {
+            executePluginAction(catalogEntry, execute, decoded.success, {
               runId: run.id,
               stepId: record.stepId,
             }),
@@ -671,13 +674,11 @@ const make = Effect.gen(function* () {
         const found = yield* runs.read(runId);
         if (Option.isNone(found)) return;
         const run = found.value;
-        if (run.status !== "pending" && run.status !== "running") return;
+        if (!isUnfinished(run.status)) return;
         if (run.status === "pending") {
           yield* commitUninterruptibly(Effect.flatMap(nowIso, (at) => runs.start(runId, at)));
         }
-        const next = run.steps.find(
-          (record) => record.status === "running" || record.status === "pending",
-        );
+        const next = findCurrentRecord(run.steps);
         if (next === undefined) {
           return yield* commitUninterruptibly(
             Effect.flatMap(nowIso, (at) => runs.finish(runId, { status: "completed" }, at)),
@@ -703,9 +704,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const found = yield* runs.read(runId);
       if (Option.isNone(found)) return;
-      const current = found.value.steps.find(
-        (record) => record.status === "running" || record.status === "pending",
-      );
+      const current = findCurrentRecord(found.value.steps);
       if (current !== undefined) {
         return yield* failRun(runId, current, UNEXPECTED_RUN_FAILURE, "step-failed");
       }
@@ -910,7 +909,7 @@ const make = Effect.gen(function* () {
                 return yield* Effect.fail(createNotFoundError("no such run"));
               }
               const { status } = found.value;
-              if (status !== "pending" && status !== "running") {
+              if (!isUnfinished(status)) {
                 return yield* Effect.fail(
                   createInvalidStateError(
                     `the run ${describeEnding(status)}; only a pending or running run can be cancelled`,

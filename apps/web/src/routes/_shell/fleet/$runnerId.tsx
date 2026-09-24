@@ -3,10 +3,9 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { FormCard, useMinuteClock } from "@hercule/ui";
 import {
-  FALLBACK_TIMEZONE,
   formatAge,
   describeCapacity,
-  isSupportedTimezone,
+  resolveDisplayTimezone,
   listQueuedSessions,
 } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
@@ -56,8 +55,9 @@ function RunnerPage(): JSX.Element {
 
   const runner = useSuspenseQuery(runnerQuery(client, runnerId)).data;
   const controller = useSuspenseQuery(controllerQuery(client)).data;
-  const stored = useSuspenseQuery(settingsQuery(client)).data.user.timezone ?? FALLBACK_TIMEZONE;
-  const timezone = isSupportedTimezone(stored) ? stored : FALLBACK_TIMEZONE;
+  const timezone = resolveDisplayTimezone(
+    useSuspenseQuery(settingsQuery(client)).data.user.timezone,
+  );
   const sessions = useSuspenseQuery(runnerSessionsQuery(client, runnerId)).data.items;
   // Ages are computed from a ticking clock, not from the last refetch, so a
   // waiting time counts up on its own, as it does in a thread row.

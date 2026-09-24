@@ -19,7 +19,7 @@ import {
   stubApi,
   type Call,
   type Handler,
-} from "../../app/testing";
+} from "../../../app/testing";
 
 type LiveStub = Awaited<ReturnType<typeof renderApp>>["live"];
 
@@ -397,7 +397,7 @@ const pushRunChange = async (
 };
 
 /* ------------------------------------------------------------------------ */
-/* AC-13: the Runs list.                                                     */
+/* The Runs list.                                                           */
 /* ------------------------------------------------------------------------ */
 
 describe("Runs > the list", () => {
@@ -541,7 +541,7 @@ describe("Runs > the list", () => {
 });
 
 /* ------------------------------------------------------------------------ */
-/* AC-13 and AC-14: the run form, opened from the Runs list.                 */
+/* The run form, opened from the Runs list.                                 */
 /* ------------------------------------------------------------------------ */
 
 describe("Runs > the run form", () => {

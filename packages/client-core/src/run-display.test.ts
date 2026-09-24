@@ -3,7 +3,9 @@ import {
   describeFailureReason,
   describeRunOrigin,
   describeRunStatus,
+  describeStepDuration,
   describeStepState,
+  describeUnstartedStep,
   formatElapsed,
   measureElapsed,
   shouldRunRecede,
@@ -18,16 +20,16 @@ describe("describeRunOrigin", () => {
   it("names who started the run, and how when not by hand", () => {
     const manual = describeRunOrigin({ kind: "manual", actor: "user" });
     assert.strictEqual(manual.starter.label, "you");
-    assert.strictEqual(manual.channel, undefined);
+    assert.strictEqual(manual.via, undefined);
 
     const api = describeRunOrigin({ kind: "api", actor: `session:${PARENT}` });
     assert.strictEqual(api.starter.label, "session 1f3a9c2e");
-    assert.strictEqual(api.channel, "through the API");
+    assert.strictEqual(api.via, "through the API");
 
     const child = describeRunOrigin({ kind: "action", parentRunId: PARENT, stepId: "spawn" });
     assert.strictEqual(child.starter.label, "run 1f3a9c2e");
-    assert.strictEqual(child.starter.runId, PARENT);
-    assert.strictEqual(child.channel, "at step spawn");
+    assert.deepStrictEqual(child.starter.link, { kind: "run", runId: PARENT });
+    assert.strictEqual(child.via, "at step spawn");
   });
 });
 
@@ -60,6 +62,18 @@ describe("formatElapsed", () => {
   });
 });
 
+describe("describeStepDuration", () => {
+  it("measures a record to its end, or to now while it runs, and says nothing before it starts", () => {
+    assert.strictEqual(describeStepDuration({ startedAt: START, finishedAt: at(40) }, NOW), "40ms");
+    assert.strictEqual(
+      describeStepDuration({ startedAt: START, finishedAt: at(75_000) }, NOW),
+      "1m 15s",
+    );
+    assert.strictEqual(describeStepDuration({ startedAt: START }, NOW), "4.3s");
+    assert.strictEqual(describeStepDuration({}, NOW), "");
+  });
+});
+
 describe("describeRunStatus", () => {
   it("adds the duration to every status but pending", () => {
     assert.strictEqual(describeRunStatus({ status: "pending" }, NOW), "pending");
@@ -89,6 +103,14 @@ describe("describeFailureReason", () => {
   it("says each reason in plain words", () => {
     assert.strictEqual(describeFailureReason("step-failed"), "step failed");
     assert.strictEqual(describeFailureReason("expression-error"), "template error");
+  });
+});
+
+describe("describeUnstartedStep", () => {
+  it("says why a step has no bar, for a pending and a cancelled step only", () => {
+    assert.strictEqual(describeUnstartedStep("pending"), "pending");
+    assert.strictEqual(describeUnstartedStep("cancelled"), "cancelled before it started");
+    assert.strictEqual(describeUnstartedStep("unreached"), undefined);
   });
 });
 
