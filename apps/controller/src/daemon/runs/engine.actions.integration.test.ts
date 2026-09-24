@@ -1,7 +1,7 @@
 /**
  * Integration tests for the built-in actions a run calls beyond `task.create`
  * and `task.update`, driven over HTTP against a real controller: `task.query`,
- * `workflow.run`, which starts a child run, and the action that stays unknown,
+ * `run.start`, which starts a child run, `wait`, and the action that stays unknown,
  * `notification.create`. Also checks that a run calls a built-in action
  * without the grant checks its starter would face.
  *
@@ -11,20 +11,20 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Task } from "@hercule/contract";
-import { post, send } from "../http/testing";
-import { spawnAgentWithGrants, WAIT_DEADLINE_MS } from "../sessions/testing";
+import { post, send } from "../../http/testing";
+import { spawnAgentWithGrants, WAIT_DEADLINE_MS, waitUntil } from "../../sessions/testing";
 import {
   ABSENT_ID,
   createWorkflow,
   createWorkflowOrFail,
   readIssues,
   withSetUpController,
-} from "../workflows/testing";
+} from "../../workflows/testing";
 import {
   buildCreateStep,
   buildHeldAction,
   countRuns,
-  findRecords,
+  findStepRecords,
   listTasks,
   queryRuns,
   readRun,
@@ -32,7 +32,9 @@ import {
   waitForHeldExecutions,
   waitForRunToFinish,
   withRunFleet,
+  expectStatus,
 } from "./testing";
+import { runEffect } from "../testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
@@ -55,11 +57,29 @@ const buildParentDefinition = (childInputs: Record<string, unknown>) => ({
     {
       id: "start_child",
       kind: "action",
-      action: "workflow.run",
+      action: "run.start",
       params: { workflowId: "{{ inputs.child }}", inputs: childInputs },
     },
   ],
 });
+
+/**
+ * A workflow whose one step starts a run of the workflow whose id is the
+ * `self` input, passing the same input on. Started with its own id, each run
+ * starts the next, until the controller refuses one as nested too deep.
+ */
+const SELF_STARTING_DEFINITION = {
+  name: "Start itself",
+  inputs: [{ name: "self", schema: { type: "string" }, required: true }],
+  steps: [
+    {
+      id: "start_self",
+      kind: "action",
+      action: "run.start",
+      params: { workflowId: "{{ inputs.self }}", inputs: { self: "{{ inputs.self }}" } },
+    },
+  ],
+};
 
 describe("a built-in action in a run", () => {
   it("runs without the starter's grants: a session without task.create still gets its task", async () => {
@@ -68,7 +88,7 @@ describe("a built-in action in a run", () => {
       const workflow = await createWorkflowOrFail(base, arranged.token, {
         definition: { name: "One task", steps: [buildCreateStep("create")] },
       });
-      const agent = await spawnAgentWithGrants(arranged, "starter", ["workflow.run", "run.read"]);
+      const agent = await spawnAgentWithGrants(arranged, "starter", ["run.start", "run.read"]);
 
       const runId = await startRun(base, agent.token, workflow.id);
       const run = await waitForRunToFinish(base, arranged.token, runId);
@@ -101,7 +121,7 @@ describe("a built-in action in a run", () => {
       const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
 
       expect(run.status, JSON.stringify(run)).toBe("completed");
-      const output = findRecords(run, "find")[0]!.output as {
+      const output = expectStatus(findStepRecords(run, "find")[0], "completed").output as {
         items: ReadonlyArray<Task>;
         nextCursor?: string;
       };
@@ -111,7 +131,7 @@ describe("a built-in action in a run", () => {
   });
 });
 
-describe("workflow.run as a step", () => {
+describe("run.start as a step", () => {
   it("starts a child run with an action origin and outputs its id without waiting for it", async () => {
     const held = buildHeldAction();
     await withSetUpController(
@@ -141,10 +161,8 @@ describe("workflow.run as a step", () => {
           const parentRun = await waitForRunToFinish(base, token, parentId);
 
           expect(parentRun.status, JSON.stringify(parentRun)).toBe("completed");
-          const output = findRecords(parentRun, "start_child")[0]!.output as Record<
-            string,
-            unknown
-          >;
+          const output = expectStatus(findStepRecords(parentRun, "start_child")[0], "completed")
+            .output as Record<string, unknown>;
           expect(Object.keys(output)).toEqual(["runId"]);
           const childId = output["runId"] as string;
 
@@ -198,16 +216,102 @@ describe("workflow.run as a step", () => {
         const run = await waitForRunToFinish(base, token, parentId);
 
         expect(run.status, `${description}: ${JSON.stringify(run)}`).toBe("failed");
-        expect(run.failureReason, description).toBe("step-failed");
-        expect(run.failedStepId, description).toBe("start_child");
-        const [record] = findRecords(run, "start_child");
+        expect(expectStatus(run, "failed").failureReason, description).toBe("step-failed");
+        expect(expectStatus(run, "failed").failedStepId, description).toBe("start_child");
+        const [record] = findStepRecords(run, "start_child");
         expect(record?.status, description).toBe("failed");
-        expect(record?.error?.code, description).toBe(code);
-        expect(record?.error?.message, description).toMatch(/\S/);
+        expect(expectStatus(record, "failed").error.code, description).toBe(code);
+        expect(expectStatus(record, "failed").error.message, description).toMatch(/\S/);
         // Only the parent run was added.
         expect(await countRuns(harness), description).toBe(runsBefore + 1);
       }
       expect(await listTasks(base, token)).toEqual([]);
+    });
+  });
+
+  it("refuses a run nested deeper than run.nestingLimit, 5 unless the setting says otherwise, and fails the step that started it", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: SELF_STARTING_DEFINITION,
+      });
+
+      for (const limit of [5, 2]) {
+        if (limit !== 5) {
+          const updated = await send("PATCH", base, "/api/v1/settings", {
+            body: { controller: { "run.nestingLimit": limit } },
+            token,
+          });
+          expect(updated.status, await updated.clone().text()).toBe(200);
+        }
+        const runsBefore = await countRuns(harness);
+        const completedBefore = (await queryRuns(base, token, "status=completed")).items.length;
+        await startRun(base, token, workflow.id, { inputs: { self: workflow.id } });
+
+        // Each run starts the next, and the deepest run's step is refused.
+        const failed = await waitUntil(`failed the run ${String(limit)} deep`, async () => {
+          const [run] = (await queryRuns(base, token, "status=failed")).items;
+          return run === undefined ? undefined : readRun(base, token, run.id);
+        });
+        const record = expectStatus(findStepRecords(failed, "start_self")[0], "failed");
+        expect(record.error).toEqual({
+          code: "cap_exceeded",
+          message: `This run would be ${String(limit + 1)} runs deep, and the limit is ${String(limit)}. A workflow may be starting itself, directly or through another workflow. Raise the run.nestingLimit setting, or change the workflow.`,
+        });
+        expect(await countRuns(harness)).toBe(runsBefore + limit);
+        await waitUntil("finished every run of the chain", async () => {
+          const unfinished = [
+            ...(await queryRuns(base, token, "status=pending")).items,
+            ...(await queryRuns(base, token, "status=running")).items,
+          ];
+          return unfinished.length === 0 ? true : undefined;
+        });
+        expect((await queryRuns(base, token, "status=completed")).items).toHaveLength(
+          completedBefore + limit - 1,
+        );
+        // Clears the failed run from the next round's search.
+        await runEffect(harness.sql`DELETE FROM runs WHERE status = 'failed'`);
+      }
+    });
+  });
+});
+
+describe("wait", () => {
+  it("completes after the seconds it is given, with an empty output", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: {
+          name: "Wait a second",
+          steps: [{ id: "pause", kind: "action", action: "wait", params: { seconds: 1 } }],
+        },
+      });
+
+      const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
+
+      expect(run.status, JSON.stringify(run)).toBe("completed");
+      const record = expectStatus(findStepRecords(run, "pause")[0], "completed");
+      expect(record.output).toEqual({});
+      expect(Date.parse(record.finishedAt) - Date.parse(record.startedAt)).toBeGreaterThanOrEqual(
+        1000,
+      );
+    });
+  });
+
+  it("is refused at save for seconds outside 1 to 86400", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      for (const seconds of [0, 86_401, 1.5]) {
+        const issues = await readIssues(
+          await createWorkflow(base, token, {
+            definition: {
+              name: "Wait too long",
+              steps: [{ id: "pause", kind: "action", action: "wait", params: { seconds } }],
+            },
+          }),
+        );
+        expect(
+          issues.map((issue) => issue.path),
+          String(seconds),
+        ).toEqual([["steps", "0", "params", "seconds"]]);
+      }
     });
   });
 });

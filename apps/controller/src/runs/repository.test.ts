@@ -42,6 +42,6 @@ describe("finishStep", () => {
       : undefined;
     expect(error).toBeInstanceOf(StepRecordEnded);
     expect(record?.status).toBe("cancelled");
-    expect(record?.output).toBeUndefined();
+    expect(record).not.toHaveProperty("output");
   });
 });

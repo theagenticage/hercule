@@ -41,18 +41,19 @@ export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 
+/** One page of the run list, as `run.query` returns it. */
 export interface RunPage {
   readonly items: ReadonlyArray<RunSummary>;
   readonly nextCursor?: string;
 }
 
 /** The input of the operations on one run: its id. */
-export const Identified = Schema.Struct({ id: Id });
+const Identified = Schema.Struct({ id: Id });
 
-export type Identified = Schema.Schema.Type<typeof Identified>;
+type Identified = Schema.Schema.Type<typeof Identified>;
 
 /** Decodes the input of an operation on one run, for the operations that did not come through a transport. */
-export const decodeIdentified = Schema.decodeUnknownEffect(Identified);
+const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 /**
  * Checks whether a run or a step record can still change: it is pending or
@@ -62,12 +63,17 @@ export const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 export const isUnfinished = (status: RunStatus): boolean =>
   status === "pending" || status === "running";
 
+/** A step record that can still change: one that is pending or running. */
+export type UnfinishedStepRecord = Extract<StepRecord, { readonly status: "pending" | "running" }>;
+
 /**
  * Returns the step record a run is at: the first that has not ended, or
  * `undefined` when every record has.
  */
-export const findCurrentRecord = (steps: ReadonlyArray<StepRecord>): StepRecord | undefined =>
-  steps.find((record) => isUnfinished(record.status));
+export const findCurrentStepRecord = (
+  steps: ReadonlyArray<StepRecord>,
+): UnfinishedStepRecord | undefined =>
+  steps.find((record): record is UnfinishedStepRecord => isUnfinished(record.status));
 
 const make = Effect.gen(function* () {
   const runs = yield* runRepository;

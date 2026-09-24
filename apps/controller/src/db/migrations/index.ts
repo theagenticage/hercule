@@ -33,6 +33,8 @@ import eventCursorsAndMatchedInputs from "./0022-event-cursors-and-matched-input
 import sessionTokenOnlyWhileRunning from "./0023-session-token-only-while-running";
 import workflowsAndTriggers from "./0024-workflows-and-triggers";
 import runs from "./0025-runs";
+import runStartGrant from "./0026-run-start-grant";
+import runsByParent from "./0027-runs-by-parent";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -60,6 +62,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [23, "session-token-only-while-running", Effect.succeed(sessionTokenOnlyWhileRunning)],
   [24, "workflows-and-triggers", Effect.succeed(workflowsAndTriggers)],
   [25, "runs", Effect.succeed(runs)],
+  [26, "run-start-grant", Effect.succeed(runStartGrant)],
+  [27, "runs-by-parent", Effect.succeed(runsByParent)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

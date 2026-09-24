@@ -192,13 +192,27 @@ const make = Effect.gen(function* () {
         return yield* readLiveTaskOrFail(id);
       }),
 
-    /** Creates a task and returns it. Fails with `NotFound` if the project does not exist. */
+    /**
+     * Creates a task and returns it. Fails with `NotFound` if the project does
+     * not exist.
+     *
+     * A task that a run's step creates gets one more provenance entry, `{
+     * runId }`, after the ones the step's params give, unless one of those
+     * already names the run. Provenance records what created the task, and
+     * that was the run. The entry is the core's own, so it does not count
+     * toward `MAX_PROVENANCE_APPEND`.
+     */
     create: (
       input: TaskCreateInput,
     ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("task.create");
+        const caller = yield* requireGrant("task.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
+        const given = decoded.provenance ?? [];
+        const provenance =
+          caller._tag === "run" && !given.some((entry) => entry.runId === caller.runId)
+            ? [...given, { runId: caller.runId }]
+            : given;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -214,7 +228,7 @@ const make = Effect.gen(function* () {
               priority: decoded.priority ?? "normal",
               labels: removeDuplicates(decoded.labels ?? []),
               projectId: decoded.projectId,
-              provenance: decoded.provenance ?? [],
+              provenance,
               at,
               actor,
             });

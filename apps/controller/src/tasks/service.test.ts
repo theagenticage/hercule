@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { Clock, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MAX_TASK_LABELS, MAX_TASK_TITLE_LENGTH, type Task } from "@hercule/contract";
+import {
+  MAX_TASK_LABELS,
+  MAX_TASK_TITLE_LENGTH,
+  type Task,
+  type TaskCreateInput,
+} from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -485,6 +490,57 @@ describe("provenance", () => {
     );
     expect(task.provenance[0]?.actor).toBe("user");
     expect(task.provenance[0]?.at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  describe("of a task a run's step creates", () => {
+    const RUN_ID = "0199e0e7-0002-7000-8000-000000000000";
+    const OTHER_RUN_ID = "0199e0e7-0003-7000-8000-000000000000";
+    const RUN: Actor = { _tag: "run", runId: RUN_ID, stepId: "file" };
+
+    /** Creates a task as the run, with `provenance` as the step's params give it, and returns the task's provenance as refs and run ids. */
+    const createAsRun = async (provenance: TaskCreateInput["provenance"]) => {
+      const task = await run(
+        Effect.provideService(
+          Effect.flatMap(TaskService, (tasks) =>
+            tasks.create({ title: "t", description: "d", ...(provenance && { provenance }) }),
+          ),
+          CurrentActor,
+          RUN,
+        ),
+      );
+      return task.provenance.map((entry) => [entry.ref, entry.runId, entry.actor]);
+    };
+
+    it("adds an entry naming the run after the entries the params give", async () => {
+      expect(await createAsRun([{ ref: ISSUE_REF }, { runId: OTHER_RUN_ID }])).toEqual([
+        [ISSUE_REF, undefined, `run:${RUN_ID}`],
+        [undefined, OTHER_RUN_ID, `run:${RUN_ID}`],
+        [undefined, RUN_ID, `run:${RUN_ID}`],
+      ]);
+      expect(await createAsRun(undefined)).toEqual([[undefined, RUN_ID, `run:${RUN_ID}`]]);
+    });
+
+    it("adds no second entry when the params already name the run", async () => {
+      expect(await createAsRun([{ ref: ISSUE_REF, runId: RUN_ID }])).toEqual([
+        [ISSUE_REF, RUN_ID, `run:${RUN_ID}`],
+      ]);
+    });
+
+    it("adds nothing when the task is updated", async () => {
+      const provenance = await run(
+        Effect.gen(function* () {
+          const tasks = yield* TaskService;
+          const created = yield* tasks.create({ title: "t", description: "d" });
+          const updated = yield* Effect.provideService(
+            tasks.update({ id: created.id, status: "done" }),
+            CurrentActor,
+            RUN,
+          );
+          return updated.provenance;
+        }),
+      );
+      expect(provenance).toEqual([]);
+    });
   });
 });
 

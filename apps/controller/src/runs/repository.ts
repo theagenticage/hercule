@@ -4,7 +4,9 @@
  * by the run engine in the controller daemon.
  *
  * Every write announces the run's id on the `run` live topic once it commits,
- * so a screen that shows the run reads it again.
+ * so a screen that shows the run reads it again. The repository announces,
+ * rather than the run engine, on purpose: every write to a run goes through
+ * here, so no write can forget its announcement.
  *
  * Each status change is guarded in its `WHERE` clause by the statuses it may
  * move from. So a run or a step record can only move forward, even if two
@@ -13,6 +15,7 @@
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type {
@@ -40,6 +43,7 @@ import {
   type CursorScope,
   type Page,
   type PageRequest,
+  withTransaction,
 } from "../db";
 
 /** A run to insert, before it has an id. */
@@ -53,17 +57,22 @@ export interface NewRun {
 }
 
 /** How a step record ends. */
-export type StepEnding =
+export type StepOutcome =
   | { readonly status: "completed"; readonly output: unknown }
   | { readonly status: "failed"; readonly error: StepError };
 
 /** How a run ends. */
-export type RunEnding =
+export type RunOutcome =
   | { readonly status: "completed" }
   | { readonly status: "cancelled" }
   | {
       readonly status: "failed";
-      readonly failureReason: FailureReason;
+      readonly failureReason: Exclude<FailureReason, "controller-error">;
+      readonly failedStepId: string;
+    }
+  | {
+      readonly status: "failed";
+      readonly failureReason: "controller-error";
       /** Absent when the run failed outside any step. */
       readonly failedStepId?: string;
     };
@@ -127,18 +136,107 @@ interface StepRow {
   readonly finished_at: string | null;
 }
 
+interface ParentRow {
+  readonly parent: string | null;
+}
+
+interface ChildRow {
+  readonly id: Uint8Array;
+  readonly status: RunStatus;
+}
+
+/**
+ * Returns a column's value, or dies if it is NULL. The engine always writes
+ * the column for the status the row has, so a NULL here is a bug, not a state
+ * to handle.
+ */
+const requireColumn = <A extends string>(value: A | null, table: string, column: string): A => {
+  if (value === null) throw new Error(`${table}.${column} is NULL for a row whose status needs it`);
+  return value;
+};
+
 /** Maps a step row to a `StepRecord`. A NULL column becomes an absent field, not `null`. */
-const toStepRecord = (row: StepRow): StepRecord => ({
-  stepId: row.step_id,
-  iteration: row.iteration,
-  status: row.status,
-  ...(row.started_at === null ? {} : { startedAt: row.started_at }),
-  ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
-  ...(row.output === null
-    ? {}
-    : { output: JSON.parse(row.output) as NonNullable<StepRecord["output"]> }),
-  ...(row.error === null ? {} : { error: JSON.parse(row.error) as StepError }),
-});
+const toStepRecord = (row: StepRow): StepRecord => {
+  const identity = { stepId: row.step_id, iteration: row.iteration };
+  const startedAt = () => requireColumn(row.started_at, "run_steps", "started_at");
+  const finishedAt = () => requireColumn(row.finished_at, "run_steps", "finished_at");
+  switch (row.status) {
+    case "pending":
+      return { ...identity, status: "pending" };
+    case "running":
+      return { ...identity, status: "running", startedAt: startedAt() };
+    case "completed":
+      return {
+        ...identity,
+        status: "completed",
+        startedAt: startedAt(),
+        finishedAt: finishedAt(),
+        output: row.output === null ? null : (JSON.parse(row.output) as Schema.Json),
+      };
+    case "failed":
+      return {
+        ...identity,
+        status: "failed",
+        startedAt: startedAt(),
+        finishedAt: finishedAt(),
+        error: JSON.parse(requireColumn(row.error, "run_steps", "error")) as StepError,
+      };
+    case "cancelled":
+      return {
+        ...identity,
+        status: "cancelled",
+        ...(row.started_at === null ? {} : { startedAt: row.started_at }),
+        finishedAt: finishedAt(),
+      };
+  }
+};
+
+/** The columns of a run row that depend on its status. */
+interface StatusColumns {
+  readonly status: RunStatus;
+  readonly failure_reason: FailureReason | null;
+  readonly failed_step_id: string | null;
+  readonly started_at: string | null;
+  readonly finished_at: string | null;
+}
+
+/**
+ * Parses the status columns of a run row into the fields a run with that
+ * status has. A run and a run summary share them.
+ */
+const parseStatusColumns = (row: StatusColumns) => {
+  const startedAt = () => requireColumn(row.started_at, "runs", "started_at");
+  const finishedAt = () => requireColumn(row.finished_at, "runs", "finished_at");
+  const startedAtIfSet = row.started_at === null ? {} : { startedAt: row.started_at };
+  switch (row.status) {
+    case "pending":
+      return { status: "pending" } as const;
+    case "running":
+      return { status: "running", startedAt: startedAt() } as const;
+    case "completed":
+      return { status: "completed", startedAt: startedAt(), finishedAt: finishedAt() } as const;
+    case "failed": {
+      const failureReason = requireColumn(row.failure_reason, "runs", "failure_reason");
+      return failureReason === "controller-error"
+        ? ({
+            status: "failed",
+            failureReason: "controller-error",
+            ...(row.failed_step_id === null ? {} : { failedStepId: row.failed_step_id }),
+            ...startedAtIfSet,
+            finishedAt: finishedAt(),
+          } as const)
+        : ({
+            status: "failed",
+            failureReason,
+            failedStepId: requireColumn(row.failed_step_id, "runs", "failed_step_id"),
+            startedAt: startedAt(),
+            finishedAt: finishedAt(),
+          } as const);
+    }
+    case "cancelled":
+      return { status: "cancelled", ...startedAtIfSet, finishedAt: finishedAt() } as const;
+  }
+};
 
 /**
  * Maps a run row and its step rows to a `Run`. The JSON columns are parsed
@@ -151,27 +249,19 @@ const toRun = (row: RunRow, steps: ReadonlyArray<StepRow>): Run => ({
   plan: JSON.parse(row.plan) as WorkflowDefinition,
   inputs: JSON.parse(row.inputs) as Run["inputs"],
   origin: JSON.parse(row.origin) as RunOrigin,
-  status: row.status,
-  ...(row.failure_reason === null ? {} : { failureReason: row.failure_reason }),
-  ...(row.failed_step_id === null ? {} : { failedStepId: row.failed_step_id }),
   steps: steps.map(toStepRecord),
   createdAt: row.created_at,
-  ...(row.started_at === null ? {} : { startedAt: row.started_at }),
-  ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
+  ...parseStatusColumns(row),
 });
 
-/** Maps a summary row to a `RunSummary`. A NULL column becomes an absent field, not `null`. */
+/** Maps a summary row to a `RunSummary`. */
 const toSummary = (row: SummaryRow): RunSummary => ({
   id: uuidToString(row.id),
   workflowId: row.workflow_id === null ? null : uuidToString(row.workflow_id),
   workflowName: row.workflow_name,
   origin: JSON.parse(row.origin) as RunOrigin,
-  status: row.status,
-  ...(row.failure_reason === null ? {} : { failureReason: row.failure_reason }),
-  ...(row.failed_step_id === null ? {} : { failedStepId: row.failed_step_id }),
   createdAt: row.created_at,
-  ...(row.started_at === null ? {} : { startedAt: row.started_at }),
-  ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
+  ...parseStatusColumns(row),
 });
 
 const make = Effect.gen(function* () {
@@ -218,16 +308,17 @@ const make = Effect.gen(function* () {
      * and its step records are from the same moment.
      */
     read: (id: string): Effect.Effect<Option.Option<Run>, SqlError> =>
-      sql.withTransaction(
+      withTransaction(
+        sql,
         Effect.gen(function* () {
           const bytes = uuidFromString(id);
           const rows = yield* sql<RunRow>`SELECT * FROM runs WHERE id = ${bytes}`;
           const row = rows[0];
           if (row === undefined) return Option.none();
           const steps = yield* sql<StepRow>`
-          SELECT step_id, iteration, status, output, error, started_at, finished_at
-          FROM run_steps WHERE run_id = ${bytes} ORDER BY rowid
-        `;
+            SELECT step_id, iteration, status, output, error, started_at, finished_at
+            FROM run_steps WHERE run_id = ${bytes} ORDER BY rowid
+          `;
           return Option.some(toRun(row, steps));
         }),
       ),
@@ -279,7 +370,7 @@ const make = Effect.gen(function* () {
       }),
 
     /** Checks whether a run of the workflow is pending or running. */
-    hasUnfinishedRunOf: (workflowId: string): Effect.Effect<boolean, SqlError> =>
+    hasUnfinishedRun: (workflowId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql`
           SELECT 1 FROM runs
@@ -288,6 +379,55 @@ const make = Effect.gen(function* () {
         `,
         (rows) => rows.length > 0,
       ),
+
+    /**
+     * Returns how deep a run is nested: 1 for a run that no other run started,
+     * and one more for each run up the chain of runs whose steps started it.
+     * Returns 0 if no run has the id.
+     */
+    measureNesting: (id: string): Effect.Effect<number, SqlError> =>
+      Effect.gen(function* () {
+        let depth = 0;
+        let current: string | undefined = id;
+        while (current !== undefined) {
+          const rows: ReadonlyArray<ParentRow> = yield* sql<ParentRow>`
+            SELECT json_extract(origin, '$.parentRunId') AS parent
+            FROM runs WHERE id = ${uuidFromString(current)}
+          `;
+          const row = rows[0];
+          if (row === undefined) return depth;
+          depth += 1;
+          current = row.parent ?? undefined;
+        }
+        return depth;
+      }),
+
+    /**
+     * Returns the ids of the runs that a run started through its steps, the
+     * runs those started, and so on, that are still pending or running. A
+     * finished run's own children are included too: a child can outlive the
+     * run that started it.
+     */
+    listUnfinishedDescendants: (id: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.gen(function* () {
+        const unfinished: Array<string> = [];
+        let parents: ReadonlyArray<string> = [id];
+        while (parents.length > 0) {
+          // The expression is the one `runs_parent` indexes, so each level is
+          // one index lookup per parent.
+          const children: ReadonlyArray<ChildRow> = yield* sql<ChildRow>`
+            SELECT id, status FROM runs
+            WHERE json_extract(origin, '$.parentRunId') IN ${sql.in(parents)}
+          `;
+          parents = children.map((child) => uuidToString(child.id));
+          for (const child of children) {
+            if (child.status === "pending" || child.status === "running") {
+              unfinished.push(uuidToString(child.id));
+            }
+          }
+        }
+        return unfinished;
+      }),
 
     /** Returns the ids of every run that is pending or running, the oldest first. */
     listUnfinished: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
@@ -349,7 +489,7 @@ const make = Effect.gen(function* () {
     finishStep: (
       runId: string,
       step: { readonly stepId: string; readonly iteration: number },
-      ending: StepEnding,
+      ending: StepOutcome,
       times: { readonly startedAt: string; readonly finishedAt: string },
     ): Effect.Effect<void, SqlError | StepRecordEnded> =>
       Effect.gen(function* () {
@@ -381,7 +521,7 @@ const make = Effect.gen(function* () {
       }),
 
     /** Ends a pending or running run. Does nothing to a run that has already ended. */
-    finish: (id: string, ending: RunEnding, at: string): Effect.Effect<void, SqlError> =>
+    finish: (id: string, ending: RunOutcome, at: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         yield* sql`
           UPDATE runs SET

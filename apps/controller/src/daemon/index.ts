@@ -15,9 +15,14 @@
  *   (`providers/resolved.ts`);
  * - a check that reads across domains belongs here (`resuming.ts`).
  *
- * `routing/` is the only subfolder. It holds the routing tables the event
- * router receives. Each table is the only module that knows both the domain
- * that owns a claim and the domain that handles it.
+ * A concern that needs several modules gets a subfolder of its own:
+ *
+ * - `routing/` holds the routing tables the event router receives. Each table
+ *   is the only module that knows both the domain that owns a claim and the
+ *   domain that handles it.
+ * - `runs/` holds the run engine: starting a run (`start.ts`) and executing
+ *   its steps (`engine.ts`), with the helpers its tests share
+ *   (`testing.ts`).
  */
 export { cancelStrandedInputsAndReportLostWakeUps } from "./boot";
 export { DispatchLayer } from "./dispatch";
@@ -31,4 +36,4 @@ export { Placement, PlacementLayer } from "./placement";
 export { ProfileRemoval, ProfileRemovalLayer } from "./profile-removal";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./provisioning";
 export { Retirement, RetirementLayer } from "./retirement";
-export { resumeUnfinishedRuns, RunEngine, RunEngineLayer } from "./run-engine";
+export { resumeUnfinishedRuns, RunEngine, RunEngineLayer } from "./runs/engine";

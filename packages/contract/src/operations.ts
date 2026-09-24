@@ -170,18 +170,10 @@ const TABLE = {
     path: "/api/v1/workflows/validate",
   },
 
-  "workflow.run": {
-    requires: "workflow.run",
-    method: "POST",
-    path: "/api/v1/workflows/:id/run",
-  },
-
-  "workflow.submit": {
-    requires: "workflow.submit",
-    method: "POST",
-    path: "/api/v1/workflows/submit",
-  },
-
+  // One operation starts a run, of a stored workflow or of one sent with the
+  // request. It is a verb on runs with no run to act on yet, so its path is
+  // the collection's plus the verb.
+  "run.start": { requires: "run.start", method: "POST", path: "/api/v1/runs/start" },
   "run.query": { requires: "run.read", method: "GET", path: "/api/v1/runs" },
   "run.read": { requires: "run.read", method: "GET", path: "/api/v1/runs/:id" },
   "run.cancel": { requires: "run.write", method: "POST", path: "/api/v1/runs/:id/cancel" },

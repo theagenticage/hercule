@@ -132,6 +132,31 @@ describe("validateExpression with a scope", () => {
   });
 });
 
+describe("validateExpression of numbers and strings mixed", () => {
+  it("accepts in the run scope what a run evaluates, so a save refuses none of it", () => {
+    for (const source of [
+      "inputs.count + 1",
+      "3 == 3.0",
+      "size(inputs.labels) == 1.0",
+      "size(inputs.labels) / 2.0",
+      "'count: ' + 1",
+      "2.5 + ' left'",
+      "[1, 2.5]",
+      "{'low': 1, 'high': 2.5}",
+    ]) {
+      expect(Exit.isSuccess(Effect.runSyncExit(validateExpression(source, "run"))), source).toBe(
+        true,
+      );
+    }
+  });
+
+  it("types a comparison of a whole number and a decimal as bool, so a condition accepts it", () => {
+    expect(
+      Exit.isSuccess(Effect.runSyncExit(validateCondition("1 < 1.5 && 3 == 3.0", "run"))),
+    ).toBe(true);
+  });
+});
+
 describe("validateCondition", () => {
   it("accepts a source of type bool, and a source of type dyn", () => {
     for (const [source, scope] of [

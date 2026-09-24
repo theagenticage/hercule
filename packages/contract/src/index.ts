@@ -307,7 +307,6 @@ export {
   WorkflowSummary,
   WorkflowUpdateInput,
   WorkflowValidateInput,
-  WorkflowSubmitInput,
 } from "./groups/workflow";
 export {
   ANY_CONNECTION,
@@ -333,6 +332,7 @@ export {
   RunFilter,
   RunInputs,
   RunOrigin,
+  RunStartInput,
   RunStarted,
   RunStatus,
   RunSummary,

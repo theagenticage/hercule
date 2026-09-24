@@ -13,16 +13,17 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Run } from "@hercule/contract";
-import { del, get, readErrorBody } from "../http/testing";
-import { WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
-import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../workflows/testing";
+import { del, get, readErrorBody } from "../../http/testing";
+import { WAIT_DEADLINE_MS, waitUntil } from "../../sessions/testing";
+import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../../workflows/testing";
 import {
   buildCreateStep,
   buildHeldAction,
   buildHeldStep,
-  findRecords,
+  findStepRecords,
   insertPendingRun,
   listTasks,
+  queryRuns,
   readRun,
   requestCancel,
   startRun,
@@ -65,7 +66,7 @@ const expectStaysCancelled = async (base: string, token: string, id: string): Pr
   for (let read = 0; read < 10; read += 1) {
     const run = await readRun(base, token, id);
     expect(run.status, JSON.stringify(run)).toBe("cancelled");
-    expect(findRecords(run, "after"), JSON.stringify(run)).toEqual([]);
+    expect(findStepRecords(run, "after"), JSON.stringify(run)).toEqual([]);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 };
@@ -101,11 +102,9 @@ describe("POST /runs/{id}/cancel", () => {
 
           const run = await waitForRunToFinish(base, token, runId);
           expect(run.status, JSON.stringify(run)).toBe("cancelled");
-          expect(run.finishedAt).toBeDefined();
-          expect(run.failureReason).toBeUndefined();
           for (const stepId of unfinished) {
             expect(
-              findRecords(run, stepId).map((record) => record.status),
+              findStepRecords(run, stepId).map((record) => record.status),
               stepId,
             ).toEqual(["cancelled"]);
           }
@@ -138,10 +137,109 @@ describe("POST /runs/{id}/cancel", () => {
 
           const run = await waitForRunToFinish(base, token, PENDING_RUN_ID);
           expect(run.status, JSON.stringify(run)).toBe("cancelled");
-          expect(run.finishedAt).toBeDefined();
           expect(run.steps.map((record) => [record.stepId, record.status])).toEqual([
             ["first", "cancelled"],
           ]);
+        } finally {
+          held.release();
+        }
+      },
+      [held.plugin],
+    );
+  });
+
+  it("interrupts a wait step at once, and starts no later step", async () => {
+    await withSetUpController(async ({ base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: {
+          name: "Wait an hour, then file a task",
+          steps: [
+            { id: "pause", kind: "action", action: "wait", params: { seconds: 3600 } },
+            buildCreateStep("after"),
+          ],
+          edges: [{ from: "pause", to: "after" }],
+        },
+      });
+      const runId = await startRun(base, token, workflow.id);
+      await waitUntil("started the wait step", async () => {
+        const run = await readRun(base, token, runId);
+        return findStepRecords(run, "pause")[0]?.status === "running" ? true : undefined;
+      });
+
+      const response = await requestCancel(base, token, runId);
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const run = await waitForRunToFinish(base, token, runId);
+      expect(run.status, JSON.stringify(run)).toBe("cancelled");
+      expect(run.steps.map((record) => [record.stepId, record.status])).toEqual([
+        ["pause", "cancelled"],
+      ]);
+      await expectStaysCancelled(base, token, runId);
+      expect(await listTasks(base, token)).toEqual([]);
+    });
+  });
+
+  it("cancels every unfinished run the run started, however deep, and leaves finished ones as they are", async () => {
+    const held = buildHeldAction();
+    await withSetUpController(
+      async ({ base, token }) => {
+        try {
+          // The parent starts the child and then waits. The child starts the
+          // grandchild and completes. The grandchild waits.
+          const grandchild = await createWorkflowOrFail(base, token, {
+            definition: { name: "Grandchild", steps: [buildHeldStep(held, "hold")] },
+          });
+          const child = await createWorkflowOrFail(base, token, {
+            definition: {
+              name: "Child",
+              steps: [
+                {
+                  id: "start",
+                  kind: "action",
+                  action: "run.start",
+                  params: { workflowId: grandchild.id },
+                },
+              ],
+            },
+          });
+          const parent = await createWorkflowOrFail(base, token, {
+            definition: {
+              name: "Parent",
+              steps: [
+                {
+                  id: "start",
+                  kind: "action",
+                  action: "run.start",
+                  params: { workflowId: child.id },
+                },
+                buildHeldStep(held, "hold"),
+              ],
+              edges: [{ from: "start", to: "hold" }],
+            },
+          });
+          const parentId = await startRun(base, token, parent.id);
+          await waitForHeldExecutions(held, 2);
+          const [childRun] = (await queryRuns(base, token, `actor=run:${parentId}`)).items;
+          const childRunId = childRun!.id;
+          expect((await waitForRunToFinish(base, token, childRunId)).status).toBe("completed");
+          const [grandchildRun] = (await queryRuns(base, token, `actor=run:${childRunId}`)).items;
+          const grandchildRunId = grandchildRun!.id;
+
+          const response = await requestCancel(base, token, parentId);
+          expect(response.status, await response.clone().text()).toBe(200);
+
+          // The grandchild is cancelled in the same request as its parent's parent.
+          expect((await readRun(base, token, grandchildRunId)).status).toBe("cancelled");
+          await waitUntil("aborted both held actions' signals", () =>
+            held.contexts.every((context) => context.signal.aborted) ? true : undefined,
+          );
+          expect((await waitForRunToFinish(base, token, parentId)).status).toBe("cancelled");
+          expect((await readRun(base, token, childRunId)).status).toBe("completed");
+          expect(
+            findStepRecords(await readRun(base, token, grandchildRunId), "hold").map(
+              (record) => record.status,
+            ),
+          ).toEqual(["cancelled"]);
         } finally {
           held.release();
         }

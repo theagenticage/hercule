@@ -76,25 +76,84 @@ const SOURCE_LIMITS = {
 };
 
 /**
- * The environment used to parse and evaluate. No function is registered on it,
- * or on the scoped environments used for validation. That keeps the function
- * whitelist pure: a registered function is the only way a custom, and possibly
- * asynchronous, handler enters, and an asynchronous handler is the only thing
- * that turns `evaluate` into a `Promise`. So evaluation is synchronous by
- * construction, and a condition can call nothing that reaches outside the
- * context it is given.
- *
- * It declares no variables and reads each one from the evaluation context.
- * Which variables a source may read was already enforced when the source was
- * validated.
+ * The two operands of a binary operator, as CEL hands them to a handler. A
+ * whole number (int) arrives as a `bigint`, a decimal (double) as a `number`.
  */
-const environment = new Environment({
-  // Context variables are dynamic. A payload is loosely shaped, and a plain
-  // JSON number stays a number this way instead of needing a BigInt literal
-  // to compare against.
-  unlistedVariablesAreDyn: true,
-  limits: SOURCE_LIMITS,
-});
+type Operand = bigint | number;
+
+/** The arithmetic operators that combine a whole number and a decimal. */
+const ARITHMETIC: Record<"+" | "-" | "*" | "/" | "%", (left: number, right: number) => number> = {
+  "+": (left, right) => left + right,
+  "-": (left, right) => left - right,
+  "*": (left, right) => left * right,
+  "/": (left, right) => left / right,
+  "%": (left, right) => left % right,
+};
+
+/**
+ * Builds an environment with the structural limits and the operators every
+ * expression gets, whether it is being validated or evaluated. Validation and
+ * evaluation share this one function, so a save accepts exactly what a run can
+ * evaluate.
+ *
+ * Standard CEL keeps whole numbers (int) and decimals (double) apart, and a
+ * number read from the context is always a decimal, because the context is
+ * plain JSON. So `inputs.count + 1` fails in standard CEL. An author should
+ * never have to think about that, so the operators below extend CEL (spec 07,
+ * section 5):
+ *
+ * - `+ - * / %` between a whole number and a decimal, in either order, give a
+ *   decimal. `%` also works between two decimals. Two whole numbers stay whole,
+ *   so `7 / 2` is still 3: the evaluator's own `int / int` cannot be replaced.
+ * - `==` and `!=` between a whole number and a decimal compare the values, so
+ *   `3 == 3.0` is true. Ordering (`<`, `>=`) already compares across the two.
+ * - `+` between a string and a number, in either order, joins them as text. A
+ *   whole decimal is written without `.0`, as JavaScript writes it.
+ * - A list or map literal may mix value types, such as `[1, inputs.price]`.
+ *
+ * Every handler is pure and synchronous. A registered handler is the only way
+ * custom code enters the evaluator, and an asynchronous one is the only thing
+ * that would turn `evaluate` into a `Promise`, so evaluation stays synchronous
+ * and an expression can reach nothing outside the context it is given. No
+ * function is registered.
+ */
+const buildEnvironment = (unlistedVariablesAreDyn: boolean): Environment => {
+  const built = new Environment({
+    unlistedVariablesAreDyn,
+    homogeneousAggregateLiterals: false,
+    limits: SOURCE_LIMITS,
+  });
+  for (const [operator, apply] of Object.entries(ARITHMETIC)) {
+    const handler = (left: Operand, right: Operand): number => apply(Number(left), Number(right));
+    built.registerOperator(`int ${operator} double: double`, handler);
+    built.registerOperator(`double ${operator} int: double`, handler);
+  }
+  built.registerOperator("double % double: double", ARITHMETIC["%"]);
+  // Registering `==` also registers `double == int` and both `!=`.
+  built.registerOperator("int == double", (left: bigint, right: number) => Number(left) === right);
+  for (const number of ["int", "double"]) {
+    built.registerOperator(
+      `string + ${number}: string`,
+      (left: string, right: Operand) => left + String(right),
+    );
+    built.registerOperator(
+      `${number} + string: string`,
+      (left: Operand, right: string) => String(left) + right,
+    );
+  }
+  return built;
+};
+
+/**
+ * The environment used to parse and evaluate. It declares no variables and
+ * reads each one from the evaluation context. Which variables a source may
+ * read was already enforced when the source was validated.
+ *
+ * Context variables are dynamic. A payload is loosely shaped, and a plain
+ * JSON number stays a number this way instead of needing a BigInt literal to
+ * compare against.
+ */
+const environment = buildEnvironment(true);
 
 /**
  * Which variables an expression can read. This depends on where the
@@ -115,13 +174,13 @@ const SCOPE_VARIABLES: Record<ExpressionScope, ReadonlyArray<string>> = {
 
 /**
  * Builds an environment that declares only the variables of one scope, so
- * validation rejects a source that reads any other variable. It uses the same
- * limits as evaluation.
+ * validation rejects a source that reads any other variable. It has the same
+ * limits and operators as evaluation.
  */
 const buildScopedEnvironment = (scope: ExpressionScope): Environment =>
   SCOPE_VARIABLES[scope].reduce(
     (built, variable) => built.registerVariable(variable, "dyn"),
-    new Environment({ unlistedVariablesAreDyn: false, limits: SOURCE_LIMITS }),
+    buildEnvironment(false),
   );
 
 const SCOPED_ENVIRONMENTS: Record<ExpressionScope, Environment> = {
@@ -476,7 +535,7 @@ export const renderTemplate = (
       if (json === undefined) {
         return yield* Effect.fail(
           new ExpressionError({
-            message: `${describeSite()} returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp or an integer too large for a JSON number. Convert it with string(), or read another value.`,
+            message: `${describeSite()} returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp, an integer too large for a JSON number, or the infinity that a division by zero gives. Convert it with string(), or change the expression.`,
           }),
         );
       }

@@ -117,8 +117,6 @@ const COMMANDS: Record<string, string> = {
   "workflow.read": "workflow read",
   "workflow.create": "workflow create",
   "workflow.update": "workflow update",
-  "workflow.run": "workflow run",
-  "workflow.submit": "workflow submit",
   "workflow.delete": "workflow delete",
   "workflow.validate": "workflow validate",
 
@@ -128,6 +126,7 @@ const COMMANDS: Record<string, string> = {
 
   "eventKind.query": "event-kind list",
 
+  "run.start": "run start",
   "run.query": "run list",
   "run.read": "run read",
   "run.cancel": "run cancel",
@@ -219,9 +218,9 @@ const STDIN_FIELDS = [
   "plugin.configure config",
   "provider.create config",
   "workflow.create source",
-  "workflow.submit source",
   "workflow.update source",
   "workflow.validate source",
+  "run.start source",
 ];
 
 /** Every field that accepts an id tail, and the list operation that resolves the tail to a full id. */
@@ -248,12 +247,12 @@ const RESOLVES: Record<string, string> = {
   "workspace.dispose id": "workspace.query",
 
   "workflow.read id": "workflow.query",
-  "workflow.run id": "workflow.query",
   "workflow.update id": "workflow.query",
   "workflow.delete id": "workflow.query",
 
   "trigger.query workflowId": "workflow.query",
 
+  "run.start workflowId": "workflow.query",
   "run.query workflowId": "workflow.query",
   "run.read id": "run.query",
   "run.cancel id": "run.query",

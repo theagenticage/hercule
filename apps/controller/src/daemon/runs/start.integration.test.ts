@@ -1,6 +1,6 @@
 /**
- * Integration tests for starting a run with `POST /workflows/{id}/run`, driven
- * over HTTP against a real controller: what the new run records (its frozen
+ * Integration tests for starting a run of a stored workflow with `run.start`
+ * (`POST /runs/start`), driven over HTTP against a real controller: what the new run records (its frozen
  * plan, resolved inputs and origin), and every request the controller refuses
  * before creating a run, including plans with elements runs cannot execute
  * yet.
@@ -12,14 +12,18 @@
  * start the run.
  */
 import { describe, expect, it, vi } from "vitest";
-import { del, readErrorBody } from "../http/testing";
-import { buildActionPlugin, NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID } from "../plugins/testing";
+import { del, readErrorBody } from "../../http/testing";
+import {
+  buildActionPlugin,
+  NOTE_APPEND_ACTION,
+  NOTE_APPEND_ACTION_ID,
+} from "../../plugins/testing";
 import {
   readProfileNamed,
   spawnAgentUnder,
   WAIT_DEADLINE_MS,
   withAgentFleet,
-} from "../sessions/testing";
+} from "../../sessions/testing";
 import {
   ABSENT_ID,
   ACCEPTED_GITHUB_TOKEN,
@@ -30,7 +34,7 @@ import {
   localMailPlugin,
   updateWorkflow,
   withSetUpController,
-} from "../workflows/testing";
+} from "../../workflows/testing";
 import {
   buildCreateStep,
   countRuns,
@@ -39,10 +43,11 @@ import {
   listTasks,
   readRun,
   requestRun,
-  runEffect,
+  requestStart,
   startRun,
   waitForRunToFinish,
 } from "./testing";
+import { runEffect } from "../testing";
 
 /** Long enough for an agent fleet, a session, and a run that waits its full deadline. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
@@ -51,7 +56,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 /* Starting a run.                                                           */
 /* ------------------------------------------------------------------------ */
 
-describe("POST /workflows/{id}/run", () => {
+describe("run.start of a stored workflow", () => {
   it("returns a run id, and the run holds the plan, the resolved inputs, the workflow id and a manual origin", async () => {
     await withSetUpController(async ({ base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, { definition: INPUTS_DEFINITION });
@@ -111,7 +116,7 @@ describe("POST /workflows/{id}/run", () => {
       const base = arranged.harness.base;
       const definition = { name: "One task", steps: [buildCreateStep("create")] };
       const workflow = await createWorkflowOrFail(base, arranged.token, { definition });
-      // The shipped assistant profile has the workflow.run and run.read grants.
+      // The shipped assistant profile has the run.start and run.read grants.
       const agent = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "assistant"));
 
       const runId = await startRun(base, agent.token, workflow.id);
@@ -132,6 +137,35 @@ describe("POST /workflows/{id}/run", () => {
 
       const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
       expect(run.status).toBe("completed");
+    });
+  });
+
+  it("refuses a request that names no workflow, or a stored one and a sent one, with validation", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: { name: "One task", steps: [buildCreateStep("create")] },
+      });
+      for (const [description, body] of [
+        ["no workflow", { inputs: {} }],
+        [
+          "a workflow id and a definition",
+          {
+            workflowId: workflow.id,
+            definition: { name: "Other", steps: [buildCreateStep("create")] },
+          },
+        ],
+        ["a workflow id and a source", { workflowId: workflow.id, source: "name: Other" }],
+      ] as const) {
+        const [issue] = await expectRefusedAt(
+          harness,
+          await requestStart(base, token, body),
+          [[]],
+          description,
+        );
+        expect(issue?.message, description).toBe(
+          "Send exactly one of workflowId (a stored workflow), source (YAML text) or definition (an object).",
+        );
+      }
     });
   });
 

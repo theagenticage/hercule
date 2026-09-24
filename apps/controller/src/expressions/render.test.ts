@@ -5,10 +5,10 @@
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Option } from "effect";
-import { renderTemplate, renderTemplates } from "./index";
+import { evaluateExpression, renderTemplate, renderTemplates } from "./index";
 
 const CONTEXT = {
-  inputs: { count: 3, title: "Fix login", labels: ["bug"], urgent: true },
+  inputs: { count: 3, price: 2.5, first: 0, title: "Fix login", labels: ["bug"], urgent: true },
   steps: { create: { output: { id: "t_1", items: [1, 2] } } },
 };
 
@@ -89,5 +89,60 @@ describe("renderTemplates", () => {
     expect(
       readFailure(renderTemplates({ provenance: [{ ref: "{{ steps.gone.output }}" }] }, CONTEXT)),
     ).toMatch(/provenance\.0\.ref/);
+  });
+});
+
+/**
+ * Standard CEL keeps whole numbers (int) and decimals (double) apart, and a
+ * number read from the context is always a double. These tests pin the
+ * extensions that let an author mix the two, and a number with a string,
+ * without thinking about types.
+ */
+describe("numbers in a template, whatever their CEL type", () => {
+  it("adds, subtracts, multiplies and divides a number read from the context and a literal", () => {
+    expect(render("{{ inputs.count + 1 }}")).toBe(4);
+    expect(render("{{ 1 + inputs.count }}")).toBe(4);
+    expect(render("{{ inputs.count - 1 }}")).toBe(2);
+    expect(render("{{ inputs.price * 2 }}")).toBe(5);
+    expect(render("{{ inputs.count / 2 }}")).toBe(1.5);
+    expect(render("{{ inputs.count % 2 }}")).toBe(1);
+    expect(render("{{ size(inputs.labels) + 0.5 }}")).toBe(1.5);
+  });
+
+  it("writes a whole decimal as a JSON integer", () => {
+    expect(JSON.stringify(render("{{ inputs.price * 2 }}"))).toBe("5");
+    expect(render("{{ inputs.price * 2 }} items")).toBe("5 items");
+  });
+
+  it("keeps two whole numbers whole, so dividing two literals still drops the remainder", () => {
+    expect(Effect.runSync(evaluateExpression("1 + 2", CONTEXT))).toBe(3n);
+    expect(render("{{ 7 / 2 }}")).toBe(3);
+    expect(render("{{ 7 / 2.0 }}")).toBe(3.5);
+  });
+
+  it("compares a whole number and a decimal by value", () => {
+    expect(render("{{ inputs.count == 3 }}")).toBe(true);
+    expect(render("{{ inputs.count < 10 }}")).toBe(true);
+    expect(render("{{ inputs.count + 1 > 3 }}")).toBe(true);
+    expect(render("{{ 3 == 3.0 }}")).toBe(true);
+    expect(render("{{ 3.0 != 3 }}")).toBe(false);
+    expect(render("{{ size(inputs.labels) == 1.0 }}")).toBe(true);
+  });
+
+  it("joins a string and a number, in either order, writing a whole decimal without .0", () => {
+    expect(render("{{ 'count: ' + inputs.count }}")).toBe("count: 3");
+    expect(render("{{ inputs.count + ' left' }}")).toBe("3 left");
+    expect(render("{{ 'price ' + inputs.price }}")).toBe("price 2.5");
+    expect(render("{{ 'step ' + 1 }}")).toBe("step 1");
+    expect(render("{{ 'step ' + 2.0 }}")).toBe("step 2");
+  });
+
+  it("indexes a list by a number read from the context", () => {
+    expect(render("{{ inputs.labels[inputs.first] }}")).toBe("bug");
+  });
+
+  it("accepts a list or a map literal that mixes whole numbers and other values", () => {
+    expect(render("{{ [1, inputs.price] }}")).toEqual([1, 2.5]);
+    expect(render("{{ {'low': 1, 'high': 2.5} }}")).toEqual({ low: 1, high: 2.5 });
   });
 });

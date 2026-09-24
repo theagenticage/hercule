@@ -552,10 +552,11 @@ describe("the workflow action catalog", () => {
     );
 
     expect(rows.sort()).toEqual([
+      "core run.start",
       "core task.create",
       "core task.query",
       "core task.update",
-      "core workflow.run",
+      "core wait",
       "notes notes/note.append",
     ]);
   });
@@ -582,10 +583,11 @@ describe("the workflow action catalog", () => {
     expect(readErroredMessage(statuses.slashed)).toContain("The id cannot contain a / character");
     expect(readErroredMessage(statuses.listed)).toContain("struct");
     expect(statuses.actions.map((action) => action.id)).toEqual([
+      "run.start",
       "task.create",
       "task.query",
       "task.update",
-      "workflow.run",
+      "wait",
     ]);
   });
 });

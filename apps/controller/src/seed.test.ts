@@ -35,9 +35,8 @@ describe("the shipped permission profiles", () => {
         "task.update",
         "task.delete",
         "workflow.read",
-        "workflow.run",
-        "workflow.submit",
         "run.read",
+        "run.start",
         "run.write",
         "session.read",
         "session.spawn",
@@ -85,8 +84,7 @@ describe("the shipped permission profiles", () => {
     expect(profile.grants).not.toContain("task.delete");
     expect(profile.grants).not.toContain("session.spawn");
     expect(profile.grants).not.toContain("session.read");
-    expect(profile.grants).not.toContain("workflow.run");
-    expect(profile.grants).not.toContain("workflow.submit");
+    expect(profile.grants).not.toContain("run.start");
     expect(profile.grants).not.toContain("memory.read");
     expect(profile.grants).not.toContain("memory.write");
     expect(profile.grants).not.toContain("event.audit");

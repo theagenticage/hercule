@@ -50,7 +50,7 @@ export const CORE_CONTRIBUTION_OWNER = "core";
 /**
  * A workflow action registered at boot. `id` is the id a step uses to call
  * the action: `<pluginId>/<word>` for a plugin's action, and the operation id
- * for a built-in action.
+ * for a built-in action, except `wait`, which calls no operation.
  */
 export interface RegisteredWorkflowAction {
   readonly id: string;
@@ -212,20 +212,22 @@ export const registerWorkflowActionContribution = (
     );
   });
 
+/** The longest a `wait` step can wait: one day, in seconds. */
+export const MAX_WAIT_SECONDS = 86_400;
+
 /**
- * The built-in workflow actions. Each one calls an operation of the public API
- * and has the operation's id, so a step can do nothing that an API request
- * cannot do. More built-in actions are added here as their operations are
- * built.
+ * The built-in workflow actions. Each one but `wait` calls an operation of the
+ * public API and has the operation's id, so a step can do nothing that an API
+ * request cannot do. `wait` only waits: it acts on nothing, so there is no
+ * operation for it to call. More built-in actions are added here as their
+ * operations are built.
  */
-const BUILT_IN_WORKFLOW_ACTIONS: ReadonlyArray<
-  DeclaredWorkflowAction & { readonly id: OperationId }
-> = [
+const BUILT_IN_WORKFLOW_ACTIONS = [
   {
     id: "task.create",
     displayName: "Create a task",
     description:
-      "Creates one Task from a title and a description, with an optional priority, labels, project and provenance.",
+      "Creates one Task from a title and a description, with an optional priority, labels, project and provenance. The task's provenance also records the run that created it.",
     input: TaskCreateInput,
     output: Task,
   },
@@ -251,16 +253,36 @@ const BUILT_IN_WORKFLOW_ACTIONS: ReadonlyArray<
     output: page(Task),
   },
   {
-    id: "workflow.run",
-    displayName: "Run a workflow",
+    id: "run.start",
+    displayName: "Start a run",
     description:
       "Starts a run of the stored workflow with the id workflowId, and does not wait for it to finish. The output holds the new run's id.",
-    // The operation's input, with the workflow id as a param, because an API
-    // request sends it in the path and a step has no path.
+    // Of the operation's input, only a stored workflow: a step that starts a
+    // run of a workflow written into its own params would be a sub-workflow,
+    // which is not built yet.
     input: Schema.Struct({ workflowId: Id, inputs: Schema.optionalKey(RunInputs) }),
     output: RunStarted,
   },
-];
+  {
+    id: "wait",
+    displayName: "Wait",
+    description: `Waits the given number of seconds, from 1 to ${MAX_WAIT_SECONDS} (one day), before the run goes on. Cancelling the run ends the wait.`,
+    input: Schema.Struct({
+      seconds: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_WAIT_SECONDS })),
+    }),
+    output: Schema.Struct({}),
+  },
+] as const satisfies ReadonlyArray<DeclaredWorkflowAction & { readonly id: OperationId | "wait" }>;
+
+/** The id of a built-in workflow action. */
+export type BuiltInActionId = (typeof BUILT_IN_WORKFLOW_ACTIONS)[number]["id"];
+
+const BUILT_IN_ACTION_IDS: ReadonlySet<string> = new Set(
+  BUILT_IN_WORKFLOW_ACTIONS.map((action) => action.id),
+);
+
+/** Checks whether an action id is one of the built-in actions. */
+export const isBuiltInActionId = (id: string): id is BuiltInActionId => BUILT_IN_ACTION_IDS.has(id);
 
 /** Adds the built-in actions, owned by `core`, to the collections of a registration pass. */
 export const registerBuiltInWorkflowActions = (

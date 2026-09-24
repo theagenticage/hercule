@@ -23,7 +23,6 @@ import {
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { RunInputs, RunStarted, workflowRunEndpoint } from "./run";
 import { WorkflowDefinition } from "./workflow-definition";
 
 /** A stored workflow: its YAML source exactly as written, plus the stored row's fields. */
@@ -96,7 +95,7 @@ const UncheckedDefinition = Schema.Json.pipe(
  * definition object. The controller validates both, with `parseWorkflowSource`
  * and `decodeWorkflowDefinition`. The transport does not validate them.
  */
-const WORKFLOW_CONTENT_FIELDS = {
+export const WORKFLOW_CONTENT_FIELDS = {
   /** Stored byte for byte. */
   source: Schema.optionalKey(Schema.String),
   /** Converted to YAML and stored as that YAML. */
@@ -130,18 +129,6 @@ export type WorkflowUpdateInput = Schema.Schema.Type<typeof WorkflowUpdateInput>
 export const WorkflowValidateInput = closedStruct(WORKFLOW_CONTENT_FIELDS);
 
 export type WorkflowValidateInput = Schema.Schema.Type<typeof WorkflowValidateInput>;
-
-/**
- * The input of `workflow.submit`: a workflow as `source` or `definition`, as
- * for a create, and the values its run starts with. The workflow is validated
- * like a stored one and is never stored.
- */
-export const WorkflowSubmitInput = closedStruct({
-  ...WORKFLOW_CONTENT_FIELDS,
-  inputs: Schema.optionalKey(RunInputs),
-});
-
-export type WorkflowSubmitInput = Schema.Schema.Type<typeof WorkflowSubmitInput>;
 
 /**
  * The result of validating a workflow. Saving the same workflow would fail
@@ -210,17 +197,6 @@ export const workflow = HttpApiGroup.make("workflow")
     HttpApiEndpoint.post("validate", "/workflows/validate", {
       payload: WorkflowValidateInput,
       success: WorkflowIssues,
-      error: [Unauthenticated, Forbidden, Validation, Internal],
-    }),
-    workflowRunEndpoint,
-    /**
-     * Starts a run of a workflow sent with the request, and returns the run's
-     * id at once. The workflow is validated like a save and is never stored,
-     * so the run's `workflowId` is null.
-     */
-    HttpApiEndpoint.post("submit", "/workflows/submit", {
-      payload: WorkflowSubmitInput,
-      success: RunStarted,
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
   )

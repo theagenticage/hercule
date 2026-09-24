@@ -282,10 +282,6 @@ const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) 
 const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
   Effect.gen(function* () {
     const workflows = yield* WorkflowService;
-    // Starting a run reads the workflow, checks its inputs against other
-    // domains' rows, and executes the steps afterwards, so it is a controller
-    // daemon use case.
-    const engine = yield* RunEngine;
     return handlers
       .handle("query", ({ query }) => withApiErrors(workflows.query(query)))
       .handle("read", ({ params }) => withApiErrors(workflows.read(params)))
@@ -294,21 +290,20 @@ const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
         withApiErrors(workflows.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(workflows.delete(params)))
-      .handle("validate", ({ payload }) => withApiErrors(workflows.validate(payload)))
-      .handle("run", ({ params, payload }) =>
-        withApiErrors(engine.startWorkflowRun({ id: params.id, ...payload })),
-      )
-      .handle("submit", ({ payload }) => withApiErrors(engine.submitWorkflow(payload)));
+      .handle("validate", ({ payload }) => withApiErrors(workflows.validate(payload)));
   }),
 );
 
 const runRoutes = HttpApiBuilder.group(api, "run", (handlers) =>
   Effect.gen(function* () {
     const runs = yield* RunService;
-    // Cancelling a run stops the fiber that executes it, which only the run
-    // engine holds.
+    // Starting a run reads the workflow, checks its inputs against other
+    // domains' rows, and executes the steps afterwards; cancelling one stops
+    // the fiber that executes it. Both are the run engine's, a controller
+    // daemon use case.
     const engine = yield* RunEngine;
     return handlers
+      .handle("start", ({ payload }) => withApiErrors(engine.startRun(payload)))
       .handle("query", ({ query }) => withApiErrors(runs.query(query)))
       .handle("read", ({ params }) => withApiErrors(runs.read(params)))
       .handle("cancel", ({ params }) => withApiErrors(engine.cancelRun(params)));

@@ -213,7 +213,7 @@ export const CLI = {
     fields: {
       controller: {
         flag: "controller",
-        help: "The controller's operational settings as a JSON object: retention, backup and session timeouts.",
+        help: "The controller's operational settings as a JSON object: retention, backup, session timeouts, workspace expiry and how deep runs may nest (run.nestingLimit).",
       },
       user: {
         flag: "user",
@@ -1101,69 +1101,6 @@ export const CLI = {
     },
   },
 
-  "workflow.run": {
-    command: "workflow run",
-    help: "Starts a run of a stored workflow and prints the run's id at once, without waiting for any step. The workflow is checked again first, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. A disabled workflow can still be run by hand. Follow the run with `hercule run read <id>`.",
-    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--inputs", '{"title":"Fix login"}'] }],
-    fields: {
-      id: {
-        positional: true,
-        help: "The workflow's id, or a tail of eight or more characters.",
-        resolves: "workflow.query",
-      },
-      inputs: {
-        flag: "inputs",
-        help: "A JSON object with a value for each input the workflow declares, by name; an input left out takes its default.",
-      },
-    },
-    errors: {
-      validation:
-        "the workflow is no longer valid, or an input is unknown, missing or has the wrong value: each printed line gives the path and the problem; no run was started",
-    },
-  },
-  "workflow.submit": {
-    command: "workflow submit",
-    help: "Runs the workflow YAML read from stdin once, without storing it. Prints the run's id at once. The YAML is checked like `hercule workflow create` checks it, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. Use it to try a workflow once before saving it. Follow the run with `hercule run read <id>`.",
-    examples: [
-      {
-        args: ["--inputs", '{"title":"Fix login"}'],
-        stdin: [
-          "name: File a task",
-          "inputs:",
-          "  - name: title",
-          "    schema: { type: string }",
-          "    required: true",
-          "steps:",
-          "  - id: file_task",
-          "    kind: action",
-          "    action: task.create",
-          "    params:",
-          '      title: "{{ inputs.title }}"',
-          "      description: Filed by a submitted workflow.",
-        ].join("\n"),
-      },
-    ],
-    fields: {
-      source: {
-        stdin: true,
-        flag: "source",
-        help: "The workflow's YAML source. It is validated and run, and never stored.",
-        required: true,
-      },
-      // The `definition` object is for programs that build a workflow in code.
-      // On the command line a workflow is always YAML text read from stdin.
-      definition: { hidden: true },
-      inputs: {
-        flag: "inputs",
-        help: "A JSON object with a value for each input the workflow declares, by name; an input left out takes its default.",
-      },
-    },
-    errors: {
-      validation:
-        "the source is not a valid workflow, or an input is unknown, missing or has the wrong value: each printed line gives the path and the problem; no run was started",
-    },
-  },
-
   "trigger.query": {
     command: "trigger list",
     help: "Lists the triggers of every workflow, newest first. Each row shows the event kind the trigger listens for, and whether a start trigger is active or paused. Triggers are defined in their workflow's source, so change one with `hercule workflow update`.",
@@ -1208,6 +1145,56 @@ export const CLI = {
     fields: {},
   },
 
+  "run.start": {
+    command: "run start",
+    help: "Starts a run and prints its id at once, without waiting for any step. Name a stored workflow with --workflow, or pipe a workflow's YAML with --source-stdin to run it once without storing it, for example to try it before saving it. The workflow is checked first, and so are the inputs: a problem is printed one line per error, each giving its path, and no run is started. A disabled workflow can still be run by hand. Follow the run with `hercule run read <id>`.",
+    examples: [
+      { args: ["--workflow", "1f3a9c2e"] },
+      { args: ["--workflow", "1f3a9c2e", "--inputs", '{"title":"Fix login"}'] },
+      {
+        args: ["--source-stdin", "--inputs", '{"title":"Fix login"}'],
+        stdin: [
+          "name: File a task",
+          "inputs:",
+          "  - name: title",
+          "    schema: { type: string }",
+          "    required: true",
+          "steps:",
+          "  - id: file_task",
+          "    kind: action",
+          "    action: task.create",
+          "    params:",
+          '      title: "{{ inputs.title }}"',
+          "      description: Filed by a workflow that was never stored.",
+        ].join("\n"),
+      },
+    ],
+    fields: {
+      workflowId: {
+        flag: "workflow",
+        help: "The stored workflow to run, by its id or a tail of eight or more characters. Give this or --source-stdin, not both.",
+        resolves: "workflow.query",
+      },
+      source: {
+        stdin: true,
+        flag: "source",
+        help: "A workflow's YAML source to run once. It is validated like a save and never stored.",
+      },
+      // The `definition` object is for programs that build a workflow in code.
+      // On the command line a workflow is always YAML text read from stdin.
+      definition: { hidden: true },
+      inputs: {
+        flag: "inputs",
+        help: "A JSON object with a value for each input the workflow declares, by name; an input left out takes its default.",
+      },
+    },
+    errors: {
+      validation:
+        "the workflow is not valid, or an input is unknown, missing or has the wrong value: each printed line gives the path and the problem; no run was started",
+      cap_exceeded:
+        "the run would be nested deeper than the controller's run.nestingLimit setting; no run was started",
+    },
+  },
   "run.query": {
     command: "run list",
     help: "Lists runs, newest first. Each row shows the run's status, its workflow, who started it, and its age. Use it to find the id that `hercule run read` and `hercule run cancel` take.",
@@ -2344,7 +2331,7 @@ export const NOUNS = {
   workflow: {
     summary:
       "Workflows: automations written as YAML - what starts them, the steps they run, and where those steps run.",
-    flow: "hercule workflow validate checks a source from stdin, hercule workflow create stores one, hercule workflow read prints its source, hercule workflow update replaces the source or enables the workflow, hercule workflow run starts a run of it, hercule workflow submit runs a source from stdin without storing it, hercule workflow delete removes it.",
+    flow: "hercule workflow validate checks a source from stdin, hercule workflow create stores one, hercule workflow read prints its source, hercule workflow update replaces the source or enables the workflow, hercule run start runs it, hercule workflow delete removes it.",
   },
   trigger: {
     summary:
@@ -2359,7 +2346,7 @@ export const NOUNS = {
   run: {
     summary:
       "Runs: a workflow's steps carried out once, each run with a frozen copy of the workflow.",
-    flow: "hercule workflow run starts one, hercule run list shows the latest, hercule run read shows how far one got, hercule run cancel stops one.",
+    flow: "hercule run start starts one, hercule run list shows the latest, hercule run read shows how far one got, hercule run cancel stops one.",
   },
   runner: {
     summary: "The fleet: the machines that host sessions on the controller's behalf.",

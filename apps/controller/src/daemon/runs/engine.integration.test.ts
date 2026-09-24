@@ -28,22 +28,27 @@ import {
   post,
   waitWithin,
   type ServerHarness,
-} from "../http/testing";
-import { buildActionPlugin, NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID } from "../plugins/testing";
-import { WAIT_DEADLINE_MS } from "../sessions/testing";
-import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../workflows/testing";
+} from "../../http/testing";
+import {
+  buildActionPlugin,
+  NOTE_APPEND_ACTION,
+  NOTE_APPEND_ACTION_ID,
+} from "../../plugins/testing";
+import { WAIT_DEADLINE_MS } from "../../sessions/testing";
+import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../../workflows/testing";
 import {
   buildCreateStep,
   expectRefusedAt,
   FILE_AND_START_DEFINITION,
-  findRecords,
+  findStepRecords,
   listTasks,
   readTask,
   requestRun,
-  runEffect,
   startRun,
   waitForRunToFinish,
+  expectStatus,
 } from "./testing";
+import { runEffect } from "../testing";
 
 /** Long enough for a run that waits its full deadline. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS + 10_000 });
@@ -63,19 +68,20 @@ describe("a run of built-in actions", () => {
       const run = await waitForRunToFinish(base, token, runId);
 
       expect(run.status, JSON.stringify(run)).toBe("completed");
-      expect(run.startedAt).toBeDefined();
+      expect(expectStatus(run, "completed").startedAt).toBeDefined();
       expect(run.steps.map((record) => [record.stepId, record.iteration, record.status])).toEqual([
         ["create", 1, "completed"],
         ["update", 1, "completed"],
       ]);
       for (const record of run.steps) {
-        expect(record.startedAt, record.stepId).toBeDefined();
-        expect(record.finishedAt, record.stepId).toBeDefined();
+        const completed = expectStatus(record, "completed");
+        expect(completed.startedAt, record.stepId).toBeDefined();
+        expect(completed.finishedAt, record.stepId).toBeDefined();
       }
 
       // The first step's output is the task as it was created, before the
       // second step changed it.
-      const created = run.steps[0]!.output as Task;
+      const created = expectStatus(run.steps[0], "completed").output as Task;
       expect(created).toMatchObject({
         title: "Fix login",
         description: "Filed by a run.",
@@ -85,8 +91,9 @@ describe("a run of built-in actions", () => {
       const task = await readTask(base, token, created.id);
       expect(task.title).toBe("Fix login");
       expect(task.status).toBe("in-progress");
-      expect(task.provenance.map((entry) => [entry.ref, entry.actor])).toEqual([
-        ["test:ticket:79", `run:${runId}`],
+      expect(task.provenance.map((entry) => [entry.ref, entry.runId, entry.actor])).toEqual([
+        ["test:ticket:79", undefined, `run:${runId}`],
+        [undefined, runId, `run:${runId}`],
       ]);
       expect((await harness.audit("task.created")).map((entry) => entry.actor)).toEqual([
         `run:${runId}`,
@@ -185,7 +192,9 @@ describe("a run of a plugin's action", () => {
         }),
       async (run, base, token) => {
         expect(run.status, JSON.stringify(run)).toBe("completed");
-        expect(findRecords(run, "note")[0]?.output).toEqual({ noteId: "n-7" });
+        expect(expectStatus(findStepRecords(run, "note")[0], "completed").output).toEqual({
+          noteId: "n-7",
+        });
         expect(calls).toEqual([{ input: { text: "hi" }, run: { runId: run.id, stepId: "note" } }]);
         expect((await listTasks(base, token)).map((task) => task.title)).toEqual(["Note n-7"]);
       },
@@ -197,13 +206,13 @@ describe("a run of a plugin's action", () => {
       () => Effect.fail(new ActionError({ code: "rate_limited", message: "Too many notes." })),
       async (run, base, token) => {
         expect(run.status, JSON.stringify(run)).toBe("failed");
-        expect(run.failureReason).toBe("step-failed");
-        expect(run.failedStepId).toBe("note");
-        expect(findRecords(run, "note")[0]?.error).toEqual({
+        expect(expectStatus(run, "failed").failureReason).toBe("step-failed");
+        expect(expectStatus(run, "failed").failedStepId).toBe("note");
+        expect(expectStatus(findStepRecords(run, "note")[0], "failed").error).toEqual({
           code: "rate_limited",
           message: "Too many notes.",
         });
-        expect(findRecords(run, "create")).toEqual([]);
+        expect(findStepRecords(run, "create")).toEqual([]);
         expect(await listTasks(base, token)).toEqual([]);
       },
     );
@@ -219,9 +228,11 @@ describe("a run of a plugin's action", () => {
     ] as ReadonlyArray<WorkflowActionContribution["execute"]>) {
       await runNoteAction(execute, async (run, base, token) => {
         expect(run.status, JSON.stringify(run)).toBe("failed");
-        expect(run.failedStepId).toBe("note");
-        expect(findRecords(run, "note")[0]?.error?.code).toBe("unexpected");
-        expect(findRecords(run, "create")).toEqual([]);
+        expect(expectStatus(run, "failed").failedStepId).toBe("note");
+        expect(expectStatus(findStepRecords(run, "note")[0], "failed").error.code).toBe(
+          "unexpected",
+        );
+        expect(findStepRecords(run, "create")).toEqual([]);
         expect(await listTasks(base, token)).toEqual([]);
       });
     }
@@ -279,15 +290,13 @@ describe("a run whose step fails", () => {
       const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
 
       expect(run.status, JSON.stringify(run)).toBe("failed");
-      expect(run.failureReason).toBe("step-failed");
-      expect(run.failedStepId).toBe("update");
-      const [update] = findRecords(run, "update");
+      expect(expectStatus(run, "failed").failureReason).toBe("step-failed");
+      expect(expectStatus(run, "failed").failedStepId).toBe("update");
+      const [update] = findStepRecords(run, "update");
       expect(update?.status).toBe("failed");
-      expect(update?.error?.code).toBe("not_found");
-      expect(update?.error?.message).toMatch(/\S/);
-      expect(findRecords(run, "after").filter((record) => record.startedAt !== undefined)).toEqual(
-        [],
-      );
+      expect(expectStatus(update, "failed").error.code).toBe("not_found");
+      expect(expectStatus(update, "failed").error.message).toMatch(/\S/);
+      expect(findStepRecords(run, "after").filter((record) => "startedAt" in record)).toEqual([]);
       expect(await listTasks(base, token)).toEqual([]);
     });
   });
@@ -317,15 +326,13 @@ describe("a run whose step fails", () => {
       const run = await waitForRunToFinish(base, token, runId);
 
       expect(run.status, JSON.stringify(run)).toBe("failed");
-      expect(run.failureReason).toBe("step-failed");
-      expect(run.failedStepId).toBe("create");
-      const [create] = findRecords(run, "create");
+      expect(expectStatus(run, "failed").failureReason).toBe("step-failed");
+      expect(expectStatus(run, "failed").failedStepId).toBe("create");
+      const [create] = findStepRecords(run, "create");
       expect(create?.status).toBe("failed");
-      expect(create?.error?.code).toBe("validation");
-      expect(create?.error?.message).toMatch(/\S/);
-      expect(findRecords(run, "after").filter((record) => record.startedAt !== undefined)).toEqual(
-        [],
-      );
+      expect(expectStatus(create, "failed").error.code).toBe("validation");
+      expect(expectStatus(create, "failed").error.message).toMatch(/\S/);
+      expect(findStepRecords(run, "after").filter((record) => "startedAt" in record)).toEqual([]);
       expect(await listTasks(base, token)).toEqual([]);
     });
   });
@@ -351,8 +358,30 @@ describe("a run whose step fails", () => {
       const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
 
       expect(run.status, JSON.stringify(run)).toBe("failed");
-      expect(run.failureReason).toBe("expression-error");
-      expect(run.failedStepId).toBe("update");
+      expect(expectStatus(run, "failed").failureReason).toBe("expression-error");
+      expect(expectStatus(run, "failed").failedStepId).toBe("update");
+    });
+  });
+
+  it("fails with controller-error, not as the step's own failure, when the database refuses the step's write", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: { name: "One task", steps: [buildCreateStep("create")] },
+      });
+      // Stands in for a database that cannot write, such as a full disk.
+      await runEffect(
+        harness.sql`
+          CREATE TRIGGER refuse_task_insert BEFORE INSERT ON tasks
+          BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`,
+      );
+
+      const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
+
+      expect(run.status, JSON.stringify(run)).toBe("failed");
+      expect(expectStatus(run, "failed").failureReason).toBe("controller-error");
+      expect(expectStatus(run, "failed").failedStepId).toBe("create");
+      expect(expectStatus(run.steps[0], "failed").error.code).toBe("unexpected");
+      expect(await listTasks(base, token)).toEqual([]);
     });
   });
 });
@@ -366,6 +395,7 @@ const RESUMED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a001";
 const INTERRUPTED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a002";
 const REPEATED_RUN_ID = "0199f0b7-0000-7000-8000-00000000a003";
 const BROKEN_RUN_ID = "0199f0b7-0000-7000-8000-00000000a004";
+const WAITING_RUN_ID = "0199f0b7-0000-7000-8000-00000000a005";
 
 /** Inserts a run row with the status `running`, as the engine leaves one between two steps. */
 const insertRunningRun = (
@@ -437,8 +467,45 @@ describe("a run interrupted by a restart", () => {
         ["create", "completed"],
         ["update", "completed"],
       ]);
-      expect(run.steps[0]!.output).toEqual(task);
+      expect(expectStatus(run.steps[0], "completed").output).toEqual(task);
       expect((await readTask(base, token, task.id)).status).toBe("in-progress");
+    });
+  });
+
+  it("waits only for the time a wait step had left when the controller stopped", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const definition = {
+        name: "Wait a minute",
+        steps: [{ id: "pause", kind: "action", action: "wait", params: { seconds: 60 } }],
+      };
+      const workflow = await createWorkflowOrFail(base, token, { definition });
+
+      // The rows a run has when the controller stopped 59 seconds into the
+      // minute its step waits.
+      const startedAt = new Date(Date.now() - 59_000).toISOString();
+      await insertRunningRun(harness, {
+        id: WAITING_RUN_ID,
+        workflowId: workflow.id,
+        plan: definition,
+        inputs: {},
+        at: startedAt,
+      });
+      await runEffect(
+        harness.sql`
+          INSERT INTO run_steps (run_id, step_id, iteration, status, created_at, started_at)
+          VALUES (unhex(replace(${WAITING_RUN_ID}, '-', '')), 'pause', 1, 'running', ${startedAt}, ${startedAt})`,
+      );
+
+      const rebootedAt = Date.now();
+      await harness.reboot();
+      const run = await waitForRunToFinish(base, token, WAITING_RUN_ID);
+
+      expect(run.status, JSON.stringify(run)).toBe("completed");
+      const record = expectStatus(run.steps[0], "completed");
+      expect(record.startedAt).toBe(startedAt);
+      expect(Date.parse(record.finishedAt) - Date.parse(startedAt)).toBeGreaterThanOrEqual(60_000);
+      // Far less than the full minute a fresh wait would take.
+      expect(Date.now() - rebootedAt).toBeLessThan(30_000);
     });
   });
 
@@ -476,7 +543,7 @@ describe("a run interrupted by a restart", () => {
     });
   });
 
-  it("fails a run at its current step with unexpected when executing it fails for a reason of its own", async () => {
+  it("fails a run with controller-error, at its current step, when executing it fails for a reason of the controller's own", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
         definition: FILE_AND_START_DEFINITION,
@@ -502,9 +569,9 @@ describe("a run interrupted by a restart", () => {
       const run = await waitForRunToFinish(base, token, BROKEN_RUN_ID);
 
       expect(run.status, JSON.stringify(run)).toBe("failed");
-      expect(run.failureReason).toBe("step-failed");
-      expect(run.failedStepId).toBe("ghost");
-      expect(run.steps[0]?.error?.code).toBe("unexpected");
+      expect(expectStatus(run, "failed").failureReason).toBe("controller-error");
+      expect(expectStatus(run, "failed").failedStepId).toBe("ghost");
+      expect(expectStatus(run.steps[0], "failed").error.code).toBe("unexpected");
     });
   });
 
@@ -550,12 +617,12 @@ describe("a run interrupted by a restart", () => {
         const run = await waitForRunToFinish(base, token, INTERRUPTED_RUN_ID);
 
         expect(run.status, JSON.stringify(run)).toBe("failed");
-        expect(run.failureReason).toBe("step-failed");
-        expect(run.failedStepId).toBe("note");
+        expect(expectStatus(run, "failed").failureReason).toBe("step-failed");
+        expect(expectStatus(run, "failed").failedStepId).toBe("note");
         expect(run.steps).toHaveLength(1);
         expect(run.steps[0]!.status).toBe("failed");
-        expect(run.steps[0]!.error?.code).toBe("interrupted");
-        expect(run.steps[0]!.error?.message).toMatch(/\S/);
+        expect(expectStatus(run.steps[0], "failed").error.code).toBe("interrupted");
+        expect(expectStatus(run.steps[0], "failed").error.message).toMatch(/\S/);
         expect(executions).toBe(0);
       },
       [countingNotesPlugin],

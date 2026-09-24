@@ -27,6 +27,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { findJsonSchemaViolation } from "@hercule/protocol/json-schema";
 import {
   createDecodeValidationError,
   createInvalidStateError,
@@ -35,7 +36,9 @@ import {
   decodeWorkflowDefinition,
   DEFAULT_PAGE_LIMIT,
   Id,
+  isId,
   parseWorkflowSource,
+  quoteAuthorText,
   renderWorkflowSource,
   TRIGGER_SORT_FIELDS,
   TriggerFilter,
@@ -190,6 +193,28 @@ const parseContentOrFail = (content: WorkflowContent): Effect.Effect<ParsedSourc
     createValidationError(issues),
   );
 
+/**
+ * Checks a value against an input's JSON Schema. Returns a message that says
+ * what is wrong, or `undefined` when the value is valid. A schema the
+ * validator cannot use is reported as the problem, because the author has to
+ * fix the workflow, not the value.
+ */
+const checkAgainstSchema = (
+  schema: Record<string, unknown>,
+  value: unknown,
+): string | undefined => {
+  try {
+    const violation = findJsonSchemaViolation(schema, value);
+    if (violation === undefined) return undefined;
+    // The issue already sits at the input's path, so a violation of the
+    // input's value itself needs no location; one inside it names the key.
+    const where = violation.location === "#" ? "" : `${violation.location}: `;
+    return `This value does not match the input's schema: ${where}${violation.message.replace(/\.$/, "")}.`;
+  } catch {
+    return "The input's schema is not a JSON Schema the controller can check values with. Correct the schema in the workflow.";
+  }
+};
+
 /** Builds one trigger row for each trigger that the definition declares. */
 const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<DeclaredTrigger> =>
   (definition.triggers ?? []).map((trigger) => ({
@@ -269,15 +294,6 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Returns the definition of a stored workflow, the parsed form of its
-     * source, or `None` if no workflow has the id. Checks no grant: this is
-     * not an operation, and the run engine checks the grant of the operation
-     * that reads it.
-     */
-    readDefinition: (id: string): Effect.Effect<Option.Option<WorkflowDefinition>, SqlError> =>
-      workflows.readDefinition(id),
-
-    /**
      * Validates a parsed definition with the same rules as a save, against
      * what exists on the controller now. Returns every error and warning.
      * Checks no grant: the run engine calls it to check a definition again
@@ -292,7 +308,8 @@ const make = Effect.gen(function* () {
      * returns its definition. Fails with a `Validation` error that lists
      * every schema error, or if the request sent neither or both. Checks no
      * grant and nothing the definition refers to: the run engine calls it for
-     * `workflow.submit`, then validates the definition itself.
+     * a `run.start` that sends a workflow, then validates the definition
+     * itself.
      */
     parseDefinition: (input: {
       readonly source?: string;
@@ -302,6 +319,81 @@ const make = Effect.gen(function* () {
         Effect.flatMap(chooseRequiredContent(input), parseContentOrFail),
         (parsed) => parsed.definition,
       ),
+
+    /**
+     * Resolves the values a run of `definition` starts with: the caller's
+     * value for each declared input, or its default. An optional input with
+     * no value and no default is left out. Returns the resolved inputs, or an
+     * issue at `inputs.<name>` for each of these:
+     *
+     * - an input the definition does not declare;
+     * - a required input with no value;
+     * - a value that does not match the input's JSON Schema;
+     * - a Connection id for a Connection that does not exist, is of another
+     *   type, or is disabled.
+     *
+     * Checks no grant: the run engine calls it while it starts a run.
+     */
+    resolveRunInputs: (
+      definition: WorkflowDefinition,
+      given: Readonly<Record<string, unknown>>,
+    ): Effect.Effect<Result.Result<Record<string, unknown>, ReadonlyArray<Issue>>, SqlError> =>
+      Effect.gen(function* () {
+        const declarations = definition.inputs ?? [];
+        const issues: Array<Issue> = [];
+        const declared = new Set(declarations.map((input) => input.name));
+        for (const name of Object.keys(given)) {
+          if (!declared.has(name)) {
+            issues.push({
+              path: ["inputs", name],
+              message: `This workflow declares no input named ${quoteAuthorText(name)}. Remove it, or use one of the declared inputs.`,
+            });
+          }
+        }
+        const resolved: Record<string, unknown> = {};
+        for (const input of declarations) {
+          const path = ["inputs", input.name];
+          const value = Object.hasOwn(given, input.name) ? given[input.name] : input.default;
+          if (value === undefined) {
+            if (input.required) {
+              issues.push({
+                path,
+                message: `Add a value for ${input.name}. This input is required.`,
+              });
+            }
+            continue;
+          }
+          if (input.schema !== undefined) {
+            const problem = checkAgainstSchema(input.schema, value);
+            if (problem !== undefined) issues.push({ path, message: problem });
+          } else if (input.connection !== undefined) {
+            const wanted = input.connection.type;
+            const found =
+              typeof value === "string" && isId(value)
+                ? yield* connections.one(value)
+                : Option.none();
+            if (Option.isNone(found)) {
+              issues.push({
+                path,
+                message: `No Connection has this id. Give the id of a Connection of type ${wanted}.`,
+              });
+            } else if (found.value.type !== wanted) {
+              issues.push({
+                path,
+                message: `This Connection is of type ${found.value.type}, but the input needs a Connection of type ${wanted}.`,
+              });
+            } else if (found.value.status === "disabled") {
+              issues.push({
+                path,
+                message:
+                  "This Connection is disabled. Enable it, or give another Connection of the same type.",
+              });
+            }
+          }
+          resolved[input.name] = value;
+        }
+        return issues.length === 0 ? Result.succeed(resolved) : Result.fail(issues);
+      }),
 
     /** Returns one page of workflows, the most recently changed first. */
     query: (input: QueryInput): Effect.Effect<WorkflowPage, CallError> =>
@@ -445,7 +537,7 @@ const make = Effect.gen(function* () {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            if (yield* runs.hasUnfinishedRunOf(id)) {
+            if (yield* runs.hasUnfinishedRun(id)) {
               return yield* Effect.fail(
                 createInvalidStateError(
                   "a run of this workflow is still pending or running; wait for it to finish, or cancel it, then delete the workflow",

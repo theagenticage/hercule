@@ -1,8 +1,8 @@
 /**
- * Integration tests for submitting a workflow to run without storing it, and
- * for listing and reading runs, driven over HTTP against a real controller:
- * `POST /workflows/submit`, `GET /runs` and `GET /runs/{id}`, and who may call
- * them and `POST /runs/{id}/cancel`.
+ * Integration tests for starting a run of a workflow sent with the request,
+ * without storing it, and for listing and reading runs, driven over HTTP
+ * against a real controller: `POST /runs/start`, `GET /runs` and
+ * `GET /runs/{id}`, and who may call them and `POST /runs/{id}/cancel`.
  *
  * The tests about grants spawn sessions on profiles with exactly the grants
  * the test needs, so they run against a controller with a connected runner.
@@ -10,20 +10,20 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Run, RunSummary } from "@hercule/contract";
-import { get, readErrorBody } from "../http/testing";
+import { get, readErrorBody } from "../../http/testing";
 import {
   readProfileNamed,
   spawnAgentUnder,
   spawnAgentWithGrants,
   WAIT_DEADLINE_MS,
-} from "../sessions/testing";
+} from "../../sessions/testing";
 import {
   ABSENT_ID,
   buildFileTaskSource,
   createWorkflowOrFail,
   queryWorkflows,
   withSetUpController,
-} from "../workflows/testing";
+} from "../../workflows/testing";
 import {
   buildCreateStep,
   buildHeldAction,
@@ -34,12 +34,13 @@ import {
   queryRuns,
   readRun,
   requestCancel,
-  requestSubmit,
+  requestStart,
   startRun,
-  submitRun,
+  startSentWorkflow,
   waitForHeldExecutions,
   waitForRunToFinish,
   withRunFleet,
+  expectStatus,
 } from "./testing";
 
 /** Long enough for an agent fleet, a session, and runs that wait their full deadline. */
@@ -67,13 +68,13 @@ const listIds = (items: ReadonlyArray<RunSummary>): ReadonlyArray<string> =>
   items.map((item) => item.id);
 
 /* ------------------------------------------------------------------------ */
-/* Submitting a workflow.                                                    */
+/* Starting a run of a sent workflow.                                        */
 /* ------------------------------------------------------------------------ */
 
-describe("POST /workflows/submit", () => {
-  it("starts a run of a definition with no workflow id and an api origin, resolves its inputs, and stores no workflow", async () => {
+describe("run.start of a sent workflow", () => {
+  it("starts a run of a definition with no workflow id and a manual origin, resolves its inputs, and stores no workflow", async () => {
     await withSetUpController(async ({ base, token }) => {
-      const runId = await submitRun(base, token, {
+      const runId = await startSentWorkflow(base, token, {
         definition: INPUTS_DEFINITION,
         inputs: { title: "Fix login" },
       });
@@ -84,7 +85,7 @@ describe("POST /workflows/submit", () => {
       // The default fills `priority`; `note` and `repo` have no value and no
       // default, so they are left out.
       expect(run.inputs).toEqual({ title: "Fix login", priority: "high" });
-      expect(run.origin).toEqual({ kind: "api", actor: "user" });
+      expect(run.origin).toEqual({ kind: "manual", actor: "user" });
 
       const finished = await waitForRunToFinish(base, token, runId);
       expect(finished.status, JSON.stringify(finished)).toBe("completed");
@@ -94,7 +95,9 @@ describe("POST /workflows/submit", () => {
 
   it("starts a run of a YAML source, with the parsed definition as its plan", async () => {
     await withSetUpController(async ({ base, token }) => {
-      const runId = await submitRun(base, token, { source: buildFileTaskSource("Submitted") });
+      const runId = await startSentWorkflow(base, token, {
+        source: buildFileTaskSource("Submitted"),
+      });
 
       const run = await waitForRunToFinish(base, token, runId);
       expect(run.status, JSON.stringify(run)).toBe("completed");
@@ -118,7 +121,7 @@ describe("POST /workflows/submit", () => {
     await withSetUpController(async ({ harness, base, token }) => {
       await expectRefusedAt(
         harness,
-        await requestSubmit(base, token, {
+        await requestStart(base, token, {
           definition: {
             name: "Unknown action",
             steps: [{ id: "first", kind: "action", action: "task.creat", params: {} }],
@@ -129,7 +132,7 @@ describe("POST /workflows/submit", () => {
       );
       await expectRefusedAt(
         harness,
-        await requestSubmit(base, token, {
+        await requestStart(base, token, {
           definition: INPUTS_DEFINITION,
           inputs: { ghost: 1, priority: "someday" },
         }),
@@ -144,27 +147,21 @@ describe("POST /workflows/submit", () => {
     });
   });
 
-  it("records the session as actor, and refuses a session without the workflow.submit grant with forbidden", async () => {
+  it("records the session as actor, and refuses a session without the run.start grant with forbidden", async () => {
     await withRunFleet(async (arranged) => {
       const base = arranged.harness.base;
       const definition = { name: "One task", steps: [buildCreateStep("create")] };
-      const allowed = await spawnAgentWithGrants(arranged, "submitter", [
-        "workflow.submit",
-        "run.read",
-      ]);
-      const refused = await spawnAgentWithGrants(arranged, "runner-only", [
-        "workflow.run",
-        "run.read",
-      ]);
+      const allowed = await spawnAgentWithGrants(arranged, "submitter", ["run.start", "run.read"]);
+      const refused = await spawnAgentWithGrants(arranged, "reader", ["run.read"]);
 
-      const response = await requestSubmit(base, refused.token, { definition });
+      const response = await requestStart(base, refused.token, { definition });
       const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(403);
       expect(refusal.code).toBe("forbidden");
-      expect(refusal.grant).toBe("workflow.submit");
+      expect(refusal.grant).toBe("run.start");
       expect(await countRuns(arranged.harness)).toBe(0);
 
-      const runId = await submitRun(base, allowed.token, { definition });
+      const runId = await startSentWorkflow(base, allowed.token, { definition });
       const run = await waitForRunToFinish(base, arranged.token, runId);
       expect(run.origin).toEqual({ kind: "api", actor: `session:${allowed.session.id}` });
       expect(run.workflowId).toBeNull();
@@ -217,8 +214,7 @@ describe("GET /runs", () => {
         failedStepId: "update",
       });
       expect(failed.createdAt).toBeDefined();
-      expect(failed.startedAt).toBeDefined();
-      expect(failed.finishedAt).toBeDefined();
+      expect(expectStatus(failed, "failed").startedAt).toBeDefined();
       expect(failed.steps.map((record) => [record.stepId, record.status])).toEqual([
         ["update", "failed"],
       ]);
@@ -290,7 +286,7 @@ describe("GET /runs", () => {
       const workflow = await createWorkflowOrFail(base, arranged.token, {
         definition: { name: "One task", steps: [buildCreateStep("create")] },
       });
-      const agent = await spawnAgentWithGrants(arranged, "starter", ["workflow.run", "run.read"]);
+      const agent = await spawnAgentWithGrants(arranged, "starter", ["run.start", "run.read"]);
       const byUser = await startRun(base, arranged.token, workflow.id);
       const bySession = await startRun(base, agent.token, workflow.id);
       await waitForRunToFinish(base, arranged.token, byUser);
