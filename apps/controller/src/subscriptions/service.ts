@@ -13,6 +13,10 @@
  *
  * `subscription.query` returns live subscriptions only: it is used to see what
  * a session is still waiting for, and to find the id to cancel.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -53,13 +57,8 @@ const QueryInput = Schema.Struct({
 
 type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-type Identified = Schema.Schema.Type<typeof Identified>;
-
 const decodeCreate = Schema.decodeUnknownEffect(SubscriptionCreateInput);
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 interface SubscriptionPage {
   readonly items: ReadonlyArray<Subscription>;
@@ -253,10 +252,9 @@ const make = Effect.gen(function* () {
      * So a caller learns nothing about what it may not reach, and in each case
      * there is nothing left for it to cancel.
      */
-    cancel: (input: Identified): Effect.Effect<Record<string, never>, CommonError | NotFound> =>
+    cancel: (id: Id): Effect.Effect<Record<string, never>, CommonError | NotFound> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("subscription.cancel");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const heldBy =
           actor._tag === "session"
             ? ({ kind: "session", id: actor.sessionId } as const)

@@ -10,7 +10,10 @@
  * request has already been decoded by the transport, but a built-in workflow
  * action calls these methods directly. The same rules apply whichever way the
  * call arrives: the title length cap, the External Ref syntax, and the rule
- * that a provenance entry must reference something.
+ * that a provenance entry must reference something. A method that takes only
+ * an id does not decode it again: the transport has already decoded a
+ * request's id against the contract, and a caller inside the controller
+ * passes an id it read from a stored row.
  *
  * Delete is soft: `deletedAt` is set and everything that reads a task stops
  * seeing it. There is no include-deleted option.
@@ -65,14 +68,9 @@ const UpdateInput = Schema.Struct({ id: Id, ...TaskUpdateInput.fields }).check(
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 /** One page of tasks, in the contract's shape. */
 export interface TaskPage {
@@ -183,12 +181,9 @@ const make = Effect.gen(function* () {
      * Returns one task by id, including its provenance. Fails with `NotFound`
      * if the task does not exist or has been deleted.
      */
-    read: (
-      input: Identified,
-    ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    read: (id: Id): Effect.Effect<Task, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* readLiveTaskOrFail(id);
       }),
 
@@ -348,14 +343,10 @@ const make = Effect.gen(function* () {
      * the task does not exist or is already deleted.
      */
     delete: (
-      input: Identified,
-    ): Effect.Effect<
-      Record<string, never>,
-      Unauthenticated | Forbidden | Validation | NotFound | SqlError
-    > =>
+      id: Id,
+    ): Effect.Effect<Record<string, never>, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("task.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

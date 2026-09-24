@@ -14,7 +14,10 @@
  * Input is decoded against the contract's schemas rather than trusted. The
  * transport has already decoded a request, but a built-in workflow action
  * calls these methods directly, and the limit on name length must apply
- * however the call arrives.
+ * however the call arrives. A method that takes only an id does not decode it
+ * again: the transport has already decoded a request's id against the
+ * contract, and a caller inside the controller passes an id it read from a
+ * stored row.
  *
  * Delete is soft: `deletedAt` is set and every read of projects stops
  * returning the project, while its tasks keep their `projectId` and its
@@ -58,14 +61,9 @@ const UpdateInput = Schema.Struct({ id: Id, ...ProjectUpdateInput.fields });
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(ProjectCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 /** One page of projects, in the contract's shape. */
 export interface ProjectPage {
@@ -132,12 +130,9 @@ const make = Effect.gen(function* () {
       }),
 
     /** Returns one project by id. Fails with `NotFound` if there is none or it is deleted. */
-    read: (
-      input: Identified,
-    ): Effect.Effect<Project, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    read: (id: Id): Effect.Effect<Project, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("project.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* readLiveProjectOrFail(id);
       }),
 
@@ -237,14 +232,10 @@ const make = Effect.gen(function* () {
      * a row. Fails with `NotFound` if the project does not exist.
      */
     delete: (
-      input: Identified,
-    ): Effect.Effect<
-      Record<string, never>,
-      Unauthenticated | Forbidden | Validation | NotFound | SqlError
-    > =>
+      id: Id,
+    ): Effect.Effect<Record<string, never>, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("project.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

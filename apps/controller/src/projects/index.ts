@@ -2,7 +2,6 @@
 export {
   ProjectService,
   ProjectServiceLayer,
-  type Identified,
   type ProjectPage,
   type QueryInput,
   type UpdateInput,

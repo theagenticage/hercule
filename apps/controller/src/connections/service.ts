@@ -16,6 +16,10 @@
  * Credentials are stored in the secrets table under the owner
  * `connection/<id>`. The API returns only references to them: each name, and
  * when the value was last replaced.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -93,15 +97,10 @@ const CredentialsInput = Schema.Struct({ id: Id, ...ConnectionCredentialsInput.f
 
 export type CredentialsInput = Schema.Schema.Type<typeof CredentialsInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(ConnectionCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeCredentials = Schema.decodeUnknownEffect(CredentialsInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 /** One page of connections, in the contract's shape. */
 export interface ConnectionPage {
@@ -475,12 +474,9 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (
-      input: Identified,
-    ): Effect.Effect<Connection, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    read: (id: Id): Effect.Effect<Connection, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("connection.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* readConnectionOrFail(id);
       }),
 
@@ -742,14 +738,13 @@ const make = Effect.gen(function* () {
      * credentials that no longer exist.
      */
     delete: (
-      input: Identified,
+      id: Id,
     ): Effect.Effect<
       Record<string, never>,
-      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+      Unauthenticated | Forbidden | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
         yield* requireGrant("connection.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const row = yield* readStoredConnectionOrFail(id);
         yield* withTransaction(
           sql,

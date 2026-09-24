@@ -13,7 +13,6 @@ export {
 export {
   ResourceService,
   ResourceServiceLayer,
-  type Identified,
   type QueryInput,
   type ResourcePage,
   type UpdateInput,

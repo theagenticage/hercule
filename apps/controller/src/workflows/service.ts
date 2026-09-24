@@ -18,6 +18,10 @@
  * that failed to save. The event holds the actor and the workflow's id, so a
  * client that watches the `workflow` topic learns about the change after it
  * commits.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -94,16 +98,11 @@ const TriggerQueryInput = Schema.Struct({
 
 export type TriggerQueryInput = Schema.Schema.Type<typeof TriggerQueryInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(WorkflowCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeValidate = Schema.decodeUnknownEffect(WorkflowValidateInput);
 const decodeTriggerQuery = Schema.decodeUnknownEffect(TriggerQueryInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 export interface WorkflowPage {
   readonly items: ReadonlyArray<WorkflowSummary>;
@@ -417,10 +416,9 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (input: Identified): Effect.Effect<Workflow, CallError | NotFound> =>
+    read: (id: Id): Effect.Effect<Workflow, CallError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* failIfWorkflowNotFound(workflows.read(id));
       }),
 
@@ -528,12 +526,9 @@ const make = Effect.gen(function* () {
      * that is still acting. A finished run keeps the workflow's id and its own
      * copy of the definition.
      */
-    delete: (
-      input: Identified,
-    ): Effect.Effect<Record<string, never>, CallError | NotFound | InvalidState> =>
+    delete: (id: Id): Effect.Effect<Record<string, never>, CallError | NotFound | InvalidState> =>
       Effect.gen(function* () {
         yield* requireGrant("workflow.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         yield* withTransaction(
           sql,
           Effect.gen(function* () {

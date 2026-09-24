@@ -39,6 +39,8 @@ const JsonObject = Schema.Record(Schema.String, Schema.Unknown);
 /** An event's id: its position in the log, counted from one. */
 export const EventId = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
+export type EventId = Schema.Schema.Type<typeof EventId>;
+
 export const Event = Schema.Struct({
   id: EventId,
   /** The plugin or core emitter: `github`, `gmail`, `cron`, `manual`, `platform`. */

@@ -87,7 +87,7 @@ describe("event log entries for workflow writes", () => {
         const audit = yield* AuditLog;
         const created = yield* workflows.create({ source: buildSource("Audited") });
         yield* workflows.update({ id: created.workflow.id, source: buildSource("Audited again") });
-        yield* workflows.delete({ id: created.workflow.id });
+        yield* workflows.delete(created.workflow.id);
         return [
           ...(yield* audit.listByKind("workflow.created")),
           ...(yield* audit.listByKind("workflow.updated")),

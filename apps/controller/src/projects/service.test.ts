@@ -178,9 +178,9 @@ describe("project.delete", () => {
         const gone = yield* projects.create({ name: "Retired" });
         yield* projects.create({ name: "Still here" });
         yield* TestClock.adjust(A_MINUTE);
-        yield* projects.delete({ id: gone.id });
+        yield* projects.delete(gone.id);
         return {
-          readError: yield* Effect.flip(projects.read({ id: gone.id })),
+          readError: yield* Effect.flip(projects.read(gone.id)),
           listed: (yield* projects.query({})).items,
           rows: yield* sql<ProjectRow>`SELECT id, name, deleted_at FROM projects
                                        WHERE id = ${uuidFromString(gone.id)}`,
@@ -199,8 +199,8 @@ describe("project.delete", () => {
       Effect.gen(function* () {
         const projects = yield* ProjectService;
         const created = yield* projects.create({ name: "Delete me" });
-        yield* projects.delete({ id: created.id });
-        return yield* projects.delete({ id: created.id });
+        yield* projects.delete(created.id);
+        return yield* projects.delete(created.id);
       }),
     );
     expect(error).toMatchObject({ error: { code: "not_found" } });
@@ -221,7 +221,7 @@ describe("projects and resources", () => {
           projectId: project.id,
         });
         yield* TestClock.adjust(A_MINUTE);
-        yield* projects.delete({ id: project.id });
+        yield* projects.delete(project.id);
         return {
           project,
           task,
@@ -286,7 +286,7 @@ describe("the event log", () => {
         const audit = yield* AuditLog;
         const project = yield* projects.create({ name: "Gone" });
         yield* TestClock.adjust(A_MINUTE);
-        yield* projects.delete({ id: project.id });
+        yield* projects.delete(project.id);
         return { project, entries: yield* audit.listByKind(DELETED) };
       }),
     );
@@ -304,7 +304,7 @@ describe("the event log", () => {
         const audit = yield* AuditLog;
         yield* Effect.ignore(projects.create({ name: "" }));
         yield* Effect.ignore(projects.update({ id: UNKNOWN_ID, name: "Renamed" }));
-        yield* Effect.ignore(projects.delete({ id: UNKNOWN_ID }));
+        yield* Effect.ignore(projects.delete(UNKNOWN_ID));
         return {
           created: yield* audit.listByKind(CREATED),
           updated: yield* audit.listByKind(UPDATED),

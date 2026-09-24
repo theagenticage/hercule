@@ -48,6 +48,10 @@
  * A run executes its ready steps one at a time, in the order their records
  * were created. The actions it can call all write to the one database, so
  * running them side by side would not finish any sooner.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -62,7 +66,6 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import {
-  createDecodeValidationError,
   createInvalidStateError,
   createNotFoundError,
   formatIssue,
@@ -80,7 +83,6 @@ import {
   type TaskCreateInput,
   type TaskFilter,
   type Unauthenticated,
-  type Validation,
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
@@ -105,13 +107,6 @@ import { TaskService } from "../../tasks";
 import type { WorkflowService } from "../../workflows";
 import { absorbFailures } from "../absorbing";
 import { makeRunStart } from "./start";
-
-const Identified = Schema.Struct({ id: Id });
-
-/** The input of an operation on one run, named by its id. */
-type Identified = Schema.Schema.Type<typeof Identified>;
-
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 /**
  * The codes of the step errors the engine writes itself. A step whose action
@@ -615,14 +610,10 @@ const make = Effect.gen(function* () {
      * run that has already ended.
      */
     cancelRun: (
-      input: Identified,
-    ): Effect.Effect<
-      Run,
-      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
-    > =>
+      id: Id,
+    ): Effect.Effect<Run, Unauthenticated | Forbidden | NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("run.cancel");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* Effect.uninterruptible(
           withTransaction(
             sql,

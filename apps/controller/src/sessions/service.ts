@@ -9,6 +9,10 @@
  * one layer up, decides when a frame is sent and over which connection. So the
  * methods the daemon calls return frames, or return what is left to do,
  * instead of doing it.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -87,10 +91,6 @@ const QueryInput = Schema.Struct({
 });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
-
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
 
 const TranscriptInput = Schema.Struct({ id: Id, ...buildPageInputFields(TRANSCRIPT_SORT_FIELDS) });
 
@@ -238,7 +238,6 @@ const toPageOutput = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCurso
 });
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 const decodeTranscript = Schema.decodeUnknownEffect(TranscriptInput);
 const decodeInputQuery = Schema.decodeUnknownEffect(InputQueryInput);
 const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
@@ -501,10 +500,9 @@ const make = Effect.gen(function* () {
         return yield* decodeSpecDocument(document.value);
       }),
 
-    read: (input: Identified): Effect.Effect<Session, ReadError | NotFound> =>
+    read: (id: Id): Effect.Effect<Session, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("session.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return (yield* recordComposer)(yield* one(id));
       }),
 
