@@ -2,9 +2,9 @@
  * Tests for the Runs screen at `/runs`: the list of runs, its filters, paging
  * and live updates, and the run form that its **Run workflow** button opens.
  *
- * The stub controller answers `run.query` from the runs a test gives it, and
+ * The stub controller serves `run.query` from the runs a test gives it, and
  * applies the filters and the cursor the screen sends, like the real
- * controller. So a test can check both what the screen asked for and what it
+ * controller. So a test can check both what the screen requested and what it
  * shows.
  */
 import { describe, expect, it } from "vitest";
@@ -280,8 +280,8 @@ const openApp = async ({
     "GET /api/v1/workflows": { body: { items: WORKFLOW_SUMMARIES } },
     [`GET /api/v1/workflows/${RELEASE.id}`]: { body: RELEASE },
     [`GET /api/v1/workflows/${NIGHTLY.id}`]: { body: NIGHTLY },
-    // The real controller filters by type when asked to; a screen may also
-    // ask for every Connection and filter them itself.
+    // The real controller filters by type when a request names one; a screen
+    // may also request every Connection and filter them itself.
     "GET /api/v1/connections": (call) => {
       const type = new URLSearchParams(call.search).get("type");
       return {
@@ -290,8 +290,7 @@ const openApp = async ({
         },
       };
     },
-    [`POST /api/v1/workflows/${RELEASE.id}/run`]: { body: { runId: STARTED_RUN_ID } },
-    [`POST /api/v1/workflows/${NIGHTLY.id}/run`]: { body: { runId: STARTED_RUN_ID } },
+    "POST /api/v1/runs/start": { body: { runId: STARTED_RUN_ID } },
     [`GET /api/v1/runs/${STARTED_RUN_ID}`]: { body: buildStartedRun(RELEASE, RELEASE_NAME) },
     ...overrides,
   });
@@ -313,11 +312,9 @@ const openApp = async ({
 const listRunQueries = (api: { readonly calls: readonly Call[] }): readonly Call[] =>
   api.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/runs");
 
-/** Returns the `workflow.run` requests the screen made, oldest first. */
+/** Returns the `run.start` requests the screen made, oldest first. */
 const listRunStarts = (api: { readonly calls: readonly Call[] }): readonly Call[] =>
-  api.calls.filter(
-    (call) => call.method === "POST" && /^\/api\/v1\/workflows\/.+\/run$/.test(call.path),
-  );
+  api.calls.filter((call) => call.method === "POST" && call.path === "/api/v1/runs/start");
 
 /** Returns the rows of the run list: the list items that link to a run's page. */
 const listRunRows = (): readonly HTMLElement[] =>
@@ -476,7 +473,7 @@ describe("Runs > the list", () => {
 
     await findRunRow(OF_DELETED.id);
     expect(listShownRunIds()).toEqual([RUNNING.id, FAILED.id, OF_DELETED.id]);
-    // The second page was asked for with the cursor the first page returned.
+    // The second page was requested with the cursor the first page returned.
     expect(new URLSearchParams(listRunQueries(api).at(-1)?.search).get("cursor")).toBe("2");
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
@@ -497,7 +494,7 @@ describe("Runs > the list", () => {
     expect(listRunQueries(api).length).toBeGreaterThan(0);
   });
 
-  it("says the filters matched nothing, rather than that there are no runs", async () => {
+  it("shows that the filters matched nothing, rather than that there are no runs", async () => {
     const user = userEvent.setup();
     await openApp();
     await findRunRow(RUNNING.id);
@@ -509,7 +506,7 @@ describe("Runs > the list", () => {
     expect(listShownRunIds()).toEqual([]);
   });
 
-  it("shows a run started elsewhere, and a run's new status, when the run topic announces them", async () => {
+  it("shows a run started elsewhere, and a run's new status, when a change is pushed on the run topic", async () => {
     const { live, hold } = await openApp();
     await findRunRow(RUNNING.id);
 
@@ -653,8 +650,8 @@ describe("Runs > the run form", () => {
     });
     const starts = listRunStarts(api);
     expect(starts).toHaveLength(1);
-    expect(starts[0]?.path).toBe(`/api/v1/workflows/${RELEASE_ID}/run`);
     expect(starts[0]?.body).toEqual({
+      workflowId: RELEASE_ID,
       inputs: {
         title: "Fix login",
         count: 3,
@@ -672,7 +669,7 @@ describe("Runs > the run form", () => {
     const titleMessage = "This input is required. Give it a value.";
     const { api, router } = await openApp({
       overrides: {
-        [`POST /api/v1/workflows/${RELEASE.id}/run`]: {
+        "POST /api/v1/runs/start": {
           status: 400,
           body: {
             error: {
@@ -713,7 +710,7 @@ describe("Runs > the run form", () => {
 });
 
 describe("Runs > the run form, when a read fails or a workflow is picked", () => {
-  it("says so when the Connections cannot be read and the workflow has a Connection input", async () => {
+  it("shows an error when the Connections cannot be read and the workflow has a Connection input", async () => {
     const user = userEvent.setup();
     const { api } = await openApp({
       overrides: {
@@ -737,9 +734,9 @@ describe("Runs > the run form, when a read fails or a workflow is picked", () =>
     await user.selectOptions(within(withConnection).getByLabelText("Workflow"), NIGHTLY_NAME);
     await user.click(within(withConnection).getByRole("button", { name: "Start" }));
     await waitFor(() => {
-      expect(listRunStarts(api).map((call) => call.path)).toEqual([
-        `/api/v1/workflows/${NIGHTLY_ID}/run`,
-      ]);
+      expect(
+        listRunStarts(api).map((call) => (call.body as { workflowId?: unknown }).workflowId),
+      ).toEqual([NIGHTLY_ID]);
     });
   });
 

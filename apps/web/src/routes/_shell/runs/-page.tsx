@@ -2,7 +2,7 @@ import { useMemo, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   buildRunGraph,
-  buildStepRows,
+  buildStepLines,
   buildTimeline,
   isRunLive,
   queryKeys,
@@ -17,12 +17,12 @@ import {
   useTickingClock,
 } from "@hercule/ui";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
+import { RunGraphView } from "../../../screens/runs/run-graph-view";
 import { RunHeader } from "../../../screens/runs/run-header";
 import { RunInputsCard } from "../../../screens/runs/run-inputs-card";
 import { StepList } from "../../../screens/runs/step-list";
 import { StepTimeline } from "../../../screens/runs/step-timeline";
 import { readErrorMessage } from "../../../screens/save-status";
-import { GraphView } from "../../../screens/workflow-editor";
 
 /** How a run's steps are shown below its graph. */
 export type StepsView = "list" | "timeline";
@@ -34,15 +34,17 @@ export type StepsView = "list" | "timeline";
 const SECTION_HEADING = "mb-2 flex h-8 items-center justify-between gap-4";
 
 /**
- * A run's page: the header, the frozen plan drawn as the workflow graph with
- * each step's progress on it, and below it the steps, as a list or on a
- * timeline, beside the inputs the run started with.
+ * Renders a run's page: the header, the frozen plan drawn as the workflow
+ * graph with each step's progress on it, and below it the steps, as a list or
+ * on a timeline, beside the inputs the run started with.
  *
  * While the run is live, one clock ticks for the whole page, so the header,
  * the graph and the steps count the same time. The page owns Cancel and the
- * question it asks first.
+ * question shown before the run is cancelled. While the question shows,
+ * Cancel is hidden instead of unmounted, so the focus can return to it when
+ * the question is declined.
  */
-export function RunScreen({
+export function RunPage({
   client,
   run,
   timezone,
@@ -72,7 +74,7 @@ export function RunScreen({
   // and with it the graph's layout, is built once per change of the run and
   // not on every tick of the clock.
   const runGraph = useMemo(() => buildRunGraph(run), [run]);
-  const rows = buildStepRows(run);
+  const lines = buildStepLines(run);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col pb-28">
@@ -82,29 +84,33 @@ export function RunScreen({
             {`Not cancelled: ${readErrorMessage(cancel.error)}`}
           </span>
         )}
-        {!isLive ? null : isAsking ? (
-          <InPlaceQuestion
-            question="Cancel this run?"
-            declineLabel="Keep running"
-            acceptLabel="Confirm"
-            onDecline={() => {
-              setAsking(false);
-            }}
-            onAccept={() => {
-              setAsking(false);
-              cancel.mutate();
-            }}
-          />
-        ) : (
-          <Button
-            aria-disabled={cancel.isPending}
-            onClick={() => {
-              cancel.reset();
-              setAsking(true);
-            }}
-          >
-            Cancel
-          </Button>
+        {!isLive ? null : (
+          <>
+            {isAsking ? (
+              <InPlaceQuestion
+                question="Cancel this run?"
+                declineLabel="Keep running"
+                acceptLabel="Confirm"
+                onDecline={() => {
+                  setAsking(false);
+                }}
+                onAccept={() => {
+                  setAsking(false);
+                  cancel.mutate();
+                }}
+              />
+            ) : null}
+            <Button
+              hidden={isAsking}
+              aria-disabled={cancel.isPending}
+              onClick={() => {
+                cancel.reset();
+                setAsking(true);
+              }}
+            >
+              Cancel
+            </Button>
+          </>
         )}
       </RunHeader>
       <div className="flex flex-col gap-6 px-8 pt-5">
@@ -114,7 +120,7 @@ export function RunScreen({
             <span className="text-fine text-faint">Frozen when the run started</span>
           </div>
           <div className="h-[260px] overflow-hidden rounded-card border border-line bg-surface">
-            <GraphView runGraph={runGraph} now={now} />
+            <RunGraphView runGraph={runGraph} now={now} />
           </div>
         </section>
         <div className="flex items-start gap-8">
@@ -140,7 +146,7 @@ export function RunScreen({
               </SegmentedControl>
             </div>
             {stepsView === "list" ? (
-              <StepList rows={rows} runStatus={run.status} now={now} />
+              <StepList lines={lines} runStatus={run.status} now={now} />
             ) : (
               <StepTimeline timeline={buildTimeline(run, now)} isLive={isLive} now={now} />
             )}

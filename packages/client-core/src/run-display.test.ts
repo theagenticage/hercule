@@ -1,4 +1,5 @@
 import { assert, describe, it } from "vitest";
+import type { StepRecord } from "@hercule/contract";
 import {
   describeFailureReason,
   describeRunOrigin,
@@ -8,6 +9,7 @@ import {
   describeUnstartedStep,
   formatElapsed,
   measureElapsed,
+  readTimestamps,
   shouldRunRecede,
 } from "./run-display";
 
@@ -20,16 +22,16 @@ describe("describeRunOrigin", () => {
   it("names who started the run, and how when not by hand", () => {
     const manual = describeRunOrigin({ kind: "manual", actor: "user" });
     assert.strictEqual(manual.starter.label, "you");
-    assert.strictEqual(manual.via, undefined);
+    assert.strictEqual(manual.howStarted, undefined);
 
     const api = describeRunOrigin({ kind: "api", actor: `session:${PARENT}` });
     assert.strictEqual(api.starter.label, "session 1f3a9c2e");
-    assert.strictEqual(api.via, "through the API");
+    assert.strictEqual(api.howStarted, "through the API");
 
     const child = describeRunOrigin({ kind: "action", parentRunId: PARENT, stepId: "spawn" });
     assert.strictEqual(child.starter.label, "run 1f3a9c2e");
     assert.deepStrictEqual(child.starter.link, { kind: "run", runId: PARENT });
-    assert.strictEqual(child.via, "at step spawn");
+    assert.strictEqual(child.howStarted, "at step spawn");
   });
 });
 
@@ -39,6 +41,27 @@ describe("shouldRunRecede", () => {
       (["pending", "running", "completed", "failed", "cancelled"] as const).map(shouldRunRecede),
       [false, false, true, false, true],
     );
+  });
+});
+
+describe("readTimestamps", () => {
+  it("reads the times each status has, and leaves out the ones it does not", () => {
+    const base = { stepId: "a", iteration: 1 };
+    assert.deepStrictEqual(readTimestamps({ ...base, status: "pending" }), {});
+    assert.deepStrictEqual(readTimestamps({ ...base, status: "running", startedAt: START }), {
+      startedAt: START,
+    });
+    const completed: StepRecord = {
+      ...base,
+      status: "completed",
+      startedAt: START,
+      finishedAt: at(40),
+      output: null,
+    };
+    assert.deepStrictEqual(readTimestamps(completed), { startedAt: START, finishedAt: at(40) });
+    assert.deepStrictEqual(readTimestamps({ ...base, status: "cancelled", finishedAt: at(5) }), {
+      finishedAt: at(5),
+    });
   });
 });
 
@@ -63,7 +86,7 @@ describe("formatElapsed", () => {
 });
 
 describe("describeStepDuration", () => {
-  it("measures a record to its end, or to now while it runs, and says nothing before it starts", () => {
+  it("measures a record to its end, or to now while it runs, and is empty before it starts", () => {
     assert.strictEqual(describeStepDuration({ startedAt: START, finishedAt: at(40) }, NOW), "40ms");
     assert.strictEqual(
       describeStepDuration({ startedAt: START, finishedAt: at(75_000) }, NOW),
@@ -100,14 +123,15 @@ describe("describeRunStatus", () => {
 });
 
 describe("describeFailureReason", () => {
-  it("says each reason in plain words", () => {
+  it("describes each reason in plain words", () => {
     assert.strictEqual(describeFailureReason("step-failed"), "step failed");
     assert.strictEqual(describeFailureReason("expression-error"), "template error");
+    assert.strictEqual(describeFailureReason("controller-error"), "controller error");
   });
 });
 
 describe("describeUnstartedStep", () => {
-  it("says why a step has no bar, for a pending and a cancelled step only", () => {
+  it("describes why a step has no bar, for a pending and a cancelled step only", () => {
     assert.strictEqual(describeUnstartedStep("pending"), "pending");
     assert.strictEqual(describeUnstartedStep("cancelled"), "cancelled before it started");
     assert.strictEqual(describeUnstartedStep("unreached"), undefined);
@@ -115,7 +139,7 @@ describe("describeUnstartedStep", () => {
 });
 
 describe("describeStepState", () => {
-  it("uses the contract's words, and tells a step not yet started from one never reached", () => {
+  it("uses the contract's words, and tells apart a step not yet started and one never reached", () => {
     assert.strictEqual(describeStepState("pending", "running"), "pending");
     assert.strictEqual(describeStepState("completed", "completed"), "completed");
     assert.strictEqual(describeStepState("unreached", "running"), "not started");

@@ -1,20 +1,20 @@
 import { useState, type JSX } from "react";
-import { describeStepState, describeStepDuration, type StepRow } from "@hercule/client-core";
+import { describeStepState, describeStepDuration, type StepLine } from "@hercule/client-core";
 import type { RunStatus } from "@hercule/contract";
 import { WORK_STATE_HUES, cn } from "@hercule/ui";
 import { StepCells, StepErrorLine } from "./step-parts";
 
 /**
- * The steps of a run as a list: one row per step record, then the steps the
+ * Renders the steps of a run as a list: one row per step record, then the steps the
  * run has not reached. A row shows the step's mark, id, action, state and
  * duration, and its error under it. A row with an output opens to show it.
  */
 export function StepList({
-  rows,
+  lines,
   runStatus,
   now,
 }: {
-  readonly rows: ReadonlyArray<StepRow>;
+  readonly lines: ReadonlyArray<StepLine>;
   readonly runStatus: RunStatus;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
@@ -22,22 +22,22 @@ export function StepList({
   const [openKey, setOpenKey] = useState<string>();
   return (
     <ul className="rounded-card border border-line-soft bg-surface px-1.5 py-1">
-      {rows.map((row) => {
-        const output = row.record?.output;
-        const isOpen = openKey === row.key && output !== undefined;
+      {lines.map((line) => {
+        const { output } = line;
+        const isOpen = openKey === line.key && output !== undefined;
         const cells = (
           <>
-            <StepCells row={row} />{" "}
-            <span className={cn("text-meta", WORK_STATE_HUES[row.state] ?? "text-muted")}>
-              {describeStepState(row.state, runStatus)}
+            <StepCells line={line} />{" "}
+            <span className={cn("text-meta", WORK_STATE_HUES[line.state] ?? "text-muted")}>
+              {describeStepState(line.state, runStatus)}
             </span>{" "}
             <span
               className={cn(
                 "text-right font-mono text-fine tabular-nums",
-                WORK_STATE_HUES[row.state] ?? "text-muted",
+                WORK_STATE_HUES[line.state] ?? "text-muted",
               )}
             >
-              {row.record === undefined ? "" : describeStepDuration(row.record, now)}
+              {describeStepDuration(line, now)}
             </span>{" "}
             <span className="flex justify-end text-faint" aria-hidden="true">
               {output === undefined ? null : <Chevron isOpen={isOpen} />}
@@ -47,7 +47,7 @@ export function StepList({
         const grid =
           "grid min-h-10 w-full grid-cols-[20px_minmax(0,1fr)_96px_72px_16px] items-center gap-3 rounded-control px-2.5 text-left";
         return (
-          <li key={row.key} className="border-b border-line-soft last:border-b-0">
+          <li key={line.key} className="border-b border-line-soft last:border-b-0">
             {output === undefined ? (
               <div className={grid}>{cells}</div>
             ) : (
@@ -55,7 +55,7 @@ export function StepList({
                 type="button"
                 aria-expanded={isOpen}
                 onClick={() => {
-                  setOpenKey(isOpen ? undefined : row.key);
+                  setOpenKey(isOpen ? undefined : line.key);
                 }}
                 className={cn(
                   grid,
@@ -66,7 +66,7 @@ export function StepList({
                 {cells}
               </button>
             )}
-            {row.record?.error === undefined ? null : <StepErrorLine error={row.record.error} />}
+            {line.error === undefined ? null : <StepErrorLine error={line.error} />}
             {isOpen ? (
               <pre className="mr-2.5 mb-2.5 ml-[42px] overflow-x-auto rounded-control border border-line-soft bg-raised px-3 py-2 font-mono text-fine leading-5 text-ink">
                 {JSON.stringify(output, null, 2)}

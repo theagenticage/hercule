@@ -14,16 +14,16 @@ import { connectionsQuery, workflowQuery, workflowsQuery } from "../../app/queri
 import { RunFormButtons, RunFormFields, RunFormSummary } from "./run-form";
 
 /**
- * The run form in a drawer. It reads the workflow's inputs and the
+ * Renders the run form in a drawer. It reads the workflow's inputs and the
  * Connections they can use, starts the run, and then goes to the run's page.
  *
  * - Given a `workflowId`, as on a workflow's page, the form runs that workflow.
- * - Without one, as on the run list, the form first asks which workflow to
- *   run, and shows that workflow's inputs once it is picked.
+ * - Without one, as on the run list, the form first shows a select for the
+ *   workflow to run, and shows that workflow's inputs once it is picked.
  *
  * A run uses the saved workflow, so the inputs come from the stored source.
- * Until the fields can be shown, Start cannot be pressed, and a read that
- * failed is said where a refused start would be.
+ * Until the fields can be shown, Start cannot be pressed, and the error of a
+ * failed read shows where the error of a refused start would.
  */
 export function RunFormDrawer({
   client,
@@ -44,8 +44,7 @@ export function RunFormDrawer({
   const connections = useQuery(connectionsQuery(client));
 
   const start = useMutation({
-    mutationFn: (inputs: RunInputs) =>
-      client.workflow.run({ params: { id: workflowId }, payload: { inputs } }),
+    mutationFn: (inputs: RunInputs) => client.run.start({ payload: { workflowId, inputs } }),
     onSuccess: async ({ runId }) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
       await navigate({ to: "/runs/$runId", params: { runId } });

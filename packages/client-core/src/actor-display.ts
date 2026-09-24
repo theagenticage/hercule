@@ -3,14 +3,14 @@
  *
  * Every mutation is stamped with an actor: `user`, `system`, `session:<id>`
  * or `run:<id>`. A screen shows it in plain words ("you", "system", "session
- * 7c82ebeb", "run 1f3a9c2e"). For a session or a run stamp it also says what
- * to link to, so the screen can open the thread or the run that made the
- * change. The rule lives here with a test rather than inside a component.
+ * 7c82ebeb", "run 1f3a9c2e"). For a session or a run stamp the reading also
+ * holds what to link to, so the screen can open the thread or the run that
+ * made the change. The rule lives here with a test rather than inside a component.
  */
 import { toIdTail } from "./id-tail";
 
 /** What an actor's label links to: nothing, a session's thread, or a run's page. */
-export type ActorLink =
+export type ActorTarget =
   | { readonly kind: "none" }
   | { readonly kind: "session"; readonly sessionId: string }
   | { readonly kind: "run"; readonly runId: string };
@@ -18,7 +18,7 @@ export type ActorLink =
 export interface ActorReading {
   /** What to print. */
   readonly label: string;
-  readonly link: ActorLink;
+  readonly link: ActorTarget;
 }
 
 /** Returns the label a screen shows for an actor stamp, and what the label links to. */

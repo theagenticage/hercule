@@ -5,7 +5,7 @@
  * import `createClient` and see only promises, plain objects and the three
  * error classes below.
  */
-export { describeActor, type ActorLink, type ActorReading } from "./actor-display";
+export { describeActor, type ActorReading } from "./actor-display";
 export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
   buildConfigDraft,
@@ -53,24 +53,20 @@ export {
   describeUnstartedStep,
   formatElapsed,
   isRunLive,
-  measureElapsed,
+  readTimestamps,
   shouldRunRecede,
-  type RunOriginReading,
-  type WorkState,
 } from "./run-display";
 export {
   buildRunGraph,
-  buildStepRows,
+  buildStepLines,
   buildTimeline,
   type EdgeTravel,
   type RunGraph,
   type RunGraphEdge,
   type RunGraphNode,
   type StepProgress,
-  type StepRow,
+  type StepLine,
   type Timeline,
-  type TimelineBar,
-  type TimelineTick,
 } from "./run-graph";
 export {
   buildRunInputDraft,
@@ -78,15 +74,10 @@ export {
   decideRunFormIssues,
   hasConnectionField,
   buildRunForm,
-  buildRunFormLoadIssues,
-  buildRunInputIssues,
   UNREADABLE_NUMBER,
-  type ConnectionChoice,
-  type RunFormReading,
   type RunInputDraft,
   type RunInputField,
   type RunInputIssues,
-  type RunInputsReading,
   type RunInputValue,
 } from "./run-inputs";
 export { createLive, type Live } from "./live/live";

@@ -150,6 +150,20 @@ describe("buildRunInputs", () => {
     );
   });
 
+  it("sends whitespace-only text as typed, and leaves whitespace-only number and JSON text out", () => {
+    const fields = readFields();
+    const draft = {
+      ...buildRunInputDraft(fields),
+      title: "  ",
+      count: " ",
+      labels: "\n ",
+      account: "c1",
+    };
+    assert.deepStrictEqual(buildRunInputs(fields, draft), {
+      inputs: { title: "  ", notify: true, account: "c1" },
+    });
+  });
+
   it("reports a number or JSON text it cannot read on its field", () => {
     const fields = readFields();
     const typed = { ...buildRunInputDraft(fields), count: "three", labels: "[ci" };

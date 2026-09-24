@@ -1,21 +1,24 @@
 /**
- * A read-only drawing of the workflow graph: a card for each trigger and
- * step, and a curve for each edge with its condition and traversal limit.
- * The layout engine (dagre) positions the cards. React Flow draws them and
+ * A read-only drawing of a workflow graph: a card for each trigger and step,
+ * and a curve for each edge with its condition and traversal limit. The
+ * layout engine (dagre) positions the cards. React Flow draws them and
  * provides pan, zoom and "Fit to view". This folder is the only place that
  * imports React Flow, so the library can be replaced here alone.
  *
- * The same drawing shows a run's plan. There each step carries its progress
- * and each edge how far the run has come along it, and the drawing shows
- * where the run is:
- * - a step card holds its state mark in its leading slot and its duration at
- *   its end, ticking while the step runs;
- * - a step the run has not reached is a dashed, flat card;
- * - an edge the run went along is solid, one it has not is dashed, and the
- *   dashes of the edge into the running step flow toward it.
+ * The workflow editor draws a workflow with the default cards and edges. A
+ * run's page draws a run's plan with this same drawing, and passes its own
+ * step cards and edge styles to show where the run is.
  */
 import "@xyflow/react/dist/base.css";
-import { useEffect, useEffectEvent, useId, useMemo, type JSX } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useMemo,
+  type ComponentType,
+  type JSX,
+  type ReactNode,
+} from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -33,18 +36,10 @@ import {
 } from "@xyflow/react";
 import {
   abbreviateEdgeCondition,
-  describeStepState,
-  describeStepDuration,
-  isRunLive,
-  type EdgeTravel,
-  type RunGraph,
-  type StepProgress,
-  type WorkflowGraph,
   type WorkflowGraphEdge,
   type WorkflowGraphNode,
 } from "@hercule/client-core";
-import type { RunStatus } from "@hercule/contract";
-import { Button, WORK_STATE_HUES, WorkStateMark, cn } from "@hercule/ui";
+import { Button, cn } from "@hercule/ui";
 import {
   computeDrawingViewport,
   computeGraphLayout,
@@ -56,8 +51,8 @@ import {
 
 /**
  * Every glyph of IBM Plex Mono, the font of the ids and edge labels, is 0.6em
- * wide. So a text's width can be computed from its length, and the layout
- * knows the size of every card and label before anything is rendered. Cards
+ * wide. So a text's width can be computed from its length, and the size of
+ * every card and label is known before anything is rendered. Cards
  * and labels are rendered with the same sizes, padding and borders they are
  * measured with, so nothing overlaps a card.
  */
@@ -72,8 +67,11 @@ const CARD_HEIGHT = 52;
 const MIN_CARD_WIDTH = 136;
 /** The font size of a card's id, `text-meta`. */
 const ID_FONT_SIZE = 12.5;
-/** The space between a card's border and its text. */
-const CARD_PADDING = 12;
+/**
+ * The space between a card's border and its text. A card passed in through
+ * `Card` uses it too, because the layout measures every card with it.
+ */
+export const CARD_PADDING = 12;
 /** A card's border, `border`. */
 const CARD_BORDER = 1;
 /**
@@ -92,31 +90,18 @@ const ARROWHEAD_SIZE = 9;
  */
 const SIDE_MARGIN = CARD_CORNER_RADIUS + ARROWHEAD_SIZE / 2;
 
-/** The leading slot of a step in a run: the 12px state mark and the gap after it. */
-const MARK_SLOT = 12 + 9;
-/** The trailing slot of a step in a run: the gap and its duration, `12.3s` at `text-fine`. */
-const DURATION_SLOT = 8 + 46;
-
-/**
- * A node as this file draws it: a trigger or step of a workflow, or of a
- * run's plan, where a step also carries its progress.
- */
-type DrawableNode = WorkflowGraphNode & { readonly progress?: StepProgress | undefined };
-
-/** An edge as this file draws it. In a run's plan it also carries how far the run came along it. */
-type DrawableEdge = WorkflowGraphEdge & { readonly travel?: EdgeTravel };
-
 /**
  * Returns the size of a node's card: wide enough for its id, up to
- * `MAX_ID_CHARACTERS`, and in a run's graph for a step's mark and duration.
+ * `MAX_ID_CHARACTERS`, plus `slotWidth` for what the card holds beside its
+ * text.
  */
-const measureCard = (node: DrawableNode): Size => ({
+const measureCard = (node: WorkflowGraphNode, slotWidth: number): Size => ({
   width:
     Math.max(
       MIN_CARD_WIDTH,
       measureMonoText(node.id.slice(0, MAX_ID_CHARACTERS), ID_FONT_SIZE) +
         2 * (CARD_PADDING + CARD_BORDER),
-    ) + (node.progress === undefined ? 0 : MARK_SLOT + DURATION_SLOT),
+    ) + slotWidth,
   height: CARD_HEIGHT,
 });
 
@@ -135,28 +120,30 @@ const BADGE_BORDER = 1;
  */
 const MAX_CONDITION_CHARACTERS = 24;
 
-/**
- * The colour of edges and arrowheads: the faint colour mixed 20% towards the
- * muted colour. This gives lines a 3:1 contrast on the surface in both
- * themes, the minimum for a graphic that carries meaning.
- */
-const EDGE_COLOUR = "color-mix(in oklch, var(--faint), var(--muted) 20%)";
+/** How an edge's curve is drawn. Its arrowhead takes the curve's colour. */
+export interface EdgeStyle {
+  /** A CSS colour. */
+  readonly colour: string;
+  /** The width of the curve, in pixels. */
+  readonly width: number;
+  /** An SVG `stroke-dasharray`, or `undefined` for a solid curve. */
+  readonly dashArray?: string;
+  /** A class for the curve, for a style that SVG attributes cannot set, such as an animation. */
+  readonly className?: string;
+}
 
 /**
- * The colour of an edge a run went along: the muted colour pulled toward the
- * ink, so the path the run took reads before the paths it did not take.
+ * The style of an edge of a workflow: a thin, solid curve in the faint colour
+ * mixed 20% towards the muted colour. This gives lines a 3:1 contrast on the
+ * surface in both themes, the minimum for a graphic that carries meaning.
  */
-const TRAVELLED_COLOUR = "color-mix(in oklch, var(--muted), var(--ink) 30%)";
-
-/** The colour of the edge into the running step: the live hue, as on every live thing. */
-const ACTIVE_COLOUR = "var(--live)";
-
-/** The colour of each kind of edge, and of its arrowhead. */
-const EDGE_COLOURS: Readonly<Record<EdgeTravel, string>> = {
-  untravelled: EDGE_COLOUR,
-  travelled: TRAVELLED_COLOUR,
-  active: ACTIVE_COLOUR,
+export const WORKFLOW_EDGE_STYLE: EdgeStyle = {
+  colour: "color-mix(in oklch, var(--faint), var(--muted) 20%)",
+  width: 1.15,
 };
+
+/** Returns the style of every edge of a workflow, `WORKFLOW_EDGE_STYLE`. */
+const decideWorkflowEdgeStyle = (): EdgeStyle => WORKFLOW_EDGE_STYLE;
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 1.5;
@@ -186,7 +173,7 @@ const formatConditionLabel = (edge: WorkflowGraphEdge): string | undefined => {
 };
 
 /** Returns the size of an edge's label, or `undefined` for an edge with no condition and no limit. */
-const measureLabel = (edge: DrawableEdge): Size | undefined => {
+const measureLabel = (edge: WorkflowGraphEdge): Size | undefined => {
   const condition = formatConditionLabel(edge);
   const badge = formatTraversalBadge(edge);
   if (condition === undefined && badge === undefined) return undefined;
@@ -226,27 +213,21 @@ const buildCurve = (points: ReadonlyArray<Point>): string => {
 };
 
 /**
- * A trigger or step as a React Flow node, drawn as a card. In a run's graph
- * the card also gets the run's moment:
- * - the run's status, because a step the run never reached recedes once the
- *   run has ended;
- * - the time now, which a running step's duration counts to.
+ * A trigger or step as a React Flow node. Its card element is created once,
+ * with the layout, so a card that changes on its own, such as a running
+ * step's ticking duration, re-renders without a new node.
  */
-type DrawnWorkflowNode = Node<
-  { readonly node: DrawableNode; readonly run: RunMoment | undefined },
-  "card"
->;
-
-/** A run at the moment it is drawn. */
-interface RunMoment {
-  readonly status: RunStatus;
-  /** The time a running step's duration counts to, in milliseconds since the epoch. */
-  readonly now: number;
-}
+type DrawnWorkflowNode = Node<{ readonly card: ReactNode }, "card">;
 
 /** An edge as a React Flow edge, drawn as a curve along its route. */
 type DrawnWorkflowEdge = Edge<
-  { readonly edge: DrawableEdge; readonly route: EdgeRoute; readonly markerBase: string },
+  {
+    readonly edge: WorkflowGraphEdge;
+    readonly route: EdgeRoute;
+    readonly style: EdgeStyle;
+    /** The id of the arrowhead marker in the edge's colour. */
+    readonly markerId: string;
+  },
   "route"
 >;
 
@@ -263,8 +244,12 @@ const HANDLES = [
   { id: "right-out", type: "source", position: Position.Right },
 ] as const;
 
-/** The handles of a card. React Flow attaches each edge to one of them. */
-function CardHandles(): JSX.Element {
+/**
+ * Renders a node's card with its handles, to which React Flow attaches the
+ * edges. The handles are positioned against React Flow's node element, so
+ * they sit beside the card rather than inside it.
+ */
+function CardNode({ data }: NodeProps<DrawnWorkflowNode>): JSX.Element {
   return (
     <>
       {HANDLES.map((handle) => (
@@ -277,16 +262,17 @@ function CardHandles(): JSX.Element {
           className="invisible"
         />
       ))}
+      {data.card}
     </>
   );
 }
 
-/** The kind label and the id, stacked: the text of every card. */
-function CardText({
+/** Renders the kind label and the id, stacked: the text of every card. */
+export function CardText({
   node,
   isFaded = false,
 }: {
-  readonly node: DrawableNode;
+  readonly node: WorkflowGraphNode;
   readonly isFaded?: boolean;
 }): JSX.Element {
   return (
@@ -308,15 +294,11 @@ function CardText({
 }
 
 /**
- * A trigger is a flat card with a thin border, because it is passive. A step
- * is raised, with a shadow, because steps do the work. In a run's graph a
- * step card is drawn by `RunStepCard` instead.
+ * Renders the card of a trigger or step of a workflow. A trigger is a flat
+ * card with a thin border, because it is passive. A step is raised, with a
+ * shadow, because steps do the work.
  */
-function WorkflowNodeCard({ data }: NodeProps<DrawnWorkflowNode>): JSX.Element {
-  const { node, run } = data;
-  if (node.progress !== undefined && run !== undefined) {
-    return <RunStepCard node={node} progress={node.progress} run={run} />;
-  }
+export function WorkflowNodeCard({ node }: { readonly node: WorkflowGraphNode }): JSX.Element {
   const isTrigger = node.kind === "start" || node.kind === "signal";
   return (
     <div
@@ -326,93 +308,28 @@ function WorkflowNodeCard({ data }: NodeProps<DrawnWorkflowNode>): JSX.Element {
         isTrigger ? "bg-surface" : "bg-raised shadow-card",
       )}
     >
-      <CardHandles />
       <CardText node={node} />
     </div>
   );
 }
 
-/**
- * A step in a run's graph, named by its step id. Its state is also said in
- * words for a screen reader, because the mark is decorative.
- *
- * - The state mark sits in the leading slot. A step with no step record has
- *   no mark; its card is flat and dashed, and it recedes once the run ended.
- * - The running step's border takes the live hue.
- * - The duration sits at the end, ticking while the step runs. A pending
- *   step says "pending" there instead.
- */
-function RunStepCard({
-  node,
-  progress,
-  run,
-}: {
-  readonly node: DrawableNode;
-  readonly progress: StepProgress;
-  readonly run: RunMoment;
-}): JSX.Element {
-  const { state } = progress;
-  const isUnreached = state === "unreached";
-  const duration = describeStepDuration(progress, run.now);
-  return (
-    <div
-      role="group"
-      aria-label={node.id}
-      data-state={state}
-      style={{
-        paddingInline: CARD_PADDING,
-        ...(state === "running"
-          ? { borderColor: "color-mix(in oklch, var(--live) 60%, var(--line))" }
-          : {}),
-      }}
-      className={cn(
-        "flex h-full w-full items-center rounded-card border border-line",
-        isUnreached
-          ? "border-dashed border-[color-mix(in_oklch,var(--faint)_60%,transparent)] bg-surface"
-          : "bg-raised shadow-card",
-        isUnreached && !isRunLive(run.status) && "opacity-60",
-      )}
-    >
-      <CardHandles />
-      <span style={{ width: MARK_SLOT }} className="flex shrink-0 items-center" aria-hidden="true">
-        <WorkStateMark state={state} />
-      </span>
-      {/* The spaces keep the state a word of its own when the card is read as text. */}
-      <span className="sr-only"> {describeStepState(state, run.status)} </span>
-      <CardText node={node} isFaded={isUnreached} />{" "}
-      <span
-        aria-hidden="true"
-        className={cn(
-          "ml-2 w-[46px] shrink-0 text-right text-fine whitespace-nowrap tabular-nums",
-          duration !== "" && "font-mono",
-          WORK_STATE_HUES[state] ?? "text-faint",
-        )}
-      >
-        {duration !== "" ? duration : state === "pending" ? "pending" : ""}
-      </span>
-    </div>
-  );
-}
-
+/** Renders an edge: its curve along its route, and its label when it has one. */
 function WorkflowEdgeCurve({ id, data }: EdgeProps<DrawnWorkflowEdge>): JSX.Element | null {
   if (data === undefined) return null;
-  const { edge, route, markerBase } = data;
+  const { edge, route, style, markerId } = data;
   const condition = formatConditionLabel(edge);
   const badge = formatTraversalBadge(edge);
-  // An edge of a workflow's graph has no travel, and is drawn like an edge
-  // the run has not gone along, but solid.
-  const travel = edge.travel ?? "untravelled";
   return (
     <>
       <BaseEdge
         id={id}
         path={buildCurve(route.points)}
-        markerEnd={`url(#${markerBase}-${travel})`}
-        className={edge.travel === "active" ? "hercule-edge-flow" : undefined}
+        markerEnd={`url(#${markerId})`}
+        className={style.className}
         style={{
-          stroke: EDGE_COLOURS[travel],
-          strokeWidth: travel === "untravelled" ? 1.15 : 1.4,
-          ...(edge.travel === "untravelled" ? { strokeDasharray: "3 4" } : {}),
+          stroke: style.colour,
+          strokeWidth: style.width,
+          ...(style.dashArray === undefined ? {} : { strokeDasharray: style.dashArray }),
         }}
       />
       {route.label === undefined ? null : (
@@ -457,26 +374,36 @@ function WorkflowEdgeCurve({ id, data }: EdgeProps<DrawnWorkflowEdge>): JSX.Elem
   );
 }
 
-const NODE_TYPES = { card: WorkflowNodeCard };
+const NODE_TYPES = { card: CardNode };
 const EDGE_TYPES = { route: WorkflowEdgeCurve };
 
+/** Builds the id of the arrowhead marker for the colour at `index` of the drawing's edge colours. */
+const buildMarkerId = (base: string, index: number): string => `${base}-${String(index)}`;
+
 /**
- * The arrowheads: an open chevron with round ends, in the same style as the
- * app's marks. There is one in the colour of each kind of edge, with the id
- * `<base>-<travel>`.
+ * Renders the arrowheads: an open chevron with round ends, in the same style
+ * as the app's marks. There is one for each colour of the drawing's edges,
+ * with the id `buildMarkerId` builds for the colour's index.
  */
-function ArrowMarkers({ base }: { readonly base: string }): JSX.Element {
+function ArrowMarkers({
+  base,
+  colours,
+}: {
+  readonly base: string;
+  readonly colours: ReadonlyArray<string>;
+}): JSX.Element {
   return (
     <svg width={0} height={0} className="absolute" aria-hidden="true">
       <defs>
-        {Object.entries(EDGE_COLOURS).map(([travel, colour]) => (
-          <ArrowMarker key={travel} id={`${base}-${travel}`} colour={colour} />
+        {colours.map((colour, index) => (
+          <ArrowMarker key={colour} id={buildMarkerId(base, index)} colour={colour} />
         ))}
       </defs>
     </svg>
   );
 }
 
+/** Renders one arrowhead marker, in `colour`. */
 function ArrowMarker({
   id,
   colour,
@@ -559,36 +486,52 @@ function DrawingPlacement({
   );
 }
 
-/**
- * What the drawing shows: a workflow, dimmed while it is older than the text
- * in the editor, or a run's plan with the time a running step counts to.
- */
-type GraphViewProps =
-  | {
-      readonly graph: WorkflowGraph;
-      /** Whether the graph shows an older version of the text than the editor. A stale graph is dimmed. */
-      readonly isStale: boolean;
-    }
-  | {
-      readonly runGraph: RunGraph;
-      /** The time a running step's duration counts to, in milliseconds since the epoch. */
-      readonly now: number;
-    };
+/** Returns no width for what a card holds beside its text: a default card holds only its text. */
+const measureNoCardSlots = (): number => 0;
 
-export function GraphView(props: GraphViewProps): JSX.Element {
-  const graph: {
-    readonly nodes: ReadonlyArray<DrawableNode>;
-    readonly edges: ReadonlyArray<DrawableEdge>;
-  } = "runGraph" in props ? props.runGraph : props.graph;
-  const isStale = "isStale" in props && props.isStale;
-  const run = "runGraph" in props ? { status: props.runGraph.status, now: props.now } : undefined;
+/**
+ * Renders a graph: a workflow's, or a run's plan with the run's progress on
+ * it. Every node is drawn by `Card`, and every edge in the style that
+ * `decideEdgeStyle` returns for it. Without them, the drawing shows a
+ * workflow: `WorkflowNodeCard` and `WORKFLOW_EDGE_STYLE`.
+ *
+ * The layout is computed again only when the graph or one of these props
+ * changes, so the caller passes stable functions and components: a module's
+ * own, not ones created during a render.
+ */
+export function GraphView<
+  GraphNode extends WorkflowGraphNode,
+  GraphEdge extends WorkflowGraphEdge,
+>({
+  graph,
+  isStale = false,
+  Card = WorkflowNodeCard,
+  measureCardSlots = measureNoCardSlots,
+  decideEdgeStyle = decideWorkflowEdgeStyle,
+}: {
+  readonly graph: {
+    readonly nodes: ReadonlyArray<GraphNode>;
+    readonly edges: ReadonlyArray<GraphEdge>;
+  };
+  /** Whether the graph shows an older version of the text than the editor. A stale graph is dimmed. */
+  readonly isStale?: boolean;
+  /** Renders a node's card. A card fills its node, and uses `CARD_PADDING` and `CardText`. */
+  readonly Card?: ComponentType<{ readonly node: GraphNode }>;
+  /** Returns the width, in pixels, of what a node's card holds beside its kind label and id. */
+  readonly measureCardSlots?: (node: GraphNode) => number;
+  /** Returns the style of an edge's curve. */
+  readonly decideEdgeStyle?: (edge: GraphEdge) => EdgeStyle;
+}): JSX.Element {
   // React's ids contain characters that are not valid in a `url(#...)`
   // fragment, so they are removed.
   const markerBase = `workflow-arrow-${useId().replace(/[^\w-]/g, "")}`;
   const drawing = useMemo(() => {
     const edges = graph.edges.map((edge, index) => ({ id: `edge-${String(index)}`, edge }));
+    const sizes = new Map(
+      graph.nodes.map((node) => [node.id, measureCard(node, measureCardSlots(node))]),
+    );
     const layout = computeGraphLayout(
-      graph.nodes.map((node) => ({ id: node.id, ...measureCard(node) })),
+      graph.nodes.map((node) => ({ id: node.id, ...sizes.get(node.id)! })),
       edges.map(({ id, edge }) => {
         const label = measureLabel(edge);
         return {
@@ -605,12 +548,12 @@ export function GraphView(props: GraphViewProps): JSX.Element {
       SIDE_MARGIN,
     );
     const nodes: Array<DrawnWorkflowNode> = graph.nodes.map((node) => {
-      const size = measureCard(node);
+      const size = sizes.get(node.id)!;
       return {
         id: node.id,
         type: "card",
         position: layout.nodes.get(node.id)!,
-        data: { node, run: undefined },
+        data: { card: <Card node={node} /> },
         ...size,
         // Handles are passed in up front, before React Flow measures the
         // cards, so the edges render in the first frame. The curves come from
@@ -623,8 +566,11 @@ export function GraphView(props: GraphViewProps): JSX.Element {
         })),
       };
     });
-    const routes: Array<DrawnWorkflowEdge> = edges.map(({ id, edge }) => {
+    const styles = edges.map(({ edge }) => decideEdgeStyle(edge));
+    const colours = [...new Set(styles.map((style) => style.colour))];
+    const routes: Array<DrawnWorkflowEdge> = edges.map(({ id, edge }, index) => {
       const route = layout.edges.get(id)!;
+      const style = styles[index]!;
       // Find the side of each card that the route leaves and enters. The
       // route runs straight out from the card's side at each end.
       const sourceSide = route.points[1]!.x > route.points[0]!.x ? "right" : "left";
@@ -636,7 +582,12 @@ export function GraphView(props: GraphViewProps): JSX.Element {
         target: edge.to,
         sourceHandle: `${sourceSide}-out`,
         targetHandle: `${targetSide}-in`,
-        data: { edge, route, markerBase },
+        data: {
+          edge,
+          route,
+          style,
+          markerId: buildMarkerId(markerBase, colours.indexOf(style.colour)),
+        },
       };
     });
     // The structure key refers to each node by its index, not by its id, so
@@ -650,15 +601,8 @@ export function GraphView(props: GraphViewProps): JSX.Element {
         (edge) => `${String(nodeIndexes.get(edge.from))}>${String(nodeIndexes.get(edge.to))}`,
       ),
     ].join(" ");
-    return { nodes, edges: routes, size: layout.size, structure };
-  }, [graph, markerBase]);
-  // The time now changes on every tick of a running step's duration, while
-  // the graph, and so the layout, stays the same object until the run
-  // changes. So the time is added to the cards after the layout.
-  const nodes =
-    run === undefined
-      ? drawing.nodes
-      : drawing.nodes.map((node) => ({ ...node, data: { ...node.data, run } }));
+    return { nodes, edges: routes, colours, size: layout.size, structure };
+  }, [graph, markerBase, Card, measureCardSlots, decideEdgeStyle]);
 
   return (
     // A stale graph dims its nodes, edges and labels, which are all inside
@@ -669,9 +613,9 @@ export function GraphView(props: GraphViewProps): JSX.Element {
       data-stale={isStale ? "" : undefined}
       className="relative h-full w-full data-stale:[&_.react-flow\_\_viewport]:opacity-50"
     >
-      <ArrowMarkers base={markerBase} />
+      <ArrowMarkers base={markerBase} colours={drawing.colours} />
       <ReactFlow
-        nodes={nodes}
+        nodes={drawing.nodes}
         edges={drawing.edges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}

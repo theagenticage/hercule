@@ -6,12 +6,12 @@ import { WORK_STATE_HUES, WorkStateMark, cn } from "@hercule/ui";
 import { FailureText } from "./step-parts";
 
 /**
- * One run in the run list: its status mark and word, the workflow's name, the
+ * Renders one run in the run list: its status mark and word, the workflow's name, the
  * failure reason when it failed, who started it, and its age. The whole row
  * links to the run's page. A finished run that did not fail recedes, so the
  * runs still going and the runs that failed stand out.
  */
-export function RunRow({
+export function RunListRow({
   run,
   now,
 }: {
@@ -36,7 +36,7 @@ export function RunRow({
         </span>
         <span className="min-w-0 flex-1 truncate font-emph text-ink">{run.workflowName}</span>
         <span className="w-[200px] shrink-0 truncate text-meta">
-          {run.failureReason === undefined ? null : (
+          {run.status !== "failed" ? null : (
             <FailureText reason={run.failureReason} stepId={run.failedStepId} />
           )}
         </span>

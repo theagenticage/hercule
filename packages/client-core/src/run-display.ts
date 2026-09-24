@@ -32,31 +32,76 @@ export const shouldRunRecede = (status: RunStatus): boolean =>
 
 /** Who started a run, and how, if not by hand. */
 export interface RunOriginReading {
-  /** The user or a session, or for a run a `workflow.run` step started, the parent run. */
+  /** The user or a session, or for a run a `run.start` step started, the parent run. */
   readonly starter: ActorReading;
   /**
    * How the run was started when that was not by hand: "through the API",
    * or "at step <id>" for a run another run's step started.
    */
-  readonly via: string | undefined;
+  readonly howStarted: string | undefined;
 }
 
 /**
  * Returns who started a run and how. A run started through the API reads
  * differently from one started by hand, even when the user started both,
- * because a submitted workflow is stored nowhere.
+ * because a workflow sent with the request is stored nowhere.
  */
 export const describeRunOrigin = (origin: RunOrigin): RunOriginReading => {
   switch (origin.kind) {
     case "manual":
-      return { starter: describeActor(origin.actor), via: undefined };
+      return { starter: describeActor(origin.actor), howStarted: undefined };
     case "api":
-      return { starter: describeActor(origin.actor), via: "through the API" };
+      return { starter: describeActor(origin.actor), howStarted: "through the API" };
     case "action":
       // The run that started this one stamps its writes `run:<id>`.
       return {
         starter: describeActor(`run:${origin.parentRunId}`),
-        via: `at step ${origin.stepId}`,
+        howStarted: `at step ${origin.stepId}`,
+      };
+  }
+};
+
+/** When a run or a step record started and finished. Each is absent until it has happened. */
+export interface Timestamps {
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
+}
+
+/**
+ * A run, a run summary or a step record, reduced to the fields its times
+ * follow from. The contract gives each status only the times it can have.
+ */
+type TimedRecord =
+  | { readonly status: "pending" }
+  | { readonly status: "running"; readonly startedAt: string }
+  | {
+      readonly status: "completed" | "failed" | "cancelled";
+      readonly startedAt?: string;
+      readonly finishedAt: string;
+    };
+
+/**
+ * Returns when a run, a run summary or a step record started and finished,
+ * by its status:
+ *
+ * - `pending`: neither.
+ * - `running`: `startedAt`.
+ * - `completed`, `failed` and `cancelled`: `finishedAt`, and `startedAt` when
+ *   it had started. A run cancelled before it started, or one the controller
+ *   could not start, has none.
+ */
+export const readTimestamps = (record: TimedRecord): Timestamps => {
+  switch (record.status) {
+    case "pending":
+      return {};
+    case "running":
+      return { startedAt: record.startedAt };
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return {
+        ...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
+        finishedAt: record.finishedAt,
       };
   }
 };
@@ -89,16 +134,13 @@ export const formatElapsed = (ms: number): string => {
 };
 
 /**
- * Returns how long a step record ran, or has run up to `now` while it runs,
- * such as `40ms` or `1m 15s`, or an empty string for a record that has not
- * started. The web app and the CLI both show a step's duration with it, so
- * the two never disagree about the same record.
+ * Returns how long a step ran, or has run up to `now` while it runs, such as
+ * `40ms` or `1m 15s`, or an empty string for a step that has not started. The
+ * web app and the CLI both show a step's duration with it, so the two never
+ * disagree about the same step record.
  */
-export const describeStepDuration = (
-  record: { readonly startedAt?: string; readonly finishedAt?: string },
-  now: number,
-): string => {
-  const elapsed = measureElapsed(record.startedAt, record.finishedAt, now);
+export const describeStepDuration = (times: Timestamps, now: number): string => {
+  const elapsed = measureElapsed(times.startedAt, times.finishedAt, now);
   return elapsed === undefined ? "" : formatElapsed(elapsed);
 };
 
@@ -108,15 +150,9 @@ export const describeStepDuration = (
  * after 1.2s", "cancelled after 4.1s". A run cancelled before it started has
  * no duration and is just "cancelled".
  */
-export const describeRunStatus = (
-  run: {
-    readonly status: RunStatus;
-    readonly startedAt?: string;
-    readonly finishedAt?: string;
-  },
-  now: number,
-): string => {
-  const elapsed = measureElapsed(run.startedAt, run.finishedAt, now);
+export const describeRunStatus = (run: TimedRecord, now: number): string => {
+  const { startedAt, finishedAt } = readTimestamps(run);
+  const elapsed = measureElapsed(startedAt, finishedAt, now);
   if (run.status === "pending" || elapsed === undefined) return run.status;
   const duration = formatElapsed(elapsed);
   switch (run.status) {
@@ -131,18 +167,23 @@ export const describeRunStatus = (
   }
 };
 
-/** Returns a failure reason in a few plain words: "step failed" or "template error". */
+/**
+ * Returns a failure reason in a few plain words: "step failed", "template
+ * error", or "controller error" for a run the controller could not carry out.
+ */
 export const describeFailureReason = (reason: FailureReason): string => {
   switch (reason) {
     case "step-failed":
       return "step failed";
     case "expression-error":
       return "template error";
+    case "controller-error":
+      return "controller error";
   }
 };
 
 /**
- * Returns what the timeline says where a step with no bar would be: "pending"
+ * Returns the text the timeline shows where a step with no bar would be: "pending"
  * for a step waiting to start, "cancelled before it started" for one the run's
  * cancel reached first, and nothing for any other step.
  */

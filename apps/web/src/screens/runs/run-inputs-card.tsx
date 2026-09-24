@@ -1,7 +1,7 @@
 import { Fragment, type JSX } from "react";
 
 /**
- * The inputs a run started with, one line each: the name, and the value as
+ * Renders the inputs a run started with, one line each: the name, and the value as
  * JSON, so a string reads with its quotes and a number without. A value stays
  * on one line, because a wrapped id breaks mid-token and no longer reads or
  * selects as one; a long value is truncated, and its tooltip shows it whole.

@@ -6,7 +6,12 @@
  * single object becomes aligned key-value lines, and ids are shortened to the
  * tail the CLI accepts back as an argument.
  */
-import { describeStepDuration, formatAge } from "@hercule/client-core";
+import {
+  describeRunOrigin,
+  describeStepDuration,
+  formatAge,
+  readTimestamps,
+} from "@hercule/client-core";
 import {
   truncateText,
   formatIssue,
@@ -110,7 +115,7 @@ const renderKeyValues = (
 
 /**
  * Formats a value like `formatCell`, but keeps every id whole, in a list too.
- * The run commands print ids in full, as `workflow run` prints the id it
+ * The run commands print ids in full, as `run start` prints the id it
  * starts, so an id a reader copies from `run read`, such as a Connection an
  * input names, works in every other command.
  */
@@ -250,10 +255,10 @@ const summarizeWorkflowAction = (action: WorkflowAction): Record<string, unknown
 };
 
 /**
- * Returns the lines printed after `workflow run` and `workflow submit`: the
- * new run's full id, and the command that shows how far it got. The hint
- * points at `run read` rather than a subscription, because the controller
- * does not accept a subscription on a run yet.
+ * Returns the lines printed after `run start`: the new run's full id, and the
+ * command that shows how far it got. The hint points at `run read` rather
+ * than a subscription, because the controller does not accept a subscription
+ * on a run yet.
  */
 const renderRunStarted = (answer: RunStarted): ReadonlyArray<string> => [
   `run ${answer.runId} started`,
@@ -261,15 +266,14 @@ const renderRunStarted = (answer: RunStarted): ReadonlyArray<string> => [
   `see how far it got with \`hercule run read ${answer.runId}\``,
 ];
 
-/** Describes who or what started a run, in a few words. */
+/**
+ * Describes who started a run, and how when not by hand, in the words the
+ * web app uses: "you", "session 7c82ebeb through the API", "run 1f3a9c2e at
+ * step spawn".
+ */
 const describeOrigin = (origin: RunOrigin): string => {
-  switch (origin.kind) {
-    case "manual":
-    case "api":
-      return origin.actor;
-    case "action":
-      return `step ${origin.stepId} of run ${origin.parentRunId}`;
-  }
+  const { starter, howStarted } = describeRunOrigin(origin);
+  return howStarted === undefined ? starter.label : `${starter.label} ${howStarted}`;
 };
 
 /**
@@ -279,16 +283,16 @@ const describeOrigin = (origin: RunOrigin): string => {
  */
 const summarizeRun = (run: RunSummary, now: Date): Record<string, unknown> => ({
   id: run.id,
-  status: run.failureReason === undefined ? run.status : `${run.status} (${run.failureReason})`,
+  status: run.status === "failed" ? `${run.status} (${run.failureReason})` : run.status,
   workflow: run.workflowName,
   startedBy: describeOrigin(run.origin),
   age: formatAge(run.createdAt, now),
 });
 
 /** Returns the rows of `run list` as a table. */
-const renderRunList = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> => {
+const renderRunList = (runs: ReadonlyArray<RunSummary>): ReadonlyArray<string> => {
   const now = new Date();
-  return renderTable(rows.map((row) => summarizeRun(row as unknown as RunSummary, now)));
+  return renderTable(runs.map((run) => summarizeRun(run, now)));
 };
 
 /**
@@ -303,9 +307,24 @@ const renderRunCancelled = (run: Run): ReadonlyArray<string> => [
 ];
 
 /**
+ * Returns a run's failure reason and the step it failed at, as the fields of
+ * `run read`, or no fields for a run that did not fail. A run the controller
+ * could not carry out may have failed before it reached any step.
+ */
+const describeFailure = (run: Run): Record<string, string> => {
+  if (run.status !== "failed") return {};
+  return {
+    failureReason: run.failureReason,
+    ...(run.failedStepId === undefined ? {} : { failedStep: run.failedStepId }),
+  };
+};
+
+/**
  * Returns the lines printed for `run read`: a summary of the run, the inputs
- * it started with, and a table with one row per step record. The plan and the
- * steps' outputs are left out, because they are long; `--json` prints them.
+ * it started with, and a table with one row per step record. A run with no
+ * inputs or no step records prints "none" under that heading. The plan and
+ * the steps' outputs are left out, because they are long; `--json` prints
+ * them.
  */
 const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...renderKeyValues(
@@ -313,12 +332,10 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
       id: run.id,
       workflow: run.plan.name,
       status: run.status,
-      ...(run.failureReason === undefined ? {} : { failureReason: run.failureReason }),
-      ...(run.failedStepId === undefined ? {} : { failedStep: run.failedStepId }),
+      ...describeFailure(run),
       startedBy: describeOrigin(run.origin),
       createdAt: run.createdAt,
-      ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
-      ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
+      ...readTimestamps(run),
     },
     formatKeepingIds,
   ),
@@ -328,23 +345,29 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
     ? ["none"]
     : renderKeyValues(run.inputs, formatKeepingIds)),
   "",
-  ...renderTable(
-    run.steps.map((record) => ({
-      step: record.stepId,
-      status: record.status,
-      took: describeStepDuration(record, now),
-      error: record.error === undefined ? "" : `${record.error.code}: ${record.error.message}`,
-    })),
-  ),
+  "steps",
+  ...(run.steps.length === 0
+    ? ["none"]
+    : renderTable(
+        run.steps.map((record) => ({
+          step: record.stepId,
+          status: record.status,
+          took: describeStepDuration(readTimestamps(record), now),
+          error: record.status === "failed" ? `${record.error.code}: ${record.error.message}` : "",
+        })),
+      )),
 ];
 
 /** Returns the lines the CLI prints for a successful command without `--json`. */
 export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
+  // The derived client decoded each item with the operation's schema, so the
+  // items of `run.query` are run summaries.
   const asLines =
     command.id === "transcript.read"
       ? renderTranscript
       : command.id === "run.query"
-        ? renderRunList
+        ? (items: ReadonlyArray<Record<string, unknown>>) =>
+            renderRunList(items as ReadonlyArray<RunSummary>)
         : renderTable;
 
   if (outcome.kind === "items") return asLines(outcome.items);
@@ -381,9 +404,7 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
       return renderWorkflowSaveResult(value as WorkflowSaveResult);
     }
     if (command.id === "workflow.validate") return renderWorkflowIssues(value as WorkflowIssues);
-    if (command.id === "workflow.run" || command.id === "workflow.submit") {
-      return renderRunStarted(value as RunStarted);
-    }
+    if (command.id === "run.start") return renderRunStarted(value as RunStarted);
     if (command.id === "run.read") return renderRun(value as Run, Date.now());
     if (command.id === "run.cancel") return renderRunCancelled(value as Run);
     const lines = [...renderKeyValues(record)];
@@ -392,7 +413,7 @@ export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<s
     // subscription on the session: no platform event about a session is
     // emitted yet, so the controller would reject it. It points at the
     // transcript, which the caller can already read. `transcript read` returns
-    // the rows so far and does not follow the session, so the hint says "read",
+    // the rows so far and does not follow the session, so the hint uses "read",
     // not "watch".
     if (command.id === "session.spawn") {
       lines.push(

@@ -141,7 +141,7 @@ export type RunFormReading =
  * Returns the run form's fields for a stored workflow's source, one per
  * declared input, in the order they are declared. A source that does not
  * parse as a workflow, such as one a newer contract rejects, has no fields
- * the form can trust, so the reading says why instead.
+ * the form can trust, so the reading holds the reason instead.
  */
 export const buildRunForm = (
   source: string,
@@ -168,8 +168,8 @@ export const hasConnectionField = (fields: ReadonlyArray<RunInputField>): boolea
 
 /**
  * Returns the errors to show when the form could not be read, such as a lost
- * connection to the controller: "The form could not be read: <message>." It
- * says nothing about starting, because nothing was started.
+ * connection to the controller: "The form could not be read: <message>." The
+ * message does not mention starting, because nothing was started.
  */
 export const buildRunFormLoadIssues = (reason: unknown): RunInputIssues => ({
   perField: {},
@@ -196,9 +196,14 @@ export type RunInputsReading =
 /**
  * Converts a draft into the `inputs` of a run. An empty field and a checkbox
  * the user has not touched are left out, so the controller applies the
- * input's default or says that a required input is missing. A number or JSON
- * text that cannot be read is an error on its field, because sending it
+ * input's default or reports that a required input is missing. A number or
+ * JSON text that cannot be read is an error on its field, because sending it
  * would only move the same error to the controller.
+ *
+ * Text is sent exactly as the user typed it, so text of only spaces is a
+ * value like any other, and the input's schema decides whether it is allowed.
+ * Number and JSON text ignore the whitespace around a value, so in those
+ * fields whitespace alone is as empty as no text at all.
  */
 export const buildRunInputs = (
   fields: ReadonlyArray<RunInputField>,
@@ -217,7 +222,8 @@ export const buildRunInputs = (
       inputs[field.name] = value;
       continue;
     }
-    if (value.trim() === "") continue;
+    const isNumberOrJson = field.kind === "number" || field.kind === "json";
+    if ((isNumberOrJson ? value.trim() : value) === "") continue;
     if (field.kind === "number") {
       const number = Number(value);
       if (Number.isFinite(number)) inputs[field.name] = number;

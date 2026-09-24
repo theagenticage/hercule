@@ -1308,10 +1308,11 @@ describe("hercule workflow validate", () => {
 });
 
 /**
- * The run commands. `workflow submit` reads a workflow's source from stdin,
- * like `workflow create`, and prints what `workflow run` prints, because both
- * start a run the caller then follows with `run read`. `run list` prints one
- * row per run, and `run cancel` confirms the cancel.
+ * The run commands. `run start` runs a stored workflow named with
+ * `--workflow`, or reads a workflow's source from stdin with
+ * `--source-stdin`, like `workflow create`, and prints the same lines for
+ * both, because both start a run the caller then follows with `run read`.
+ * `run list` prints one row per run, and `run cancel` confirms the cancel.
  */
 describe("the run commands", () => {
   const CREDENTIAL_ENV = { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" };
@@ -1332,19 +1333,24 @@ describe("the run commands", () => {
     ...fields,
   });
 
-  it("sends stdin and --inputs with workflow submit, and prints what workflow run prints", async () => {
+  it("sends --workflow or stdin, with --inputs, to run start, and prints the same lines for both", async () => {
     const runFetch = stubFetch(() => ({ runId: RUN_ID }));
     const runIo = stubIo({ env: CREDENTIAL_ENV, fetch: runFetch });
-    expect(await main(["--home", home, "workflow", "run", WORKFLOW_ID], runIo)).toBe(0);
+    expect(await main(["--home", home, "run", "start", "--workflow", WORKFLOW_ID], runIo)).toBe(0);
+    expect(runFetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/runs/start" });
+    expect(runFetch.calls[0]!.body).toEqual({ workflowId: WORKFLOW_ID });
 
     const fetch = stubFetch(() => ({ runId: RUN_ID }));
     const io = stubIo({ env: CREDENTIAL_ENV, fetch, stdin: WORKFLOW_FILE });
     expect(
-      await main(["--home", home, "workflow", "submit", "--inputs", '{"title":"Fix login"}'], io),
+      await main(
+        ["--home", home, "run", "start", "--source-stdin", "--inputs", '{"title":"Fix login"}'],
+        io,
+      ),
     ).toBe(0);
 
     expect(fetch.calls).toHaveLength(1);
-    expect(fetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/workflows/submit" });
+    expect(fetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/runs/start" });
     expect(fetch.calls[0]!.body).toEqual({
       source: WORKFLOW_FILE.slice(0, -1),
       inputs: { title: "Fix login" },
@@ -1378,10 +1384,10 @@ describe("the run commands", () => {
     expect(header).toMatch(/age/i);
     expect(failed).toContain("failed");
     expect(failed).toContain("File a task");
-    expect(failed).toContain("session:");
+    expect(failed).toContain(`session ${SESSION_ID.slice(-8)} through the API`);
     expect(completed).toContain("completed");
     expect(completed).toContain("File a task");
-    expect(completed).toContain("user");
+    expect(completed).toContain("you");
   });
 
   it("sends run cancel to the run's cancel route and confirms it, without printing the whole run", async () => {

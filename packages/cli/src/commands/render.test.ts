@@ -257,9 +257,9 @@ describe("hercule run", () => {
   const RUN = "0199e0e7-3333-7000-8000-0000000000bb";
   const CONNECTION = "0199e0e7-4444-7000-8000-0000000000cc";
 
-  it("prints the new run's full id after workflow run, and the command that shows it", () => {
+  it("prints the new run's full id after run start, and the command that shows it", () => {
     expect(
-      renderHuman({ kind: "value", value: { runId: RUN } }, lookUpCommand("workflow", "run")),
+      renderHuman({ kind: "value", value: { runId: RUN } }, lookUpCommand("run", "start")),
     ).toEqual([`run ${RUN} started`, "", `see how far it got with \`hercule run read ${RUN}\``]);
   });
 
@@ -290,7 +290,12 @@ describe("hercule run", () => {
           finishedAt: "2026-09-24T10:01:15.040Z",
           error: { code: "not_found", message: "no such task" },
         },
-        { stepId: "notify", iteration: 1, status: "cancelled" },
+        {
+          stepId: "notify",
+          iteration: 1,
+          status: "cancelled",
+          finishedAt: "2026-09-24T10:01:15.040Z",
+        },
       ],
       createdAt: "2026-09-24T10:00:00.000Z",
       startedAt: "2026-09-24T10:00:00.000Z",
@@ -302,7 +307,7 @@ describe("hercule run", () => {
       "status         failed",
       "failureReason  step-failed",
       "failedStep     start_task",
-      "startedBy      user",
+      "startedBy      you",
       "createdAt      2026-09-24T10:00:00.000Z",
       "startedAt      2026-09-24T10:00:00.000Z",
       "finishedAt     2026-09-24T10:00:01.540Z",
@@ -313,6 +318,7 @@ describe("hercule run", () => {
       `account    ${CONNECTION}`,
       `reviewers  ${CONNECTION}`,
       "",
+      "steps",
       "step        status     took    error",
       "file_task   completed  40ms",
       "start_task  failed     1m 15s  not_found: no such task",
@@ -320,7 +326,7 @@ describe("hercule run", () => {
     ]);
   });
 
-  it("says so when a run has no inputs", () => {
+  it("prints none under inputs and under steps for a run that has neither", () => {
     const lines = renderHuman(
       {
         kind: "value",
@@ -337,6 +343,62 @@ describe("hercule run", () => {
       },
       lookUpCommand("run", "read"),
     );
-    expect(lines.slice(lines.indexOf("inputs"))).toEqual(["inputs", "none", "", "no results"]);
+    expect(lines.slice(lines.indexOf("inputs"))).toEqual(["inputs", "none", "", "steps", "none"]);
+  });
+
+  it("prints a run the controller could not carry out without the step and times it never had", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: { name: "Nothing", steps: [] },
+          inputs: {},
+          origin: { kind: "manual", actor: "user" },
+          status: "failed",
+          failureReason: "controller-error",
+          steps: [],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.010Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(0, lines.indexOf(""))).toEqual([
+      `id             ${RUN}`,
+      "workflow       Nothing",
+      "status         failed",
+      "failureReason  controller-error",
+      "startedBy      you",
+      "createdAt      2026-09-24T10:00:00.000Z",
+      "finishedAt     2026-09-24T10:00:00.010Z",
+    ]);
+  });
+
+  it("describes who started a run in the words the web app uses", () => {
+    const readStartedBy = (origin: Record<string, unknown>): string | undefined =>
+      renderHuman(
+        {
+          kind: "value",
+          value: {
+            id: RUN,
+            workflowId: null,
+            plan: { name: "Nothing", steps: [] },
+            inputs: {},
+            origin,
+            status: "pending",
+            steps: [],
+            createdAt: "2026-09-24T10:00:00.000Z",
+          },
+        },
+        lookUpCommand("run", "read"),
+      ).find((line) => line.startsWith("startedBy"));
+    expect(readStartedBy({ kind: "api", actor: `session:${CONNECTION}` })).toBe(
+      "startedBy  session 000000cc through the API",
+    );
+    expect(readStartedBy({ kind: "action", parentRunId: RUN, stepId: "spawn" })).toBe(
+      "startedBy  run 000000bb at step spawn",
+    );
   });
 });

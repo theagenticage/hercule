@@ -4,7 +4,7 @@
  * timeline, Cancel, and live updates.
  *
  * The stub controller holds one run at a time. A test replaces it, as the run
- * engine would change it, and announces the change on the `run` topic.
+ * engine would change it, and pushes the change on the `run` topic.
  */
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -285,7 +285,7 @@ describe("A run's page > the header", () => {
 
     const header = await findPageHeader();
     const text = readPageText(header);
-    // The failure reason; it also says that the run failed.
+    // The failure reason, which also shows that the run failed.
     expect(text).toMatch(/step.failed/i);
     expect(text).toContain(describeActor("user").label);
     // The times are machine-readable, whatever words show them.
@@ -317,7 +317,21 @@ describe("A run's page > the header", () => {
     expect(within(header).queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 
-  it("asks in place before it cancels, then cancels and shows the run cancelled", async () => {
+  it("puts the focus on Keep running when the cancel question shows, and back on Cancel after Keep running", async () => {
+    const user = userEvent.setup();
+    const { api } = await openRunPage(RUNNING_RUN);
+
+    await user.click(within(await findPageHeader()).getByRole("button", { name: "Cancel" }));
+
+    const keepRunning = screen.getByRole("button", { name: "Keep running" });
+    expect(document.activeElement).toBe(keepRunning);
+
+    await user.click(keepRunning);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
+    expect(listCancels(api, RUNNING_RUN.id)).toEqual([]);
+  });
+
+  it("shows a question in place before it cancels, then cancels and shows the run cancelled", async () => {
     const user = userEvent.setup();
     const { api, hold } = await openRunPage(RUNNING_RUN, {
       overrides: {
@@ -404,7 +418,7 @@ describe("A run's page > the steps", { timeout: GRAPH_TEST_TIMEOUT_MS }, () => {
     }
   });
 
-  it("updates the header and the steps live when the run topic announces a change", async () => {
+  it("updates the header and the steps live when a change is pushed on the run topic", async () => {
     const { live, hold } = await openRunPage(RUNNING_RUN);
     const header = await findPageHeader();
     expect(readPageText(header).toLowerCase()).toContain("running");
@@ -465,7 +479,7 @@ describe("A run's page > the run graph", { timeout: GRAPH_TEST_TIMEOUT_MS }, () 
     },
   );
 
-  it("moves a step's state on the graph live when the run topic announces a change", async () => {
+  it("moves a step's state on the graph live when a change is pushed on the run topic", async () => {
     const { live, hold } = await openRunPage(RUNNING_RUN);
     const graph = await findRunGraph();
     await waitFor(() => {

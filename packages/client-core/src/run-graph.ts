@@ -1,13 +1,13 @@
 /**
  * A run's plan as a run's page draws it: the workflow graph with each step's
- * state, the steps as rows, and the rows placed on a time axis.
+ * state, the steps as lines, and the lines placed on a time axis.
  *
- * A run's step records say what happened; the plan says what could have
+ * A run's step records hold what happened; the plan holds what could have
  * happened. These functions join the two, so the graph, the step list and the
  * timeline agree on every step's state.
  */
-import type { Run, RunStatus, StepRecord } from "@hercule/contract";
-import type { WorkState } from "./run-display";
+import type { Run, RunStatus, StepError, StepRecord } from "@hercule/contract";
+import { readTimestamps, type Timestamps, type WorkState } from "./run-display";
 import {
   buildWorkflowGraph,
   type WorkflowGraphEdge,
@@ -15,10 +15,8 @@ import {
 } from "./workflow-graph";
 
 /** Where a run is at one step of its plan: the step's state and its times. */
-export interface StepProgress {
+export interface StepProgress extends Timestamps {
   readonly state: WorkState;
-  readonly startedAt?: string;
-  readonly finishedAt?: string;
 }
 
 /** A trigger or a step of a run's plan. A step carries its progress; a trigger has none. */
@@ -46,15 +44,18 @@ export interface RunGraph {
   readonly status: RunStatus;
 }
 
-/** The parts of a run the timeline reads. */
-type RunTimes = Pick<Run, "plan" | "steps" | "createdAt" | "startedAt" | "finishedAt">;
-
 /**
  * Returns the latest step record of each step, by step id. A step that runs
- * again gets a new record, and the latest one says where the step is now.
+ * again gets a new record, and the latest one holds where the step is now.
  */
 const findLatestRecords = (steps: ReadonlyArray<StepRecord>): ReadonlyMap<string, StepRecord> =>
   new Map(steps.map((record) => [record.stepId, record]));
+
+/** Returns a step's progress from its step record, or `unreached` for a step with none. */
+const readStepProgress = (record: StepRecord | undefined): StepProgress =>
+  record === undefined
+    ? { state: "unreached" }
+    : { state: record.status, ...readTimestamps(record) };
 
 /**
  * Builds the graph of a run's plan, as `buildWorkflowGraph` does, with the
@@ -70,6 +71,12 @@ export const buildRunGraph = (run: Pick<Run, "plan" | "steps" | "status">): RunG
   const graph = buildWorkflowGraph(run.plan);
   const latest = findLatestRecords(run.steps);
   const stepIds = new Set(run.plan.steps.map((step) => step.id));
+  /**
+   * Decides how far the run has come along the edge from `from` to `to`, from
+   * the latest step record at each end. This handles a linear graph, where
+   * each step runs at most once; loops and joins come with
+   * [#80](https://github.com/theagenticage/hercule/issues/80).
+   */
   const decideTravel = (from: string, to: string): EdgeTravel => {
     const target = latest.get(to);
     if (latest.get(from)?.status !== "completed" || target === undefined) return "untravelled";
@@ -78,59 +85,60 @@ export const buildRunGraph = (run: Pick<Run, "plan" | "steps" | "status">): RunG
   return {
     nodes: graph.nodes.map((node) => {
       if (!stepIds.has(node.id)) return { ...node, progress: undefined };
-      const record = latest.get(node.id);
-      return {
-        ...node,
-        progress: {
-          state: record?.status ?? "unreached",
-          ...(record?.startedAt === undefined ? {} : { startedAt: record.startedAt }),
-          ...(record?.finishedAt === undefined ? {} : { finishedAt: record.finishedAt }),
-        },
-      };
+      return { ...node, progress: readStepProgress(latest.get(node.id)) };
     }),
     edges: graph.edges.map((edge) => ({ ...edge, travel: decideTravel(edge.from, edge.to) })),
     status: run.status,
   };
 };
 
-/** One row of a run's step list and timeline: a step record, or a step that has none. */
-export interface StepRow {
+/** What a completed step's action returned. */
+type StepOutput = Extract<StepRecord, { readonly status: "completed" }>["output"];
+
+/**
+ * One line of a run's step list and timeline: a step record, or a step that
+ * has none, with its state and times.
+ */
+export interface StepLine extends StepProgress {
   /** Unique within the run. */
   readonly key: string;
   readonly stepId: string;
   /** The action an action step calls, as the plan names it. */
   readonly action: string | undefined;
-  readonly state: WorkState;
-  /** Absent for a step the run has not reached. */
-  readonly record: StepRecord | undefined;
+  /** What the action returned, for a completed step; `null` for an action that returns nothing. */
+  readonly output: StepOutput | undefined;
+  /** Why the step failed, for a failed step. */
+  readonly error: StepError | undefined;
 }
 
 /**
- * Returns a run's step rows: one per step record, in the order the records
+ * Returns a run's step lines: one per step record, in the order the records
  * were created, then one for each step of the plan that has no record, in the
  * plan's order.
  */
-export const buildStepRows = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<StepRow> => {
+export const buildStepLines = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<StepLine> => {
   const actions = new Map(
     run.plan.steps.map((step) => [step.id, step.kind === "action" ? step.action : undefined]),
   );
   const recorded = new Set(run.steps.map((record) => record.stepId));
   return [
-    ...run.steps.map((record) => ({
+    ...run.steps.map((record): StepLine => ({
       key: `${record.stepId}#${String(record.iteration)}`,
       stepId: record.stepId,
       action: actions.get(record.stepId),
-      state: record.status,
-      record,
+      ...readStepProgress(record),
+      output: record.status === "completed" ? record.output : undefined,
+      error: record.status === "failed" ? record.error : undefined,
     })),
     ...run.plan.steps
       .filter((step) => !recorded.has(step.id))
-      .map((step) => ({
+      .map((step): StepLine => ({
         key: step.id,
         stepId: step.id,
         action: actions.get(step.id),
-        state: "unreached" as const,
-        record: undefined,
+        ...readStepProgress(undefined),
+        output: undefined,
+        error: undefined,
       })),
   ];
 };
@@ -156,7 +164,7 @@ export interface Timeline {
   readonly now: number;
   /** How long the run has run up to now, or ran, in milliseconds. */
   readonly elapsedMs: number;
-  readonly rows: ReadonlyArray<{ readonly row: StepRow; readonly bar: TimelineBar | undefined }>;
+  readonly lines: ReadonlyArray<{ readonly line: StepLine; readonly bar: TimelineBar | undefined }>;
 }
 
 /** The most ticks an axis has, not counting the one at 0. More would crowd the labels. */
@@ -219,19 +227,20 @@ const decideTickStep = (spanMs: number): number =>
   Math.ceil(spanMs / MAX_TICKS / (24 * HOUR_MS)) * 24 * HOUR_MS;
 
 /**
- * Places a run's step rows on a time axis that starts when the run started
+ * Places a run's step lines on a time axis that starts when the run started
  * and ends at now, or where the run ended. The axis is rounded up to a whole
  * number of round ticks, so it grows in steps while the run is live rather
  * than rescaling on every render.
  */
-export const buildTimeline = (run: RunTimes, now: number): Timeline => {
-  const origin = Date.parse(run.startedAt ?? run.createdAt);
-  const end = run.finishedAt === undefined ? now : Date.parse(run.finishedAt);
+export const buildTimeline = (run: Run, now: number): Timeline => {
+  const { startedAt, finishedAt } = readTimestamps(run);
+  const origin = Date.parse(startedAt ?? run.createdAt);
+  const end = finishedAt === undefined ? now : Date.parse(finishedAt);
   const elapsedMs = Math.max(0, end - origin);
   // An axis needs a length, even for a run that took no measurable time.
   const step = decideTickStep(Math.max(1, elapsedMs));
   const spanMs = Math.ceil(Math.max(1, elapsedMs) / step) * step;
-  const toFraction = (instant: number): number =>
+  const measureFraction = (instant: number): number =>
     Math.min(1, Math.max(0, (instant - origin) / spanMs));
   return {
     spanMs,
@@ -239,19 +248,19 @@ export const buildTimeline = (run: RunTimes, now: number): Timeline => {
       position: (index * step) / spanMs,
       label: formatTickLabel(index * step),
     })),
-    now: toFraction(end),
+    now: measureFraction(end),
     elapsedMs,
-    rows: buildStepRows(run).map((row) => {
-      const startedAt = row.record?.startedAt;
-      if (startedAt === undefined) return { row, bar: undefined };
-      const finishedAt = row.record?.finishedAt;
-      return {
-        row,
-        bar: {
-          start: toFraction(Date.parse(startedAt)),
-          end: toFraction(finishedAt === undefined ? end : Date.parse(finishedAt)),
-        },
-      };
-    }),
+    lines: buildStepLines(run).map((line) => ({
+      line,
+      bar:
+        line.startedAt === undefined
+          ? undefined
+          : {
+              start: measureFraction(Date.parse(line.startedAt)),
+              end: measureFraction(
+                line.finishedAt === undefined ? end : Date.parse(line.finishedAt),
+              ),
+            },
+    })),
   };
 };

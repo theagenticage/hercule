@@ -4,6 +4,7 @@ import {
   describeRunOrigin,
   describeRunStatus,
   formatPreciseStamp,
+  readTimestamps,
   toIdTail,
 } from "@hercule/client-core";
 import type { Run } from "@hercule/contract";
@@ -16,9 +17,9 @@ const QUIET_LINK =
   "-mx-1 rounded-control px-1 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live";
 
 /**
- * The header of a run's page. The first line is a breadcrumb back to the run
- * list and the workflow's name, with the page's actions on the right. The
- * second line says where the run is: its status mark and status with its
+ * Renders the header of a run's page. The first line is a breadcrumb back to
+ * the run list and the workflow's name, with the page's actions on the right.
+ * The second line shows where the run is: its status mark and status with its
  * duration, why it failed, who started it and how, when it started and ended,
  * and its id's tail, which the CLI takes.
  *
@@ -35,11 +36,12 @@ export function RunHeader({
   /** The time a live run's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
   readonly timezone: string;
-  /** The actions on the right: Cancel, or the question it asks. */
+  /** The actions on the right: Cancel, and the question shown before the run is cancelled. */
   readonly children: ReactNode;
 }): JSX.Element {
   const origin = describeRunOrigin(run.origin);
-  const started = run.startedAt ?? run.createdAt;
+  const { startedAt, finishedAt } = readTimestamps(run);
+  const started = startedAt ?? run.createdAt;
   return (
     <header className="shrink-0 px-8 pt-[22px]">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[1lh] items-center gap-4 text-title">
@@ -67,7 +69,7 @@ export function RunHeader({
         <span className={cn("font-emph", WORK_STATE_HUES[run.status] ?? "text-ink")}>
           {describeRunStatus(run, now)}
         </span>
-        {run.failureReason === undefined ? null : (
+        {run.status !== "failed" ? null : (
           <>
             <Dot />
             <FailureText reason={run.failureReason} stepId={run.failedStepId} />
@@ -77,19 +79,19 @@ export function RunHeader({
         <span>
           {"started by "}
           <ActorLink actor={origin.starter} plainClassName="text-ink" />
-          {origin.via === undefined ? null : ` ${origin.via}`}
+          {origin.howStarted === undefined ? null : ` ${origin.howStarted}`}
         </span>
         <Dot />
         <span className="font-mono text-fine tabular-nums">
           <time dateTime={started}>
             {formatPreciseStamp(new Date(started), timezone) ?? started}
           </time>
-          {run.finishedAt === undefined ? null : (
+          {finishedAt === undefined ? null : (
             <>
               <span className="text-faint">{" → "}</span>
-              <time dateTime={run.finishedAt}>
-                {formatPreciseStamp(new Date(run.finishedAt), timezone, new Date(started)) ??
-                  run.finishedAt}
+              <time dateTime={finishedAt}>
+                {formatPreciseStamp(new Date(finishedAt), timezone, new Date(started)) ??
+                  finishedAt}
               </time>
             </>
           )}

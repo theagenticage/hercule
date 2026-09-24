@@ -12,7 +12,7 @@ import type { RunInputs } from "@hercule/contract";
 import { Button, Checkbox, Input, Label, Select, Textarea } from "@hercule/ui";
 
 /**
- * The run form's fields: one per input the workflow declares, then Cancel and
+ * Renders the run form's fields: one per input the workflow declares, then Cancel and
  * Start. It sits inside the caller's `<form>`, whose own submit it ignores:
  * pressing Enter in a field clicks Start, which starts the run.
  *
@@ -82,7 +82,7 @@ export function RunFormFields({
 }
 
 /**
- * The errors of a refused run that belong to no field: why it was refused,
+ * Renders the errors of a refused run that belong to no field: why it was refused,
  * and each issue with its path, such as a problem in a workflow that no
  * longer validates.
  */
@@ -105,7 +105,7 @@ export function RunFormSummary({
 }
 
 /**
- * The run form's buttons: Cancel first and Start last, as every pair in the
+ * Renders the run form's buttons: Cancel first and Start last, as every pair in the
  * app. Start is `aria-disabled` rather than `disabled`, so it keeps the focus
  * while the run starts.
  */
@@ -132,7 +132,7 @@ export function RunFormButtons({
 const buildControlId = (field: RunInputField): string => `run-input-${field.name}`;
 
 /**
- * One input: its name, marked when required, its description, its control,
+ * Renders one input: its name, marked when required, its description, its control,
  * and its error under the control. A checkbox carries its name beside it, so
  * it is the one control not placed under a label.
  */
@@ -220,9 +220,9 @@ function RunInputControl({
   readonly onChange: (value: RunInputValue) => void;
 }): JSX.Element {
   // Announced with `aria-required` but not enforced with `required`: the
-  // controller decides what a missing value means, and says so on the field.
+  // controller checks for a missing value, and its issue shows on the field.
   const required = field.required ? true : undefined;
-  const common = { id, autoFocus: isFocused, "aria-required": required } as const;
+  const sharedControlProps = { id, autoFocus: isFocused, "aria-required": required } as const;
 
   switch (field.kind) {
     case "enum":
@@ -237,7 +237,7 @@ function RunInputControl({
       return (
         <>
           <Select
-            {...common}
+            {...sharedControlProps}
             value={text}
             onChange={(event) => {
               onChange(event.target.value);
@@ -264,7 +264,7 @@ function RunInputControl({
     case "json":
       return (
         <Textarea
-          {...common}
+          {...sharedControlProps}
           spellCheck={false}
           className="font-mono text-meta"
           value={text}
@@ -276,14 +276,15 @@ function RunInputControl({
     case "number":
       return (
         <Input
-          {...common}
+          {...sharedControlProps}
           type="number"
           step="any"
           className="w-[140px]"
           value={text}
           onChange={(event) => {
             // The browser reports text it cannot read as a number, such as
-            // `1.2.3`, as an empty value; `badInput` tells the two apart.
+            // `1.2.3`, as an empty value. `badInput` is true only for such
+            // text, so an unreadable number is not taken for an empty field.
             onChange(event.target.validity.badInput ? UNREADABLE_NUMBER : event.target.value);
           }}
         />
@@ -291,7 +292,7 @@ function RunInputControl({
     case "text":
       return (
         <Input
-          {...common}
+          {...sharedControlProps}
           type="text"
           value={text}
           onChange={(event) => {

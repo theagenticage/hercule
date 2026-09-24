@@ -29,7 +29,7 @@ const TRACK: CSSProperties = {
 };
 
 /** Converts a fraction of the axis to a CSS length. */
-const toPercent = (fraction: number): string => `${String(fraction * 100)}%`;
+const formatPercent = (fraction: number): string => `${String(fraction * 100)}%`;
 
 /** The fill of each state's bar: live while it runs, the fail hue once it failed. */
 const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
@@ -40,7 +40,7 @@ const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
 };
 
 /**
- * The steps of a run on a shared time axis: one row per step record with a
+ * Renders the steps of a run on a shared time axis: one row per step record with a
  * bar from its start to its end, or to now while it runs, then the steps the
  * run has not reached. A vertical line marks now; it moves while the run is
  * live and stands where the run ended once it has ended.
@@ -66,7 +66,7 @@ export function StepTimeline({
           {ticks.map((tick, index) => (
             <span
               key={tick.position}
-              style={{ left: toPercent(tick.position) }}
+              style={{ left: formatPercent(tick.position) }}
               className={cn(
                 "absolute bottom-0 font-mono text-label text-faint tabular-nums",
                 index === 0
@@ -81,7 +81,7 @@ export function StepTimeline({
           ))}
           {isLive ? (
             <span
-              style={{ left: toPercent(timeline.now) }}
+              style={{ left: formatPercent(timeline.now) }}
               className="absolute top-0 -translate-x-1/2 rounded-control bg-surface px-1 font-mono text-label text-live tabular-nums"
             >
               {`now ${formatElapsed(timeline.elapsedMs)}`}
@@ -92,26 +92,26 @@ export function StepTimeline({
       </div>
       <div className="relative">
         <ul>
-          {timeline.rows.map(({ row, bar }) => {
+          {timeline.lines.map(({ line, bar }) => {
             return (
-              <li key={row.key} className="border-t border-line-soft">
+              <li key={line.key} className="border-t border-line-soft">
                 <div style={GRID} className="grid min-h-10 items-center">
-                  <StepCells row={row} />{" "}
+                  <StepCells line={line} />{" "}
                   <span className="relative h-full min-h-10">
                     {ticks.map((tick) => (
                       <span
                         key={tick.position}
-                        style={{ left: toPercent(tick.position) }}
+                        style={{ left: formatPercent(tick.position) }}
                         className="absolute inset-y-0 w-px bg-line-soft"
                       />
                     ))}
                     {bar === undefined ? (
-                      describeUnstartedStep(row.state) === undefined ? null : (
+                      describeUnstartedStep(line.state) === undefined ? null : (
                         <span
-                          style={{ left: toPercent(timeline.now) }}
+                          style={{ left: formatPercent(timeline.now) }}
                           className="absolute top-1/2 ml-2 -translate-y-1/2 text-fine whitespace-nowrap text-faint"
                         >
-                          {describeUnstartedStep(row.state)}
+                          {describeUnstartedStep(line.state)}
                         </span>
                       )
                     ) : (
@@ -119,12 +119,12 @@ export function StepTimeline({
                         // A bar is at least as wide as its round ends, so a step
                         // of a millisecond still shows.
                         style={{
-                          left: toPercent(bar.start),
-                          width: `max(6px, ${toPercent(bar.end - bar.start)})`,
+                          left: formatPercent(bar.start),
+                          width: `max(6px, ${formatPercent(bar.end - bar.start)})`,
                         }}
                         className={cn(
                           "absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full",
-                          BAR_FILL[row.state],
+                          BAR_FILL[line.state],
                         )}
                       />
                     )}
@@ -132,22 +132,20 @@ export function StepTimeline({
                   <span
                     className={cn(
                       "text-right font-mono text-fine tabular-nums",
-                      WORK_STATE_HUES[row.state] ?? "text-muted",
+                      WORK_STATE_HUES[line.state] ?? "text-muted",
                     )}
                   >
-                    {row.record === undefined ? "" : describeStepDuration(row.record, now)}
+                    {describeStepDuration(line, now)}
                   </span>
                 </div>
-                {row.record?.error === undefined ? null : (
-                  <StepErrorLine error={row.record.error} />
-                )}
+                {line.error === undefined ? null : <StepErrorLine error={line.error} />}
               </li>
             );
           })}
         </ul>
         <div aria-hidden="true" style={TRACK} className="pointer-events-none absolute inset-y-0">
           <span
-            style={{ left: toPercent(timeline.now) }}
+            style={{ left: formatPercent(timeline.now) }}
             className={cn(
               "absolute inset-y-0 w-px",
               isLive ? "bg-[color-mix(in_oklch,var(--live)_70%,transparent)]" : "bg-line",

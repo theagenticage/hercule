@@ -6,7 +6,7 @@ import { Button, EmptyState, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { runsQuery, workflowsQuery } from "../../../app/queries";
 import { RunFormDrawer } from "../../../screens/runs/run-form-drawer";
-import { RunRow } from "../../../screens/runs/run-row";
+import { RunListRow } from "../../../screens/runs/run-list-row";
 import { RunFilterBar } from "./-filters";
 
 export const Route = createFileRoute("/_shell/runs/")({
@@ -23,7 +23,7 @@ export const Route = createFileRoute("/_shell/runs/")({
 });
 
 /**
- * The run list, newest first, with filters by workflow and status, paging
+ * Renders the run list, newest first, with filters by workflow and status, paging
  * with Load more, and the run form behind Run workflow. The list follows the
  * `run` topic, so a run started anywhere, and every change of status, shows
  * without a reload.
@@ -68,7 +68,7 @@ function Runs(): JSX.Element {
         <div className="flex flex-col gap-3">
           <ul className="rounded-card border border-line-soft bg-surface px-1.5 py-1">
             {runs.map((run) => (
-              <RunRow key={run.id} run={run} now={now} />
+              <RunListRow key={run.id} run={run} now={now} />
             ))}
           </ul>
           {listing.hasNextPage ? (

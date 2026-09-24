@@ -5,7 +5,7 @@ import { isNotFound, resolveDisplayTimezone } from "@hercule/client-core";
 import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { runQuery, settingsQuery } from "../../../app/queries";
-import { RunScreen, type StepsView } from "./-screen";
+import { RunPage, type StepsView } from "./-page";
 
 export const Route = createFileRoute("/_shell/runs/$runId")({
   // The page draws its own header with the workflow's name, so the shell
@@ -23,15 +23,16 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
       throw isNotFound(error) ? notFound() : error;
     });
   },
-  component: StoredRun,
+  component: RunScreen,
   notFoundComponent: MissingRun,
 });
 
 /**
  * Renders a run's page, kept current by the `run` topic: the run engine
- * announces the run after every change to it or to one of its step records.
+ * publishes the run's id on that topic after every change to the run or to
+ * one of its step records.
  */
-function StoredRun(): JSX.Element {
+function RunScreen(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
   const { runId } = Route.useParams();
   const { steps = "list" } = Route.useSearch();
@@ -45,7 +46,7 @@ function StoredRun(): JSX.Element {
   );
 
   return (
-    <RunScreen
+    <RunPage
       // Keyed by id, so moving to another run mounts a fresh page, without the
       // previous run's open rows or its question.
       key={runId}

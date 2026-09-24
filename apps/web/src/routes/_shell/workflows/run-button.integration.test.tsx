@@ -91,7 +91,7 @@ const openWorkflowPage = async () => {
     "GET /api/v1/event-kinds": { body: [] },
     "GET /api/v1/agents": { body: { items: [] } },
     "GET /api/v1/connections": { body: { items: [] } },
-    [`POST /api/v1/workflows/${NIGHTLY.id}/run`]: { body: { runId: STARTED_RUN_ID } },
+    "POST /api/v1/runs/start": { body: { runId: STARTED_RUN_ID } },
     [`GET /api/v1/runs/${STARTED_RUN_ID}`]: { body: STARTED_RUN },
     "GET /api/v1/runs": { body: { items: [] } },
   });
@@ -125,11 +125,9 @@ const getRunButton = (): HTMLElement => {
 const isUnpressable = (button: HTMLElement): boolean =>
   (button as HTMLButtonElement).disabled || button.getAttribute("aria-disabled") === "true";
 
-/** Returns the `workflow.run` requests the page made. */
+/** Returns the `run.start` requests the page made. */
 const listRunStarts = (api: { readonly calls: readonly Call[] }): readonly Call[] =>
-  api.calls.filter(
-    (call) => call.method === "POST" && call.path === `/api/v1/workflows/${NIGHTLY.id}/run`,
-  );
+  api.calls.filter((call) => call.method === "POST" && call.path === "/api/v1/runs/start");
 
 describe("Workflows > the Run button", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
   it("opens the run form, which for a workflow with no inputs holds only Start, and starts the run", async () => {
@@ -151,8 +149,10 @@ describe("Workflows > the Run button", { timeout: EDITOR_TEST_TIMEOUT_MS }, () =
     });
     const starts = listRunStarts(api);
     expect(starts).toHaveLength(1);
+    const body = starts[0]?.body as { workflowId?: unknown; inputs?: unknown } | undefined;
+    expect(body?.workflowId).toBe(NIGHTLY.id);
     // A workflow with no inputs starts with none.
-    expect((starts[0]?.body as { inputs?: unknown } | undefined)?.inputs ?? {}).toEqual({});
+    expect(body?.inputs ?? {}).toEqual({});
   });
 
   it("is disabled while the editor holds unsaved changes, and opens no form then", async () => {
