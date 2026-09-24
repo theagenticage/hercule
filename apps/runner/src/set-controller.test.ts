@@ -27,7 +27,7 @@ const logged: Array<string> = [];
 const errored: Array<string> = [];
 let fetches = 0;
 
-const collect =
+const collectInto =
   (into: Array<string>) =>
   (...args: ReadonlyArray<unknown>) => {
     into.push(args.map((arg) => String(arg)).join(" "));
@@ -38,8 +38,8 @@ beforeEach(() => {
   logged.length = 0;
   errored.length = 0;
   fetches = 0;
-  vi.spyOn(console, "log").mockImplementation(collect(logged));
-  vi.spyOn(console, "error").mockImplementation(collect(errored));
+  vi.spyOn(console, "log").mockImplementation(collectInto(logged));
+  vi.spyOn(console, "error").mockImplementation(collectInto(errored));
   // The verb makes no network call, which is only a claim until something
   // watches the one function that could make one.
   vi.spyOn(globalThis, "fetch").mockImplementation(() => {
@@ -54,25 +54,25 @@ afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-const temporaryHome = (): string => {
+const createTemporaryHome = (): string => {
   const home = mkdtempSync(pathJoin(tmpdir(), "hercule-set-controller-"));
   homes.push(home);
   return home;
 };
 
-const runnerFile = (home: string): string => pathJoin(home, "runner", "runner.json");
+const buildRunnerFilePath = (home: string): string => pathJoin(home, "runner", "runner.json");
 
 /** A home a machine has already joined from, at the mode the join leaves. */
-const enrolled = (
+const createEnrolledHome = (
   controllerUrl: string = ORIGINAL_URL,
 ): {
   home: string;
   path: string;
   before: string;
 } => {
-  const home = temporaryHome();
+  const home = createTemporaryHome();
   mkdirSync(pathJoin(home, "runner"), { recursive: true, mode: 0o700 });
-  const path = runnerFile(home);
+  const path = buildRunnerFilePath(home);
   const contents = {
     runnerId: "0199e0e7-2222-7000-8000-000000000000",
     credential: "credential-for-thalia",
@@ -87,7 +87,7 @@ const enrolled = (
 
 describe("hercule runner set-controller", () => {
   it("repairs a file whose controller URL no longer reads as one", async () => {
-    const { home, path } = enrolled("127.0.0.1:4937");
+    const { home, path } = createEnrolledHome("127.0.0.1:4937");
 
     await run(["--home", home, "set-controller", NEW_URL]);
 
@@ -97,7 +97,7 @@ describe("hercule runner set-controller", () => {
   });
 
   it("rewrites only controllerUrl, keeps the file the runner's alone, prints the new URL", async () => {
-    const { home, path, before } = enrolled();
+    const { home, path, before } = createEnrolledHome();
 
     await run(["--home", home, "set-controller", NEW_URL]);
 
@@ -117,7 +117,7 @@ describe("hercule runner set-controller", () => {
   });
 
   it("refuses a malformed URL, writes nothing and exits non-zero", async () => {
-    const { home, path, before } = enrolled();
+    const { home, path, before } = createEnrolledHome();
 
     await run(["--home", home, "set-controller", "not a url"]);
 
@@ -128,13 +128,13 @@ describe("hercule runner set-controller", () => {
   });
 
   it("refuses a home that has never joined, naming the file, and exits non-zero", async () => {
-    const home = temporaryHome();
+    const home = createTemporaryHome();
 
     await run(["--home", home, "set-controller", NEW_URL]);
 
     expect(process.exitCode).not.toBe(0);
-    expect(errored.join("\n")).toContain(runnerFile(home));
-    expect(existsSync(runnerFile(home))).toBe(false);
+    expect(errored.join("\n")).toContain(buildRunnerFilePath(home));
+    expect(existsSync(buildRunnerFilePath(home))).toBe(false);
     expect(fetches).toBe(0);
   });
 });

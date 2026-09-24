@@ -20,23 +20,23 @@ const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effe
 const at = "2026-09-07T10:00:00.000Z";
 
 /** A canonical v7 id, which is the only shape the store takes. */
-const anId = () => uuidToString(mintUuid());
+const mintId = () => uuidToString(mintUuid());
 
 /** A session row carrying one profile, with the shipped defaults filled in. */
-const aSessionOn = (permissionProfileId: string) =>
+const insertSession = (permissionProfileId: string) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
     // The caller mints the id, not the repository. A spawn opens the working
     // area in the same transaction, and that area's branch is named after the
     // session, so the id must exist before the row is written.
-    const id = anId();
+    const id = mintId();
     yield* sessions.insert({
       id,
       title: "a session",
       permissionProfileId,
       agentId: undefined,
-      instanceId: anId(),
-      runnerId: anId(),
+      instanceId: mintId(),
+      runnerId: mintId(),
       requestedAccessMode: "approval-required",
       accessMode: "approval-required",
       workspaceId: null,
@@ -52,16 +52,16 @@ const aSessionOn = (permissionProfileId: string) =>
   });
 
 /** A session row to hang a stream on; nothing else carries its profile. */
-const aSession = Effect.suspend(() => aSessionOn(anId()));
+const aSession = Effect.suspend(() => insertSession(mintId()));
 
 /** `count` ordinary events on one session, numbered from one. */
-const fill = (sessionId: string, count: number) =>
+const fillStream = (sessionId: string, count: number) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
     for (let seq = 1; seq <= count; seq += 1) {
       const event: ProviderEvent = {
         _tag: "turn.started",
-        eventId: anId(),
+        eventId: mintId(),
         sessionId,
         at,
         turnId: `t${String(seq)}`,
@@ -71,7 +71,7 @@ const fill = (sessionId: string, count: number) =>
   });
 
 /** Every row of a session's transcript, read `limit` at a time. */
-const walk = (sessionId: string, limit: number) =>
+const walkTranscript = (sessionId: string, limit: number) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
     const items: Array<StoredStreamRow> = [];
@@ -99,7 +99,7 @@ const readTokenHash = (sessionId: string) =>
     (rows) => rows[0]!.token_hash,
   );
 
-const turnIdOf = (row: StoredStreamRow): string =>
+const readTurnId = (row: StoredStreamRow): string =>
   row.event._tag === "turn.started" ? row.event.turnId : row.event._tag;
 
 describe("the transcript walk", () => {
@@ -107,13 +107,13 @@ describe("the transcript walk", () => {
     const { items, pages } = await run(
       Effect.gen(function* () {
         const sessionId = yield* aSession;
-        yield* fill(sessionId, 5);
-        return yield* walk(sessionId, 2);
+        yield* fillStream(sessionId, 5);
+        return yield* walkTranscript(sessionId, 2);
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(items.map((row) => row.position)).toEqual([1, 2, 3, 4, 5]);
-    expect(items.map(turnIdOf)).toEqual(["t1", "t2", "t3", "t4", "t5"]);
+    expect(items.map(readTurnId)).toEqual(["t1", "t2", "t3", "t4", "t5"]);
     // Three pages of two: the third comes back short and ends the walk, which
     // is the page that proves the cursor is not handed out one page too long.
     expect(pages).toBe(3);
@@ -124,7 +124,7 @@ describe("the transcript walk", () => {
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
         const sessionId = yield* aSession;
-        yield* fill(sessionId, 3);
+        yield* fillStream(sessionId, 3);
         return yield* sessions.transcript({
           sessionId,
           limit: 3,
@@ -144,8 +144,8 @@ describe("the transcript walk", () => {
         const sessions = yield* sessionRepository;
         const mine = yield* aSession;
         const theirs = yield* aSession;
-        yield* fill(mine, 2);
-        yield* fill(theirs, 4);
+        yield* fillStream(mine, 2);
+        yield* fillStream(theirs, 4);
         const page = yield* sessions.transcript({
           sessionId: mine,
           limit: 50,
@@ -164,7 +164,7 @@ describe("the transcript walk", () => {
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
         const sessionId = yield* aSession;
-        yield* fill(sessionId, 4);
+        yield* fillStream(sessionId, 4);
         const forwards = yield* sessions.transcript({
           sessionId,
           limit: 2,
@@ -189,8 +189,8 @@ describe("the transcript walk", () => {
         const sessions = yield* sessionRepository;
         const mine = yield* aSession;
         const theirs = yield* aSession;
-        yield* fill(mine, 6);
-        yield* fill(theirs, 6);
+        yield* fillStream(mine, 6);
+        yield* fillStream(theirs, 6);
         const theirPage = yield* sessions.transcript({
           sessionId: theirs,
           limit: 4,
@@ -218,7 +218,7 @@ describe("the transcript walk", () => {
         const sessionId = yield* aSession;
         const event: ProviderEvent = {
           _tag: "content.delta",
-          eventId: anId(),
+          eventId: mintId(),
           sessionId,
           at,
           turnId: "t1",
@@ -247,7 +247,7 @@ describe("the transcript walk", () => {
 });
 
 /** A session moved to `starting` under a token hash, as dispatch moves one. */
-const aStartedSession = (tokenHash: string) =>
+const insertStartedSession = (tokenHash: string) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
     const sessionId = yield* aSession;
@@ -262,15 +262,15 @@ describe("the session's own credential", () => {
     const hashes = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
-        const exited = yield* aStartedSession("hash-exited");
+        const exited = yield* insertStartedSession("hash-exited");
         yield* sessions.moved(exited.sessionId, "exited", at);
-        const queued = yield* aStartedSession("hash-queued");
+        const queued = yield* insertStartedSession("hash-queued");
         yield* sessions.moved(queued.sessionId, "queued", at);
-        const retired = yield* aStartedSession("hash-retired");
+        const retired = yield* insertStartedSession("hash-retired");
         yield* sessions.endOnRunner(retired.runnerId, at);
-        const reported = yield* aStartedSession("hash-reported");
+        const reported = yield* insertStartedSession("hash-reported");
         yield* sessions.reportedGone(reported.runnerId, [], at);
-        const running = yield* aStartedSession("hash-running");
+        const running = yield* insertStartedSession("hash-running");
         yield* sessions.moved(running.sessionId, "busy", at);
         return {
           exited: yield* readTokenHash(exited.sessionId),
@@ -315,12 +315,12 @@ describe("listing the sessions that carry one profile", () => {
     const { listed, profileId, live } = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
-        const profileId = anId();
-        const live = yield* aSessionOn(profileId);
-        const exited = yield* aSessionOn(profileId);
+        const profileId = mintId();
+        const live = yield* insertSession(profileId);
+        const exited = yield* insertSession(profileId);
         yield* sessions.moved(exited, "exited", at);
         // Another profile's session, which the filter must not answer.
-        yield* aSessionOn(anId());
+        yield* insertSession(mintId());
         const page = yield* sessions.list({
           limit: 10,
           cursor: undefined,

@@ -9,31 +9,31 @@
  */
 import { describe, expect, it } from "vitest";
 import { del, get, post, send } from "../http/testing";
-import { spawned, until, type Arranged, type Wire } from "../sessions/testing";
+import { spawnSessionOrFail, waitUntil, type Arranged, type Wire } from "../sessions/testing";
 import {
-  codeOf,
-  framesTagged,
-  provisioned,
+  readErrorCode,
+  listFramesTagged,
+  provisionWorkspaceOrFail,
   readWorkspace,
-  repo,
+  createRepo,
   withFleet as withWorkspaces,
   type CheckoutRecord,
   type Frame,
   type WorkspaceRecord,
 } from "./testing";
 
-const frameWhen = (wire: Wire, tag: string, index = 0): Promise<Frame> =>
-  until(`sent ${String(index + 1)} ${tag} frames`, () => framesTagged(wire, tag)[index]);
+const waitForFrameTagged = (wire: Wire, tag: string, index = 0): Promise<Frame> =>
+  waitUntil(`sent ${String(index + 1)} ${tag} frames`, () => listFramesTagged(wire, tag)[index]);
 
-const provision = (arranged: Arranged, body: unknown): Promise<Response> =>
+const provisionWorkspace = (arranged: Arranged, body: unknown): Promise<Response> =>
   post(arranged.harness.base, "/api/v1/workspaces", body, arranged.token);
 
-const workspaceWhen = (
+const waitForWorkspace = (
   arranged: Arranged,
   id: string,
   ready: (record: WorkspaceRecord) => boolean,
 ): Promise<WorkspaceRecord> =>
-  until("moved the workspace", async () => {
+  waitUntil("moved the workspace", async () => {
     const record = await readWorkspace(arranged, id);
     return ready(record) ? record : undefined;
   });
@@ -47,7 +47,7 @@ const queryWorkspaces = async (
   return ((await response.json()) as { items: ReadonlyArray<WorkspaceRecord> }).items;
 };
 
-const checkoutIdOf = (checkout: CheckoutRecord): string => {
+const readCheckoutId = (checkout: CheckoutRecord): string => {
   const id = checkout.checkoutId ?? checkout.id;
   expect(id, "the checkout has no id").toBeTruthy();
   return String(id);
@@ -67,9 +67,9 @@ const ABSENT = "0198e4b0-0000-7000-8000-0000000000ff";
 describe("workspace.provision", () => {
   it("writes a provisioning primary with one clone checkout and tells the machine to make it", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
+      const web = await createRepo(arranged, "https://github.com/acme/web");
 
-      const workspace = await provisioned(arranged, {
+      const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
@@ -84,13 +84,13 @@ describe("workspace.provision", () => {
         branch: null,
       });
 
-      const frame = await frameWhen(arranged.wire, "workspaceProvision");
+      const frame = await waitForFrameTagged(arranged.wire, "workspaceProvision");
       expect(frame["workspaceId"]).toBe(workspace.id);
       expect(frame["kind"]).toBe("primary");
       const checkouts = frame["checkouts"] as ReadonlyArray<Record<string, unknown>>;
       expect(checkouts).toHaveLength(1);
       expect(checkouts[0]).toMatchObject({
-        checkoutId: checkoutIdOf(workspace.checkouts[0]!),
+        checkoutId: readCheckoutId(workspace.checkouts[0]!),
         resourceId: web,
         remote: "https://github.com/acme/web",
       });
@@ -104,26 +104,26 @@ describe("workspace.provision", () => {
   // path and one offered is refused rather than quietly ignored.
   it("refuses a path: a main workspace is always Hercule's own clone", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const refused = await provision(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const refused = await provisionWorkspace(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
         path: "/Users/rogier/code/web",
       });
-      expect(await codeOf(refused)).toBe("validation");
+      expect(await readErrorCode(refused)).toBe("validation");
     });
   });
 
   it("refuses a second primary of the same repo on the same machine", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      await provisioned(arranged, { resourceId: web, runnerId: arranged.runnerId });
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      await provisionWorkspaceOrFail(arranged, { resourceId: web, runnerId: arranged.runnerId });
 
-      const again = await provision(arranged, {
+      const again = await provisionWorkspace(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
-      expect(await codeOf(again)).toBe("conflict");
+      expect(await readErrorCode(again)).toBe("conflict");
       expect(await queryWorkspaces(arranged)).toHaveLength(1);
     });
   });
@@ -139,15 +139,15 @@ describe("workspace.provision", () => {
       expect([200, 201], await folder.clone().text()).toContain(folder.status);
       const folderId = ((await folder.json()) as { id: string }).id;
 
-      const refused = await provision(arranged, {
+      const refused = await provisionWorkspace(arranged, {
         resourceId: folderId,
         runnerId: arranged.runnerId,
       });
-      expect(await codeOf(refused)).toBe("invalid_state");
+      expect(await readErrorCode(refused)).toBe("invalid_state");
 
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const nowhere = await provision(arranged, { resourceId: web, runnerId: ABSENT });
-      expect(await codeOf(nowhere)).toBe("not_found");
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const nowhere = await provisionWorkspace(arranged, { resourceId: web, runnerId: ABSENT });
+      expect(await readErrorCode(nowhere)).toBe("not_found");
 
       expect(await queryWorkspaces(arranged)).toEqual([]);
     });
@@ -157,27 +157,27 @@ describe("workspace.provision", () => {
 describe("a primary the machine could not make", () => {
   it("is stood down and replaced by the next provision, rather than standing in its way", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const first = await provisioned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const first = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
-      await frameWhen(arranged.wire, "workspaceProvision");
+      await waitForFrameTagged(arranged.wire, "workspaceProvision");
       arranged.wire.send({
         _tag: "workspaceReport",
         workspaceId: first.id,
         status: "failed",
         message: "fatal: could not read from remote repository",
       } as never);
-      await workspaceWhen(arranged, first.id, (one) => one.status === "failed");
+      await waitForWorkspace(arranged, first.id, (one) => one.status === "failed");
 
-      const second = await provisioned(arranged, {
+      const second = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
       expect(second.id).not.toBe(first.id);
       expect(second.status).toBe("provisioning");
-      await frameWhen(arranged.wire, "workspaceProvision", 1);
+      await waitForFrameTagged(arranged.wire, "workspaceProvision", 1);
 
       // The one that failed is kept as the record of an attempt, not as a
       // workspace: it is gone, and it no longer holds the repo's place.
@@ -198,19 +198,19 @@ describe("the machine's report", () => {
    */
   it("records the branches a re-report brings for a workspace that is already ready", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const workspace = await provisioned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
-      const checkoutId = checkoutIdOf(workspace.checkouts[0]!);
+      const checkoutId = readCheckoutId(workspace.checkouts[0]!);
       arranged.wire.send({
         _tag: "workspaceReport",
         workspaceId: workspace.id,
         status: "ready",
         checkouts: [{ checkoutId, branch: "main", branches: ["main"], defaultBranch: "main" }],
       } as never);
-      await workspaceWhen(arranged, workspace.id, (one) => one.status === "ready");
+      await waitForWorkspace(arranged, workspace.id, (one) => one.status === "ready");
 
       // What the machine says after a session in it: the agent made a branch and
       // left the checkout on it.
@@ -228,7 +228,7 @@ describe("the machine's report", () => {
         ],
       } as never);
 
-      const after = await workspaceWhen(
+      const after = await waitForWorkspace(
         arranged,
         workspace.id,
         (one) => one.checkouts[0]?.branch === "feature/what-the-agent-did",
@@ -248,25 +248,28 @@ describe("the machine's report", () => {
    */
   it("writes no checkouts when it says ready about a workspace that has gone", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const session = await spawned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
       const workspaceId = String(session.workspaceId);
       const opened = (await readWorkspace(arranged, workspaceId)).checkouts[0]!;
-      const checkoutId = checkoutIdOf(opened);
+      const checkoutId = readCheckoutId(opened);
       arranged.wire.send({
         _tag: "workspaceReport",
         workspaceId,
         status: "deleted",
       } as never);
-      await workspaceWhen(arranged, workspaceId, (one) => one.status === "deleted");
+      await waitForWorkspace(arranged, workspaceId, (one) => one.status === "deleted");
 
       // A second workspace whose own report follows the stale one: frames are
       // handled in the order they arrive, so its readiness is what says the
       // stale one has been through.
-      const next = await provisioned(arranged, { resourceId: web, runnerId: arranged.runnerId });
+      const next = await provisionWorkspaceOrFail(arranged, {
+        resourceId: web,
+        runnerId: arranged.runnerId,
+      });
       arranged.wire.send({
         _tag: "workspaceReport",
         workspaceId,
@@ -281,7 +284,7 @@ describe("the machine's report", () => {
         status: "ready",
         checkouts: [],
       } as never);
-      await workspaceWhen(arranged, next.id, (one) => one.status === "ready");
+      await waitForWorkspace(arranged, next.id, (one) => one.status === "ready");
 
       const after = await readWorkspace(arranged, workspaceId);
       expect(after.status).toBe("deleted");
@@ -293,8 +296,8 @@ describe("the machine's report", () => {
 
   it("changes nothing when it says a workspace failed that has already come up", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const session = await spawned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
@@ -305,7 +308,7 @@ describe("the machine's report", () => {
         status: "ready",
         checkouts: [],
       } as never);
-      await workspaceWhen(arranged, workspaceId, (one) => one.status === "ready");
+      await waitForWorkspace(arranged, workspaceId, (one) => one.status === "ready");
 
       // A report that arrives late, or twice, is about a workspace that has
       // moved on: it must not take the sessions living in it down with it.
@@ -315,7 +318,7 @@ describe("the machine's report", () => {
         status: "failed",
         message: "fatal: could not read from remote repository",
       } as never);
-      await until("dispatched the session", async () => {
+      await waitUntil("dispatched the session", async () => {
         const response = await get(
           arranged.harness.base,
           `/api/v1/sessions/${session.id}`,
@@ -333,13 +336,13 @@ describe("the machine's report", () => {
 
   it("moves a provisioning primary to ready and stores each checkout's branches", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const workspace = await provisioned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
-      const checkoutId = checkoutIdOf(workspace.checkouts[0]!);
-      await frameWhen(arranged.wire, "workspaceProvision");
+      const checkoutId = readCheckoutId(workspace.checkouts[0]!);
+      await waitForFrameTagged(arranged.wire, "workspaceProvision");
 
       arranged.wire.send({
         _tag: "workspaceReport",
@@ -355,7 +358,7 @@ describe("the machine's report", () => {
         ],
       } as never);
 
-      const ready = await workspaceWhen(arranged, workspace.id, (one) => one.status === "ready");
+      const ready = await waitForWorkspace(arranged, workspace.id, (one) => one.status === "ready");
       expect(ready.provisionedAt).not.toBeNull();
       expect(ready.checkouts[0]).toMatchObject({
         branch: "feature/x",
@@ -367,12 +370,12 @@ describe("the machine's report", () => {
 
   it("keeps the message a failed report carried", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const workspace = await provisioned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
-      await frameWhen(arranged.wire, "workspaceProvision");
+      await waitForFrameTagged(arranged.wire, "workspaceProvision");
 
       arranged.wire.send({
         _tag: "workspaceReport",
@@ -381,7 +384,11 @@ describe("the machine's report", () => {
         message: "/Users/rogier/code/web is not a git repository",
       } as never);
 
-      const failed = await workspaceWhen(arranged, workspace.id, (one) => one.status === "failed");
+      const failed = await waitForWorkspace(
+        arranged,
+        workspace.id,
+        (one) => one.status === "failed",
+      );
       expect(failed.message).toBe("/Users/rogier/code/web is not a git repository");
     });
   });
@@ -407,13 +414,13 @@ describe("workspace.query and workspace.read", () => {
       );
       expect([200, 201], await created.clone().text()).toContain(created.status);
       const web = ((await created.json()) as { id: string }).id;
-      const api = await repo(arranged, "https://github.com/acme/api");
+      const api = await createRepo(arranged, "https://github.com/acme/api");
 
-      const primary = await provisioned(arranged, {
+      const primary = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
-      const other = await provisioned(arranged, {
+      const other = await provisionWorkspaceOrFail(arranged, {
         resourceId: api,
         runnerId: arranged.runnerId,
       });
@@ -448,15 +455,15 @@ describe("workspace.query and workspace.read", () => {
 
   it("names the sessions in a workspace that have not exited", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const session = await spawned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
       const workspaceId = session.workspaceId;
       expect(workspaceId, "the session got no workspace").toBeTruthy();
 
-      const held = await workspaceWhen(
+      const held = await waitForWorkspace(
         arranged,
         String(workspaceId),
         (one) => one.sessionIds.length > 0,
@@ -469,9 +476,9 @@ describe("workspace.query and workspace.read", () => {
 describe("a machine that was not connected", () => {
   it("is told about the workspace it owes as soon as it dials in again", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
+      const web = await createRepo(arranged, "https://github.com/acme/web");
       arranged.wire.close();
-      await until("saw the machine go", async () => {
+      await waitUntil("saw the machine go", async () => {
         const response = await get(
           arranged.harness.base,
           `/api/v1/runners/${arranged.runnerId}`,
@@ -484,14 +491,14 @@ describe("a machine that was not connected", () => {
       // D-20a: every frame the rows can rebuild is one that can be re-sent, so
       // provisioning while the machine is away is taken and queued rather than
       // refused.
-      const workspace = await provisioned(arranged, {
+      const workspace = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
       expect(workspace.status).toBe("provisioning");
 
       const again = await arranged.reconnect();
-      const frame = await frameWhen(again, "workspaceProvision");
+      const frame = await waitForFrameTagged(again, "workspaceProvision");
       expect(frame["workspaceId"]).toBe(workspace.id);
       expect(frame["kind"]).toBe("primary");
     });
@@ -501,8 +508,8 @@ describe("a machine that was not connected", () => {
 describe("workspace.dispose", () => {
   it("tells the machine to tear an ephemeral down and marks it deleted", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const session = await spawned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
@@ -518,7 +525,7 @@ describe("workspace.dispose", () => {
       );
       expect([200, 204], await response.clone().text()).toContain(response.status);
 
-      const frame = await frameWhen(arranged.wire, "workspaceDispose");
+      const frame = await waitForFrameTagged(arranged.wire, "workspaceDispose");
       expect(frame["workspaceId"]).toBe(workspaceId);
 
       const gone = await readWorkspace(arranged, workspaceId);
@@ -531,19 +538,19 @@ describe("workspace.dispose", () => {
         `/api/v1/workspaces/${workspaceId}`,
         arranged.token,
       );
-      expect(await codeOf(again)).toBe("invalid_state");
+      expect(await readErrorCode(again)).toBe("invalid_state");
     });
   });
 
   it("refuses while a session is still living in it, naming how many", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const session = await spawned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
       });
       const workspaceId = String(session.workspaceId);
-      await workspaceWhen(arranged, workspaceId, (one) => one.sessionIds.length > 0);
+      await waitForWorkspace(arranged, workspaceId, (one) => one.sessionIds.length > 0);
 
       const refused = await del(
         arranged.harness.base,
@@ -551,10 +558,10 @@ describe("workspace.dispose", () => {
         arranged.token,
       );
       const said = await refused.clone().text();
-      expect(await codeOf(refused)).toBe("invalid_state");
+      expect(await readErrorCode(refused)).toBe("invalid_state");
       expect(said).toContain("1 session(s)");
       expect((await readWorkspace(arranged, workspaceId)).status).not.toBe("deleted");
-      expect(framesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
+      expect(listFramesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
 
       // Once the thread is over, the directory is nobody's.
       const stopped = await send(
@@ -575,8 +582,8 @@ describe("workspace.dispose", () => {
 
   it("never tears a primary down", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const primary = await provisioned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const primary = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
@@ -586,9 +593,9 @@ describe("workspace.dispose", () => {
         `/api/v1/workspaces/${primary.id}`,
         arranged.token,
       );
-      expect(await codeOf(refused)).toBe("invalid_state");
+      expect(await readErrorCode(refused)).toBe("invalid_state");
       expect((await readWorkspace(arranged, primary.id)).status).toBe("provisioning");
-      expect(framesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
+      expect(listFramesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
     });
   });
 });
@@ -596,13 +603,13 @@ describe("workspace.dispose", () => {
 describe("runner.retire", () => {
   it("loses every workspace on the machine that had not already ended", async () => {
     await withWorkspaces(async (arranged) => {
-      const web = await repo(arranged, "https://github.com/acme/web");
-      const api = await repo(arranged, "https://github.com/acme/api");
-      const primary = await provisioned(arranged, {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const api = await createRepo(arranged, "https://github.com/acme/api");
+      const primary = await provisionWorkspaceOrFail(arranged, {
         resourceId: web,
         runnerId: arranged.runnerId,
       });
-      const session = await spawned(arranged, {
+      const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: api }] },
       });
@@ -623,7 +630,7 @@ describe("runner.retire", () => {
       );
       expect(retired.status, await retired.clone().text()).toBe(200);
 
-      const lost = await workspaceWhen(arranged, primary.id, (one) => one.status === "lost");
+      const lost = await waitForWorkspace(arranged, primary.id, (one) => one.status === "lost");
       expect(lost.status).toBe("lost");
       // The one that was already gone is left as it was.
       expect((await readWorkspace(arranged, ephemeral)).status).toBe("deleted");

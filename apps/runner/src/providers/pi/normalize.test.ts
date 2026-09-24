@@ -48,7 +48,7 @@ const ZERO = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-const message = (content: ReadonlyArray<Record<string, unknown>>, totals = usage) => ({
+const buildMessage = (content: ReadonlyArray<Record<string, unknown>>, totals = usage) => ({
   role: "assistant",
   content,
   api: "openai-completions",
@@ -59,29 +59,30 @@ const message = (content: ReadonlyArray<Record<string, unknown>>, totals = usage
   timestamp: 1789373122124,
 });
 
-const line = (event: Record<string, unknown>): string => JSON.stringify(event);
+const buildLine = (event: Record<string, unknown>): string => JSON.stringify(event);
 
-const state = () => buildNormalizingState(SESSION, NATIVE, undefined);
+const buildTestState = () => buildNormalizingState(SESSION, NATIVE, undefined);
 
-const through = (
+const normalizeEvents = (
   running: ReturnType<typeof buildNormalizingState>,
   events: ReadonlyArray<Record<string, unknown>>,
-): ReadonlyArray<ProviderEvent> => events.flatMap((event) => normalize(running, line(event)));
+): ReadonlyArray<ProviderEvent> => events.flatMap((event) => normalize(running, buildLine(event)));
 
 /** A whole sequence against a state of its own, which is the common case. */
-const fresh = (events: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<ProviderEvent> =>
-  through(state(), events);
+const normalizeFromStart = (
+  events: ReadonlyArray<Record<string, unknown>>,
+): ReadonlyArray<ProviderEvent> => normalizeEvents(buildTestState(), events);
 
-const tags = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+const listEventTags = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
   events.map((event) => event._tag);
 
-const only = <Tag extends ProviderEvent["_tag"]>(
+const filterByTag = <Tag extends ProviderEvent["_tag"]>(
   events: ReadonlyArray<ProviderEvent>,
   tag: Tag,
 ): ReadonlyArray<Extract<ProviderEvent, { _tag: Tag }>> =>
   events.filter((event): event is Extract<ProviderEvent, { _tag: Tag }> => event._tag === tag);
 
-const delta = (assistantMessageEvent: Record<string, unknown>) => ({
+const buildMessageUpdate = (assistantMessageEvent: Record<string, unknown>) => ({
   type: "message_update",
   usage,
   assistantMessageEvent,
@@ -92,25 +93,25 @@ const TEXT = [{ type: "text", text: "OK" }];
 const ANSWERING = [
   { type: "agent_start" },
   { type: "turn_start" },
-  { type: "message_start", message: message([], ZERO) },
-  delta({ type: "text_start", contentIndex: 0 }),
-  delta({ type: "text_delta", contentIndex: 0, delta: "O" }),
-  delta({ type: "text_delta", contentIndex: 0, delta: "K" }),
-  delta({ type: "text_end", contentIndex: 0, content: "OK" }),
-  { type: "message_end", message: message(TEXT) },
-  { type: "turn_end", message: message(TEXT), toolResults: [] },
-  { type: "agent_end", messages: [message(TEXT)], willRetry: false },
+  { type: "message_start", message: buildMessage([], ZERO) },
+  buildMessageUpdate({ type: "text_start", contentIndex: 0 }),
+  buildMessageUpdate({ type: "text_delta", contentIndex: 0, delta: "O" }),
+  buildMessageUpdate({ type: "text_delta", contentIndex: 0, delta: "K" }),
+  buildMessageUpdate({ type: "text_end", contentIndex: 0, content: "OK" }),
+  { type: "message_end", message: buildMessage(TEXT) },
+  { type: "turn_end", message: buildMessage(TEXT), toolResults: [] },
+  { type: "agent_end", messages: [buildMessage(TEXT)], willRetry: false },
   { type: "agent_settled" },
 ];
 
-const toolStart = (toolName: string, args: Record<string, unknown>) => ({
+const buildToolStart = (toolName: string, args: Record<string, unknown>) => ({
   type: "tool_execution_start",
   toolCallId: CALL,
   toolName,
   args,
 });
 
-const partial = (text: string) => ({
+const buildToolUpdate = (text: string) => ({
   type: "tool_execution_update",
   toolCallId: CALL,
   toolName: "bash",
@@ -121,7 +122,7 @@ const partial = (text: string) => ({
   },
 });
 
-const toolEnd = (isError: boolean) => ({
+const buildToolEnd = (isError: boolean) => ({
   type: "tool_execution_end",
   toolCallId: CALL,
   toolName: "bash",
@@ -131,9 +132,9 @@ const toolEnd = (isError: boolean) => ({
 
 describe("what a whole pi turn normalizes to", () => {
   it("reports the turn, the assistant's item, its deltas, and both completions", () => {
-    const events = fresh(ANSWERING);
+    const events = normalizeFromStart(ANSWERING);
 
-    expect(tags(events)).toEqual([
+    expect(listEventTags(events)).toEqual([
       "turn.started",
       "item.started",
       "content.delta",
@@ -142,16 +143,16 @@ describe("what a whole pi turn normalizes to", () => {
       "session.usage.updated",
       "turn.completed",
     ]);
-    expect(only(events, "item.started")[0]?.kind).toBe("assistant_message");
-    expect(only(events, "content.delta").map((event) => event.delta)).toEqual(["O", "K"]);
-    expect(only(events, "content.delta")[0]?.streamKind).toBe("assistant_text");
-    expect(only(events, "item.completed")[0]?.status).toBe("completed");
+    expect(filterByTag(events, "item.started")[0]?.kind).toBe("assistant_message");
+    expect(filterByTag(events, "content.delta").map((event) => event.delta)).toEqual(["O", "K"]);
+    expect(filterByTag(events, "content.delta")[0]?.streamKind).toBe("assistant_text");
+    expect(filterByTag(events, "item.completed")[0]?.status).toBe("completed");
   });
 
   it("files everything in the turn it opened, so a consumer can bracket it", () => {
-    const events = fresh(ANSWERING);
+    const events = normalizeFromStart(ANSWERING);
 
-    const turnId = only(events, "turn.started")[0]?.turnId;
+    const turnId = filterByTag(events, "turn.started")[0]?.turnId;
     expect(turnId).toBeDefined();
     for (const event of events) {
       if ("turnId" in event) expect(event.turnId).toBe(turnId);
@@ -159,167 +160,178 @@ describe("what a whole pi turn normalizes to", () => {
   });
 
   it("reports thinking as its own item on its own stream, before the answer", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       { type: "agent_start" },
-      { type: "message_start", message: message([], ZERO) },
-      delta({ type: "thinking_start", contentIndex: 0 }),
-      delta({ type: "thinking_delta", contentIndex: 0, delta: "The user said hi." }),
-      delta({ type: "thinking_end", contentIndex: 0, content: "The user said hi." }),
-      delta({ type: "text_start", contentIndex: 1 }),
-      delta({ type: "text_delta", contentIndex: 1, delta: "OK" }),
-      delta({ type: "text_end", contentIndex: 1, content: "OK" }),
-      { type: "message_end", message: message([{ type: "thinking", thinking: "..." }, ...TEXT]) },
+      { type: "message_start", message: buildMessage([], ZERO) },
+      buildMessageUpdate({ type: "thinking_start", contentIndex: 0 }),
+      buildMessageUpdate({ type: "thinking_delta", contentIndex: 0, delta: "The user said hi." }),
+      buildMessageUpdate({ type: "thinking_end", contentIndex: 0, content: "The user said hi." }),
+      buildMessageUpdate({ type: "text_start", contentIndex: 1 }),
+      buildMessageUpdate({ type: "text_delta", contentIndex: 1, delta: "OK" }),
+      buildMessageUpdate({ type: "text_end", contentIndex: 1, content: "OK" }),
+      {
+        type: "message_end",
+        message: buildMessage([{ type: "thinking", thinking: "..." }, ...TEXT]),
+      },
     ]);
 
-    expect(only(events, "item.started").map((event) => event.kind)).toEqual([
+    expect(filterByTag(events, "item.started").map((event) => event.kind)).toEqual([
       "reasoning",
       "assistant_message",
     ]);
-    const reasoning = only(events, "content.delta").filter(
+    const reasoning = filterByTag(events, "content.delta").filter(
       (event) => event.streamKind === "reasoning_text",
     );
     expect(reasoning.map((event) => event.delta)).toEqual(["The user said hi."]);
     // The two blocks are two items: a surface that folded them into one would
     // show the model's thinking as its answer.
-    expect(new Set(only(events, "item.started").map((event) => event.itemId)).size).toBe(2);
+    expect(new Set(filterByTag(events, "item.started").map((event) => event.itemId)).size).toBe(2);
   });
 
   it("reports the session's usage and the turn's own cost when the run settles", () => {
-    const events = fresh(ANSWERING);
+    const events = normalizeFromStart(ANSWERING);
 
-    expect(only(events, "session.usage.updated")[0]?.usage).toMatchObject({
+    expect(filterByTag(events, "session.usage.updated")[0]?.usage).toMatchObject({
       inputTokens: 120,
       outputTokens: 8,
       cacheReadTokens: 30,
       cacheWriteTokens: 0,
     });
-    const completed = only(events, "turn.completed")[0];
+    const completed = filterByTag(events, "turn.completed")[0];
     expect(completed?.state).toBe("completed");
     expect(completed?.costUsd).toBe(usage.cost.total);
     expect(completed?.usage).toMatchObject({ inputTokens: 120, outputTokens: 8 });
   });
 
   it("warns about a run pi will retry by itself, and ends no turn on it", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       { type: "agent_start" },
       { type: "agent_end", messages: [], willRetry: true },
     ]);
 
-    expect(only(events, "runtime.warning")).toHaveLength(1);
-    expect(only(events, "runtime.warning")[0]?.message ?? "").not.toBe("");
+    expect(filterByTag(events, "runtime.warning")).toHaveLength(1);
+    expect(filterByTag(events, "runtime.warning")[0]?.message ?? "").not.toBe("");
     // The turn is not over: pi is about to run again under it.
-    expect(only(events, "turn.completed")).toEqual([]);
+    expect(filterByTag(events, "turn.completed")).toEqual([]);
   });
 });
 
 describe("what a tool call on a pi turn normalizes to", () => {
   it("reports a shell command as a command execution, streaming only what is new", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       { type: "agent_start" },
-      toolStart("bash", { command: "echo hello" }),
-      partial("hel"),
-      partial("hello\n"),
-      toolEnd(false),
+      buildToolStart("bash", { command: "echo hello" }),
+      buildToolUpdate("hel"),
+      buildToolUpdate("hello\n"),
+      buildToolEnd(false),
     ]);
 
-    expect(tags(events)).toEqual([
+    expect(listEventTags(events)).toEqual([
       "turn.started",
       "item.started",
       "content.delta",
       "content.delta",
       "item.completed",
     ]);
-    expect(only(events, "item.started")[0]?.kind).toBe("command_execution");
+    expect(filterByTag(events, "item.started")[0]?.kind).toBe("command_execution");
     // pi's `partialResult` is the whole output so far, so the delta is the
     // suffix: appending the cumulative text would print the output twice.
-    expect(only(events, "content.delta").map((event) => event.delta)).toEqual(["hel", "lo\n"]);
-    expect(only(events, "content.delta")[0]?.streamKind).toBe("command_output");
-    expect(only(events, "item.completed")[0]?.status).toBe("completed");
+    expect(filterByTag(events, "content.delta").map((event) => event.delta)).toEqual([
+      "hel",
+      "lo\n",
+    ]);
+    expect(filterByTag(events, "content.delta")[0]?.streamKind).toBe("command_output");
+    expect(filterByTag(events, "item.completed")[0]?.status).toBe("completed");
   });
 
   it("reports a failed tool call as a failed item", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       { type: "agent_start" },
-      toolStart("bash", { command: "nope" }),
-      toolEnd(true),
+      buildToolStart("bash", { command: "nope" }),
+      buildToolEnd(true),
     ]);
 
-    expect(only(events, "item.completed")[0]?.status).toBe("failed");
+    expect(filterByTag(events, "item.completed")[0]?.status).toBe("failed");
   });
 
   it("reports an edit as a file change and anything else as a tool call", () => {
-    const edited = fresh([
+    const edited = normalizeFromStart([
       { type: "agent_start" },
-      toolStart("edit", {
+      buildToolStart("edit", {
         path: "/tmp/work/main.ts",
         edits: [{ oldText: "a", newText: "b" }],
       }),
     ]);
-    const written = fresh([
+    const written = normalizeFromStart([
       { type: "agent_start" },
-      toolStart("write", { path: "/tmp/work/new.ts", content: "b" }),
+      buildToolStart("write", { path: "/tmp/work/new.ts", content: "b" }),
     ]);
-    const other = fresh([{ type: "agent_start" }, toolStart("grep", { pattern: "todo" })]);
+    const other = normalizeFromStart([
+      { type: "agent_start" },
+      buildToolStart("grep", { pattern: "todo" }),
+    ]);
 
-    expect(only(edited, "item.started")[0]?.kind).toBe("file_change");
-    expect(only(written, "item.started")[0]?.kind).toBe("file_change");
-    expect(only(other, "item.started")[0]?.kind).toBe("tool_call");
+    expect(filterByTag(edited, "item.started")[0]?.kind).toBe("file_change");
+    expect(filterByTag(written, "item.started")[0]?.kind).toBe("file_change");
+    expect(filterByTag(other, "item.started")[0]?.kind).toBe("tool_call");
   });
 });
 
 describe("how a turn that did not simply finish ends", () => {
-  const stopping = (stopReason: string, extra: Record<string, unknown> = {}) => [
+  const buildStoppedEvents = (stopReason: string, extra: Record<string, unknown> = {}) => [
     { type: "agent_start" },
-    { type: "turn_end", message: { ...message(TEXT), stopReason, ...extra }, toolResults: [] },
+    { type: "turn_end", message: { ...buildMessage(TEXT), stopReason, ...extra }, toolResults: [] },
     {
       type: "agent_end",
-      messages: [{ ...message(TEXT), stopReason, ...extra }],
+      messages: [{ ...buildMessage(TEXT), stopReason, ...extra }],
       willRetry: false,
     },
     { type: "agent_settled" },
   ];
 
   it("reports a turn the user stopped as interrupted", () => {
-    const events = fresh(stopping("aborted"));
+    const events = normalizeFromStart(buildStoppedEvents("aborted"));
 
-    expect(only(events, "turn.completed")[0]?.state).toBe("interrupted");
+    expect(filterByTag(events, "turn.completed")[0]?.state).toBe("interrupted");
   });
 
   it("reports a turn that errored as failed, in the words pi used", () => {
-    const events = fresh(stopping("error", { errorMessage: "1210 thinking is not supported" }));
+    const events = normalizeFromStart(
+      buildStoppedEvents("error", { errorMessage: "1210 thinking is not supported" }),
+    );
 
-    const completed = only(events, "turn.completed")[0];
+    const completed = filterByTag(events, "turn.completed")[0];
     expect(completed?.state).toBe("failed");
     expect(completed?.error).toContain("1210");
     // The failure is reported as it happens too: a turn state alone is a row
     // that says something went wrong without saying what.
-    expect(only(events, "runtime.error")[0]?.class).toBe("agent_error");
+    expect(filterByTag(events, "runtime.error")[0]?.class).toBe("agent_error");
   });
 
   it("carries one turn across pi's own retry, and prices both attempts", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       { type: "agent_start" },
-      { type: "turn_end", message: message(TEXT), toolResults: [] },
+      { type: "turn_end", message: buildMessage(TEXT), toolResults: [] },
       { type: "agent_end", messages: [], willRetry: true },
       { type: "agent_start" },
-      { type: "turn_end", message: message(TEXT), toolResults: [] },
-      { type: "agent_end", messages: [message(TEXT)], willRetry: false },
+      { type: "turn_end", message: buildMessage(TEXT), toolResults: [] },
+      { type: "agent_end", messages: [buildMessage(TEXT)], willRetry: false },
       { type: "agent_settled" },
     ]);
 
     // One episode: the attempt after a retry is the same turn carrying on.
-    expect(only(events, "turn.started")).toHaveLength(1);
-    expect(only(events, "turn.completed")).toHaveLength(1);
+    expect(filterByTag(events, "turn.started")).toHaveLength(1);
+    expect(filterByTag(events, "turn.completed")).toHaveLength(1);
     // What the failed attempt cost is still spent.
-    expect(only(events, "turn.completed")[0]?.costUsd).toBeCloseTo(usage.cost.total * 2, 12);
+    expect(filterByTag(events, "turn.completed")[0]?.costUsd).toBeCloseTo(usage.cost.total * 2, 12);
   });
 
   it("carries one turn across a compaction and a queued message alike", () => {
     const answered = [
-      { type: "turn_end", message: message(TEXT), toolResults: [] },
-      { type: "agent_end", messages: [message(TEXT)], willRetry: false },
+      { type: "turn_end", message: buildMessage(TEXT), toolResults: [] },
+      { type: "agent_end", messages: [buildMessage(TEXT)], willRetry: false },
     ];
-    const compacted = fresh([
+    const compacted = normalizeFromStart([
       { type: "agent_start" },
       ...answered,
       { type: "compaction_start", reason: "threshold" },
@@ -329,7 +341,7 @@ describe("how a turn that did not simply finish ends", () => {
       ...answered,
       { type: "agent_settled" },
     ]);
-    const queued = fresh([
+    const queued = normalizeFromStart([
       { type: "agent_start" },
       ...answered,
       // A steer that landed between the run ending and the session settling.
@@ -339,59 +351,68 @@ describe("how a turn that did not simply finish ends", () => {
     ]);
 
     for (const events of [compacted, queued]) {
-      expect(only(events, "turn.started")).toHaveLength(1);
-      expect(only(events, "turn.completed")).toHaveLength(1);
-      expect(only(events, "turn.completed")[0]?.costUsd).toBeCloseTo(usage.cost.total * 2, 12);
+      expect(filterByTag(events, "turn.started")).toHaveLength(1);
+      expect(filterByTag(events, "turn.completed")).toHaveLength(1);
+      expect(filterByTag(events, "turn.completed")[0]?.costUsd).toBeCloseTo(
+        usage.cost.total * 2,
+        12,
+      );
     }
   });
 
   it("reports a failure pi retried and gave up on once, not twice", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       { type: "agent_start" },
       {
         type: "agent_end",
-        messages: [{ ...message(TEXT), stopReason: "error", errorMessage: "529 overloaded" }],
+        messages: [{ ...buildMessage(TEXT), stopReason: "error", errorMessage: "529 overloaded" }],
         willRetry: false,
       },
       // pi says the attempts are over after the run that ended them.
       { type: "auto_retry_end", success: false, attempt: 3, finalError: "529 overloaded" },
     ]);
 
-    expect(only(events, "runtime.error")).toHaveLength(1);
-    expect(only(events, "runtime.error")[0]?.class).toBe("agent_error");
+    expect(filterByTag(events, "runtime.error")).toHaveLength(1);
+    expect(filterByTag(events, "runtime.error")[0]?.class).toBe("agent_error");
   });
 
   it("says an answer was cut at the output limit, and still ends the turn normally", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       { type: "agent_start" },
-      { type: "turn_end", message: { ...message(TEXT), stopReason: "length" }, toolResults: [] },
+      {
+        type: "turn_end",
+        message: { ...buildMessage(TEXT), stopReason: "length" },
+        toolResults: [],
+      },
       { type: "agent_settled" },
     ]);
 
-    expect(only(events, "runtime.warning")[0]?.message).toContain("cut short");
-    expect(only(events, "turn.completed")[0]?.state).toBe("completed");
+    expect(filterByTag(events, "runtime.warning")[0]?.message).toContain("cut short");
+    expect(filterByTag(events, "turn.completed")[0]?.state).toBe("completed");
   });
 
   it("closes the items still running when the turn ends", () => {
-    const events = fresh([
+    const events = normalizeFromStart([
       { type: "agent_start" },
-      { type: "message_start", message: message([], ZERO) },
-      delta({ type: "text_start", contentIndex: 0 }),
-      toolStart("bash", { command: "sleep 100" }),
+      { type: "message_start", message: buildMessage([], ZERO) },
+      buildMessageUpdate({ type: "text_start", contentIndex: 0 }),
+      buildToolStart("bash", { command: "sleep 100" }),
       { type: "agent_settled" },
     ]);
 
     // A tool whose result never came and a block pi stopped mid-stream: a row
     // nobody closes spins for the rest of the session.
-    expect(only(events, "item.completed").map((event) => event.status)).toEqual([
+    expect(filterByTag(events, "item.completed").map((event) => event.status)).toEqual([
       "failed",
       "failed",
     ]);
-    expect(only(events, "item.completed")).toHaveLength(only(events, "item.started").length);
+    expect(filterByTag(events, "item.completed")).toHaveLength(
+      filterByTag(events, "item.started").length,
+    );
   });
 
   it("reports what failed around the turn without ending it", () => {
-    const extension = fresh([
+    const extension = normalizeFromStart([
       { type: "agent_start" },
       {
         type: "extension_error",
@@ -400,37 +421,39 @@ describe("how a turn that did not simply finish ends", () => {
         error: "the approval hook threw",
       },
     ]);
-    const retries = fresh([
+    const retries = normalizeFromStart([
       { type: "agent_start" },
       { type: "auto_retry_end", success: false, attempt: 3, finalError: "529 overloaded" },
     ]);
 
-    expect(only(extension, "runtime.error")[0]?.class).toBe("extension_error");
-    expect(only(extension, "runtime.error")[0]?.message).toContain("the approval hook threw");
-    expect(only(retries, "runtime.error")[0]?.class).toBe("auto_retry_failed");
-    expect(only(retries, "runtime.error")[0]?.message).toContain("529");
+    expect(filterByTag(extension, "runtime.error")[0]?.class).toBe("extension_error");
+    expect(filterByTag(extension, "runtime.error")[0]?.message).toContain(
+      "the approval hook threw",
+    );
+    expect(filterByTag(retries, "runtime.error")[0]?.class).toBe("auto_retry_failed");
+    expect(filterByTag(retries, "runtime.error")[0]?.message).toContain("529");
     // Neither is the end of the turn: the settle that follows is.
-    expect(only(extension, "turn.completed")).toEqual([]);
-    expect(only(retries, "turn.completed")).toEqual([]);
+    expect(filterByTag(extension, "turn.completed")).toEqual([]);
+    expect(filterByTag(retries, "turn.completed")).toEqual([]);
   });
 });
 
 describe("a line pi wrote that is not an event", () => {
   it("warns about it and carries on with the next one", () => {
-    const running = state();
+    const running = buildTestState();
 
-    const stray = through(running, [{ type: "agent_start" }]).concat(
+    const stray = normalizeEvents(running, [{ type: "agent_start" }]).concat(
       normalize(running, "pi: warning, something on stdout that is not JSON"),
     );
-    const after = through(running, [{ type: "agent_settled" }]);
+    const after = normalizeEvents(running, [{ type: "agent_settled" }]);
 
-    expect(only(stray, "runtime.warning")).toHaveLength(1);
-    expect(only(stray, "runtime.warning")[0]?.message ?? "").not.toBe("");
+    expect(filterByTag(stray, "runtime.warning")).toHaveLength(1);
+    expect(filterByTag(stray, "runtime.warning")[0]?.message ?? "").not.toBe("");
     // Not the line itself: what pi could not frame is as likely to be a
     // credential in a stack trace as a complaint.
-    expect(only(stray, "runtime.warning")[0]?.message).not.toContain("something on stdout");
+    expect(filterByTag(stray, "runtime.warning")[0]?.message).not.toContain("something on stdout");
     // Skipped, not decoded into something: the line said nothing about a turn.
-    expect(tags(stray)).toEqual(["turn.started", "runtime.warning"]);
-    expect(tags(after)).toContain("turn.completed");
+    expect(listEventTags(stray)).toEqual(["turn.started", "runtime.warning"]);
+    expect(listEventTags(after)).toContain("turn.completed");
   });
 });

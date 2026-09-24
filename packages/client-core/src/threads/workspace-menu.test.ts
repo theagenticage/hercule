@@ -5,7 +5,7 @@
  * that cannot be had yet says why rather than going missing.
  */
 import { describe, expect, it } from "vitest";
-import { workspaceMenu } from "./workspace-menu";
+import { buildWorkspaceMenu } from "./workspace-menu";
 import {
   COVE,
   INFRA,
@@ -15,17 +15,17 @@ import {
   RUNBOOKS,
   WEBSHOP,
   WEBSHOP_PROJECT,
-  project,
-  session,
+  buildProject,
+  buildSession,
 } from "./workspaces.testing";
 
 const SESSIONS = [
-  session({ id: "s-flaky", title: "Fix flaky webhook tests" }),
-  session({ id: "s-runbook", title: "Write the retry runbook" }),
+  buildSession({ id: "s-flaky", title: "Fix flaky webhook tests" }),
+  buildSession({ id: "s-runbook", title: "Write the retry runbook" }),
 ];
 
-const menu = (over: Partial<Parameters<typeof workspaceMenu>[0]> = {}) =>
-  workspaceMenu({
+const buildMenu = (over: Partial<Parameters<typeof buildWorkspaceMenu>[0]> = {}) =>
+  buildWorkspaceMenu({
     project: WEBSHOP_PROJECT,
     repos: [WEBSHOP],
     workspaces: [PRIMARY, RUN_3F1],
@@ -36,10 +36,10 @@ const menu = (over: Partial<Parameters<typeof workspaceMenu>[0]> = {}) =>
     ...over,
   });
 
-describe("workspaceMenu", () => {
+describe("buildWorkspaceMenu", () => {
   // D-20d: a project that holds a repo never offers None.
   it("leads with the main workspace in a project that holds one repo", () => {
-    expect(menu().rows.map((row) => row.name)).toEqual([
+    expect(buildMenu().rows.map((row) => row.name)).toEqual([
       "Main workspace",
       "New workspace",
       "hercule/run-3f1",
@@ -47,7 +47,7 @@ describe("workspaceMenu", () => {
   });
 
   it("leads with a worktree of each repo in a project that holds several, naming each checkout", () => {
-    const rows = menu({ repos: [INFRA, RUNBOOKS], workspaces: [] }).rows;
+    const rows = buildMenu({ repos: [INFRA, RUNBOOKS], workspaces: [] }).rows;
 
     expect(rows.map((row) => row.name)).toEqual([
       "New workspace",
@@ -58,14 +58,14 @@ describe("workspaceMenu", () => {
   });
 
   it("says what a main workspace is on, and says so when the machine has none", () => {
-    expect(menu().rows[0]?.sub).toBe("on main · you and the agent share the files");
-    expect(menu({ runnerId: COVE.id }).rows[0]?.sub).toBe(
+    expect(buildMenu().rows[0]?.sub).toBe("on main · you and the agent share the files");
+    expect(buildMenu({ runnerId: COVE.id }).rows[0]?.sub).toBe(
       "not cloned on cove · clones on first use",
     );
   });
 
   it("names a live worktree after its branch, with its machine and the threads in it", () => {
-    const row = menu().rows[2];
+    const row = buildMenu().rows[2];
 
     expect(row?.mono).toBe(true);
     expect(row?.note).toBe("moss");
@@ -74,20 +74,24 @@ describe("workspaceMenu", () => {
 
   // D-20d: None is offered only where there is nothing else to offer.
   it("offers None alone in a project with no repo", () => {
-    const empty = menu({ repos: [], workspaces: [], project: project("p-sandbox", "sandbox") });
+    const empty = buildMenu({
+      repos: [],
+      workspaces: [],
+      project: buildProject("p-sandbox", "sandbox"),
+    });
 
     expect(empty.rows.map((row) => row.name)).toEqual(["None"]);
   });
 
   it("calls it No workspace on a draft that stands in no project", () => {
-    const loose = menu({ repos: [], workspaces: [], project: undefined });
+    const loose = buildMenu({ repos: [], workspaces: [], project: undefined });
 
     expect(loose.rows.map((row) => row.name)).toEqual(["No workspace"]);
   });
 
   it("reads the trigger off the row in force", () => {
-    expect(menu().label).toBe("Main workspace");
-    expect(menu({ pick: { kind: "existing", workspaceId: RUN_3F1.id } }).label).toBe(
+    expect(buildMenu().label).toBe("Main workspace");
+    expect(buildMenu({ pick: { kind: "existing", workspaceId: RUN_3F1.id } }).label).toBe(
       "hercule/run-3f1",
     );
   });

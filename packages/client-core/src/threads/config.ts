@@ -74,7 +74,7 @@ export interface ThreadCatalogs {
  * What the thread itself runs with, before any pick: the draft's own config,
  * or what the session was spawned with and still carries.
  */
-export const threadConfig = (thread: Thread): ThreadConfig =>
+export const readThreadConfig = (thread: Thread): ThreadConfig =>
   thread.kind === "draft"
     ? thread.config
     : {
@@ -98,7 +98,7 @@ export const threadConfig = (thread: Thread): ThreadConfig =>
  * thread stored only while both are the ones it stored them for; any other
  * pair shows its own defaults.
  */
-export const effectiveConfig = (base: ThreadConfig, picks: ThreadPicks): ThreadConfig => {
+export const computeEffectiveConfig = (base: ThreadConfig, picks: ThreadPicks): ThreadConfig => {
   const instanceId = picks.instanceId ?? base.instanceId;
   const model = picks.model ?? base.model;
   const same = instanceId === base.instanceId && model === base.model;

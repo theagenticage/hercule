@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { memoryStorage } from "@hercule/ui/testing";
+import { createMemoryStorage } from "@hercule/ui/testing";
 import script from "../public/theme-init.js?raw";
 
 /**
@@ -14,7 +14,7 @@ import script from "../public/theme-init.js?raw";
  */
 
 /** Runs the script the way the page does, against this storage and document. */
-const run = (storage: Storage): void => {
+const runThemeScript = (storage: Storage): void => {
   vi.stubGlobal("localStorage", storage);
   delete document.documentElement.dataset.theme;
   // The script is plain source with no imports; direct eval compiles and runs
@@ -28,20 +28,20 @@ afterEach(() => {
 
 describe("the pre-paint theme script", () => {
   it("paints a stored light choice before the app renders", () => {
-    run(memoryStorage({ "hercule:theme": "light" }));
+    runThemeScript(createMemoryStorage({ "hercule:theme": "light" }));
     expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("paints a stored dark choice before the app renders", () => {
-    run(memoryStorage({ "hercule:theme": "dark" }));
+    runThemeScript(createMemoryStorage({ "hercule:theme": "dark" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("paints nothing for no choice and for a value it does not know", () => {
-    run(memoryStorage());
+    runThemeScript(createMemoryStorage());
     expect(document.documentElement.dataset.theme).toBeUndefined();
 
-    run(memoryStorage({ "hercule:theme": "purple" }));
+    runThemeScript(createMemoryStorage({ "hercule:theme": "purple" }));
     expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 
@@ -51,7 +51,7 @@ describe("the pre-paint theme script", () => {
         throw new Error("The quota has been exceeded");
       },
     } as unknown as Storage;
-    run(denied);
+    runThemeScript(denied);
     expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { runnerFactsReading } from "@hercule/client-core";
+import { describeRunnerFacts } from "@hercule/client-core";
 import type { Runner } from "@hercule/contract";
 import { Connectivity } from "../../../screens/connectivity";
 
@@ -8,8 +8,8 @@ import { Connectivity } from "../../../screens/connectivity";
  * In the order a person scans it. A row runs the facts together, so the two
  * sizes carry what they are: on the page each has a label of its own.
  */
-const probed = (runner: Runner): ReadonlyArray<string> => {
-  const reading = runnerFactsReading(runner);
+const listProbedFacts = (runner: Runner): ReadonlyArray<string> => {
+  const reading = describeRunnerFacts(runner);
   return [
     reading.machine,
     reading.memory === null ? null : `${reading.memory} memory`,
@@ -39,7 +39,7 @@ export function RunnerRow({
   readonly timezone: string;
 }): JSX.Element {
   const skewed = runner.version !== null && runner.version !== controllerVersion;
-  const facts = probed(runner);
+  const facts = listProbedFacts(runner);
 
   return (
     <Link

@@ -62,12 +62,13 @@ export const thisMachine: Machine = {
  * Cut to what the protocol carries. One over-long value would otherwise make the
  * whole report fail to encode, which a runner meets as a connection it cannot make.
  */
-const fact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
+const truncateFact = (value: string): string => value.slice(0, MAX_FACT_LENGTH);
 
 /** What `--version` prints is the binary's business, so the unrecognisable goes raw. */
-const versionFrom = (printed: string): string => fact(SEMVER.exec(printed)?.[0] ?? printed.trim());
+const parseVersion = (printed: string): string =>
+  truncateFact(SEMVER.exec(printed)?.[0] ?? printed.trim());
 
-const toolchainAt = (machine: Machine, name: string): Effect.Effect<Toolchain | undefined> =>
+const findToolchain = (machine: Machine, name: string): Effect.Effect<Toolchain | undefined> =>
   Effect.gen(function* () {
     const path = machine.locate(name);
     if (path === undefined) return undefined;
@@ -78,27 +79,27 @@ const toolchainAt = (machine: Machine, name: string): Effect.Effect<Toolchain | 
       () => undefined,
     );
     if (printed === undefined) return undefined;
-    const version = versionFrom(printed);
+    const version = parseVersion(printed);
     // An entry with an empty version is not a fact this protocol carries.
-    return version.length === 0 ? undefined : { name, version, path: fact(path) };
+    return version.length === 0 ? undefined : { name, version, path: truncateFact(path) };
   });
 
 export const probeFacts = (machine: Machine, identityPort: number): Effect.Effect<RunnerFacts> =>
   Effect.gen(function* () {
     const toolchains: Array<Toolchain> = [];
     for (const name of TOOLCHAINS) {
-      const found = yield* toolchainAt(machine, name);
+      const found = yield* findToolchain(machine, name);
       if (found !== undefined) toolchains.push(found);
     }
     const providers: Array<ProviderBinary> = PROVIDER_BINARIES.map((name) => {
       const path = machine.locate(name);
       return path === undefined
         ? { name, present: false }
-        : { name, present: true, path: fact(path) };
+        : { name, present: true, path: truncateFact(path) };
     });
     return {
-      os: fact(platform()),
-      arch: fact(arch()),
+      os: truncateFact(platform()),
+      arch: truncateFact(arch()),
       totalMemoryBytes: totalmem(),
       docker: machine.locate(DOCKER) !== undefined,
       toolchains,

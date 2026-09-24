@@ -23,7 +23,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentUser, USER_ACTOR } from "../actor";
+import { requireUserActor, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -51,7 +51,7 @@ const make = Effect.gen(function* () {
    * naming something that is not a GitHub connection would be a setting that
    * can only fail later, on a machine.
    */
-  const checkedGithubConnection = (
+  const validateGithubConnection = (
     patch: SettingsPatch,
   ): Effect.Effect<void, Validation | SqlError> =>
     Effect.gen(function* () {
@@ -65,7 +65,9 @@ const make = Effect.gen(function* () {
       }
     });
 
-  const state = (userId: string): Effect.Effect<SettingsState, SettingError | SqlError> =>
+  const readSettingsState = (
+    userId: string,
+  ): Effect.Effect<SettingsState, SettingError | SqlError> =>
     Effect.all({ controller: settings.all(), user: settings.allForUser(userId) });
 
   /**
@@ -102,7 +104,7 @@ const make = Effect.gen(function* () {
   return {
     /** Everything that is set: the controller's settings, and the caller's own. */
     read: (): Effect.Effect<SettingsState, Unauthenticated | Forbidden | SettingError | SqlError> =>
-      Effect.flatMap(currentUser("settings.read"), (actor) => state(actor.userId)),
+      Effect.flatMap(requireUserActor("settings.read"), (actor) => readSettingsState(actor.userId)),
 
     /**
      * Writes the keys the patch names and leaves every other key alone, then
@@ -125,7 +127,7 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | SettingError | SqlError
     > =>
       Effect.gen(function* () {
-        const actor = yield* currentUser("settings.update");
+        const actor = yield* requireUserActor("settings.update");
         if (
           Object.keys(patch.controller ?? {}).length === 0 &&
           Object.keys(patch.user ?? {}).length === 0
@@ -139,7 +141,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             // Inside the transaction that writes: a connection deleted between
             // the check and the write would leave a setting naming nothing.
-            yield* checkedGithubConnection(patch);
+            yield* validateGithubConnection(patch);
             const written = [
               ...(patch.controller === undefined
                 ? []
@@ -153,7 +155,7 @@ const make = Effect.gen(function* () {
               actor: USER_ACTOR,
               payload: { keys: written },
             });
-            return yield* state(actor.userId);
+            return yield* readSettingsState(actor.userId);
           }),
         );
       }),

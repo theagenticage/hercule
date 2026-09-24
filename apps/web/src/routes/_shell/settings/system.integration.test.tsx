@@ -9,9 +9,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
-import { reading, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { readPageText, renderApp, stubApi, type Handler } from "../../../app/testing";
 
-const controller = (): Readonly<Record<string, Handler>> => ({
+const buildController = (): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/setup": { body: { complete: true } },
   "GET /api/v1/settings": {
     body: {
@@ -21,8 +21,8 @@ const controller = (): Readonly<Record<string, Handler>> => ({
   },
 });
 
-const open = async () => {
-  const api = stubApi(controller());
+const openApp = async () => {
+  const api = stubApi(buildController());
   const app = await renderApp({ path: "/settings/system", api: api.fetch, token: "held" });
   return { ...app, api };
 };
@@ -32,9 +32,9 @@ const CHAIN = /approval-required\s*<\s*auto-accept-edits\s*<\s*auto\s*<\s*full-a
 
 describe("Settings > System: the access-mode fallback policy", () => {
   it("states the ordered chain, the downward substitution, and that it is fixed", async () => {
-    await open();
+    await openApp();
 
-    const text = reading();
+    const text = readPageText();
 
     // The chain, in order, least permissive first.
     expect(text).toMatch(CHAIN);
@@ -51,7 +51,7 @@ describe("Settings > System: the access-mode fallback policy", () => {
   });
 
   it("offers nothing to change the policy with", async () => {
-    await open();
+    await openApp();
 
     // The statement is text: it is not itself a control and sits in none.
     expect(
@@ -67,7 +67,7 @@ describe("Settings > System: the access-mode fallback policy", () => {
       ...screen.queryAllByRole("textbox"),
     ];
     for (const control of controls) {
-      const name = `${reading(control)} ${control.getAttribute("aria-label") ?? ""}`;
+      const name = `${readPageText(control)} ${control.getAttribute("aria-label") ?? ""}`;
       expect(name, "a control offers to change the fallback policy").not.toMatch(
         /fallback|access mode|approval-required|auto-accept-edits|full-access/i,
       );
@@ -75,12 +75,12 @@ describe("Settings > System: the access-mode fallback policy", () => {
   });
 
   it("keeps the retention, backup and HTTPS settings an empty state that no longer promises the policy", async () => {
-    await open();
+    await openApp();
 
     const headline = await screen.findByRole("heading", {
       name: "The controller's settings are not editable yet.",
     });
-    const empty = reading(headline.parentElement);
+    const empty = readPageText(headline.parentElement);
     expect(empty).toContain("Retention");
     expect(empty).toContain("HTTPS");
     // The empty state no longer says the fallback policy is set here: the

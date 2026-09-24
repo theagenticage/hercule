@@ -10,7 +10,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { AuditLog, EventKindsLayer } from "../events";
 import { EventKindCatalogLayer, PluginHost } from "../plugins";
-import { pluginStack } from "../plugins/testing";
+import { buildPluginStack } from "../plugins/testing";
 import { WorkflowService, WorkflowServiceLayer } from "./index";
 import { buildFileTaskSource } from "./testing";
 
@@ -22,7 +22,7 @@ type Deps = WorkflowService | AuditLog | PluginHost | SqlClient.SqlClient;
  */
 const layer = WorkflowServiceLayer.pipe(
   Layer.provideMerge(EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer))),
-  Layer.provideMerge(pluginStack()),
+  Layer.provideMerge(buildPluginStack()),
 );
 
 const USER: Actor = {

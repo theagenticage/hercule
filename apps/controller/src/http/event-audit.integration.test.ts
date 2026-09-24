@@ -14,8 +14,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Profile } from "@hercule/contract";
 import {
-  agentOn,
-  profileNamed,
+  spawnAgentUnder,
+  readProfileNamed,
   createProfile,
   WAIT_DEADLINE_MS,
   withAgentFleet as withFleet,
@@ -33,16 +33,16 @@ interface EventPage {
   readonly items: ReadonlyArray<Record<string, unknown>>;
 }
 
-const events = async (base: string, token: string, query = ""): Promise<EventPage> => {
+const listEvents = async (base: string, token: string, query = ""): Promise<EventPage> => {
   const response = await get(base, `/api/v1/events${query}`, token);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as EventPage;
 };
 
-const kinds = (page: EventPage): ReadonlyArray<unknown> => page.items.map((item) => item.kind);
+const listKinds = (page: EventPage): ReadonlyArray<unknown> => page.items.map((item) => item.kind);
 
 /** The error code a refusal names. */
-const codeOf = async (response: Response): Promise<string> =>
+const readErrorCode = async (response: Response): Promise<string> =>
   ((await response.json()) as { readonly error: { readonly code: string } }).error.code;
 
 /**
@@ -88,9 +88,9 @@ const writeTheLog = async (arranged: Arranged): Promise<void> => {
 const SECURITY_KINDS = ["auth.login.failed", "secret.created", "user.passwordChanged"] as const;
 
 /** One security entry's id, read by the user, who may see it. */
-const securityEntryId = async (arranged: Arranged, kind: string): Promise<number> => {
-  const page = await events(arranged.harness.base, arranged.token, `?kind=${kind}`);
-  expect(kinds(page), kind).toEqual([kind]);
+const readSecurityEntryId = async (arranged: Arranged, kind: string): Promise<number> => {
+  const page = await listEvents(arranged.harness.base, arranged.token, `?kind=${kind}`);
+  expect(listKinds(page), kind).toEqual([kind]);
   return page.items[0]!.id as number;
 };
 
@@ -98,40 +98,40 @@ describe("security entries in the event log", () => {
   it("keeps them off a worker session's page, and leaves the rest of the log on it", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
-      const { token } = await agentOn(arranged, await profileNamed(arranged, "worker"));
+      const { token } = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
       const base = arranged.harness.base;
 
-      const page = await events(base, token, "?limit=500");
-      for (const kind of SECURITY_KINDS) expect(kinds(page), kind).not.toContain(kind);
+      const page = await listEvents(base, token, "?limit=500");
+      for (const kind of SECURITY_KINDS) expect(listKinds(page), kind).not.toContain(kind);
 
       // The rest of the log is untouched: a worker still reads the entries its
       // own work is recorded in.
-      expect(kinds(page)).toContain("task.created");
+      expect(listKinds(page)).toContain("task.created");
 
       // Asking for a security kind by name is the same answer, not a way round
       // the filter.
       for (const kind of SECURITY_KINDS) {
-        expect((await events(base, token, `?kind=${kind}`)).items, kind).toEqual([]);
+        expect((await listEvents(base, token, `?kind=${kind}`)).items, kind).toEqual([]);
       }
 
       // And the user, on the same log, sees every one of them.
-      const theirs = await events(base, arranged.token, "?limit=500");
-      for (const kind of SECURITY_KINDS) expect(kinds(theirs), kind).toContain(kind);
+      const theirs = await listEvents(base, arranged.token, "?limit=500");
+      for (const kind of SECURITY_KINDS) expect(listKinds(theirs), kind).toContain(kind);
     });
   });
 
   it("answers a worker session's read of one with a not-found, and the user's with the entry", async () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
-      const { token } = await agentOn(arranged, await profileNamed(arranged, "worker"));
+      const { token } = await spawnAgentUnder(arranged, await readProfileNamed(arranged, "worker"));
       const base = arranged.harness.base;
 
       for (const kind of SECURITY_KINDS) {
-        const id = await securityEntryId(arranged, kind);
+        const id = await readSecurityEntryId(arranged, kind);
 
         const refused = await get(base, `/api/v1/events/${String(id)}`, token);
         expect(refused.status, kind).toBe(404);
-        expect(await codeOf(refused), kind).toBe("not_found");
+        expect(await readErrorCode(refused), kind).toBe("not_found");
 
         const mine = await get(base, `/api/v1/events/${String(id)}`, arranged.token);
         expect(mine.status, kind).toBe(200);
@@ -140,7 +140,7 @@ describe("security entries in the event log", () => {
 
       // What is withheld is the security kind and nothing else: the same
       // session reads a non-security entry by id.
-      const created = await events(base, token, "?kind=task.created");
+      const created = await listEvents(base, token, "?kind=task.created");
       const id = created.items[0]!.id as number;
       const readable = await get(base, `/api/v1/events/${String(id)}`, token);
       expect(readable.status, await readable.clone().text()).toBe(200);
@@ -151,14 +151,14 @@ describe("security entries in the event log", () => {
     await withFleet(async (arranged) => {
       await writeTheLog(arranged);
       const auditor = await createProfile(arranged, "auditor", ["event.read", "event.audit"]);
-      const { token } = await agentOn(arranged, auditor);
+      const { token } = await spawnAgentUnder(arranged, auditor);
       const base = arranged.harness.base;
 
-      const page = await events(base, token, "?limit=500");
-      for (const kind of SECURITY_KINDS) expect(kinds(page), kind).toContain(kind);
+      const page = await listEvents(base, token, "?limit=500");
+      for (const kind of SECURITY_KINDS) expect(listKinds(page), kind).toContain(kind);
 
       for (const kind of SECURITY_KINDS) {
-        const id = await securityEntryId(arranged, kind);
+        const id = await readSecurityEntryId(arranged, kind);
         const response = await get(base, `/api/v1/events/${String(id)}`, token);
         expect(response.status, kind).toBe(200);
         expect((await response.json()) as Record<string, unknown>).toMatchObject({ id, kind });

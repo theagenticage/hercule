@@ -13,9 +13,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ROOT, startController, temporaryHome, type Controller } from "./harness";
+import { ROOT, startController, createTemporaryHome, type Controller } from "./harness";
 
-const state = temporaryHome();
+const state = createTemporaryHome();
 
 let controller: Controller | undefined;
 let url: string;

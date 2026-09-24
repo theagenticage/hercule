@@ -6,7 +6,7 @@ import { ALL_GRANTS } from "./grants";
 import { ALL_OPERATIONS, isOperationId, OPERATIONS, type OperationId } from "./operations";
 
 /** Every endpoint in the declaration, named the way the operation table names it. */
-const declared = (): ReadonlyArray<{ id: string; method: string; path: string }> => {
+const listDeclaredEndpoints = (): ReadonlyArray<{ id: string; method: string; path: string }> => {
   const found: Array<{ id: string; method: string; path: string }> = [];
   HttpApi.reflect(api, {
     onGroup: () => {},
@@ -51,7 +51,7 @@ describe("the operation table", () => {
 
 describe("the HttpApi declaration", () => {
   it("has exactly one endpoint per operation, on the route the table names", () => {
-    const endpoints = declared();
+    const endpoints = listDeclaredEndpoints();
     expect(endpoints.length).toBe(ALL_OPERATIONS.length);
 
     for (const endpoint of endpoints) {
@@ -206,7 +206,7 @@ describe("the operations with an explicit row", () => {
   });
 
   it.each(NEW_OPERATIONS)("answers $id from one endpoint on $method $path", (operation) => {
-    const endpoints = declared().filter((endpoint) => endpoint.id === operation.id);
+    const endpoints = listDeclaredEndpoints().filter((endpoint) => endpoint.id === operation.id);
     expect(endpoints).toEqual([
       { id: operation.id, method: operation.method, path: operation.path },
     ]);

@@ -2,10 +2,10 @@ import { useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, FormCard, cn } from "@hercule/ui";
 import {
-  configFields,
-  configIssues,
+  buildConfigFields,
+  readConfigIssues,
   queryKeys,
-  refusalReason,
+  describeRefusalReason,
   type ConfigJson,
   type HerculeClient,
 } from "@hercule/client-core";
@@ -43,7 +43,7 @@ export function PluginCard({
   const [confirmingReset, setConfirmingReset] = useState(false);
 
   const refused = plugin.status._tag === "refused";
-  const fields = configFields(plugin.configSchema);
+  const fields = buildConfigFields(plugin.configSchema);
 
   // Every move answers with the plugin as it now stands, but a move can change
   // more than the plugin it names - deactivating one invalidates what it
@@ -69,7 +69,7 @@ export function PluginCard({
     onSuccess: reread,
   });
 
-  const issues = configIssues(configure.error, fields);
+  const issues = readConfigIssues(configure.error, fields);
   // A move that failed leaves the card exactly as it was, so the card is the
   // only thing that can say it failed. A refusal shown under the field it
   // blamed has already been said.
@@ -92,7 +92,7 @@ export function PluginCard({
         <p className="text-fine text-muted">{plugin.status.message}</p>
       ) : null}
       {plugin.status._tag === "refused" ? (
-        <p className="text-fine text-muted">{refusalReason(plugin.status.reason)}</p>
+        <p className="text-fine text-muted">{describeRefusalReason(plugin.status.reason)}</p>
       ) : null}
 
       <div className="flex flex-col gap-px text-fine text-muted">

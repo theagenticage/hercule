@@ -18,7 +18,7 @@ import {
   Id,
   createInvalidStateError,
   createNotFoundError,
-  nearestSupportedAccessMode,
+  findNearestSupportedAccessMode,
   SESSION_CONTINUE_FIELDS,
   SessionSpawnInput,
   createValidationError,
@@ -37,7 +37,7 @@ import { mintUuid, nowIso, uuidToString, withTransaction } from "../db";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../permissions";
 import type { PluginHost } from "../plugins";
 import {
-  loggedIn,
+  isLoggedIn,
   NO_PLACEMENT,
   providerRepository,
   resolvedInstance,
@@ -47,12 +47,12 @@ import { resourceRepository } from "../resources";
 import { DRAINING, NO_SUCH_RUNNER, RETIRED, RunnerConnections, runnerRepository } from "../runners";
 import {
   buildContinuingSpec,
-  requireSession,
+  readSessionOrFail,
   sessionRecordComposer,
   SessionService,
   sessionRepository,
-  timeoutsFrom,
-  validatedOptions,
+  buildTimeouts,
+  validateOptions,
 } from "../sessions";
 import { Settings, type SettingError } from "../settings";
 import { WorkspaceService } from "../workspaces";
@@ -171,7 +171,7 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const profiles = yield* PermissionProfiles;
   const settings = yield* Settings;
-  const one = requireSession(rows);
+  const one = readSessionOrFail(rows);
   const resumableNativeSession = yield* resumable;
   const { dispatch } = yield* Dispatch;
 
@@ -180,13 +180,13 @@ const make = Effect.gen(function* () {
    * the first that is online and holds a capability snapshot saying it has
    * this instance's harness and a login for it.
    */
-  const placement = (
+  const choosePlacement = (
     snapshots: ReadonlyArray<StoredSnapshot>,
   ): Effect.Effect<StoredSnapshot, InvalidState | SqlError> =>
     Effect.gen(function* () {
       const placeable = yield* runners.placeable();
       const found = snapshots.find(
-        (snapshot) => loggedIn(snapshot) && placeable.has(snapshot.runnerId),
+        (snapshot) => isLoggedIn(snapshot) && placeable.has(snapshot.runnerId),
       );
       if (found === undefined) return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       return found;
@@ -200,7 +200,7 @@ const make = Effect.gen(function* () {
    * fallback above. Whether it can take the session now is dispatch's to
    * decide; a machine that cannot yet still gets the session queued on it.
    */
-  const explicitRunner = (
+  const chooseExplicitRunner = (
     runnerId: string,
     snapshots: ReadonlyArray<StoredSnapshot>,
   ): Effect.Effect<StoredSnapshot, InvalidState | Validation | SqlError> =>
@@ -217,7 +217,7 @@ const make = Effect.gen(function* () {
           createInvalidStateError(runner.lifecycle === "retired" ? RETIRED : DRAINING),
         );
       }
-      const snapshot = snapshots.find((one) => one.runnerId === runnerId && loggedIn(one));
+      const snapshot = snapshots.find((one) => one.runnerId === runnerId && isLoggedIn(one));
       if (snapshot === undefined) return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       return snapshot;
     });
@@ -230,7 +230,7 @@ const make = Effect.gen(function* () {
    * carries that profile, and a profile that is gone would mint a token that
    * resolves to no actor.
    */
-  const requireAgentWithProfile = (
+  const readAgentWithProfileOrFail = (
     agentId: string,
   ): Effect.Effect<
     { readonly agent: StoredAgent; readonly profile: PermissionProfile },
@@ -286,7 +286,7 @@ const make = Effect.gen(function* () {
    * escalation the grant rule above closes, on the other axis (spec 13
    * section 6.3).
    *
-   * The order is the order `nearestSupportedAccessMode` uses, so "more
+   * The order is the order `findNearestSupportedAccessMode` uses, so "more
    * permissive" means the same here as where a provider falls back.
    */
   const mayRunOn = (actor: Actor, requested: AccessMode | undefined, agent: StoredAgent): boolean =>
@@ -299,7 +299,7 @@ const make = Effect.gen(function* () {
    * The check runs before anything is written, so a schema outside the subset
    * leaves no session behind, and the caller is told which rule it broke.
    */
-  const requireLintedSchema = (
+  const validateOutputSchema = (
     schema: SessionSpec["outputSchema"],
   ): Effect.Effect<SessionSpec["outputSchema"], Validation> => {
     if (schema === undefined) return Effect.succeed(undefined);
@@ -314,7 +314,7 @@ const make = Effect.gen(function* () {
   };
 
   /** Refuses a permissionProfileId naming no profile, before it is trusted as this session's. */
-  const requireProfile = (
+  const validateProfileExists = (
     profileId: string,
   ): Effect.Effect<void, Validation | GrantsError | SqlError> =>
     Effect.gen(function* () {
@@ -327,10 +327,13 @@ const make = Effect.gen(function* () {
     });
 
   /** The shipped thread default until the user has a `thread.instanceId` (spec 02 Thread). */
-  const firstLoggedIn = (): Effect.Effect<string, InvalidState | SqlError | Schema.SchemaError> =>
+  const pickLoggedInInstance = (): Effect.Effect<
+    string,
+    InvalidState | SqlError | Schema.SchemaError
+  > =>
     Effect.gen(function* () {
       for (const snapshot of yield* instances.snapshots()) {
-        if (loggedIn(snapshot)) return snapshot.instanceId;
+        if (isLoggedIn(snapshot)) return snapshot.instanceId;
       }
       return yield* Effect.fail(
         createInvalidStateError(
@@ -339,7 +342,7 @@ const make = Effect.gen(function* () {
       );
     });
 
-  const threadProfile = (): Effect.Effect<string, InvalidState | GrantsError | SqlError> =>
+  const readThreadProfileId = (): Effect.Effect<string, InvalidState | GrantsError | SqlError> =>
     Effect.flatMap(
       profiles.getByName(DEFAULT_PROFILE),
       Option.match({
@@ -353,7 +356,7 @@ const make = Effect.gen(function* () {
     );
 
   /** A thread is filed under a project that exists, or under none at all. */
-  const liveProject = (projectId: string): Effect.Effect<void, Validation | SqlError> =>
+  const validateLiveProject = (projectId: string): Effect.Effect<void, Validation | SqlError> =>
     Effect.gen(function* () {
       const live = yield* resources.liveProjects([projectId]);
       if (live.length === 0) {
@@ -456,7 +459,7 @@ const make = Effect.gen(function* () {
         const spawnedFrom =
           decoded.agentId === undefined
             ? undefined
-            : yield* requireAgentWithProfile(decoded.agentId);
+            : yield* readAgentWithProfileOrFail(decoded.agentId);
         const agent = spawnedFrom?.agent;
         // Only a Thread reads the user's own settings, so only the user may
         // open a Thread. A spawn from an Agent takes its values from the Agent
@@ -474,8 +477,8 @@ const make = Effect.gen(function* () {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_ACCESS_MODE));
           }
         }
-        const outputSchema = yield* requireLintedSchema(decoded.outputSchema);
-        if (decoded.projectId !== undefined) yield* liveProject(decoded.projectId);
+        const outputSchema = yield* validateOutputSchema(decoded.outputSchema);
+        if (decoded.projectId !== undefined) yield* validateLiveProject(decoded.projectId);
         // Read before placement: a workspace that already stands decides which
         // machine the session runs on, because that is where its files are.
         const pinnedTo =
@@ -493,19 +496,19 @@ const make = Effect.gen(function* () {
           decoded.instanceId ??
           agent?.instanceId ??
           defaults["thread.instanceId"] ??
-          (yield* firstLoggedIn());
+          (yield* pickLoggedInInstance());
         const { definition, snapshots } = yield* resolved(instanceId);
         const placeOn = pinnedTo ?? decoded.runnerId;
         const hosting = yield* placeOn === undefined
-          ? placement(snapshots)
-          : explicitRunner(placeOn, snapshots);
+          ? choosePlacement(snapshots)
+          : chooseExplicitRunner(placeOn, snapshots);
 
         const requestedAccessMode =
           decoded.accessMode ??
           agent?.accessMode ??
           defaults["thread.accessMode"] ??
           DEFAULT_ACCESS_MODE;
-        const accessMode = nearestSupportedAccessMode(
+        const accessMode = findNearestSupportedAccessMode(
           requestedAccessMode,
           definition.declared.accessModes,
         );
@@ -537,16 +540,16 @@ const make = Effect.gen(function* () {
         // from. A choice the model does not offer is refused by name. It is
         // not dropped because it came from the Agent.
         const options = decoded.options ?? agentSelection?.options ?? {};
-        yield* validatedOptions(hosting.models, model, options);
+        yield* validateOptions(hosting.models, model, options);
 
         if (decoded.permissionProfileId !== undefined) {
-          yield* requireProfile(decoded.permissionProfileId);
+          yield* validateProfileExists(decoded.permissionProfileId);
         }
         const profileId =
           decoded.permissionProfileId ??
           agent?.permissionProfileId ??
           defaults["thread.profileId"] ??
-          (yield* threadProfile());
+          (yield* readThreadProfileId());
 
         const spec = {
           instanceId,
@@ -558,7 +561,7 @@ const make = Effect.gen(function* () {
             ? {}
             : { disallowedTools: agent.disallowedTools }),
           ...(outputSchema === undefined ? {} : { outputSchema }),
-          timeouts: timeoutsFrom(yield* settings.all()),
+          timeouts: buildTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
         return yield* place({

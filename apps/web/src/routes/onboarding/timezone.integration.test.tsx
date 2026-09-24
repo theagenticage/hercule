@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { browserTimezone } from "@hercule/client-core";
+import { resolveBrowserTimezone } from "@hercule/client-core";
 import { renderApp, stubApi, type Handler } from "../../app/testing";
 
 /** A signed-in controller with nothing recorded against onboarding yet. */
-const fresh = (): Readonly<Record<string, Handler>> => {
+const buildFreshController = (): Readonly<Record<string, Handler>> => {
   let user: Record<string, unknown> = {};
   return {
     "GET /api/v1/setup": { body: { complete: true } },
@@ -19,15 +19,15 @@ const fresh = (): Readonly<Record<string, Handler>> => {
 
 describe("the timezone step", () => {
   it("offers the zone the browser detected", async () => {
-    const api = stubApi(fresh());
+    const api = stubApi(buildFreshController());
     await renderApp({ path: "/", api: api.fetch, token: "bearer" });
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Timezone");
-    expect(field.value).toBe(browserTimezone());
+    expect(field.value).toBe(resolveBrowserTimezone());
   });
 
   it("offers only zones this browser can format, and no free text", async () => {
-    const api = stubApi(fresh());
+    const api = stubApi(buildFreshController());
     await renderApp({ path: "/", api: api.fetch, token: "bearer" });
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Timezone");
@@ -41,7 +41,7 @@ describe("the timezone step", () => {
   });
 
   it("sends the zone the user picks", async () => {
-    const api = stubApi(fresh());
+    const api = stubApi(buildFreshController());
     const { router } = await renderApp({ path: "/", api: api.fetch, token: "bearer" });
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Timezone");
@@ -59,7 +59,7 @@ describe("the timezone step", () => {
   });
 
   it("records the step as completed and lets the app open", async () => {
-    const api = stubApi(fresh());
+    const api = stubApi(buildFreshController());
     const { router } = await renderApp({ path: "/", api: api.fetch, token: "bearer" });
 
     await screen.findByLabelText<HTMLSelectElement>("Timezone");
@@ -71,7 +71,7 @@ describe("the timezone step", () => {
     const written = api.calls.find((call) => call.method === "PATCH")!;
     expect(written.body).toEqual({
       user: {
-        timezone: browserTimezone(),
+        timezone: resolveBrowserTimezone(),
         "onboarding.completedSteps": ["timezone"],
       },
     });

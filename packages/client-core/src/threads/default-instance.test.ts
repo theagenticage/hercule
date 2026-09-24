@@ -1,32 +1,36 @@
 /**
- * `defaultInstanceId(instances)` picks the instance the composer and
+ * `findDefaultInstanceId(instances)` picks the instance the composer and
  * Settings > Threads both prefill from: the first with a logged-in snapshot,
  * else the first instance, else none.
  */
 import { describe, expect, it } from "vitest";
-import { instance, snapshot } from "../providers.testing";
-import { defaultInstanceId } from "./default-instance";
+import { buildInstance, buildSnapshot } from "../providers.testing";
+import { findDefaultInstanceId } from "./default-instance";
 
-describe("defaultInstanceId", () => {
+describe("findDefaultInstanceId", () => {
   it("picks the first instance with a logged-in snapshot, not necessarily the first instance", () => {
     const instances = [
-      instance("claude-code", "First", [snapshot({ auth: { status: "unauthenticated" } })]),
-      instance("codex", "Second", [snapshot()]),
+      buildInstance("claude-code", "First", [
+        buildSnapshot({ auth: { status: "unauthenticated" } }),
+      ]),
+      buildInstance("codex", "Second", [buildSnapshot()]),
     ];
 
-    expect(defaultInstanceId(instances)).toBe(instances[1]!.id);
+    expect(findDefaultInstanceId(instances)).toBe(instances[1]!.id);
   });
 
   it("falls back to the first instance when none is logged in", () => {
     const instances = [
-      instance("claude-code", "First", [snapshot({ auth: { status: "unauthenticated" } })]),
-      instance("codex", "Second", []),
+      buildInstance("claude-code", "First", [
+        buildSnapshot({ auth: { status: "unauthenticated" } }),
+      ]),
+      buildInstance("codex", "Second", []),
     ];
 
-    expect(defaultInstanceId(instances)).toBe(instances[0]!.id);
+    expect(findDefaultInstanceId(instances)).toBe(instances[0]!.id);
   });
 
   it("is null when there are no instances", () => {
-    expect(defaultInstanceId([])).toBeNull();
+    expect(findDefaultInstanceId([])).toBeNull();
   });
 });

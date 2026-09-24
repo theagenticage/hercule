@@ -1,10 +1,10 @@
 /**
- * `resumeBlockedReason(session)` says why a thread cannot take input, or
+ * `findResumeBlockedReason(session)` says why a thread cannot take input, or
  * `null` when it can.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
-import { resumeBlockedReason } from "@hercule/client-core";
+import { findResumeBlockedReason } from "@hercule/client-core";
 
 const BASE: Session = {
   id: "s0",
@@ -30,26 +30,26 @@ const BASE: Session = {
   unenforced: [],
 };
 
-const session = (overrides: Partial<Session>): Session => ({ ...BASE, ...overrides });
+const buildSession = (overrides: Partial<Session>): Session => ({ ...BASE, ...overrides });
 
-describe("resumeBlockedReason", () => {
+describe("findResumeBlockedReason", () => {
   it("blocks nothing on a session that is not exited", () => {
-    expect(resumeBlockedReason(session({ status: "idle" }))).toBeNull();
-    expect(resumeBlockedReason(session({ status: "busy" }))).toBeNull();
+    expect(findResumeBlockedReason(buildSession({ status: "idle" }))).toBeNull();
+    expect(findResumeBlockedReason(buildSession({ status: "busy" }))).toBeNull();
   });
 
   it("blocks nothing on an exited session that is resumable", () => {
-    const exited = session({ status: "exited", resumable: true, nativeSessionId: "n" });
-    expect(resumeBlockedReason(exited)).toBeNull();
+    const exited = buildSession({ status: "exited", resumable: true, nativeSessionId: "n" });
+    expect(findResumeBlockedReason(exited)).toBeNull();
   });
 
   it("says the transcript is gone when an unresumable exit kept no native session", () => {
-    const exited = session({ status: "exited", resumable: false, nativeSessionId: null });
-    expect(resumeBlockedReason(exited)).toBe("its transcript is gone");
+    const exited = buildSession({ status: "exited", resumable: false, nativeSessionId: null });
+    expect(findResumeBlockedReason(exited)).toBe("its transcript is gone");
   });
 
   it("says the runner was retired when an unresumable exit still has its native session", () => {
-    const exited = session({ status: "exited", resumable: false, nativeSessionId: "n" });
-    expect(resumeBlockedReason(exited)).toBe("its runner was retired");
+    const exited = buildSession({ status: "exited", resumable: false, nativeSessionId: "n" });
+    expect(findResumeBlockedReason(exited)).toBe("its runner was retired");
   });
 });

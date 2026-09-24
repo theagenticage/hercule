@@ -3,7 +3,7 @@ import { LoginForm, type StandardSchemaV1 } from "@hercule/contract";
 import { FORM_ERROR, validate } from "./form";
 
 /** A schema that refuses everything without naming a field, which no v1 form does yet. */
-const blames = (message: string): StandardSchemaV1<unknown, never> => ({
+const buildRefusingSchema = (message: string): StandardSchemaV1<unknown, never> => ({
   "~standard": {
     version: 1,
     vendor: "test",
@@ -30,7 +30,7 @@ describe("validate", () => {
   });
 
   it("files a message that names no field under the form", () => {
-    const checked = validate(blames("These two do not go together."), {});
+    const checked = validate(buildRefusingSchema("These two do not go together."), {});
 
     expect(checked.errors).toEqual({ [FORM_ERROR]: "These two do not go together." });
   });

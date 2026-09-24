@@ -10,5 +10,5 @@ import type { ThreadRows } from "@hercule/contract";
 /** What a thread row shows when the user has not said otherwise. */
 export const THREAD_ROWS_DEFAULT: ThreadRows = "meta";
 
-export const threadRowsMode = (stored: ThreadRows | undefined): ThreadRows =>
+export const resolveThreadRowsMode = (stored: ThreadRows | undefined): ThreadRows =>
   stored ?? THREAD_ROWS_DEFAULT;

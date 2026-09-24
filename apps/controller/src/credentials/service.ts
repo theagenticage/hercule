@@ -26,7 +26,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentUser, USER_ACTOR } from "../actor";
+import { requireUserActor, USER_ACTOR } from "../actor";
 import { withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Credentials, type ApiKeyRecord } from "./repository";
@@ -86,7 +86,7 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | SqlError
     > =>
       Effect.gen(function* () {
-        const actor = yield* currentUser("apiKey.create");
+        const actor = yield* requireUserActor("apiKey.create");
         const token = mintToken();
         const record = yield* withTransaction(
           sql,
@@ -115,7 +115,7 @@ const make = Effect.gen(function* () {
       input: QueryInput,
     ): Effect.Effect<ApiKeyPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
-        const actor = yield* currentUser("apiKey.query");
+        const actor = yield* requireUserActor("apiKey.query");
         const page = yield* credentials
           .listApiKeys(actor.userId, {
             limit: input.limit ?? DEFAULT_PAGE_LIMIT,
@@ -143,7 +143,7 @@ const make = Effect.gen(function* () {
       readonly id: string;
     }): Effect.Effect<Record<string, never>, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
-        const actor = yield* currentUser("apiKey.revoke");
+        const actor = yield* requireUserActor("apiKey.revoke");
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

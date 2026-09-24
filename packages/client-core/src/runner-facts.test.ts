@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Runner } from "@hercule/contract";
-import { runnerFactsReading } from "./runner-facts";
+import { describeRunnerFacts } from "./runner-facts";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -46,9 +46,9 @@ const REPORTED: Runner = {
   },
 };
 
-describe("runnerFactsReading", () => {
+describe("describeRunnerFacts", () => {
   it("reads a machine that has reported", () => {
-    expect(runnerFactsReading(REPORTED)).toEqual({
+    expect(describeRunnerFacts(REPORTED)).toEqual({
       machine: "darwin · arm64",
       memory: "64 GiB",
       diskFree: "128 GiB",
@@ -60,7 +60,7 @@ describe("runnerFactsReading", () => {
   });
 
   it("reads every fact as absent when the machine has said nothing", () => {
-    expect(runnerFactsReading(SILENT)).toEqual({
+    expect(describeRunnerFacts(SILENT)).toEqual({
       machine: null,
       memory: null,
       diskFree: null,
@@ -73,24 +73,25 @@ describe("runnerFactsReading", () => {
 
   it("tells a machine that found no provider from one that has not looked", () => {
     const none = { ...REPORTED, facts: { ...REPORTED.facts!, providers: [] } };
-    expect(runnerFactsReading(none).providers).toBe("none installed");
-    expect(runnerFactsReading(SILENT).providers).toBeNull();
+    expect(describeRunnerFacts(none).providers).toBe("none installed");
+    expect(describeRunnerFacts(SILENT).providers).toBeNull();
   });
 
   it("says so when Docker is not installed", () => {
     expect(
-      runnerFactsReading({ ...REPORTED, facts: { ...REPORTED.facts!, docker: false } }).docker,
+      describeRunnerFacts({ ...REPORTED, facts: { ...REPORTED.facts!, docker: false } }).docker,
     ).toBe("not installed");
   });
 
   it("has nothing to say about a machine that probed no toolchain", () => {
     expect(
-      runnerFactsReading({ ...REPORTED, facts: { ...REPORTED.facts!, toolchains: [] } }).toolchains,
+      describeRunnerFacts({ ...REPORTED, facts: { ...REPORTED.facts!, toolchains: [] } })
+        .toolchains,
     ).toBeNull();
   });
 
   it("reads the disk off the watermark, which arrives apart from the facts", () => {
-    expect(runnerFactsReading({ ...REPORTED, watermark: null }).diskFree).toBeNull();
-    expect(runnerFactsReading({ ...REPORTED, watermark: null }).memory).toBe("64 GiB");
+    expect(describeRunnerFacts({ ...REPORTED, watermark: null }).diskFree).toBeNull();
+    expect(describeRunnerFacts({ ...REPORTED, watermark: null }).memory).toBe("64 GiB");
   });
 });

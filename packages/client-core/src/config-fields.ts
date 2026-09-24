@@ -41,7 +41,7 @@ const asStrings = (value: unknown): ReadonlyArray<string> | undefined =>
   Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
 
 /** Which widget one property asks for. */
-const kindOf = (property: Record<string, unknown>): ConfigFieldKind => {
+const decideFieldKind = (property: Record<string, unknown>): ConfigFieldKind => {
   const type = property["type"];
   if (type === "boolean" || type === "number" || type === "integer") return type;
   if (type === "string") return property["enum"] === undefined ? "string" : "enum";
@@ -49,7 +49,7 @@ const kindOf = (property: Record<string, unknown>): ConfigFieldKind => {
 };
 
 /** The fields one config schema asks for, in the order it lists them. */
-export const configFields = (
+export const buildConfigFields = (
   schema: Record<string, unknown> | undefined,
 ): ReadonlyArray<ConfigField> => {
   const properties = asRecord(schema?.["properties"]);
@@ -59,7 +59,7 @@ export const configFields = (
   const fields: ConfigField[] = [];
   for (const [name, raw] of Object.entries(properties)) {
     const property = asRecord(raw) ?? {};
-    const kind = kindOf(property);
+    const kind = decideFieldKind(property);
 
     const title = property["title"];
     const description = property["description"];
@@ -75,17 +75,20 @@ export const configFields = (
   return fields;
 };
 
-const storedValue = (field: ConfigField, stored: unknown): ConfigValue => {
+const toDraftValue = (field: ConfigField, stored: unknown): ConfigValue => {
   if (field.kind === "boolean") return stored === true;
   if (field.kind === "stringList") return asStrings(stored) ?? [];
   if (typeof stored === "number" || typeof stored === "string") return String(stored);
   return "";
 };
 
-export const configDraft = (fields: ReadonlyArray<ConfigField>, config: unknown): ConfigDraft => {
+export const buildConfigDraft = (
+  fields: ReadonlyArray<ConfigField>,
+  config: unknown,
+): ConfigDraft => {
   const stored = asRecord(config) ?? {};
   return Object.fromEntries(
-    fields.map((field) => [field.name, storedValue(field, stored[field.name])]),
+    fields.map((field) => [field.name, toDraftValue(field, stored[field.name])]),
   );
 };
 
@@ -94,8 +97,11 @@ export const configDraft = (fields: ReadonlyArray<ConfigField>, config: unknown)
  * would store a `false` or an `[]` under a setting nobody touched, which is not
  * the same as unset. A required one is written either way: it has no unset.
  */
-const unfilled = (field: ConfigField, stored: Record<string, unknown>, atRest: boolean): boolean =>
-  atRest && !field.required && stored[field.name] === undefined;
+const isUnfilled = (
+  field: ConfigField,
+  stored: Record<string, unknown>,
+  atRest: boolean,
+): boolean => atRest && !field.required && stored[field.name] === undefined;
 
 /**
  * The config a draft means, typed the way the schema names. An empty text or
@@ -104,7 +110,7 @@ const unfilled = (field: ConfigField, stored: Record<string, unknown>, atRest: b
  * is allowed is the plugin's schema to answer. The stored config is read for
  * the same reason - it says which settings the user has an answer for.
  */
-export const configPayload = (
+export const buildConfigPayload = (
   fields: ReadonlyArray<ConfigField>,
   draft: ConfigDraft,
   config: unknown,
@@ -114,10 +120,10 @@ export const configPayload = (
   for (const field of fields) {
     const value = draft[field.name];
     if (field.kind === "boolean") {
-      if (!unfilled(field, stored, value !== true)) payload[field.name] = value === true;
+      if (!isUnfilled(field, stored, value !== true)) payload[field.name] = value === true;
     } else if (field.kind === "stringList") {
       const list = [...(asStrings(value) ?? [])];
-      if (!unfilled(field, stored, list.length === 0)) payload[field.name] = list;
+      if (!isUnfilled(field, stored, list.length === 0)) payload[field.name] = list;
     } else if (typeof value === "string" && value !== "") {
       payload[field.name] =
         field.kind === "string" || field.kind === "enum" ? value : Number(value);
@@ -147,7 +153,7 @@ export interface ConfigIssues {
  * is the form's own failure either way: a message under a field nobody can see
  * is a refusal nobody is told about.
  */
-export const configIssues = (
+export const readConfigIssues = (
   error: unknown,
   fields: ReadonlyArray<{ readonly name: string }>,
   prefix?: string,

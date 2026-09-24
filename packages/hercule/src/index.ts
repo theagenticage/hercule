@@ -81,5 +81,5 @@ export async function dispatch(argv: readonly string[]): Promise<void> {
   await entrypoint.run(args);
 }
 
-export { spawnHercule } from "./spawn";
+export { spawnOwnBinary } from "./spawn";
 export { VERSION };

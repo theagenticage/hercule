@@ -19,17 +19,17 @@ import {
   createClient,
   readValidationIssues,
 } from "@hercule/client-core";
-import { parseGlobalOptions, resolveHomePath, setupUrlFileIn } from "@hercule/home";
+import { parseGlobalOptions, resolveHomePath, locateSetupUrlFile } from "@hercule/home";
 import { Result } from "effect";
-import { parseArguments, said } from "./commands/args";
+import { parseArguments, formatFieldName } from "./commands/args";
 import { formatIssue, type WorkflowIssues } from "@hercule/contract";
 import { execute, type Outcome } from "./commands/execute";
-import { commandHelp, nounHelp, rootHelp, shellExample } from "./commands/help";
+import { buildCommandHelp, buildNounHelp, buildRootHelp, buildShellExample } from "./commands/help";
 import { renderHuman } from "./commands/render";
-import { commandAt, wordsAfter, type Command } from "./commands/tree";
+import { findCommandByWords, listWordsAfter, type Command } from "./commands/tree";
 import { CredentialError, resolveCredential, resolveUrl, type Env } from "./credentials";
 import { EXIT, UsageError } from "./exit";
-import { login, loginHelp } from "./login";
+import { login, getLoginHelp } from "./login";
 import { processIo, type Io } from "./io";
 
 /** What `hercule setup-url` prints, or the reason there is nothing to print. */
@@ -38,7 +38,7 @@ export function readSetupUrl(argv: readonly string[], env: Env): Result.Result<s
   if (Result.isFailure(options)) {
     return Result.fail(`${options.failure.option}: ${options.failure.message}`);
   }
-  const file = setupUrlFileIn(resolveHomePath(options.success.home, env));
+  const file = locateSetupUrlFile(resolveHomePath(options.success.home, env));
   try {
     return Result.succeed(readFileSync(file, "utf8").trim());
   } catch {
@@ -62,11 +62,11 @@ const wantsHelp = (tokens: ReadonlyArray<string>): boolean =>
  * The issue's path is the field's path inside the request, so its head names a
  * field of this command, and each is named the way the caller wrote it.
  */
-const usageErrorOf = (error: RequestError, command: Command): UsageError => {
+const toUsageError = (error: RequestError, command: Command): UsageError => {
   const named = new Map(
     [...command.positionals, ...command.payload, ...command.query].map((field) => [
       field.name,
-      said(field),
+      formatFieldName(field),
     ]),
   );
   const refused = error.issues.map((issue) => {
@@ -84,7 +84,7 @@ const usageErrorOf = (error: RequestError, command: Command): UsageError => {
  * caller just wrote, with the pipe it was missing. The refusal is the read
  * itself, so a command that would not have read anything is unaffected.
  */
-const stdinOf = (
+const buildStdinReader = (
   command: Command,
   tokens: ReadonlyArray<string>,
   io: Io,
@@ -98,9 +98,10 @@ const stdinOf = (
         ? `${names[0]} is read from stdin, and stdin is a terminal. Pipe it in:`
         : `${names.join(" and ")} are read from stdin, and stdin is a terminal. Pipe them in:`;
     throw new UsageError(
-      [asked, ...shellExample(command, tokens, names.map((name) => `<${name}>`).join("\n"))].join(
-        "\n",
-      ),
+      [
+        asked,
+        ...buildShellExample(command, tokens, names.map((name) => `<${name}>`).join("\n")),
+      ].join("\n"),
       command.spelling,
     );
   };
@@ -113,7 +114,7 @@ const runOperation = async (
   home: string,
   io: Io,
 ): Promise<number> => {
-  const args = await parseArguments(command, tokens, stdinOf(command, tokens, io));
+  const args = await parseArguments(command, tokens, buildStdinReader(command, tokens, io));
 
   let url: string;
   let token: string | null = null;
@@ -136,7 +137,7 @@ const runOperation = async (
 
   const client = createClient({ baseUrl: url, token, fetch: io.fetch });
   const outcome = await execute(client, command, args).catch((error: unknown) => {
-    throw error instanceof RequestError ? usageErrorOf(error, command) : error;
+    throw error instanceof RequestError ? toUsageError(error, command) : error;
   });
 
   if (args.json) {
@@ -170,15 +171,16 @@ const decideExitCode = (command: Command, outcome: Outcome): number =>
  * what the tree does answer to at that position is the whole of the help a
  * misspelling needs.
  */
-const walk = (
+const findLongestCommand = (
   words: ReadonlyArray<string>,
 ): { readonly command: Command; readonly taken: number } | { readonly prefix: number } => {
   for (let taken = words.length; taken > 0; taken -= 1) {
-    const command = commandAt(words.slice(0, taken));
+    const command = findCommandByWords(words.slice(0, taken));
     if (command !== undefined) return { command, taken };
   }
   let prefix = 0;
-  while (prefix < words.length && wordsAfter(words.slice(0, prefix + 1)).length > 0) prefix += 1;
+  while (prefix < words.length && listWordsAfter(words.slice(0, prefix + 1)).length > 0)
+    prefix += 1;
   return { prefix };
 };
 
@@ -195,7 +197,7 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
 
   // `hercule` on its own is the same ask as `hercule --help`: what is there.
   if (head === undefined || head === "--help" || head === "-h") {
-    for (const line of rootHelp()) io.out(line);
+    for (const line of buildRootHelp()) io.out(line);
     return EXIT.ok;
   }
 
@@ -221,7 +223,7 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
   if (head === "login") {
     const tokens = after;
     if (wantsHelp(tokens)) {
-      for (const line of loginHelp()) io.out(line);
+      for (const line of getLoginHelp()) io.out(line);
       return EXIT.ok;
     }
     const result = await login(tokens, home, io);
@@ -241,23 +243,23 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
   const flag = rest.findIndex((token) => token.startsWith("-"));
   const words = flag === -1 ? rest : rest.slice(0, flag);
   if (words.length === 0) {
-    throw new UsageError(`unknown command \`${head}\`; there is ${wordsAfter([]).join(", ")}`);
+    throw new UsageError(`unknown command \`${head}\`; there is ${listWordsAfter([]).join(", ")}`);
   }
-  const found = walk(words);
+  const found = findLongestCommand(words);
 
   if ("command" in found) {
     const tokens = rest.slice(found.taken);
     if (wantsHelp(tokens)) {
-      for (const line of commandHelp(found.command)) io.out(line);
+      for (const line of buildCommandHelp(found.command)) io.out(line);
       return EXIT.ok;
     }
     return runOperation(found.command, tokens, home, io);
   }
 
-  const valid = wordsAfter(words.slice(0, found.prefix));
+  const valid = listWordsAfter(words.slice(0, found.prefix));
   if (found.prefix === words.length) {
     if (wantsHelp(rest)) {
-      for (const line of nounHelp(words)) io.out(line);
+      for (const line of buildNounHelp(words)) io.out(line);
       return EXIT.ok;
     }
     throw new UsageError(`${words.join(" ")} needs a verb: ${valid.join(", ")}`, words.join(" "));
@@ -278,11 +280,11 @@ const dispatch = async (argv: readonly string[], io: Io): Promise<number> => {
  * because the detail is in the issues, and a human rendering that printed only
  * the message told the caller nothing it could act on.
  */
-const refusals = (error: ApiError): ReadonlyArray<string> =>
+const formatValidationIssues = (error: ApiError): ReadonlyArray<string> =>
   (readValidationIssues(error) ?? []).map(formatIssue);
 
 /** Turn whatever went wrong into a message and an exit code. */
-const report = (error: unknown, json: boolean, io: Io): number => {
+const reportError = (error: unknown, json: boolean, io: Io): number => {
   if (error instanceof UsageError) {
     io.err(`hercule: ${error.message}`);
     io.err(
@@ -311,7 +313,7 @@ const report = (error: unknown, json: boolean, io: Io): number => {
       // A validation envelope says which parameter it refused and why, and
       // without this the human rendering printed only "the request is not
       // valid" - true, and no help at all.
-      for (const line of refusals(error)) io.err(line);
+      for (const line of formatValidationIssues(error)) io.err(line);
     }
     return EXIT.api;
   }
@@ -323,7 +325,7 @@ export const main = async (argv: readonly string[], io: Io): Promise<number> => 
   try {
     return await dispatch(argv, io);
   } catch (error) {
-    return report(error, argv.includes("--json"), io);
+    return reportError(error, argv.includes("--json"), io);
   }
 };
 

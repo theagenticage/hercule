@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Session, Workspace } from "@hercule/contract";
-import { ageOf } from "@hercule/client-core";
-import { threadsWorld } from "@hercule/client-core/threads/testing";
+import { formatAge } from "@hercule/client-core";
+import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
-  envelope,
+  buildErrorBody,
   expectInDocumentOrder,
   readCurrentNavItems,
   renderApp,
@@ -15,7 +15,7 @@ import {
 
 const ZONE = "Europe/Amsterdam";
 
-const settings = (user: Record<string, unknown>) => ({
+const buildSettingsRoutes = (user: Record<string, unknown>) => ({
   "GET /api/v1/setup": { body: { complete: true } },
   "GET /api/v1/settings": {
     body: { controller: {}, user: { "onboarding.completedSteps": ["timezone"], ...user } },
@@ -25,8 +25,8 @@ const settings = (user: Record<string, unknown>) => ({
   "GET /api/v1/sessions": { body: { items: [] } },
 });
 
-const inShell = (user: Record<string, unknown> = {}): Readonly<Record<string, Handler>> =>
-  settings({ timezone: ZONE, ...user });
+const buildShellRoutes = (user: Record<string, unknown> = {}): Readonly<Record<string, Handler>> =>
+  buildSettingsRoutes({ timezone: ZONE, ...user });
 
 const BASE_SESSION: Session = {
   id: "01a06d02-2000-7000-8000-000000000001",
@@ -52,28 +52,28 @@ const BASE_SESSION: Session = {
   unenforced: [],
 };
 
-const session = (overrides: Partial<Session> & { id: string }): Session => ({
+const buildSession = (overrides: Partial<Session> & { id: string }): Session => ({
   ...BASE_SESSION,
   ...overrides,
 });
 
 /** Three sessions, deliberately out of `lastActivityAt` order in the fixture. */
 const THREE_SESSIONS: readonly Session[] = [
-  session({
+  buildSession({
     id: "01a06d02-2000-7000-8000-000000000001",
     title: "Fix the login bug",
     status: "busy",
     modelSelection: { model: "claude-sonnet-5", options: {} },
     lastActivityAt: "2026-09-05T09:05:00.000Z",
   }),
-  session({
+  buildSession({
     id: "01a06d02-2000-7000-8000-000000000002",
     title: "Write the changelog",
     status: "idle",
     modelSelection: { model: "claude-opus-5", options: {} },
     lastActivityAt: "2026-09-06T10:00:00.000Z",
   }),
-  session({
+  buildSession({
     id: "01a06d02-2000-7000-8000-000000000003",
     title: "Investigate the flaky test",
     status: "exited",
@@ -83,21 +83,21 @@ const THREE_SESSIONS: readonly Session[] = [
   }),
 ];
 
-/** The same handlers as `inShell`, with a real session list. */
+/** The same handlers as `buildShellRoutes`, with a real session list. */
 const withThreads = (
   sessions: readonly Session[],
   user: Record<string, unknown> = {},
 ): Readonly<Record<string, Handler>> => ({
-  ...inShell(user),
+  ...buildShellRoutes(user),
   "GET /api/v1/sessions": { body: { items: sessions } },
 });
 
-const herculeNav = () => within(screen.getByRole("navigation", { name: "Hercule" }));
+const getOrchestrationNav = () => within(screen.getByRole("navigation", { name: "Hercule" }));
 
-const threadsNav = () => within(screen.getByRole("navigation", { name: "Threads" }));
+const getThreadsNav = () => within(screen.getByRole("navigation", { name: "Threads" }));
 
-const navLabels = (): string[] =>
-  herculeNav()
+const readNavLabels = (): string[] =>
+  getOrchestrationNav()
     .getAllByRole("link")
     .map((link) => link.textContent ?? "");
 
@@ -107,9 +107,9 @@ beforeEach(() => {
 
 describe("the two-face sidebar", () => {
   it("shows the Hercule face on an orchestration screen, in its pinned order", async () => {
-    await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
+    await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
-    expect(navLabels()).toEqual([
+    expect(readNavLabels()).toEqual([
       "Intake",
       "Check-in",
       "Tasks",
@@ -126,7 +126,7 @@ describe("the two-face sidebar", () => {
     await renderApp({
       path: "/workflows/new",
       api: stubApi({
-        ...inShell(),
+        ...buildShellRoutes(),
         "GET /api/v1/workflow-actions": { body: [] },
         "GET /api/v1/event-kinds": { body: [] },
         "GET /api/v1/agents": { body: { items: [] } },
@@ -138,9 +138,9 @@ describe("the two-face sidebar", () => {
   });
 
   it("carries a glyph on the entity items and on no other", async () => {
-    await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
+    await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
-    const withGlyph = herculeNav()
+    const withGlyph = getOrchestrationNav()
       .getAllByRole("link")
       .filter((link) => link.querySelector("[data-mark]") !== null)
       .map((link) => link.textContent);
@@ -149,61 +149,67 @@ describe("the two-face sidebar", () => {
   });
 
   it("shows the Threads face on Sessions", async () => {
-    await renderApp({ path: "/", api: stubApi(inShell()).fetch, token: "held" });
+    await renderApp({ path: "/", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
     // Create new thread opens the project picker (#72 AC-16, which supersedes
     // #160's plain link to `/threads/new`; recorded as D-14).
-    expect(await threadsNav().findByRole("button", { name: /create new thread/i })).toBeDefined();
-    expect(await threadsNav().findByText("No threads yet")).toBeDefined();
+    expect(
+      await getThreadsNav().findByRole("button", { name: /create new thread/i }),
+    ).toBeDefined();
+    expect(await getThreadsNav().findByText("No threads yet")).toBeDefined();
     expect(screen.queryByRole("navigation", { name: "Hercule" })).toBeNull();
   });
 
   it("switches face when the segmented switch is used", async () => {
     const user = userEvent.setup();
-    await renderApp({ path: "/", api: stubApi(inShell()).fetch, token: "held" });
+    await renderApp({ path: "/", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
     await user.click(screen.getByRole("radio", { name: /Hercule/ }));
 
-    expect(navLabels()[0]).toBe("Intake");
+    expect(readNavLabels()[0]).toBe("Intake");
   });
 
   it("puts the screen back in charge of the face on the next navigation", async () => {
     const user = userEvent.setup();
-    const { router } = await renderApp({ path: "/", api: stubApi(inShell()).fetch, token: "held" });
+    const { router } = await renderApp({
+      path: "/",
+      api: stubApi(buildShellRoutes()).fetch,
+      token: "held",
+    });
 
     await user.click(screen.getByRole("radio", { name: /Hercule/ }));
-    await user.click(herculeNav().getByRole("link", { name: "Intake" }));
+    await user.click(getOrchestrationNav().getByRole("link", { name: "Intake" }));
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/intake");
     });
-    expect(navLabels()[0]).toBe("Intake");
+    expect(readNavLabels()[0]).toBe("Intake");
 
     await user.click(screen.getByRole("radio", { name: "Threads" }));
-    expect(await threadsNav().findByText("No threads yet")).toBeDefined();
+    expect(await getThreadsNav().findByText("No threads yet")).toBeDefined();
   });
 
   it("reads the thread-row density from the settings store", async () => {
     await renderApp({
       path: "/",
-      api: stubApi(inShell({ "ui.threadRows": "plain" })).fetch,
+      api: stubApi(buildShellRoutes({ "ui.threadRows": "plain" })).fetch,
       token: "held",
     });
 
-    const empty = await threadsNav().findByText("No threads yet");
+    const empty = await getThreadsNav().findByText("No threads yet");
     expect(empty.parentElement?.dataset.threadRows).toBe("plain");
   });
 
   it("defaults the thread-row density to meta", async () => {
-    await renderApp({ path: "/", api: stubApi(inShell()).fetch, token: "held" });
+    await renderApp({ path: "/", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
-    const empty = await threadsNav().findByText("No threads yet");
+    const empty = await getThreadsNav().findByText("No threads yet");
     expect(empty.parentElement?.dataset.threadRows).toBe("meta");
   });
 
   it("opens the marks legend on ?", async () => {
     const user = userEvent.setup();
-    await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
+    await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
     expect(screen.queryByLabelText("Marks legend")).toBeNull();
     await user.keyboard("?");
@@ -220,7 +226,7 @@ describe("the theme selector", () => {
 
   it("sits below Marks at the sidebar foot, and a pick paints and persists", async () => {
     const user = userEvent.setup();
-    await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
+    await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
     // At rest the machine is in charge: no explicit theme on the document.
     expect(document.documentElement.dataset.theme).toBeUndefined();
@@ -238,8 +244,8 @@ describe("the theme selector", () => {
 
 describe("the Threads face's session rows", () => {
   /** Every row link the face renders for a session, in DOM order. */
-  const rowLinks = (): HTMLElement[] =>
-    threadsNav()
+  const listRowLinks = (): HTMLElement[] =>
+    getThreadsNav()
       .getAllByRole("link")
       .filter((link) => {
         const href = link.getAttribute("href") ?? "";
@@ -250,23 +256,23 @@ describe("the Threads face's session rows", () => {
     await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
 
     for (const s of THREE_SESSIONS) {
-      const row = await threadsNav().findByRole("link", { name: new RegExp(s.title) });
+      const row = await getThreadsNav().findByRole("link", { name: new RegExp(s.title) });
       expect(row.getAttribute("href")).toBe(`/threads/${s.id}`);
     }
     // Create new thread still comes before the rows.
-    const create = threadsNav().getByRole("button", { name: /create new thread/i });
-    expectInDocumentOrder([create, rowLinks()[0]!]);
+    const create = getThreadsNav().getByRole("button", { name: /create new thread/i });
+    expectInDocumentOrder([create, listRowLinks()[0]!]);
   });
 
-  it("carries the age read with ageOf, and the model slug in meta mode", async () => {
+  it("carries the age read with formatAge, and the model slug in meta mode", async () => {
     await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
 
     const first = THREE_SESSIONS[0]!;
-    const row = await threadsNav().findByRole("link", { name: new RegExp(first.title) });
+    const row = await getThreadsNav().findByRole("link", { name: new RegExp(first.title) });
     // Read right beside the assertion, the same instant the row itself reads
-    // from: `ageOf`'s coarsest unit is a minute, so the two reads agree unless
+    // from: `formatAge`'s coarsest unit is a minute, so the two reads agree unless
     // this line and the render it followed straddle a minute boundary.
-    expect(row.textContent).toContain(ageOf(first.lastActivityAt, new Date()));
+    expect(row.textContent).toContain(formatAge(first.lastActivityAt, new Date()));
     expect(row.textContent).toContain(first.modelSelection.model);
   });
 
@@ -278,12 +284,14 @@ describe("the Threads face's session rows", () => {
       token: "held",
     });
 
-    const currentRow = await threadsNav().findByRole("link", { name: new RegExp(current.title) });
+    const currentRow = await getThreadsNav().findByRole("link", {
+      name: new RegExp(current.title),
+    });
     expect(currentRow.getAttribute("aria-current")).toBe("page");
 
     for (const s of THREE_SESSIONS) {
       if (s.id === current.id) continue;
-      const row = threadsNav().getByRole("link", { name: new RegExp(s.title) });
+      const row = getThreadsNav().getByRole("link", { name: new RegExp(s.title) });
       expect(row.getAttribute("aria-current")).not.toBe("page");
     }
   });
@@ -296,7 +304,7 @@ describe("the Threads face's session rows", () => {
       api: stubApi(withThreads(THREE_SESSIONS, { "ui.threadRows": "meta" })).fetch,
       token: "held",
     });
-    const metaRow = await threadsNav().findByRole("link", { name: new RegExp(target.title) });
+    const metaRow = await getThreadsNav().findByRole("link", { name: new RegExp(target.title) });
     expect(metaRow.textContent).toContain(target.modelSelection.model);
     metaRender.unmount();
 
@@ -305,22 +313,22 @@ describe("the Threads face's session rows", () => {
       api: stubApi(withThreads(THREE_SESSIONS, { "ui.threadRows": "plain" })).fetch,
       token: "held",
     });
-    const plainRow = await threadsNav().findByRole("link", { name: new RegExp(target.title) });
+    const plainRow = await getThreadsNav().findByRole("link", { name: new RegExp(target.title) });
     expect(plainRow.textContent).not.toContain(target.modelSelection.model);
   });
 
   it("carries an All sessions link to /sessions, after the rows", async () => {
     await renderApp({ path: "/", api: stubApi(withThreads(THREE_SESSIONS)).fetch, token: "held" });
-    await threadsNav().findByRole("link", { name: new RegExp(THREE_SESSIONS[0]!.title) });
+    await getThreadsNav().findByRole("link", { name: new RegExp(THREE_SESSIONS[0]!.title) });
 
-    const allSessions = threadsNav().getByRole("link", { name: /All sessions/i });
+    const allSessions = getThreadsNav().getByRole("link", { name: /All sessions/i });
     expect(allSessions.getAttribute("href")).toBe("/sessions");
   });
 
   it("refetches the list on a session invalidation nudge", async () => {
     const api = stubApi(withThreads(THREE_SESSIONS));
     const { live } = await renderApp({ path: "/", api: api.fetch, token: "held" });
-    await threadsNav().findByRole("link", { name: new RegExp(THREE_SESSIONS[0]!.title) });
+    await getThreadsNav().findByRole("link", { name: new RegExp(THREE_SESSIONS[0]!.title) });
 
     await waitFor(() => {
       expect(live.topics()).toContain("session");
@@ -342,17 +350,17 @@ describe("the Threads face's session rows", () => {
 
     // Amended by #72 AC-16 (D-14): it opens the project picker rather than
     // navigating, so it is a button and no longer carries an href.
-    const create = await threadsNav().findByRole<HTMLButtonElement>("button", {
+    const create = await getThreadsNav().findByRole<HTMLButtonElement>("button", {
       name: /create new thread/i,
     });
     expect(create.disabled).toBe(false);
-    expect(threadsNav().queryByRole("link", { name: /create new thread/i })).toBeNull();
+    expect(getThreadsNav().queryByRole("link", { name: /create new thread/i })).toBeNull();
   });
 
   it.each(["/", "/threads/s1", "/sessions"])(
     "shows the Threads face, not Hercule, on %s",
     async (path) => {
-      await renderApp({ path, api: stubApi(inShell()).fetch, token: "held" });
+      await renderApp({ path, api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
       expect(screen.getByRole("navigation", { name: "Threads" })).toBeDefined();
       expect(screen.queryByRole("navigation", { name: "Hercule" })).toBeNull();
@@ -361,26 +369,30 @@ describe("the Threads face's session rows", () => {
 });
 
 describe("the pulse at the sidebar foot", () => {
-  const pulseButton = () => screen.getByRole("button", { name: /Nothing to report yet/ });
+  const getPulseButton = () => screen.getByRole("button", { name: /Nothing to report yet/ });
 
   it("is collapsed on arrival", async () => {
-    await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
+    await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
-    expect(pulseButton().getAttribute("aria-expanded")).toBe("false");
+    expect(getPulseButton().getAttribute("aria-expanded")).toBe("false");
   });
 
   it("opens on click and remembers that for the browser session", async () => {
     const user = userEvent.setup();
-    const first = await renderApp({ path: "/tasks", api: stubApi(inShell()).fetch, token: "held" });
+    const first = await renderApp({
+      path: "/tasks",
+      api: stubApi(buildShellRoutes()).fetch,
+      token: "held",
+    });
 
-    await user.click(pulseButton());
-    expect(pulseButton().getAttribute("aria-expanded")).toBe("true");
+    await user.click(getPulseButton());
+    expect(getPulseButton().getAttribute("aria-expanded")).toBe("true");
 
     // The second load is a second page load, so the first one is gone by then
     // and the pulse is the only one on screen.
     first.unmount();
-    await renderApp({ path: "/runs", api: stubApi(inShell()).fetch, token: "held" });
-    expect(pulseButton().getAttribute("aria-expanded")).toBe("true");
+    await renderApp({ path: "/runs", api: stubApi(buildShellRoutes()).fetch, token: "held" });
+    expect(getPulseButton().getAttribute("aria-expanded")).toBe("true");
   });
 });
 
@@ -389,7 +401,7 @@ describe("the top bar", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
     try {
-      await renderApp({ path: "/runs", api: stubApi(inShell()).fetch, token: "held" });
+      await renderApp({ path: "/runs", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Runs");
       expect(screen.getByText("Monday 09:14")).toBeDefined();
@@ -406,10 +418,10 @@ describe("the top bar", () => {
     await renderApp({
       path: `/workflows/${workflowId}`,
       api: stubApi({
-        ...inShell(),
+        ...buildShellRoutes(),
         [`GET /api/v1/workflows/${workflowId}`]: {
           status: 500,
-          body: envelope("internal", "The database is locked."),
+          body: buildErrorBody("internal", "The database is locked."),
         },
         "GET /api/v1/workflow-actions": { body: [] },
         "GET /api/v1/event-kinds": { body: [] },
@@ -426,7 +438,7 @@ describe("the top bar", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
     try {
-      const api = stubApi(inShell({ timezone: "Europe/Nowhere" }));
+      const api = stubApi(buildShellRoutes({ timezone: "Europe/Nowhere" }));
       await renderApp({ path: "/runs", api: api.fetch, token: "held" });
 
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Runs");
@@ -441,7 +453,7 @@ describe("the top bar", () => {
   });
 
   it("frames Intake on when the user last checked", async () => {
-    const api = stubApi(inShell({ "lastChecked.intake": "2026-09-06T20:10:00.000Z" }));
+    const api = stubApi(buildShellRoutes({ "lastChecked.intake": "2026-09-06T20:10:00.000Z" }));
     await renderApp({ path: "/intake", api: api.fetch, token: "held" });
 
     expect(screen.getByText("since Sunday 22:10")).toBeDefined();
@@ -451,7 +463,7 @@ describe("the top bar", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
     try {
-      await renderApp({ path: "/intake", api: stubApi(inShell()).fetch, token: "held" });
+      await renderApp({ path: "/intake", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
       expect(screen.getByText("Monday 09:14")).toBeDefined();
     } finally {
@@ -463,7 +475,7 @@ describe("the top bar", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
     try {
-      const api = stubApi(inShell({ "lastChecked.intake": "0000-00-00T00:00:00.000Z" }));
+      const api = stubApi(buildShellRoutes({ "lastChecked.intake": "0000-00-00T00:00:00.000Z" }));
       await renderApp({ path: "/intake", api: api.fetch, token: "held" });
 
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Intake");
@@ -505,7 +517,7 @@ const IDS = {
   runbookThread: "01a06d02-7400-7000-8000-000000000002",
 };
 
-const WORLD = threadsWorld(IDS);
+const WORLD = buildThreadsWorld(IDS);
 const MOSS = WORLD.MOSS;
 const WEBSHOP = WORLD.WEBSHOP_PROJECT;
 const OPS = WORLD.OPS_PROJECT;
@@ -516,42 +528,42 @@ const W_PRIMARY: Workspace = { ...WORLD.PRIMARY, sessionIds: [BUMP_THE_BUN_PIN] 
 const W_RUN_3F1 = WORLD.RUN_3F1;
 
 const grouped: readonly Session[] = [
-  session({
+  buildSession({
     id: IDS.flakyThread,
     title: "Fix flaky webhook tests",
     projectId: WEBSHOP.id,
     workspaceId: W_RUN_3F1.id,
     lastActivityAt: "2026-09-10T09:05:00.000Z",
   }),
-  session({
+  buildSession({
     id: IDS.runbookThread,
     title: "Write the retry runbook",
     projectId: WEBSHOP.id,
     workspaceId: W_RUN_3F1.id,
     lastActivityAt: "2026-09-10T09:04:00.000Z",
   }),
-  session({
+  buildSession({
     id: BUMP_THE_BUN_PIN,
     title: "Bump the Bun pin",
     projectId: WEBSHOP.id,
     workspaceId: W_PRIMARY.id,
     lastActivityAt: "2026-09-10T09:03:00.000Z",
   }),
-  session({
+  buildSession({
     id: "01a06d02-7400-7000-8000-000000000004",
     title: "Tidy the promotion runbook",
     projectId: WEBSHOP.id,
     workspaceId: null,
     lastActivityAt: "2026-09-10T09:02:00.000Z",
   }),
-  session({
+  buildSession({
     id: "01a06d02-7400-7000-8000-000000000005",
     title: "Rotate the Hetzner backups key",
     projectId: OPS.id,
     workspaceId: null,
     lastActivityAt: "2026-09-10T09:01:00.000Z",
   }),
-  session({
+  buildSession({
     id: "01a06d02-7400-7000-8000-000000000006",
     title: "Nothing to do with a project",
     projectId: null,
@@ -561,7 +573,7 @@ const grouped: readonly Session[] = [
 ];
 
 const withProjects = (user: Record<string, unknown> = {}): Readonly<Record<string, Handler>> => ({
-  ...inShell(user),
+  ...buildShellRoutes(user),
   "GET /api/v1/sessions": { body: { items: grouped } },
   "GET /api/v1/projects": { body: { items: [WEBSHOP, OPS] } },
   "GET /api/v1/resources": { body: { items: [R_WEBSHOP, R_INFRA] } },
@@ -573,7 +585,7 @@ const withProjects = (user: Record<string, unknown> = {}): Readonly<Record<strin
 });
 
 /** The Threads face's own text, whitespace collapsed, in DOM order. */
-const faceText = (): string =>
+const readFaceText = (): string =>
   (screen.getByRole("navigation", { name: "Threads" }).textContent ?? "")
     .replace(/\s+/g, " ")
     .trim();
@@ -584,22 +596,22 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
 
     // The project's own + names it, and unlike the bare word it stands in one
     // place only: a main workspace's label carries the repo's name too.
-    await threadsNav().findByRole("link", { name: "New thread in webshop" });
-    expect(faceText()).toContain("webshop 4");
-    expect(faceText()).toContain("ops 1");
+    await getThreadsNav().findByRole("link", { name: "New thread in webshop" });
+    expect(readFaceText()).toContain("webshop 4");
+    expect(readFaceText()).toContain("ops 1");
 
-    const plus = threadsNav().getByRole("link", { name: "New thread in webshop" });
+    const plus = getThreadsNav().getByRole("link", { name: "New thread in webshop" });
     expect(plus.getAttribute("href")).toBe(`/threads/new?project=${WEBSHOP.id}`);
   });
 
   it("groups a project's threads per workspace, naming a primary after its repo and machine", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    await threadsNav().findByText("hercule/run-3f1");
+    await getThreadsNav().findByText("hercule/run-3f1");
     // The whole label is the tooltip, and it is split so that a sidebar too
     // narrow for it cuts the repo rather than the machine that tells one
     // repo's two main workspaces apart. D-20c: the word "checkout" is gone.
-    const label = threadsNav().getByTitle("webshop · moss");
+    const label = getThreadsNav().getByTitle("webshop · moss");
     expect(label.textContent).toBe("webshop · moss");
     expect(label.firstElementChild?.textContent).toBe("webshop");
     expect(label.lastElementChild?.textContent).toBe(" · moss");
@@ -608,8 +620,8 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
   it("puts the workspace-less threads of a project last, under 'no workspace'", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    await threadsNav().findByText("no workspace");
-    const text = faceText();
+    await getThreadsNav().findByText("no workspace");
+    const text = readFaceText();
     expect(text.indexOf("hercule/run-3f1")).toBeLessThan(text.indexOf("no workspace"));
     expect(text.indexOf("webshop · moss")).toBeLessThan(text.indexOf("no workspace"));
     expect(text.indexOf("no workspace")).toBeLessThan(text.indexOf("Tidy the promotion runbook"));
@@ -618,7 +630,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
   it("offers a + on a workspace group that opens a draft joining it", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    const plus = await threadsNav().findByRole("link", {
+    const plus = await getThreadsNav().findByRole("link", {
       name: "New thread in hercule/run-3f1",
     });
     expect(plus.getAttribute("href")).toBe(
@@ -629,8 +641,8 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
   it("puts the threads that belong to no project last, under no header of their own", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    await threadsNav().findByRole("link", { name: "New thread in webshop" });
-    const text = faceText();
+    await getThreadsNav().findByRole("link", { name: "New thread in webshop" });
+    const text = readFaceText();
     expect(text.indexOf("ops")).toBeLessThan(text.indexOf("Nothing to do with a project"));
     expect(text.indexOf("Rotate the Hetzner backups key")).toBeLessThan(
       text.indexOf("Nothing to do with a project"),
@@ -644,8 +656,8 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
       token: "held",
     });
 
-    await threadsNav().findByText("hercule/run-3f1");
-    const text = faceText();
+    await getThreadsNav().findByText("hercule/run-3f1");
+    const text = readFaceText();
     expect(text).toContain("New thread draft");
     expect(text.indexOf("hercule/run-3f1")).toBeLessThan(text.indexOf("New thread draft"));
     // The draft is the group's last row, as it is the last of the thread tabs.
@@ -656,7 +668,7 @@ describe("the Threads face groups by project and workspace (AC-20)", () => {
   it("no longer repeats the workspace on a row's second line", async () => {
     await renderApp({ path: "/", api: stubApi(withProjects()).fetch, token: "held" });
 
-    const row = await threadsNav().findByRole("link", { name: /Fix flaky webhook tests/ });
+    const row = await getThreadsNav().findByRole("link", { name: /Fix flaky webhook tests/ });
     expect(row.textContent).not.toContain("hercule/run-3f1");
   });
 });
@@ -670,7 +682,7 @@ describe("Create new thread opens the project picker (AC-16)", () => {
       token: "held",
     });
 
-    await user.click(threadsNav().getByText("Create new thread"));
+    await user.click(getThreadsNav().getByText("Create new thread"));
 
     const picker = await screen.findByRole("dialog");
     expect((picker.textContent ?? "").replace(/\s+/g, " ")).toContain("New thread in");

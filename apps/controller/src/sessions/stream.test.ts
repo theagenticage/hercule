@@ -10,8 +10,8 @@ import type { ProviderEvent } from "@hercule/protocol";
 import {
   DELTA_FLUSH_BYTES,
   fold,
-  openRequestAfter,
-  track,
+  computeOpenRequestAfter,
+  startTracking,
   type Folded,
   type Tracked,
 } from "./stream";
@@ -35,7 +35,7 @@ const turnCompleted: ProviderEvent = {
 
 const exited: ProviderEvent = { ...base, _tag: "session.exited", reason: "stopped" };
 
-const delta = (itemId: string, text: string): ProviderEvent => ({
+const buildDelta = (itemId: string, text: string): ProviderEvent => ({
   ...base,
   _tag: "content.delta",
   turnId: TURN,
@@ -44,7 +44,7 @@ const delta = (itemId: string, text: string): ProviderEvent => ({
   delta: text,
 });
 
-const completedItem = (itemId: string): ProviderEvent => ({
+const buildCompletedItem = (itemId: string): ProviderEvent => ({
   ...base,
   _tag: "item.completed",
   turnId: TURN,
@@ -71,16 +71,17 @@ const resolved: ProviderEvent = {
 };
 
 /** The tags a fold wrote, in the order it wrote them. */
-const tags = (folded: Folded): ReadonlyArray<string> => folded.rows.map((row) => row.event._tag);
+const listTags = (folded: Folded): ReadonlyArray<string> =>
+  folded.rows.map((row) => row.event._tag);
 
 /** The coalesced text of the one delta row a fold wrote. */
-const texts = (folded: Folded): ReadonlyArray<string> =>
+const listTexts = (folded: Folded): ReadonlyArray<string> =>
   folded.rows.flatMap((row) => (row.event._tag === "content.delta" ? [row.event.delta] : []));
 
 /** Applies a run of events, failing loudly on one the fold refused. */
-const applied = (
+const applyEvents = (
   events: ReadonlyArray<readonly [number, ProviderEvent]>,
-  from: Tracked = track({ lastSeq: 0, base: 0 }),
+  from: Tracked = startTracking({ lastSeq: 0, base: 0 }),
 ): { readonly state: Tracked; readonly folds: ReadonlyArray<Folded> } => {
   let state = from;
   const folds: Array<Folded> = [];
@@ -95,11 +96,11 @@ const applied = (
 
 describe("the status axis", () => {
   it("moves on the four events that move it and on nothing else", () => {
-    const { folds } = applied([
+    const { folds } = applyEvents([
       [1, started],
       [2, turnStarted],
-      [3, delta("i1", "hi")],
-      [4, completedItem("i1")],
+      [3, buildDelta("i1", "hi")],
+      [4, buildCompletedItem("i1")],
       [5, turnCompleted],
       [6, exited],
     ]);
@@ -117,7 +118,7 @@ describe("the status axis", () => {
 
 describe("a sequence number already applied", () => {
   it("writes nothing and leaves the state where it was", () => {
-    const { state } = applied([
+    const { state } = applyEvents([
       [1, started],
       [2, turnStarted],
     ]);
@@ -128,75 +129,75 @@ describe("a sequence number already applied", () => {
   });
 
   it("is refused whether or not it would have been a delta", () => {
-    const { state } = applied([[1, delta("i1", "one")]]);
+    const { state } = applyEvents([[1, buildDelta("i1", "one")]]);
 
-    expect(fold(state, 1, delta("i1", "again"))).toBeUndefined();
+    expect(fold(state, 1, buildDelta("i1", "again"))).toBeUndefined();
     // The held text is untouched, so a replayed delta cannot be counted twice.
-    const flushed = fold(state, 2, completedItem("i1"))!;
-    expect(texts(flushed)).toEqual(["one"]);
+    const flushed = fold(state, 2, buildCompletedItem("i1"))!;
+    expect(listTexts(flushed)).toEqual(["one"]);
   });
 });
 
 describe("coalescing", () => {
   it("holds deltas and writes one row at the item boundary", () => {
-    const { folds } = applied([
-      [1, delta("i1", "Hel")],
-      [2, delta("i1", "lo")],
-      [3, completedItem("i1")],
+    const { folds } = applyEvents([
+      [1, buildDelta("i1", "Hel")],
+      [2, buildDelta("i1", "lo")],
+      [3, buildCompletedItem("i1")],
     ]);
 
-    expect(tags(folds[0]!)).toEqual([]);
-    expect(tags(folds[1]!)).toEqual([]);
+    expect(listTags(folds[0]!)).toEqual([]);
+    expect(listTags(folds[1]!)).toEqual([]);
     // The coalesced text first, then the boundary that flushed it.
-    expect(tags(folds[2]!)).toEqual(["content.delta", "item.completed"]);
-    expect(texts(folds[2]!)).toEqual(["Hello"]);
+    expect(listTags(folds[2]!)).toEqual(["content.delta", "item.completed"]);
+    expect(listTexts(folds[2]!)).toEqual(["Hello"]);
     // The row is idempotent on the last delta folded into it.
     expect(folds[2]!.rows[0]?.seq).toBe(2);
   });
 
   it("keeps two stream kinds on one item apart", () => {
-    const { folds } = applied([
-      [1, delta("i1", "said")],
-      [2, { ...delta("i1", "thought"), streamKind: "reasoning_text" } as ProviderEvent],
-      [3, completedItem("i1")],
+    const { folds } = applyEvents([
+      [1, buildDelta("i1", "said")],
+      [2, { ...buildDelta("i1", "thought"), streamKind: "reasoning_text" } as ProviderEvent],
+      [3, buildCompletedItem("i1")],
     ]);
 
-    expect(texts(folds[2]!).toSorted()).toEqual(["said", "thought"]);
+    expect(listTexts(folds[2]!).toSorted()).toEqual(["said", "thought"]);
   });
 
   it("flushes only the item that ended, and everything at a turn boundary", () => {
-    const { folds } = applied([
-      [1, delta("i1", "one")],
-      [2, delta("i2", "two")],
-      [3, completedItem("i1")],
+    const { folds } = applyEvents([
+      [1, buildDelta("i1", "one")],
+      [2, buildDelta("i2", "two")],
+      [3, buildCompletedItem("i1")],
       [4, turnCompleted],
     ]);
 
-    expect(texts(folds[2]!)).toEqual(["one"]);
-    expect(texts(folds[3]!)).toEqual(["two"]);
+    expect(listTexts(folds[2]!)).toEqual(["one"]);
+    expect(listTexts(folds[3]!)).toEqual(["two"]);
   });
 
   it("flushes what a session that exits was still holding", () => {
-    const { folds } = applied([
-      [1, delta("i1", "tail")],
+    const { folds } = applyEvents([
+      [1, buildDelta("i1", "tail")],
       [2, exited],
     ]);
 
-    expect(tags(folds[1]!)).toEqual(["content.delta", "session.exited"]);
+    expect(listTags(folds[1]!)).toEqual(["content.delta", "session.exited"]);
   });
 
   it("writes a row of its own once the held text passes the threshold", () => {
     const long = "x".repeat(DELTA_FLUSH_BYTES - 1);
-    const { folds, state } = applied([
-      [1, delta("i1", long)],
-      [2, delta("i1", "yz")],
+    const { folds, state } = applyEvents([
+      [1, buildDelta("i1", long)],
+      [2, buildDelta("i1", "yz")],
     ]);
 
-    expect(tags(folds[0]!)).toEqual([]);
-    expect(texts(folds[1]!)).toEqual([`${long}yz`]);
+    expect(listTags(folds[0]!)).toEqual([]);
+    expect(listTexts(folds[1]!)).toEqual([`${long}yz`]);
     // Flushed means nothing is held: the next boundary writes no empty row.
     expect(state.buffers.size).toBe(0);
-    expect(tags(fold(state, 3, completedItem("i1"))!)).toEqual(["item.completed"]);
+    expect(listTags(fold(state, 3, buildCompletedItem("i1"))!)).toEqual(["item.completed"]);
   });
 });
 
@@ -207,7 +208,7 @@ describe("every other event", () => {
       _tag: "session.usage.updated",
       usage: { inputTokens: 10, outputTokens: 20 },
     };
-    const { folds } = applied([[1, usage]]);
+    const { folds } = applyEvents([[1, usage]]);
 
     expect(folds[0]!.rows).toEqual([{ seq: 1, at: base.at, event: usage }]);
   });
@@ -215,33 +216,33 @@ describe("every other event", () => {
 
 describe("the open request", () => {
   it("is set by the request that opens it", () => {
-    expect(openRequestAfter(opened, null)).toEqual(request);
+    expect(computeOpenRequestAfter(opened, null)).toEqual(request);
   });
 
   it("is cleared by the answer to it, by the turn ending and by the harness going", () => {
-    expect(openRequestAfter(resolved, request)).toBeNull();
+    expect(computeOpenRequestAfter(resolved, request)).toBeNull();
     // The question dies with the turn it was asked in, answered or not.
-    expect(openRequestAfter(turnCompleted, request)).toBeNull();
-    expect(openRequestAfter(exited, request)).toBeNull();
+    expect(computeOpenRequestAfter(turnCompleted, request)).toBeNull();
+    expect(computeOpenRequestAfter(exited, request)).toBeNull();
   });
 
   it("is left standing by an answer to some other request", () => {
     const other: ProviderEvent = { ...resolved, requestId: "r2" };
 
-    expect(openRequestAfter(other, request)).toBeUndefined();
-    expect(openRequestAfter(resolved, null)).toBeUndefined();
+    expect(computeOpenRequestAfter(other, request)).toBeUndefined();
+    expect(computeOpenRequestAfter(resolved, null)).toBeUndefined();
   });
 
   it("says nothing where the clear changes nothing, so no write is made for it", () => {
     // How most turns end: nothing was parked, and a write would cost every
     // client watching the session a refetch for no change.
-    expect(openRequestAfter(turnCompleted, null)).toBeUndefined();
-    expect(openRequestAfter(exited, null)).toBeUndefined();
+    expect(computeOpenRequestAfter(turnCompleted, null)).toBeUndefined();
+    expect(computeOpenRequestAfter(exited, null)).toBeUndefined();
   });
 
   it("is left alone by every other event", () => {
-    for (const event of [started, turnStarted, delta("i1", "hi"), completedItem("i1")]) {
-      expect(openRequestAfter(event, request), event._tag).toBeUndefined();
+    for (const event of [started, turnStarted, buildDelta("i1", "hi"), buildCompletedItem("i1")]) {
+      expect(computeOpenRequestAfter(event, request), event._tag).toBeUndefined();
     }
   });
 });

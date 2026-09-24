@@ -7,26 +7,31 @@ import { networkInterfaces } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { runnerDirIn } from "@hercule/home";
+import { locateRunnerDir } from "@hercule/home";
 import { IDENTITY_PORT } from "@hercule/protocol";
 import {
-  gitCredentialEnv,
+  buildGitCredentialEnv,
   makeCredentialRelay,
   serveCredentialSocket,
-  socketPathIn,
+  buildSocketPath,
 } from "./credentials";
-import { identityListener } from "./identity";
+import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { HERCULE_SKILL } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
-import { reconnect, reconnectSignals } from "./reconnect";
-import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile, runnerFileIn } from "./runner-file";
+import { reconnect, streamReconnectSignals } from "./reconnect";
+import {
+  CONTROLLER_URL_SCHEMES,
+  NotEnrolled,
+  readRunnerFile,
+  buildRunnerFilePath,
+} from "./runner-file";
 import { connect, type RunnerRetired } from "./socket";
-import { machineHeadroom } from "./watermark";
+import { readMachineHeadroom } from "./watermark";
 import { makeWorkspaces } from "./workspaces";
 
 /** Sorted, so two readings can be compared. */
-const addresses = (): ReadonlyArray<string> =>
+const listNetworkAddresses = (): ReadonlyArray<string> =>
   Object.values(networkInterfaces())
     .flatMap((entries) => entries ?? [])
     .map((entry) => entry.address)
@@ -37,7 +42,10 @@ const addresses = (): ReadonlyArray<string> =>
  * builds a request URL off it, so a hand-edited value is refused here by name
  * rather than failing deep in a dial.
  */
-const dialable = (home: string, controllerUrl: string): Effect.Effect<void, NotEnrolled> => {
+const validateControllerUrl = (
+  home: string,
+  controllerUrl: string,
+): Effect.Effect<void, NotEnrolled> => {
   const url = URL.parse(controllerUrl);
   const wrong =
     url === null
@@ -49,7 +57,7 @@ const dialable = (home: string, controllerUrl: string): Effect.Effect<void, NotE
   return Effect.fail(
     new NotEnrolled({
       message:
-        `controllerUrl in ${runnerFileIn(home)} ${wrong}: ${controllerUrl}. ` +
+        `controllerUrl in ${buildRunnerFilePath(home)} ${wrong}: ${controllerUrl}. ` +
         "Run `hercule runner set-controller <controller-url>` to point this machine at one it can dial.",
     }),
   );
@@ -72,7 +80,10 @@ export class ToolingUnavailable extends Schema.TaggedError<ToolingUnavailable>()
  * a step: a runner that came up without them hosts sessions that cannot call
  * Hercule at all. Reported by name, like every other precondition here.
  */
-const tooling = (home: string, storageDir: string): Effect.Effect<Tooling, ToolingUnavailable> =>
+const prepareRunnerTooling = (
+  home: string,
+  storageDir: string,
+): Effect.Effect<Tooling, ToolingUnavailable> =>
   Effect.tap(
     Effect.try({
       try: () =>
@@ -80,7 +91,7 @@ const tooling = (home: string, storageDir: string): Effect.Effect<Tooling, Tooli
       catch: (error) =>
         new ToolingUnavailable({
           message:
-            `could not put hercule and the session skill under ${runnerDirIn(home)}: ` +
+            `could not put hercule and the session skill under ${locateRunnerDir(home)}: ` +
             `${error instanceof Error ? error.message : String(error)}. ` +
             "No session on this machine could reach Hercule.",
         }),
@@ -93,7 +104,7 @@ const tooling = (home: string, storageDir: string): Effect.Effect<Tooling, Tooli
       Bun.main.startsWith(EMBEDDED)
         ? Effect.void
         : Effect.logWarning(
-            `This runner is not the compiled binary, so ${joinPath(runnerDirIn(home), "bin", "hercule")} ` +
+            `This runner is not the compiled binary, so ${joinPath(locateRunnerDir(home), "bin", "hercule")} ` +
               `points at ${process.execPath}: a session calling \`hercule\` gets bun.`,
           ),
   );
@@ -102,26 +113,26 @@ const tooling = (home: string, storageDir: string): Effect.Effect<Tooling, Tooli
  * The facts are read afresh per attempt, so a machine that gained memory between
  * two connections says so in the second hello.
  */
-export const daemon = (
+export const runDaemon = (
   home: string,
 ): Effect.Effect<never, NotEnrolled | RunnerRetired | ToolingUnavailable> =>
   Effect.scoped(
     Effect.gen(function* () {
       const pin = yield* readRunnerFile(home);
-      yield* dialable(home, pin.controllerUrl);
+      yield* validateControllerUrl(home, pin.controllerUrl);
       // Before the first probe, so the port the facts report is the one a
       // browser will find this runner on.
-      const identityPort = yield* identityListener({
+      const identityPort = yield* serveIdentity({
         runnerId: pin.runnerId,
         controllerUrl: pin.controllerUrl,
         port: IDENTITY_PORT,
       });
       const probe = probeFacts(thisMachine, identityPort);
-      const headroom = machineHeadroom(home);
+      const headroom = readMachineHeadroom(home);
       // Everything this machine holds for its controller sits under here, so
       // re-enlisting it leaves every provider login, workspace and cache behind
       // with the identity it belonged to.
-      const storageDir = joinPath(runnerDirIn(home), pin.storageDirectory);
+      const storageDir = joinPath(locateRunnerDir(home), pin.storageDirectory);
       // Nobody else on the machine reads a session's workspace or the socket
       // its credentials are asked down.
       mkdirSync(storageDir, { recursive: true, mode: 0o700 });
@@ -129,10 +140,13 @@ export const daemon = (
       // Beside them, and just as disposable: what a workspace-less session gets
       // as a cwd, one directory per session.
       const scratchDir = joinPath(storageDir, "scratch");
-      const socketPath = socketPathIn(storageDir);
+      const socketPath = buildSocketPath(storageDir);
       // The runner's own git asks for its credentials the same way a session's
       // does: down this socket, with nothing on disk.
-      const workspaces = makeWorkspaces({ storageDir, gitEnv: gitCredentialEnv({ socketPath }) });
+      const workspaces = makeWorkspaces({
+        storageDir,
+        gitEnv: buildGitCredentialEnv({ socketPath }),
+      });
       const credentials = makeCredentialRelay();
       yield* Effect.acquireRelease(
         // A second daemon on one home would answer this machine's helpers with
@@ -153,9 +167,9 @@ export const daemon = (
       // Once, here: what every session on this machine reaches Hercule through,
       // refreshed so an upgraded binary takes over the last build's symlink and
       // skill text (spec 15 section 2, spec 06 section 9.3).
-      const { binDir, herculeTool } = yield* tooling(
+      const { binDir, herculeTool } = yield* prepareRunnerTooling(
         home,
-        joinPath(runnerDirIn(home), pin.storageDirectory),
+        joinPath(locateRunnerDir(home), pin.storageDirectory),
       );
       return yield* reconnect({
         attempt: Effect.flatMap(probe, (facts) =>
@@ -173,7 +187,7 @@ export const daemon = (
             herculeTool,
           }),
         ),
-        signals: reconnectSignals({ now: () => Date.now(), addresses }),
+        signals: streamReconnectSignals({ now: () => Date.now(), addresses: listNetworkAddresses }),
       });
     }),
   );

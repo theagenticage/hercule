@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { networkInterfaces } from "node:os";
 import { IDENTITY_PORT_COUNT } from "@hercule/protocol";
-import { identityListener } from "./identity";
+import { serveIdentity } from "./identity";
 import { probeFacts, type Machine } from "./probe";
 
 /** A controller URL with a path on it: the header carries the origin, not the URL. */
@@ -34,14 +34,16 @@ const withListener = <A>(
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const port = yield* identityListener(options);
+        const port = yield* serveIdentity(options);
         return yield* Effect.promise(() => use(port));
       }),
     ),
   );
 
 /** Holds a port the way another process would, until it is let go of. */
-const occupy = (port: number): { readonly port: number; readonly release: () => Promise<void> } => {
+const occupyPort = (
+  port: number,
+): { readonly port: number; readonly release: () => Promise<void> } => {
   const server = Bun.serve({ port, hostname: "127.0.0.1", fetch: () => new Response("taken") });
   return { port: server.port!, release: () => server.stop(true) };
 };
@@ -51,7 +53,7 @@ const occupy = (port: number): { readonly port: number; readonly release: () => 
  * free one, so a run that turns out to be partly taken is given back and tried
  * again from somewhere else rather than failing as though the code were wrong.
  */
-const occupyRun = async (
+const occupyPortRange = async (
   length: number,
 ): Promise<{
   readonly base: number;
@@ -60,10 +62,10 @@ const occupyRun = async (
   readonly release: () => Promise<void>;
 }> => {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const base = await freePort();
+    const base = await findFreePort();
     const held: Array<{ readonly release: () => Promise<void> }> = [];
     try {
-      for (let offset = 0; offset < length; offset += 1) held.push(occupy(base + offset));
+      for (let offset = 0; offset < length; offset += 1) held.push(occupyPort(base + offset));
       const released = new Set<number>();
       const releaseAt = async (offset: number): Promise<void> => {
         released.add(offset);
@@ -85,14 +87,14 @@ const occupyRun = async (
 };
 
 /** A port nothing is on, and nothing takes while this test holds the number. */
-const freePort = async (): Promise<number> => {
-  const held = occupy(0);
+const findFreePort = async (): Promise<number> => {
+  const held = occupyPort(0);
   await held.release();
   return held.port;
 };
 
 /** A non-loopback IPv4 address of this machine, or undefined when it has none. */
-const lanAddress = (): string | undefined =>
+const findLanAddress = (): string | undefined =>
   Object.values(networkInterfaces())
     .flat()
     .find((one) => one !== undefined && one.family === "IPv4" && !one.internal)?.address;
@@ -106,7 +108,7 @@ const bareMachine: Machine = {
 describe("what the listener answers", () => {
   it("names the runner and lets the controller origin read it", async () => {
     const { status, body, allowOrigin } = await withListener(
-      { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: await freePort() },
+      { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: await findFreePort() },
       async (port) => {
         const response = await fetch(`http://127.0.0.1:${port}/identity`);
         return {
@@ -126,7 +128,7 @@ describe("what the listener answers", () => {
 
 describe("the port it binds", () => {
   it("takes the port it is asked for when that port is free", async () => {
-    const wanted = await freePort();
+    const wanted = await findFreePort();
 
     const port = await withListener(
       { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: wanted },
@@ -148,7 +150,7 @@ describe("the port it binds", () => {
     // the listener then falls past the set to an ephemeral port; that is
     // somebody else's race and not a result, so the arrangement is made again.
     const attempt = async (): Promise<{ landed: boolean; body: unknown }> => {
-      const run = await occupyRun(IDENTITY_PORT_COUNT);
+      const run = await occupyPortRange(IDENTITY_PORT_COUNT);
       await run.releaseAt(IDENTITY_PORT_COUNT - 1);
       try {
         const { port, body } = await withListener(
@@ -175,7 +177,7 @@ describe("the port it binds", () => {
   it("still serves when every port a browser may ask is taken", async () => {
     // The last resort: a machine can host sessions without being one a page can
     // recognise, so the listener takes whatever is free rather than giving up.
-    const run = await occupyRun(IDENTITY_PORT_COUNT);
+    const run = await occupyPortRange(IDENTITY_PORT_COUNT);
     try {
       const { port, body } = await withListener(
         { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: run.base },
@@ -197,7 +199,7 @@ describe("the port it binds", () => {
   });
 
   it("is the port the facts report", async () => {
-    const held = occupy(0);
+    const held = occupyPort(0);
     try {
       const port = await withListener(
         { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: held.port },
@@ -214,7 +216,7 @@ describe("the port it binds", () => {
   });
 
   it("lets the port go when the scope that opened it closes", async () => {
-    const wanted = await freePort();
+    const wanted = await findFreePort();
 
     const port = await withListener(
       { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: wanted },
@@ -223,7 +225,7 @@ describe("the port it binds", () => {
 
     // A runner that stopped must not leave the number held: the next one on
     // this machine would be pushed off it for the life of the process.
-    const after = occupy(port);
+    const after = occupyPort(port);
     expect(after.port).toBe(port);
     await after.release();
   });
@@ -231,11 +233,11 @@ describe("the port it binds", () => {
 
 describe("who can reach it", () => {
   it("refuses everything that is not loopback", async ({ skip }) => {
-    const lan = lanAddress();
+    const lan = findLanAddress();
     if (lan === undefined) skip("this machine has no non-loopback IPv4 address");
 
     const outcome = await withListener(
-      { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: await freePort() },
+      { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: await findFreePort() },
       async (port) => {
         // Loopback first, so a failure off the machine is the binding and not
         // a listener that was never up.
@@ -257,7 +259,7 @@ describe("who can reach it", () => {
 });
 
 describe("what it refuses", () => {
-  const refusals = async (
+  const fetchRefusals = async (
     port: number,
   ): Promise<{ elsewhere: number; posted: number; renamed: number; named: number }> => {
     const elsewhere = await fetch(`http://127.0.0.1:${String(port)}/runner`);
@@ -280,11 +282,11 @@ describe("what it refuses", () => {
   };
 
   it("answers only a GET of /identity that came to loopback by address", async () => {
-    const wanted = await freePort();
+    const wanted = await findFreePort();
 
     const seen = await withListener(
       { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: wanted },
-      refusals,
+      fetchRefusals,
     );
 
     expect(seen).toEqual({ elsewhere: 404, posted: 404, renamed: 404, named: 200 });

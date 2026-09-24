@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
-import { claudeCodeAdapter, type ClaudeSeam } from "./claude-code";
+import { makeClaudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import type { ProviderRunnerContext } from "./index";
 
 const CONTEXT: ProviderRunnerContext = {
@@ -19,7 +19,7 @@ const CONTEXT: ProviderRunnerContext = {
   herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
 };
 
-const seamRunning = (answer: {
+const buildStubSeam = (answer: {
   readonly code: number;
   readonly stdout?: string;
   readonly stderr?: string;
@@ -43,20 +43,20 @@ const seamRunning = (answer: {
   };
 };
 
-const asWritten = (command: ReadonlyArray<string>): string => command.join(" ");
+const formatCommand = (command: ReadonlyArray<string>): string => command.join(" ");
 
 const install = (seam: ClaudeSeam) =>
-  Effect.runPromise(claudeCodeAdapter(seam).install!(CONTEXT.env));
+  Effect.runPromise(makeClaudeCodeAdapter(seam).install!(CONTEXT.env));
 
 describe("installing the Claude Code harness", () => {
   it("runs the vendor's install script pinned to the version this build talks to", async () => {
-    const { seam, commands } = seamRunning({ code: 0, stdout: "Installed claude" });
+    const { seam, commands } = buildStubSeam({ code: 0, stdout: "Installed claude" });
 
     const outcome = await install(seam);
 
     expect(outcome.ok).toBe(true);
     expect(commands).toHaveLength(1);
-    const written = asWritten(commands[0]!);
+    const written = formatCommand(commands[0]!);
     expect(written).toContain("curl -fsSL https://claude.ai/install.sh");
     // Pinned to the version this build's SDK was made for, never "latest".
     expect(written).toContain(`bash -s ${CLAUDE_CODE_VERSION}`);
@@ -68,7 +68,7 @@ describe("installing the Claude Code harness", () => {
       "curl: (22) The requested URL returned error: 404",
       "install.sh: could not download the manifest",
     ].join("\n");
-    const { seam } = seamRunning({ code: 1, stderr });
+    const { seam } = buildStubSeam({ code: 1, stderr });
 
     const outcome = await install(seam);
 

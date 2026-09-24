@@ -3,12 +3,12 @@ import { Effect, Schema } from "effect";
 import { ALL_GRANTS } from "../grants";
 import { MAX_PROFILE_GRANTS, Profile } from "./profile";
 
-const outcome = <S extends Schema.Codec<unknown, unknown, never, never>>(
+const decodeOutcome = <S extends Schema.Codec<unknown, unknown, never, never>>(
   schema: S,
   input: unknown,
 ) => Effect.runSyncExit(Schema.decodeUnknownEffect(schema)(input))._tag;
 
-const profile = (grants: ReadonlyArray<string>) => ({
+const buildProfile = (grants: ReadonlyArray<string>) => ({
   id: "01a06d02-beca-760b-a6b2-83af536c3c20",
   name: "operator",
   grants,
@@ -23,7 +23,7 @@ describe("the bound on a profile's grant list", () => {
   });
 
   it("takes every grant once and refuses the one past it", () => {
-    expect(outcome(Profile, profile(ALL_GRANTS))).toBe("Success");
-    expect(outcome(Profile, profile([...ALL_GRANTS, "task.read"]))).toBe("Failure");
+    expect(decodeOutcome(Profile, buildProfile(ALL_GRANTS))).toBe("Success");
+    expect(decodeOutcome(Profile, buildProfile([...ALL_GRANTS, "task.read"]))).toBe("Failure");
   });
 });

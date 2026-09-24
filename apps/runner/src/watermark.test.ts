@@ -16,7 +16,7 @@ import { Cause, Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { freemem, tmpdir, totalmem } from "node:os";
 import type { RunnerWatermark } from "@hercule/protocol";
-import { checkWatermark, machineHeadroom, WATERMARK_INTERVAL } from "./watermark";
+import { reportWatermark, readMachineHeadroom, WATERMARK_INTERVAL } from "./watermark";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -31,7 +31,7 @@ const settle = TestClock.adjust(Duration.zero);
 
 describe("reading the real machine", () => {
   it("reports the free bytes of the filesystem a path sits on, in bytes", async () => {
-    const headroom = await Effect.runPromise(machineHeadroom(tmpdir()));
+    const headroom = await Effect.runPromise(readMachineHeadroom(tmpdir()));
 
     expect(Number.isInteger(headroom.diskFreeBytes)).toBe(true);
     expect(headroom.diskFreeBytes).toBeGreaterThan(0);
@@ -45,7 +45,7 @@ describe("reading the real machine", () => {
 
   it("fails rather than guessing when the path is not there", async () => {
     const outcome = await Effect.runPromise(
-      Effect.result(machineHeadroom("/no/such/directory/on/this/machine")),
+      Effect.result(readMachineHeadroom("/no/such/directory/on/this/machine")),
     );
     expect(outcome._tag).toBe("Failure");
   });
@@ -58,7 +58,7 @@ describe("the sixty-second check", () => {
         const sent: Array<RunnerWatermark> = [];
 
         const loop = yield* Effect.forkChild(
-          checkWatermark({
+          reportWatermark({
             read: Effect.succeed(ROOMY),
             send: (watermark) => Effect.sync(() => void sent.push(watermark)),
           }),
@@ -92,7 +92,7 @@ describe("the sixty-second check", () => {
         let disk = 200 * GIB;
 
         const loop = yield* Effect.forkChild(
-          checkWatermark({
+          reportWatermark({
             read: Effect.suspend(() =>
               Effect.succeed({ ...ROOMY, diskFreeBytes: disk } satisfies RunnerWatermark),
             ),
@@ -121,7 +121,7 @@ describe("the sixty-second check", () => {
         let readable = false;
 
         const loop = yield* Effect.forkChild(
-          checkWatermark({
+          reportWatermark({
             read: Effect.suspend(() =>
               readable
                 ? Effect.succeed(ROOMY)
@@ -154,7 +154,7 @@ describe("the sixty-second check", () => {
         const sent: Array<RunnerWatermark> = [];
 
         const loop = yield* Effect.forkChild(
-          checkWatermark({
+          reportWatermark({
             read: Effect.succeed(ROOMY),
             send: (watermark) => Effect.sync(() => void sent.push(watermark)),
           }),

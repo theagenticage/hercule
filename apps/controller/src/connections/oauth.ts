@@ -51,11 +51,11 @@ const CallbackQuery = Schema.Struct({
 export const decodeCallback = Schema.decodeUnknownEffect(CallbackQuery);
 
 /** The PKCE challenge: the verifier, hashed the way the provider will hash it. */
-export const challengeFor = (verifier: string): string =>
+export const computeChallenge = (verifier: string): string =>
   createHash("sha256").update(verifier).digest("base64url");
 
 /** The authorization request, as RFC 6749 and RFC 7636 spell it. */
-export const authorizationUrl = (
+export const buildAuthorizationUrl = (
   oauth: OAuthDeclaration,
   parts: {
     readonly clientId: string;
@@ -130,14 +130,14 @@ const TokenResponse = Schema.Struct({
 
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse);
 
-const refused = (message: string): Effect.Effect<never, TokenRefused> =>
+const failTokenRefused = (message: string): Effect.Effect<never, TokenRefused> =>
   Effect.fail(new TokenRefused({ message }));
 
-const unreachable = (message: string): Effect.Effect<never, TokenUnreachable> =>
+const failTokenUnreachable = (message: string): Effect.Effect<never, TokenUnreachable> =>
   Effect.fail(new TokenUnreachable({ message }));
 
 /** The redirect URI the provider will send the browser back to, for this origin. */
-export const redirectUri = (origin: string): string => `${origin}${CALLBACK_PATH}`;
+export const buildRedirectUri = (origin: string): string => `${origin}${CALLBACK_PATH}`;
 
 /** Written by this module alone, so a token set that does not parse is a broken database. */
 export const parseTokens = (stored: string): TokenSet => JSON.parse(stored) as TokenSet;
@@ -179,7 +179,7 @@ export const oauthClients: Effect.Effect<
  * `expires_in` is turned into an instant here, because that is the only moment
  * it can be read against.
  */
-const tokenRequest = (
+const requestTokens = (
   tokenUrl: string,
   form: Record<string, string>,
 ): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
@@ -189,11 +189,11 @@ const tokenRequest = (
       acceptJson: true,
     });
     if (response.status !== 200) {
-      return yield* refused(`the token endpoint answered ${String(response.status)}`);
+      return yield* failTokenRefused(`the token endpoint answered ${String(response.status)}`);
     }
     const body = yield* decodeTokenResponse(yield* response.json).pipe(
       Effect.catchTag("SchemaError", () =>
-        unreachable("the token endpoint answered no access token"),
+        failTokenUnreachable("the token endpoint answered no access token"),
       ),
     );
     const millis = yield* Clock.currentTimeMillis;
@@ -206,7 +206,7 @@ const tokenRequest = (
     };
   }).pipe(
     Effect.catchTag("HttpClientError", (error) =>
-      unreachable(`the token endpoint could not be reached: ${error.message}`),
+      failTokenUnreachable(`the token endpoint could not be reached: ${error.message}`),
     ),
   );
 
@@ -218,7 +218,7 @@ export const exchangeCode = (request: {
   readonly redirectUri: string;
   readonly codeVerifier: string;
 }): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
-  tokenRequest(request.tokenUrl, {
+  requestTokens(request.tokenUrl, {
     grant_type: "authorization_code",
     code: request.code,
     redirect_uri: request.redirectUri,
@@ -237,7 +237,7 @@ export const refreshAccess = (request: {
   readonly client: OAuthClient;
   readonly refreshToken: string;
 }): Effect.Effect<TokenSet, TokenRefused | TokenUnreachable, HttpClient.HttpClient> =>
-  tokenRequest(request.tokenUrl, {
+  requestTokens(request.tokenUrl, {
     grant_type: "refresh_token",
     refresh_token: request.refreshToken,
     client_id: request.client.clientId,

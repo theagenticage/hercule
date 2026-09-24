@@ -5,24 +5,24 @@
  * workspace is the last tab.
  */
 import { describe, expect, it } from "vitest";
-import { siblingTabs } from "./siblings";
-import { RUN_3F1, session } from "./workspaces.testing";
+import { buildSiblingTabs } from "./siblings";
+import { RUN_3F1, buildSession } from "./workspaces.testing";
 
 const SESSIONS = [
-  session({ id: "s-runbook", title: "Write the retry runbook", status: "busy" }),
-  session({ id: "s-flaky", title: "Fix flaky webhook tests" }),
+  buildSession({ id: "s-runbook", title: "Write the retry runbook", status: "busy" }),
+  buildSession({ id: "s-flaky", title: "Fix flaky webhook tests" }),
 ];
 
-describe("siblingTabs", () => {
+describe("buildSiblingTabs", () => {
   it("is empty on a thread with no workspace: there is nothing beside it", () => {
     expect(
-      siblingTabs({ workspace: undefined, sessions: SESSIONS, activeSessionId: "s-flaky" }),
+      buildSiblingTabs({ workspace: undefined, sessions: SESSIONS, activeSessionId: "s-flaky" }),
     ).toEqual([]);
   });
 
   it("is empty while the workspace holds one thread, whose title is the row", () => {
     expect(
-      siblingTabs({
+      buildSiblingTabs({
         workspace: { ...RUN_3F1, sessionIds: ["s-flaky"] },
         sessions: SESSIONS,
         activeSessionId: "s-flaky",
@@ -32,7 +32,7 @@ describe("siblingTabs", () => {
 
   it("keeps the workspace's own order, marking the thread on screen", () => {
     expect(
-      siblingTabs({ workspace: RUN_3F1, sessions: SESSIONS, activeSessionId: "s-flaky" }),
+      buildSiblingTabs({ workspace: RUN_3F1, sessions: SESSIONS, activeSessionId: "s-flaky" }),
     ).toEqual([
       { sessionId: "s-flaky", title: "Fix flaky webhook tests", mark: "idle", active: true },
       { sessionId: "s-runbook", title: "Write the retry runbook", mark: "working", active: false },
@@ -40,7 +40,7 @@ describe("siblingTabs", () => {
   });
 
   it("puts the draft joining the workspace last, as the one on screen", () => {
-    const tabs = siblingTabs({
+    const tabs = buildSiblingTabs({
       workspace: { ...RUN_3F1, sessionIds: ["s-flaky"] },
       sessions: SESSIONS,
       activeSessionId: null,
@@ -57,7 +57,7 @@ describe("siblingTabs", () => {
   });
 
   it("skips a session the listing does not hold rather than drawing an empty tab", () => {
-    const tabs = siblingTabs({
+    const tabs = buildSiblingTabs({
       workspace: { ...RUN_3F1, sessionIds: ["s-flaky", "s-gone", "s-runbook"] },
       sessions: SESSIONS,
       activeSessionId: "s-flaky",

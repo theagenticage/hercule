@@ -19,19 +19,19 @@ import type { ModelDescriptor, RunnerFacts, SessionInput } from "@hercule/protoc
 import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
 import { get, post, type ServerHarness } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
+import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import { EvaluationErrorNotifier } from "../subscriptions";
 import {
-  agentHolding,
+  spawnAgentWithGrants,
   at,
-  framesOf,
+  listFrames,
   createProfile,
-  report,
-  sessionWhen,
-  spawned,
-  startFrames,
+  reportEvent,
+  waitForSession,
+  spawnSessionOrFail,
+  waitForStartFrames,
   readSessionToken,
-  until,
+  waitUntil,
   withFleet as sharedWithFleet,
   type Agent,
   type Arranged,
@@ -77,7 +77,7 @@ export const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
  */
 export const READS_RAW = "event.raw != null";
 
-export const PROVIDER = providerDefinition("full-provider", { token: "t" });
+export const PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
 
 export const FACTS: RunnerFacts = {
   os: "darwin",
@@ -94,8 +94,8 @@ export const MODELS: ReadonlyArray<ModelDescriptor> = [
   { slug: "fast", name: "Fast", isDefault: true, options: [] },
 ];
 
-export const registry = (): ReadonlyArray<Plugin> => [
-  fixture({ id: "providers", definitions: [PROVIDER] }).plugin,
+export const buildPlugins = (): ReadonlyArray<Plugin> => [
+  createPluginFixture({ id: "providers", definitions: [PROVIDER] }).plugin,
   github,
 ];
 
@@ -135,7 +135,7 @@ export const withPipeline = (
   } = {},
 ): Promise<void> =>
   sharedWithFleet(body, {
-    plugins: registry(),
+    plugins: buildPlugins(),
     facts: FACTS,
     models: MODELS,
     eventRoutingInterval: TICK,
@@ -148,7 +148,7 @@ export const runEffect = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
 
 /** A session on a profile that may subscribe and read back what it subscribed to. */
 export const spawnSubscriber = (arranged: Arranged, name: string): Promise<Agent> =>
-  agentHolding(arranged, name, ["subscription.write", "subscription.read"]);
+  spawnAgentWithGrants(arranged, name, ["subscription.write", "subscription.read"]);
 
 /**
  * A session that exited leaving nothing to resume: its machine never reported
@@ -156,13 +156,16 @@ export const spawnSubscriber = (arranged: Arranged, name: string): Promise<Agent
  */
 export const spawnStrandedAgent = async (arranged: Arranged, name: string): Promise<Agent> => {
   const profile = await createProfile(arranged, name, ["subscription.write", "subscription.read"]);
-  const opened = await spawned(arranged, { prompt: "hello", permissionProfileId: profile.id });
-  const token = readSessionToken((await startFrames(arranged, opened.id, 1))[0]!);
+  const opened = await spawnSessionOrFail(arranged, {
+    prompt: "hello",
+    permissionProfileId: profile.id,
+  });
+  const token = readSessionToken((await waitForStartFrames(arranged, opened.id, 1))[0]!);
   return { session: opened, token };
 };
 
 const reportExit = (arranged: Arranged, sessionId: string, seq: number): void =>
-  report(arranged.wire, seq, {
+  reportEvent(arranged.wire, seq, {
     eventId: crypto.randomUUID(),
     sessionId,
     at,
@@ -171,13 +174,13 @@ const reportExit = (arranged: Arranged, sessionId: string, seq: number): void =>
   });
 
 /** Ends a session the way its machine ends one, and answers the ended row. */
-export const exit = async (arranged: Arranged, agent: Agent, seq: number): Promise<void> => {
+export const exitSession = async (arranged: Arranged, agent: Agent, seq: number): Promise<void> => {
   reportExit(arranged, agent.session.id, seq);
-  await sessionWhen(arranged, agent.session.id, (one) => one.status === "exited");
+  await waitForSession(arranged, agent.session.id, (one) => one.status === "exited");
 };
 
-export const turnStarted = (arranged: Arranged, sessionId: string, seq: number): void =>
-  report(arranged.wire, seq, {
+export const reportTurnStarted = (arranged: Arranged, sessionId: string, seq: number): void =>
+  reportEvent(arranged.wire, seq, {
     eventId: crypto.randomUUID(),
     sessionId,
     at,
@@ -185,8 +188,8 @@ export const turnStarted = (arranged: Arranged, sessionId: string, seq: number):
     turnId: `t${String(seq)}`,
   });
 
-export const turnCompleted = (arranged: Arranged, sessionId: string, seq: number): void =>
-  report(arranged.wire, seq, {
+export const reportTurnCompleted = (arranged: Arranged, sessionId: string, seq: number): void =>
+  reportEvent(arranged.wire, seq, {
     eventId: crypto.randomUUID(),
     sessionId,
     at,
@@ -196,12 +199,12 @@ export const turnCompleted = (arranged: Arranged, sessionId: string, seq: number
   });
 
 /** Puts a session on a running turn, so an input has to wait for a boundary. */
-export const madeBusy = async (arranged: Arranged, agent: Agent, seq: number): Promise<void> => {
-  turnStarted(arranged, agent.session.id, seq);
-  await sessionWhen(arranged, agent.session.id, (one) => one.status === "busy");
+export const makeBusy = async (arranged: Arranged, agent: Agent, seq: number): Promise<void> => {
+  reportTurnStarted(arranged, agent.session.id, seq);
+  await waitForSession(arranged, agent.session.id, (one) => one.status === "busy");
 };
 
-export const subscribed = async (
+export const subscribeAgent = async (
   arranged: Arranged,
   agent: Agent,
   ref: string,
@@ -251,31 +254,31 @@ export const readSubscription = async (
 export const readHealth = async (arranged: Arranged, agent: Agent, id: string): Promise<Health> =>
   (await readSubscription(arranged, agent, id)).health;
 
-export const subscriptionWhen = (
+export const waitForSubscription = (
   arranged: Arranged,
   agent: Agent,
   id: string,
   ready: (subscription: ReadSubscription) => boolean,
 ): Promise<ReadSubscription> =>
-  until("answered the subscription the holder was waiting on", async () => {
+  waitUntil("answered the subscription the holder was waiting on", async () => {
     const found = await readSubscription(arranged, agent, id);
     return ready(found) ? found : undefined;
   });
 
-export const healthWhen = async (
+export const waitForHealth = async (
   arranged: Arranged,
   agent: Agent,
   id: string,
   ready: (health: Health) => boolean,
 ): Promise<Health> =>
-  (await subscriptionWhen(arranged, agent, id, (one) => ready(one.health))).health;
+  (await waitForSubscription(arranged, agent, id, (one) => ready(one.health))).health;
 
 export const buildPayload = (title: string): unknown => ({
   subject: { repo: "o/r", number: 87, title, url: PR_URL },
 });
 
 /** One manual event, through the operation a person calls. */
-export const emitted = async (
+export const emitManualEvent = async (
   arranged: Arranged,
   refs: ReadonlyArray<string>,
   title: string,
@@ -300,7 +303,7 @@ export interface MatchedInputRow {
   readonly session: string;
 }
 
-export const matchedInputRows = (
+export const readMatchedInputRows = (
   harness: ServerHarness,
   subscriptionId: string,
 ): Promise<ReadonlyArray<MatchedInputRow>> =>
@@ -312,13 +315,13 @@ export const matchedInputRows = (
       ORDER BY created_at, id`,
   );
 
-export const rowsWhen = (
+export const waitForMatchedInputRows = (
   harness: ServerHarness,
   subscriptionId: string,
   ready: (rows: ReadonlyArray<MatchedInputRow>) => boolean,
 ): Promise<ReadonlyArray<MatchedInputRow>> =>
-  until("wrote the matched inputs", async () => {
-    const rows = await matchedInputRows(harness, subscriptionId);
+  waitUntil("wrote the matched inputs", async () => {
+    const rows = await readMatchedInputRows(harness, subscriptionId);
     return ready(rows) ? rows : undefined;
   });
 
@@ -338,8 +341,8 @@ export const readCursorAndHead = async (
  * The cursor once it has reached the end of the log. Read together with the
  * head in one statement, so the pair can never be half a tick apart.
  */
-export const caughtUp = (harness: ServerHarness): Promise<number> =>
-  until("walked the log to its end", async () => {
+export const waitUntilCaughtUp = (harness: ServerHarness): Promise<number> =>
+  waitUntil("walked the log to its end", async () => {
     const seen = await readCursorAndHead(harness);
     return seen.position !== null && seen.position === seen.head ? seen.position : undefined;
   });
@@ -354,7 +357,7 @@ export interface SubscriptionRow {
   readonly lost_wake_up_event_id: number | null;
 }
 
-export const subscriptionRow = async (
+export const readSubscriptionRow = async (
   harness: ServerHarness,
   id: string,
 ): Promise<SubscriptionRow | undefined> => {
@@ -383,12 +386,12 @@ export const storeCondition = (
                 WHERE id = unhex(replace(${id}, '-', ''))`,
   );
 
-export const inputFrames = (arranged: Arranged): ReadonlyArray<SessionInput> =>
-  framesOf<SessionInput>(arranged.wire, "sessionInput");
+export const listInputFrames = (arranged: Arranged): ReadonlyArray<SessionInput> =>
+  listFrames<SessionInput>(arranged.wire, "sessionInput");
 
 /** Whether a frame carrying this text has crossed the socket. */
-export const sentFrames = (arranged: Arranged, text: string): ReadonlyArray<SessionInput> =>
-  inputFrames(arranged).filter((frame) => frame.input.text.includes(text));
+export const listFramesCarrying = (arranged: Arranged, text: string): ReadonlyArray<SessionInput> =>
+  listInputFrames(arranged).filter((frame) => frame.input.text.includes(text));
 
-export const frameWhen = (arranged: Arranged, text: string): Promise<SessionInput> =>
-  until(`sent a frame carrying ${text}`, () => sentFrames(arranged, text)[0]);
+export const waitForFrameCarrying = (arranged: Arranged, text: string): Promise<SessionInput> =>
+  waitUntil(`sent a frame carrying ${text}`, () => listFramesCarrying(arranged, text)[0]);

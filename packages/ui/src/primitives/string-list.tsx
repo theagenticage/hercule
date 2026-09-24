@@ -23,10 +23,10 @@ export function StringList({
   readonly onChange: (values: ReadonlyArray<string>) => void;
   readonly addLabel?: string;
 }): JSX.Element {
-  const replace = (index: number, value: string): void => {
+  const replaceEntry = (index: number, value: string): void => {
     onChange(values.map((each, at) => (at === index ? value : each)));
   };
-  const entryName = (index: number): string => `${label} entry ${String(index + 1)}`;
+  const buildEntryName = (index: number): string => `${label} entry ${String(index + 1)}`;
 
   return (
     <div
@@ -40,14 +40,14 @@ export function StringList({
         // the list is short and only ever edited in place.
         <div key={index} className="flex w-full items-center gap-1.5">
           <Input
-            aria-label={entryName(index)}
+            aria-label={buildEntryName(index)}
             value={value}
             onChange={(event) => {
-              replace(index, event.target.value);
+              replaceEntry(index, event.target.value);
             }}
           />
           <Button
-            aria-label={`Remove ${entryName(index)}`}
+            aria-label={`Remove ${buildEntryName(index)}`}
             onClick={() => {
               onChange(values.filter((_, at) => at !== index));
             }}

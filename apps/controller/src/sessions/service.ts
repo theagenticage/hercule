@@ -61,7 +61,7 @@ import {
   afterCommit,
   announce,
   nowIso,
-  pageInput,
+  buildPageInputFields,
   refuseCursor,
   withTransaction,
   type Page,
@@ -70,20 +70,20 @@ import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
 import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
-import { gitIdentityOf, type GitCredential } from "../workspaces";
+import { buildGitIdentity, type GitCredential } from "../workspaces";
 import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
 import { sessionRecordComposer } from "./records";
 import {
-  requireSession,
+  readSessionOrFail,
   sessionRepository,
   type QueuePosition,
   type StoredSession,
 } from "./repository";
-import { fold, openRequestAfter, track, type Folded, type Tracked } from "./stream";
+import { fold, computeOpenRequestAfter, startTracking, type Folded, type Tracked } from "./stream";
 
 const QueryInput = Schema.Struct({
   ...SessionFilter.fields,
-  ...pageInput(SESSION_SORT_FIELDS),
+  ...buildPageInputFields(SESSION_SORT_FIELDS),
 });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
@@ -92,11 +92,11 @@ const Identified = Schema.Struct({ id: Id });
 
 export type Identified = Schema.Schema.Type<typeof Identified>;
 
-const TranscriptInput = Schema.Struct({ id: Id, ...pageInput(TRANSCRIPT_SORT_FIELDS) });
+const TranscriptInput = Schema.Struct({ id: Id, ...buildPageInputFields(TRANSCRIPT_SORT_FIELDS) });
 
 export type TranscriptInput = Schema.Schema.Type<typeof TranscriptInput>;
 
-const InputQueryInput = Schema.Struct({ id: Id, ...pageInput(INPUT_SORT_FIELDS) });
+const InputQueryInput = Schema.Struct({ id: Id, ...buildPageInputFields(INPUT_SORT_FIELDS) });
 
 export type InputQueryInput = Schema.Schema.Type<typeof InputQueryInput>;
 
@@ -231,7 +231,7 @@ export interface Applied {
 }
 
 /** A listing as the contract hands it out: the cursor is a key, not a null. */
-const pageOut = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCursor?: string } => ({
+const toPageOutput = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCursor?: string } => ({
   items: listing.items,
   ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
 });
@@ -264,7 +264,7 @@ const RUNNER_LOST =
   "so the session was ended before this input was sent";
 
 /** Why a queued input never left, written on the row when its session ends. */
-const exitedWith = (reason: string): string =>
+const describeExited = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
 
 /**
@@ -272,7 +272,7 @@ const exitedWith = (reason: string): string =>
  * The key is `SessionBinding`'s own field name, because it is the same fact.
  * An event that carries none leaves the id null until the next sessions report.
  */
-const nativeIdIn = (event: ProviderEvent): string | undefined =>
+const findNativeId = (event: ProviderEvent): string | undefined =>
   event._tag === "session.started" ? event.providerRefs?.nativeSessionId : undefined;
 
 /** How long a sidebar row's title may run before it is cut. */
@@ -283,7 +283,7 @@ const MAX_TITLE_LENGTH = 80;
  * separately: the first line that is not blank, trimmed and capped, so a
  * sidebar row has something to show without reading the transcript.
  */
-const titleOf = (prompt: string): string => {
+const buildTitle = (prompt: string): string => {
   const line = prompt.split("\n").find((one) => one.trim().length > 0) ?? "";
   return line.trim().slice(0, MAX_TITLE_LENGTH);
 };
@@ -297,7 +297,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* sessionRepository;
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
-  const one = requireSession(sessions);
+  const one = readSessionOrFail(sessions);
   const tokens = yield* SessionTokens;
   const audit = yield* AuditLog;
 
@@ -369,7 +369,10 @@ const make = Effect.gen(function* () {
    * token and ingest state forgotten, one announce per session. A reason is
    * written on the rows where one is known.
    */
-  const ending = (ids: ReadonlyArray<string>, reason?: string): Effect.Effect<void, SqlError> =>
+  const endSessions = (
+    ids: ReadonlyArray<string>,
+    reason?: string,
+  ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       yield* Effect.forEach(
         ids,
@@ -429,7 +432,7 @@ const make = Effect.gen(function* () {
           // watching that session has to be told about that session.
           yield* announce({ _tag: "transcript", sessionId: id });
         }
-        yield* ending(waiting, message ?? undefined);
+        yield* endSessions(waiting, message ?? undefined);
       }),
     );
 
@@ -470,7 +473,7 @@ const make = Effect.gen(function* () {
           }),
         );
         const composeRecord = yield* recordComposer;
-        return pageOut({ ...listing, items: listing.items.map(composeRecord) });
+        return toPageOutput({ ...listing, items: listing.items.map(composeRecord) });
       }),
 
     /**
@@ -522,7 +525,7 @@ const make = Effect.gen(function* () {
             direction: sort?.direction ?? TRANSCRIPT_DIRECTION,
           }),
         );
-        return pageOut(listing);
+        return toPageOutput(listing);
       }),
 
     /**
@@ -537,7 +540,7 @@ const make = Effect.gen(function* () {
         const actor = yield* currentStamp;
         yield* sessions.insert({
           id: open.id,
-          title: titleOf(open.prompt),
+          title: buildTitle(open.prompt),
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           instanceId: open.spec.instanceId,
@@ -655,7 +658,7 @@ const make = Effect.gen(function* () {
                 token,
                 ...(account === undefined
                   ? {}
-                  : { ghToken: account.token, gitIdentity: gitIdentityOf(account.login) }),
+                  : { ghToken: account.token, gitIdentity: buildGitIdentity(account.login) }),
                 ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
               },
             });
@@ -748,7 +751,7 @@ const make = Effect.gen(function* () {
     endQueued: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         yield* sessions.moved(sessionId, "exited", at);
-        yield* ending([sessionId]);
+        yield* endSessions([sessionId]);
       }),
 
     /**
@@ -765,7 +768,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const at = yield* nowIso;
           const { ended, toStop } = yield* sessions.endOnRunner(runnerId, at);
-          yield* ending(ended);
+          yield* endSessions(ended);
           yield* Effect.forEach(
             ended,
             (id) =>
@@ -796,7 +799,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = yield* nowIso;
         const ended = yield* sessions.endOnLostRunners(connected, at);
-        yield* ending(
+        yield* endSessions(
           ended.map((one) => one.sessionId),
           RUNNER_LOST,
         );
@@ -995,7 +998,7 @@ const make = Effect.gen(function* () {
           // `ending` is the whole revocation: the rows moved to `exited`, which
           // is what refuses their tokens, and what was cached from them while
           // they ran is dropped after the commit.
-          yield* ending(gone);
+          yield* endSessions(gone);
           yield* Effect.forEach(
             gone,
             (id) =>
@@ -1038,7 +1041,7 @@ const make = Effect.gen(function* () {
         // runner reporting about a session that is not its to report.
         if (Option.isNone(found) || found.value.runnerId !== runnerId) return undefined;
         const before = found.value.status;
-        const held = tracking.get(id) ?? track(yield* sessions.ingestState(id));
+        const held = tracking.get(id) ?? startTracking(yield* sessions.ingestState(id));
         const folded = fold(held, seq, event);
         if (folded === undefined) return undefined;
         if (event._tag === "content.delta") {
@@ -1059,7 +1062,10 @@ const make = Effect.gen(function* () {
           // What this event does to the open request, or `undefined` for
           // nothing. An event reaching a session that has already exited never
           // parks it again.
-          park: before === "exited" ? undefined : openRequestAfter(event, found.value.openRequest),
+          park:
+            before === "exited"
+              ? undefined
+              : computeOpenRequestAfter(event, found.value.openRequest),
         };
       }),
 
@@ -1086,7 +1092,7 @@ const make = Effect.gen(function* () {
         }
         // Written with the move the same event causes: a session that reads
         // `idle` has the provider-native id that made it so.
-        const native = nativeIdIn(event);
+        const native = findNativeId(event);
         if (native !== undefined) {
           yield* sessions.bind(id, runnerId, session.instanceId, native);
         }
@@ -1101,7 +1107,7 @@ const make = Effect.gen(function* () {
           yield* sessions.moved(id, moved, at);
           if (event._tag === "session.exited") {
             // Nothing waits on a harness that is gone, so the queue goes with it.
-            yield* ending([id], exitedWith(event.reason));
+            yield* endSessions([id], describeExited(event.reason));
           } else {
             yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
           }
@@ -1156,7 +1162,7 @@ const make = Effect.gen(function* () {
             direction: sort?.direction ?? INPUT_DIRECTION,
           }),
         );
-        return pageOut(listing);
+        return toPageOutput(listing);
       }),
 
     updateInput: (input: InputUpdate): Effect.Effect<Input, InputError> =>

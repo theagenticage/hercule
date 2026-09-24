@@ -6,17 +6,17 @@
  */
 import { describe, expect, it } from "vitest";
 import { renderHuman } from "./render";
-import { commandAt, type Command } from "./tree";
+import { findCommandByWords, type Command } from "./tree";
 
-const command = (...words: ReadonlyArray<string>): Command => {
-  const found = commandAt(words);
+const lookUpCommand = (...words: ReadonlyArray<string>): Command => {
+  const found = findCommandByWords(words);
   expect(found, words.join(" ")).toBeDefined();
   return found!;
 };
 
 const SESSION = "0199e0e7-1111-7000-8000-0000000000ff";
 
-const row = (position: number, event: Record<string, unknown>) => ({
+const buildTranscriptRow = (position: number, event: Record<string, unknown>) => ({
   position,
   at: "2026-09-07T10:00:00.000Z",
   event: { eventId: "e1", sessionId: SESSION, at: "2026-09-07T10:00:00.000Z", ...event },
@@ -26,7 +26,7 @@ describe("hercule session spawn", () => {
   it("prints the session and teaches the command that reads it back", () => {
     const lines = renderHuman(
       { kind: "value", value: { id: SESSION, status: "starting" } },
-      command("session", "spawn"),
+      lookUpCommand("session", "spawn"),
     );
 
     expect(lines[0]).toBe(`id      ${SESSION.slice(-8)}`);
@@ -38,7 +38,7 @@ describe("hercule session spawn", () => {
   it("teaches nothing after an ordinary read", () => {
     const lines = renderHuman(
       { kind: "value", value: { id: SESSION, status: "idle" } },
-      command("session", "read"),
+      lookUpCommand("session", "read"),
     );
 
     expect(lines.join("\n")).not.toContain("hercule transcript read");
@@ -52,19 +52,19 @@ describe("hercule transcript read", () => {
         kind: "value",
         value: {
           items: [
-            row(1, { _tag: "turn.started", turnId: "t1" }),
-            row(2, {
+            buildTranscriptRow(1, { _tag: "turn.started", turnId: "t1" }),
+            buildTranscriptRow(2, {
               _tag: "content.delta",
               turnId: "t1",
               itemId: "i1",
               streamKind: "assistant_text",
               delta: "Hello\nthere",
             }),
-            row(3, { _tag: "turn.completed", turnId: "t1", state: "completed" }),
+            buildTranscriptRow(3, { _tag: "turn.completed", turnId: "t1", state: "completed" }),
           ],
         },
       },
-      command("transcript", "read"),
+      lookUpCommand("transcript", "read"),
     );
 
     expect(lines).toEqual([
@@ -80,7 +80,7 @@ describe("hercule transcript read", () => {
         kind: "value",
         value: {
           items: [
-            row(1, {
+            buildTranscriptRow(1, {
               _tag: "content.delta",
               turnId: "t1",
               itemId: "i1",
@@ -91,7 +91,7 @@ describe("hercule transcript read", () => {
           nextCursor: "next",
         },
       },
-      command("transcript", "read"),
+      lookUpCommand("transcript", "read"),
     );
 
     expect(lines[0]).toContain("...");
@@ -102,7 +102,7 @@ describe("hercule transcript read", () => {
   it("says so when the session has said nothing yet", () => {
     const lines = renderHuman(
       { kind: "value", value: { items: [] } },
-      command("transcript", "read"),
+      lookUpCommand("transcript", "read"),
     );
 
     expect(lines).toEqual(["no results"]);
@@ -121,9 +121,9 @@ describe("hercule workflow", () => {
   };
 
   it("prints the source of a read unchanged, and nothing else", () => {
-    expect(renderHuman({ kind: "value", value: record }, command("workflow", "read"))).toEqual([
-      SOURCE,
-    ]);
+    expect(
+      renderHuman({ kind: "value", value: record }, lookUpCommand("workflow", "read")),
+    ).toEqual([SOURCE]);
   });
 
   it("adds a carriage return after a CRLF source, so its last line ends in CRLF when printed", () => {
@@ -131,7 +131,7 @@ describe("hercule workflow", () => {
     expect(
       renderHuman(
         { kind: "value", value: { ...record, source: crlfSource } },
-        command("workflow", "read"),
+        lookUpCommand("workflow", "read"),
       ),
     ).toEqual([`${crlfSource}\r`]);
   });
@@ -146,7 +146,7 @@ describe("hercule workflow", () => {
           ],
         },
       },
-      command("workflow", "list"),
+      lookUpCommand("workflow", "list"),
     );
     expect(listed).toEqual([
       "id        name         description",
@@ -158,13 +158,13 @@ describe("hercule workflow", () => {
         kind: "value",
         value: { items: [{ triggerId: "on_label", filter: "event.a == 1 &&\r\n  event.b == 2" }] },
       },
-      command("trigger", "list"),
+      lookUpCommand("trigger", "list"),
     );
     expect(triggers).toEqual(["triggerId  filter", "on_label   event.a == 1 && ..."]);
   });
 
   it("prints one line per error and per warning after validate, or one line when there are none", () => {
-    const validate = command("workflow", "validate");
+    const validate = lookUpCommand("workflow", "validate");
     expect(
       renderHuman(
         {
@@ -194,12 +194,14 @@ describe("hercule workflow", () => {
       ],
     };
     for (const verb of ["create", "update"]) {
-      expect(renderHuman({ kind: "value", value: saved }, command("workflow", verb))).toEqual([
-        `id       ${WORKFLOW.slice(-8)}`,
-        "enabled  false",
-        "warning: The run can end only when someone cancels it.",
-        "warning: steps.0: Nothing starts this step.",
-      ]);
+      expect(renderHuman({ kind: "value", value: saved }, lookUpCommand("workflow", verb))).toEqual(
+        [
+          `id       ${WORKFLOW.slice(-8)}`,
+          "enabled  false",
+          "warning: The run can end only when someone cancels it.",
+          "warning: steps.0: Nothing starts this step.",
+        ],
+      );
     }
   });
 });
@@ -215,7 +217,7 @@ describe("a catalog query that returns a plain array", () => {
             { kind: "github.pr.labeled", description: "Labels changed.", connectionRequired: true },
           ],
         },
-        command("event-kind", "list"),
+        lookUpCommand("event-kind", "list"),
       ),
     ).toEqual([
       "kind               description           connectionRequired",
@@ -242,7 +244,7 @@ describe("a catalog query that returns a plain array", () => {
             },
           ],
         },
-        command("workflow-action", "list"),
+        lookUpCommand("workflow-action", "list"),
       ),
     ).toEqual([
       "id           params                     description",

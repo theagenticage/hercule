@@ -20,14 +20,14 @@ afterEach(() => {
 });
 
 /** An empty Hercule Home, as a machine that has never joined has. */
-const temporaryHome = (): string => {
+const createTemporaryHome = (): string => {
   const home = mkdtempSync(pathJoin(tmpdir(), "hercule-join-"));
   homes.push(home);
   return home;
 };
 
 /** What the controller answers a join with. */
-const answer = (runnerId: string, name: string) => ({
+const buildJoinAnswer = (runnerId: string, name: string) => ({
   runnerId,
   name,
   credential: `credential-for-${runnerId}`,
@@ -48,7 +48,11 @@ const stubFetch = (body: unknown): typeof fetch =>
     { preconnect: () => {} },
   );
 
-const run = (options: { readonly home: string; readonly body: unknown; readonly token?: string }) =>
+const runJoin = (options: {
+  readonly home: string;
+  readonly body: unknown;
+  readonly token?: string;
+}) =>
   Effect.runPromise(
     join({
       controllerUrl: "http://127.0.0.1:4937",
@@ -71,10 +75,10 @@ const RUNNER_JSON_FIELDS = [
 
 describe("the join", () => {
   it("writes runner.json readable by nobody else, holding exactly what a runner needs", async () => {
-    const home = temporaryHome();
-    const body = answer("0199e0e7-2222-7000-8000-000000000000", "hercule-thalia");
+    const home = createTemporaryHome();
+    const body = buildJoinAnswer("0199e0e7-2222-7000-8000-000000000000", "hercule-thalia");
 
-    const result = await run({ home, body });
+    const result = await runJoin({ home, body });
 
     expect(result.runnerId).toBe(body.runnerId);
     expect(result.name).toBe(body.name);
@@ -105,12 +109,15 @@ describe("the join", () => {
   });
 
   it("gives a second enrolment its own runner and its own directory, leaving the first in place", async () => {
-    const home = temporaryHome();
+    const home = createTemporaryHome();
 
-    const first = await run({ home, body: answer("0199e0e7-3333-7000-8000-000000000000", "iris") });
-    const second = await run({
+    const first = await runJoin({
       home,
-      body: answer("0199e0e7-4444-7000-8000-000000000000", "vega"),
+      body: buildJoinAnswer("0199e0e7-3333-7000-8000-000000000000", "iris"),
+    });
+    const second = await runJoin({
+      home,
+      body: buildJoinAnswer("0199e0e7-4444-7000-8000-000000000000", "vega"),
     });
 
     expect(second.runnerId).not.toBe(first.runnerId);
@@ -139,7 +146,7 @@ describe("the join", () => {
  */
 describe("hercule runner join --reserved", () => {
   /** The body of the one join request `run(argv)` made. */
-  const joinBody = async (argv: ReadonlyArray<string>): Promise<unknown> => {
+  const captureJoinBody = async (argv: ReadonlyArray<string>): Promise<unknown> => {
     const bodies: Array<unknown> = [];
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -147,10 +154,13 @@ describe("hercule runner join --reserved", () => {
       const body = init?.body;
       bodies.push(typeof body === "string" ? (JSON.parse(body) as unknown) : body);
       return Promise.resolve(
-        new Response(JSON.stringify(answer("0199e0e7-5555-7000-8000-000000000000", "lyra")), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify(buildJoinAnswer("0199e0e7-5555-7000-8000-000000000000", "lyra")),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
       );
     });
     try {
@@ -169,9 +179,9 @@ describe("hercule runner join --reserved", () => {
   };
 
   it("sends reserved: true with the flag", async () => {
-    const home = temporaryHome();
+    const home = createTemporaryHome();
     expect(
-      await joinBody([
+      await captureJoinBody([
         "--home",
         home,
         "join",
@@ -184,9 +194,16 @@ describe("hercule runner join --reserved", () => {
   });
 
   it("sends reserved: false without it", async () => {
-    const home = temporaryHome();
+    const home = createTemporaryHome();
     expect(
-      await joinBody(["--home", home, "join", "http://127.0.0.1:4937", "--token", "a-join-token"]),
+      await captureJoinBody([
+        "--home",
+        home,
+        "join",
+        "http://127.0.0.1:4937",
+        "--token",
+        "a-join-token",
+      ]),
     ).toEqual({ reserved: false });
   });
 });

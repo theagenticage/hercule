@@ -27,7 +27,7 @@ import {
   RETIRED_CLOSE_CODE,
   RETIRED_CLOSE_REASON,
   RunnerToController,
-  signedChallenge,
+  encodeChallengeBytes,
   type ControllerHello,
   MAX_FACT_LENGTH,
   type InstallRequest,
@@ -41,11 +41,11 @@ import {
 } from "@hercule/protocol";
 import type { CredentialRelay } from "./credentials";
 import { refreshFacts } from "./probe";
-import { wentWrong } from "./report";
+import { describeCause } from "./report";
 import {
-  adapterFor,
-  noAdapterFor,
-  probeFailed,
+  findAdapter,
+  describeMissingAdapter,
+  buildFailedProbe,
   providerLogins,
   type InstallOutcome,
   type ProviderAdapter,
@@ -53,7 +53,7 @@ import {
 } from "./providers";
 import type { LoginAnswer } from "./providers/login";
 import { sessions } from "./sessions";
-import { checkWatermark } from "./watermark";
+import { reportWatermark } from "./watermark";
 import type { Workspaces } from "./workspaces";
 
 const SOCKET_PATH = "/api/v1/runners/socket";
@@ -140,26 +140,26 @@ const decodePeerVersion = Schema.decodeUnknownEffect(PeerVersion);
 const UNREADABLE = "the controller sent something this build cannot read";
 const encodeFrame = Schema.encodeUnknownSync(RunnerToController);
 
-const asText = (message: typeof RunnerToController.Type): string =>
+const encodeFrameText = (message: typeof RunnerToController.Type): string =>
   JSON.stringify(encodeFrame(message));
 
 /** In the buffer WebCrypto's types ask for, which a Node `Buffer` is not. */
-const asBytes = (encoded: string): Uint8Array<ArrayBuffer> => {
+const decodeBase64 = (encoded: string): Uint8Array<ArrayBuffer> => {
   const decoded = Buffer.from(encoded, "base64");
   const bytes = new Uint8Array(decoded.byteLength);
   bytes.set(decoded);
   return bytes;
 };
 
-const base64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
+const encodeBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
 
-const retiredIn = (error: unknown): boolean =>
+const isRetiredClose = (error: unknown): boolean =>
   error instanceof Socket.SocketError &&
   error.reason._tag === "SocketCloseError" &&
   error.reason.code === RETIRED_CLOSE_CODE &&
   error.reason.closeReason === RETIRED_CLOSE_REASON;
 
-const socketUrlFor = (controllerUrl: string): string => {
+const buildSocketUrl = (controllerUrl: string): string => {
   const url = new URL(SOCKET_PATH, controllerUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
@@ -176,7 +176,7 @@ const isOurs = (
     : Effect.promise(async () => {
         const key = await crypto.subtle.importKey(
           "spki",
-          asBytes(pin.controllerPublicKey),
+          decodeBase64(pin.controllerPublicKey),
           ED25519,
           false,
           ["verify"],
@@ -184,8 +184,8 @@ const isOurs = (
         return crypto.subtle.verify(
           ED25519,
           key,
-          asBytes(hello.signature),
-          signedChallenge(pin.runnerId, nonce),
+          decodeBase64(hello.signature),
+          encodeChallengeBytes(pin.runnerId, nonce),
         );
       }).pipe(
         // A key the runner cannot even import cannot have signed anything.
@@ -201,7 +201,7 @@ export const connect = (
 > =>
   Effect.gen(function* () {
     const { pin } = options;
-    const url = socketUrlFor(pin.controllerUrl);
+    const url = buildSocketUrl(pin.controllerUrl);
     const socket = yield* Socket.fromWebSocket(
       Effect.acquireRelease(
         Effect.sync(
@@ -216,7 +216,7 @@ export const connect = (
         // because everything above it is already being torn down.
         (ws) =>
           Effect.sync(() => {
-            if (ws.readyState === WebSocket.OPEN) ws.send(asText({ _tag: "goodbye" }));
+            if (ws.readyState === WebSocket.OPEN) ws.send(encodeFrameText({ _tag: "goodbye" }));
             ws.close(1000);
           }),
       ),
@@ -226,7 +226,7 @@ export const connect = (
     // forked into the connection's scope, not the transport's per-frame fiber.
     const connection = yield* Effect.scope;
 
-    const nonce = base64(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
+    const nonce = encodeBase64(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
     let greeted = false;
     // The machine as this connection last described it. An install changes what
     // is on it, and the probe that follows has to reach the binary that was
@@ -251,11 +251,11 @@ export const connect = (
       }),
     );
 
-    const binaryOf = (binaryName: string): string | undefined =>
+    const findBinaryPath = (binaryName: string): string | undefined =>
       facts.providers.find((provider) => provider.name === binaryName && provider.present)?.path;
 
     /** The instance's private directory: where the harness keeps its credential. */
-    const contextFor = (
+    const buildContext = (
       adapter: ProviderAdapter,
       instanceId: string,
       secrets: Readonly<Record<string, string>>,
@@ -267,7 +267,7 @@ export const connect = (
       return {
         cwd: null,
         home,
-        binary: binaryOf(adapter.binaryName),
+        binary: findBinaryPath(adapter.binaryName),
         env: process.env,
         secrets,
         // Carried because the context type is one: a probe, an install and a
@@ -279,7 +279,7 @@ export const connect = (
     // The connection lends the supervisor a way to write and the paths this
     // machine resolved; the sessions themselves are the process's.
     const supervisor = sessions.forConnection({
-      send: (frame) => write(asText(frame)),
+      send: (frame) => write(encodeFrameText(frame)),
       machine: {
         providersDir: options.providersDir,
         scratchDir: options.scratchDir,
@@ -287,7 +287,7 @@ export const connect = (
         herculeTool: options.herculeTool,
         controllerUrl: pin.controllerUrl,
         baseEnv: process.env,
-        binaryOf,
+        binaryOf: findBinaryPath,
         workspaces: options.workspaces,
         socketPath: options.socketPath,
       },
@@ -296,7 +296,7 @@ export const connect = (
     // The helper's questions go out on this connection for as long as it is up;
     // with none up there is no credential, which git reads as "try the next
     // helper" rather than as a failure.
-    yield* options.credentials.attached((frame) => write(asText(frame)));
+    yield* options.credentials.attached((frame) => write(encodeFrameText(frame)));
 
     /**
      * Making a workspace takes as long as a clone does, so it is forked and the
@@ -308,15 +308,15 @@ export const connect = (
       making: () => Promise<WorkspaceReport>,
     ): Effect.Effect<void> =>
       Effect.promise(making).pipe(
-        Effect.flatMap((report) => write(asText(report))),
+        Effect.flatMap((report) => write(encodeFrameText(report))),
         Effect.catchCause((cause) =>
           Effect.ignore(
             write(
-              asText({
+              encodeFrameText({
                 _tag: "workspaceReport",
                 workspaceId,
                 status: "failed",
-                message: wentWrong(cause, MAX_MESSAGE_LENGTH),
+                message: describeCause(cause, MAX_MESSAGE_LENGTH),
               }),
             ),
           ),
@@ -325,9 +325,9 @@ export const connect = (
       );
 
     const answerProbe = (request: ProbeRequest) => {
-      const reporting = (result: ProbeResult) =>
+      const sendProbeReport = (result: ProbeResult) =>
         write(
-          asText({
+          encodeFrameText({
             _tag: "probeReport",
             requestId: request.requestId,
             instanceId: request.instanceId,
@@ -335,21 +335,23 @@ export const connect = (
           }),
         );
       return Effect.gen(function* () {
-        const adapter = adapterFor(request.providerId);
-        return yield* reporting(
+        const adapter = findAdapter(request.providerId);
+        return yield* sendProbeReport(
           adapter === undefined
-            ? probeFailed(null, noAdapterFor(request.providerId))
+            ? buildFailedProbe(null, describeMissingAdapter(request.providerId))
             : yield* adapter.probe(
-                contextFor(adapter, request.instanceId, request.secrets),
+                buildContext(adapter, request.instanceId, request.secrets),
                 request.config,
               ),
         );
       }).pipe(
-        // The encoding is inside the catch: a result `asText` cannot carry must
+        // The encoding is inside the catch: a result `encodeFrameText` cannot carry must
         // reach the controller as an error, not as silence. The fallback is
         // bounded, so it always encodes.
         Effect.catchCause((cause) =>
-          Effect.ignore(reporting(probeFailed(null, wentWrong(cause, MAX_FACT_LENGTH)))),
+          Effect.ignore(
+            sendProbeReport(buildFailedProbe(null, describeCause(cause, MAX_FACT_LENGTH))),
+          ),
         ),
         // The connection is going if the write itself failed, and there is
         // nowhere left to report that to.
@@ -362,9 +364,9 @@ export const connect = (
      * the machine with the harness on it rather than as it was.
      */
     const answerInstall = (request: InstallRequest) => {
-      const reporting = (outcome: InstallOutcome) =>
+      const sendInstallResult = (outcome: InstallOutcome) =>
         write(
-          asText({
+          encodeFrameText({
             _tag: "installResult",
             requestId: request.requestId,
             ok: outcome.ok,
@@ -372,18 +374,23 @@ export const connect = (
           }),
         );
       return Effect.gen(function* () {
-        const install = adapterFor(request.providerId)?.install;
+        const install = findAdapter(request.providerId)?.install;
         if (install === undefined) {
-          return yield* reporting({ ok: false, message: noAdapterFor(request.providerId) });
+          return yield* sendInstallResult({
+            ok: false,
+            message: describeMissingAdapter(request.providerId),
+          });
         }
         const outcome = yield* install(process.env);
         if (outcome.ok) {
-          yield* write(asText({ _tag: "factsReport", facts: yield* reportFacts }));
+          yield* write(encodeFrameText({ _tag: "factsReport", facts: yield* reportFacts }));
         }
-        return yield* reporting(outcome);
+        return yield* sendInstallResult(outcome);
       }).pipe(
         Effect.catchCause((cause) =>
-          Effect.ignore(reporting({ ok: false, message: wentWrong(cause, MAX_FACT_LENGTH) })),
+          Effect.ignore(
+            sendInstallResult({ ok: false, message: describeCause(cause, MAX_FACT_LENGTH) }),
+          ),
         ),
         Effect.ignore,
       );
@@ -394,35 +401,39 @@ export const connect = (
      * this connection, so a socket dropping in between does not end it.
      */
     const answerLogin = (requestId: string, answering: Effect.Effect<LoginAnswer>) => {
-      const reporting = (answer: LoginAnswer) => write(asText({ ...answer, requestId }));
-      return Effect.flatMap(answering, reporting).pipe(
+      const sendLoginAnswer = (answer: LoginAnswer) =>
+        write(encodeFrameText({ ...answer, requestId }));
+      return Effect.flatMap(answering, sendLoginAnswer).pipe(
         Effect.catchCause((cause) =>
           Effect.ignore(
-            reporting({ _tag: "loginFailed", message: wentWrong(cause, MAX_FACT_LENGTH) }),
+            sendLoginAnswer({
+              _tag: "loginFailed",
+              message: describeCause(cause, MAX_FACT_LENGTH),
+            }),
           ),
         ),
         Effect.ignore,
       );
     };
 
-    const startingLogin = (request: LoginStart): Effect.Effect<LoginAnswer> =>
+    const startLogin = (request: LoginStart): Effect.Effect<LoginAnswer> =>
       Effect.suspend(() => {
-        const adapter = adapterFor(request.providerId);
+        const adapter = findAdapter(request.providerId);
         return adapter === undefined
           ? Effect.succeed<LoginAnswer>({
               _tag: "loginFailed",
-              message: noAdapterFor(request.providerId),
+              message: describeMissingAdapter(request.providerId),
             })
           : providerLogins.start(
               request.instanceId,
               adapter,
               // A login is the harness writing its own credential on this
               // machine; the instance's stored ones have no part in it.
-              contextFor(adapter, request.instanceId, {}),
+              buildContext(adapter, request.instanceId, {}),
             );
       });
 
-    const handle = (raw: string) =>
+    const handleFrame = (raw: string) =>
       Effect.gen(function* () {
         if (impostor !== undefined) return;
         const parsed = yield* Effect.option(
@@ -456,11 +467,13 @@ export const connect = (
         if (!greeted) return;
         switch (message._tag) {
           case "ping":
-            return yield* write(asText({ _tag: "pong" }));
+            return yield* write(encodeFrameText({ _tag: "pong" }));
           case "factsRequest":
             // Sent whatever the probe finds, unlike the hourly report: the
             // controller asked because somebody is waiting for an answer.
-            return yield* write(asText({ _tag: "factsReport", facts: yield* reportFacts }));
+            return yield* write(
+              encodeFrameText({ _tag: "factsReport", facts: yield* reportFacts }),
+            );
           case "probeRequest":
             // Forked: a probe takes seconds, and the connection has to keep
             // answering pings and further requests while it runs.
@@ -469,7 +482,7 @@ export const connect = (
             return yield* Effect.asVoid(Effect.forkIn(answerInstall(message), connection));
           case "loginStart":
             return yield* Effect.asVoid(
-              Effect.forkIn(answerLogin(message.requestId, startingLogin(message)), connection),
+              Effect.forkIn(answerLogin(message.requestId, startLogin(message)), connection),
             );
           case "loginCode":
             return yield* Effect.asVoid(
@@ -523,7 +536,7 @@ export const connect = (
     // The transport forks a fiber per frame, so two frames arriving together
     // would otherwise run the exchange twice over the same three flags.
     const frames = yield* Semaphore.make(1);
-    const receive = (raw: string) => frames.withPermits(1)(handle(raw));
+    const receive = (raw: string) => frames.withPermits(1)(handleFrame(raw));
 
     /**
      * The deadline is only ever the answer before the proof arrives: one that
@@ -546,14 +559,14 @@ export const connect = (
       yield* supervisor.report;
       yield* Effect.all(
         [
-          checkWatermark({
+          reportWatermark({
             read: options.headroom,
-            send: (watermark) => write(asText({ _tag: "watermarkReport", watermark })),
+            send: (watermark) => write(encodeFrameText({ _tag: "watermarkReport", watermark })),
           }),
           refreshFacts({
             probe: reportFacts,
             reported: options.facts,
-            send: (probed) => write(asText({ _tag: "factsReport", facts: probed })),
+            send: (probed) => write(encodeFrameText({ _tag: "factsReport", facts: probed })),
           }),
         ],
         { concurrency: "unbounded" },
@@ -565,7 +578,7 @@ export const connect = (
     yield* Effect.raceFirst(
       socket.runString(receive, {
         onOpen: write(
-          asText({
+          encodeFrameText({
             _tag: "runnerHello",
             protocolVersion: PROTOCOL_VERSION,
             capabilities: [],
@@ -583,7 +596,9 @@ export const connect = (
       // The one close reason this end reads: it says the credential is gone,
       // which no amount of dialling again will bring back.
       Effect.catch((error) =>
-        Effect.fail(retiredIn(error) ? new RunnerRetired({ message: RETIRED_MESSAGE }) : error),
+        Effect.fail(
+          isRetiredClose(error) ? new RunnerRetired({ message: RETIRED_MESSAGE }) : error,
+        ),
       ),
     );
 

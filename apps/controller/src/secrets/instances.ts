@@ -9,8 +9,8 @@
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { secretFields, type ProviderDefinition } from "@hercule/plugin-host";
-import { providerInstanceOwner, Secrets, type SecretDecryptError } from "./repository";
+import { listSecretFields, type ProviderDefinition } from "@hercule/plugin-host";
+import { buildProviderInstanceOwner, Secrets, type SecretDecryptError } from "./repository";
 
 /**
  * Only the fields the provider declares travel: a row left under this owner by
@@ -22,7 +22,7 @@ import { providerInstanceOwner, Secrets, type SecretDecryptError } from "./repos
  * without the key would report itself as not logged in, which reads as the user
  * never having entered one.
  */
-export const instanceSecrets = (
+export const readInstanceSecrets = (
   secrets: Secrets["Service"],
   definitions: ReadonlyArray<ProviderDefinition>,
   instanceId: string,
@@ -32,8 +32,8 @@ export const instanceSecrets = (
   const declared =
     definition === undefined
       ? []
-      : secretFields(definition.configSchema).map((field) => field.name);
-  return Effect.map(secrets.values(providerInstanceOwner(instanceId)), (stored) =>
+      : listSecretFields(definition.configSchema).map((field) => field.name);
+  return Effect.map(secrets.values(buildProviderInstanceOwner(instanceId)), (stored) =>
     Object.fromEntries(
       stored
         .filter((held) => declared.includes(held.name))

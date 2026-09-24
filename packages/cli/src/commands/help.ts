@@ -18,20 +18,20 @@ import {
   type NounRow,
   type Requirement,
 } from "@hercule/contract";
-import { COMMANDS, commandsUnder, mentionsIn, type Command, type Field } from "./tree";
+import { COMMANDS, listCommandsUnder, findMentions, type Command, type Field } from "./tree";
 
 /** How wide a line is allowed to be before it is wrapped. */
 const WIDTH = 94;
 
 /** The grant an operation needs, or `undefined` for one of the three markers. */
-const grantOf = (requires: Requirement): Grant | undefined =>
+const findRequiredGrant = (requires: Requirement): Grant | undefined =>
   requires === "unauthenticated" || requires === "setup-token" || requires === "authenticated"
     ? undefined
     : requires;
 
 /** The three markers are not grants, so they are rendered as prose. */
-const requirementProse = (requires: Requirement): string => {
-  const grant = grantOf(requires);
+const describeRequirement = (requires: Requirement): string => {
+  const grant = findRequiredGrant(requires);
   if (grant !== undefined) return `grant ${grant}`;
   switch (requires) {
     case "setup-token":
@@ -45,7 +45,7 @@ const requirementProse = (requires: Requirement): string => {
 };
 
 /** One paragraph, broken at spaces so nothing runs past the width. */
-const wrap = (text: string, indent: string): ReadonlyArray<string> => {
+const wrapParagraph = (text: string, indent: string): ReadonlyArray<string> => {
   const lines: Array<string> = [];
   let line = indent;
   for (const word of text.split(/\s+/).filter((each) => each !== "")) {
@@ -61,17 +61,17 @@ const wrap = (text: string, indent: string): ReadonlyArray<string> => {
 };
 
 /** A label and its prose, the prose hanging under the label when it wraps. */
-const labelled = (label: string, width: number, text: string): ReadonlyArray<string> => {
+const formatLabelledText = (label: string, width: number, text: string): ReadonlyArray<string> => {
   const indent = " ".repeat(width + 4);
-  const [first = "", ...rest] = wrap(text, indent);
+  const [first = "", ...rest] = wrapParagraph(text, indent);
   return [`  ${label.padEnd(width)}  ${first.trimStart()}`, ...rest];
 };
 
 /** What the help says before the first full stop. */
-const firstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
+const extractFirstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
 
 /** One token of a shell line, quoted only where a shell would need it. */
-const shellArg = (text: string): string => {
+const quoteShellArg = (text: string): string => {
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(text)) return text;
   return text.includes('"') ? `'${text}'` : `"${text}"`;
 };
@@ -83,18 +83,18 @@ const shellArg = (text: string): string => {
  * it needs a heredoc, whose body and terminator stay at the left margin because
  * a shell takes the body literally and ends it only on a bare `EOF`.
  */
-export const shellExample = (
+export const buildShellExample = (
   command: Command,
   args: ReadonlyArray<string>,
   stdin: string | undefined,
 ): ReadonlyArray<string> => {
-  const invocation = ["hercule", ...command.words, ...args.map(shellArg)].join(" ");
+  const invocation = ["hercule", ...command.words, ...args.map(quoteShellArg)].join(" ");
   if (stdin === undefined) return [`  ${invocation}`];
-  if (!stdin.includes("\n")) return [`  echo ${shellArg(stdin)} | ${invocation}`];
+  if (!stdin.includes("\n")) return [`  echo ${quoteShellArg(stdin)} | ${invocation}`];
   return [`  ${invocation} <<'EOF'`, ...stdin.split("\n"), "EOF"];
 };
 
-const placeholder = (field: Field): string => {
+const buildPlaceholder = (field: Field): string => {
   if (field.choices !== undefined) return `<${field.spelling}>`;
   // A field written as one word shows that word, whatever shape the value
   // behind it has: `<json>` would send the writer looking for a brace.
@@ -124,9 +124,9 @@ const GENERIC: Record<ErrorCode, string> = {
 };
 
 /** The commands a help text names, in the order it names them, itself excluded. */
-const mentioned = (command: Command): ReadonlyArray<string> => {
+const listMentionedCommands = (command: Command): ReadonlyArray<string> => {
   const found: Array<string> = [];
-  for (const mention of mentionsIn(command.help)) {
+  for (const mention of findMentions(command.help)) {
     const named = mention.command?.spelling;
     if (named === undefined || named === command.spelling || found.includes(named)) continue;
     found.push(named);
@@ -135,11 +135,11 @@ const mentioned = (command: Command): ReadonlyArray<string> => {
 };
 
 /** `hercule <noun>... <verb> --help`. */
-export const commandHelp = (command: Command): ReadonlyArray<string> => {
+export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   const flags = [...command.payload.filter((field) => !field.stdin), ...command.query];
   const onStdin = command.payload.filter((field) => field.stdin);
   const shape = command.positionals.map((field) => `<${field.spelling}>`).join(" ");
-  const lines: Array<string> = [...wrap(command.help, "")];
+  const lines: Array<string> = [...wrapParagraph(command.help, "")];
 
   const takesFlags = flags.length > 0 || command.paged || command.requires === "setup-token";
   lines.push(
@@ -151,7 +151,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
 
   lines.push("", "examples:");
   for (const example of command.examples) {
-    lines.push(...shellExample(command, example.args, example.stdin));
+    lines.push(...buildShellExample(command, example.args, example.stdin));
   }
 
   if (command.positionals.length > 0) {
@@ -159,7 +159,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
     lines.push("", "arguments:");
     for (const field of command.positionals) {
       const closed = field.choices === undefined ? "" : ` One of: ${field.choices.join(", ")}.`;
-      lines.push(...labelled(`<${field.spelling}>`, width, `${field.help}${closed}`));
+      lines.push(...formatLabelledText(`<${field.spelling}>`, width, `${field.help}${closed}`));
     }
   }
 
@@ -172,7 +172,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
       if (field.choices !== undefined) notes.push(`one of: ${field.choices.join(", ")}`);
       if (field.nullable) notes.push("`null` clears it");
       return {
-        label: `--${field.spelling} ${placeholder(field)}`,
+        label: `--${field.spelling} ${buildPlaceholder(field)}`,
         notes: notes.join("; "),
         help: field.help,
       };
@@ -202,8 +202,8 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
     const width = Math.max(...rows.map((row) => row.label.length));
     lines.push("", "flags:");
     for (const row of rows) {
-      lines.push(...labelled(row.label, width, row.notes));
-      if (row.help !== undefined) lines.push(...wrap(row.help, "      "));
+      lines.push(...formatLabelledText(row.label, width, row.notes));
+      if (row.help !== undefined) lines.push(...wrapParagraph(row.help, "      "));
     }
   }
 
@@ -224,8 +224,8 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
             .map((field) => `--${field.spelling}-stdin`)
             .join(" and ")} are accepted and do not change the order.`;
     lines.push("", "stdin:");
-    for (const field of onStdin) lines.push(...wrap(field.help, "  "));
-    lines.push(...wrap(rule, "  "));
+    for (const field of onStdin) lines.push(...wrapParagraph(field.help, "  "));
+    lines.push(...wrapParagraph(rule, "  "));
     if (one !== undefined) lines.push(`  There is no --${one.spelling} flag.`);
   }
 
@@ -233,7 +233,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
     lines.push(
       "",
       "paging:",
-      ...wrap(
+      ...wrapParagraph(
         "One page at a time, newest first unless --sort says otherwise. The answer carries nextCursor while more remain; pass it back as --cursor, or let --all follow it to the end.",
         "  ",
       ),
@@ -243,29 +243,29 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
   lines.push("", "returns:");
   const { fields, items } = command.returns;
   if (items === undefined) {
-    lines.push(...wrap(fields.join(", ") || "nothing but the status", "  "));
+    lines.push(...wrapParagraph(fields.join(", ") || "nothing but the status", "  "));
   } else {
     // A page names its items; a small fixed listing answers with the bare list.
     const said = fields.includes("items")
       ? `items[] (${items.join(", ")})`
       : `a list of (${items.join(", ")})`;
-    const [head = "", ...more] = wrap(said, "  ");
+    const [head = "", ...more] = wrapParagraph(said, "  ");
     lines.push(head, ...more.map((line) => `  ${line}`));
     for (const name of fields.filter((field) => field !== "items")) lines.push(`  ${name}`);
   }
 
   lines.push("", "errors:");
   const width = Math.max(...command.codes.map((code) => code.length));
-  const grant = grantOf(command.requires);
+  const grant = findRequiredGrant(command.requires);
   for (const code of command.codes) {
     const meaning =
       code === "forbidden" && grant !== undefined
         ? `you lack ${grant}; ask with \`hercule permission request ${grant}\``
         : (command.meanings[code] ?? GENERIC[code]);
-    lines.push(...labelled(code, width, meaning));
+    lines.push(...formatLabelledText(code, width, meaning));
   }
 
-  const next = mentioned(command);
+  const next = listMentionedCommands(command);
   if (next.length > 0) {
     lines.push("", "next:");
     for (const named of next) lines.push(`  hercule ${named}`);
@@ -273,7 +273,7 @@ export const commandHelp = (command: Command): ReadonlyArray<string> => {
 
   lines.push(
     "",
-    `operation ${command.id} · ${command.method} ${command.path} · ${requirementProse(command.requires)}`,
+    `operation ${command.id} · ${command.method} ${command.path} · ${describeRequirement(command.requires)}`,
   );
   return lines;
 };
@@ -288,10 +288,10 @@ const DAEMON_FORMS = [
 ];
 
 /** `hercule <noun> --help`, and the same for a nested noun. */
-export const nounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<string> => {
+export const buildNounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<string> => {
   const noun = prefix.join(" ");
-  const commands = commandsUnder(prefix);
-  const shapeOf = (command: Command): string =>
+  const commands = listCommandsUnder(prefix);
+  const buildUsageShape = (command: Command): string =>
     [
       ...command.words.slice(prefix.length),
       ...command.positionals.map((field) => `<${field.spelling}>`),
@@ -301,23 +301,25 @@ export const nounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<string> =
     prefix.length === 1 ? NOUNS[prefix[0] as keyof typeof NOUNS] : undefined;
 
   const lines: Array<string> = [`usage: hercule ${noun} <verb> [arguments] [flags]`];
-  if (noted !== undefined) lines.push("", ...wrap(noted.summary, ""));
+  if (noted !== undefined) lines.push("", ...wrapParagraph(noted.summary, ""));
   if (noun === "runner") lines.push("", ...DAEMON_FORMS);
 
-  const width = Math.max(...commands.map((command) => shapeOf(command).length));
+  const width = Math.max(...commands.map((command) => buildUsageShape(command).length));
   lines.push("", "verbs:");
   for (const command of commands) {
-    lines.push(`  ${shapeOf(command).padEnd(width)}  ${requirementProse(command.requires)}`);
-    lines.push(...wrap(firstSentence(command.help), "      "));
+    lines.push(
+      `  ${buildUsageShape(command).padEnd(width)}  ${describeRequirement(command.requires)}`,
+    );
+    lines.push(...wrapParagraph(extractFirstSentence(command.help), "      "));
   }
 
-  if (noted?.flow !== undefined) lines.push("", "flow:", ...wrap(noted.flow, "  "));
+  if (noted?.flow !== undefined) lines.push("", "flow:", ...wrapParagraph(noted.flow, "  "));
   lines.push("", `run \`hercule ${noun} <verb> --help\` for one command's arguments and examples.`);
   return lines;
 };
 
 /** Every noun at the root, in the contract's order, with what sits under it. */
-const nounsOfTheRoot = (): ReadonlyArray<{
+const listRootNouns = (): ReadonlyArray<{
   readonly noun: string;
   readonly verbs: ReadonlyArray<string>;
   readonly nested: ReadonlyArray<readonly [string, ReadonlyArray<string>]>;
@@ -327,7 +329,7 @@ const nounsOfTheRoot = (): ReadonlyArray<{
     if (!order.includes(command.words[0]!)) order.push(command.words[0]!);
   }
   return order.map((noun) => {
-    const under = commandsUnder([noun]);
+    const under = listCommandsUnder([noun]);
     const nested = new Map<string, Array<string>>();
     for (const command of under.filter((each) => each.words.length > 2)) {
       const child = command.words[1]!;
@@ -342,8 +344,8 @@ const nounsOfTheRoot = (): ReadonlyArray<{
 };
 
 /** `hercule --help`. */
-export const rootHelp = (): ReadonlyArray<string> => {
-  const nouns = nounsOfTheRoot();
+export const buildRootHelp = (): ReadonlyArray<string> => {
+  const nouns = listRootNouns();
   const width = Math.max(...nouns.map((each) => each.noun.length));
   const indent = " ".repeat(width + 4);
   const lines: Array<string> = [
@@ -359,7 +361,7 @@ export const rootHelp = (): ReadonlyArray<string> => {
     for (const [child, children] of nested) {
       lines.push(`${indent}${child}: ${children.join(" ")}`);
     }
-    lines.push(...wrap(NOUNS[noun as keyof typeof NOUNS].summary, indent));
+    lines.push(...wrapParagraph(NOUNS[noun as keyof typeof NOUNS].summary, indent));
   }
 
   lines.push(

@@ -39,7 +39,7 @@ export interface EventRow {
   readonly actor: string | null;
 }
 
-const object = (text: string): Record<string, unknown> =>
+const parseJsonObject = (text: string): Record<string, unknown> =>
   JSON.parse(text) as Record<string, unknown>;
 
 export const toEvent = (row: EventRow): Event => ({
@@ -53,8 +53,8 @@ export const toEvent = (row: EventRow): Event => ({
   dedupKey: row.dedup_key,
   refs: JSON.parse(row.refs) as ReadonlyArray<string>,
   url: row.url,
-  payload: object(row.payload),
-  raw: row.raw === null ? null : object(row.raw),
+  payload: parseJsonObject(row.payload),
+  raw: row.raw === null ? null : parseJsonObject(row.raw),
   actor: row.actor,
 });
 

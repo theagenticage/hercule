@@ -25,7 +25,7 @@ export const SortDirection = Schema.Literals(["asc", "desc"]);
 
 export type SortDirection = Schema.Schema.Type<typeof SortDirection>;
 
-/** The annotation carrying an operation's sortable fields; `sortFieldsOf` reads it. */
+/** The annotation carrying an operation's sortable fields; `readSortFields` reads it. */
 const SORT_FIELDS = "sortFields";
 
 /**
@@ -63,7 +63,7 @@ export const sortParam = <const Fields extends ReadonlyArray<string>>(fields: Fi
  * to render or validate them (the CLI's `--sort`). Empty when the operation
  * does not page.
  */
-export const sortFieldsOf = (query: unknown): ReadonlyArray<string> => {
+export const readSortFields = (query: unknown): ReadonlyArray<string> => {
   const ast = (
     query as
       | {

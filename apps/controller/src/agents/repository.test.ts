@@ -13,16 +13,16 @@ import { agentRepository } from "./repository";
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
 
 /** A canonical v7 id, which is the only shape the store takes. */
-const anId = () => uuidToString(mintUuid());
+const mintId = () => uuidToString(mintUuid());
 
 /** One agent under a profile, written at the instant given so the walk has an order. */
-const anAgent = (name: string, permissionProfileId: string, at: string) =>
+const insertAgent = (name: string, permissionProfileId: string, at: string) =>
   Effect.flatMap(agentRepository, (agents) =>
     agents.insert({
       providerId: "claude-provider",
       name,
       systemPrompt: "do the work",
-      instanceId: anId(),
+      instanceId: mintId(),
       permissionProfileId,
       accessMode: "full-access",
       model: null,
@@ -36,11 +36,11 @@ describe("listing the agents under one profile", () => {
     const { listed, profileId } = await run(
       Effect.gen(function* () {
         const agents = yield* agentRepository;
-        const profileId = anId();
-        yield* anAgent("the-younger", profileId, "2026-09-15T11:00:00.000Z");
-        yield* anAgent("the-elder", profileId, "2026-09-15T10:00:00.000Z");
+        const profileId = mintId();
+        yield* insertAgent("the-younger", profileId, "2026-09-15T11:00:00.000Z");
+        yield* insertAgent("the-elder", profileId, "2026-09-15T10:00:00.000Z");
         // Another profile's agent, which the filter must not answer.
-        yield* anAgent("the-stranger", anId(), "2026-09-15T09:00:00.000Z");
+        yield* insertAgent("the-stranger", mintId(), "2026-09-15T09:00:00.000Z");
         const page = yield* agents.list({
           limit: 10,
           cursor: undefined,
@@ -59,8 +59,8 @@ describe("listing the agents under one profile", () => {
     const listed = await run(
       Effect.gen(function* () {
         const agents = yield* agentRepository;
-        yield* anAgent("the-elder", anId(), "2026-09-15T10:00:00.000Z");
-        yield* anAgent("the-younger", anId(), "2026-09-15T11:00:00.000Z");
+        yield* insertAgent("the-elder", mintId(), "2026-09-15T10:00:00.000Z");
+        yield* insertAgent("the-younger", mintId(), "2026-09-15T11:00:00.000Z");
         const page = yield* agents.list({
           limit: 10,
           cursor: undefined,

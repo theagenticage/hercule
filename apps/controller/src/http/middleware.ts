@@ -33,13 +33,13 @@ import {
   SetupToken,
   type OperationId,
 } from "@hercule/contract";
-import { CurrentActor, grantCheck, NO_CREDENTIAL, type Actor } from "../actor";
+import { CurrentActor, checkGrant, NO_CREDENTIAL, type Actor } from "../actor";
 import { Credentials, hashToken } from "../credentials";
 import { SessionTokens } from "../permissions";
 import { Setup } from "../setup";
 
 /** The operation a request is for: the group and endpoint identifiers, joined. */
-export const operationIdOf = (options: {
+export const buildOperationId = (options: {
   readonly group: HttpApiGroup.Top;
   readonly endpoint: HttpApiEndpoint.Top;
 }): string => `${options.group.identifier}.${options.endpoint.identifier}`;
@@ -50,7 +50,7 @@ export const operationIdOf = (options: {
  * and the table are one-to-one - so it is a defect rather than an error with a
  * response.
  */
-const operationFor = (id: string): Effect.Effect<OperationId> =>
+const parseOperationId = (id: string): Effect.Effect<OperationId> =>
   isOperationId(id)
     ? Effect.succeed(id)
     : Effect.die(`no operation named ${id} in the contract's table`);
@@ -66,7 +66,7 @@ const operationFor = (id: string): Effect.Effect<OperationId> =>
  * cached lookup rather than two indexed misses ahead of it, while a user pays
  * one cache miss before the lookup a human is waiting on.
  */
-const resolve = (
+const resolveActor = (
   credentials: Credentials["Service"],
   sessions: SessionTokens["Service"],
   token: string,
@@ -112,12 +112,12 @@ export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials |
             const token = Redacted.value(options.credential);
             if (token === "") return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
-            const actor = yield* resolve(credentials, sessions, token);
+            const actor = yield* resolveActor(credentials, sessions, token);
             if (Option.isNone(actor))
               return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
-            const operation = yield* operationFor(operationIdOf(options));
-            const refused = grantCheck(operation, actor.value);
+            const operation = yield* parseOperationId(buildOperationId(options));
+            const refused = checkGrant(operation, actor.value);
             if (refused !== undefined) return yield* Effect.fail(refused);
 
             return yield* Effect.provideService(httpEffect, CurrentActor, actor.value);

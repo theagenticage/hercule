@@ -43,10 +43,10 @@ const decodeEntry = Schema.decodeUnknownResult(RegisteredWorkspace);
  * and one nothing can be re-reported about, so both readers ask it here rather
  * than each keeping its own idea of what standing means.
  */
-export const stillOnDisk = (entry: RegisteredWorkspace): boolean =>
+export const isStillOnDisk = (entry: RegisteredWorkspace): boolean =>
   existsSync(entry.root) && entry.checkouts.every((one) => existsSync(one.path));
 
-const registryPathIn = (storageDir: string): string => joinPath(storageDir, "workspaces.json");
+const buildRegistryPath = (storageDir: string): string => joinPath(storageDir, "workspaces.json");
 
 /**
  * A file that is not there yet, or that something outside Hercule has made
@@ -56,7 +56,7 @@ const registryPathIn = (storageDir: string): string => joinPath(storageDir, "wor
 const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> => {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(registryPathIn(storageDir), "utf8"));
+    parsed = JSON.parse(readFileSync(buildRegistryPath(storageDir), "utf8"));
   } catch {
     return [];
   }
@@ -72,7 +72,7 @@ const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> =>
  * a half-written registry would lose every workspace on the machine at once.
  */
 const writeRegistry = (storageDir: string, entries: ReadonlyArray<RegisteredWorkspace>): void => {
-  const path = registryPathIn(storageDir);
+  const path = buildRegistryPath(storageDir);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {

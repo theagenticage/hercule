@@ -2,10 +2,10 @@ import { useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@hercule/ui";
 import {
-  configDraft,
-  configFields,
-  configIssues,
-  configPayload,
+  buildConfigDraft,
+  buildConfigFields,
+  readConfigIssues,
+  buildConfigPayload,
   queryKeys,
   type ConfigDraft,
   type ConnectionType,
@@ -35,9 +35,11 @@ export function ConfigureConnection({
   readonly onDone: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
-  const fields = configFields(type?.configSchema);
+  const fields = buildConfigFields(type?.configSchema);
 
-  const [draft, setDraft] = useState<ConfigDraft>(() => configDraft(fields, connection.config));
+  const [draft, setDraft] = useState<ConfigDraft>(() =>
+    buildConfigDraft(fields, connection.config),
+  );
   const [label, setLabel] = useState(connection.label);
   const [topic, setTopic] = useState(connection.labels[0] ?? "");
 
@@ -52,7 +54,7 @@ export function ConfigureConnection({
           // against, so they are left exactly as they are stored.
           ...(type === undefined
             ? {}
-            : { config: configPayload(fields, draft, connection.config) }),
+            : { config: buildConfigPayload(fields, draft, connection.config) }),
         },
       }),
     onSuccess: async () => {
@@ -63,7 +65,7 @@ export function ConfigureConnection({
 
   // A setting the type refused belongs under the setting it named; anything
   // else refused is the form's own to say.
-  const issues = configIssues(save.error, fields, "config");
+  const issues = readConfigIssues(save.error, fields, "config");
   const failure = issues.rest ? save.error : null;
 
   // What the last save was refused for is about what was in the fields then.

@@ -59,7 +59,7 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { agentRepository } from "../agents";
 import { connectionRepository } from "../connections";
-import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog, EventKinds } from "../events";
 import { PluginHost } from "../plugins";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
@@ -72,7 +72,7 @@ import {
 
 const QueryInput = Schema.Struct({
   ...WorkflowFilter.fields,
-  ...pageInput(WORKFLOW_SORT_FIELDS),
+  ...buildPageInputFields(WORKFLOW_SORT_FIELDS),
 });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
@@ -83,7 +83,7 @@ export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
 const TriggerQueryInput = Schema.Struct({
   ...TriggerFilter.fields,
-  ...pageInput(TRIGGER_SORT_FIELDS),
+  ...buildPageInputFields(TRIGGER_SORT_FIELDS),
 });
 
 export type TriggerQueryInput = Schema.Schema.Type<typeof TriggerQueryInput>;

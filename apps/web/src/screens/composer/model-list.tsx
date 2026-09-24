@@ -1,13 +1,13 @@
 import { Fragment, type JSX, type ReactNode } from "react";
 import type { LoginTarget, ModelMenu } from "@hercule/client-core";
 import { ProviderLogo } from "@hercule/ui";
-import { Lane, markerOf, MenuRow } from "./menu";
+import { Lane, renderMarker, MenuRow } from "./menu";
 
 type Row = ModelMenu["current"]["rows"][number];
 type Instance = ModelMenu["others"][number];
 
 /** An account's row names who is logged in and on what plan, beside the account. */
-const whoOf = (instance: Instance): string =>
+const describeLogin = (instance: Instance): string =>
   [instance.identity, instance.planLabel].filter((each) => each !== null).join(" · ");
 
 /** The Log in on an account's row reads as the row's own note, not as a button. */
@@ -35,10 +35,10 @@ export function ModelList({
   readonly onPickInstance: (instanceId: string) => void;
   readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
 }): JSX.Element {
-  const modelRow = (providerId: string | null, row: Row): JSX.Element => (
+  const renderModelRow = (providerId: string | null, row: Row): JSX.Element => (
     <MenuRow
       key={`${row.instanceId}:${row.slug}`}
-      marker={markerOf(providerId === null ? null : <ProviderLogo providerId={providerId} />)}
+      marker={renderMarker(providerId === null ? null : <ProviderLogo providerId={providerId} />)}
       name={row.name}
       detail={row.isDefault && !row.current ? "default" : null}
       note={row.current ? "✓" : undefined}
@@ -55,7 +55,7 @@ export function ModelList({
       {menu.recent.map((row) => (
         <MenuRow
           key={`recent:${row.instanceId}:${row.model}`}
-          marker={markerOf(<ProviderLogo providerId={row.providerId} />)}
+          marker={renderMarker(<ProviderLogo providerId={row.providerId} />)}
           name={row.name}
           detail={row.account}
           dimmed={row.dimmed}
@@ -65,12 +65,12 @@ export function ModelList({
         />
       ))}
       {menu.current.label === null ? null : <Lane label={menu.current.label} />}
-      {menu.current.rows.map((row) => modelRow(menu.current.providerId, row))}
+      {menu.current.rows.map((row) => renderModelRow(menu.current.providerId, row))}
       {menu.current.older.length === 0 ? null : older ? (
-        menu.current.older.map((row) => modelRow(menu.current.providerId, row))
+        menu.current.older.map((row) => renderModelRow(menu.current.providerId, row))
       ) : (
         <MenuRow
-          marker={markerOf(null)}
+          marker={renderMarker(null)}
           name={<span className="text-faint">older models ({menu.current.older.length}) ›</span>}
           onPick={onOlder}
         />
@@ -80,9 +80,9 @@ export function ModelList({
           <MenuRow
             key={instance.instanceId}
             className="mt-1 rounded-t-none border-t border-line-soft pt-[9px]"
-            marker={markerOf(<ProviderLogo providerId={instance.providerId} />)}
+            marker={renderMarker(<ProviderLogo providerId={instance.providerId} />)}
             name={instance.name}
-            detail={whoOf(instance)}
+            detail={describeLogin(instance)}
             note={instance.dimmed === null ? `${String(instance.modelCount)} models ›` : undefined}
             dimmed={instance.dimmed}
             trailing={instance.login === null ? null : loginSlot(instance.login, ROW_LOGIN)}
@@ -93,7 +93,7 @@ export function ModelList({
         ) : (
           <Fragment key={instance.instanceId}>
             <Lane label={instance.name} />
-            {instance.rows.map((row) => modelRow(instance.providerId, row))}
+            {instance.rows.map((row) => renderModelRow(instance.providerId, row))}
           </Fragment>
         ),
       )}

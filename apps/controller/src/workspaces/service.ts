@@ -60,13 +60,13 @@ import {
   type WorkspaceStatus,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
-import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import type { SessionTokens } from "../permissions";
 import { AuditLog } from "../events";
 import {
   isCheckedOut,
   NOT_CHECKED_OUT,
-  repoNameOf,
+  extractRepoName,
   resourceRepository,
   type StoredRepo,
 } from "../resources";
@@ -74,12 +74,17 @@ import { NO_SUCH_RUNNER, runnerRepository } from "../runners";
 import type { Secrets } from "../secrets";
 import { Settings, type ScopeSettings, type SettingError } from "../settings";
 import { gitCredentials } from "./credentials";
-import { openPrimary, openWorkspace, provisionFrame, type OpeningCheckout } from "./provisioning";
+import {
+  openPrimary,
+  openWorkspace,
+  buildProvisionFrame,
+  type OpeningCheckout,
+} from "./provisioning";
 import { workspaceRepository, type StoredCheckout, type StoredWorkspace } from "./repository";
 
 const QueryInput = Schema.Struct({
   ...WorkspaceFilter.fields,
-  ...pageInput(WORKSPACE_SORT_FIELDS),
+  ...buildPageInputFields(WORKSPACE_SORT_FIELDS),
 });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
@@ -129,7 +134,7 @@ const WORKSPACE_NOT_READY = "that workspace is not ready to be worked in";
 /** The one rule the runner lays a multi-repo workspace out by, asked here too. */
 const isDirectoryName = Schema.is(Subdirectory);
 
-const unnameable = (name: string): string =>
+const describeUnnameableRepo = (name: string): string =>
   `a repo called ${name} cannot have a directory of its own in a workspace`;
 
 /**
@@ -138,11 +143,11 @@ const unnameable = (name: string): string =>
  * threads started in the same millisecond share their first eight and would ask
  * one machine for one branch twice.
  */
-const threadBranch = (sessionId: string): string => `hercule/run-${sessionId.slice(-8)}`;
+const buildThreadBranch = (sessionId: string): string => `hercule/run-${sessionId.slice(-8)}`;
 
 const ALREADY_GONE = "that workspace is already gone";
 
-const stillLivedIn = (sessions: number): string =>
+const describeLiveSessions = (sessions: number): string =>
   `${String(sessions)} session(s) in that workspace have not exited; stop them first`;
 
 /**
@@ -186,7 +191,7 @@ interface Expired {
  * still be resumed keeps its worktree - that worktree is its work - so it
  * survives the orphan window and goes only on the long idle one.
  */
-const expired = (
+const decideExpiry = (
   candidate: { readonly liveSessions: number; readonly resumableSessions: number },
   idleFor: number,
   controller: ScopeSettings<"controller">,
@@ -209,7 +214,9 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const audit = yield* AuditLog;
 
-  const stored = (id: string): Effect.Effect<StoredWorkspace, NotFound | SqlError> =>
+  const readStoredWorkspaceOrFail = (
+    id: string,
+  ): Effect.Effect<StoredWorkspace, NotFound | SqlError> =>
     Effect.flatMap(
       workspaces.one(id),
       Option.match({
@@ -218,7 +225,7 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const asCheckout = (checkout: StoredCheckout): Checkout => ({
+  const toCheckoutRecord = (checkout: StoredCheckout): Checkout => ({
     checkoutId: checkout.id,
     resourceId: checkout.resourceId,
     form: checkout.form,
@@ -235,19 +242,19 @@ const make = Effect.gen(function* () {
    * resource that changes hands does not change what a workspace already
    * standing was opened against.
    */
-  const composed = (
+  const readWorkspaceRecords = (
     rows: ReadonlyArray<StoredWorkspace>,
   ): Effect.Effect<ReadonlyArray<Workspace>, SqlError> =>
     Effect.gen(function* () {
       const ids = rows.map((row) => row.id);
-      const checkouts = yield* workspaces.checkoutsOf(ids);
+      const checkouts = yield* workspaces.listCheckouts(ids);
       const sessionIds = yield* workspaces.sessionIdsOf(ids);
       return rows.map((row) => ({
         id: row.id,
         runnerId: row.runnerId,
         kind: row.kind,
         status: row.status,
-        checkouts: (checkouts.get(row.id) ?? []).map(asCheckout),
+        checkouts: (checkouts.get(row.id) ?? []).map(toCheckoutRecord),
         designatedConnectionId: row.designatedConnectionId,
         message: row.message,
         sessionIds: sessionIds.get(row.id) ?? [],
@@ -258,10 +265,10 @@ const make = Effect.gen(function* () {
       }));
     });
 
-  const composedOne = (row: StoredWorkspace): Effect.Effect<Workspace, SqlError> =>
-    Effect.map(composed([row]), (found) => found[0]!);
+  const readWorkspaceRecord = (row: StoredWorkspace): Effect.Effect<Workspace, SqlError> =>
+    Effect.map(readWorkspaceRecords([row]), (found) => found[0]!);
 
-  const repo = (
+  const readRepoOrFail = (
     resourceId: string,
   ): Effect.Effect<StoredRepo, NotFound | InvalidState | SqlError> =>
     Effect.gen(function* () {
@@ -273,7 +280,7 @@ const make = Effect.gen(function* () {
     });
 
   /** The repo a checkout is made of, held to what a checkout needs of it. */
-  const checkoutable = (
+  const readCheckoutableRepoOrFail = (
     resourceId: string,
     projectId: string | undefined,
   ): Effect.Effect<StoredRepo, Validation | SqlError> =>
@@ -289,7 +296,7 @@ const make = Effect.gen(function* () {
           createValidationError([{ path: ["workspace"], message: NOT_CHECKED_OUT }]),
         );
       }
-      yield* filedUnder([resourceId], projectId);
+      yield* validateFiledUnderProject([resourceId], projectId);
       return found.value;
     });
 
@@ -299,7 +306,7 @@ const make = Effect.gen(function* () {
    * a thread under one project must not reach a repo that belongs to another
    * just because a workspace holding it already stands.
    */
-  const filedUnder = (
+  const validateFiledUnderProject = (
     resourceIds: ReadonlyArray<string>,
     projectId: string | undefined,
   ): Effect.Effect<void, Validation | SqlError> =>
@@ -361,10 +368,10 @@ const make = Effect.gen(function* () {
             ]),
           );
         }
-        const held = (yield* workspaces.checkoutsOf([joined])).get(joined) ?? [];
+        const held = (yield* workspaces.listCheckouts([joined])).get(joined) ?? [];
         // A workspace that stands is still a set of repos, and they have to be
         // this project's: joining is not a way around the filing.
-        yield* filedUnder(
+        yield* validateFiledUnderProject(
           held.map((checkout) => checkout.resourceId),
           input.projectId,
         );
@@ -376,7 +383,7 @@ const make = Effect.gen(function* () {
       }
 
       if (wish.kind === "primary") {
-        const resource = yield* checkoutable(wish.resourceId, input.projectId);
+        const resource = yield* readCheckoutableRepoOrFail(wish.resourceId, input.projectId);
         const standing = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(standing)) {
           return {
@@ -398,15 +405,18 @@ const make = Effect.gen(function* () {
       }
 
       const repos = yield* Effect.forEach(wish.checkouts, (checkout) =>
-        Effect.map(checkoutable(checkout.resourceId, input.projectId), (resource) => ({
-          resource,
-          baseBranch: checkout.baseBranch,
-        })),
+        Effect.map(
+          readCheckoutableRepoOrFail(checkout.resourceId, input.projectId),
+          (resource) => ({
+            resource,
+            baseBranch: checkout.baseBranch,
+          }),
+        ),
       );
       // Each working copy gets a directory of its own, named after the repo, so
       // one repo twice and two repos of the same name are both a workspace that
       // cannot be laid out.
-      const names = repos.map((repo) => repoNameOf(repo.resource.canonicalRemote));
+      const names = repos.map((repo) => extractRepoName(repo.resource.canonicalRemote));
       if (new Set(repos.map((repo) => repo.resource.id)).size !== repos.length) {
         return yield* Effect.fail(
           createValidationError([{ path: ["workspace", "checkouts"], message: REPO_TWICE }]),
@@ -424,7 +434,7 @@ const make = Effect.gen(function* () {
       if (unusable !== undefined) {
         return yield* Effect.fail(
           createValidationError([
-            { path: ["workspace", "checkouts"], message: unnameable(unusable) },
+            { path: ["workspace", "checkouts"], message: describeUnnameableRepo(unusable) },
           ]),
         );
       }
@@ -434,7 +444,7 @@ const make = Effect.gen(function* () {
         // One repo sits at the root of the workspace; several sit side by side,
         // each under the name it is known by.
         subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
-        branch: threadBranch(input.sessionId),
+        branch: buildThreadBranch(input.sessionId),
         ...(repo.baseBranch === undefined ? {} : { baseBranch: repo.baseBranch }),
       }));
       const opened = yield* openWorkspace(
@@ -477,7 +487,7 @@ const make = Effect.gen(function* () {
           }),
         );
         return {
-          items: yield* composed(listing.items),
+          items: yield* readWorkspaceRecords(listing.items),
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
         };
       }),
@@ -486,7 +496,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("workspace.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        return yield* Effect.flatMap(stored(id), composedOne);
+        return yield* Effect.flatMap(readStoredWorkspaceOrFail(id), readWorkspaceRecord);
       }),
 
     /**
@@ -512,7 +522,7 @@ const make = Effect.gen(function* () {
       Conflict | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
-        const resource = yield* repo(input.resourceId);
+        const resource = yield* readRepoOrFail(input.resourceId);
         const runner = yield* runners.read(input.runnerId);
         if (Option.isNone(runner)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RUNNER));
         const held = yield* workspaces.primaryOn(resource.id, input.runnerId);
@@ -528,7 +538,7 @@ const make = Effect.gen(function* () {
           { workspaces, audit },
           { resource, runnerId: input.runnerId, actor: USER_ACTOR, at },
         );
-        return { workspace: yield* composedOne(opened.workspace), frame: opened.frame };
+        return { workspace: yield* readWorkspaceRecord(opened.workspace), frame: opened.frame };
       }),
 
     /**
@@ -539,7 +549,7 @@ const make = Effect.gen(function* () {
      */
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
-        const workspace = yield* stored(id);
+        const workspace = yield* readStoredWorkspaceOrFail(id);
         if (workspace.kind === "primary")
           return yield* Effect.fail(createInvalidStateError(PRIMARY_STANDS));
         if (workspace.status === "deleted" || workspace.status === "lost") {
@@ -547,7 +557,7 @@ const make = Effect.gen(function* () {
         }
         const living = (yield* workspaces.sessionIdsOf([id])).get(id) ?? [];
         if (living.length > 0)
-          return yield* Effect.fail(createInvalidStateError(stillLivedIn(living.length)));
+          return yield* Effect.fail(createInvalidStateError(describeLiveSessions(living.length)));
         return workspace;
       }),
 
@@ -564,7 +574,7 @@ const make = Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         const due: Array<Expired> = [];
         for (const candidate of candidates) {
-          const reason = expired(candidate, now - Date.parse(candidate.usedAt), controller);
+          const reason = decideExpiry(candidate, now - Date.parse(candidate.usedAt), controller);
           if (reason !== undefined) due.push({ id: candidate.id, reason });
         }
         return due;
@@ -634,7 +644,8 @@ const make = Effect.gen(function* () {
         const owed = yield* workspaces.provisioningOn(runnerId);
         const frames: Array<WorkspaceProvision> = [];
         for (const workspace of owed) {
-          const checkouts = (yield* workspaces.checkoutsOf([workspace.id])).get(workspace.id) ?? [];
+          const checkouts =
+            (yield* workspaces.listCheckouts([workspace.id])).get(workspace.id) ?? [];
           const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
           const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
           for (const checkout of checkouts) {
@@ -645,7 +656,7 @@ const make = Effect.gen(function* () {
             if (resource.kind !== "repo") continue;
             plans.push({ checkout, resource });
           }
-          frames.push(provisionFrame(workspace, plans));
+          frames.push(buildProvisionFrame(workspace, plans));
         }
         return frames;
       }),

@@ -67,7 +67,7 @@ export const stubFetch = (handler: Handler): FetchLike & { readonly calls: Array
 };
 
 /** The error envelope, at the status the code maps to. */
-export const envelope = (
+export const buildErrorEnvelope = (
   code: ErrorCode,
   status: number,
   message: string,
@@ -119,7 +119,7 @@ export const stubIo = (options: StubIoOptions = {}): StubIo => {
 };
 
 /** A canonical UUIDv7, distinguished by its last characters. */
-export const id = (tail: string): string => {
+export const buildId = (tail: string): string => {
   const padded = tail.padStart(12, "0");
   return `0192f0a1-0000-7000-8000-${padded}`;
 };

@@ -1,6 +1,6 @@
 import { Fragment, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { approvalCard, type HerculeClient } from "@hercule/client-core";
+import { buildApprovalCard, type HerculeClient } from "@hercule/client-core";
 import type { ApprovalDecision, OpenRequest } from "@hercule/contract";
 import { cn, DecisionMark } from "@hercule/ui";
 import { readErrorMessage } from "../save-status";
@@ -23,7 +23,7 @@ import { readErrorMessage } from "../save-status";
  * reads as one block per question - its chip, its prose, and its options
  * read-only under it - in the slot a command or a path would sit in.
  *
- * Every word on it comes from `approvalCard`, so what an answer does reads the
+ * Every word on it comes from `buildApprovalCard`, so what an answer does reads the
  * same wherever it is shown and no surface can reword or drop it.
  */
 export function PermissionCard({
@@ -35,7 +35,7 @@ export function PermissionCard({
   readonly sessionId: string;
   readonly request: OpenRequest;
 }): JSX.Element {
-  const card = approvalCard(request);
+  const card = buildApprovalCard(request);
   const respond = useMutation({
     mutationFn: (decision: ApprovalDecision) =>
       client.session.respond({

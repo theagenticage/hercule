@@ -87,7 +87,7 @@ const run = <A, E>(body: Effect.Effect<A, E, SessionTokens | SqlClient.SqlClient
     ),
   );
 
-const grantsOf = (actor: Option.Option<{ readonly grants: ReadonlyArray<string> }>) =>
+const readGrants = (actor: Option.Option<{ readonly grants: ReadonlyArray<string> }>) =>
   Option.getOrThrow(actor).grants;
 
 describe("what the resolver remembers", () => {
@@ -103,8 +103,8 @@ describe("what the resolver remembers", () => {
       }),
     );
 
-    expect(grantsOf(first)).toEqual(["task.read", "task.create"]);
-    expect(grantsOf(second)).toEqual(["task.read", "task.create"]);
+    expect(readGrants(first)).toEqual(["task.read", "task.create"]);
+    expect(readGrants(second)).toEqual(["task.read", "task.create"]);
   });
 
   it("keeps nothing from a lookup that was already reading when the drop landed", async () => {
@@ -125,6 +125,6 @@ describe("what the resolver remembers", () => {
       }),
     );
 
-    expect(grantsOf(after)).toEqual(["task.read"]);
+    expect(readGrants(after)).toEqual(["task.read"]);
   });
 });

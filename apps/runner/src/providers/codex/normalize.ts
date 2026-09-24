@@ -24,10 +24,10 @@ import {
   type TurnState,
   type Usage,
 } from "@hercule/protocol";
-import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
+import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize";
 import { judgeAnswer, type HarnessAnswer } from "../structured-result";
-import { idOf } from "../events";
-import { fact, text } from "../text";
+import { ensureId } from "../events";
+import { truncateFact, truncateMessage } from "../text";
 import type { NotificationFrame } from "./rpc";
 import type {
   AgentMessageDeltaNotification,
@@ -80,11 +80,12 @@ export const buildNormalizingState = (
   lastCompletedItem: undefined,
 });
 
-const envelope = (state: Normalizing): Envelope =>
+const buildSessionEnvelope = (state: Normalizing): Envelope =>
   buildEnvelope(state.sessionId, { threadId: state.threadId });
 
 /** The notification the event was read off, under this adapter's channel. */
-const raw = (payload: unknown): ReturnType<typeof rawOf> => rawOf(CODEX_NOTIFICATION, payload);
+const buildNotificationRaw = (payload: unknown): ReturnType<typeof buildRaw> =>
+  buildRaw(CODEX_NOTIFICATION, payload);
 
 /**
  * Codex's item vocabulary in the taxonomy's; everything else is `unknown`.
@@ -115,7 +116,7 @@ const ITEM_KINDS: Readonly<Record<ThreadItem["type"], ItemKind | null>> = {
   exitedReviewMode: "unknown",
 };
 
-const kindOf = (item: ThreadItem): ItemKind | null => {
+const classifyItem = (item: ThreadItem): ItemKind | null => {
   const known: ItemKind | null | undefined = ITEM_KINDS[item.type];
   // An item type this release did not have is still an item.
   return known === undefined ? "unknown" : known;
@@ -127,8 +128,10 @@ const kindOf = (item: ThreadItem): ItemKind | null => {
  * frame nobody can decode, so it is left out: the adapter's approval card and
  * the item row read the same list.
  */
-export const pathsOf = (item: Extract<ThreadItem, { type: "fileChange" }>): ReadonlyArray<string> =>
-  item.changes.flatMap((change) => (change.path === "" ? [] : [fact(change.path)]));
+export const readChangedPaths = (
+  item: Extract<ThreadItem, { type: "fileChange" }>,
+): ReadonlyArray<string> =>
+  item.changes.flatMap((change) => (change.path === "" ? [] : [truncateFact(change.path)]));
 
 /**
  * The one field of an item a reader wants in a row: what the command ran, what
@@ -136,12 +139,12 @@ export const pathsOf = (item: Extract<ThreadItem, { type: "fileChange" }>): Read
  * rest, and a vendor-shaped detail would make what the user reads a function of
  * which harness answered.
  */
-const detail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
+const buildDetail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
   switch (item.type) {
     case "commandExecution":
-      return { detail: { command: text(item.command) } };
+      return { detail: { command: truncateMessage(item.command) } };
     case "fileChange": {
-      const paths = pathsOf(item);
+      const paths = readChangedPaths(item);
       const path = paths[0];
       if (path === undefined) return {};
       // The first path is what a one-line row shows; the rest are there for a
@@ -149,15 +152,15 @@ const detail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
       return { detail: paths.length === 1 ? { path } : { path, paths } };
     }
     case "mcpToolCall":
-      return { detail: { name: fact(`${item.server}/${item.tool}`), kind: "mcp" } };
+      return { detail: { name: truncateFact(`${item.server}/${item.tool}`), kind: "mcp" } };
     case "dynamicToolCall":
-      return { detail: { name: fact(item.tool), kind: "native" } };
+      return { detail: { name: truncateFact(item.tool), kind: "native" } };
     case "functionCallOutput":
-      return { detail: { name: fact(item.name), kind: "native" } };
+      return { detail: { name: truncateFact(item.name), kind: "native" } };
     case "webSearch":
-      return { detail: { description: text(item.query) } };
+      return { detail: { description: truncateMessage(item.query) } };
     case "collabAgentToolCall":
-      return { detail: { name: fact(item.tool) } };
+      return { detail: { name: truncateFact(item.tool) } };
     default:
       // A plan, a reasoning block, an assistant message, a compaction and an
       // unmapped item are all read off their own text or their raw payload.
@@ -170,7 +173,7 @@ const detail = (item: ThreadItem): { readonly detail?: Schema.Json } => {
  * refusal reported as a failure would show the agent as broken rather than as
  * told no.
  */
-const statusOf = (item: ThreadItem): ItemStatus => {
+const readItemStatus = (item: ThreadItem): ItemStatus => {
   const status = "status" in item ? item.status : undefined;
   if (status === "declined") return "declined";
   return status === "failed" ? "failed" : "completed";
@@ -193,16 +196,16 @@ const REASONING_CHANNELS: Readonly<Record<string, Channel>> = {
   "item/reasoning/summaryTextDelta": "summary",
 };
 
-const delta = (
+const buildContentDelta = (
   state: Normalizing,
   params: AgentMessageDeltaNotification,
   streamKind: StreamKind,
 ): ReadonlyArray<ProviderEvent> => [
   {
     _tag: "content.delta",
-    ...envelope(state),
-    turnId: idOf(params.turnId),
-    itemId: idOf(params.itemId),
+    ...buildSessionEnvelope(state),
+    turnId: ensureId(params.turnId),
+    itemId: ensureId(params.itemId),
     streamKind,
     delta: params.delta,
   },
@@ -213,21 +216,21 @@ const delta = (
  * twice, so streaming both would double the item's text and there is no third
  * stream kind to put the other on (spec 06 section 6.4).
  */
-const reasoningDelta = (
+const buildReasoningDelta = (
   state: Normalizing,
   params: AgentMessageDeltaNotification,
   channel: Channel,
 ): ReadonlyArray<ProviderEvent> => {
   if (state.reasoning.get(params.itemId) === "raw" && channel === "summary") return [];
   state.reasoning.set(params.itemId, channel);
-  return delta(state, params, "reasoning_text");
+  return buildContentDelta(state, params, "reasoning_text");
 };
 
-const usageOf = (usage: ThreadTokenUsageUpdatedNotification["tokenUsage"]): Usage => ({
-  inputTokens: count(usage.total.inputTokens),
-  outputTokens: count(usage.total.outputTokens),
-  cacheReadTokens: count(usage.total.cachedInputTokens),
-  cacheWriteTokens: count(usage.total.cacheWriteInputTokens),
+const toUsage = (usage: ThreadTokenUsageUpdatedNotification["tokenUsage"]): Usage => ({
+  inputTokens: clampCount(usage.total.inputTokens),
+  outputTokens: clampCount(usage.total.outputTokens),
+  cacheReadTokens: clampCount(usage.total.cachedInputTokens),
+  cacheWriteTokens: clampCount(usage.total.cacheWriteInputTokens),
 });
 
 /**
@@ -236,36 +239,38 @@ const usageOf = (usage: ThreadTokenUsageUpdatedNotification["tokenUsage"]): Usag
  * with no class is still an error, so it is reported as `unknown` rather than
  * dropped.
  */
-const classOf = (info: CodexErrorInfo | null | undefined): string => {
-  if (typeof info === "string") return fact(info);
+const classifyError = (info: CodexErrorInfo | null | undefined): string => {
+  if (typeof info === "string") return truncateFact(info);
   if (typeof info !== "object" || info === null) return "unknown";
-  return fact(Object.keys(info)[0] ?? "unknown");
+  return truncateFact(Object.keys(info)[0] ?? "unknown");
 };
 
 const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<ProviderEvent> => {
-  const turn = params.turnId === "" ? {} : { turnId: fact(params.turnId) };
-  const failure = classOf(params.error.codexErrorInfo);
+  const turn = params.turnId === "" ? {} : { turnId: truncateFact(params.turnId) };
+  const failure = classifyError(params.error.codexErrorInfo);
   // Codex is already retrying it, so a failure here would be a turn reported as
   // over while it is still running.
   if (params.willRetry) {
     return [
       {
         _tag: "runtime.warning",
-        ...envelope(state),
-        ...raw(params),
+        ...buildSessionEnvelope(state),
+        ...buildNotificationRaw(params),
         ...turn,
-        message: text(`${failure}: ${params.error.message}, which Codex is retrying itself`),
+        message: truncateMessage(
+          `${failure}: ${params.error.message}, which Codex is retrying itself`,
+        ),
       },
     ];
   }
   return [
     {
       _tag: "runtime.error",
-      ...envelope(state),
-      ...raw(params),
+      ...buildSessionEnvelope(state),
+      ...buildNotificationRaw(params),
       ...turn,
       class: failure,
-      message: text(params.error.message),
+      message: truncateMessage(params.error.message),
     },
   ];
 };
@@ -358,11 +363,11 @@ export const normalize = (
 ): ReadonlyArray<ProviderEvent> => {
   const reasoning = REASONING_CHANNELS[frame.method];
   if (reasoning !== undefined) {
-    return reasoningDelta(state, frame.params as AgentMessageDeltaNotification, reasoning);
+    return buildReasoningDelta(state, frame.params as AgentMessageDeltaNotification, reasoning);
   }
   const streamKind = DELTA_STREAMS[frame.method];
   if (streamKind !== undefined) {
-    return delta(state, frame.params as AgentMessageDeltaNotification, streamKind);
+    return buildContentDelta(state, frame.params as AgentMessageDeltaNotification, streamKind);
   }
   switch (frame.method) {
     case "turn/started": {
@@ -374,10 +379,10 @@ export const normalize = (
       return [
         {
           _tag: "turn.started",
-          ...envelope(state),
-          ...raw(params),
-          turnId: idOf(params.turn.id),
-          ...(state.model === undefined ? {} : { model: fact(state.model) }),
+          ...buildSessionEnvelope(state),
+          ...buildNotificationRaw(params),
+          turnId: ensureId(params.turn.id),
+          ...(state.model === undefined ? {} : { model: truncateFact(state.model) }),
         },
       ];
     }
@@ -393,9 +398,9 @@ export const normalize = (
       return [
         {
           _tag: "turn.completed",
-          ...envelope(state),
-          ...raw(params),
-          turnId: idOf(params.turn.id),
+          ...buildSessionEnvelope(state),
+          ...buildNotificationRaw(params),
+          turnId: ensureId(params.turn.id),
           state: ended,
           ...(structuredResult === undefined ? {} : { structuredResult }),
         },
@@ -403,17 +408,17 @@ export const normalize = (
     }
     case "item/started": {
       const params = frame.params as ItemStartedNotification;
-      const kind = kindOf(params.item);
+      const kind = classifyItem(params.item);
       if (kind === null) return [];
       return [
         {
           _tag: "item.started",
-          ...envelope(state),
-          ...raw(params),
-          turnId: idOf(params.turnId),
-          itemId: idOf(params.item.id),
+          ...buildSessionEnvelope(state),
+          ...buildNotificationRaw(params),
+          turnId: ensureId(params.turnId),
+          itemId: ensureId(params.item.id),
           kind,
-          ...detail(params.item),
+          ...buildDetail(params.item),
         },
       ];
     }
@@ -423,18 +428,18 @@ export const normalize = (
       // the item. The echo of the user's own message is also an item the turn
       // completed, and a turn that ends on that echo ended with no answer.
       state.lastCompletedItem = params.item;
-      const kind = kindOf(params.item);
+      const kind = classifyItem(params.item);
       if (kind === null) return [];
       return [
         {
           _tag: "item.completed",
-          ...envelope(state),
-          ...raw(params),
-          turnId: idOf(params.turnId),
-          itemId: idOf(params.item.id),
+          ...buildSessionEnvelope(state),
+          ...buildNotificationRaw(params),
+          turnId: ensureId(params.turnId),
+          itemId: ensureId(params.item.id),
           kind,
-          status: statusOf(params.item),
-          ...detail(params.item),
+          status: readItemStatus(params.item),
+          ...buildDetail(params.item),
         },
       ];
     }
@@ -443,11 +448,11 @@ export const normalize = (
       return [
         {
           _tag: "session.usage.updated",
-          ...envelope(state),
-          ...raw(params),
+          ...buildSessionEnvelope(state),
+          ...buildNotificationRaw(params),
           // The cumulative breakdown, not the last turn's: a snapshot taken
           // from `last` would make the session look like it never grew.
-          usage: usageOf(params.tokenUsage),
+          usage: toUsage(params.tokenUsage),
         },
       ];
     }

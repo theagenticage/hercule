@@ -20,7 +20,7 @@ import {
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
-import { homePaths, HerculeHome } from "../config";
+import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
@@ -28,7 +28,7 @@ import { ConnectionTypesLayer } from "../connections";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 
 /** One provider definition, the only contribution shape with a consumer. */
-export const providerDefinition = (
+export const buildProviderDefinition = (
   id: string,
   defaultConfig: Schema.Json = {},
 ): ProviderDefinition => ({
@@ -68,7 +68,7 @@ afterAll(() => {
  * plugin's secrets are rows in the one secrets table, so the encryption is part
  * of what is under test.
  */
-export const pluginStack = () => {
+export const buildPluginStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
   homes.push(home);
   return PluginsLayer.pipe(
@@ -79,7 +79,7 @@ export const pluginStack = () => {
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
 };
 
@@ -108,7 +108,7 @@ export interface Fixture {
  * default is the plugin that comes up and stays up, so a test names only what
  * it is varying.
  */
-export const fixture = (options: {
+export const createPluginFixture = (options: {
   readonly id: string;
   readonly hostApi?: number;
   readonly capabilities?: ReadonlyArray<PluginCapability>;
@@ -129,7 +129,7 @@ export const fixture = (options: {
   const calls: Array<string> = [];
   const contexts: Array<ActivationContext> = [];
   const hosts: Array<RegistrationHost> = [];
-  const definitions = options.definitions ?? [providerDefinition(`${options.id}-provider`)];
+  const definitions = options.definitions ?? [buildProviderDefinition(`${options.id}-provider`)];
   let remainingFailures = options.activateFailures ?? 0;
   let up = false;
   const pause = options.slow === true ? Effect.yieldNow : Effect.void;

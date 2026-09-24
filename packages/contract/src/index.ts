@@ -16,7 +16,7 @@ export {
   API_PREFIX,
   OPERATIONS,
   isOperationId,
-  requirementOf,
+  readRequirement,
   type Method,
   type Operation,
   type OperationId,
@@ -62,11 +62,11 @@ export {
   SortDirection,
   page,
   pageParams,
-  sortFieldsOf,
+  readSortFields,
   sortParam,
 } from "./pagination";
 
-export { ACCESS_MODE_CHAIN, nearestSupportedAccessMode } from "./access-modes";
+export { ACCESS_MODE_CHAIN, findNearestSupportedAccessMode } from "./access-modes";
 
 export {
   MAX_PASSWORD_LENGTH,
@@ -343,8 +343,8 @@ export {
   LiveTopic,
   MUTABLE_LIVE_TOPICS,
   parseSessionTopic,
-  sessionStreamTopic,
-  sessionTapTopic,
+  buildSessionStreamTopic,
+  buildSessionTapTopic,
   TapItem,
   isAppendOnlyLiveTopic,
   live,

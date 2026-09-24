@@ -21,7 +21,7 @@ export interface RunnerFactsReading {
   readonly binary: string | null;
 }
 
-export const runnerFactsReading = (runner: Runner): RunnerFactsReading => {
+export const describeRunnerFacts = (runner: Runner): RunnerFactsReading => {
   const { facts, watermark } = runner;
   // A machine that answered and found no provider has said something; one that
   // has not answered has not. The two must not read alike.

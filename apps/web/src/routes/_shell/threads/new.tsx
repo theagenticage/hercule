@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { siblingTabs, threadDefaults } from "@hercule/client-core";
+import { buildSiblingTabs, computeThreadDefaults } from "@hercule/client-core";
 import {
   localRunnerQuery,
   profilesQuery,
@@ -71,7 +71,13 @@ function NewThread(): JSX.Element {
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
 
   const joined = workspaces.find((each) => each.id === search.workspace);
-  const defaults = threadDefaults(settings.user, instances, runners, profiles, localRunnerId);
+  const defaults = computeThreadDefaults(
+    settings.user,
+    instances,
+    runners,
+    profiles,
+    localRunnerId,
+  );
 
   // Resolved every render rather than snapshotted: a login landing while the
   // draft is open has to reach it, and the composer lays the picks over this.
@@ -94,7 +100,7 @@ function NewThread(): JSX.Element {
       <ThreadChrome
         crumb={projects.find((each) => each.id === search.project)?.name}
         title="New thread"
-        tabs={siblingTabs({ workspace: joined, sessions, activeSessionId: null, draft: true })}
+        tabs={buildSiblingTabs({ workspace: joined, sessions, activeSessionId: null, draft: true })}
       />
       <ThreadColumn className="justify-end">
         <Composer thread={{ kind: "draft", config }} />

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
-  envelope,
+  buildErrorBody,
   expectInDocumentOrder,
   renderApp,
   stubApi,
@@ -85,7 +85,7 @@ const PRUNE: Fixture = {
  * A controller holding the tasks given, answering a listing with them and a
  * patch by applying it, so a screen that reads its own write back sees it.
  */
-const controller = (
+const buildController = (
   tasks: readonly Fixture[],
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => {
@@ -136,21 +136,21 @@ const controller = (
   };
 };
 
-const open = async (tasks: readonly Fixture[], extra?: Readonly<Record<string, Handler>>) => {
-  const api = stubApi(controller(tasks, extra));
+const openApp = async (tasks: readonly Fixture[], extra?: Readonly<Record<string, Handler>>) => {
+  const api = stubApi(buildController(tasks, extra));
   const app = await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
   return { ...app, api };
 };
 
 /** The listing calls, oldest first, as query strings. */
-const listings = (api: { readonly calls: readonly Call[] }) =>
+const listTaskReads = (api: { readonly calls: readonly Call[] }) =>
   api.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/tasks");
 
-const row = (title: string) => screen.getByRole("button", { name: new RegExp(title) });
+const getTaskRow = (title: string) => screen.getByRole("button", { name: new RegExp(title) });
 
 describe("Tasks", () => {
   it("shows a row per task with what it is, how much it matters and where it sits", async () => {
-    await open([RUNNER, PRUNE]);
+    await openApp([RUNNER, PRUNE]);
 
     const first = await screen.findByRole("button", { name: new RegExp(RUNNER.title) });
     expect(first.textContent).toContain("open");
@@ -159,13 +159,13 @@ describe("Tasks", () => {
     expect(first.textContent).toContain(PROJECT.name);
     expect(within(first).getByLabelText(/high/i)).toBeTruthy();
 
-    const second = row(PRUNE.title);
+    const second = getTaskRow(PRUNE.title);
     expect(second.textContent).toContain("done");
     expect(within(second).getByLabelText(/normal/i)).toBeTruthy();
   });
 
   it("offers the pinned filters, each opening on no filter at all", async () => {
-    await open([RUNNER]);
+    await openApp([RUNNER]);
 
     const status = screen.getByLabelText<HTMLSelectElement>("Status");
     expect([...status.options].map((option) => option.textContent)).toEqual([
@@ -186,35 +186,35 @@ describe("Tasks", () => {
 
   it("searches by asking the controller, not by filtering what it already has", async () => {
     const user = userEvent.setup();
-    const { api } = await open([RUNNER, PRUNE]);
+    const { api } = await openApp([RUNNER, PRUNE]);
 
     await user.type(screen.getByLabelText("Search"), "retention");
 
     await waitFor(() => {
-      const last = listings(api).at(-1);
+      const last = listTaskReads(api).at(-1);
       expect(new URLSearchParams(last?.search).get("text")).toBe("retention");
     });
   });
 
   it("narrows by status through the controller too", async () => {
     const user = userEvent.setup();
-    const { api } = await open([RUNNER, PRUNE]);
+    const { api } = await openApp([RUNNER, PRUNE]);
 
     await user.selectOptions(screen.getByLabelText("Status"), "in-progress");
 
     await waitFor(() => {
-      const last = listings(api).at(-1);
+      const last = listTaskReads(api).at(-1);
       expect(new URLSearchParams(last?.search).has("status")).toBe(true);
       expect(decodeURIComponent(last?.search ?? "")).toContain("in-progress");
     });
   });
 
   it("says what a task is for when there are none at all", async () => {
-    const { api } = await open([]);
+    const { api } = await openApp([]);
 
     expect(await screen.findByText("No tasks yet.")).toBeTruthy();
     // Emptiness is what the controller answered, not what the screen assumed.
-    expect(listings(api).length).toBeGreaterThan(0);
+    expect(listTaskReads(api).length).toBeGreaterThan(0);
     expect(
       screen.getByText(
         "Triage proposes tasks from what comes in, and you can add one by hand. A task is intent; a run or a thread does the work.",
@@ -225,7 +225,7 @@ describe("Tasks", () => {
   it("blames the filters rather than the emptiness when a filter matched nothing", async () => {
     const user = userEvent.setup();
     const api = stubApi({
-      ...controller([RUNNER]),
+      ...buildController([RUNNER]),
       "GET /api/v1/tasks": (call: Call) => ({
         body: { items: call.search.includes("text=") ? [] : [RUNNER] },
       }),
@@ -240,7 +240,7 @@ describe("Tasks", () => {
 
   it("creates a task by hand from the composer", async () => {
     const user = userEvent.setup();
-    const { api } = await open([]);
+    const { api } = await openApp([]);
 
     await user.click(screen.getByRole("button", { name: "New task" }));
     await user.type(screen.getByLabelText("Title"), "Read the log");
@@ -263,7 +263,7 @@ describe("Tasks", () => {
 describe("Tasks > the drawer", () => {
   it("opens the task beside the list without leaving the list", async () => {
     const user = userEvent.setup();
-    const { router } = await open([RUNNER, PRUNE]);
+    const { router } = await openApp([RUNNER, PRUNE]);
 
     await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
 
@@ -280,7 +280,7 @@ describe("Tasks > the drawer", () => {
 
   it("shows what each provenance entry points at, who wrote it and when", async () => {
     const user = userEvent.setup();
-    await open([RUNNER, PRUNE]);
+    await openApp([RUNNER, PRUNE]);
 
     await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
     const first = await screen.findByRole("dialog");
@@ -294,7 +294,7 @@ describe("Tasks > the drawer", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
-    await user.click(row(PRUNE.title));
+    await user.click(getTaskRow(PRUNE.title));
     const second = await screen.findByRole("dialog");
     expect(second.textContent).toContain("4242");
     // A session that acted is named by its tail and links to its thread, rather
@@ -306,7 +306,7 @@ describe("Tasks > the drawer", () => {
 
   it("moves a task from any status to any other", async () => {
     const user = userEvent.setup();
-    const { api } = await open([RUNNER, PRUNE]);
+    const { api } = await openApp([RUNNER, PRUNE]);
 
     await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
     await user.selectOptions(
@@ -323,7 +323,7 @@ describe("Tasks > the drawer", () => {
     });
 
     await user.keyboard("{Escape}");
-    await user.click(row(PRUNE.title));
+    await user.click(getTaskRow(PRUNE.title));
     await user.selectOptions(
       within(await screen.findByRole("dialog")).getByLabelText("Status"),
       "open",
@@ -340,7 +340,7 @@ describe("Tasks > the drawer", () => {
 
   it("closes on Escape and leaves the list where it was", async () => {
     const user = userEvent.setup();
-    const { router } = await open([RUNNER, PRUNE]);
+    const { router } = await openApp([RUNNER, PRUNE]);
 
     await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
     expect(await screen.findByRole("dialog")).toBeTruthy();
@@ -352,7 +352,7 @@ describe("Tasks > the drawer", () => {
     });
     expect(router.state.location.pathname).toBe("/tasks");
     expect(router.state.location.searchStr).not.toContain(RUNNER.id);
-    expect(row(RUNNER.title)).toBeTruthy();
+    expect(getTaskRow(RUNNER.title)).toBeTruthy();
   });
 });
 
@@ -372,7 +372,7 @@ describe("Tasks > what the screen must not hide", () => {
   it("says so when the controller refuses an edit", async () => {
     const user = userEvent.setup();
     const api = stubApi({
-      ...controller([RUNNER]),
+      ...buildController([RUNNER]),
       [`PATCH /api/v1/tasks/${RUNNER.id}`]: refused,
     });
     await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
@@ -393,7 +393,7 @@ describe("Tasks > what the screen must not hide", () => {
       release = resolve;
     });
     const api = stubApi({
-      ...controller([RUNNER]),
+      ...buildController([RUNNER]),
       // The status edit is refused, but only once the priority edit that
       // follows it has already been answered.
       [`PATCH /api/v1/tasks/${RUNNER.id}`]: async (call: Call) => {
@@ -417,7 +417,7 @@ describe("Tasks > what the screen must not hide", () => {
   it("leaves one task's refusal out of the next task's drawer", async () => {
     const user = userEvent.setup();
     const api = stubApi({
-      ...controller([RUNNER, PRUNE]),
+      ...buildController([RUNNER, PRUNE]),
       [`PATCH /api/v1/tasks/${RUNNER.id}`]: refused,
     });
     await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
@@ -430,7 +430,7 @@ describe("Tasks > what the screen must not hide", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("task.update is not granted");
 
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
-    await user.click(row(PRUNE.title));
+    await user.click(getTaskRow(PRUNE.title));
 
     const next = await screen.findByRole("dialog");
     expect(next.textContent).toContain(PRUNE.title);
@@ -440,7 +440,7 @@ describe("Tasks > what the screen must not hide", () => {
   it("clears a refusal once a later edit of the same task goes through", async () => {
     const user = userEvent.setup();
     const api = stubApi({
-      ...controller([RUNNER]),
+      ...buildController([RUNNER]),
       // The status edit is refused; the priority edit that follows is taken.
       [`PATCH /api/v1/tasks/${RUNNER.id}`]: (call: Call) => {
         const sent = call.body as { status?: string; priority?: string };
@@ -464,7 +464,7 @@ describe("Tasks > what the screen must not hide", () => {
   it("leaves a refusal behind when the task is left, Back included", async () => {
     const user = userEvent.setup();
     const api = stubApi({
-      ...controller([RUNNER]),
+      ...buildController([RUNNER]),
       [`PATCH /api/v1/tasks/${RUNNER.id}`]: refused,
     });
     const { router } = await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
@@ -495,10 +495,10 @@ describe("Tasks > what the screen must not hide", () => {
 
   it("says so when the address names a task the controller will not answer for", async () => {
     const api = stubApi({
-      ...controller([]),
+      ...buildController([]),
       [`GET /api/v1/tasks/${RUNNER.id}`]: {
         status: 404,
-        body: envelope("not_found", `no task with id ${RUNNER.id}`),
+        body: buildErrorBody("not_found", `no task with id ${RUNNER.id}`),
       },
     });
     await renderApp({ path: `/tasks?task=${RUNNER.id}`, api: api.fetch, token: "held" });
@@ -511,8 +511,11 @@ describe("Tasks > what the screen must not hide", () => {
   it("says so when the controller refuses a new task, and keeps what was typed", async () => {
     const user = userEvent.setup();
     const api = stubApi({
-      ...controller([]),
-      "POST /api/v1/tasks": { status: 500, body: envelope("internal", "the database is locked") },
+      ...buildController([]),
+      "POST /api/v1/tasks": {
+        status: 500,
+        body: buildErrorBody("internal", "the database is locked"),
+      },
     });
     await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
 
@@ -527,8 +530,11 @@ describe("Tasks > what the screen must not hide", () => {
   it("drops a refused attempt when the composer is closed", async () => {
     const user = userEvent.setup();
     const api = stubApi({
-      ...controller([]),
-      "POST /api/v1/tasks": { status: 500, body: envelope("internal", "the database is locked") },
+      ...buildController([]),
+      "POST /api/v1/tasks": {
+        status: 500,
+        body: buildErrorBody("internal", "the database is locked"),
+      },
     });
     await renderApp({ path: "/tasks", api: api.fetch, token: "held" });
 
@@ -547,7 +553,7 @@ describe("Tasks > what the screen must not hide", () => {
 
   it("opens a task named in the address that no page of the listing holds", async () => {
     const api = stubApi({
-      ...controller([]),
+      ...buildController([]),
       [`GET /api/v1/tasks/${RUNNER.id}`]: { body: RUNNER },
     });
     await renderApp({ path: `/tasks?task=${RUNNER.id}`, api: api.fetch, token: "held" });
@@ -560,7 +566,7 @@ describe("Tasks > what the screen must not hide", () => {
     const user = userEvent.setup();
     let held = { ...RUNNER };
     const api = stubApi({
-      ...controller([RUNNER]),
+      ...buildController([RUNNER]),
       // A listing narrowed to `open`, which the edit below takes the task out of.
       "GET /api/v1/tasks": (call: Call) => ({
         body: {
@@ -593,7 +599,7 @@ describe("Tasks > what the screen must not hide", () => {
     const user = userEvent.setup();
     const orphan: Fixture = { ...RUNNER, projectId: "01a06d02-0000-7000-8000-00000000dead" };
     const api = stubApi({
-      ...controller([orphan]),
+      ...buildController([orphan]),
       "GET /api/v1/projects": { body: { items: [] } },
       [`GET /api/v1/tasks/${orphan.id}`]: { body: orphan },
     });
@@ -619,7 +625,7 @@ describe("Tasks > live", () => {
   };
 
   /** One invalidation, in the shape the contract puts on the wire. */
-  const invalidate = (kind: string, ids: readonly string[]) => ({
+  const buildInvalidation = (kind: string, ids: readonly string[]) => ({
     _tag: "invalidate",
     ids,
     kind,
@@ -630,18 +636,18 @@ describe("Tasks > live", () => {
    * own fibers, so it is a start rather than a barrier: what it causes is
    * waited for at the assertion.
    */
-  const deliver = (
+  const pushTaskInvalidation = (
     live: { push(topic: string, message: unknown): void },
     kind: string,
     ids: readonly string[],
   ): void => {
     act(() => {
-      live.push("task", invalidate(kind, ids));
+      live.push("task", buildInvalidation(kind, ids));
     });
   };
 
   /** The screen is watching `task` before a push can mean anything. */
-  const watching = async (live: { topics(): readonly string[] }) => {
+  const waitForTaskTopic = async (live: { topics(): readonly string[] }) => {
     await waitFor(() => {
       expect(live.topics()).toContain("task");
     });
@@ -649,47 +655,47 @@ describe("Tasks > live", () => {
 
   it("shows a task created elsewhere, without navigating", async () => {
     let held: readonly Fixture[] = [RUNNER];
-    const { api, live, router } = await open([RUNNER], {
+    const { api, live, router } = await openApp([RUNNER], {
       "GET /api/v1/tasks": () => ({ body: { items: held } }),
     });
 
     await screen.findByRole("button", { name: new RegExp(RUNNER.title) });
-    await watching(live);
-    const before = listings(api).length;
+    await waitForTaskTopic(live);
+    const before = listTaskReads(api).length;
 
     // The controller now holds one more task than the screen has read.
     held = [ADDED, ...held];
-    deliver(live, "created", [ADDED.id]);
+    pushTaskInvalidation(live, "created", [ADDED.id]);
 
     expect(await screen.findByRole("button", { name: new RegExp(ADDED.title) })).toBeTruthy();
     // The row came from a fresh listing, not from the push itself.
-    expect(listings(api).length).toBeGreaterThan(before);
+    expect(listTaskReads(api).length).toBeGreaterThan(before);
     expect(router.state.location.pathname).toBe("/tasks");
     expect(router.state.location.searchStr).not.toContain(ADDED.id);
   });
 
   it("drops the row for a task deleted elsewhere", async () => {
     let held: readonly Fixture[] = [RUNNER, PRUNE];
-    const { live } = await open([RUNNER, PRUNE], {
+    const { live } = await openApp([RUNNER, PRUNE], {
       "GET /api/v1/tasks": () => ({ body: { items: held } }),
     });
 
     await screen.findByRole("button", { name: new RegExp(PRUNE.title) });
-    await watching(live);
+    await waitForTaskTopic(live);
 
     held = held.filter((candidate) => candidate.id !== PRUNE.id);
-    deliver(live, "deleted", [PRUNE.id]);
+    pushTaskInvalidation(live, "deleted", [PRUNE.id]);
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: new RegExp(PRUNE.title) })).toBeNull();
     });
-    expect(row(RUNNER.title)).toBeTruthy();
+    expect(getTaskRow(RUNNER.title)).toBeTruthy();
   });
 
   it("shows the new values in a dossier that is open when the task is updated elsewhere", async () => {
     const user = userEvent.setup();
     let held: Fixture = { ...RUNNER };
-    const { live } = await open([RUNNER], {
+    const { live } = await openApp([RUNNER], {
       "GET /api/v1/tasks": () => ({ body: { items: [held] } }),
       [`GET /api/v1/tasks/${RUNNER.id}`]: () => ({ body: held }),
     });
@@ -697,10 +703,10 @@ describe("Tasks > live", () => {
     await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
     const drawer = await screen.findByRole("dialog");
     expect(within(drawer).getByLabelText<HTMLSelectElement>("Status").value).toBe("open");
-    await watching(live);
+    await waitForTaskTopic(live);
 
     held = { ...held, title: "Wire the runner socket up, at last", status: "in-progress" };
-    deliver(live, "updated", [RUNNER.id]);
+    pushTaskInvalidation(live, "updated", [RUNNER.id]);
 
     await waitFor(() => {
       expect(
@@ -713,30 +719,30 @@ describe("Tasks > live", () => {
   it("says so in a dossier left open on a task deleted elsewhere", async () => {
     const user = userEvent.setup();
     let held: readonly Fixture[] = [RUNNER];
-    const { live } = await open([RUNNER], {
+    const { live } = await openApp([RUNNER], {
       "GET /api/v1/tasks": () => ({ body: { items: held } }),
       [`GET /api/v1/tasks/${RUNNER.id}`]: () =>
         held.length === 0
-          ? { status: 404, body: envelope("not_found", "no task 01a06d02") }
+          ? { status: 404, body: buildErrorBody("not_found", "no task 01a06d02") }
           : { body: RUNNER },
     });
 
     await user.click(await screen.findByRole("button", { name: new RegExp(RUNNER.title) }));
     await screen.findByRole("dialog");
-    await watching(live);
+    await waitForTaskTopic(live);
 
     held = [];
-    deliver(live, "deleted", [RUNNER.id]);
+    pushTaskInvalidation(live, "deleted", [RUNNER.id]);
 
     expect(await screen.findByText("no task 01a06d02")).toBeTruthy();
     expect(screen.getByRole("dialog").textContent).not.toContain(RUNNER.title);
   });
 
   it("leaves no subscription behind when the screen is left", async () => {
-    const { live, router } = await open([RUNNER]);
+    const { live, router } = await openApp([RUNNER]);
 
     await screen.findByRole("button", { name: new RegExp(RUNNER.title) });
-    await watching(live);
+    await waitForTaskTopic(live);
 
     await act(async () => {
       await router.navigate({ to: "/runs" });

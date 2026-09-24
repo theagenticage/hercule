@@ -42,14 +42,14 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
-import { checkExpression } from "../expressions";
+import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
+import { validateExpression } from "../expressions";
 import { expandTarget } from "./targets";
 import { subscriptionRepository, type StoredSubscription } from "./repository";
 
 const QueryInput = Schema.Struct({
   holder: Schema.optionalKey(SubscriptionHolder),
-  ...pageInput(SUBSCRIPTION_SORT_FIELDS),
+  ...buildPageInputFields(SUBSCRIPTION_SORT_FIELDS),
 });
 
 type QueryInput = Schema.Schema.Type<typeof QueryInput>;
@@ -172,7 +172,7 @@ const make = Effect.gen(function* () {
         // quoted string literal, so nothing a caller writes can reach the
         // grammar. The check stands for the sources a trigger stores later,
         // which are written by hand.
-        yield* Effect.mapError(checkExpression(condition, "event"), (failure) =>
+        yield* Effect.mapError(validateExpression(condition, "event"), (failure) =>
           createInvalidStateError(failure.message),
         );
         const subscriptionId = yield* withTransaction(

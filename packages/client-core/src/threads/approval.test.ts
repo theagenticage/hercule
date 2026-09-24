@@ -1,5 +1,5 @@
 /**
- * `approvalCard(openRequest)` is the whole text of the permission card: its
+ * `buildApprovalCard(openRequest)` is the whole text of the permission card: its
  * title line, what the request is about, and one row per offered decision
  * ([#70](https://github.com/theagenticage/hercule/issues/70)); nothing in
  * `apps/web` authors any of it.
@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { OpenRequest } from "@hercule/contract";
-import { approvalCard } from "./approval";
+import { buildApprovalCard } from "./approval";
 
 const COMMAND: OpenRequest = {
   requestId: "req-1",
@@ -19,9 +19,9 @@ const COMMAND: OpenRequest = {
   detail: { command: "ls -la" },
 };
 
-describe("approvalCard", () => {
+describe("buildApprovalCard", () => {
   it("offers one row per decision the request lists, in that order, each with its own label and describe line", () => {
-    const card = approvalCard(COMMAND);
+    const card = buildApprovalCard(COMMAND);
 
     expect(card.rows.map((row) => row.decision)).toEqual([
       "allow",
@@ -41,13 +41,13 @@ describe("approvalCard", () => {
   });
 
   it("offers no allow-always row where the request does not list that decision", () => {
-    const card = approvalCard({ ...COMMAND, decisions: ["allow", "deny", "cancel"] });
+    const card = buildApprovalCard({ ...COMMAND, decisions: ["allow", "deny", "cancel"] });
 
     expect(card.rows.map((row) => row.decision)).toEqual(["allow", "deny", "cancel"]);
   });
 
   it("names the command a command_approval is about, as its subject, and marks it code", () => {
-    const card = approvalCard(COMMAND);
+    const card = buildApprovalCard(COMMAND);
 
     expect(card.subject).toEqual(["ls -la"]);
     expect(card.code).toBe(true);
@@ -60,14 +60,14 @@ describe("approvalCard", () => {
       kind: "file_change_approval",
       detail: { paths: ["src/auth.ts", "src/auth.test.ts"] },
     };
-    const card = approvalCard(request);
+    const card = buildApprovalCard(request);
 
     expect(card.subject).toEqual(["src/auth.ts", "src/auth.test.ts"]);
     expect(card.code).toBe(true);
   });
 
   it("names the path a file_read_approval is about, as its subject", () => {
-    const card = approvalCard({
+    const card = buildApprovalCard({
       ...COMMAND,
       kind: "file_read_approval",
       detail: { paths: ["docs/"] },
@@ -78,7 +78,7 @@ describe("approvalCard", () => {
   });
 
   it("names the tool a tool_approval is about, in its title", () => {
-    const card = approvalCard({
+    const card = buildApprovalCard({
       ...COMMAND,
       kind: "tool_approval",
       detail: { toolName: "WebFetch" },
@@ -108,7 +108,7 @@ describe("approvalCard", () => {
         ],
       },
     };
-    const card = approvalCard(request);
+    const card = buildApprovalCard(request);
 
     expect(card.rows.map((row) => row.decision)).toEqual(["deny", "cancel"]);
     // A question asks for answers rather than permission, so the title says so
@@ -160,7 +160,7 @@ describe("approvalCard", () => {
         ],
       },
     };
-    const card = approvalCard(request);
+    const card = buildApprovalCard(request);
 
     expect(card.questions.map((one) => one.header)).toEqual(["Features", "Branch"]);
     // No description to show: the label is the whole option.
@@ -172,6 +172,6 @@ describe("approvalCard", () => {
   });
 
   it("gives the other kinds no questions", () => {
-    expect(approvalCard(COMMAND).questions).toEqual([]);
+    expect(buildApprovalCard(COMMAND).questions).toEqual([]);
   });
 });

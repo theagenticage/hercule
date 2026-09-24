@@ -26,7 +26,7 @@ const withUser = Effect.gen(function* () {
   return yield* users.create("rogier", yield* hashPassword(PASSWORD, TEST_PASSWORD_PARAMS));
 });
 
-const asLogin = (tokenHash: string): Actor => ({
+const buildLoginActor = (tokenHash: string): Actor => ({
   _tag: "user",
   userId: "0199f0b7-0000-7000-8000-000000000000",
   credential: { kind: "login", id: "0199f0b7-0001-7000-8000-000000000000", tokenHash },
@@ -124,7 +124,7 @@ describe("auth.logout", () => {
         const tokenHash = hashToken(login.token);
         expect(user.username).toBe("rogier");
 
-        yield* auth.logout().pipe(Effect.provideService(CurrentActor, asLogin(tokenHash)));
+        yield* auth.logout().pipe(Effect.provideService(CurrentActor, buildLoginActor(tokenHash)));
         return yield* credentials.findLoginToken(tokenHash);
       }),
     );

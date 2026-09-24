@@ -19,8 +19,8 @@ import {
 } from "@hercule/plugin-host";
 import { del, get, post, send } from "../http/testing";
 import type { AuditKind } from "../events";
-import { until, type Arranged } from "../sessions/testing";
-import { codeOf, withFleet } from "../workspaces/testing";
+import { waitUntil, type Arranged } from "../sessions/testing";
+import { readErrorCode, withFleet } from "../workspaces/testing";
 
 /** The account the GitHub type names, which is what a login is read off. */
 const LOGIN = "octocat";
@@ -95,7 +95,7 @@ interface ResourceRecord {
  * resource takes is not in the criterion, so either is accepted and the body is
  * what is asserted.
  */
-const okCreate = async (response: Response): Promise<ResourceRecord> => {
+const parseCreatedResource = async (response: Response): Promise<ResourceRecord> => {
   expect([200, 201], await response.clone().text()).toContain(response.status);
   return (await response.json()) as ResourceRecord;
 };
@@ -103,12 +103,15 @@ const okCreate = async (response: Response): Promise<ResourceRecord> => {
 const createResource = (arranged: Arranged, body: unknown): Promise<Response> =>
   post(arranged.harness.base, "/api/v1/resources", body, arranged.token);
 
-const repo = (arranged: Arranged, body: Record<string, unknown> = {}): Promise<ResourceRecord> =>
+const createRepo = (
+  arranged: Arranged,
+  body: Record<string, unknown> = {},
+): Promise<ResourceRecord> =>
   createResource(arranged, {
     kind: "repo",
     remote: "https://github.com/acme/web.git",
     ...body,
-  }).then(okCreate);
+  }).then(parseCreatedResource);
 
 const readResource = async (arranged: Arranged, id: string): Promise<ResourceRecord> => {
   const response = await get(arranged.harness.base, `/api/v1/resources/${id}`, arranged.token);
@@ -128,13 +131,13 @@ const queryResources = async (
 const patchResource = (arranged: Arranged, id: string, body: unknown): Promise<Response> =>
   send("PATCH", arranged.harness.base, `/api/v1/resources/${id}`, { body, token: arranged.token });
 
-const project = async (arranged: Arranged, name: string): Promise<string> => {
+const createProject = async (arranged: Arranged, name: string): Promise<string> => {
   const response = await post(arranged.harness.base, "/api/v1/projects", { name }, arranged.token);
   expect([200, 201], await response.clone().text()).toContain(response.status);
   return ((await response.json()) as { id: string }).id;
 };
 
-const connection = async (
+const createConnection = async (
   arranged: Arranged,
   type: string,
   credentials: Record<string, string>,
@@ -150,12 +153,13 @@ const connection = async (
 };
 
 /** What the audit log holds under a kind this feature adds. */
-const auditRows = (arranged: Arranged, kind: string) => arranged.harness.audit(kind as AuditKind);
+const readAuditRows = (arranged: Arranged, kind: string) =>
+  arranged.harness.audit(kind as AuditKind);
 
 describe("resource.create", () => {
   it("canonicalises a repo's remote to host/owner/repo, however it was spelled", async () => {
     await withResources(async (arranged) => {
-      const https = await repo(arranged, { remote: "https://GitHub.com/acme/web" });
+      const https = await createRepo(arranged, { remote: "https://GitHub.com/acme/web" });
       expect(https.kind).toBe("repo");
       expect(https.remote).toBe("https://GitHub.com/acme/web");
       expect(https.canonicalRemote).toBe("github.com/acme/web");
@@ -166,7 +170,7 @@ describe("resource.create", () => {
         kind: "repo",
         remote: "git@github.com:Acme/Web.git",
       });
-      expect(await codeOf(conflict)).toBe("conflict");
+      expect(await readErrorCode(conflict)).toBe("conflict");
 
       // And nothing was created by the refused call.
       expect((await queryResources(arranged)).map((one) => one.id)).toEqual([https.id]);
@@ -175,25 +179,25 @@ describe("resource.create", () => {
 
   it("refuses a repo whose connection is not a GitHub one", async () => {
     await withResources(async (arranged) => {
-      const mailbox = await connection(arranged, "mailer/mailbox", { token: "t" });
+      const mailbox = await createConnection(arranged, "mailer/mailbox", { token: "t" });
       const refused = await createResource(arranged, {
         kind: "repo",
         remote: "https://github.com/acme/web",
         connectionId: mailbox,
       });
-      expect(await codeOf(refused)).toBe("validation");
+      expect(await readErrorCode(refused)).toBe("validation");
 
-      const github = await connection(arranged, "github/github", { pat: PAT });
-      const accepted = await repo(arranged, { connectionId: github });
+      const github = await createConnection(arranged, "github/github", { pat: PAT });
+      const accepted = await createRepo(arranged, { connectionId: github });
       expect(accepted.connectionId).toBe(github);
     });
   });
 
   it("takes a folder and a mailbox with a label and no remote", async () => {
     await withResources(async (arranged) => {
-      const mailbox = await connection(arranged, "mailer/mailbox", { token: "t" });
+      const mailbox = await createConnection(arranged, "mailer/mailbox", { token: "t" });
 
-      const folder = await okCreate(
+      const folder = await parseCreatedResource(
         await createResource(arranged, { kind: "folder", label: "Notes" }),
       );
       expect(folder.kind).toBe("folder");
@@ -201,7 +205,7 @@ describe("resource.create", () => {
       expect(folder.remote ?? null).toBeNull();
       expect(folder.canonicalRemote ?? null).toBeNull();
 
-      const inbox = await okCreate(
+      const inbox = await parseCreatedResource(
         await createResource(arranged, {
           kind: "mailbox",
           label: "Work mail",
@@ -250,8 +254,8 @@ describe("resource.create", () => {
 
   it("refuses the same on an update", async () => {
     await withResources(async (arranged) => {
-      const web = await repo(arranged);
-      const folder = await okCreate(
+      const web = await createRepo(arranged);
+      const folder = await parseCreatedResource(
         await createResource(arranged, { kind: "folder", label: "Notes" }),
       );
 
@@ -269,8 +273,8 @@ describe("resource.create", () => {
 
   it("appends an audit row for the resource it created", async () => {
     await withResources(async (arranged) => {
-      const created = await repo(arranged);
-      const rows = await auditRows(arranged, "resource.created");
+      const created = await createRepo(arranged);
+      const rows = await readAuditRows(arranged, "resource.created");
       expect(rows).toHaveLength(1);
       expect(rows[0]?.actor).toBe("user");
       expect(JSON.stringify(rows[0]?.payload)).toContain(created.id);
@@ -281,15 +285,15 @@ describe("resource.create", () => {
 describe("resource.query and resource.read", () => {
   it("filters by kind and by project, and reads one back whole", async () => {
     await withResources(async (arranged) => {
-      const hercule = await project(arranged, "Hercule");
-      const web = await repo(arranged, {
+      const hercule = await createProject(arranged, "Hercule");
+      const web = await createRepo(arranged, {
         remote: "https://github.com/acme/web",
         projectIds: [hercule],
         setupCommand: "pnpm install",
         workspaceInclude: true,
       });
-      const api = await repo(arranged, { remote: "https://github.com/acme/api" });
-      const notes = await okCreate(
+      const api = await createRepo(arranged, { remote: "https://github.com/acme/api" });
+      const notes = await parseCreatedResource(
         await createResource(arranged, { kind: "folder", label: "Notes" }),
       );
 
@@ -319,8 +323,8 @@ describe("resource.query and resource.read", () => {
 describe("resource.update", () => {
   it("changes the remote, re-canonicalises it, and refuses one that collides", async () => {
     await withResources(async (arranged) => {
-      const web = await repo(arranged, { remote: "https://github.com/acme/web" });
-      const api = await repo(arranged, { remote: "https://github.com/acme/api" });
+      const web = await createRepo(arranged, { remote: "https://github.com/acme/web" });
+      const api = await createRepo(arranged, { remote: "https://github.com/acme/api" });
 
       const moved = await patchResource(arranged, api.id, {
         remote: "git@github.com:acme/API.git",
@@ -331,7 +335,7 @@ describe("resource.update", () => {
       const collides = await patchResource(arranged, api.id, {
         remote: "https://github.com/acme/web.git",
       });
-      expect(await codeOf(collides)).toBe("conflict");
+      expect(await readErrorCode(collides)).toBe("conflict");
       // The refused change left the canonical remote where it was.
       expect((await readResource(arranged, api.id)).canonicalRemote).toBe("github.com/acme/api");
       expect((await readResource(arranged, web.id)).canonicalRemote).toBe("github.com/acme/web");
@@ -340,10 +344,10 @@ describe("resource.update", () => {
 
   it("changes the connection, the setup command, the include flag and the projects", async () => {
     await withResources(async (arranged) => {
-      const hercule = await project(arranged, "Hercule");
-      const side = await project(arranged, "Side");
-      const github = await connection(arranged, "github/github", { pat: PAT });
-      const web = await repo(arranged, { projectIds: [hercule] });
+      const hercule = await createProject(arranged, "Hercule");
+      const side = await createProject(arranged, "Side");
+      const github = await createConnection(arranged, "github/github", { pat: PAT });
+      const web = await createRepo(arranged, { projectIds: [hercule] });
 
       const response = await patchResource(arranged, web.id, {
         connectionId: github,
@@ -371,9 +375,9 @@ describe("resource.update", () => {
 
   it("appends an audit row for the change", async () => {
     await withResources(async (arranged) => {
-      const web = await repo(arranged);
+      const web = await createRepo(arranged);
       await patchResource(arranged, web.id, { setupCommand: "make" });
-      const rows = await auditRows(arranged, "resource.updated");
+      const rows = await readAuditRows(arranged, "resource.updated");
       expect(rows).toHaveLength(1);
       expect(rows[0]?.actor).toBe("user");
     });
@@ -383,8 +387,8 @@ describe("resource.update", () => {
 describe("resource.delete", () => {
   it("deletes the row and its project joins, and appends an audit row", async () => {
     await withResources(async (arranged) => {
-      const hercule = await project(arranged, "Hercule");
-      const web = await repo(arranged, { projectIds: [hercule] });
+      const hercule = await createProject(arranged, "Hercule");
+      const web = await createRepo(arranged, { projectIds: [hercule] });
 
       const response = await del(
         arranged.harness.base,
@@ -396,9 +400,9 @@ describe("resource.delete", () => {
       expect(await queryResources(arranged)).toEqual([]);
       expect(await queryResources(arranged, `?projectId=${hercule}`)).toEqual([]);
       const gone = await get(arranged.harness.base, `/api/v1/resources/${web.id}`, arranged.token);
-      expect(await codeOf(gone)).toBe("not_found");
+      expect(await readErrorCode(gone)).toBe("not_found");
 
-      const rows = await auditRows(arranged, "resource.deleted");
+      const rows = await readAuditRows(arranged, "resource.deleted");
       expect(rows).toHaveLength(1);
       expect(rows[0]?.actor).toBe("user");
     });
@@ -406,7 +410,7 @@ describe("resource.delete", () => {
 
   it("refuses while a workspace stands on it, and allows it once that workspace is gone", async () => {
     await withResources(async (arranged) => {
-      const web = await repo(arranged);
+      const web = await createRepo(arranged);
       const provisioned = await post(
         arranged.harness.base,
         "/api/v1/workspaces",
@@ -421,7 +425,7 @@ describe("resource.delete", () => {
         `/api/v1/resources/${web.id}`,
         arranged.token,
       );
-      expect(await codeOf(refused)).toBe("invalid_state");
+      expect(await readErrorCode(refused)).toBe("invalid_state");
       expect((await queryResources(arranged)).map((one) => one.id)).toEqual([web.id]);
 
       // A retired machine loses its workspaces, which is the one way a primary
@@ -433,7 +437,7 @@ describe("resource.delete", () => {
         { body: {}, token: arranged.token },
       );
       expect(retired.status, await retired.clone().text()).toBe(200);
-      await until("marked the workspace lost", async () => {
+      await waitUntil("marked the workspace lost", async () => {
         const response = await get(
           arranged.harness.base,
           `/api/v1/workspaces/${workspace.id}`,
@@ -457,15 +461,15 @@ describe("resource.delete", () => {
 describe("connection.delete", () => {
   it("is refused while a resource names the connection, and goes through once none does", async () => {
     await withResources(async (arranged) => {
-      const github = await connection(arranged, "github/github", { pat: PAT });
-      const web = await repo(arranged, { connectionId: github });
+      const github = await createConnection(arranged, "github/github", { pat: PAT });
+      const web = await createRepo(arranged, { connectionId: github });
 
       const refused = await del(
         arranged.harness.base,
         `/api/v1/connections/${github}`,
         arranged.token,
       );
-      expect(await codeOf(refused)).toBe("invalid_state");
+      expect(await readErrorCode(refused)).toBe("invalid_state");
       const still = await get(
         arranged.harness.base,
         `/api/v1/connections/${github}`,

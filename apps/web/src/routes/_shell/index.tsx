@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Button, EmptyState } from "@hercule/ui";
-import { queryKeys, sessionsEmptyState } from "@hercule/client-core";
+import { queryKeys, decideSessionsEmptyState } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
 import { CreateThreadLink } from "../../screens/create-thread-link";
@@ -41,7 +41,7 @@ function Sessions(): JSX.Element {
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   const local = runners.find((runner) => runner.id === localId) ?? null;
 
-  const state = sessionsEmptyState(local, instances);
+  const state = decideSessionsEmptyState(local, instances);
   const reread = (): void => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   };
@@ -93,13 +93,13 @@ function Sessions(): JSX.Element {
   if (state.kind === "sign-in") {
     return (
       <Screen
-        headline={found(state.offers.map((row) => row.name))}
+        headline={describeFoundHarnesses(state.offers.map((row) => row.name))}
         lead={state.lead}
         fine="A thread needs a harness that is logged in, so starting one waits on this."
         failure={probe.error === null ? null : readErrorMessage(probe.error)}
       >
         {state.offers.flatMap((row) => {
-          const entered = () => {
+          const probeOfferedInstance = () => {
             probe.mutate({ runnerId: local.id, instanceId: row.id });
           };
           // A provider credentialled with a value of the user's has no vendor
@@ -114,7 +114,7 @@ function Sessions(): JSX.Element {
                   subject={`${row.name} on this machine`}
                   label={`Log in to ${row.name}`}
                   variant="primary"
-                  onLoggedIn={entered}
+                  onLoggedIn={probeOfferedInstance}
                 />,
               ]
             : row.secretFields.map((field) => (
@@ -124,7 +124,7 @@ function Sessions(): JSX.Element {
                   instanceId={row.id}
                   field={field}
                   variant="primary"
-                  onSaved={entered}
+                  onSaved={probeOfferedInstance}
                 />
               ));
         })}
@@ -180,7 +180,7 @@ function Screen({
 }
 
 /** The harnesses on offer, read as a sentence rather than as a list. */
-const found = (names: ReadonlyArray<string>): string =>
+const describeFoundHarnesses = (names: ReadonlyArray<string>): string =>
   names.length < 2
     ? `${names[0] ?? "A coding harness"} was found on this machine.`
     : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1] ?? ""} were found on this machine.`;

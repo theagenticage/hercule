@@ -20,8 +20,8 @@ import {
   Validation,
 } from "@hercule/contract";
 import { JoinRequest } from "@hercule/protocol";
-import { bearerOf } from "../http/bearer";
-import { responseFor } from "../http/envelope";
+import { readBearerToken } from "../http/bearer";
+import { buildErrorResponse } from "../http/envelope";
 import { RunnerJoin } from "./join";
 
 const JOIN_PATH = "/api/v1/runners/join";
@@ -55,18 +55,18 @@ const requestIn = Effect.mapError(HttpServerRequest.schemaBodyJson(JoinRequest, 
 export const RunnerJoinRouteLayer = HttpRouter.add("POST", JOIN_PATH, (request) =>
   Effect.gen(function* () {
     const enlist = yield* RunnerJoin;
-    const token = bearerOf(request);
-    if (token === undefined) return responseFor(createUnauthenticatedError(NO_TOKEN));
+    const token = readBearerToken(request);
+    if (token === undefined) return buildErrorResponse(createUnauthenticatedError(NO_TOKEN));
     return yield* Effect.flatMap(requestIn, (body) =>
       enlist.join(token, body.reserved ?? false),
     ).pipe(
       Effect.map((answer) => HttpServerResponse.jsonUnsafe(answer, { status: 201 })),
       Effect.catch((error) =>
         error instanceof Unauthenticated || error instanceof Validation
-          ? Effect.succeed(responseFor(error))
+          ? Effect.succeed(buildErrorResponse(error))
           : Effect.as(
               Effect.logError("A machine presenting a join token could not be enlisted", error),
-              responseFor(createInternalError("something went wrong")),
+              buildErrorResponse(createInternalError("something went wrong")),
             ),
       ),
     );

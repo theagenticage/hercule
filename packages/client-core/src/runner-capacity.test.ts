@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Runner, Session, SessionStatus } from "@hercule/contract";
-import { capacityLine } from "./runner-capacity";
+import { describeCapacity } from "./runner-capacity";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -22,7 +22,7 @@ const MOSS: Runner = {
 let next = 0;
 
 /** One session in the state that matters here; nothing else is read. */
-const at = (status: SessionStatus): Session => {
+const buildSession = (status: SessionStatus): Session => {
   next += 1;
   return {
     id: `01a06d02-2000-7000-8000-00000000000${String(next)}`,
@@ -49,38 +49,52 @@ const at = (status: SessionStatus): Session => {
   };
 };
 
-describe("capacityLine", () => {
+describe("describeCapacity", () => {
   it("says how many slots are taken and how many sessions wait for one", () => {
-    expect(capacityLine(MOSS, [at("busy"), at("queued"), at("queued")])).toBe(
-      "1 running of 2 · 2 queued",
-    );
+    expect(
+      describeCapacity(MOSS, [
+        buildSession("busy"),
+        buildSession("queued"),
+        buildSession("queued"),
+      ]),
+    ).toBe("1 running of 2 · 2 queued");
   });
 
   it("says nothing about a queue that is empty", () => {
-    expect(capacityLine(MOSS, [at("busy")])).toBe("1 running of 2");
+    expect(describeCapacity(MOSS, [buildSession("busy")])).toBe("1 running of 2");
   });
 
   it("counts one waiting session too", () => {
-    expect(capacityLine(MOSS, [at("busy"), at("queued")])).toBe("1 running of 2 · 1 queued");
+    expect(describeCapacity(MOSS, [buildSession("busy"), buildSession("queued")])).toBe(
+      "1 running of 2 · 1 queued",
+    );
   });
 
   it("counts a session as running from the moment it is started until it is gone", () => {
     // `starting` and `idle` hold a slot exactly as `busy` does: the controller
     // admits against all three, so a line that counted only `busy` would say a
     // full machine had room.
-    expect(capacityLine(MOSS, [at("starting"), at("idle"), at("busy")])).toBe("3 running of 2");
+    expect(
+      describeCapacity(MOSS, [
+        buildSession("starting"),
+        buildSession("idle"),
+        buildSession("busy"),
+      ]),
+    ).toBe("3 running of 2");
   });
 
   it("counts an exited session as neither running nor queued", () => {
-    expect(capacityLine(MOSS, [at("exited"), at("exited")])).toBe("0 running of 2");
+    expect(describeCapacity(MOSS, [buildSession("exited"), buildSession("exited")])).toBe(
+      "0 running of 2",
+    );
   });
 
   it("reads an empty machine as empty", () => {
-    expect(capacityLine(MOSS, [])).toBe("0 running of 2");
+    expect(describeCapacity(MOSS, [])).toBe("0 running of 2");
   });
 
   it("reads the cap off the machine it is given", () => {
-    expect(capacityLine({ ...MOSS, maxConcurrentSessions: 7 }, [at("busy")])).toBe(
+    expect(describeCapacity({ ...MOSS, maxConcurrentSessions: 7 }, [buildSession("busy")])).toBe(
       "1 running of 7",
     );
   });

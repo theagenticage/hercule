@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { FALLBACK_TIMEZONE, idTail, isSupportedTimezone, queryKeys } from "@hercule/client-core";
+import { FALLBACK_TIMEZONE, toIdTail, isSupportedTimezone, queryKeys } from "@hercule/client-core";
 import type { TaskCreateInput } from "@hercule/contract";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { projectsQuery, settingsQuery, tasksQuery } from "../../../app/queries";
@@ -49,8 +49,8 @@ function Tasks(): JSX.Element {
   const projects = useQuery(projectsQuery(client));
   const tasks = listing.data?.pages.flatMap((page) => page.items) ?? [];
   const known = projects.data?.items ?? [];
-  const nameOf = (id: string): string =>
-    known.find((project) => project.id === id)?.name ?? idTail(id);
+  const readProjectName = (id: string): string =>
+    known.find((project) => project.id === id)?.name ?? toIdTail(id);
 
   const reread = async (id?: string) => {
     await Promise.all([
@@ -111,7 +111,7 @@ function Tasks(): JSX.Element {
         pending={listing.isPending}
         filtering={filtering}
         timezone={timezone}
-        nameOf={nameOf}
+        nameOf={readProjectName}
         openId={openId}
         onOpen={(id) => void navigate({ to: "/tasks", search: { task: id } })}
         more={

@@ -1,11 +1,11 @@
 /**
  * The four access modes, in the one order they are ever shown, dimmed by the
- * same downward-only fallback the controller spawns on (`nearestSupportedAccessMode`,
+ * same downward-only fallback the controller spawns on (`findNearestSupportedAccessMode`,
  * spec 06 §8.4) - so a mode this menu shows as available is a mode the
  * controller will actually grant.
  */
 import {
-  nearestSupportedAccessMode,
+  findNearestSupportedAccessMode,
   type AccessMode,
   type DeclaredCapabilities,
 } from "@hercule/contract";
@@ -23,13 +23,13 @@ const MEANINGS: Readonly<Record<AccessMode, string>> = {
   "full-access": "allows everything",
 };
 
-export const accessModeMenu = (
+export const buildAccessModeMenu = (
   declared: DeclaredCapabilities["accessModes"],
   /** The provider's display name: the annotation names the harness that decided the fallback. */
   providerName: string,
 ): readonly AccessModeMenuItem[] =>
   (["approval-required", "auto-accept-edits", "auto", "full-access"] as const).map((mode) => {
-    const fallback = nearestSupportedAccessMode(mode, declared);
+    const fallback = findNearestSupportedAccessMode(mode, declared);
     const dimmed =
       fallback === undefined || fallback === mode ? null : `runs as ${fallback} on ${providerName}`;
     return { mode, meaning: MEANINGS[mode], dimmed };

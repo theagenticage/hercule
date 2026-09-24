@@ -2,7 +2,7 @@ import { useEffect, useState, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { EmptyState, Group, LaneLabel } from "@hercule/ui";
-import { connectionTypes, setupFlowOf, type ConnectionType } from "@hercule/client-core";
+import { listConnectionTypes, decideSetupFlow, type ConnectionType } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import { connectionsQuery, pluginsQuery } from "../../../app/queries";
 import { ConnectRows } from "../../../screens/connect-rows";
@@ -46,8 +46,8 @@ const GISTS = {
  * setting it up takes. The plugin comes first because two plugins may each
  * declare a type called Gmail, and the name above says nothing about which.
  */
-const gistOf = (type: ConnectionType): string => {
-  const flow = setupFlowOf(type);
+const summarizeConnectionType = (type: ConnectionType): string => {
+  const flow = decideSetupFlow(type);
   // A step kind this build does not know: the type names itself rather than
   // being described as something it may not be.
   return `${type.pluginName} · ${flow === "unknown" ? type.type : GISTS[flow]}`;
@@ -76,7 +76,7 @@ function Connections(): JSX.Element {
   }, [notice, navigate]);
 
   const connections = useSuspenseQuery(connectionsQuery(client)).data.items;
-  const types = connectionTypes(useSuspenseQuery(pluginsQuery(client)).data);
+  const types = listConnectionTypes(useSuspenseQuery(pluginsQuery(client)).data);
 
   const [connecting, setConnecting] = useState<string | null>(null);
   const chosen = types.find((type) => type.type === connecting);
@@ -86,7 +86,7 @@ function Connections(): JSX.Element {
       <ConnectRows
         offers={types.map((type) => ({
           name: type.displayName,
-          gist: gistOf(type),
+          gist: summarizeConnectionType(type),
           onConnect: () => {
             setConnecting(type.type);
           },

@@ -4,11 +4,11 @@
  * environment is built rather than passed on.
  */
 import { describe, expect, it } from "vitest";
-import { substrateEnv } from "./substrate";
+import { buildSubstrateEnv } from "./substrate";
 
 describe("the environment provisioning git runs with", () => {
   it("keeps the machine's own and drops what would answer for the agent", () => {
-    const env = substrateEnv(
+    const env = buildSubstrateEnv(
       {
         PATH: "/usr/bin",
         HOME: "/home/somebody",

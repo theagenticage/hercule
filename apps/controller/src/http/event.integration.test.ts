@@ -18,7 +18,7 @@ interface EventPage {
   readonly nextCursor?: string;
 }
 
-const events = async (base: string, token: string, query = ""): Promise<EventPage> => {
+const listEvents = async (base: string, token: string, query = ""): Promise<EventPage> => {
   const response = await get(base, `/api/v1/events${query}`, token);
   expect(response.status).toBe(200);
   return (await response.json()) as EventPage;
@@ -39,20 +39,21 @@ const failLogin = async (base: string): Promise<void> => {
 };
 
 /** An instant strictly between two batches of writes, for `since` and `until`. */
-const between = async (): Promise<string> => {
+const captureInstantBetween = async (): Promise<string> => {
   await new Promise((resolve) => setTimeout(resolve, 10));
   const now = new Date().toISOString();
   await new Promise((resolve) => setTimeout(resolve, 10));
   return now;
 };
 
-const kinds = (page: EventPage): ReadonlyArray<unknown> => page.items.map((item) => item.kind);
+const listKinds = (page: EventPage): ReadonlyArray<unknown> => page.items.map((item) => item.kind);
 
 /** The titles of the tasks a page of `task.created` rows describes. */
-const titlesOf = (page: EventPage): ReadonlyArray<string | undefined> =>
+const listTitles = (page: EventPage): ReadonlyArray<string | undefined> =>
   page.items.map((item) => (item.payload as { task?: { title?: string } }).task?.title);
 
-const ids = (page: EventPage): ReadonlyArray<number> => page.items.map((item) => item.id as number);
+const listIds = (page: EventPage): ReadonlyArray<number> =>
+  page.items.map((item) => item.id as number);
 
 describe("the event log over HTTP", () => {
   it("returns both populations from one unfiltered call, told apart only by kind", async () => {
@@ -61,7 +62,7 @@ describe("the event log over HTTP", () => {
       await createTask(base, token, "a task the log should hold");
       await failLogin(base);
 
-      const page = await events(base, token, "?limit=500");
+      const page = await listEvents(base, token, "?limit=500");
       const created = page.items.find((item) => item.kind === "task.created");
       const failed = page.items.find((item) => item.kind === "auth.login.failed");
       expect(created).toBeDefined();
@@ -87,14 +88,14 @@ describe("the event log over HTTP", () => {
       await createTask(base, token, "two");
       await failLogin(base);
 
-      const created = await events(base, token, "?kind=task.created");
+      const created = await listEvents(base, token, "?kind=task.created");
       expect(created.items).toHaveLength(2);
-      expect(new Set(kinds(created))).toEqual(new Set(["task.created"]));
+      expect(new Set(listKinds(created))).toEqual(new Set(["task.created"]));
 
-      const failed = await events(base, token, "?kind=auth.login.failed");
+      const failed = await listEvents(base, token, "?kind=auth.login.failed");
       expect(failed.items).toHaveLength(1);
 
-      const none = await events(base, token, "?kind=task.exploded");
+      const none = await listEvents(base, token, "?kind=task.exploded");
       expect(none.items).toEqual([]);
     });
   });
@@ -103,23 +104,23 @@ describe("the event log over HTTP", () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
       await createTask(base, token, "before the boundary");
-      const boundary = await between();
+      const boundary = await captureInstantBetween();
       await createTask(base, token, "after the boundary");
 
-      const after = await events(base, token, `?kind=task.created&since=${boundary}`);
-      expect(titlesOf(after)).toEqual(["after the boundary"]);
+      const after = await listEvents(base, token, `?kind=task.created&since=${boundary}`);
+      expect(listTitles(after)).toEqual(["after the boundary"]);
 
-      const before = await events(base, token, `?kind=task.created&until=${boundary}`);
-      expect(titlesOf(before)).toEqual(["before the boundary"]);
+      const before = await listEvents(base, token, `?kind=task.created&until=${boundary}`);
+      expect(listTitles(before)).toEqual(["before the boundary"]);
 
-      const both = await events(
+      const both = await listEvents(
         base,
         token,
         `?kind=task.created&since=1970-01-01T00:00:00.000Z&until=2999-01-01T00:00:00.000Z`,
       );
       expect(both.items).toHaveLength(2);
 
-      const window = await events(
+      const window = await listEvents(
         base,
         token,
         `?since=2999-01-01T00:00:00.000Z&until=2999-01-02T00:00:00.000Z`,
@@ -133,10 +134,10 @@ describe("the event log over HTTP", () => {
       const token = await completeSetup(base);
       await createTask(base, token, "a task through no connection");
 
-      const unfiltered = await events(base, token, "?kind=task.created");
+      const unfiltered = await listEvents(base, token, "?kind=task.created");
       expect(unfiltered.items).toHaveLength(1);
 
-      const byConnection = await events(
+      const byConnection = await listEvents(
         base,
         token,
         "?kind=task.created&connectionId=0199e0e7-1111-7000-8000-000000000000",
@@ -165,7 +166,7 @@ describe("the event log over HTTP", () => {
         ),
       );
 
-      const page = await events(base, token, `?connectionId=${connectionId}`);
+      const page = await listEvents(base, token, `?connectionId=${connectionId}`);
       expect(page.items).toHaveLength(1);
       expect(page.items[0]).toMatchObject({
         source: "github",
@@ -186,8 +187,8 @@ describe("the event log over HTTP", () => {
       const token = await completeSetup(base);
       await createTask(base, token, "readable");
 
-      const page = await events(base, token, "?kind=task.created");
-      const id = ids(page)[0];
+      const page = await listEvents(base, token, "?kind=task.created");
+      const id = listIds(page)[0];
       expect(typeof id).toBe("number");
       expect(Number.isInteger(id)).toBe(true);
 
@@ -210,16 +211,16 @@ describe("the event log's order and paging", () => {
       await createTask(base, token, "two");
       await createTask(base, token, "three");
 
-      const byDefault = await events(base, token, "?kind=task.created");
-      const descending = ids(byDefault);
+      const byDefault = await listEvents(base, token, "?kind=task.created");
+      const descending = listIds(byDefault);
       expect(descending).toEqual([...descending].sort((a, b) => b - a));
       expect(descending).toHaveLength(3);
 
-      const explicit = await events(base, token, "?kind=task.created&sort=id:desc");
-      expect(ids(explicit)).toEqual(descending);
+      const explicit = await listEvents(base, token, "?kind=task.created&sort=id:desc");
+      expect(listIds(explicit)).toEqual(descending);
 
-      const ascending = await events(base, token, "?kind=task.created&sort=id:asc");
-      expect(ids(ascending)).toEqual([...descending].reverse());
+      const ascending = await listEvents(base, token, "?kind=task.created&sort=id:asc");
+      expect(listIds(ascending)).toEqual([...descending].reverse());
 
       const unknown = await get(base, "/api/v1/events?sort=receivedAt", token);
       expect(unknown.status).toBe(400);
@@ -238,9 +239,9 @@ describe("the event log's order and paging", () => {
       let cursor: string | undefined;
       for (let page = 0; page < 10; page++) {
         const query = `?kind=task.created&limit=2${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`;
-        const result = await events(base, token, query);
+        const result = await listEvents(base, token, query);
         expect(result.items.length).toBeLessThanOrEqual(2);
-        seen.push(...ids(result));
+        seen.push(...listIds(result));
         cursor = result.nextCursor;
         if (cursor === undefined) break;
       }
@@ -259,7 +260,7 @@ describe("a failed login in the log", () => {
       const token = await completeSetup(base);
       await failLogin(base);
 
-      const page = await events(base, token, "?kind=auth.login.failed");
+      const page = await listEvents(base, token, "?kind=auth.login.failed");
       expect(page.items).toHaveLength(1);
       const row = page.items[0]!;
       expect(row.actor).toBeNull();

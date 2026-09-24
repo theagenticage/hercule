@@ -6,8 +6,8 @@
  */
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
 import {
-  effectiveConfig,
-  threadConfig,
+  computeEffectiveConfig,
+  readThreadConfig,
   type MessageDraft,
   type Thread,
   type ThreadPicks,
@@ -21,7 +21,7 @@ export type Submission =
       readonly payload: SessionInputPayload;
     };
 
-export const submission = (
+export const buildSubmission = (
   thread: Thread,
   picks: ThreadPicks,
   message: MessageDraft,
@@ -41,7 +41,7 @@ export const submission = (
 
   // Nothing unpicked is sent as an empty string: the server has its own
   // fallback for each of these and `Id` refuses one outright.
-  const config = effectiveConfig(threadConfig(thread), picks);
+  const config = computeEffectiveConfig(readThreadConfig(thread), picks);
   // A thread that works without a checkout is spelled by leaving `workspace`
   // off, and a draft that has resolved none says nothing either: neither
   // `{ kind: "none" }` nor `null` is a value the contract has a field for.

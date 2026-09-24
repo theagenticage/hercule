@@ -3,7 +3,7 @@ import type { Profile } from "@hercule/contract";
 import { completeSetup, post, send, withServer } from "./testing";
 
 /** Permission profiles over a real socket. */
-const list = async (base: string, token: string, query = ""): Promise<Profile[]> => {
+const listProfiles = async (base: string, token: string, query = ""): Promise<Profile[]> => {
   const response = await send("GET", base, `/api/v1/profiles${query}`, { token });
   expect(response.status).toBe(200);
   return ((await response.json()) as { items: Profile[] }).items;
@@ -13,7 +13,7 @@ describe("permission profiles over HTTP", () => {
   it("lists the three profiles Hercule ships, by name", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
-      const items = await list(base, token);
+      const items = await listProfiles(base, token);
       expect(items.map((profile) => profile.name)).toEqual(["assistant", "unrestricted", "worker"]);
       expect(items.every((profile) => profile.shipped)).toBe(true);
     });
@@ -53,7 +53,7 @@ describe("permission profiles over HTTP", () => {
       expect(deleted.status).toBe(200);
       expect(await deleted.json()).toEqual({});
 
-      expect((await list(base, token)).map((one) => one.name)).not.toContain("auditor");
+      expect((await listProfiles(base, token)).map((one) => one.name)).not.toContain("auditor");
       expect((await audit("profile.created")).map((entry) => entry.actor)).toEqual(["user"]);
       expect(await audit("profile.updated")).toHaveLength(1);
       expect((await audit("profile.deleted"))[0]?.payload).toMatchObject({ name: "auditor" });
@@ -80,14 +80,14 @@ describe("permission profiles over HTTP", () => {
       );
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({ error: { code: "validation" } });
-      expect((await list(base, token)).map((one) => one.name)).not.toContain("broken");
+      expect((await listProfiles(base, token)).map((one) => one.name)).not.toContain("broken");
     });
   });
 
   it("edits a shipped profile but refuses to delete one", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
-      const worker = (await list(base, token)).find((one) => one.name === "worker");
+      const worker = (await listProfiles(base, token)).find((one) => one.name === "worker");
       expect(worker).toBeDefined();
 
       const edited = await send("PATCH", base, `/api/v1/profiles/${worker!.id}`, {
@@ -101,7 +101,7 @@ describe("permission profiles over HTTP", () => {
       expect(deleted.status).toBe(409);
       expect(await deleted.json()).toMatchObject({ error: { code: "invalid_state" } });
 
-      expect((await list(base, token)).map((one) => one.name)).toContain("worker");
+      expect((await listProfiles(base, token)).map((one) => one.name)).toContain("worker");
     });
   });
 

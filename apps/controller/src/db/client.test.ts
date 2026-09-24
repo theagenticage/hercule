@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { LockTimeoutError, SqlError, UnknownError } from "effect/unstable/sql/SqlError";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { databaseError, openDatabase, withTransaction } from "./client";
+import { createDatabaseError, openDatabase, withTransaction } from "./client";
 
 let home: string;
 let file: string;
@@ -22,7 +22,7 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-describe("databaseError", () => {
+describe("createDatabaseError", () => {
   it("names the other controller when a real transaction times out on the write lock", async () => {
     // The shape a second `hercule serve` hits: one connection holds the write
     // lock, the other opens a transaction that reads and then writes. The busy
@@ -48,7 +48,7 @@ describe("databaseError", () => {
 
     try {
       const error = await Effect.runPromise(write.pipe(Effect.flip));
-      expect(databaseError(file, error).message).toContain(
+      expect(createDatabaseError(file, error).message).toContain(
         "already open by another Hercule controller",
       );
     } finally {
@@ -62,7 +62,7 @@ describe("databaseError", () => {
       reason: new LockTimeoutError({ cause: { code: "SQLITE_BUSY" } }),
     });
     const outer = new SqlError({ reason: new UnknownError({ cause: inner }) });
-    expect(databaseError(file, outer).message).toContain(
+    expect(createDatabaseError(file, outer).message).toContain(
       "already open by another Hercule controller",
     );
   });
@@ -74,7 +74,7 @@ describe("databaseError", () => {
         yield* sql`SELECT * FROM absent`;
       }).pipe(Effect.provide(openDatabase(file)), Effect.flip),
     );
-    expect(databaseError(file, error).message).toContain(`Cannot use ${file}`);
+    expect(createDatabaseError(file, error).message).toContain(`Cannot use ${file}`);
   });
 });
 

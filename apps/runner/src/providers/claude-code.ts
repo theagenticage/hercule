@@ -42,17 +42,17 @@ import {
   normalize,
   buildNormalizingState,
   openTurn,
-  toolKind,
+  classifyTool,
   type Normalizing,
 } from "./claude-code-normalize";
 import type { ProviderAdapter, ProviderRunnerContext } from "./index";
-import { installing } from "./install";
-import { PROBE_DEADLINE, probeFailed } from "./probe";
+import { makeInstall } from "./install";
+import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
-import { fact, text } from "./text";
-import { userMessage } from "./events";
-import { questionRequest } from "./questions";
+import { truncateFact, truncateMessage } from "./text";
+import { buildUserMessage } from "./events";
+import { buildQuestionRequest } from "./questions";
 import { now } from "../report";
 
 export const CLAUDE_CODE = "claude-code";
@@ -121,21 +121,24 @@ const SEMVER = /\d+\.\d+\.\d+\S*/;
 const DEFAULT_EFFORT = "medium";
 
 /** `Fact` refuses an empty string, and an `Error` can carry an empty message. */
-const describe = (error: unknown): string => {
-  const said = fact(error instanceof Error ? error.message : String(error));
+const describeError = (error: unknown): string => {
+  const said = truncateFact(error instanceof Error ? error.message : String(error));
   return said === "" ? "the harness failed without saying why" : said;
 };
 
 /** Only ever called with levels the CLI listed, or with the overlay's own. */
-function effortOver([first, ...rest]: readonly [string, ...ReadonlyArray<string>]): ModelOption {
+function buildEffortOption([first, ...rest]: readonly [
+  string,
+  ...ReadonlyArray<string>,
+]): ModelOption {
   const levels = [first, ...rest];
   return {
     id: "effort",
     label: "Effort",
     kind: "select",
     choices: levels.map((level) => ({
-      value: fact(level),
-      label: fact(`${level.slice(0, 1).toUpperCase()}${level.slice(1)}`),
+      value: truncateFact(level),
+      label: truncateFact(`${level.slice(0, 1).toUpperCase()}${level.slice(1)}`),
     })),
     default: levels.includes(DEFAULT_EFFORT) ? DEFAULT_EFFORT : first,
   };
@@ -157,28 +160,28 @@ const LEGACY_MODELS: ReadonlyArray<ModelDescriptor> = [
     slug: "claude-opus-4-8",
     name: "Opus 4.8",
     isLegacy: true,
-    options: [effortOver(["low", "medium", "high"])],
+    options: [buildEffortOption(["low", "medium", "high"])],
   },
   {
     slug: "claude-fable-5",
     name: "Fable 5",
     isLegacy: true,
-    options: [effortOver(["low", "medium", "high"])],
+    options: [buildEffortOption(["low", "medium", "high"])],
   },
 ];
 
 /** Adaptive thinking is a property of the model, not a choice, so it is no option. */
-const descriptorOf = (model: Model): ModelDescriptor => {
+const buildModelDescriptor = (model: Model): ModelDescriptor => {
   const options: Array<ModelOption> = [];
   const levels = model.supportedEffortLevels ?? [];
   const [first, ...rest] = levels;
   if (model.supportsEffort === true && first !== undefined) {
-    options.push(effortOver([first, ...rest]));
+    options.push(buildEffortOption([first, ...rest]));
   }
   if (model.supportsFastMode === true) options.push(FAST_MODE);
   return {
-    slug: fact(model.value),
-    name: fact(model.displayName),
+    slug: truncateFact(model.value),
+    name: truncateFact(model.displayName),
     ...(model.value === "default" ? { isDefault: true } : {}),
     options,
   };
@@ -188,11 +191,11 @@ const descriptorOf = (model: Model): ModelDescriptor => {
  * A probed row wins over the overlay: it is what this machine will really offer.
  * Cut to what the protocol carries, or the whole report fails to encode.
  */
-const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor> => {
+const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor> => {
   // The protocol will not carry an empty slug or name.
   const probed = models
     .filter((model) => model.value !== "" && model.displayName !== "")
-    .map(descriptorOf);
+    .map(buildModelDescriptor);
   const listed = new Set(probed.map((model) => model.slug));
   return [...probed, ...LEGACY_MODELS.filter((model) => !listed.has(model.slug))].slice(
     0,
@@ -201,7 +204,8 @@ const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor>
 };
 
 /** `"none"` is what the harness says where it has no credential of that kind. */
-const sourced = (source: string | undefined): boolean => source !== undefined && source !== "none";
+const hasCredentialSource = (source: string | undefined): boolean =>
+  source !== undefined && source !== "none";
 
 /**
  * Whether the harness has a usable login, which spec 06 §3.2 makes the
@@ -210,10 +214,10 @@ const sourced = (source: string | undefined): boolean => source !== undefined &&
  * to it on the environment - an OAuth token or an API key - reports only where
  * it came from, and runs just as well.
  */
-const credentialled = (account: Account): boolean =>
+const hasCredential = (account: Account): boolean =>
   account.email !== undefined ||
-  sourced(account.tokenSource) ||
-  sourced(account.apiKeySource) ||
+  hasCredentialSource(account.tokenSource) ||
+  hasCredentialSource(account.apiKeySource) ||
   // A third-party backend - bedrock, vertex, foundry - authenticates outside
   // the harness, so it names no token source of its own and still runs.
   (account.apiProvider !== undefined && account.apiProvider !== "firstParty");
@@ -222,26 +226,26 @@ const credentialled = (account: Account): boolean =>
  * One field of the report, dropped when the account left it blank: an empty
  * string is not a `Fact`, and the whole report would fail to encode over it.
  */
-const carried = <K extends string>(
+const buildOptionalFact = <K extends string>(
   key: K,
   value: string | undefined,
 ): Partial<Record<K, string>> => {
-  const said = value === undefined ? "" : fact(value);
+  const said = value === undefined ? "" : truncateFact(value);
   return said === "" ? {} : ({ [key]: said } as Record<K, string>);
 };
 
-const authOf = (account: Account): ProbeResult["auth"] => {
-  if (!credentialled(account)) return { status: "unauthenticated" };
+const buildAuth = (account: Account): ProbeResult["auth"] => {
+  if (!hasCredential(account)) return { status: "unauthenticated" };
   return {
     status: "ok",
-    ...carried("identity", account.email),
-    ...carried("planLabel", account.subscriptionType),
-    ...carried("backend", account.apiProvider),
+    ...buildOptionalFact("identity", account.email),
+    ...buildOptionalFact("planLabel", account.subscriptionType),
+    ...buildOptionalFact("backend", account.apiProvider),
   };
 };
 
 /** `HOME` is left alone: overriding it makes the CLI report another account's login. */
-const envFor = (ctx: ProviderRunnerContext): Record<string, string | undefined> => ({
+const buildEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined> => ({
   ...ctx.env,
   CLAUDE_CONFIG_DIR: ctx.home,
   // A probe that let the harness update itself would install a version nobody
@@ -254,16 +258,16 @@ const envFor = (ctx: ProviderRunnerContext): Record<string, string | undefined> 
  * facts. The CLI writes into the config directory regardless, which is why that
  * directory is the instance's own.
  */
-const optionsFor = (ctx: ProviderRunnerContext, binary: string): Options => ({
+const buildProbeOptions = (ctx: ProviderRunnerContext, binary: string): Options => ({
   pathToClaudeCodeExecutable: binary,
   settingSources: [],
   strictMcpConfig: true,
   persistSession: false,
-  env: envFor(ctx),
+  env: buildEnv(ctx),
 });
 
 /** The prompt the SDK insists on, yielding nothing, so the run costs nothing. */
-const noPrompt = (): AsyncIterable<never> => ({
+const buildEmptyPrompt = (): AsyncIterable<never> => ({
   [Symbol.asyncIterator]: () => ({
     next: () => Promise.resolve({ done: true, value: undefined as never }),
   }),
@@ -280,7 +284,7 @@ interface Pushable<A> extends AsyncIterable<A> {
   readonly end: () => void;
 }
 
-const pushable = <A>(): Pushable<A> => {
+const createPushable = <A>(): Pushable<A> => {
   const queued: Array<A> = [];
   const waiting: Array<(result: IteratorResult<A>) => void> = [];
   let ended = false;
@@ -333,10 +337,10 @@ const FILE_READ_TOOLS: ReadonlySet<string> = new Set(["Read", "Glob", "Grep"]);
  */
 const PATH_KEYS: ReadonlyArray<string> = ["file_path", "notebook_path", "path"];
 
-const pathsIn = (input: Record<string, unknown>): ReadonlyArray<string> =>
+const readInputPaths = (input: Record<string, unknown>): ReadonlyArray<string> =>
   PATH_KEYS.flatMap((key) => {
     const found = input[key];
-    return typeof found === "string" && found !== "" ? [fact(found)] : [];
+    return typeof found === "string" && found !== "" ? [truncateFact(found)] : [];
   });
 
 /**
@@ -344,7 +348,7 @@ const pathsIn = (input: Record<string, unknown>): ReadonlyArray<string> =>
  * what the protocol carries: an over-long command or path would be a frame
  * nobody can decode, which loses the event and leaves the park hanging.
  */
-const requestFor = (
+const buildOpenRequest = (
   requestId: string,
   itemId: string,
   toolName: string,
@@ -352,7 +356,7 @@ const requestFor = (
   canPersist: boolean,
 ): OpenRequest => {
   if (toolName === "AskUserQuestion") {
-    return questionRequest({ requestId, itemId }, toolName, input["questions"]);
+    return buildQuestionRequest({ requestId, itemId }, toolName, input["questions"]);
   }
   // `allow always` is offered only where the harness handed over rules to
   // persist: a button that would have to invent one grants more than the user
@@ -367,19 +371,19 @@ const requestFor = (
       ...ReadonlyArray<ApprovalDecision>,
     ],
   };
-  const kind = toolKind(toolName);
+  const kind = classifyTool(toolName);
   const command = input["command"];
   // A command the harness did not name has nothing for a command card to show.
   if (kind === "command_execution" && typeof command === "string") {
-    return { ...common, kind: "command_approval", detail: { command: text(command) } };
+    return { ...common, kind: "command_approval", detail: { command: truncateMessage(command) } };
   }
   if (kind === "file_change") {
-    return { ...common, kind: "file_change_approval", detail: { paths: pathsIn(input) } };
+    return { ...common, kind: "file_change_approval", detail: { paths: readInputPaths(input) } };
   }
   if (FILE_READ_TOOLS.has(toolName)) {
-    return { ...common, kind: "file_read_approval", detail: { paths: pathsIn(input) } };
+    return { ...common, kind: "file_read_approval", detail: { paths: readInputPaths(input) } };
   }
-  return { ...common, kind: "tool_approval", detail: { toolName: fact(toolName) } };
+  return { ...common, kind: "tool_approval", detail: { toolName: truncateFact(toolName) } };
 };
 
 /** What the model is told when the user refuses; the vendor requires a reason. */
@@ -393,7 +397,7 @@ const CANCELLED = "the user cancelled this turn";
  * else. `decisionClassification` is how the harness reports who decided, and
  * a persisted rule is the harness's own suggestion handed straight back.
  */
-const resultFor = (
+const buildPermissionResult = (
   decision: ApprovalDecision,
   persists: ReadonlyArray<PermissionUpdate>,
 ): PermissionResult => {
@@ -421,7 +425,7 @@ const resultFor = (
 const EFFORTS: ReadonlyArray<EffortLevel> = ["low", "medium", "high", "xhigh", "max"];
 
 /** The one per-model choice the SDK's options carry; `fastMode` has no field. */
-const effortIn = (options: SessionSpec["modelSelection"]["options"]): EffortLevel | undefined => {
+const readEffort = (options: SessionSpec["modelSelection"]["options"]): EffortLevel | undefined => {
   const chosen = options["effort"];
   return EFFORTS.find((level) => level === chosen);
 };
@@ -434,7 +438,7 @@ const effortIn = (options: SessionSpec["modelSelection"]["options"]): EffortLeve
  * Loaded independently of `settingSources`, which stays empty: the plugin is
  * named here, not discovered among whatever settings sit on this runner.
  */
-const pluginsFor = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
+const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
 ];
 
@@ -459,14 +463,14 @@ const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<stri
  * author, never whatever files happen to sit on this runner (spec 06 section 4.2,
  * section 10.1).
  */
-const sessionOptionsFor = (
+const buildSessionOptions = (
   ctx: ProviderRunnerContext,
   spec: SessionSpec,
   binary: string,
   native: Options,
   canUseTool: CanUseTool,
 ): Options => {
-  const effort = effortIn(spec.modelSelection.options);
+  const effort = readEffort(spec.modelSelection.options);
   const disallowedTools = (spec.disallowedTools ?? []).flatMap(
     (family) => CLAUDE_TOOLS_BY_FAMILY[family],
   );
@@ -495,8 +499,8 @@ const sessionOptionsFor = (
     ...(spec.accessMode === "full-access"
       ? { allowDangerouslySkipPermissions: true }
       : { canUseTool }),
-    env: { ...envFor(ctx), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
-    plugins: pluginsFor(ctx),
+    env: { ...buildEnv(ctx), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+    plugins: buildPlugins(ctx),
   };
 };
 
@@ -508,7 +512,7 @@ const sessionOptionsFor = (
  * first turn arrives, so a binding that waited for it would make `startSession`
  * block until somebody sent input.
  */
-const nativeSessionFor = (
+const resolveNativeSession = (
   spec: SessionSpec,
 ): { readonly nativeSessionId: string; readonly options: Options } => {
   const carried = spec.continue;
@@ -567,9 +571,9 @@ interface Live {
   model: string;
 }
 
-export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
+export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
-  // run here and keeps `adapterFor` the synchronous lookup every other caller
+  // run here and keeps `findAdapter` the synchronous lookup every other caller
   // already treats it as.
   const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
   const live = new Map<string, Live>();
@@ -582,10 +586,10 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
    * One control request, bounded. Answers with why it did not go through, or
    * `undefined` where it did.
    */
-  const controlling = (request: Promise<void>): Effect.Effect<string | undefined> =>
+  const sendControlRequest = (request: Promise<void>): Effect.Effect<string | undefined> =>
     Effect.map(
       Effect.timeoutOption(
-        Effect.match(Effect.tryPromise({ try: () => request, catch: describe }), {
+        Effect.match(Effect.tryPromise({ try: () => request, catch: describeError }), {
           onFailure: (why: string) => why,
           onSuccess: () => undefined,
         }),
@@ -601,7 +605,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
    * goes. Held by the session's own entry, under the id the adapter mints,
    * which is the id every answer comes back under.
    */
-  const asking =
+  const buildCanUseTool =
     (sessionId: string): CanUseTool =>
     (toolName, input, options) =>
       new Promise<PermissionResult>((settle) => {
@@ -610,13 +614,13 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // one on its way out, nobody is left to answer and the park would hold
         // the harness for ever.
         if (held === undefined || held.stopping !== undefined) {
-          settle(resultFor("deny", []));
+          settle(buildPermissionResult("deny", []));
           return;
         }
         // Withdrawn before it was ever asked: the turn is already being
         // interrupted, so there is nothing to put in front of the user.
         if (options.signal.aborted) {
-          settle(resultFor("deny", []));
+          settle(buildPermissionResult("deny", []));
           return;
         }
         // One at a time. A second question while one is held would replace the
@@ -645,16 +649,16 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // none yet.
         const { events } = openTurn(held.state);
         for (const event of events) emit(event);
-        const request = requestFor(
+        const request = buildOpenRequest(
           requestId,
           // An id the protocol will not carry is a frame nobody can decode,
           // which would lose the event and leave a park nothing can see.
-          options.toolUseID === "" ? held.state.mint() : fact(options.toolUseID),
+          options.toolUseID === "" ? held.state.mint() : truncateFact(options.toolUseID),
           toolName,
           input,
           persists.length > 0,
         );
-        const end = (decision: ApprovalDecision, told: PermissionResult): void => {
+        const endPark = (decision: ApprovalDecision, told: PermissionResult): void => {
           // The park is this session's only one, and only while it is still
           // this one: a second answer has nothing left to end.
           if (held.park?.requestId !== requestId) return;
@@ -673,12 +677,12 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // Every way this question can stop existing without an answer, in one
         // place: the harness's own withdrawal, an interrupt, a stop, and the
         // harness reaching the end of its stream.
-        const withdraw = (): void => end("cancel", resultFor("deny", []));
+        const withdraw = (): void => endPark("cancel", buildPermissionResult("deny", []));
         options.signal.addEventListener("abort", withdraw, { once: true });
         held.park = {
           requestId,
           decisions: request.decisions,
-          answer: (decision) => end(decision, resultFor(decision, persists)),
+          answer: (decision) => endPark(decision, buildPermissionResult(decision, persists)),
           withdraw,
         };
         emit({
@@ -691,7 +695,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       });
 
   /** The session this adapter is hosting, refusing one already on its way out. */
-  const hosting = (sessionId: string): Effect.Effect<Live, string> =>
+  const getHostedSession = (sessionId: string): Effect.Effect<Live, string> =>
     Effect.suspend(() => {
       const held = live.get(sessionId);
       return held === undefined || held.stopping !== undefined
@@ -700,7 +704,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     });
 
   /** Reads the session until the harness stops talking, and says why it did. */
-  const pump = async (sessionId: string, held: Live): Promise<void> => {
+  const pumpEvents = async (sessionId: string, held: Live): Promise<void> => {
     let reason: ExitReason = "process_exit";
     try {
       for await (const sdk of held.stream) {
@@ -717,7 +721,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           sessionId,
           at: now(),
           class: "unknown",
-          message: describe(error),
+          message: describeError(error),
         });
       }
     } finally {
@@ -739,29 +743,29 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     }
   };
 
-  const versionOf = (ctx: ProviderRunnerContext, binary: string): Effect.Effect<string | null> =>
-    Effect.map(seam.run([binary, "--version"], envFor(ctx)), (ran) => {
+  const readVersion = (ctx: ProviderRunnerContext, binary: string): Effect.Effect<string | null> =>
+    Effect.map(seam.run([binary, "--version"], buildEnv(ctx)), (ran) => {
       if (ran.code !== 0) return null;
       // An unrecognisable version goes raw; an empty one the protocol will not carry.
-      const printed = fact(SEMVER.exec(ran.stdout)?.[0] ?? ran.stdout.trim());
+      const printed = truncateFact(SEMVER.exec(ran.stdout)?.[0] ?? ran.stdout.trim());
       return printed === "" ? null : printed;
     });
 
-  const ask = (
+  const queryHarness = (
     ctx: ProviderRunnerContext,
     binary: string,
   ): Effect.Effect<{ account: Account; models: ReadonlyArray<Model> }, string> =>
     Effect.acquireUseRelease(
-      Effect.sync(() => seam.query({ options: optionsFor(ctx, binary) })),
+      Effect.sync(() => seam.query({ options: buildProbeOptions(ctx, binary) })),
       (session) =>
         Effect.gen(function* () {
           const account = yield* Effect.tryPromise({
             try: () => session.accountInfo(),
-            catch: describe,
+            catch: describeError,
           });
           const models = yield* Effect.tryPromise({
             try: () => session.supportedModels(),
-            catch: describe,
+            catch: describeError,
           });
           return { account: account as Account, models: models as ReadonlyArray<Model> };
         }),
@@ -789,21 +793,27 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         if (live.has(sessionId)) {
           return Effect.fail(`session ${sessionId} is already running here`);
         }
-        const native = nativeSessionFor(spec);
+        const native = resolveNativeSession(spec);
         const binding: SessionBinding = {
           sessionId,
           nativeSessionId: native.nativeSessionId,
           instanceId: spec.instanceId,
         };
-        const input = pushable<SDKUserMessage>();
+        const input = createPushable<SDKUserMessage>();
         return Effect.map(
           Effect.try({
             try: () =>
               seam.stream({
-                options: sessionOptionsFor(ctx, spec, binary, native.options, asking(sessionId)),
+                options: buildSessionOptions(
+                  ctx,
+                  spec,
+                  binary,
+                  native.options,
+                  buildCanUseTool(sessionId),
+                ),
                 input,
               }),
-            catch: describe,
+            catch: describeError,
           }),
           (stream) => {
             const held: Live = {
@@ -821,7 +831,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               model: spec.modelSelection.model,
             };
             live.set(sessionId, held);
-            void pump(sessionId, held);
+            void pumpEvents(sessionId, held);
             // The native id rides the event, because the controller has no
             // other way to learn it: `sessionsReport` is sent once, at hello,
             // and a session started after that would never be named again.
@@ -840,7 +850,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     sendInput: (sessionId: string, turn: TurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
         const model = turn.modelSelection?.model;
-        const before = yield* hosting(sessionId);
+        const before = yield* getHostedSession(sessionId);
         // A model change lands only where a turn is about to open: mid-turn the
         // harness is already answering under the model it started with. Asked
         // only where it differs from what was last applied, so a session with
@@ -848,7 +858,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // harness will not take fails the input: delivering it under the old
         // one would answer for a turn the caller did not ask for.
         if (model !== undefined && model !== before.model && before.state.turnId === undefined) {
-          const refused = yield* controlling(before.stream.setModel(model));
+          const refused = yield* sendControlRequest(before.stream.setModel(model));
           if (refused !== undefined) {
             return yield* Effect.fail(`the model was not changed to ${model}: ${refused}`);
           }
@@ -856,14 +866,14 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         }
         // Asked again, because `setModel` waits on the harness and the turn may
         // have opened, ended or the whole session gone while it did.
-        const held = yield* hosting(sessionId);
+        const held = yield* getHostedSession(sessionId);
         const { turnId, events } = openTurn(held.state);
         for (const event of events) emit(event);
         // Steering is implicit: a turn the adapter did not have to open is a
         // turn already running, so the input folds into it. Read off what
         // `openTurn` just did rather than remembered from before the wait.
         const steered = events.length === 0;
-        for (const event of userMessage({ sessionId, turnId, text: turn.text, steered })) {
+        for (const event of buildUserMessage({ sessionId, turnId, text: turn.text, steered })) {
           emit(event);
         }
         held.input.push({
@@ -888,7 +898,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         held.park?.withdraw();
         // The turn completing as `interrupted` is the whole report; a refusal
         // means the harness is already gone, which is the same outcome.
-        return Effect.asVoid(controlling(held.stream.interrupt()));
+        return Effect.asVoid(sendControlRequest(held.stream.interrupt()));
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
@@ -933,23 +943,26 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> => {
       const binary = ctx.binary;
       if (binary === undefined) {
-        return Effect.succeed(probeFailed(null, `no ${CLAUDE_BINARY} on this machine`));
+        return Effect.succeed(buildFailedProbe(null, `no ${CLAUDE_BINARY} on this machine`));
       }
       const gather = Effect.gen(function* () {
-        const harnessVersion = yield* versionOf(ctx, binary);
-        return yield* Effect.match(ask(ctx, binary), {
-          onFailure: (message) => probeFailed(harnessVersion, message),
+        const harnessVersion = yield* readVersion(ctx, binary);
+        return yield* Effect.match(queryHarness(ctx, binary), {
+          onFailure: (message) => buildFailedProbe(harnessVersion, message),
           onSuccess: ({ account, models }) => ({
             harnessVersion,
-            auth: authOf(account),
-            models: catalogOf(models),
+            auth: buildAuth(account),
+            models: buildCatalog(models),
           }),
         });
       });
       return Effect.map(
         Effect.timeoutOption(gather, PROBE_DEADLINE),
         Option.getOrElse(() =>
-          probeFailed(null, `the harness did not answer within ${Duration.format(PROBE_DEADLINE)}`),
+          buildFailedProbe(
+            null,
+            `the harness did not answer within ${Duration.format(PROBE_DEADLINE)}`,
+          ),
         ),
       );
     },
@@ -960,14 +973,14 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
      */
     login: (ctx: ProviderRunnerContext, binary: string): LoginCommand => ({
       command: [binary, "auth", "login"],
-      env: { ...envFor(ctx), BROWSER: "false" },
+      env: { ...buildEnv(ctx), BROWSER: "false" },
     }),
 
     /**
      * Pinned to the CLI this build's SDK talks to. The script needs the network
      * even so.
      */
-    install: installing(seam.run, [
+    install: makeInstall(seam.run, [
       "bash",
       "-c",
       `curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION}`,
@@ -975,7 +988,7 @@ export const claudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   };
 };
 
-export const claudeCode: ProviderAdapter = claudeCodeAdapter({
+export const claudeCode: ProviderAdapter = makeClaudeCodeAdapter({
   stream: ({ options, input }) => {
     const running: Query = sdkQuery({ prompt: input, options });
     return {
@@ -990,7 +1003,7 @@ export const claudeCode: ProviderAdapter = claudeCodeAdapter({
     };
   },
   query: ({ options }) => {
-    const session: Query = sdkQuery({ prompt: noPrompt(), options });
+    const session: Query = sdkQuery({ prompt: buildEmptyPrompt(), options });
     return {
       accountInfo: () => session.accountInfo(),
       supportedModels: () => session.supportedModels(),

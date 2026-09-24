@@ -13,7 +13,7 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
  * (spec 15 section 6). Everything else is controller state.
  *
  * `dataDir` is the value as configured, which may be relative: it is resolved
- * against the Hercule Home by `homePaths`, so a home that moves takes its Data
+ * against the Hercule Home by `buildHomePaths`, so a home that moves takes its Data
  * Root with it (spec 04, Relocatable Data Root).
  */
 export class BootstrapConfig extends Context.Service<
@@ -32,7 +32,7 @@ export const BOOTSTRAP_KEYS = ["data.dir", "bind.host", "bind.port", "log.level"
 export type BootstrapKey = (typeof BOOTSTRAP_KEYS)[number];
 
 /** The env form of a bootstrap key: uppercase, dots to underscores, `HERCULE_` prefix. */
-export function envName(key: BootstrapKey): string {
+export function buildEnvName(key: BootstrapKey): string {
   return `HERCULE_${key.toUpperCase().replaceAll(".", "_")}`;
 }
 
@@ -105,26 +105,31 @@ const keyList = BOOTSTRAP_KEYS.join(", ");
  * sections 6 and 7). Returns the keys the file sets, as strings.
  */
 export const loadConfigFile = Effect.fn("loadConfigFile")(function* (configFile: string) {
-  const fail = (message: string) => new ConfigFileError({ path: configFile, message });
+  const createConfigFileError = (message: string) =>
+    new ConfigFileError({ path: configFile, message });
 
   if (!existsSync(configFile)) {
     yield* Effect.try({
       try: () => writeFileSync(configFile, formatToml(DEFAULTS)),
-      catch: () => fail("could not be written"),
+      catch: () => createConfigFileError("could not be written"),
     });
   }
 
   const text = yield* Effect.try({
     try: () => readFileSync(configFile, "utf8"),
-    catch: () => fail("could not be read"),
+    catch: () => createConfigFileError("could not be read"),
   });
 
-  const parsed = yield* Effect.fromResult(parseToml(text)).pipe(Effect.mapError(fail));
+  const parsed = yield* Effect.fromResult(parseToml(text)).pipe(
+    Effect.mapError(createConfigFileError),
+  );
 
   const values: Partial<Record<BootstrapKey, string>> = {};
   for (const [key, value] of Object.entries(parsed)) {
     if (!isBootstrapKey(key)) {
-      return yield* fail(`unknown key ${key}; bootstrap config holds only ${keyList}`);
+      return yield* createConfigFileError(
+        `unknown key ${key}; bootstrap config holds only ${keyList}`,
+      );
     }
     values[key] = String(value);
   }
@@ -154,11 +159,11 @@ export const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
   }
 
   /** Where a key's value came from, so an unusable one names its source. */
-  const chosen = (key: BootstrapKey): { readonly value: string; readonly source: string } => {
+  const chooseValue = (key: BootstrapKey): { readonly value: string; readonly source: string } => {
     const flag = flags[key];
     if (flag !== undefined) return { value: flag, source: `-c ${key}` };
-    const fromEnv = options.env[envName(key)];
-    if (fromEnv !== undefined) return { value: fromEnv, source: envName(key) };
+    const fromEnv = options.env[buildEnvName(key)];
+    if (fromEnv !== undefined) return { value: fromEnv, source: buildEnvName(key) };
     const fromFile = options.file[key];
     if (fromFile !== undefined)
       return { value: fromFile, source: `${key} in ${options.configFile}` };
@@ -166,7 +171,7 @@ export const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
   };
 
   const decode = <K extends BootstrapKey>(key: K): Effect.Effect<Value<K>, ConfigValueError> => {
-    const { value, source } = chosen(key);
+    const { value, source } = chooseValue(key);
     const schema = SCHEMAS[key] as unknown as Schema.Codec<Value<K>, string>;
     return Schema.decodeUnknownEffect(schema)(value).pipe(
       Effect.mapError(

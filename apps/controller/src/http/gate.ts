@@ -24,7 +24,7 @@ import * as Effect from "effect/Effect";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import { OPERATIONS, createUnauthenticatedError } from "@hercule/contract";
 import { Setup } from "../setup";
-import { responseFor } from "./envelope";
+import { buildErrorResponse } from "./envelope";
 
 /** The two operations open before setup, as the routes the router matches. */
 const OPEN_BEFORE_SETUP = new Set([
@@ -57,7 +57,7 @@ export const setupGate = HttpRouter.middleware(
         const { route } = yield* HttpRouter.RouteContext;
         if (OPEN_BEFORE_SETUP.has(`${route.method} ${route.path}`)) return yield* httpEffect;
         if (yield* isComplete) return yield* httpEffect;
-        return responseFor(createUnauthenticatedError(NOT_SET_UP));
+        return buildErrorResponse(createUnauthenticatedError(NOT_SET_UP));
       });
   }),
 );

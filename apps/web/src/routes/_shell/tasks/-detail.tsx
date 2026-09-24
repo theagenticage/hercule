@@ -1,11 +1,11 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import {
-  actorReading,
+  describeActor,
   formatStamp,
-  idTail,
-  priorityGlyph,
-  provenanceTarget,
+  toIdTail,
+  readPriorityGlyph,
+  describeProvenanceTarget,
 } from "@hercule/client-core";
 import {
   TASK_PRIORITIES,
@@ -44,7 +44,7 @@ export function TaskDetail({
   readonly onClose: () => void;
 }): JSX.Element {
   const [label, setLabel] = useState("");
-  const glyph = priorityGlyph(task.priority);
+  const glyph = readPriorityGlyph(task.priority);
 
   // A task keeps its project past that project's deletion, and the picker holds
   // one page. Either way the task names a project the list does not, and the
@@ -52,7 +52,7 @@ export function TaskDetail({
   const offered =
     task.projectId === undefined || projects.some((project) => project.id === task.projectId)
       ? projects
-      : [...projects, { id: task.projectId, name: idTail(task.projectId) }];
+      : [...projects, { id: task.projectId, name: toIdTail(task.projectId) }];
 
   const addLabel = (event: FormEvent): void => {
     event.preventDefault();
@@ -187,14 +187,14 @@ export function TaskDetail({
           ) : (
             <ol className="flex flex-col gap-2">
               {task.provenance.map((entry) => {
-                const actor = actorReading(entry.actor);
+                const actor = describeActor(entry.actor);
                 return (
                   <li
-                    key={`${entry.at}-${provenanceTarget(entry)}`}
+                    key={`${entry.at}-${describeProvenanceTarget(entry)}`}
                     className="flex flex-col gap-0.5"
                   >
                     <span className="font-mono text-fine break-all text-muted">
-                      {provenanceTarget(entry)}
+                      {describeProvenanceTarget(entry)}
                     </span>
                     <span className="flex items-baseline gap-2 font-mono text-fine">
                       {actor.sessionId === undefined ? (

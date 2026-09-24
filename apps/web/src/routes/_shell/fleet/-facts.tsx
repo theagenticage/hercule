@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Row } from "@hercule/ui";
-import { runnerFactsReading, type RunnerFactsReading } from "@hercule/client-core";
+import { describeRunnerFacts, type RunnerFactsReading } from "@hercule/client-core";
 import type { RunnerDetail } from "@hercule/contract";
 
 const LINES: ReadonlyArray<readonly [string, keyof RunnerFactsReading]> = [
@@ -21,7 +21,7 @@ const LINES: ReadonlyArray<readonly [string, keyof RunnerFactsReading]> = [
  * editable: the only way to change it is to make the machine report again.
  */
 export function RunnerFacts({ runner }: { readonly runner: RunnerDetail }): JSX.Element {
-  const reading = runnerFactsReading(runner);
+  const reading = describeRunnerFacts(runner);
 
   return (
     <div className="flex flex-col gap-1.5">

@@ -19,11 +19,11 @@ import {
   type SnapshotAuth,
 } from "@hercule/protocol";
 import type { InstallOutcome } from "../index";
-import { installing } from "../install";
-import { PROBE_DEADLINE, probeFailed } from "../probe";
+import { makeInstall } from "../install";
+import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
 import type { Ran, Run } from "../process";
-import { fact } from "../text";
-import { rpcOver, type PiSpawn } from "./rpc";
+import { truncateFact } from "../text";
+import { makeRpc, type PiSpawn } from "./rpc";
 
 /** The upstream Hercule runs pi against; nothing else is offered or asked about. */
 export const ZAI = "zai";
@@ -41,7 +41,7 @@ interface PiModel {
 }
 
 /** What a command said, in preference to the fact that it failed. */
-const saidBy = (ran: Ran): string => {
+const readComplaint = (ran: Ran): string => {
   const said = (ran.stderr.trim() === "" ? ran.stdout : ran.stderr).trim();
   return said === "" ? `pi exited ${ran.code} without saying why` : said;
 };
@@ -51,22 +51,23 @@ const saidBy = (ran: Ran): string => {
  * is configured, so the exit code alone cannot tell a machine nobody has
  * entered a key on from a machine with no working pi: what it printed can.
  */
-const authOf = (ran: Ran): SnapshotAuth => {
+const buildAuth = (ran: Ran): SnapshotAuth => {
   let status: unknown;
   try {
     status = (JSON.parse(ran.stdout) as { readonly status?: unknown }).status;
   } catch {
-    return { status: "error", message: fact(saidBy(ran)) };
+    return { status: "error", message: truncateFact(readComplaint(ran)) };
   }
   if (status === "ready") return { status: "ok" };
   // The Z.ai upstream is an API key: there is no account to name, and a
   // made-up identity would be a name the user never entered.
   return status === "not_ready"
     ? { status: "unauthenticated" }
-    : { status: "error", message: fact(saidBy(ran)) };
+    : { status: "error", message: truncateFact(readComplaint(ran)) };
 };
 
-const labelled = (level: string): string => `${level.slice(0, 1).toUpperCase()}${level.slice(1)}`;
+const formatLevelLabel = (level: string): string =>
+  `${level.slice(0, 1).toUpperCase()}${level.slice(1)}`;
 
 /**
  * The thinking option the model offers, or none: the levels it maps to
@@ -84,7 +85,10 @@ const buildThinkingOption = (model: PiModel): ReadonlyArray<ModelOption> => {
       id: "thinking",
       label: "Thinking",
       kind: "select",
-      choices: levels.map((level) => ({ value: fact(level), label: fact(labelled(level)) })),
+      choices: levels.map((level) => ({
+        value: truncateFact(level),
+        label: truncateFact(formatLevelLabel(level)),
+      })),
       default: levels.includes(DEFAULT_THINKING) ? DEFAULT_THINKING : levels[0]!,
     },
   ];
@@ -102,8 +106,8 @@ const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescri
     )
     .slice(0, MAX_FACT_ITEMS)
     .map((model) => ({
-      slug: fact(model.id as string),
-      name: fact(model.name as string),
+      slug: truncateFact(model.id as string),
+      name: truncateFact(model.name as string),
       options: buildThinkingOption(model),
     }));
 
@@ -142,7 +146,7 @@ const fetchCatalog = (
       catch: (error) => (error instanceof Error ? error.message : String(error)),
     }),
     (child) => {
-      const rpc = rpcOver(child, () => undefined);
+      const rpc = makeRpc(child, () => undefined);
       Effect.runFork(rpc.pump);
       return Effect.map(rpc.send({ type: "get_available_models" }), (answer) => {
         const models = (answer["data"] as { readonly models?: ReadonlyArray<PiModel> } | undefined)
@@ -153,7 +157,7 @@ const fetchCatalog = (
     (child) => Effect.sync(() => child.kill()),
   );
 
-export const probing =
+export const makeProbe =
   (spawn: PiSpawn, run: Run) =>
   (
     binary: string,
@@ -161,27 +165,29 @@ export const probing =
   ): Effect.Effect<ProbeResult> => {
     const gather = Effect.gen(function* () {
       const version = yield* run([binary, "--version"], env);
-      if (version.code !== 0) return probeFailed(null, saidBy(version));
-      const harnessVersion = fact(version.stdout.trim());
-      const auth = authOf(yield* run([binary, "auth", "check", "--provider", ZAI, "--json"], env));
+      if (version.code !== 0) return buildFailedProbe(null, readComplaint(version));
+      const harnessVersion = truncateFact(version.stdout.trim());
+      const auth = buildAuth(
+        yield* run([binary, "auth", "check", "--provider", ZAI, "--json"], env),
+      );
       // pi lists only the providers whose credentials it found, so a machine
       // nobody has entered a key on has no catalog to read.
       if (auth.status !== "ok") return { harnessVersion, auth, models: [] };
       return yield* Effect.match(fetchCatalog(spawn, binary, env), {
-        onFailure: (message) => probeFailed(harnessVersion, message),
+        onFailure: (message) => buildFailedProbe(harnessVersion, message),
         onSuccess: (models) => ({ harnessVersion, auth, models }),
       });
     });
     return Effect.map(
       Effect.timeoutOption(gather, PROBE_DEADLINE),
       Option.getOrElse(() =>
-        probeFailed(null, `pi did not answer within ${Duration.format(PROBE_DEADLINE)}`),
+        buildFailedProbe(null, `pi did not answer within ${Duration.format(PROBE_DEADLINE)}`),
       ),
     );
   };
 
 /** The vendor ships one install script and pins no release, so this is all of it. */
-export const piInstall = (
+export const makePiInstall = (
   run: Run,
 ): ((env: Readonly<Record<string, string | undefined>>) => Effect.Effect<InstallOutcome>) =>
-  installing(run, ["bash", "-c", "curl -fsSL https://pi.dev/install.sh | sh"]);
+  makeInstall(run, ["bash", "-c", "curl -fsSL https://pi.dev/install.sh | sh"]);

@@ -7,7 +7,7 @@
  */
 import type { Session } from "@hercule/contract";
 
-export const resumeBlockedReason = (session: Session): string | null => {
+export const findResumeBlockedReason = (session: Session): string | null => {
   if (session.status !== "exited" || session.resumable) return null;
   return session.nativeSessionId === null ? "its transcript is gone" : "its runner was retired";
 };

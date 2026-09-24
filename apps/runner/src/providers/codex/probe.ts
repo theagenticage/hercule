@@ -16,10 +16,10 @@ import {
   type ProbeResult,
 } from "@hercule/protocol";
 import type { InstallOutcome, ProviderRunnerContext } from "../index";
-import { installing } from "../install";
-import { PROBE_DEADLINE, probeFailed } from "../probe";
+import { makeInstall } from "../install";
+import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
 import type { Run } from "../process";
-import { fact } from "../text";
+import { truncateFact } from "../text";
 import type { Rpc, RpcError } from "./rpc";
 import type {
   GetAccountResponse,
@@ -48,14 +48,14 @@ const INITIALIZE: InitializeParams = {
 };
 
 /** Nothing else may be asked of an app-server until this has been answered. */
-export const handshake = (host: AppServer): Effect.Effect<InitializeResponse, RpcError> =>
+export const initializeAppServer = (host: AppServer): Effect.Effect<InitializeResponse, RpcError> =>
   Effect.map(host.rpc.request("initialize", INITIALIZE), (answer) => {
     host.rpc.notify("initialized");
     return answer as InitializeResponse;
   });
 
 /** What the app-server said, in preference to what the codec made of it. */
-export const saidBy = (host: AppServer, error: RpcError): string => {
+export const describeRpcError = (host: AppServer, error: RpcError): string => {
   const said = host.complaint();
   return said === "" ? error.message : said;
 };
@@ -64,25 +64,25 @@ export const saidBy = (host: AppServer, error: RpcError): string => {
  * `initialize` carries no version field, so the version is the token after the
  * first `/` of the user agent, which reads `<client>/<version> (os; arch) ...`.
  * A user agent that does not read as one reports nothing rather than a guess,
- * which `versionVerdict` already takes as "unknown".
+ * which `computeVersionVerdict` already takes as "unknown".
  */
 const USER_AGENT = /^[^/\s]+\/(\S+)/;
 
-const versionOf = (userAgent: string): string | null =>
+const parseVersion = (userAgent: string): string | null =>
   USER_AGENT.exec(userAgent)?.[1]?.slice(0, MAX_FACT_LENGTH) ?? null;
 
-const authOf = ({ account }: GetAccountResponse): ProbeResult["auth"] => {
+const buildAuth = ({ account }: GetAccountResponse): ProbeResult["auth"] => {
   if (account === null) return { status: "unauthenticated" };
   if (account.type !== "chatgpt") return { status: "ok", backend: account.type };
   return {
     status: "ok",
-    ...(account.email === null ? {} : { identity: fact(account.email) }),
+    ...(account.email === null ? {} : { identity: truncateFact(account.email) }),
     planLabel: account.planType,
     backend: account.type,
   };
 };
 
-const selecting = (
+const buildSelectOption = (
   id: string,
   label: string,
   choices: ReadonlyArray<{ readonly value: string; readonly label: string }>,
@@ -108,19 +108,21 @@ export const STANDARD_TIER = "standard";
  * Only what the model itself lists: an empty select is a control the composer
  * shows and nothing can be chosen in.
  */
-const optionsFor = (model: Model): ReadonlyArray<ModelOption> => {
+const buildModelOptions = (model: Model): ReadonlyArray<ModelOption> => {
   const options: Array<ModelOption> = [];
   const efforts = model.supportedReasoningEfforts ?? [];
   if (efforts.length > 0) {
     options.push(
-      selecting(
+      buildSelectOption(
         // The well-known option id (spec 06 section 3.3): the composer labels and
         // recognises reasoning effort under `effort`, whatever the harness calls it.
         "effort",
         "Effort",
         efforts.map(({ reasoningEffort }) => ({
-          value: fact(reasoningEffort),
-          label: fact(`${reasoningEffort.slice(0, 1).toUpperCase()}${reasoningEffort.slice(1)}`),
+          value: truncateFact(reasoningEffort),
+          label: truncateFact(
+            `${reasoningEffort.slice(0, 1).toUpperCase()}${reasoningEffort.slice(1)}`,
+          ),
         })),
         model.defaultReasoningEffort ?? null,
       ),
@@ -129,7 +131,7 @@ const optionsFor = (model: Model): ReadonlyArray<ModelOption> => {
   const tiers = model.serviceTiers ?? [];
   if (tiers.length > 0) {
     options.push(
-      selecting(
+      buildSelectOption(
         "serviceTier",
         "Service tier",
         [
@@ -137,8 +139,8 @@ const optionsFor = (model: Model): ReadonlyArray<ModelOption> => {
           // An unnamed tier is still a tier, and the protocol will not carry an
           // empty label.
           ...tiers.map((tier) => ({
-            value: fact(tier.id),
-            label: fact(tier.name === "" || tier.name === undefined ? tier.id : tier.name),
+            value: truncateFact(tier.id),
+            label: truncateFact(tier.name === "" || tier.name === undefined ? tier.id : tier.name),
           })),
         ],
         model.defaultServiceTier ?? STANDARD_TIER,
@@ -148,16 +150,16 @@ const optionsFor = (model: Model): ReadonlyArray<ModelOption> => {
   return options;
 };
 
-const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor> =>
+const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor> =>
   models
     // The protocol will not carry an empty slug or name.
     .filter((model) => model.id !== "" && model.displayName !== "")
     .slice(0, MAX_FACT_ITEMS)
     .map((model) => ({
-      slug: fact(model.id),
-      name: fact(model.displayName),
+      slug: truncateFact(model.id),
+      name: truncateFact(model.displayName),
       ...(model.isDefault === true ? { isDefault: true } : {}),
-      options: optionsFor(model),
+      options: buildModelOptions(model),
     }));
 
 /**
@@ -166,7 +168,7 @@ const catalogOf = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor>
  * session too, and a probe that opened its own differently would report on a
  * connection no session will ever run on.
  */
-export const probing =
+export const makeProbe =
   (openHost: (ctx: ProviderRunnerContext, binary: string) => Effect.Effect<AppServer, string>) =>
   (ctx: ProviderRunnerContext, binary: string): Effect.Effect<ProbeResult> => {
     // A probe runs on a process of its own and kills it: sharing the connection
@@ -175,8 +177,9 @@ export const probing =
     const gather = Effect.acquireUseRelease(
       openHost(ctx, binary),
       (host) =>
-        Effect.matchEffect(handshake(host), {
-          onFailure: (error) => Effect.succeed(probeFailed(null, saidBy(host, error))),
+        Effect.matchEffect(initializeAppServer(host), {
+          onFailure: (error) =>
+            Effect.succeed(buildFailedProbe(null, describeRpcError(host, error))),
           onSuccess: (initialized) =>
             Effect.match(
               Effect.all([
@@ -185,21 +188,24 @@ export const probing =
               ]),
               {
                 onFailure: (error) =>
-                  probeFailed(versionOf(initialized.userAgent), saidBy(host, error)),
+                  buildFailedProbe(
+                    parseVersion(initialized.userAgent),
+                    describeRpcError(host, error),
+                  ),
                 onSuccess: ([account, models]) => ({
-                  harnessVersion: versionOf(initialized.userAgent),
-                  auth: authOf(account as GetAccountResponse),
-                  models: catalogOf((models as ModelListResponse).data),
+                  harnessVersion: parseVersion(initialized.userAgent),
+                  auth: buildAuth(account as GetAccountResponse),
+                  models: buildCatalog((models as ModelListResponse).data),
                 }),
               },
             ),
         }),
       (host) => Effect.sync(() => host.kill()),
-    ).pipe(Effect.catch((message) => Effect.succeed(probeFailed(null, message))));
+    ).pipe(Effect.catch((message) => Effect.succeed(buildFailedProbe(null, message))));
     return Effect.map(
       Effect.timeoutOption(gather, PROBE_DEADLINE),
       Option.getOrElse(() =>
-        probeFailed(
+        buildFailedProbe(
           null,
           `the app-server did not answer within ${Duration.format(PROBE_DEADLINE)}`,
         ),
@@ -208,10 +214,10 @@ export const probing =
   };
 
 /** The script URL is pinned to the tag, so it and the release it fetches move together. */
-export const codexInstall = (
+export const makeCodexInstall = (
   run: Run,
 ): ((env: Readonly<Record<string, string | undefined>>) => Effect.Effect<InstallOutcome>) =>
-  installing(run, [
+  makeInstall(run, [
     "bash",
     "-c",
     `curl -fsSL https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/scripts/install/install.sh | CODEX_RELEASE=${CODEX_VERSION} CODEX_NON_INTERACTIVE=1 sh`,

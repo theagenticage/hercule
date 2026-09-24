@@ -12,17 +12,17 @@ import {
   type RunnerToController as RunnerMessage,
 } from "./index";
 
-const fromRunner = (input: unknown) =>
+const decodeFromRunner = (input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(RunnerToController)(input));
 
-const fromController = (input: unknown) =>
+const decodeFromController = (input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(ControllerToRunner)(input));
 
-const sequenced = (input: unknown) =>
+const decodeSequenced = (input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(Sequenced)(input))._tag;
 
 /** A copy of `message` without `key`, for asserting a field is required. */
-const without = (message: Record<string, unknown>, key: string) => {
+const omitKey = (message: Record<string, unknown>, key: string) => {
   const copy = { ...message };
   delete copy[key];
   return copy;
@@ -32,7 +32,7 @@ const without = (message: Record<string, unknown>, key: string) => {
  * The tags a union really holds, read off the schema rather than off the list
  * of examples below it, so a member added without a case here is caught.
  */
-const tagsOf = (union: typeof RunnerToController | typeof ControllerToRunner): Array<string> =>
+const listTags = (union: typeof RunnerToController | typeof ControllerToRunner): Array<string> =>
   union.members.flatMap((member) =>
     // A frame whose shape depends on what it carries is a union of its own, and
     // each of its members is still that frame's tag.
@@ -263,7 +263,7 @@ describe("the runner-to-controller catalogue", () => {
   });
 
   it("holds exactly the members the round-trip cases cover", () => {
-    expect(tagsOf(RunnerToController)).toEqual(runnerMessages.map((message) => message._tag));
+    expect(listTags(RunnerToController)).toEqual(runnerMessages.map((message) => message._tag));
   });
 
   /**
@@ -283,9 +283,9 @@ describe("the runner-to-controller catalogue", () => {
   });
 
   it("refuses a tag outside the union, including one the other direction owns", () => {
-    expect(fromRunner({ _tag: "hello" })._tag).toBe("Failure");
-    expect(fromRunner({ _tag: "ping" })._tag).toBe("Failure");
-    expect(fromRunner({})._tag).toBe("Failure");
+    expect(decodeFromRunner({ _tag: "hello" })._tag).toBe("Failure");
+    expect(decodeFromRunner({ _tag: "ping" })._tag).toBe("Failure");
+    expect(decodeFromRunner({})._tag).toBe("Failure");
   });
 });
 
@@ -298,13 +298,13 @@ describe("the controller-to-runner catalogue", () => {
   });
 
   it("holds exactly the members the round-trip cases cover", () => {
-    expect(tagsOf(ControllerToRunner)).toEqual(controllerMessages.map((message) => message._tag));
+    expect(listTags(ControllerToRunner)).toEqual(controllerMessages.map((message) => message._tag));
   });
 
   it("refuses a tag outside the union, including one the other direction owns", () => {
-    expect(fromController({ _tag: "hello" })._tag).toBe("Failure");
-    expect(fromController({ _tag: "goodbye" })._tag).toBe("Failure");
-    expect(fromController({})._tag).toBe("Failure");
+    expect(decodeFromController({ _tag: "hello" })._tag).toBe("Failure");
+    expect(decodeFromController({ _tag: "goodbye" })._tag).toBe("Failure");
+    expect(decodeFromController({})._tag).toBe("Failure");
   });
 });
 
@@ -312,12 +312,12 @@ describe("the runner hello", () => {
   it.each(["protocolVersion", "capabilities", "binaryVersion", "nonce", "facts"])(
     "refuses a hello without %s",
     (key) => {
-      expect(fromRunner(without(runnerHello, key))._tag).toBe("Failure");
+      expect(decodeFromRunner(omitKey(runnerHello, key))._tag).toBe("Failure");
     },
   );
 
   it("decodes a version that is not ours, so the mismatch is answered rather than dropped", () => {
-    expect(fromRunner({ ...runnerHello, protocolVersion: PROTOCOL_VERSION + 1 })._tag).toBe(
+    expect(decodeFromRunner({ ...runnerHello, protocolVersion: PROTOCOL_VERSION + 1 })._tag).toBe(
       "Success",
     );
   });
@@ -332,9 +332,9 @@ describe("the runner hello", () => {
 
 describe("the watermark a runner reports", () => {
   it.each(["diskFreeBytes", "availableMemoryBytes"])("refuses a report without %s", (key) => {
-    expect(fromRunner({ _tag: "watermarkReport", watermark: without(watermark, key) })._tag).toBe(
-      "Failure",
-    );
+    expect(
+      decodeFromRunner({ _tag: "watermarkReport", watermark: omitKey(watermark, key) })._tag,
+    ).toBe("Failure");
   });
 
   it("says nothing about placement: whether the machine may be given work is not the machine's", () => {
@@ -354,7 +354,7 @@ describe("the controller hello", () => {
   it.each(["protocolVersion", "capabilities", "identityId", "publicKey", "nonce", "signature"])(
     "refuses a hello without %s",
     (key) => {
-      expect(fromController(without(controllerHello, key))._tag).toBe("Failure");
+      expect(decodeFromController(omitKey(controllerHello, key))._tag).toBe("Failure");
     },
   );
 
@@ -363,8 +363,12 @@ describe("the controller hello", () => {
     (key) => {
       // The URL-safe alphabet is the mistake to catch: it looks like base64,
       // decodes to different bytes, and would surface as a bad signature.
-      expect(fromController({ ...controllerHello, [key]: "c2ln-mF0dXJl" })._tag).toBe("Failure");
-      expect(fromController({ ...controllerHello, [key]: "c2lnbmF0dXJlL" })._tag).toBe("Failure");
+      expect(decodeFromController({ ...controllerHello, [key]: "c2ln-mF0dXJl" })._tag).toBe(
+        "Failure",
+      );
+      expect(decodeFromController({ ...controllerHello, [key]: "c2lnbmF0dXJlL" })._tag).toBe(
+        "Failure",
+      );
     },
   );
 
@@ -382,7 +386,7 @@ describe("the controller hello", () => {
 describe("the runner facts", () => {
   it("takes an identity port inside the port range and nothing outside it", () => {
     const withPort = (identityPort: unknown) =>
-      fromRunner({ _tag: "factsReport", facts: { ...facts, identityPort } })._tag;
+      decodeFromRunner({ _tag: "factsReport", facts: { ...facts, identityPort } })._tag;
     expect(withPort(4939)).toBe("Success");
     expect(withPort(65535)).toBe("Success");
     expect(withPort(0)).toBe("Failure");
@@ -391,7 +395,7 @@ describe("the runner facts", () => {
 
   it("takes a toolchain version it could not parse, but not an empty one", () => {
     const withVersion = (version: string) =>
-      fromRunner({
+      decodeFromRunner({
         _tag: "factsReport",
         facts: { ...facts, toolchains: [{ name: "git", version, path: "/usr/bin/git" }] },
       })._tag;
@@ -403,27 +407,27 @@ describe("the runner facts", () => {
 describe("sequence numbers", () => {
   it("rides the one frame that extends the envelope, and is required there", () => {
     const event = runnerMessages.find((message) => message._tag === "sessionEvent");
-    expect(fromRunner(without(event as Record<string, unknown>, "seq"))._tag).toBe("Failure");
+    expect(decodeFromRunner(omitKey(event as Record<string, unknown>, "seq"))._tag).toBe("Failure");
   });
 
   it("takes an integer of at least one", () => {
-    expect(sequenced({ seq: 1 })).toBe("Success");
-    expect(sequenced({ seq: 9007199254740991 })).toBe("Success");
-    expect(fromController({ _tag: "ack", lastAckedSeq: 1 })._tag).toBe("Success");
+    expect(decodeSequenced({ seq: 1 })).toBe("Success");
+    expect(decodeSequenced({ seq: 9007199254740991 })).toBe("Success");
+    expect(decodeFromController({ _tag: "ack", lastAckedSeq: 1 })._tag).toBe("Success");
   });
 
   it("refuses zero, a negative, a fraction and a string", () => {
-    expect(sequenced({ seq: 0 })).toBe("Failure");
-    expect(sequenced({ seq: -1 })).toBe("Failure");
-    expect(sequenced({ seq: 1.5 })).toBe("Failure");
-    expect(sequenced({ seq: "1" })).toBe("Failure");
-    expect(fromController({ _tag: "ack", lastAckedSeq: 0 })._tag).toBe("Failure");
-    expect(fromController({ _tag: "ack", lastAckedSeq: 1.5 })._tag).toBe("Failure");
-    expect(fromController({ _tag: "ack", lastAckedSeq: "1" })._tag).toBe("Failure");
+    expect(decodeSequenced({ seq: 0 })).toBe("Failure");
+    expect(decodeSequenced({ seq: -1 })).toBe("Failure");
+    expect(decodeSequenced({ seq: 1.5 })).toBe("Failure");
+    expect(decodeSequenced({ seq: "1" })).toBe("Failure");
+    expect(decodeFromController({ _tag: "ack", lastAckedSeq: 0 })._tag).toBe("Failure");
+    expect(decodeFromController({ _tag: "ack", lastAckedSeq: 1.5 })._tag).toBe("Failure");
+    expect(decodeFromController({ _tag: "ack", lastAckedSeq: "1" })._tag).toBe("Failure");
   });
 });
 
-const provisioning = (overrides: Record<string, unknown>): Record<string, unknown> => ({
+const buildProvisionMessage = (overrides: Record<string, unknown>): Record<string, unknown> => ({
   ...(controllerMessages.find((message) => message._tag === "workspaceProvision") as Record<
     string,
     unknown
@@ -433,23 +437,25 @@ const provisioning = (overrides: Record<string, unknown>): Record<string, unknow
 
 describe("the ids a machine makes a directory of", () => {
   it("takes the identifiers the controller mints", () => {
-    expect(fromController(provisioning({}))._tag).toBe("Success");
+    expect(decodeFromController(buildProvisionMessage({}))._tag).toBe("Success");
   });
 
   it("refuses anything that could be a path rather than a name", () => {
     // The runner joins these into paths under its storage directory and a
     // dispose removes what they name.
     for (const workspaceId of ["../../etc", "a/b", "", "with space", ".."]) {
-      expect(fromController(provisioning({ workspaceId }))._tag).toBe("Failure");
+      expect(decodeFromController(buildProvisionMessage({ workspaceId }))._tag).toBe("Failure");
     }
-    expect(fromController({ _tag: "workspaceDispose", workspaceId: "../elsewhere" })._tag).toBe(
-      "Failure",
-    );
+    expect(
+      decodeFromController({ _tag: "workspaceDispose", workspaceId: "../elsewhere" })._tag,
+    ).toBe("Failure");
   });
 
   it("refuses a checkout whose resource or subdirectory could climb out of the workspace", () => {
-    const one = (checkout: Record<string, unknown>): Record<string, unknown> =>
-      provisioning({
+    const buildProvisionWithCheckout = (
+      checkout: Record<string, unknown>,
+    ): Record<string, unknown> =>
+      buildProvisionMessage({
         checkouts: [
           {
             ...((
@@ -461,15 +467,27 @@ describe("the ids a machine makes a directory of", () => {
           },
         ],
       });
-    expect(fromController(one({ subdirectory: "web" }))._tag).toBe("Success");
-    expect(fromController(one({ subdirectory: "my.repo" }))._tag).toBe("Success");
+    expect(decodeFromController(buildProvisionWithCheckout({ subdirectory: "web" }))._tag).toBe(
+      "Success",
+    );
+    expect(decodeFromController(buildProvisionWithCheckout({ subdirectory: "my.repo" }))._tag).toBe(
+      "Success",
+    );
     // A repository really can be called this, and a workspace can hold it.
-    expect(fromController(one({ subdirectory: ".github" }))._tag).toBe("Success");
+    expect(decodeFromController(buildProvisionWithCheckout({ subdirectory: ".github" }))._tag).toBe(
+      "Success",
+    );
     for (const subdirectory of ["..", ".", "../web", "web/api", ".git", ".GIT", ""]) {
-      expect(fromController(one({ subdirectory }))._tag).toBe("Failure");
+      expect(decodeFromController(buildProvisionWithCheckout({ subdirectory }))._tag).toBe(
+        "Failure",
+      );
     }
-    expect(fromController(one({ resourceId: "../../cache" }))._tag).toBe("Failure");
-    expect(fromController(one({ checkoutId: "a/b" }))._tag).toBe("Failure");
+    expect(
+      decodeFromController(buildProvisionWithCheckout({ resourceId: "../../cache" }))._tag,
+    ).toBe("Failure");
+    expect(decodeFromController(buildProvisionWithCheckout({ checkoutId: "a/b" }))._tag).toBe(
+      "Failure",
+    );
   });
 });
 
@@ -509,7 +527,7 @@ describe("the join answer", () => {
 
   it("needs every field", () => {
     for (const key of Object.keys(answer)) {
-      expect(decode(without(answer, key))._tag, key).toBe("Failure");
+      expect(decode(omitKey(answer, key))._tag, key).toBe("Failure");
     }
   });
 
@@ -526,30 +544,30 @@ describe("the join answer", () => {
 });
 
 describe("what a controller and the runner it spawned say over their pipes", () => {
-  const decodeSaid = (input: unknown) =>
+  const decodeAnnouncement = (input: unknown) =>
     Effect.runSyncExit(Schema.decodeUnknownEffect(LocalAnnouncement)(input));
-  const decodeHanded = (input: unknown) =>
+  const decodeEnrolment = (input: unknown) =>
     Effect.runSyncExit(Schema.decodeUnknownEffect(LocalEnrolment)(input));
 
   it("carries the two things a child can be, and nothing between them", () => {
     const enrolled = { runnerId: "0199e0e7-1111-7000-8000-000000000000" };
-    expect(decodeSaid(enrolled)._tag).toBe("Success");
+    expect(decodeAnnouncement(enrolled)._tag).toBe("Success");
     expect(Effect.runSync(Schema.encodeEffect(LocalAnnouncement)(enrolled))).toEqual(enrolled);
-    expect(decodeSaid({ join: true })._tag).toBe("Success");
+    expect(decodeAnnouncement({ join: true })._tag).toBe("Success");
     // A child that says nothing, says both, or says it is not joining is a
     // child the controller cannot place: none of them is an answer.
-    expect(decodeSaid({})._tag).toBe("Failure");
-    expect(decodeSaid({ join: false })._tag).toBe("Failure");
-    expect(decodeSaid({ runnerId: "" })._tag).toBe("Failure");
+    expect(decodeAnnouncement({})._tag).toBe("Failure");
+    expect(decodeAnnouncement({ join: false })._tag).toBe("Failure");
+    expect(decodeAnnouncement({ runnerId: "" })._tag).toBe("Failure");
   });
 
   it("hands back where to join and the token to join with, both required", () => {
     const enrolment = { controllerUrl: "http://127.0.0.1:4937", token: "a-join-token" };
-    expect(decodeHanded(enrolment)._tag).toBe("Success");
+    expect(decodeEnrolment(enrolment)._tag).toBe("Success");
     expect(Effect.runSync(Schema.encodeEffect(LocalEnrolment)(enrolment))).toEqual(enrolment);
     for (const key of Object.keys(enrolment)) {
-      expect(decodeHanded(without(enrolment, key))._tag, key).toBe("Failure");
+      expect(decodeEnrolment(omitKey(enrolment, key))._tag, key).toBe("Failure");
     }
-    expect(decodeHanded({ ...enrolment, token: "" })._tag).toBe("Failure");
+    expect(decodeEnrolment({ ...enrolment, token: "" })._tag).toBe("Failure");
   });
 });

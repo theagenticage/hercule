@@ -23,7 +23,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
   );
 
 /** The one user, with a real hash of {@link CURRENT}, and a call made as it. */
-const asUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
+const runAsUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
   run(
     Effect.gen(function* () {
       const users = yield* Users;
@@ -42,7 +42,7 @@ const asUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
 
 describe("user.setPassword", () => {
   it("stores the new password and stamps the change", async () => {
-    const result = await asUser(
+    const result = await runAsUser(
       Effect.gen(function* () {
         const user = yield* User;
         const users = yield* Users;
@@ -68,7 +68,7 @@ describe("user.setPassword", () => {
   });
 
   it("refuses a wrong current password, on that field, and changes nothing", async () => {
-    const result = await asUser(
+    const result = await runAsUser(
       Effect.gen(function* () {
         const user = yield* User;
         const users = yield* Users;

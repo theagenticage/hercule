@@ -20,7 +20,7 @@ import {
   type FieldNotation,
   type WorkflowAction,
 } from "@hercule/contract";
-import { idTail } from "./id-tail";
+import { toIdTail } from "./id-tail";
 import { findLineEnd, findLineStart, type ParsedWorkflowSource } from "./workflow-source";
 
 /** The ids from the controller that a workflow can reference. */
@@ -282,7 +282,7 @@ const listCatalogValues = (
       label: agent.name,
       ...(names.indexOf(agent.name) === names.lastIndexOf(agent.name)
         ? {}
-        : { detail: idTail(agent.id) }),
+        : { detail: toIdTail(agent.id) }),
       text: agent.id,
     }));
   }

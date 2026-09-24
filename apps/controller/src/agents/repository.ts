@@ -16,9 +16,9 @@ import type { AccessMode, DisallowedTool, ModelSelection } from "@hercule/protoc
 import {
   decodeCursor,
   encodeCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -198,7 +198,7 @@ const make = Effect.gen(function* () {
           request.cursor === undefined
             ? undefined
             : yield* decodeCursor(request.cursor, scope, "string");
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["created_at", "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -212,7 +212,7 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(COLUMNS)} FROM agents WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toAgent)),

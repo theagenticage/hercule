@@ -1,5 +1,5 @@
 /**
- * `turnsOf(rows)` groups a session's transcript rows into turns.
+ * `buildTurns(rows)` groups a session's transcript rows into turns.
  *
  * Fixtures follow the Claude adapter's real shapes (spec 06 §6.3, and
  * `apps/runner/src/providers/claude-code.ts` / `claude-code-normalize.ts`):
@@ -10,14 +10,14 @@
  */
 import { describe, expect, it } from "vitest";
 import type { TranscriptRow } from "@hercule/contract";
-import { turnsOf } from "./turns";
+import { buildTurns } from "./turns";
 
 const SESSION_ID = "session-1";
 
 let idSeq = 0;
 const nextId = (): string => `e${idSeq++}`;
 
-const row = (event: TranscriptRow["event"]): TranscriptRow => ({
+const buildRow = (event: TranscriptRow["event"]): TranscriptRow => ({
   position: idSeq,
   at: event.at,
   event,
@@ -26,17 +26,17 @@ const row = (event: TranscriptRow["event"]): TranscriptRow => ({
 /** The `kind` an `item.started` row carries, narrowed off the row union. */
 type ItemKindType = Extract<TranscriptRow["event"], { _tag: "item.started" }>["kind"];
 
-describe("turnsOf", () => {
+describe("buildTurns", () => {
   it("groups rows into turns: the user message, ordered tool items, and the streamed assistant text", () => {
     const rows: TranscriptRow[] = [
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T10:00:00.000Z",
         turnId: "t1",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -46,7 +46,7 @@ describe("turnsOf", () => {
         kind: "user_message",
         detail: { text: "Fix the login bug" },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -57,7 +57,7 @@ describe("turnsOf", () => {
         status: "completed",
         detail: { text: "Fix the login bug" },
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -67,7 +67,7 @@ describe("turnsOf", () => {
         kind: "command_execution",
         detail: { name: "Bash", input: { command: "ls -la" } },
       }),
-      row({
+      buildRow({
         _tag: "content.delta",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -77,7 +77,7 @@ describe("turnsOf", () => {
         streamKind: "assistant_text",
         delta: "I'll ",
       }),
-      row({
+      buildRow({
         _tag: "content.delta",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -87,7 +87,7 @@ describe("turnsOf", () => {
         streamKind: "assistant_text",
         delta: "look at the file.",
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -98,7 +98,7 @@ describe("turnsOf", () => {
         status: "completed",
         detail: { name: "Bash", input: { command: "ls -la" } },
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -107,7 +107,7 @@ describe("turnsOf", () => {
         itemId: "a1",
         kind: "assistant_message",
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -117,7 +117,7 @@ describe("turnsOf", () => {
         kind: "assistant_message",
         status: "completed",
       }),
-      row({
+      buildRow({
         _tag: "turn.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -125,14 +125,14 @@ describe("turnsOf", () => {
         turnId: "t1",
         state: "completed",
       }),
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T10:01:00.000Z",
         turnId: "t2",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -142,7 +142,7 @@ describe("turnsOf", () => {
         kind: "user_message",
         detail: { text: "What about the tests?" },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -153,7 +153,7 @@ describe("turnsOf", () => {
         status: "completed",
         detail: { text: "What about the tests?" },
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -163,7 +163,7 @@ describe("turnsOf", () => {
         kind: "file_change",
         detail: { name: "Edit", input: { path: "src/auth.ts" } },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -174,7 +174,7 @@ describe("turnsOf", () => {
         status: "completed",
         detail: { name: "Edit", input: { path: "src/auth.ts" } },
       }),
-      row({
+      buildRow({
         _tag: "content.delta",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -184,7 +184,7 @@ describe("turnsOf", () => {
         streamKind: "assistant_text",
         delta: "Added a test too.",
       }),
-      row({
+      buildRow({
         _tag: "turn.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -194,7 +194,7 @@ describe("turnsOf", () => {
       }),
     ];
 
-    const turns = turnsOf(rows);
+    const turns = buildTurns(rows);
 
     expect(turns).toHaveLength(2);
 
@@ -230,14 +230,14 @@ describe("turnsOf", () => {
 
   it("joins two distinct assistant_message items in one turn with a blank line, not a run-on sentence", () => {
     const rows: TranscriptRow[] = [
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T10:00:00.000Z",
         turnId: "t1",
       }),
-      row({
+      buildRow({
         _tag: "content.delta",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -247,7 +247,7 @@ describe("turnsOf", () => {
         streamKind: "assistant_text",
         delta: "Sleep 1 ",
       }),
-      row({
+      buildRow({
         _tag: "content.delta",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -257,7 +257,7 @@ describe("turnsOf", () => {
         streamKind: "assistant_text",
         delta: "of 4 finished.",
       }),
-      row({
+      buildRow({
         _tag: "content.delta",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -269,7 +269,7 @@ describe("turnsOf", () => {
       }),
     ];
 
-    const turns = turnsOf(rows);
+    const turns = buildTurns(rows);
 
     expect(turns[0]!.assistantText).toBe("Sleep 1 of 4 finished.\n\nSleep 2 of 4 finished.");
   });
@@ -278,14 +278,14 @@ describe("turnsOf", () => {
     // The real Claude adapter's shape for a shell item (spec 06 §6.3's
     // command_execution): `{ name, input: { command, description } }`.
     const rows: TranscriptRow[] = [
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T10:00:00.000Z",
         turnId: "t1",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -300,14 +300,14 @@ describe("turnsOf", () => {
       }),
     ];
 
-    const turns = turnsOf(rows);
+    const turns = buildTurns(rows);
 
     expect(turns[0]!.items[0]!.target).toBe("ls -la");
   });
 
   it("falls back down summarize's chain: file_path, then description, then name, then raw JSON", () => {
-    const fileChange = turnsOf([
-      row({
+    const fileChange = buildTurns([
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -320,8 +320,8 @@ describe("turnsOf", () => {
     ]);
     expect(fileChange[0]!.items[0]!.target).toBe("src/auth.ts");
 
-    const described = turnsOf([
-      row({
+    const described = buildTurns([
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -334,8 +334,8 @@ describe("turnsOf", () => {
     ]);
     expect(described[0]!.items[0]!.target).toBe("Search the web");
 
-    const named = turnsOf([
-      row({
+    const named = buildTurns([
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -348,8 +348,8 @@ describe("turnsOf", () => {
     ]);
     expect(named[0]!.items[0]!.target).toBe("some_mcp_tool");
 
-    const bare = turnsOf([
-      row({
+    const bare = buildTurns([
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -365,14 +365,14 @@ describe("turnsOf", () => {
 
   it("leaves duration null and marks the still-open item running while a turn has no turn.completed yet", () => {
     const rows: TranscriptRow[] = [
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T11:00:00.000Z",
         turnId: "t3",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -382,7 +382,7 @@ describe("turnsOf", () => {
         kind: "user_message",
         detail: { text: "Run the tests" },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -393,7 +393,7 @@ describe("turnsOf", () => {
         status: "completed",
         detail: { text: "Run the tests" },
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -406,7 +406,7 @@ describe("turnsOf", () => {
       // No item.completed for tool3, and no turn.completed: the turn is live.
     ];
 
-    const turns = turnsOf(rows);
+    const turns = buildTurns(rows);
 
     expect(turns).toHaveLength(1);
     expect(turns[0]!.duration).toBeNull();
@@ -417,14 +417,14 @@ describe("turnsOf", () => {
 
   it("carries a failed or declined item.completed status through as the item's result", () => {
     const rows: TranscriptRow[] = [
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T12:00:00.000Z",
         turnId: "t4",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -434,7 +434,7 @@ describe("turnsOf", () => {
         kind: "file_change",
         detail: { name: "Edit", input: { path: "src/broken.ts" } },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -445,7 +445,7 @@ describe("turnsOf", () => {
         status: "failed",
         detail: { name: "Edit", input: { path: "src/broken.ts" } },
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -455,7 +455,7 @@ describe("turnsOf", () => {
         kind: "tool_call",
         detail: { name: "mcp__example__do_thing", input: {}, kind: "mcp" },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -466,7 +466,7 @@ describe("turnsOf", () => {
         status: "declined",
         detail: { name: "mcp__example__do_thing", input: {}, kind: "mcp" },
       }),
-      row({
+      buildRow({
         _tag: "turn.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -476,7 +476,7 @@ describe("turnsOf", () => {
       }),
     ];
 
-    const turns = turnsOf(rows);
+    const turns = buildTurns(rows);
 
     expect(turns[0]!.items).toEqual([
       expect.objectContaining({ itemId: "edit4", verb: "edit", result: "failed" }),
@@ -488,14 +488,14 @@ describe("turnsOf", () => {
     const novelKind = "image_generation" as unknown as ItemKindType;
 
     const rows: TranscriptRow[] = [
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T13:00:00.000Z",
         turnId: "t5",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -509,7 +509,7 @@ describe("turnsOf", () => {
         kind: novelKind,
         detail: { note: "review mode" },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -520,7 +520,7 @@ describe("turnsOf", () => {
         status: "completed",
         detail: { note: "review mode" },
       }),
-      row({
+      buildRow({
         _tag: "turn.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -530,7 +530,7 @@ describe("turnsOf", () => {
       }),
     ];
 
-    const turns = turnsOf(rows);
+    const turns = buildTurns(rows);
 
     expect(turns[0]!.items).toEqual([
       expect.objectContaining({ itemId: "novel1", verb: "unknown" }),
@@ -539,14 +539,14 @@ describe("turnsOf", () => {
 
   it("has an empty items array when a turn holds only the user and assistant messages", () => {
     const rows: TranscriptRow[] = [
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T14:00:00.000Z",
         turnId: "t6",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -556,7 +556,7 @@ describe("turnsOf", () => {
         kind: "user_message",
         detail: { text: "Say hi" },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -567,7 +567,7 @@ describe("turnsOf", () => {
         status: "completed",
         detail: { text: "Say hi" },
       }),
-      row({
+      buildRow({
         _tag: "content.delta",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -577,7 +577,7 @@ describe("turnsOf", () => {
         streamKind: "assistant_text",
         delta: "Hi!",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -586,7 +586,7 @@ describe("turnsOf", () => {
         itemId: "a6",
         kind: "assistant_message",
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -596,7 +596,7 @@ describe("turnsOf", () => {
         kind: "assistant_message",
         status: "completed",
       }),
-      row({
+      buildRow({
         _tag: "turn.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -606,7 +606,7 @@ describe("turnsOf", () => {
       }),
     ];
 
-    const turns = turnsOf(rows);
+    const turns = buildTurns(rows);
 
     expect(turns[0]!.items).toEqual([]);
     expect(turns[0]!.assistantText).toBe("Hi!");
@@ -614,14 +614,14 @@ describe("turnsOf", () => {
 
   it("renders target as the empty string when item.started carries no detail at all", () => {
     const rows: TranscriptRow[] = [
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T15:00:00.000Z",
         turnId: "t7",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -631,7 +631,7 @@ describe("turnsOf", () => {
         kind: "tool_call",
         // no `detail`
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -641,7 +641,7 @@ describe("turnsOf", () => {
         kind: "tool_call",
         status: "completed",
       }),
-      row({
+      buildRow({
         _tag: "turn.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -651,21 +651,21 @@ describe("turnsOf", () => {
       }),
     ];
 
-    const turns = turnsOf(rows);
+    const turns = buildTurns(rows);
 
     expect(turns[0]!.items[0]!.target).toBe("");
   });
 
   it("keeps the opening prompt when a steered input adds a second user_message to the same turn", () => {
     const rows: TranscriptRow[] = [
-      row({
+      buildRow({
         _tag: "turn.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
         at: "2026-09-08T16:00:00.000Z",
         turnId: "t8",
       }),
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -675,7 +675,7 @@ describe("turnsOf", () => {
         kind: "user_message",
         detail: { text: "Fix the login bug" },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -688,7 +688,7 @@ describe("turnsOf", () => {
       }),
       // A steered input folds into the same running turn as a second
       // user_message, rather than opening a turn of its own.
-      row({
+      buildRow({
         _tag: "item.started",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -698,7 +698,7 @@ describe("turnsOf", () => {
         kind: "user_message",
         detail: { text: "Also check auth.ts", steered: true },
       }),
-      row({
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -709,7 +709,7 @@ describe("turnsOf", () => {
         status: "completed",
         detail: { text: "Also check auth.ts", steered: true },
       }),
-      row({
+      buildRow({
         _tag: "turn.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -719,7 +719,7 @@ describe("turnsOf", () => {
       }),
     ];
 
-    const turns = turnsOf(rows);
+    const turns = buildTurns(rows);
 
     expect(turns[0]!.user).toContain("Fix the login bug");
     expect(turns[0]!.user).toContain("Also check auth.ts");
@@ -731,16 +731,16 @@ describe("turnsOf", () => {
  * `running`, so the transcript line for `openRequest.itemId` says what the
  * card above the composer is asking about (ticket #70).
  */
-describe("turnsOf: the item an open request is about", () => {
-  const parkedRows = (): TranscriptRow[] => [
-    row({
+describe("buildTurns: the item an open request is about", () => {
+  const buildParkedRows = (): TranscriptRow[] => [
+    buildRow({
       _tag: "turn.started",
       eventId: nextId(),
       sessionId: SESSION_ID,
       at: "2026-09-08T17:00:00.000Z",
       turnId: "t9",
     }),
-    row({
+    buildRow({
       _tag: "item.started",
       eventId: nextId(),
       sessionId: SESSION_ID,
@@ -750,7 +750,7 @@ describe("turnsOf: the item an open request is about", () => {
       kind: "command_execution",
       detail: { name: "Bash", input: { command: "ls -la" } },
     }),
-    row({
+    buildRow({
       _tag: "item.started",
       eventId: nextId(),
       sessionId: SESSION_ID,
@@ -763,22 +763,22 @@ describe("turnsOf: the item an open request is about", () => {
   ];
 
   it("reads the item named by the open request as awaiting approval, and only that one", () => {
-    const items = turnsOf(parkedRows(), "tool9")[0]!.items;
+    const items = buildTurns(buildParkedRows(), "tool9")[0]!.items;
 
     expect(items.find((item) => item.itemId === "tool9")!.result).toBe("awaiting approval");
     expect(items.find((item) => item.itemId === "tool10")!.result).toBe("running");
   });
 
   it("reads every open item as running when no request is open", () => {
-    const items = turnsOf(parkedRows())[0]!.items;
+    const items = buildTurns(buildParkedRows())[0]!.items;
 
     expect(items.map((item) => item.result)).toEqual(["running", "running"]);
   });
 
   it("leaves a settled item at its own status, whatever the open request names", () => {
     const rows = [
-      ...parkedRows(),
-      row({
+      ...buildParkedRows(),
+      buildRow({
         _tag: "item.completed",
         eventId: nextId(),
         sessionId: SESSION_ID,
@@ -791,8 +791,8 @@ describe("turnsOf: the item an open request is about", () => {
       }),
     ];
 
-    expect(turnsOf(rows, "tool9")[0]!.items.find((item) => item.itemId === "tool9")!.result).toBe(
-      "completed",
-    );
+    expect(
+      buildTurns(rows, "tool9")[0]!.items.find((item) => item.itemId === "tool9")!.result,
+    ).toBe("completed");
   });
 });

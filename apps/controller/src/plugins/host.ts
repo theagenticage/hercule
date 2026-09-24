@@ -26,7 +26,7 @@ import {
   PluginError,
   PluginManifest,
   ProviderDefinition,
-  secretFields,
+  listSecretFields,
   type ActivationContext,
   type ConnectionTypeContribution,
   type Deactivate,
@@ -44,13 +44,13 @@ import {
 } from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { CurrentActor, stampOf, SYSTEM_ACTOR } from "../actor";
+import { CurrentActor, buildActorStamp, SYSTEM_ACTOR } from "../actor";
 import { Secrets, type SecretOwner } from "../secrets";
 // The types a plugin declares, and what it reaches its own connections through,
 // both live in the connections domain: everything they touch is there. This is
 // the only direction the two point in.
 import { ConnectionTypes, PluginConfigs, type RegisteredConnectionType } from "../connections";
-import { asPluginError, describeFieldIssues, truncateMessage } from "./errors";
+import { toPluginError, describeFieldIssues, truncateMessage } from "./errors";
 import { registerEventSourceContribution, type RegisteredEventKind } from "./event-sources";
 import { pluginRepository, type NewContribution } from "./repository";
 import {
@@ -99,7 +99,7 @@ interface Entry extends LoadedPlugin {
   readonly startable: boolean;
 }
 
-const exposed = (entry: Entry): LoadedPlugin => ({
+const toLoadedPlugin = (entry: Entry): LoadedPlugin => ({
   id: entry.id,
   displayName: entry.displayName,
   hostApi: entry.hostApi,
@@ -146,7 +146,7 @@ const readCauseMessage = (cause: Cause.Cause<PluginError>): string =>
  * A defect, not a failure: the surface a plugin programs against declares no
  * error, and the host catches it as that plugin's crash either way.
  */
-const named = (what: string, value: string): Effect.Effect<void> =>
+const assertNonEmpty = (what: string, value: string): Effect.Effect<void> =>
   value.length === 0
     ? Effect.die(new PluginError({ message: `A plugin ${what} cannot be empty.` }))
     : Effect.void;
@@ -155,7 +155,7 @@ const named = (what: string, value: string): Effect.Effect<void> =>
  * The claimed id is the useful half, but it is also the field most likely to be
  * what is wrong, so a non-string id falls back to the registry position.
  */
-const nameOf = (manifest: unknown, index: number): string => {
+const describeManifestName = (manifest: unknown, index: number): string => {
   const id = (manifest as { readonly id?: unknown } | null | undefined)?.id;
   return typeof id === "string" ? `"${id}"` : `at registry position ${String(index)}`;
 };
@@ -169,7 +169,7 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
     Effect.catchTag("SchemaError", (error) =>
       Effect.die(
         new Error(
-          `The plugin ${nameOf(manifest, index)} has an invalid manifest: ${describeFieldIssues(error)}`,
+          `The plugin ${describeManifestName(manifest, index)} has an invalid manifest: ${describeFieldIssues(error)}`,
         ),
       ),
     ),
@@ -185,7 +185,7 @@ const SECRET_FIELDS_ARE_PROVIDER_ONLY =
   "a secret-valued config field is supported on a provider definition only";
 
 /** Everything decided from the manifest alone, before any plugin code runs. */
-const inspect = (
+const inspectManifest = (
   manifest: PluginManifest,
 ): Result.Result<JsonSchema.JsonSchema, PluginRefusalReason> => {
   if (manifest.hostApi !== HOST_API) {
@@ -195,7 +195,7 @@ const inspect = (
   if (missing !== undefined) {
     return Result.fail({ kind: "unimplementedCapability", capability: missing });
   }
-  if (secretFields(manifest.configSchema).length > 0) {
+  if (listSecretFields(manifest.configSchema).length > 0) {
     return Result.fail({
       kind: "unsupportedConfigSchema",
       message: truncateMessage(`the plugin's own config: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`),
@@ -217,7 +217,7 @@ const inspect = (
  * joined: two plugins may each call a type `gmail` and still name two different
  * things, so no plugin can claim a word out from under another.
  */
-const registrationHost = (
+const buildRegistrationHost = (
   manifest: PluginManifest,
   declared: Array<NewContribution>,
   live: Array<ProviderDefinition>,
@@ -231,7 +231,7 @@ const registrationHost = (
           register: (definition) =>
             Effect.gen(function* () {
               const decoded = yield* decodeProvider(definition).pipe(
-                Effect.mapError(asPluginError),
+                Effect.mapError(toPluginError),
               );
               // The catalog persists the derived JSON Schema: what the plugin
               // authored is a live Effect Schema no catalog reader can use.
@@ -275,7 +275,7 @@ const registrationHost = (
               // which stays in memory here instead.
               const { validate, ...serializable } = contribution;
               const decoded = yield* decodeConnectionType(serializable).pipe(
-                Effect.mapError(asPluginError),
+                Effect.mapError(toPluginError),
               );
               // The identity the catalog, the stored rows and every lookup use.
               // Nothing splits it again: the plugin a type belongs to is read
@@ -295,7 +295,7 @@ const registrationHost = (
               // where a connection's stored config is decoded against it.
               if (
                 decoded.configSchema !== undefined &&
-                secretFields(decoded.configSchema).length > 0
+                listSecretFields(decoded.configSchema).length > 0
               ) {
                 return yield* Effect.fail(
                   new PluginError({
@@ -377,7 +377,7 @@ const make = Effect.gen(function* () {
    */
   const gate = yield* Semaphore.make(1);
 
-  const patch = (id: string, change: Partial<Entry>): Effect.Effect<void> =>
+  const patchEntry = (id: string, change: Partial<Entry>): Effect.Effect<void> =>
     Ref.update(entries, (current) => {
       const entry = current.get(id);
       if (entry === undefined) return current;
@@ -407,7 +407,7 @@ const make = Effect.gen(function* () {
     message: string,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      yield* patch(id, {
+      yield* patchEntry(id, {
         status: { _tag: "errored", message },
         deactivate: undefined,
         // What a failed teardown left behind is still running, so nothing may
@@ -419,7 +419,7 @@ const make = Effect.gen(function* () {
       // what caused it rather than blaming whoever logged in last. Anything
       // else got here through a request, and is stamped with who made it.
       const actor = yield* Effect.map(CurrentActor, (who) =>
-        who._tag === "none" ? SYSTEM_ACTOR : stampOf(who),
+        who._tag === "none" ? SYSTEM_ACTOR : buildActorStamp(who),
       );
       yield* withTransaction(
         sql,
@@ -437,28 +437,33 @@ const make = Effect.gen(function* () {
    * A refused statement dies rather than failing: the surface a plugin programs
    * against says these cannot fail, and a plugin cannot act on a broken database.
    */
-  const keyValueStore = (pluginId: string): KeyValueStore => ({
-    get: (key) => Effect.andThen(named("key", key), Effect.orDie(repository.kvGet(pluginId, key))),
+  const buildKeyValueStore = (pluginId: string): KeyValueStore => ({
+    get: (key) =>
+      Effect.andThen(assertNonEmpty("key", key), Effect.orDie(repository.kvGet(pluginId, key))),
     set: (key, value) =>
-      Effect.andThen(named("key", key), Effect.orDie(repository.kvSet(pluginId, key, value))),
+      Effect.andThen(
+        assertNonEmpty("key", key),
+        Effect.orDie(repository.kvSet(pluginId, key, value)),
+      ),
     delete: (key) =>
-      Effect.andThen(named("key", key), Effect.orDie(repository.kvDelete(pluginId, key))),
+      Effect.andThen(assertNonEmpty("key", key), Effect.orDie(repository.kvDelete(pluginId, key))),
     list: () => Effect.orDie(repository.kvKeys(pluginId)),
   });
 
   /** The owner is fixed here, so nothing a plugin passes can widen its scope. */
-  const pluginSecrets = (pluginId: string): PluginSecrets => {
+  const buildPluginSecrets = (pluginId: string): PluginSecrets => {
     const owner: SecretOwner = { kind: "plugin", id: pluginId };
     return {
-      get: (name) => Effect.andThen(named("name", name), Effect.orDie(secrets.get(owner, name))),
+      get: (name) =>
+        Effect.andThen(assertNonEmpty("name", name), Effect.orDie(secrets.get(owner, name))),
       set: (name, value) =>
         Effect.andThen(
-          named("name", name),
+          assertNonEmpty("name", name),
           Effect.orDie(Effect.asVoid(secrets.set(owner, name, value))),
         ),
       delete: (name) =>
         Effect.andThen(
-          named("name", name),
+          assertNonEmpty("name", name),
           Effect.orDie(Effect.asVoid(secrets.delete(owner, name))),
         ),
       list: () =>
@@ -469,10 +474,15 @@ const make = Effect.gen(function* () {
   };
 
   /** The runtime surfaces of the capabilities this manifest asked for, and no others. */
-  const activationContext = (manifest: PluginManifest, config: unknown): ActivationContext => ({
+  const buildActivationContext = (
+    manifest: PluginManifest,
+    config: unknown,
+  ): ActivationContext => ({
     config,
-    ...(manifest.capabilities.includes("kv") ? { kv: keyValueStore(manifest.id) } : {}),
-    ...(manifest.capabilities.includes("secrets") ? { secrets: pluginSecrets(manifest.id) } : {}),
+    ...(manifest.capabilities.includes("kv") ? { kv: buildKeyValueStore(manifest.id) } : {}),
+    ...(manifest.capabilities.includes("secrets")
+      ? { secrets: buildPluginSecrets(manifest.id) }
+      : {}),
     ...(manifest.capabilities.includes("connections")
       ? { connections: connectionTypes.runtimeFor(manifest.id) }
       : {}),
@@ -492,7 +502,7 @@ const make = Effect.gen(function* () {
     actions: Map<string, RegisteredWorkflowAction>,
   ): Effect.Effect<PluginStatus> =>
     Effect.suspend(() =>
-      plugin.register(registrationHost(manifest, declared, live, types, kinds, actions)),
+      plugin.register(buildRegistrationHost(manifest, declared, live, types, kinds, actions)),
     ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
@@ -516,17 +526,17 @@ const make = Effect.gen(function* () {
       // beside whatever the last one left behind.
       if (!state.enabled || !entry.startable) {
         if (entry.startable) {
-          yield* patch(id, { status: { _tag: "inactive" }, deactivate: undefined });
+          yield* patchEntry(id, { status: { _tag: "inactive" }, deactivate: undefined });
         }
         return;
       }
 
       const config = yield* decodeAgainst(entry.manifest.configSchema, state.config);
       yield* Effect.suspend(() =>
-        entry.plugin.activate(activationContext(entry.manifest, config)),
+        entry.plugin.activate(buildActivationContext(entry.manifest, config)),
       ).pipe(
         Effect.matchCauseEffect({
-          onSuccess: (deactivate) => patch(id, { status: { _tag: "active" }, deactivate }),
+          onSuccess: (deactivate) => patchEntry(id, { status: { _tag: "active" }, deactivate }),
           onFailure: (cause) => markErrored(id, "activate", readCauseMessage(cause)),
         }),
       );
@@ -547,13 +557,16 @@ const make = Effect.gen(function* () {
       if (entry.deactivate === undefined) {
         // Already stopped - unless an earlier teardown failed, in which case
         // what it left behind is not.
-        if (entry.startable) yield* patch(id, { status: { _tag: "inactive" } });
+        if (entry.startable) yield* patchEntry(id, { status: { _tag: "inactive" } });
         return entry.startable;
       }
       return yield* entry.deactivate.pipe(
         Effect.matchCauseEffect({
           onSuccess: () =>
-            Effect.as(patch(id, { status: { _tag: "inactive" }, deactivate: undefined }), true),
+            Effect.as(
+              patchEntry(id, { status: { _tag: "inactive" }, deactivate: undefined }),
+              true,
+            ),
           onFailure: (cause) =>
             Effect.as(markErrored(id, "deactivate", readCauseMessage(cause)), false),
         }),
@@ -609,7 +622,7 @@ const make = Effect.gen(function* () {
             capabilities: manifest.capabilities,
           };
 
-          const inspected = inspect(manifest);
+          const inspected = inspectManifest(manifest);
           if (Result.isFailure(inspected)) {
             booted.set(manifest.id, {
               ...facts,
@@ -680,7 +693,7 @@ const make = Effect.gen(function* () {
 
     /** Every plugin the last boot loaded, in registry order. */
     loaded: (): Effect.Effect<ReadonlyArray<LoadedPlugin>> =>
-      Effect.map(Ref.get(entries), (booted) => [...booted.values()].map(exposed)),
+      Effect.map(Ref.get(entries), (booted) => [...booted.values()].map(toLoadedPlugin)),
 
     /** Every provider this boot registered, in registry order. */
     providers: (): Effect.Effect<ReadonlyArray<ProviderDefinition>> => Ref.get(providers),

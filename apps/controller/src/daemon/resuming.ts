@@ -13,7 +13,7 @@ import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { createInvalidStateError, type InvalidState } from "@hercule/contract";
-import { loggedIn, NO_PLACEMENT, providerRepository } from "../providers";
+import { isLoggedIn, NO_PLACEMENT, providerRepository } from "../providers";
 import { DRAINING, RETIRED, runnerRepository } from "../runners";
 import type { StoredSession } from "../sessions";
 import { WorkspaceService } from "../workspaces";
@@ -30,7 +30,7 @@ const NO_TRANSCRIPT =
   "nothing to resume";
 
 /** Why a thread cannot be picked up again: the files it worked in are gone. */
-const workspaceGone = (status: string): string =>
+const describeWorkspaceGone = (status: string): string =>
   `that session's workspace is ${status}, so there is nothing left to resume it in`;
 
 /**
@@ -65,7 +65,7 @@ export const resumable: Effect.Effect<
             ? undefined
             : yield* workspaces.statusOf(session.workspaceId);
         if (status !== undefined && status !== "ready") {
-          return yield* Effect.fail(createInvalidStateError(workspaceGone(status)));
+          return yield* Effect.fail(createInvalidStateError(describeWorkspaceGone(status)));
         }
         return yield* Effect.fail(createInvalidStateError(RETIRED));
       }
@@ -80,7 +80,7 @@ export const resumable: Effect.Effect<
       // state rather than of the fleet, because the transcript is only where it
       // already is.
       const snapshots = yield* instances.snapshotsOf(session.instanceId);
-      if (!snapshots.some((one) => loggedIn(one) && one.runnerId === session.runnerId)) {
+      if (!snapshots.some((one) => isLoggedIn(one) && one.runnerId === session.runnerId)) {
         return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       }
       return session.nativeSessionId;

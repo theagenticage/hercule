@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { homePaths, resolveHomePath } from "./paths";
+import { buildHomePaths, resolveHomePath } from "./paths";
 
 describe("resolveHomePath", () => {
   it("prefers --home, then HERCULE_HOME, then ~/.hercule", () => {
@@ -19,9 +19,9 @@ describe("resolveHomePath", () => {
   });
 });
 
-describe("homePaths", () => {
+describe("buildHomePaths", () => {
   it("lays out the home", () => {
-    const paths = homePaths("/srv/hercule", "/srv/hercule/data");
+    const paths = buildHomePaths("/srv/hercule", "/srv/hercule/data");
     expect(paths).toEqual({
       home: "/srv/hercule",
       configFile: "/srv/hercule/config.toml",
@@ -38,7 +38,9 @@ describe("homePaths", () => {
   });
 
   it("takes a Data Root outside the home, and resolves a relative one against it", () => {
-    expect(homePaths("/srv/hercule", "/mnt/state").dataDir).toBe("/mnt/state");
-    expect(homePaths("/srv/hercule", "state").databaseFile).toBe("/srv/hercule/state/hercule.db");
+    expect(buildHomePaths("/srv/hercule", "/mnt/state").dataDir).toBe("/mnt/state");
+    expect(buildHomePaths("/srv/hercule", "state").databaseFile).toBe(
+      "/srv/hercule/state/hercule.db",
+    );
   });
 });

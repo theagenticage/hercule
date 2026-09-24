@@ -151,7 +151,7 @@ const controllerSrc = `${root}apps/controller/src`;
  * the store rules by copying this script into a root of its own, and a rule
  * about a directory that is not there has nothing to say.
  */
-const domainsOf = async (): Promise<ReadonlyArray<string>> => {
+const listDomains = async (): Promise<ReadonlyArray<string>> => {
   const entries = await readdir(controllerSrc, { withFileTypes: true }).catch(() => undefined);
   return entries === undefined
     ? []
@@ -165,15 +165,15 @@ const domainsOf = async (): Promise<ReadonlyArray<string>> => {
  * integration test is for. What this rule is about is the order the controller
  * links its own modules in at boot.
  */
-const shipped = (name: string): boolean =>
+const isShipped = (name: string): boolean =>
   name.endsWith(".ts") && !name.endsWith(".test.ts") && name !== "testing.ts";
 
-const filesUnder = async (dir: string): Promise<ReadonlyArray<string>> =>
+const listShippedFiles = async (dir: string): Promise<ReadonlyArray<string>> =>
   (await readdir(dir, { withFileTypes: true, recursive: true }))
-    .filter((entry) => entry.isFile() && shipped(entry.name))
+    .filter((entry) => entry.isFile() && isShipped(entry.name))
     .map((entry) => resolve(entry.parentPath, entry.name));
 
-const domains = await domainsOf();
+const domains = await listDomains();
 
 /**
  * `../<domain>` exactly: the domain's index, which is the boundary another
@@ -181,7 +181,7 @@ const domains = await domainsOf();
  * about. A deep `../<domain>/<file>` reaches one module and never loads that
  * index, so it is not an edge between the two domains.
  */
-const reached = (specifier: string): string | undefined => {
+const findReachedDomain = (specifier: string): string | undefined => {
   const match = /^\.\.\/([^/]+)$/.exec(specifier);
   const named = match?.[1];
   return named !== undefined && domains.includes(named) ? named : undefined;
@@ -190,13 +190,13 @@ const reached = (specifier: string): string | undefined => {
 const edges = new Map<string, Set<string>>();
 for (const domain of domains) {
   const out = new Set<string>();
-  for (const file of await filesUnder(resolve(controllerSrc, domain))) {
+  for (const file of await listShippedFiles(resolve(controllerSrc, domain))) {
     const text = await Bun.file(file).text();
     const transpiler = new Bun.Transpiler({ loader: "ts" });
     // `scanImports` drops `import type`, which creates no runtime edge: a type
     // that crosses a domain boundary cannot be evaluated too early.
     for (const record of transpiler.scanImports(text)) {
-      const other = reached(record.path);
+      const other = findReachedDomain(record.path);
       if (other !== undefined && other !== domain) out.add(other);
     }
   }
@@ -204,7 +204,7 @@ for (const domain of domains) {
 }
 
 /** The first cycle a depth-first walk closes, as the path that closed it. */
-const cycleIn = (): ReadonlyArray<string> | undefined => {
+const findCycle = (): ReadonlyArray<string> | undefined => {
   const open = new Set<string>();
   const done = new Set<string>();
   const path: Array<string> = [];
@@ -229,7 +229,7 @@ const cycleIn = (): ReadonlyArray<string> | undefined => {
   return undefined;
 };
 
-const cycle = domains.length === 0 ? undefined : cycleIn();
+const cycle = domains.length === 0 ? undefined : findCycle();
 if (cycle !== undefined) {
   console.error("dep-lint: the controller's domains import each other in a cycle:");
   console.error(`    ${cycle.join(" -> ")}`);

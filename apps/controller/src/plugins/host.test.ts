@@ -20,29 +20,29 @@ import { pluginRepository } from "./repository";
 import {
   asUser,
   buildActionPlugin,
-  fixture,
+  createPluginFixture,
   NOTE_APPEND_ACTION,
   notesPlugin,
-  pluginStack,
-  providerDefinition,
+  buildPluginStack,
+  buildProviderDefinition,
 } from "./testing";
 
 /** Every call runs on a stack of its own, as the user a request would arrive as. */
 const run = <A, E>(body: Effect.Effect<A, E, Plugins | PluginHost | SqlClient.SqlClient>) =>
-  Effect.runPromise(body.pipe(Effect.provide(pluginStack()), asUser));
+  Effect.runPromise(body.pipe(Effect.provide(buildPluginStack()), asUser));
 
-const detailOf = <T extends { readonly id: string }>(details: ReadonlyArray<T>, id: string) =>
+const findDetail = <T extends { readonly id: string }>(details: ReadonlyArray<T>, id: string) =>
   details.find((detail) => detail.id === id);
 
 describe("PluginHost.boot on an empty database", () => {
   it("lists every registry plugin enabled, unconfigured, with its one contribution", async () => {
-    const alpha = fixture({
+    const alpha = createPluginFixture({
       id: "alpha",
-      definitions: [providerDefinition("alpha-provider", { model: "alpha-default" })],
+      definitions: [buildProviderDefinition("alpha-provider", { model: "alpha-default" })],
     });
-    const beta = fixture({
+    const beta = createPluginFixture({
       id: "beta",
-      definitions: [providerDefinition("beta-provider", { model: "beta-default" })],
+      definitions: [buildProviderDefinition("beta-provider", { model: "beta-default" })],
     });
 
     const details = await run(
@@ -58,7 +58,7 @@ describe("PluginHost.boot on an empty database", () => {
       ["alpha", "alpha-default"],
       ["beta", "beta-default"],
     ] as const) {
-      const detail = detailOf(details, id);
+      const detail = findDetail(details, id);
       expect(detail?.enabled).toBe(true);
       expect(detail?.config).toEqual({});
       expect(detail?.contributions).toHaveLength(1);
@@ -80,8 +80,8 @@ describe("PluginHost.boot on an empty database", () => {
 
 describe("a second PluginHost.boot on the same database", () => {
   it("lists only the plugins still in the registry, each contribution once", async () => {
-    const alpha = fixture({ id: "alpha" });
-    const beta = fixture({ id: "beta" });
+    const alpha = createPluginFixture({ id: "alpha" });
+    const beta = createPluginFixture({ id: "beta" });
 
     const details = await run(
       Effect.gen(function* () {
@@ -97,13 +97,13 @@ describe("a second PluginHost.boot on the same database", () => {
     );
 
     expect(details.listed.map((detail) => detail.id)).toEqual(["beta"]);
-    expect(detailOf(details.listed, "beta")?.contributions).toHaveLength(1);
+    expect(findDetail(details.listed, "beta")?.contributions).toHaveLength(1);
     expect(details.catalog.get("alpha")).toBeUndefined();
   });
 
   it("keeps a plugin disabled between boots", async () => {
-    const alpha = fixture({ id: "alpha" });
-    const beta = fixture({ id: "beta" });
+    const alpha = createPluginFixture({ id: "alpha" });
+    const beta = createPluginFixture({ id: "beta" });
 
     const details = await run(
       Effect.gen(function* () {
@@ -116,14 +116,14 @@ describe("a second PluginHost.boot on the same database", () => {
       }),
     );
 
-    expect(detailOf(details, "alpha")?.enabled).toBe(false);
-    expect(detailOf(details, "beta")?.enabled).toBe(true);
+    expect(findDetail(details, "alpha")?.enabled).toBe(false);
+    expect(findDetail(details, "beta")?.enabled).toBe(true);
   });
 });
 
 describe("a plugin built against another host API version", () => {
   it("is refused with the two versions, never registered, and has no contributions", async () => {
-    const future = fixture({ id: "future", hostApi: HOST_API + 1 });
+    const future = createPluginFixture({ id: "future", hostApi: HOST_API + 1 });
 
     const { status, detail } = await run(
       Effect.gen(function* () {
@@ -151,8 +151,8 @@ describe("a plugin built against another host API version", () => {
 
 describe("a plugin the host cannot load", () => {
   it("is refused for an unimplemented capability and for an unrenderable config schema", async () => {
-    const channels = fixture({ id: "channels-plugin", capabilities: ["channels"] });
-    const nested = fixture({
+    const channels = createPluginFixture({ id: "channels-plugin", capabilities: ["channels"] });
+    const nested = createPluginFixture({
       id: "nested-plugin",
       configSchema: Schema.Struct({ server: Schema.Struct({ host: Schema.String }) }),
     });
@@ -188,7 +188,10 @@ describe("a plugin the host cannot load", () => {
 
 describe("a plugin whose register fails", () => {
   it("is errored with its own message, holds no contributions, and is never activated", async () => {
-    const broken = fixture({ id: "broken", registerFails: "the harness binary is missing" });
+    const broken = createPluginFixture({
+      id: "broken",
+      registerFails: "the harness binary is missing",
+    });
 
     const { status, detail } = await run(
       Effect.gen(function* () {
@@ -213,10 +216,10 @@ describe("a plugin whose register fails", () => {
 
   it("is errored naming the path when a contribution carries a function", async () => {
     const definition = {
-      ...providerDefinition("callback-provider", {}),
+      ...buildProviderDefinition("callback-provider", {}),
       defaultConfig: { onStart: () => undefined } as unknown as Schema.Json,
     };
-    const callback = fixture({ id: "callback", definitions: [definition] });
+    const callback = createPluginFixture({ id: "callback", definitions: [definition] });
 
     const { status, detail } = await run(
       Effect.gen(function* () {
@@ -240,11 +243,11 @@ describe("a plugin whose register fails", () => {
   });
 
   it("is errored, keeping every other plugin's rows, when it registers one id twice", async () => {
-    const twice = fixture({
+    const twice = createPluginFixture({
       id: "twice",
-      definitions: [providerDefinition("same", {}), providerDefinition("same", {})],
+      definitions: [buildProviderDefinition("same", {}), buildProviderDefinition("same", {})],
     });
-    const other = fixture({ id: "other" });
+    const other = createPluginFixture({ id: "other" });
 
     const { status, details } = await run(
       Effect.gen(function* () {
@@ -264,16 +267,16 @@ describe("a plugin whose register fails", () => {
     expect(errored?._tag).toBe("errored");
     expect(errored?.message).toContain("provider");
     expect(errored?.message).toContain("same");
-    expect(detailOf(details, "twice")?.contributions).toEqual([]);
-    expect(detailOf(details, "other")?.contributions).toHaveLength(1);
+    expect(findDetail(details, "twice")?.contributions).toEqual([]);
+    expect(findDetail(details, "other")?.contributions).toHaveLength(1);
   });
 
   it("is errored when its provider carries a config schema no form can render", async () => {
-    const unrenderable = fixture({
+    const unrenderable = createPluginFixture({
       id: "unrenderable",
       definitions: [
         {
-          ...providerDefinition("deep-provider", {}),
+          ...buildProviderDefinition("deep-provider", {}),
           configSchema: Schema.Struct({ server: Schema.Struct({ host: Schema.String }) }),
         },
       ],
@@ -296,9 +299,11 @@ describe("a plugin whose register fails", () => {
   });
 
   it("is errored when its provider's display name overruns what an instance name takes", async () => {
-    const shouty = fixture({
+    const shouty = createPluginFixture({
       id: "shouty",
-      definitions: [{ ...providerDefinition("shouty-provider", {}), displayName: "S".repeat(129) }],
+      definitions: [
+        { ...buildProviderDefinition("shouty-provider", {}), displayName: "S".repeat(129) },
+      ],
     });
 
     const detail = await run(
@@ -314,11 +319,11 @@ describe("a plugin whose register fails", () => {
   });
 
   it("is errored when its contribution carries a key the host does not know", async () => {
-    const extra = fixture({
+    const extra = createPluginFixture({
       id: "extra",
       definitions: [
         {
-          ...providerDefinition("extra-provider", {}),
+          ...buildProviderDefinition("extra-provider", {}),
           onStart: () => undefined,
         } as ProviderDefinition,
       ],
@@ -339,13 +344,13 @@ describe("a plugin whose register fails", () => {
 
 describe("a plugin whose register crashes", () => {
   it("is errored when the hook throws before it returns an Effect", async () => {
-    const thrower = fixture({
+    const thrower = createPluginFixture({
       id: "thrower",
       register: () => {
         throw new Error("no such directory");
       },
     });
-    const other = fixture({ id: "other" });
+    const other = createPluginFixture({ id: "other" });
 
     const { status, details } = await run(
       Effect.gen(function* () {
@@ -364,11 +369,11 @@ describe("a plugin whose register crashes", () => {
     } | null;
     expect(errored?._tag).toBe("errored");
     expect(errored?.message).toBe("no such directory");
-    expect(detailOf(details, "other")?.contributions).toHaveLength(1);
+    expect(findDetail(details, "other")?.contributions).toHaveLength(1);
   });
 
   it("is errored when the Effect it returns dies", async () => {
-    const dying = fixture({
+    const dying = createPluginFixture({
       id: "dying",
       register: () => Effect.die(new Error("the manifest was generated wrong")),
     });
@@ -392,8 +397,8 @@ describe("a plugin whose register crashes", () => {
 
 describe("a registry that lists one plugin id twice", () => {
   it("fails the boot naming the id, because the two would share every namespace", async () => {
-    const first = fixture({ id: "doubled" });
-    const second = fixture({ id: "doubled" });
+    const first = createPluginFixture({ id: "doubled" });
+    const second = createPluginFixture({ id: "doubled" });
 
     const crash = await run(
       Effect.flatMap(PluginHost, (host) => host.boot([first.plugin, second.plugin])).pipe(
@@ -407,7 +412,7 @@ describe("a registry that lists one plugin id twice", () => {
 
 describe("a registry plugin whose manifest does not decode", () => {
   it("fails the boot saying what is wrong, because the registry is a file in this binary", async () => {
-    const wrong = fixture({ id: "fine" });
+    const wrong = createPluginFixture({ id: "fine" });
     const broken: Plugin = {
       ...wrong.plugin,
       manifest: { ...wrong.plugin.manifest, id: "Not A Slug" },
@@ -426,7 +431,7 @@ describe("a registry plugin whose manifest does not decode", () => {
 
 describe("Plugins.read on an id no plugin carries", () => {
   it("is not_found", async () => {
-    const only = fixture({ id: "only" });
+    const only = createPluginFixture({ id: "only" });
 
     const error = await run(
       Effect.gen(function* () {
@@ -450,7 +455,7 @@ describe("Plugins.read on an id no plugin carries", () => {
  */
 describe("a secret-valued field declared outside a provider", () => {
   it("refuses it in the plugin's own config, saying where one belongs", async () => {
-    const keyed = fixture({
+    const keyed = createPluginFixture({
       id: "keyed-plugin",
       configSchema: Schema.Struct({
         apiKey: secret({ title: "API key", description: "The vendor's own." }),
@@ -639,7 +644,9 @@ describe("the event source catalog", () => {
 describe("a registry that lists a plugin with the id core", () => {
   it("fails the boot, because that id is reserved for the built-in contributions", async () => {
     const crash = await run(
-      Effect.flatMap(PluginHost, (host) => host.boot([fixture({ id: "core" }).plugin])).pipe(
+      Effect.flatMap(PluginHost, (host) =>
+        host.boot([createPluginFixture({ id: "core" }).plugin]),
+      ).pipe(
         Effect.as("booted"),
         Effect.catchCause((cause) => Effect.succeed(Cause.pretty(cause))),
       ),

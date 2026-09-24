@@ -125,11 +125,12 @@ export const parseSessionTopic = (
 };
 
 /** The one session's durable transcript, as a topic name. */
-export const sessionStreamTopic = (sessionId: string): SessionLiveTopic =>
+export const buildSessionStreamTopic = (sessionId: string): SessionLiveTopic =>
   `session:${sessionId}:stream`;
 
 /** The one session's ephemeral token taps, as a topic name. */
-export const sessionTapTopic = (sessionId: string): SessionLiveTopic => `session:${sessionId}:tap`;
+export const buildSessionTapTopic = (sessionId: string): SessionLiveTopic =>
+  `session:${sessionId}:tap`;
 
 /** Which way a record changed, as the audit kinds spell it. */
 export const InvalidateKind = Schema.Literals(["created", "updated", "deleted"]);

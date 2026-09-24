@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { browserTimezone } from "@hercule/client-core";
+import { resolveBrowserTimezone } from "@hercule/client-core";
 import { SetupForm } from "@hercule/contract";
 import { Button, Field, Input } from "@hercule/ui";
 import { validate, type FieldErrors } from "../app/form";
@@ -45,7 +45,7 @@ function Setup(): JSX.Element {
 
     // The timezone is never asked for here: the controller needs one from its
     // first minute, and the browser already knows it.
-    const checked = validate(SetupForm, { username, password, timezone: browserTimezone() });
+    const checked = validate(SetupForm, { username, password, timezone: resolveBrowserTimezone() });
     setErrors(checked.errors ?? {});
     if (checked.errors !== undefined) return;
 

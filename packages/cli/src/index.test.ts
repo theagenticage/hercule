@@ -5,13 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Result } from "effect";
 import { CLI, NOUNS, OPERATIONS, type OperationId } from "@hercule/contract";
 import { main, readSetupUrl } from "./index";
-import { envelope, id, stubFetch, stubIo, type Handler } from "./testing";
+import { buildErrorEnvelope, buildId, stubFetch, stubIo, type Handler } from "./testing";
 
 const SETUP_URL = "http://127.0.0.1:4937/setup?token=abc";
 
 /** A Profile as the contract declares it; the client decodes what the stub returns. */
-const profile = (tail: string, name: string) => ({
-  id: id(tail),
+const buildProfile = (tail: string, name: string) => ({
+  id: buildId(tail),
   name,
   grants: ["task.read"],
   shipped: false,
@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 /** A CLI wired to a stub controller, already holding an environment credential. */
-const cli = (handler: Handler = () => ({})) => {
+const createStubCli = (handler: Handler = () => ({})) => {
   const fetch = stubFetch(handler);
   const io = stubIo({
     env: { HERCULE_TOKEN: "test-token", HERCULE_API_URL: "http://controller.test" },
@@ -56,14 +56,14 @@ describe("hercule setup-url", () => {
 
   it("prints the URL on stdout and nothing else", async () => {
     writeSetupUrl();
-    const { io, run } = cli();
+    const { io, run } = createStubCli();
     expect(await run("setup-url")).toBe(0);
     expect(io.stdout).toEqual([SETUP_URL]);
     expect(io.stderr).toEqual([]);
   });
 
   it("reports an absent file on stderr as missing local state, not as an API failure", async () => {
-    const { io, run } = cli();
+    const { io, run } = createStubCli();
     expect(await run("setup-url")).toBe(3);
     expect(io.stdout).toEqual([]);
     expect(io.stderr[0]).toContain(join(home, "setup-url"));
@@ -76,28 +76,28 @@ describe("hercule setup-url", () => {
 });
 
 /** The lines one `--help` printed, at exit 0. */
-const help = async (...argv: ReadonlyArray<string>): Promise<ReadonlyArray<string>> => {
-  const { io, run } = cli();
+const runHelp = async (...argv: ReadonlyArray<string>): Promise<ReadonlyArray<string>> => {
+  const { io, run } = createStubCli();
   expect(await run(...argv, "--help"), `hercule ${argv.join(" ")} --help`).toBe(0);
   return io.stdout;
 };
 
 /** Where a section marker sits, or -1. */
-const section = (out: ReadonlyArray<string>, marker: string): number =>
+const findSection = (out: ReadonlyArray<string>, marker: string): number =>
   out.findIndex((line) => line.trim().toLowerCase().startsWith(marker));
 
 /** The text between two section markers. */
-const between = (out: ReadonlyArray<string>, from: string, to: string): string =>
-  out.slice(section(out, from), section(out, to)).join("\n");
+const readBetweenSections = (out: ReadonlyArray<string>, from: string, to: string): string =>
+  out.slice(findSection(out, from), findSection(out, to)).join("\n");
 
-const lastLine = (out: ReadonlyArray<string>): string =>
+const findLastLine = (out: ReadonlyArray<string>): string =>
   [...out].reverse().find((line) => line.trim() !== "") ?? "";
 
 const startsWithWord = (line: string, word: string): boolean =>
   new RegExp(`^${word}\\b`).test(line.trim());
 
 /** The root help's lines for one noun: its own, and everything before the next noun. */
-const nounBlock = (out: ReadonlyArray<string>, noun: string): string => {
+const readNounBlock = (out: ReadonlyArray<string>, noun: string): string => {
   const from = out.findIndex((line) => startsWithWord(line, noun));
   expect(from, `the root help has no ${noun} noun`).toBeGreaterThan(-1);
   const next = out.findIndex(
@@ -127,8 +127,8 @@ describe("hercule session input --help", () => {
   ];
 
   it("opens with the purpose, then the sections in their fixed order", async () => {
-    const out = await help("session", "input");
-    const at = MARKERS.map((marker) => section(out, marker));
+    const out = await runHelp("session", "input");
+    const at = MARKERS.map((marker) => findSection(out, marker));
     for (const [index, marker] of MARKERS.entries()) {
       expect(at[index], `${marker} is missing`).toBeGreaterThan(-1);
     }
@@ -138,14 +138,14 @@ describe("hercule session input --help", () => {
   });
 
   it("renders the example as a piped shell line", async () => {
-    const out = await help("session", "input");
+    const out = await runHelp("session", "input");
     expect(out.join("\n")).toMatch(
       /echo "Carry on, and run the tests when you are done\." \| hercule session input 1f3a9c2e/,
     );
   });
 
   it("describes the id argument and each flag", async () => {
-    const text = (await help("session", "input")).join("\n");
+    const text = (await runHelp("session", "input")).join("\n");
     expect(text).toContain("<id>");
     expect(text).toContain("The session's id, or a tail of eight or more characters.");
     expect(text).toContain("--model");
@@ -157,26 +157,26 @@ describe("hercule session input --help", () => {
   });
 
   it("says the text is required on stdin and that there is no --text flag", async () => {
-    const out = await help("session", "input");
-    const block = between(out, "stdin:", "returns:");
+    const out = await runHelp("session", "input");
+    const block = readBetweenSections(out, "stdin:", "returns:");
     expect(block.toLowerCase()).toContain("required");
     expect(block.toLowerCase()).toContain("there is no --text flag");
   });
 
   it("names what comes back", async () => {
-    const block = between(await help("session", "input"), "returns:", "errors:");
+    const block = readBetweenSections(await runHelp("session", "input"), "returns:", "errors:");
     expect(block).toContain("inputId");
     expect(block).toContain("result");
   });
 
   it("says what forbidden means and how to ask for the grant", async () => {
-    const block = between(await help("session", "input"), "errors:", "next:");
+    const block = readBetweenSections(await runHelp("session", "input"), "errors:", "next:");
     expect(block).toContain("forbidden");
     expect(block).toContain("hercule permission request session.steer");
   });
 
   it("ends on the operation line", async () => {
-    expect(lastLine(await help("session", "input"))).toBe(
+    expect(findLastLine(await runHelp("session", "input"))).toBe(
       "operation session.input \u00b7 POST /api/v1/sessions/:id/input \u00b7 grant session.steer",
     );
   });
@@ -184,9 +184,9 @@ describe("hercule session input --help", () => {
 
 describe("hercule task list --help", () => {
   it("shows the paging section and a page's items", async () => {
-    const out = await help("task", "list");
-    expect(section(out, "paging:"), "no paging section").toBeGreaterThan(-1);
-    expect(out.slice(section(out, "returns:")).join("\n")).toContain("items[]");
+    const out = await runHelp("task", "list");
+    expect(findSection(out, "paging:"), "no paging section").toBeGreaterThan(-1);
+    expect(out.slice(findSection(out, "returns:")).join("\n")).toContain("items[]");
   });
 });
 
@@ -204,7 +204,7 @@ describe("hercule session --help", () => {
   ];
 
   it("lists the nine verbs, each with the grant it needs", async () => {
-    const out = await help("session");
+    const out = await runHelp("session");
     for (const verb of VERBS) {
       const line = out.find((each) => startsWithWord(each, verb));
       expect(line, `no line for session ${verb}`).toBeDefined();
@@ -213,36 +213,36 @@ describe("hercule session --help", () => {
   });
 
   it("names the usual order in a flow line", async () => {
-    const out = await help("session");
-    expect(section(out, "flow:"), "no flow line").toBeGreaterThan(-1);
+    const out = await runHelp("session");
+    expect(findSection(out, "flow:"), "no flow line").toBeGreaterThan(-1);
     expect(out.join("\n")).toContain("hercule session spawn starts one");
   });
 });
 
 describe("hercule --help", () => {
   it("lists every visible noun with its verbs", async () => {
-    const out = await help();
+    const out = await runHelp();
     for (const words of spellings) {
-      expect(nounBlock(out, words[0]!), `${words.join(" ")} is not in the root help`).toContain(
+      expect(readNounBlock(out, words[0]!), `${words.join(" ")} is not in the root help`).toContain(
         words[1]!,
       );
     }
   });
 
   it("shows the nested join-token noun under runner", async () => {
-    const block = nounBlock(await help(), "runner");
+    const block = readNounBlock(await runHelp(), "runner");
     expect(block).toMatch(/join-token:\s+create\s+list\s+revoke/);
   });
 
   it("carries the conventions that hold everywhere", async () => {
-    const text = (await help()).join("\n");
+    const text = (await runHelp()).join("\n");
     expect(text).toContain("--json");
     expect(text).toContain("exit");
     expect(text).toContain("hercule permission request");
   });
 
   it("has no auth noun at all", async () => {
-    const out = await help();
+    const out = await runHelp();
     expect(out.filter((line) => startsWithWord(line, "auth"))).toEqual([]);
     expect(out.join("\n")).not.toContain("ws-ticket");
   });
@@ -251,7 +251,7 @@ describe("hercule --help", () => {
 // the bridge, on the CLI's side of it.
 describe("hercule runner --help", () => {
   it("shows the four daemon forms above the verbs", async () => {
-    const out = await help("runner");
+    const out = await runHelp("runner");
     const text = out.join("\n");
     expect(
       out.some((line) => /^hercule runner(\s\s|$)/.test(line.trim())),
@@ -266,37 +266,37 @@ describe("hercule runner --help", () => {
 
 // a word the tree does not answer to, and the ones it does.
 describe("an unknown command", () => {
-  const fails = async (...argv: ReadonlyArray<string>) => {
-    const { io, run } = cli();
+  const runAndCaptureErrors = async (...argv: ReadonlyArray<string>) => {
+    const { io, run } = createStubCli();
     return { code: await run(...argv), err: io.stderr.join("\n") };
   };
 
   it("exits 2 on a hidden noun, help or not", async () => {
-    const asked = await fails("auth", "--help");
+    const asked = await runAndCaptureErrors("auth", "--help");
     expect(asked.code).toBe(2);
     expect(asked.err).toContain("auth");
     expect(asked.err).toContain("api-key");
     expect(asked.err).toContain("task");
 
-    const called = await fails("auth", "ws-ticket");
+    const called = await runAndCaptureErrors("auth", "ws-ticket");
     expect(called.code).toBe(2);
     expect(called.err).toContain("auth");
   });
 
   it("exits 2 on the operation id spelled as a command", async () => {
-    const keys = await fails("apiKey", "query");
+    const keys = await runAndCaptureErrors("apiKey", "query");
     expect(keys.code).toBe(2);
     expect(keys.err).toContain("apiKey");
     expect(keys.err).toContain("api-key");
 
-    const task = await fails("task", "query");
+    const task = await runAndCaptureErrors("task", "query");
     expect(task.code).toBe(2);
     expect(task.err).toContain("query");
     expect(task.err).toContain("list");
   });
 
   it("exits 2 on the derived join-token verb and says what is valid there", async () => {
-    const { code, err } = await fails("runner", "create-join-token");
+    const { code, err } = await runAndCaptureErrors("runner", "create-join-token");
     expect(code).toBe(2);
     expect(err).toContain("create-join-token");
     expect(err).toContain("join-token");
@@ -309,7 +309,7 @@ describe("an unknown command", () => {
       [["runner", "join-token", "list"], "/api/v1/runners/join-tokens"],
     ] as const;
     for (const [argv, path] of cases) {
-      const { fetch, run } = cli((request) =>
+      const { fetch, run } = createStubCli((request) =>
         request.path === "/api/v1/runners/join-tokens" ? [] : { items: [] },
       );
       expect(await run(...argv), argv.join(" ")).toBe(0);
@@ -336,7 +336,7 @@ describe("a stdin field with no pipe", () => {
       },
     };
 
-    expect(await main(["--home", home, "session", "input", id("aaaaaaa1")], io)).toBe(2);
+    expect(await main(["--home", home, "session", "input", buildId("aaaaaaa1")], io)).toBe(2);
     expect(reads).toBe(0);
     expect(base.stderr.join("\n")).toContain("text");
     expect(base.stderr.join("\n")).toContain("| hercule session input");
@@ -356,7 +356,7 @@ describe("a stdin field with no pipe", () => {
 
 describe("running an operation", () => {
   it("sends the payload the flags describe, under the resolved credential", async () => {
-    const { fetch, run } = cli(() => profile("aaaaaaa1", "reviewer"));
+    const { fetch, run } = createStubCli(() => buildProfile("aaaaaaa1", "reviewer"));
 
     expect(await run("profile", "create", "--name", "reviewer", "--grant", "task.read")).toBe(0);
     expect(fetch.calls[0]).toMatchObject({
@@ -368,8 +368,8 @@ describe("running an operation", () => {
   });
 
   it("repeats a list flag into a list", async () => {
-    const { fetch, run } = cli(() => ({
-      ...profile("aaaaaaa1", "reviewer"),
+    const { fetch, run } = createStubCli(() => ({
+      ...buildProfile("aaaaaaa1", "reviewer"),
       grants: ["task.read", "task.update"],
     }));
     await run(
@@ -389,15 +389,15 @@ describe("running an operation", () => {
   });
 
   it("prints the contract's output verbatim under --json", async () => {
-    const reviewer = profile("aaaaaaa1", "reviewer");
-    const { io, run } = cli(() => reviewer);
+    const reviewer = buildProfile("aaaaaaa1", "reviewer");
+    const { io, run } = createStubCli(() => reviewer);
     expect(await run("profile", "read", reviewer.id, "--json")).toBe(0);
     expect(JSON.parse(io.stdout.join("\n"))).toEqual(reviewer);
   });
 
   it("prints an object as key-value lines, with ids as tails", async () => {
-    const { io, run } = cli(() => ({
-      id: id("abcdef12"),
+    const { io, run } = createStubCli(() => ({
+      id: buildId("abcdef12"),
       publicKey: "key",
       version: "0.1.0",
       defaultRunnerId: null,
@@ -412,7 +412,7 @@ describe("running an operation", () => {
   });
 
   it("flattens a nested object into dotted keys", async () => {
-    const { io, run } = cli(() => ({
+    const { io, run } = createStubCli(() => ({
       controller: { "retention.events": 30 },
       user: { timezone: "Europe/Amsterdam" },
     }));
@@ -424,7 +424,10 @@ describe("running an operation", () => {
   });
 
   it("prints a page as a table and says how to get the rest", async () => {
-    const { io, run } = cli(() => ({ items: [profile("aaaaaaa1", "one")], nextCursor: "c2" }));
+    const { io, run } = createStubCli(() => ({
+      items: [buildProfile("aaaaaaa1", "one")],
+      nextCursor: "c2",
+    }));
     await run("profile", "list");
     expect(io.stdout).toEqual([
       "id        name  grants     shipped  createdAt                 updatedAt",
@@ -469,13 +472,13 @@ describe("running an operation", () => {
   });
 
   it("has no plain flag for any password", async () => {
-    const { io, run } = cli();
+    const { io, run } = createStubCli();
     expect(await run("user", "set-password", "--current", "p")).toBe(2);
     expect(io.stderr.join("\n")).toContain("--current-stdin");
   });
 
   it("refuses --value on a secret and says where the value goes", async () => {
-    const { io, run } = cli();
+    const { io, run } = createStubCli();
     expect(await run("secret", "set", "connection", "github", "token", "--value", "s3cret")).toBe(
       2,
     );
@@ -484,7 +487,7 @@ describe("running an operation", () => {
 });
 
 describe("paging", () => {
-  const page = (items: ReadonlyArray<unknown>, nextCursor?: string) => ({
+  const buildPage = (items: ReadonlyArray<unknown>, nextCursor?: string) => ({
     items,
     ...(nextCursor === undefined ? {} : { nextCursor }),
   });
@@ -492,9 +495,9 @@ describe("paging", () => {
   it("follows nextCursor to the end under --all", async () => {
     const fetch = stubFetch((request) => {
       const cursor = request.query.get("cursor");
-      if (cursor === null) return page([profile("aaaaaaa1", "one")], "c2");
-      if (cursor === "c2") return page([profile("aaaaaaa2", "two")], "c3");
-      return page([profile("aaaaaaa3", "three")]);
+      if (cursor === null) return buildPage([buildProfile("aaaaaaa1", "one")], "c2");
+      if (cursor === "c2") return buildPage([buildProfile("aaaaaaa2", "two")], "c3");
+      return buildPage([buildProfile("aaaaaaa3", "three")]);
     });
     const io = stubIo({
       env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
@@ -502,7 +505,11 @@ describe("paging", () => {
     });
     expect(await main(["--home", home, "profile", "list", "--all", "--json"], io)).toBe(0);
     expect(JSON.parse(io.stdout.join("\n"))).toEqual({
-      items: [profile("aaaaaaa1", "one"), profile("aaaaaaa2", "two"), profile("aaaaaaa3", "three")],
+      items: [
+        buildProfile("aaaaaaa1", "one"),
+        buildProfile("aaaaaaa2", "two"),
+        buildProfile("aaaaaaa3", "three"),
+      ],
     });
     expect(fetch.calls.length).toBe(3);
   });
@@ -510,9 +517,9 @@ describe("paging", () => {
   it("starts the --all sweep at --cursor instead of discarding it", async () => {
     const fetch = stubFetch((request) => {
       const cursor = request.query.get("cursor");
-      if (cursor === null) return page([profile("aaaaaaa1", "one")], "c2");
-      if (cursor === "c2") return page([profile("aaaaaaa2", "two")], "c3");
-      return page([profile("aaaaaaa3", "three")]);
+      if (cursor === null) return buildPage([buildProfile("aaaaaaa1", "one")], "c2");
+      if (cursor === "c2") return buildPage([buildProfile("aaaaaaa2", "two")], "c3");
+      return buildPage([buildProfile("aaaaaaa3", "three")]);
     });
     const io = stubIo({
       env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
@@ -522,14 +529,14 @@ describe("paging", () => {
       await main(["--home", home, "profile", "list", "--all", "--cursor", "c2", "--json"], io),
     ).toBe(0);
     expect(JSON.parse(io.stdout.join("\n"))).toEqual({
-      items: [profile("aaaaaaa2", "two"), profile("aaaaaaa3", "three")],
+      items: [buildProfile("aaaaaaa2", "two"), buildProfile("aaaaaaa3", "three")],
     });
     expect(fetch.calls[0]?.query.get("cursor")).toBe("c2");
     expect(fetch.calls.length).toBe(2);
   });
 
   it("passes --limit and --sort through", async () => {
-    const { fetch, run } = cli(() => ({ items: [] }));
+    const { fetch, run } = createStubCli(() => ({ items: [] }));
     await run("profile", "list", "--limit", "2", "--sort", "name:desc");
     expect(fetch.calls[0]?.query.get("limit")).toBe("2");
     expect(fetch.calls[0]?.query.get("sort")).toBe("name:desc");
@@ -537,26 +544,26 @@ describe("paging", () => {
   });
 
   it("leaves the direction out when --sort names only a field", async () => {
-    const { fetch, run } = cli(() => ({ items: [] }));
+    const { fetch, run } = createStubCli(() => ({ items: [] }));
     await run("profile", "list", "--sort", "name");
     expect(fetch.calls[0]?.query.get("sort")).toBe("name");
   });
 
   it("rejects a sort direction that is neither asc nor desc", async () => {
-    const { io, run } = cli();
+    const { io, run } = createStubCli();
     expect(await run("profile", "list", "--sort", "name:sideways")).toBe(2);
     expect(io.stderr.join("\n")).toContain("is not asc or desc");
   });
 
   it("rejects a sort field the operation does not declare", async () => {
-    const { io, run } = cli();
+    const { io, run } = createStubCli();
     expect(await run("profile", "list", "--sort", "createdAt")).toBe(2);
     expect(io.stderr.join("\n")).toContain("is not sortable");
   });
 });
 
 describe("id tails", () => {
-  const profiles = [profile("aaaaaaa1", "one"), profile("bbbbbbb2", "two")];
+  const profiles = [buildProfile("aaaaaaa1", "one"), buildProfile("bbbbbbb2", "two")];
 
   const withProfiles = (extra: Handler) =>
     stubFetch((request) =>
@@ -565,29 +572,29 @@ describe("id tails", () => {
         : extra(request),
     );
 
-  const io = (fetch: ReturnType<typeof stubFetch>) =>
+  const stubEnvIo = (fetch: ReturnType<typeof stubFetch>) =>
     stubIo({ env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" }, fetch });
 
   it("resolves a unique tail through the entity's query operation", async () => {
     const fetch = withProfiles(() => profiles[1]!);
-    const stub = io(fetch);
+    const stub = stubEnvIo(fetch);
     expect(await main(["--home", home, "profile", "read", "bbbbbbb2", "--json"], stub)).toBe(0);
-    expect(fetch.calls[1]?.path).toBe(`/api/v1/profiles/${id("bbbbbbb2")}`);
+    expect(fetch.calls[1]?.path).toBe(`/api/v1/profiles/${buildId("bbbbbbb2")}`);
   });
 
   it("uses a full canonical id without a lookup", async () => {
     const fetch = withProfiles(() => profiles[0]!);
-    const stub = io(fetch);
-    await main(["--home", home, "profile", "read", id("aaaaaaa1"), "--json"], stub);
+    const stub = stubEnvIo(fetch);
+    await main(["--home", home, "profile", "read", buildId("aaaaaaa1"), "--json"], stub);
     expect(fetch.calls.length).toBe(1);
-    expect(fetch.calls[0]?.path).toBe(`/api/v1/profiles/${id("aaaaaaa1")}`);
+    expect(fetch.calls[0]?.path).toBe(`/api/v1/profiles/${buildId("aaaaaaa1")}`);
   });
 
   it("resolves a tail against a listing that answers with the whole set", async () => {
     // A provider instance listing is the whole set rather than a page, because
     // there is one instance per provider and a handful of providers.
     const instance = {
-      id: id("cccccccc"),
+      id: buildId("cccccccc"),
       providerId: "claude-code",
       name: "Claude Code",
       config: {},
@@ -615,19 +622,19 @@ describe("id tails", () => {
     const fetch = stubFetch((request) =>
       request.path === "/api/v1/providers" && request.method === "GET" ? [instance] : instance,
     );
-    const stub = io(fetch);
+    const stub = stubEnvIo(fetch);
     expect(await main(["--home", home, "provider", "read", "cccccccc", "--json"], stub)).toBe(0);
-    expect(fetch.calls[1]?.path).toBe(`/api/v1/providers/${id("cccccccc")}`);
+    expect(fetch.calls[1]?.path).toBe(`/api/v1/providers/${buildId("cccccccc")}`);
   });
 
   it("reports conflict when a tail matches more than one id", async () => {
     const fetch = stubFetch(() => ({
       items: [
-        { ...profile("x", "one"), id: "0192f0a1-0000-7000-8000-000011112222" },
-        { ...profile("x", "two"), id: "0192f0a1-0000-7000-8000-999911112222" },
+        { ...buildProfile("x", "one"), id: "0192f0a1-0000-7000-8000-000011112222" },
+        { ...buildProfile("x", "two"), id: "0192f0a1-0000-7000-8000-999911112222" },
       ],
     }));
-    const stub = io(fetch);
+    const stub = stubEnvIo(fetch);
     expect(await main(["--home", home, "profile", "read", "11112222", "--json"], stub)).toBe(1);
     const printed = JSON.parse(stub.stderr.join("\n")) as { error: { code: string } };
     expect(printed.error.code).toBe("conflict");
@@ -635,7 +642,7 @@ describe("id tails", () => {
 
   it("reports not_found when a tail matches nothing", async () => {
     const fetch = withProfiles(() => ({}));
-    const stub = io(fetch);
+    const stub = stubEnvIo(fetch);
     expect(await main(["--home", home, "profile", "read", "ffffffff"], stub)).toBe(1);
     expect(stub.stderr.join("\n")).toContain("no profile whose id ends with ffffffff");
   });
@@ -656,15 +663,15 @@ describe("id tails", () => {
       raw: null,
       actor: null,
     }));
-    const stub = io(fetch);
+    const stub = stubEnvIo(fetch);
     expect(await main(["--home", home, "event", "read", "42", "--json"], stub)).toBe(0);
     expect(fetch.calls.length).toBe(1);
     expect(fetch.calls[0]?.path).toBe("/api/v1/events/42");
   });
 
   it("sweeps in an order writes do not move, so a touched row is still found", async () => {
-    const row = (tail: string, at: string) => ({
-      id: id(tail),
+    const buildTaskRow = (tail: string, at: string) => ({
+      id: buildId(tail),
       title: `task ${tail}`,
       description: "",
       status: "open",
@@ -676,9 +683,9 @@ describe("id tails", () => {
       statusChangedAt: at,
     });
     const rows = [
-      row("aaaaaaa1", "2026-01-01T00:00:00.000Z"),
-      row("bbbbbbb2", "2026-01-02T00:00:00.000Z"),
-      row("ccccccc3", "2026-01-03T00:00:00.000Z"),
+      buildTaskRow("aaaaaaa1", "2026-01-01T00:00:00.000Z"),
+      buildTaskRow("bbbbbbb2", "2026-01-02T00:00:00.000Z"),
+      buildTaskRow("ccccccc3", "2026-01-03T00:00:00.000Z"),
     ];
     let touched = false;
 
@@ -707,25 +714,25 @@ describe("id tails", () => {
         ...(from + 2 < ordered.length && last !== undefined ? { nextCursor: last.id } : {}),
       };
     });
-    const stub = io(fetch);
+    const stub = stubEnvIo(fetch);
     expect(await main(["--home", home, "task", "read", "aaaaaaa1", "--json"], stub)).toBe(0);
-    expect(fetch.calls.at(-1)?.path).toBe(`/api/v1/tasks/${id("aaaaaaa1")}`);
+    expect(fetch.calls.at(-1)?.path).toBe(`/api/v1/tasks/${buildId("aaaaaaa1")}`);
   });
 
   it("exits 2 on a tail where the row names no listing, and calls nothing", async () => {
     const fetch = stubFetch(() => ({}));
-    const stub = io(fetch);
+    const stub = stubEnvIo(fetch);
     // A queued input's own id is a Hercule id nothing lists on its own.
-    expect(await main(["--home", home, "input", "cancel", id("aaaaaaa1"), "1f3a9c2e"], stub)).toBe(
-      2,
-    );
+    expect(
+      await main(["--home", home, "input", "cancel", buildId("aaaaaaa1"), "1f3a9c2e"], stub),
+    ).toBe(2);
     expect(fetch.calls).toEqual([]);
     expect(stub.stderr.join("\n")).toContain("full id");
   });
 
   it("sends a name that only looks like a tail, where the field holds no Hercule id", async () => {
     const fetch = stubFetch(() => ({ items: [] }));
-    const stub = io(fetch);
+    const stub = stubEnvIo(fetch);
 
     expect(await main(["--home", home, "secret", "list", "--owner-id", "deadbeef"], stub)).toBe(0);
 
@@ -737,7 +744,7 @@ describe("id tails", () => {
 
   it("refuses a tail shorter than eight characters before calling anything", async () => {
     const fetch = withProfiles(() => ({}));
-    const stub = io(fetch);
+    const stub = stubEnvIo(fetch);
     expect(await main(["--home", home, "profile", "read", "abc"], stub)).toBe(2);
     expect(fetch.calls.length).toBe(0);
     expect(stub.stderr.join("\n")).toContain("at least 8 characters");
@@ -746,42 +753,46 @@ describe("id tails", () => {
 
 describe("failures", () => {
   it("exits 2 on an unknown noun and lists what is valid there", async () => {
-    const { io, run } = cli();
+    const { io, run } = createStubCli();
     expect(await run("nope", "read")).toBe(2);
     expect(io.stderr.join("\n")).toContain("nope");
     expect(io.stderr.join("\n")).toContain("task");
   });
 
   it("exits 2 on an unknown flag and points at --help", async () => {
-    const { io, run } = cli();
+    const { io, run } = createStubCli();
     expect(await run("profile", "create", "--nope", "x")).toBe(2);
     expect(io.stderr.join("\n")).toContain("hercule profile create --help");
   });
 
   it("exits 2 when a required flag is missing", async () => {
-    const { io, run } = cli();
+    const { io, run } = createStubCli();
     expect(await run("profile", "create")).toBe(2);
     expect(io.stderr.join("\n")).toContain("missing required --name, --grant");
   });
 
   it("exits 1 on an error envelope and prints the missing grant verbatim", async () => {
-    const { io, run } = cli(() =>
-      envelope("forbidden", 403, "missing grant permission.write", { grant: "permission.write" }),
+    const { io, run } = createStubCli(() =>
+      buildErrorEnvelope("forbidden", 403, "missing grant permission.write", {
+        grant: "permission.write",
+      }),
     );
     expect(await run("profile", "create", "--name", "x", "--grant", "task.read")).toBe(1);
     expect(io.stderr.join("\n")).toContain("missing grant permission.write");
   });
 
   it("prints the error envelope verbatim under --json", async () => {
-    const { io, run } = cli(() => envelope("not_found", 404, "no such profile"));
-    expect(await run("profile", "delete", id("aaaaaaa1"), "--json")).toBe(1);
+    const { io, run } = createStubCli(() =>
+      buildErrorEnvelope("not_found", 404, "no such profile"),
+    );
+    expect(await run("profile", "delete", buildId("aaaaaaa1"), "--json")).toBe(1);
     expect(JSON.parse(io.stderr.join("\n"))).toEqual({
       error: { code: "not_found", message: "no such profile" },
     });
   });
 
   it("exits 2 when a flag's value does not fit its field, and sends nothing", async () => {
-    const { io, fetch, run } = cli();
+    const { io, fetch, run } = createStubCli();
     expect(
       await run(
         "task",
@@ -800,8 +811,8 @@ describe("failures", () => {
   it("names a field read from stdin by its name, never by a flag it does not have", async () => {
     // An empty pipe is a value the field refuses, and the caller has no
     // `--text` to correct: the message has to point at the pipe.
-    const { io, fetch, run } = cli();
-    expect(await run("session", "input", id("aaaaaaa1"))).toBe(2);
+    const { io, fetch, run } = createStubCli();
+    expect(await run("session", "input", buildId("aaaaaaa1"))).toBe(2);
     expect(fetch.calls).toEqual([]);
     expect(io.stderr.join("\n")).toContain("text (on stdin)");
     expect(io.stderr.join("\n")).not.toContain("--text");
@@ -831,8 +842,8 @@ const buildAgentRecord = (agentId: string, name: string) => ({
   id: agentId,
   name,
   systemPrompt: "You assess tasks.",
-  instanceId: id("cccccccc"),
-  permissionProfileId: id("dddddddd"),
+  instanceId: buildId("cccccccc"),
+  permissionProfileId: buildId("dddddddd"),
   accessMode: "full-access",
   model: null,
   disallowedTools: [] as Array<string>,
@@ -842,17 +853,17 @@ const buildAgentRecord = (agentId: string, name: string) => ({
 });
 
 describe("hercule session spawn --agent", () => {
-  const AGENT = buildAgentRecord(id("aaaaaaa1"), "triager");
+  const AGENT = buildAgentRecord(buildId("aaaaaaa1"), "triager");
 
   const SPAWNED = {
-    id: id("eeeeeee1"),
+    id: buildId("eeeeeee1"),
     title: "Assess this task.",
     status: "starting",
     resumable: false,
     permissionProfileId: AGENT.permissionProfileId,
     agentId: AGENT.id,
     instanceId: AGENT.instanceId,
-    runnerId: id("ffffffff"),
+    runnerId: buildId("ffffffff"),
     workspaceId: null,
     projectId: null,
     requestedAccessMode: "full-access",
@@ -900,7 +911,7 @@ describe("hercule session spawn --agent", () => {
   });
 
   it("resolves a profile tail on a flag through the profile listing", async () => {
-    const PROFILE = profile("dddddddd", "worker");
+    const PROFILE = buildProfile("dddddddd", "worker");
     const fetch = stubFetch((request) =>
       request.path === "/api/v1/profiles" && request.method === "GET"
         ? { items: [PROFILE] }
@@ -947,7 +958,7 @@ describe("hercule session spawn --agent", () => {
 
 describe("hercule session list --agent", () => {
   const AGENTS = [
-    buildAgentRecord(id("aaaaaaa1"), "triager"),
+    buildAgentRecord(buildId("aaaaaaa1"), "triager"),
     buildAgentRecord("0192f0a1-0000-7000-8000-999911112222", "reviewer"),
   ];
 
@@ -969,7 +980,7 @@ describe("hercule session list --agent", () => {
     ).toBe(0);
 
     expect(fetch.calls[0]?.path).toBe("/api/v1/agents");
-    expect(fetch.calls[1]?.query.get("agentId")).toBe(id("aaaaaaa1"));
+    expect(fetch.calls[1]?.query.get("agentId")).toBe(buildId("aaaaaaa1"));
   });
 
   it("answers conflict when the tail could be either of two agents", async () => {
@@ -1000,7 +1011,7 @@ describe("hercule session list --agent", () => {
 });
 
 describe("hercule transcript read: a turn that answered under a schema", () => {
-  const SESSION_ID = id("eeeeeee1");
+  const SESSION_ID = buildId("eeeeeee1");
   const VALUE = { verdict: "accept", confidence: 0.9 };
 
   const buildTurnRow = (
@@ -1066,7 +1077,7 @@ describe("hercule transcript read: a turn that answered under a schema", () => {
 // schema before the call, so the wire never carries the terminal's spelling.
 describe("a positional a field's own schema decodes", () => {
   it("sends the decoded target, not the shorthand the agent typed", async () => {
-    const { fetch, run } = cli(() => ({ subscriptionId: id("aaaaaaa1") }));
+    const { fetch, run } = createStubCli(() => ({ subscriptionId: buildId("aaaaaaa1") }));
 
     expect(await run("subscription", "create", "github:pr:o/r#87")).toBe(0);
 
@@ -1087,7 +1098,7 @@ describe("the last line of every command's help", () => {
     const rows = Object.entries(CLI as Record<string, { command?: string; hidden?: true }>);
     for (const [id, row] of rows) {
       if (row.hidden === true) continue;
-      const printed = lastLine(await help(...row.command!.split(" ")));
+      const printed = findLastLine(await runHelp(...row.command!.split(" ")));
       const operation = OPERATIONS[id as OperationId];
       expect(printed, row.command).toContain(`operation ${id}`);
       expect(printed, row.command).toContain(`${operation.method} ${operation.path}`);
@@ -1131,7 +1142,7 @@ describe("a workflow's source in the CLI", () => {
   ].join("\n");
   /** The source the CLI sends for that file: the file minus its trailing newline. */
   const WORKFLOW_SOURCE = WORKFLOW_FILE.slice(0, -1);
-  const WORKFLOW_ID = id("aaaaaaa1");
+  const WORKFLOW_ID = buildId("aaaaaaa1");
 
   const buildWorkflowRecord = (source: string) => ({
     id: WORKFLOW_ID,

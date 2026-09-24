@@ -21,10 +21,10 @@ export interface RunnerMenu {
   readonly defaultRunnerId: string | null;
 }
 
-const stateOf = (runner: Runner): RunnerMenuRow["state"] =>
+const readRunnerState = (runner: Runner): RunnerMenuRow["state"] =>
   runner.lifecycle !== "active" ? runner.lifecycle : runner.connectivity;
 
-export const runnerMenu = (
+export const buildRunnerMenu = (
   runners: readonly Runner[],
   localId: string | null,
   instance: ProviderInstance,
@@ -43,7 +43,7 @@ export const runnerMenu = (
     return {
       runnerId: runner.id,
       name: runner.name,
-      state: stateOf(runner),
+      state: readRunnerState(runner),
       isLocal: runner.id === localId,
       reserved: runner.reserved,
       identity: snapshot?.auth.identity ?? null,
@@ -67,7 +67,7 @@ export const runnerMenu = (
  * when there is one, else the local machine, else the first runner in the
  * list, else no runner exists at all to name.
  */
-export const referenceRunner = (
+export const findReferenceRunner = (
   runners: readonly Runner[],
   selectedRunnerId: string | null,
   localRunnerId: string | null,

@@ -2,11 +2,11 @@ import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
-  githubConnections,
-  instanceDefaults,
-  threadDefaults,
-  threadModelField,
-  threadRowsMode,
+  filterGitHubConnections,
+  computeInstanceDefaults,
+  computeThreadDefaults,
+  buildThreadModelField,
+  resolveThreadRowsMode,
 } from "@hercule/client-core";
 import type { AccessMode, ThreadRows, ThreadWorkspace } from "@hercule/contract";
 import { Field, FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hercule/ui";
@@ -70,21 +70,21 @@ function Threads(): JSX.Element {
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
-  const githubs = githubConnections(useQuery(connectionsQuery(client)).data?.items ?? []);
+  const githubs = filterGitHubConnections(useQuery(connectionsQuery(client)).data?.items ?? []);
   const { save, saved, failure } = useSaveSettings(client);
 
-  const rows = threadRowsMode(settings.user["ui.threadRows"]);
+  const rows = resolveThreadRowsMode(settings.user["ui.threadRows"]);
 
-  // Every default below is `threadDefaults`' answer, the same rule the
+  // Every default below is `computeThreadDefaults`' answer, the same rule the
   // composer prefills a new thread from: a stored id naming an instance that
   // no longer exists falls back, the model is read from the runner that
   // instance would actually be placed on, and "nothing picked" is null.
-  const defaults = threadDefaults(settings.user, instances, runners, profiles, localId);
+  const defaults = computeThreadDefaults(settings.user, instances, runners, profiles, localId);
   const instance = instances.find((each) => each.id === defaults.instanceId);
   const modelField =
     instance === undefined
       ? { dimmed: null, options: [] }
-      : threadModelField(instance, defaults.runnerId, settings.user["thread.model"]);
+      : buildThreadModelField(instance, defaults.runnerId, settings.user["thread.model"]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -103,9 +103,11 @@ function Threads(): JSX.Element {
                 onChange={(event) => {
                   const next = instances.find((each) => each.id === event.target.value);
                   // The model follows the instance, read from the runner that
-                  // instance would be placed on - one rule, `instanceDefaults`.
+                  // instance would be placed on - one rule, `computeInstanceDefaults`.
                   const nextModel =
-                    next === undefined ? null : instanceDefaults(next, runners, localId).model;
+                    next === undefined
+                      ? null
+                      : computeInstanceDefaults(next, runners, localId).model;
                   save({
                     user: {
                       "thread.instanceId": event.target.value,

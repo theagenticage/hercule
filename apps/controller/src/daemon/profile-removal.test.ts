@@ -54,7 +54,7 @@ const readRefusalMessage = (error: unknown): string =>
   (error as { readonly error: { readonly message: string } }).error.message;
 
 /** A session carrying this profile, in the status given. */
-const placeSessionOn = (profileId: string, status: string) =>
+const insertSession = (profileId: string, status: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) => {
     const id = mintUuid();
     const owner = uuidFromString(profileId);
@@ -68,7 +68,7 @@ const placeSessionOn = (profileId: string, status: string) =>
   });
 
 /** An agent that spawns its sessions under this profile. */
-const agentUnder = (profileId: string, name: string, at: string) =>
+const insertAgent = (profileId: string, name: string, at: string) =>
   Effect.flatMap(agentRepository, (agents) =>
     agents.insert({
       providerId: "claude-provider",
@@ -132,7 +132,7 @@ describe("profile.delete", () => {
         const profiles = yield* Profiles;
         const removal = yield* ProfileRemoval;
         const created = yield* profiles.create({ name: "reviewer", grants: READER });
-        yield* placeSessionOn(created.id, "idle");
+        yield* insertSession(created.id, "idle");
         return yield* removal.deleteProfile({ id: created.id });
       }),
     );
@@ -149,7 +149,7 @@ describe("profile.delete", () => {
         const profiles = yield* Profiles;
         const removal = yield* ProfileRemoval;
         const created = yield* profiles.create({ name: "reviewer", grants: READER });
-        yield* placeSessionOn(created.id, "exited");
+        yield* insertSession(created.id, "exited");
         yield* removal.deleteProfile({ id: created.id });
         return (yield* profiles.query({})).items;
       }),
@@ -164,8 +164,8 @@ describe("profile.delete", () => {
         const profiles = yield* Profiles;
         const removal = yield* ProfileRemoval;
         const created = yield* profiles.create({ name: "reviewer", grants: READER });
-        yield* agentUnder(created.id, "the-elder", "2026-09-15T10:00:00.000Z");
-        yield* agentUnder(created.id, "the-younger", "2026-09-15T11:00:00.000Z");
+        yield* insertAgent(created.id, "the-elder", "2026-09-15T10:00:00.000Z");
+        yield* insertAgent(created.id, "the-younger", "2026-09-15T11:00:00.000Z");
         return yield* removal.deleteProfile({ id: created.id });
       }),
     );
@@ -184,8 +184,8 @@ describe("profile.delete", () => {
         const profiles = yield* Profiles;
         const removal = yield* ProfileRemoval;
         const created = yield* profiles.create({ name: "reviewer", grants: READER });
-        yield* placeSessionOn(created.id, "busy");
-        yield* agentUnder(created.id, "the-elder", "2026-09-15T10:00:00.000Z");
+        yield* insertSession(created.id, "busy");
+        yield* insertAgent(created.id, "the-elder", "2026-09-15T10:00:00.000Z");
         return yield* removal.deleteProfile({ id: created.id });
       }),
     );

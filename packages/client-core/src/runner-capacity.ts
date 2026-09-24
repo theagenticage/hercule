@@ -15,7 +15,7 @@ export const RUNNING_STATUSES: ReadonlyArray<SessionStatus> = ["starting", "idle
 
 const holdsSlot = new Set<SessionStatus>(RUNNING_STATUSES);
 
-export const capacityLine = (runner: Runner, sessions: ReadonlyArray<Session>): string => {
+export const describeCapacity = (runner: Runner, sessions: ReadonlyArray<Session>): string => {
   const running = sessions.filter((session) => holdsSlot.has(session.status)).length;
   const queued = sessions.filter((session) => session.status === "queued").length;
   const line = `${String(running)} running of ${String(runner.maxConcurrentSessions)}`;
@@ -23,7 +23,7 @@ export const capacityLine = (runner: Runner, sessions: ReadonlyArray<Session>): 
 };
 
 /** The queue itself, oldest first: the session that has waited longest starts next. */
-export const queuedSessions = (sessions: ReadonlyArray<Session>): ReadonlyArray<Session> =>
+export const listQueuedSessions = (sessions: ReadonlyArray<Session>): ReadonlyArray<Session> =>
   sessions
     .filter((session) => session.status === "queued")
     .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));

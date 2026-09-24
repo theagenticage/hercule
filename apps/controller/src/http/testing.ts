@@ -35,7 +35,7 @@ import {
   type RunnerLifecycle,
 } from "@hercule/contract";
 import type { Plugin } from "@hercule/plugin-host";
-import { homePaths } from "@hercule/home";
+import { buildHomePaths } from "@hercule/home";
 import { HerculeHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
@@ -94,7 +94,7 @@ export const USERNAME = "rogier";
  * and the routes must share one: the status a request reads is held by the same
  * object the boot's activation pass wrote it into.
  */
-const services = (home: string, notifier: Layer.Layer<EvaluationErrorNotifier>) =>
+const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifier>) =>
   // The routes' own layer holds the controller daemon, which reaches the
   // session and workspace services and the plugin host, so it is provided this
   // block's output rather than merely merged beside it, the way the real boot's
@@ -139,7 +139,7 @@ const services = (home: string, notifier: Layer.Layer<EvaluationErrorNotifier>) 
     ),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
 
 /** An address a fetch can use; the server binds an ephemeral port on loopback. */
@@ -184,7 +184,7 @@ export type RebootArranger = () => Promise<void>;
  * The services are inferred rather than listed, so a step added to the boot
  * cannot leave a stale list behind.
  */
-const repeatable = <A, E, R>(
+const makeRepeatable = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<() => Promise<A>, never, R> =>
   Effect.map(
@@ -283,21 +283,21 @@ export const withServer = (
           yield* ensureProviderInstances;
         });
         yield* bootSteps;
-        const reboot: RebootArranger = yield* repeatable(bootSteps);
+        const reboot: RebootArranger = yield* makeRepeatable(bootSteps);
         let listening = serve(bundle);
-        const named = <A>(key: Context.Reference<A>, value: A | undefined): void => {
+        const provideIfSet = <A>(key: Context.Reference<A>, value: A | undefined): void => {
           if (value !== undefined) listening = Effect.provideService(listening, key, value);
         };
-        named(RunnerPingSchedule, options.pings);
-        named(RunnerFactsDeadline, options.factsDeadline);
-        named(ProviderProbeDeadline, options.probeDeadline);
-        named(ProviderProbeInterval, options.probeInterval);
-        named(ProviderLoginDeadline, options.loginDeadline);
-        named(SessionInputDeadline, options.inputDeadline);
-        named(WorkspaceSweepInterval, options.workspaceSweepInterval);
-        named(EventRoutingInterval, options.eventRoutingInterval);
-        named(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
-        named(ExpressionBudget, options.expressionBudget);
+        provideIfSet(RunnerPingSchedule, options.pings);
+        provideIfSet(RunnerFactsDeadline, options.factsDeadline);
+        provideIfSet(ProviderProbeDeadline, options.probeDeadline);
+        provideIfSet(ProviderProbeInterval, options.probeInterval);
+        provideIfSet(ProviderLoginDeadline, options.loginDeadline);
+        provideIfSet(SessionInputDeadline, options.inputDeadline);
+        provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
+        provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
+        provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
+        provideIfSet(ExpressionBudget, options.expressionBudget);
         yield* listening;
         const base = yield* baseUrl;
         // The log this database holds, read the way anything else reads it: a
@@ -348,7 +348,7 @@ export const withServer = (
       }),
     ).pipe(
       Effect.provide(
-        services(home, options.evaluationErrorNotifier ?? EvaluationErrorNotifierLayer).pipe(
+        buildServices(home, options.evaluationErrorNotifier ?? EvaluationErrorNotifierLayer).pipe(
           // The same listener `hercule serve` builds, body cap included: the cap
           // is the transport's, so a harness without it would test a different
           // server from the one that ships.
@@ -419,7 +419,7 @@ export interface Refusal {
  * here, so a caller may ask about the code, the grant and the issue paths
  * without juggling clones of a stream that can only be read once.
  */
-export const readRefusal = async (response: Response): Promise<Refusal> => {
+export const readErrorBody = async (response: Response): Promise<Refusal> => {
   const text = await response.text();
   const body = JSON.parse(text) as ErrorBody;
   return {
@@ -466,11 +466,11 @@ export const completeSetup = async (base: string): Promise<string> => {
 export type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof live>, RpcClientError>;
 
 /** The socket sits at `/ws` on the same authority the API is served from. */
-export const socketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}/ws`;
+export const buildSocketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}/ws`;
 
-export const liveConnection = (base: string) =>
+export const buildLiveConnection = (base: string) =>
   RpcClient.layerProtocolSocket().pipe(
-    Layer.provide(BunSocket.layerWebSocket(socketUrl(base))),
+    Layer.provide(BunSocket.layerWebSocket(buildSocketUrl(base))),
     Layer.provide(RpcSerialization.layerJson),
   );
 
@@ -484,12 +484,12 @@ export const onSocket = (
       Effect.gen(function* () {
         const client = yield* RpcClient.make(live);
         yield* body(client);
-      }).pipe(Effect.provide(liveConnection(base))),
+      }).pipe(Effect.provide(buildLiveConnection(base))),
     ).pipe(Effect.orDie),
   );
 
 /** A ticket, fetched the way a client fetches one: over HTTP, before dialling. */
-export const ticketFor = async (base: string, token: string): Promise<string> => {
+export const fetchTicket = async (base: string, token: string): Promise<string> => {
   const response = await post(base, "/api/v1/auth/ws-ticket", {}, token);
   expect(response.status).toBe(200);
   return ((await response.json()) as { ticket: string }).ticket;
@@ -500,11 +500,11 @@ export const ticketFor = async (base: string, token: string): Promise<string> =>
  * opened after this sees is caused by what the test does next and not by
  * whatever the boot or the setup left in flight.
  */
-export const settleLive = (): Promise<void> =>
+export const waitForLiveToSettle = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 2 * COALESCE_WINDOW_MS));
 
 /** Waits up to `ms` for something to become true, and answers whether it did. */
-export const within = async (ms: number, ready: () => boolean): Promise<boolean> => {
+export const waitWithin = async (ms: number, ready: () => boolean): Promise<boolean> => {
   const deadline = Date.now() + ms;
   while (!ready() && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -542,7 +542,7 @@ export interface Collected {
  * assertions are made against the array afterwards, so a test says what the
  * subscriber ended up seeing rather than when each frame landed.
  */
-export const collecting = (
+export const collectMessages = (
   client: LiveClient,
   payload: { readonly topic: string; readonly cursor?: string },
 ): Effect.Effect<Collected, never, Scope.Scope> =>

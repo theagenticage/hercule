@@ -17,7 +17,7 @@ import {
   OPERATIONS,
   api,
   readShorthandDecoder,
-  sortFieldsOf,
+  readSortFields,
   type CliRow,
   type ErrorCode,
   type CliExample,
@@ -125,7 +125,7 @@ type Ast = {
 };
 
 /** The string literals a union is made of, or `undefined` when it is not one. */
-const literalsOf = (ast: Ast): ReadonlyArray<string> | undefined => {
+const readStringLiterals = (ast: Ast): ReadonlyArray<string> | undefined => {
   if (ast._tag === "Literal") return typeof ast.literal === "string" ? [ast.literal] : undefined;
   if (ast._tag !== "Union" || ast.types === undefined) return undefined;
   const literals: Array<string> = [];
@@ -141,7 +141,7 @@ const literalsOf = (ast: Ast): ReadonlyArray<string> | undefined => {
  * still the shape it holds; only the way it is cleared is different, and on the
  * command line that is `--field null`.
  */
-const withoutNull = (ast: Ast): Ast => {
+const stripNull = (ast: Ast): Ast => {
   if (ast._tag !== "Union" || ast.types === undefined) return ast;
   const present = ast.types.filter((member) => member._tag !== "Null");
   return present.length === 1 ? present[0]! : ast;
@@ -161,8 +161,8 @@ const isNullable = (ast: Ast): boolean =>
  * one-value member exists so a caller may send a scalar, and on a command line
  * repeating the flag is how that choice is made.
  */
-const elementOf = (input: Ast): Ast | undefined => {
-  const ast = withoutNull(input);
+const readElementType = (input: Ast): Ast | undefined => {
+  const ast = stripNull(input);
   if (ast._tag === "Arrays") return ast.rest?.[0];
   if (ast._tag !== "Union" || ast.types === undefined) return undefined;
   const list = ast.types.find((member) => member._tag === "Arrays");
@@ -181,11 +181,11 @@ const UUID = "uuidv7";
  * UUID and for nothing else.
  */
 const holdsAnId = (input: Ast): boolean =>
-  (withoutNull(input).checks ?? []).some((check) => check.annotations?.title === UUID);
+  (stripNull(input).checks ?? []).some((check) => check.annotations?.title === UUID);
 
-const scalarKind = (input: Ast): FieldKind => {
-  const ast = withoutNull(input);
-  if (literalsOf(ast) !== undefined) return "string";
+const readScalarKind = (input: Ast): FieldKind => {
+  const ast = stripNull(input);
+  if (readStringLiterals(ast) !== undefined) return "string";
   switch (ast._tag) {
     case "String":
       return "string";
@@ -199,7 +199,8 @@ const scalarKind = (input: Ast): FieldKind => {
 };
 
 /** `sessionId` on the wire is `<session-id>` on the command line. */
-const kebab = (name: string): string => name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+const toKebabCase = (name: string): string =>
+  name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 
 /**
  * The shape of one field, as the schema has it and the row spells it.
@@ -214,17 +215,17 @@ const buildField = (
   carriedIn: FieldCarrier,
   schema: unknown,
 ): Field => {
-  const element = elementOf(ast);
+  const element = readElementType(ast);
   const value = element ?? ast;
   // A positional is spelled by the row where its own name would not say whose
   // id it is; a flag is always spelled by the row.
-  const spelling = "flag" in row ? row.flag : (row.placeholder ?? kebab(name));
+  const spelling = "flag" in row ? row.flag : (row.placeholder ?? toKebabCase(name));
   return {
     name,
     spelling,
     positional: "positional" in row,
     carriedIn,
-    kind: scalarKind(value),
+    kind: readScalarKind(value),
     decodeShorthand: readShorthandDecoder(schema),
     repeated: element !== undefined,
     // A row can make a field required on the command line even when the
@@ -232,7 +233,7 @@ const buildField = (
     // only way to pass its value on the command line.
     optional: ast.context?.isOptional === true && !("required" in row && row.required === true),
     nullable: isNullable(ast) || isNullable(value),
-    choices: literalsOf(withoutNull(value)),
+    choices: readStringLiterals(stripNull(value)),
     holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,
     resolves: "resolves" in row ? row.resolves : undefined,
@@ -285,19 +286,19 @@ const readPayloadSchema = (payload: unknown): unknown => {
   return (json?.schemas?.[0] as { schema?: unknown } | undefined)?.schema;
 };
 
-const propertyNames = (ast: Ast | undefined): ReadonlyArray<string> =>
+const listPropertyNames = (ast: Ast | undefined): ReadonlyArray<string> =>
   (ast?.propertySignatures ?? []).map((property) => String(property.name));
 
 /** What the success schema answers with: a record, a page of records, or a bare list. */
-const returnsOf = (success: unknown): Returns => {
+const readReturns = (success: unknown): Returns => {
   const ast = [...((success as Set<{ ast?: Ast }> | undefined) ?? [])][0]?.ast;
   if (ast === undefined) return { fields: [], items: undefined };
   if (ast._tag === "Arrays") {
-    return { fields: [], items: propertyNames(ast.rest?.[0]) };
+    return { fields: [], items: listPropertyNames(ast.rest?.[0]) };
   }
-  const fields = propertyNames(ast);
+  const fields = listPropertyNames(ast);
   const page = ast.propertySignatures?.find((property) => String(property.name) === "items");
-  return { fields, items: page === undefined ? undefined : propertyNames(page.type.rest?.[0]) };
+  return { fields, items: page === undefined ? undefined : listPropertyNames(page.type.rest?.[0]) };
 };
 
 /**
@@ -305,7 +306,7 @@ const returnsOf = (success: unknown): Returns => {
  * struct wrapped in a class declaration, so the code is the literal its `error`
  * field carries.
  */
-const codesOf = (errors: unknown): ReadonlyArray<ErrorCode> => {
+const listErrorCodes = (errors: unknown): ReadonlyArray<ErrorCode> => {
   const codes: Array<ErrorCode> = [];
   for (const error of (errors as Set<{ ast?: Ast }> | undefined) ?? []) {
     const envelope = error.ast?.typeParameters?.[0];
@@ -318,13 +319,13 @@ const codesOf = (errors: unknown): ReadonlyArray<ErrorCode> => {
 };
 
 /** `:name` path parameters, in the order the route writes them. */
-const pathParams = (path: string): ReadonlyArray<string> =>
+const listPathParams = (path: string): ReadonlyArray<string> =>
   [...path.matchAll(/:([A-Za-z0-9_]+)/g)].map((match) => match[1]!);
 
 /** The table, read through its row type rather than through its literal shape. */
 const TABLE: Record<OperationId, CliRow> = CLI;
 
-const build = (): ReadonlyArray<Command> => {
+const buildCommands = (): ReadonlyArray<Command> => {
   const commands: Array<Command> = [];
 
   HttpApi.reflect(api, {
@@ -348,7 +349,7 @@ const build = (): ReadonlyArray<Command> => {
       // row, so the CLI table and the schemas always list the same fields.
       const taken = new Set(
         [each.params, payloadSchema, each.query].flatMap((schema) =>
-          propertyNames((schema as { ast?: Ast } | undefined)?.ast),
+          listPropertyNames((schema as { ast?: Ast } | undefined)?.ast),
         ),
       );
       const stale = Object.keys(row.fields).find((name) => !taken.has(name));
@@ -363,7 +364,7 @@ const build = (): ReadonlyArray<Command> => {
       );
       const payload = buildFields(id, payloadSchema, row.fields, "payload");
       const query = buildFields(id, each.query, row.fields, "query");
-      const inPath = pathParams(operation.path);
+      const inPath = listPathParams(operation.path);
 
       commands.push({
         id,
@@ -385,13 +386,13 @@ const build = (): ReadonlyArray<Command> => {
         query,
         // The paging triple travels together, so the sort field is enough to
         // say the operation pages.
-        paged: propertyNames((each.query as { ast?: Ast } | undefined)?.ast).includes("sort"),
-        sortFields: sortFieldsOf(each.query),
+        paged: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast).includes("sort"),
+        sortFields: readSortFields(each.query),
         help: row.help,
         examples: row.examples,
-        codes: codesOf(each.error),
+        codes: listErrorCodes(each.error),
         meanings: row.errors ?? {},
-        returns: returnsOf(each.success),
+        returns: readReturns(each.success),
       });
     },
   });
@@ -400,24 +401,24 @@ const build = (): ReadonlyArray<Command> => {
 };
 
 /** Every visible command, in the contract's own order. */
-export const COMMANDS: ReadonlyArray<Command> = build();
+export const COMMANDS: ReadonlyArray<Command> = buildCommands();
 
 /** A key no single word can collide with, so `hercule "task list"` is not a command. */
-const keyOf = (words: ReadonlyArray<string>): string => words.join("\u0000");
+const buildWordsKey = (words: ReadonlyArray<string>): string => words.join("\u0000");
 
-const BY_WORDS = new Map(COMMANDS.map((command) => [keyOf(command.words), command]));
+const BY_WORDS = new Map(COMMANDS.map((command) => [buildWordsKey(command.words), command]));
 
 const BY_ID = new Map(COMMANDS.map((command) => [command.id, command]));
 
 /** The command spelled by exactly these words, or `undefined`. */
-export const commandAt = (words: ReadonlyArray<string>): Command | undefined =>
-  BY_WORDS.get(keyOf(words));
+export const findCommandByWords = (words: ReadonlyArray<string>): Command | undefined =>
+  BY_WORDS.get(buildWordsKey(words));
 
 /** The command an operation id names; `undefined` for a hidden operation. */
-export const commandOf = (id: OperationId): Command | undefined => BY_ID.get(id);
+export const findCommandById = (id: OperationId): Command | undefined => BY_ID.get(id);
 
 /** Every command spelled under this prefix, in the contract's order. */
-export const commandsUnder = (prefix: ReadonlyArray<string>): ReadonlyArray<Command> =>
+export const listCommandsUnder = (prefix: ReadonlyArray<string>): ReadonlyArray<Command> =>
   COMMANDS.filter(
     (command) =>
       command.words.length > prefix.length &&
@@ -429,9 +430,9 @@ export const commandsUnder = (prefix: ReadonlyArray<string>): ReadonlyArray<Comm
  * the root, and a noun's verbs and nested nouns below it. Empty when the prefix
  * is not a node of the tree, which is what makes a word unknown.
  */
-export const wordsAfter = (prefix: ReadonlyArray<string>): ReadonlyArray<string> => {
+export const listWordsAfter = (prefix: ReadonlyArray<string>): ReadonlyArray<string> => {
   const next: Array<string> = [];
-  for (const command of commandsUnder(prefix)) {
+  for (const command of listCommandsUnder(prefix)) {
     const word = command.words[prefix.length]!;
     if (!next.includes(word)) next.push(word);
   }
@@ -467,15 +468,15 @@ export interface Mention {
  * prose that runs on after a whole command - "hercule task list to find work" -
  * keeps the command.
  */
-export const mentionsIn = (text: string): ReadonlyArray<Mention> =>
+export const findMentions = (text: string): ReadonlyArray<Mention> =>
   [...text.matchAll(/\bhercule((?:\s+[a-z][a-z-]*)+)/g)].map((match) => {
     const words = match[1]!.trim().split(/\s+/);
     for (let length = words.length; length > 0; length -= 1) {
       const run = words.slice(0, length);
       const named = run.join(" ");
-      const command = commandAt(run);
+      const command = findCommandByWords(run);
       const whole = command !== undefined || HAND_WRITTEN.includes(named);
-      if (!whole && wordsAfter(run).length === 0) continue;
+      if (!whole && listWordsAfter(run).length === 0) continue;
       if (length === words.length || whole) return { words, names: named, command };
       break;
     }

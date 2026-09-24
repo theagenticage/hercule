@@ -49,17 +49,17 @@ import {
 } from "@hercule/contract";
 import { currentStamp, requireGrant, USER_ACTOR } from "../actor";
 import { mintToken } from "../credentials";
-import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
 import {
-  authorizationUrl,
-  challengeFor,
+  buildAuthorizationUrl,
+  computeChallenge,
   decodeCallback,
   exchangeCode,
   oauthClients,
   OAUTH_TOKENS,
-  redirectUri,
+  buildRedirectUri,
   serializeTokens,
   SETUP_LIFETIME_MS,
   type Outcome,
@@ -77,7 +77,7 @@ import { oauthSetupRepository } from "./setups";
 const QueryInput = Schema.Struct({
   type: Schema.optionalKey(Schema.String),
   status: Schema.optionalKey(ConnectionStatus),
-  ...pageInput(CONNECTION_SORT_FIELDS),
+  ...buildPageInputFields(CONNECTION_SORT_FIELDS),
 });
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
@@ -121,7 +121,7 @@ const NAMED_BY_RESOURCE =
 type Contribution = RegisteredConnectionType["contribution"];
 
 /** The credential fields a type declares, which is what a setup asks for. */
-const fieldsOf = (contribution: Contribution): ReadonlyArray<string> =>
+const listCredentialFields = (contribution: Contribution): ReadonlyArray<string> =>
   contribution.setup.flatMap((step) =>
     step.kind === "credentials" ? step.fields.map((field) => field.name) : [],
   );
@@ -132,21 +132,21 @@ const isOAuthFlow = (contribution: Contribution): boolean =>
 const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
 
 /** A flow that ended before it made a connection, carrying what to say about it. */
-const ended = (outcome: Outcome): Effect.Effect<never, Outcome> => Effect.fail(outcome);
+const failWithOutcome = (outcome: Outcome): Effect.Effect<never, Outcome> => Effect.fail(outcome);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connections = yield* connectionRepository;
   const setups = yield* oauthSetupRepository;
-  const clientOf = yield* oauthClients;
+  const findOAuthClient = yield* oauthClients;
   const secrets = yield* Secrets;
   const types = yield* ConnectionTypes;
   const audit = yield* AuditLog;
 
-  const ownerOf = (id: string): SecretOwner => ({ kind: "connection", id });
+  const buildSecretOwner = (id: string): SecretOwner => ({ kind: "connection", id });
 
   /** The type a request names, or the `validation` a caller can act on. */
-  const typeNamed = (type: string): Effect.Effect<RegisteredConnectionType, Validation> =>
+  const readTypeOrFail = (type: string): Effect.Effect<RegisteredConnectionType, Validation> =>
     Effect.flatMap(
       types.named(type),
       Option.match({
@@ -165,7 +165,9 @@ const make = Effect.gen(function* () {
    * row was written, so a build that no longer defines it is the build's to fix
    * and nothing the caller can correct by sending something else.
    */
-  const typeOf = (row: StoredConnection): Effect.Effect<RegisteredConnectionType, InvalidState> =>
+  const readStoredTypeOrFail = (
+    row: StoredConnection,
+  ): Effect.Effect<RegisteredConnectionType, InvalidState> =>
     Effect.flatMap(
       types.named(row.type),
       Option.match({
@@ -218,7 +220,7 @@ const make = Effect.gen(function* () {
     contribution: Contribution,
     credentials: Record<string, string>,
   ): Effect.Effect<Record<string, string>, Validation> => {
-    const declared = fieldsOf(contribution);
+    const declared = listCredentialFields(contribution);
     const issues = [
       ...declared
         .filter((name) => credentials[name] === undefined)
@@ -241,14 +243,14 @@ const make = Effect.gen(function* () {
    * needs somewhere to put the message. A type with no field to put it under -
    * a redirect flow - is refused at the group itself.
    */
-  const validated = (
+  const validateCredentials = (
     contribution: Contribution,
     credentials: Record<string, string>,
   ): Effect.Effect<{ readonly displayName: string; readonly detail?: string }, Validation> =>
     Effect.mapError(
       Effect.provide(contribution.validate(credentials), FetchHttpClient.layer),
       (failure: ConnectionValidationFailed) => {
-        const field = fieldsOf(contribution)[0];
+        const field = listCredentialFields(contribution)[0];
         return createValidationError(
           [
             {
@@ -262,7 +264,10 @@ const make = Effect.gen(function* () {
     );
 
   /** A connection as the wire sees it: the row, plus what it owns in `secrets`. */
-  const compose = (row: StoredConnection, refs: ReadonlyArray<SecretNameRef>): Connection => ({
+  const buildConnectionRecord = (
+    row: StoredConnection,
+    refs: ReadonlyArray<SecretNameRef>,
+  ): Connection => ({
     id: row.id,
     type: row.type,
     label: row.label,
@@ -279,7 +284,9 @@ const make = Effect.gen(function* () {
     updatedAt: row.updatedAt,
   });
 
-  const stored = (id: string): Effect.Effect<StoredConnection, NotFound | SqlError> =>
+  const readStoredConnectionOrFail = (
+    id: string,
+  ): Effect.Effect<StoredConnection, NotFound | SqlError> =>
     Effect.flatMap(
       connections.one(id),
       Option.match({
@@ -288,13 +295,13 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const composed = (row: StoredConnection): Effect.Effect<Connection, SqlError> =>
+  const readConnectionRecord = (row: StoredConnection): Effect.Effect<Connection, SqlError> =>
     Effect.map(secrets.refs("connection", [row.id]), (refs) =>
-      compose(row, refs.get(row.id) ?? []),
+      buildConnectionRecord(row, refs.get(row.id) ?? []),
     );
 
-  const one = (id: string): Effect.Effect<Connection, NotFound | SqlError> =>
-    Effect.flatMap(stored(id), composed);
+  const readConnectionOrFail = (id: string): Effect.Effect<Connection, NotFound | SqlError> =>
+    Effect.flatMap(readStoredConnectionOrFail(id), readConnectionRecord);
 
   /**
    * Writes each pasted value under the connection's own owner scope. A field
@@ -307,7 +314,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.forEach(
       Object.entries(credentials),
-      ([name, value]) => secrets.set(ownerOf(id), name, Redacted.make(value)),
+      ([name, value]) => secrets.set(buildSecretOwner(id), name, Redacted.make(value)),
       { discard: true },
     ).pipe(Effect.catchTag("SecretNameError", Effect.die));
 
@@ -316,22 +323,22 @@ const make = Effect.gen(function* () {
    * is a typed failure carrying the word the user is told, so the path through
    * here reads as the one thing that has to happen.
    */
-  const finish = (query: unknown): Effect.Effect<Outcome, Outcome> =>
+  const finishOAuthCallback = (query: unknown): Effect.Effect<Outcome, Outcome> =>
     Effect.gen(function* () {
       const params = yield* Effect.catchTag(decodeCallback(query), "SchemaError", () =>
-        ended("expired"),
+        failWithOutcome("expired"),
       );
-      if (params.state === undefined) return yield* ended("expired");
+      if (params.state === undefined) return yield* failWithOutcome("expired");
       const at = yield* nowIso;
       // Spent in its own transaction, before anything waits on the provider: a
       // state presented twice must find nothing the second time.
       const pending = yield* Effect.orDie(withTransaction(sql, setups.consume(params.state, at)));
-      if (Option.isNone(pending)) return yield* ended("expired");
+      if (Option.isNone(pending)) return yield* failWithOutcome("expired");
       const setup = pending.value;
       // The provider sent the user back with a refusal instead of a code, or
       // with neither: either way there is nothing here to spend.
       if (params.error !== undefined || params.code === undefined) {
-        return yield* ended("denied");
+        return yield* failWithOutcome("denied");
       }
 
       const registered = Option.getOrUndefined(yield* types.named(setup.type));
@@ -339,29 +346,29 @@ const make = Effect.gen(function* () {
       const client =
         registered === undefined
           ? Option.none()
-          : yield* Effect.orDie(clientOf(registered.pluginId));
+          : yield* Effect.orDie(findOAuthClient(registered.pluginId));
       // A build that no longer declares the type, or a plugin whose credentials
       // were cleared while the user was at the provider: the code cannot be
       // spent in either, which is what the word says.
       if (registered === undefined || oauth === undefined || Option.isNone(client)) {
-        return yield* ended("exchange-failed");
+        return yield* failWithOutcome("exchange-failed");
       }
 
       const tokens = yield* exchangeCode({
         tokenUrl: oauth.tokenUrl,
         client: client.value,
         code: params.code,
-        redirectUri: redirectUri(setup.origin),
+        redirectUri: buildRedirectUri(setup.origin),
         codeVerifier: setup.codeVerifier,
       }).pipe(
         Effect.provide(FetchHttpClient.layer),
-        Effect.catch(() => ended("exchange-failed")),
+        Effect.catch(() => failWithOutcome("exchange-failed")),
       );
       const account = yield* registered.contribution
         .validate({ accessToken: tokens.accessToken })
         .pipe(
           Effect.provide(FetchHttpClient.layer),
-          Effect.catchTag("ConnectionValidationFailed", () => ended("rejected")),
+          Effect.catchTag("ConnectionValidationFailed", () => failWithOutcome("rejected")),
         );
 
       const credentials = { [OAUTH_TOKENS]: serializeTokens(tokens) };
@@ -419,7 +426,7 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
-      if (!written) return yield* ended("expired");
+      if (!written) return yield* failWithOutcome("expired");
       return "ok" as const;
     });
 
@@ -451,7 +458,9 @@ const make = Effect.gen(function* () {
           "connection",
           listing.items.map((row) => row.id),
         );
-        const items = listing.items.map((row) => compose(row, refs.get(row.id) ?? []));
+        const items = listing.items.map((row) =>
+          buildConnectionRecord(row, refs.get(row.id) ?? []),
+        );
         return {
           items,
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
@@ -464,7 +473,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("connection.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        return yield* one(id);
+        return yield* readConnectionOrFail(id);
       }),
 
     /**
@@ -478,7 +487,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("connection.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
-        const { pluginId, contribution } = yield* typeNamed(decoded.type);
+        const { pluginId, contribution } = yield* readTypeOrFail(decoded.type);
         if (isOAuthFlow(contribution)) {
           const message = `the type ${decoded.type} is set up through its OAuth flow: start it with connection.startOAuth`;
           return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
@@ -486,7 +495,7 @@ const make = Effect.gen(function* () {
         const config = decoded.config ?? {};
         yield* readConfig(contribution, config);
         const credentials = yield* readCredentials(contribution, decoded.credentials);
-        const account = yield* validated(contribution, credentials);
+        const account = yield* validateCredentials(contribution, credentials);
 
         return yield* withTransaction(
           sql,
@@ -516,7 +525,7 @@ const make = Effect.gen(function* () {
               record: { topic: "connection", id: row.id },
               at,
             });
-            return yield* composed(row);
+            return yield* readConnectionRecord(row);
           }),
         );
       }),
@@ -534,9 +543,9 @@ const make = Effect.gen(function* () {
           decodeUpdate(input),
           createDecodeValidationError,
         );
-        const row = yield* stored(id);
+        const row = yield* readStoredConnectionOrFail(id);
         if (patch.config !== undefined) {
-          const { contribution } = yield* typeOf(row);
+          const { contribution } = yield* readStoredTypeOrFail(row);
           yield* readConfig(contribution, patch.config);
         }
         return yield* withTransaction(
@@ -551,7 +560,7 @@ const make = Effect.gen(function* () {
               record: { topic: "connection", id },
               at,
             });
-            return yield* one(id);
+            return yield* readConnectionOrFail(id);
           }),
         );
       }),
@@ -573,8 +582,8 @@ const make = Effect.gen(function* () {
           decodeCredentials(input),
           createDecodeValidationError,
         );
-        const row = yield* stored(decoded.id);
-        const { contribution } = yield* typeOf(row);
+        const row = yield* readStoredConnectionOrFail(decoded.id);
+        const { contribution } = yield* readStoredTypeOrFail(row);
         if (isOAuthFlow(contribution)) {
           const message = `the type ${row.type} is reconnected through its OAuth flow: start it with connection.startOAuth`;
           return yield* Effect.fail(
@@ -582,7 +591,7 @@ const make = Effect.gen(function* () {
           );
         }
         const credentials = yield* readCredentials(contribution, decoded.credentials);
-        const account = yield* validated(contribution, credentials);
+        const account = yield* validateCredentials(contribution, credentials);
 
         return yield* withTransaction(
           sql,
@@ -601,7 +610,7 @@ const make = Effect.gen(function* () {
               record: { topic: "connection", id: row.id },
               at,
             });
-            return yield* one(row.id);
+            return yield* readConnectionOrFail(row.id);
           }),
         );
       }),
@@ -620,7 +629,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("connection.startOAuth");
         const decoded = yield* Effect.mapError(decodeStart(input), createDecodeValidationError);
-        const { pluginId, contribution } = yield* typeNamed(decoded.type);
+        const { pluginId, contribution } = yield* readTypeOrFail(decoded.type);
         const oauth = contribution.oauth;
         if (oauth === undefined) {
           const message = `the type ${decoded.type} is not set up through a redirect flow`;
@@ -661,7 +670,7 @@ const make = Effect.gen(function* () {
         }
         const config = decoded.config ?? existing?.config ?? {};
         yield* readConfig(contribution, config);
-        const client = yield* clientOf(pluginId);
+        const client = yield* findOAuthClient(pluginId);
         if (Option.isNone(client)) {
           return yield* Effect.fail(
             createInvalidStateError(
@@ -693,11 +702,11 @@ const make = Effect.gen(function* () {
           }),
         );
         return {
-          authorizationUrl: authorizationUrl(oauth, {
+          authorizationUrl: buildAuthorizationUrl(oauth, {
             clientId: client.value.clientId,
-            redirectUri: redirectUri(decoded.origin),
+            redirectUri: buildRedirectUri(decoded.origin),
             state,
-            challenge: challengeFor(codeVerifier),
+            challenge: computeChallenge(codeVerifier),
           }),
         };
       }),
@@ -713,7 +722,7 @@ const make = Effect.gen(function* () {
      */
     completeOAuth: (query: unknown): Effect.Effect<string> =>
       Effect.map(
-        Effect.catch(finish(query), (outcome: Outcome) => Effect.succeed(outcome)),
+        Effect.catch(finishOAuthCallback(query), (outcome: Outcome) => Effect.succeed(outcome)),
         (outcome) => `/connections?oauth=${outcome}`,
       ),
 
@@ -731,7 +740,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("connection.delete");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        const row = yield* stored(id);
+        const row = yield* readStoredConnectionOrFail(id);
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -742,7 +751,7 @@ const make = Effect.gen(function* () {
               return yield* Effect.fail(createInvalidStateError(NAMED_BY_RESOURCE));
             }
             const at = yield* nowIso;
-            const owner = ownerOf(id);
+            const owner = buildSecretOwner(id);
             const names =
               (yield* secrets.refs("connection", [id])).get(id)?.map((ref) => ref.name) ?? [];
             yield* Effect.forEach(names, (name) => secrets.delete(owner, name), {

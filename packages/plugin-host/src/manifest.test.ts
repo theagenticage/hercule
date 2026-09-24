@@ -16,7 +16,7 @@ const decode = (input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(PluginManifest)(input))._tag;
 
 /** A copy of `manifest` without `key`, for asserting a field is required. */
-const without = (key: string) => {
+const omitKey = (key: string) => {
   const copy: Record<string, unknown> = { ...manifest };
   delete copy[key];
   return copy;
@@ -49,7 +49,7 @@ describe("the plugin manifest", () => {
   it.each(["id", "displayName", "hostApi", "capabilities"])(
     "refuses a manifest without %s",
     (key) => {
-      expect(decode(without(key))).toBe("Failure");
+      expect(decode(omitKey(key))).toBe("Failure");
     },
   );
 

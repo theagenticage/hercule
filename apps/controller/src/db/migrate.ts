@@ -51,10 +51,10 @@ export const databaseVersion: Effect.Effect<number, SqlError, SqlClient.SqlClien
 );
 
 /** UTC, filename-safe, sorts by age: `20260904T092133084Z`. */
-const timestamp = (now: Date): string => now.toISOString().replaceAll(/[-:.]/g, "");
+const formatTimestamp = (now: Date): string => now.toISOString().replaceAll(/[-:.]/g, "");
 
 /** Keeps the newest pre-migration copies and deletes the rest. Daily backups are untouched. */
-const prune = (backupsDir: string): Effect.Effect<void, PlatformError, FileSystem> =>
+const pruneBackups = (backupsDir: string): Effect.Effect<void, PlatformError, FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem;
     const entries = yield* fs.readDirectory(backupsDir);
@@ -80,11 +80,11 @@ export const backupBeforeMigration = (
     const fs = yield* FileSystem;
     yield* fs.makeDirectory(backupsDir, { recursive: true });
     const now = new Date(yield* Clock.currentTimeMillis);
-    const path = `${backupsDir}/${timestamp(now)}${PREMIGRATION_SUFFIX}`;
+    const path = `${backupsDir}/${formatTimestamp(now)}${PREMIGRATION_SUFFIX}`;
     // A path is not bindable in a VACUUM statement, so it is inlined with
     // SQLite's own quoting. Backup paths come from the config, never from a row.
     yield* sql.unsafe(`VACUUM INTO '${path.replaceAll("'", "''")}'`);
-    yield* prune(backupsDir);
+    yield* pruneBackups(backupsDir);
     return path;
   });
 
@@ -98,7 +98,7 @@ export const runMigrations = (
 > => Effect.suspend(() => SqliteMigrator.run({ loader: Effect.succeed(set) }));
 
 /** The schema version a migration set carries: the highest id in it. */
-const highestId = (set: ReadonlyArray<Migrator.ResolvedMigration>): number =>
+const findHighestId = (set: ReadonlyArray<Migrator.ResolvedMigration>): number =>
   set.reduce((highest, [id]) => Math.max(highest, id), 0);
 
 /**
@@ -123,7 +123,7 @@ export const migrate = (options: {
 > =>
   Effect.gen(function* () {
     const set = options.migrations ?? migrations;
-    const target = highestId(set);
+    const target = findHighestId(set);
     const version = yield* databaseVersion;
     if (version > target) {
       return yield* new SchemaVersionError({

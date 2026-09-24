@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Checkbox } from "@hercule/ui";
 import {
   formatStamp,
-  idTail,
+  toIdTail,
   joinCommand,
   queryKeys,
   type HerculeClient,
@@ -119,7 +119,7 @@ export function AddMachine({
               {/* Two tokens minted in the same minute read alike, so each says
                   which one it is: the tail is what the revoke names. */}
               <span className="min-w-0 flex-1 truncate text-muted">
-                Token <code className="font-mono text-faint">{idTail(token.id)}</code> expires{" "}
+                Token <code className="font-mono text-faint">{toIdTail(token.id)}</code> expires{" "}
                 {formatStamp(new Date(token.expiresAt), timezone)}
               </span>
               <Button

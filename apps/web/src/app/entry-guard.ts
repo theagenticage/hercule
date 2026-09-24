@@ -11,7 +11,7 @@
  * and what clears a rejected token are all decided in `client-core`; nothing
  * here interprets a settings value or an error beyond routing on it.
  */
-import { ApiError, nextOnboardingStep, type OnboardingStep } from "@hercule/client-core";
+import { ApiError, findNextOnboardingStep, type OnboardingStep } from "@hercule/client-core";
 import type { SettingsState } from "@hercule/contract";
 import type { RouterContext } from "./context";
 import { setupQuery, settingsQuery } from "./queries";
@@ -42,7 +42,7 @@ export interface EntryDeps {
   readonly readSettings: () => Promise<SettingsState>;
 }
 
-export const entryDeps = ({ client, queryClient }: RouterContext): EntryDeps => ({
+export const buildEntryDeps = ({ client, queryClient }: RouterContext): EntryDeps => ({
   hasToken: () => client.getToken() !== null,
   readSetup: () => queryClient.ensureQueryData(setupQuery(client)),
   readSettings: () => queryClient.ensureQueryData(settingsQuery(client)),
@@ -67,7 +67,7 @@ export const resolveEntry = async (
     throw error;
   }
 
-  const step = nextOnboardingStep(completedSteps);
+  const step = findNextOnboardingStep(completedSteps);
   if (step === null) return BEFORE_THE_APP.has(pathname) ? HOME_PATH : null;
   return pathname === ONBOARDING_PATH[step] ? null : ONBOARDING_PATH[step];
 };

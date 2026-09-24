@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema";
 import { EventSourceNames, PluginError, type EventSourceDefinition } from "@hercule/plugin-host";
 import { MAX_EVENT_KIND_LENGTH, MAX_PLUGIN_MESSAGE_LENGTH } from "@hercule/contract";
 import { isCoreEventKind, type DeclaredEventKindWithConnectionType } from "../events";
-import { asPluginError, describeFieldIssues } from "./errors";
+import { toPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
 import type { NewContribution } from "./repository";
 
@@ -71,7 +71,7 @@ export const registerEventSourceContribution = (
   Effect.gen(function* () {
     const names = yield* Effect.mapError(
       decodeEventSourceNames({ id: definition.id, connectionType: definition.connectionType }),
-      asPluginError,
+      toPluginError,
     );
     // The identity the catalog keys on, made the same way a connection type's
     // is: the plugin's id and the word it declared.

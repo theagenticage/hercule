@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { approvalCard, formatDuration, formatStamp } from "@hercule/client-core";
+import { buildApprovalCard, formatDuration, formatStamp } from "@hercule/client-core";
 import type {
   Input,
   ModelOption,
@@ -25,8 +25,15 @@ import type {
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
-import { sessionStreamTopic, sessionTapTopic } from "@hercule/contract";
-import { envelope, pickRow, reading, renderApp, stubApi, type Handler } from "../../../app/testing";
+import { buildSessionStreamTopic, buildSessionTapTopic } from "@hercule/contract";
+import {
+  buildErrorBody,
+  pickRow,
+  readPageText,
+  renderApp,
+  stubApi,
+  type Handler,
+} from "../../../app/testing";
 
 const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
 const ZONE = "Europe/Amsterdam";
@@ -55,7 +62,7 @@ const BASE_SESSION: Session = {
   unenforced: [],
 };
 
-const session = (overrides: Partial<Session>): Session => ({ ...BASE_SESSION, ...overrides });
+const buildSession = (overrides: Partial<Session>): Session => ({ ...BASE_SESSION, ...overrides });
 
 /**
  * The composer's own fixtures (AC-19 to AC-21): a provider instance, a runner
@@ -79,7 +86,7 @@ const DECLARED: ProviderInstance["declared"] = {
   structuredOutput: "supported",
 };
 
-const instanceSnapshot = (
+const buildInstanceSnapshot = (
   runnerId: string,
   identity: string,
   planLabel: string,
@@ -103,7 +110,7 @@ const INSTANCE_STARTED: ProviderInstance = {
   binaryName: "claude",
   declared: DECLARED,
   snapshots: [
-    instanceSnapshot(BASE_SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildInstanceSnapshot(BASE_SESSION.runnerId, "rogier@example.com", "Claude Max", [
       { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] },
       { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
     ]),
@@ -134,7 +141,7 @@ const EFFORT: ModelOption = {
 const INSTANCE_OPTIONS: ProviderInstance = {
   ...INSTANCE_STARTED,
   snapshots: [
-    instanceSnapshot(BASE_SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildInstanceSnapshot(BASE_SESSION.runnerId, "rogier@example.com", "Claude Max", [
       { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [EFFORT] },
       { slug: "claude-opus-5", name: "Claude Opus 5", options: [EFFORT] },
     ]),
@@ -146,7 +153,7 @@ const INSTANCE_OTHER: ProviderInstance = {
   id: "01a06d02-1000-7000-8000-000000000099",
   name: "work",
   snapshots: [
-    instanceSnapshot(BASE_SESSION.runnerId, "work@example.com", "Claude Pro", [
+    buildInstanceSnapshot(BASE_SESSION.runnerId, "work@example.com", "Claude Pro", [
       { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
     ]),
   ],
@@ -189,7 +196,7 @@ const PROFILE_OTHER: Profile = {
 };
 
 /** A controller answering for itself and for this one session's thread. */
-const controller = (
+const buildController = (
   fixture: Session,
   rows: readonly TranscriptRow[],
   extra: Readonly<Record<string, Handler>> = {},
@@ -212,12 +219,12 @@ const controller = (
   ...extra,
 });
 
-const open = async (
+const openApp = async (
   fixture: Session,
   rows: readonly TranscriptRow[],
   extra: Readonly<Record<string, Handler>> = {},
 ) => {
-  const api = stubApi(controller(fixture, rows, extra));
+  const api = stubApi(buildController(fixture, rows, extra));
   const app = await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
   return { ...app, api };
 };
@@ -236,7 +243,7 @@ const settle = () =>
   });
 
 /** A `TranscriptRow`, position and `at` taken off the event itself. */
-const row = (position: number, event: TranscriptRow["event"]): TranscriptRow => ({
+const buildTranscriptRow = (position: number, event: TranscriptRow["event"]): TranscriptRow => ({
   position,
   at: event.at,
   event,
@@ -247,7 +254,7 @@ const row = (position: number, event: TranscriptRow["event"]): TranscriptRow => 
  * agent is typing, the live tail beside them. Found from any node inside it,
  * because a block and the tail are siblings there.
  */
-const answerArea = (inside: HTMLElement): HTMLElement => {
+const findAnswerArea = (inside: HTMLElement): HTMLElement => {
   const paragraph = inside.tagName === "SPAN" ? inside : inside.closest("p");
   expect(paragraph, "the answer is neither a paragraph nor the live tail").not.toBeNull();
   return paragraph!.parentElement as HTMLElement;
@@ -258,7 +265,7 @@ const answerArea = (inside: HTMLElement): HTMLElement => {
  * - the same anchor the transcript test above uses. It scopes the markdown
  * assertions to the thread's own prose, away from the chrome and the composer.
  */
-const proseColumn = (inside: HTMLElement): HTMLElement => {
+const findProseColumn = (inside: HTMLElement): HTMLElement => {
   const column = inside.closest('[class*="max-w-[800px]"]');
   expect(column, "no 800px column ancestor found").not.toBeNull();
   return column as HTMLElement;
@@ -273,16 +280,16 @@ type TurnEvent = TranscriptRow["event"];
  * surfaces is where it sits in the log, and the position is what
  * `mergeTranscript` orders and de-duplicates on.
  */
-const transcript = (...parts: ReadonlyArray<readonly TurnEvent[]>): TranscriptRow[] =>
-  parts.flat().map((event, index) => row(index, { ...event, eventId: `e${index}` }));
+const buildTranscript = (...parts: ReadonlyArray<readonly TurnEvent[]>): TranscriptRow[] =>
+  parts.flat().map((event, index) => buildTranscriptRow(index, { ...event, eventId: `e${index}` }));
 
 /** A turn opens. */
-const turnStarted = (turnId: string, at: string): TurnEvent[] => [
+const buildTurnStart = (turnId: string, at: string): TurnEvent[] => [
   { _tag: "turn.started", eventId: "", sessionId: SESSION_ID, at, turnId },
 ];
 
 /** A turn closes, which is what gives it a duration to show. */
-const turnCompleted = (turnId: string, at: string): TurnEvent[] => [
+const buildTurnCompletion = (turnId: string, at: string): TurnEvent[] => [
   { _tag: "turn.completed", eventId: "", sessionId: SESSION_ID, at, turnId, state: "completed" },
 ];
 
@@ -290,7 +297,12 @@ const turnCompleted = (turnId: string, at: string): TurnEvent[] => [
  * The user's message, the way a transcript writes one: started and completed
  * in the same breath, the text on both.
  */
-const userSaid = (turnId: string, at: string, itemId: string, text: string): TurnEvent[] => [
+const buildUserMessage = (
+  turnId: string,
+  at: string,
+  itemId: string,
+  text: string,
+): TurnEvent[] => [
   {
     _tag: "item.started",
     eventId: "",
@@ -315,7 +327,12 @@ const userSaid = (turnId: string, at: string, itemId: string, text: string): Tur
 ];
 
 /** The text of an assistant message, which is the only place one carries text. */
-const assistantText = (turnId: string, at: string, itemId: string, text: string): TurnEvent[] => [
+const buildAssistantTextDelta = (
+  turnId: string,
+  at: string,
+  itemId: string,
+  text: string,
+): TurnEvent[] => [
   {
     _tag: "content.delta",
     eventId: "",
@@ -329,7 +346,7 @@ const assistantText = (turnId: string, at: string, itemId: string, text: string)
 ];
 
 /** An assistant message's start; on an open item this is the last row there is. */
-const assistantStarted = (turnId: string, at: string, itemId: string): TurnEvent[] => [
+const buildAssistantStart = (turnId: string, at: string, itemId: string): TurnEvent[] => [
   {
     _tag: "item.started",
     eventId: "",
@@ -342,7 +359,7 @@ const assistantStarted = (turnId: string, at: string, itemId: string): TurnEvent
 ];
 
 /** An assistant message's completion. */
-const assistantCompleted = (turnId: string, at: string, itemId: string): TurnEvent[] => [
+const buildAssistantCompletion = (turnId: string, at: string, itemId: string): TurnEvent[] => [
   {
     _tag: "item.completed",
     eventId: "",
@@ -356,14 +373,19 @@ const assistantCompleted = (turnId: string, at: string, itemId: string): TurnEve
 ];
 
 /** What an assistant message is in full: its text, then its own two rows. */
-const assistantSaid = (turnId: string, at: string, itemId: string, text: string): TurnEvent[] => [
-  ...assistantText(turnId, at, itemId, text),
-  ...assistantStarted(turnId, at, itemId),
-  ...assistantCompleted(turnId, at, itemId),
+const buildAssistantMessage = (
+  turnId: string,
+  at: string,
+  itemId: string,
+  text: string,
+): TurnEvent[] => [
+  ...buildAssistantTextDelta(turnId, at, itemId, text),
+  ...buildAssistantStart(turnId, at, itemId),
+  ...buildAssistantCompletion(turnId, at, itemId),
 ];
 
 /** A command item's start; it completes separately, or not at all while it runs. */
-const commandStarted = (
+const buildCommandStart = (
   turnId: string,
   at: string,
   itemId: string,
@@ -382,7 +404,7 @@ const commandStarted = (
 ];
 
 /** A command item's completion. */
-const commandCompleted = (
+const buildCommandCompletion = (
   turnId: string,
   at: string,
   itemId: string,
@@ -404,18 +426,18 @@ const commandCompleted = (
 const USER_TEXT = "Show me some markdown";
 
 /** One completed turn: `userText` as the user's line, then `text` as the whole answer. */
-const turnWithAnswer = (text: string, userText: string = USER_TEXT): TranscriptRow[] =>
-  transcript(
-    turnStarted("t5", "2026-09-08T13:00:00.000Z"),
-    userSaid("t5", "2026-09-08T13:00:00.100Z", "u5", userText),
-    assistantSaid("t5", "2026-09-08T13:00:01.000Z", "a5", text),
-    turnCompleted("t5", "2026-09-08T13:00:02.000Z"),
+const buildAnsweredTurn = (text: string, userText: string = USER_TEXT): TranscriptRow[] =>
+  buildTranscript(
+    buildTurnStart("t5", "2026-09-08T13:00:00.000Z"),
+    buildUserMessage("t5", "2026-09-08T13:00:00.100Z", "u5", userText),
+    buildAssistantMessage("t5", "2026-09-08T13:00:01.000Z", "a5", text),
+    buildTurnCompletion("t5", "2026-09-08T13:00:02.000Z"),
   );
 
 /** Opens a thread whose one turn answers with `text`, and returns its column. */
-const openAnswer = async (text: string): Promise<HTMLElement> => {
-  await open(session({ status: "idle" }), turnWithAnswer(text));
-  return proseColumn(await screen.findByText(USER_TEXT));
+const openAnsweredThread = async (text: string): Promise<HTMLElement> => {
+  await openApp(buildSession({ status: "idle" }), buildAnsweredTurn(text));
+  return findProseColumn(await screen.findByText(USER_TEXT));
 };
 
 const TOOL_DETAIL = { name: "Bash", input: { command: "ls -la" } };
@@ -426,53 +448,53 @@ const TOOL_TARGET = "ls -la";
  * Two completed turns: the first opens with a tool call (a divider to
  * collapse/expand), the second has no tool items at all (no divider).
  */
-const twoCompletedTurns = (): TranscriptRow[] =>
-  transcript(
-    turnStarted("t1", "2026-09-08T10:00:00.000Z"),
-    userSaid("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+const buildTwoCompletedTurns = (): TranscriptRow[] =>
+  buildTranscript(
+    buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+    buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
     // The tool starts before the answer's text and finishes between that text
     // and the assistant item's own rows, the way a real turn interleaves them.
-    commandStarted("t1", "2026-09-08T10:00:01.000Z", "tool1", TOOL_DETAIL),
-    assistantText("t1", "2026-09-08T10:00:02.000Z", "a1", "I'll look at the file."),
-    commandCompleted("t1", "2026-09-08T10:00:03.000Z", "tool1", TOOL_DETAIL),
-    assistantStarted("t1", "2026-09-08T10:00:03.500Z", "a1"),
-    assistantCompleted("t1", "2026-09-08T10:00:03.600Z", "a1"),
-    turnCompleted("t1", "2026-09-08T10:00:05.000Z"),
-    turnStarted("t2", "2026-09-08T10:01:00.000Z"),
-    userSaid("t2", "2026-09-08T10:01:00.100Z", "u2", "What about the tests?"),
-    assistantSaid("t2", "2026-09-08T10:01:01.000Z", "a2", "Added a test too."),
-    turnCompleted("t2", "2026-09-08T10:01:03.000Z"),
+    buildCommandStart("t1", "2026-09-08T10:00:01.000Z", "tool1", TOOL_DETAIL),
+    buildAssistantTextDelta("t1", "2026-09-08T10:00:02.000Z", "a1", "I'll look at the file."),
+    buildCommandCompletion("t1", "2026-09-08T10:00:03.000Z", "tool1", TOOL_DETAIL),
+    buildAssistantStart("t1", "2026-09-08T10:00:03.500Z", "a1"),
+    buildAssistantCompletion("t1", "2026-09-08T10:00:03.600Z", "a1"),
+    buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+    buildTurnStart("t2", "2026-09-08T10:01:00.000Z"),
+    buildUserMessage("t2", "2026-09-08T10:01:00.100Z", "u2", "What about the tests?"),
+    buildAssistantMessage("t2", "2026-09-08T10:01:01.000Z", "a2", "Added a test too."),
+    buildTurnCompletion("t2", "2026-09-08T10:01:03.000Z"),
   );
 
 describe("Thread: transcript (AC-11)", () => {
   it("renders each completed turn with its timestamp, the user bubble, the assistant text and a Worked-for divider for the turn with a tool item", async () => {
     const user = userEvent.setup();
-    await open(session({ status: "idle", title: "Thread s1" }), twoCompletedTurns());
+    await openApp(buildSession({ status: "idle", title: "Thread s1" }), buildTwoCompletedTurns());
 
     // The user's message and the assistant's reply, both turns.
     const userBubble = await screen.findByText("Fix the login bug");
     // The column itself: 800px max width, holding both.
-    const column = proseColumn(userBubble);
+    const column = findProseColumn(userBubble);
     expect(column.contains(await screen.findByText("What about the tests?"))).toBe(true);
-    expect(reading()).toContain("I'll look at the file.");
-    expect(reading()).toContain("What about the tests?");
-    expect(reading()).toContain("Added a test too.");
+    expect(readPageText()).toContain("I'll look at the file.");
+    expect(readPageText()).toContain("What about the tests?");
+    expect(readPageText()).toContain("Added a test too.");
 
     // Each turn's own mono timestamp line.
     const stamp1 = formatStamp(new Date("2026-09-08T10:00:00.000Z"), ZONE)!;
     const stamp2 = formatStamp(new Date("2026-09-08T10:01:00.000Z"), ZONE)!;
-    expect(reading()).toContain(stamp1);
-    expect(reading()).toContain(stamp2);
+    expect(readPageText()).toContain(stamp1);
+    expect(readPageText()).toContain(stamp2);
 
     // Turn 1 has a tool item, so it has a collapsed Worked-for divider.
     const divider = await screen.findByRole("button", { name: /worked for/i });
-    expect(reading(divider)).toBe(`Worked for ${formatDuration(5000)}›`);
+    expect(readPageText(divider)).toBe(`Worked for ${formatDuration(5000)}›`);
     // The tool item's line is not shown until the divider opens.
-    expect(reading()).not.toContain(TOOL_TARGET);
+    expect(readPageText()).not.toContain(TOOL_TARGET);
 
     await user.click(divider);
     await waitFor(() => {
-      expect(reading()).toContain(`command · ${TOOL_TARGET} · completed`);
+      expect(readPageText()).toContain(`command · ${TOOL_TARGET} · completed`);
     });
 
     // Turn 2 has no tool items at all, so it has no divider.
@@ -483,14 +505,14 @@ describe("Thread: transcript (AC-11)", () => {
     // Turn 1 opens a tool call and is cut off - no item.completed, no
     // turn.completed - before turn 2 starts and finishes normally.
     const abandonedThenCompleted: TranscriptRow[] = [
-      row(0, {
+      buildTranscriptRow(0, {
         _tag: "turn.started",
         eventId: "e0",
         sessionId: SESSION_ID,
         at: "2026-09-08T10:00:00.000Z",
         turnId: "t1",
       }),
-      row(1, {
+      buildTranscriptRow(1, {
         _tag: "item.started",
         eventId: "e1",
         sessionId: SESSION_ID,
@@ -500,7 +522,7 @@ describe("Thread: transcript (AC-11)", () => {
         kind: "user_message",
         detail: { text: "Fix the login bug" },
       }),
-      row(2, {
+      buildTranscriptRow(2, {
         _tag: "item.started",
         eventId: "e2",
         sessionId: SESSION_ID,
@@ -511,14 +533,14 @@ describe("Thread: transcript (AC-11)", () => {
         detail: TOOL_DETAIL,
       }),
       // No item.completed for tool1, no turn.completed for t1: abandoned.
-      row(3, {
+      buildTranscriptRow(3, {
         _tag: "turn.started",
         eventId: "e3",
         sessionId: SESSION_ID,
         at: "2026-09-08T10:01:00.000Z",
         turnId: "t2",
       }),
-      row(4, {
+      buildTranscriptRow(4, {
         _tag: "item.started",
         eventId: "e4",
         sessionId: SESSION_ID,
@@ -528,7 +550,7 @@ describe("Thread: transcript (AC-11)", () => {
         kind: "user_message",
         detail: { text: "Try again" },
       }),
-      row(5, {
+      buildTranscriptRow(5, {
         _tag: "turn.completed",
         eventId: "e5",
         sessionId: SESSION_ID,
@@ -537,10 +559,10 @@ describe("Thread: transcript (AC-11)", () => {
         state: "completed",
       }),
     ];
-    await open(session({ status: "idle" }), abandonedThenCompleted);
+    await openApp(buildSession({ status: "idle" }), abandonedThenCompleted);
 
     const divider = await screen.findByRole("button", { name: /worked for/i });
-    expect(reading(divider)).toBe("Worked for —›");
+    expect(readPageText(divider)).toBe("Worked for —›");
     // Settled, not still running: no shimmer, no live hue, no ticking.
     expect(divider.className).not.toContain("hercule-thread-shimmer");
     expect(divider.className).not.toContain("text-live");
@@ -548,12 +570,12 @@ describe("Thread: transcript (AC-11)", () => {
 });
 
 describe("Thread: the live turn (AC-12)", () => {
-  const liveTurnRows = (): TranscriptRow[] =>
-    transcript(
-      turnStarted("t3", "2026-09-08T11:00:00.000Z"),
-      userSaid("t3", "2026-09-08T11:00:00.100Z", "u3", "Run the tests"),
+  const buildLiveTurnRows = (): TranscriptRow[] =>
+    buildTranscript(
+      buildTurnStart("t3", "2026-09-08T11:00:00.000Z"),
+      buildUserMessage("t3", "2026-09-08T11:00:00.100Z", "u3", "Run the tests"),
       // No completion for tool3, and no turn.completed: the turn is live.
-      commandStarted("t3", "2026-09-08T11:00:01.000Z", "tool3", {
+      buildCommandStart("t3", "2026-09-08T11:00:01.000Z", "tool3", {
         name: "Bash",
         input: { command: "pnpm test" },
       }),
@@ -585,8 +607,8 @@ describe("Thread: the live turn (AC-12)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-08T11:00:03.000Z")); // 3s after turn.started
 
-    const busy = session({ status: "busy", lastActivityAt: "2026-09-08T11:00:01.000Z" });
-    await open(busy, liveTurnRows());
+    const busy = buildSession({ status: "busy", lastActivityAt: "2026-09-08T11:00:01.000Z" });
+    await openApp(busy, buildLiveTurnRows());
     await settle();
 
     const divider = screen.getByRole("button", { name: /^Working for 3s$/ });
@@ -597,7 +619,7 @@ describe("Thread: the live turn (AC-12)", () => {
     // own internal delays do not get on with a fully frozen fake clock.
     fireEvent.click(divider);
     await settle();
-    expect(reading()).toContain("command · pnpm test · running");
+    expect(readPageText()).toContain("command · pnpm test · running");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
@@ -621,8 +643,8 @@ describe("Thread: the live turn (AC-12)", () => {
       removeEventListener: () => {},
     }));
 
-    const busy = session({ status: "busy", lastActivityAt: "2026-09-08T11:00:01.000Z" });
-    await open(busy, liveTurnRows());
+    const busy = buildSession({ status: "busy", lastActivityAt: "2026-09-08T11:00:01.000Z" });
+    await openApp(busy, buildLiveTurnRows());
     await settle();
 
     const divider = screen.getByRole("button", { name: /^Working for 3s$/ });
@@ -636,12 +658,12 @@ describe("Thread: the live turn (AC-12)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-08T11:00:03.000Z"));
 
-    const exited = session({
+    const exited = buildSession({
       status: "exited",
       exitedAt: "2026-09-08T11:00:02.000Z",
       lastActivityAt: "2026-09-08T11:00:01.000Z",
     });
-    await open(exited, liveTurnRows());
+    await openApp(exited, buildLiveTurnRows());
     await settle();
 
     const divider = screen.getByRole("button", { name: /^Worked for —$/ });
@@ -660,8 +682,8 @@ describe("Thread: the live turn (AC-12)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-08T11:00:03.000Z"));
 
-    const busy = session({ status: "busy", lastActivityAt: "2026-09-08T11:00:01.000Z" });
-    const { live } = await open(busy, liveTurnRows());
+    const busy = buildSession({ status: "busy", lastActivityAt: "2026-09-08T11:00:01.000Z" });
+    const { live } = await openApp(busy, buildLiveTurnRows());
     await settle();
 
     // Live and ticking, however many seconds the wait for the subscription
@@ -670,12 +692,12 @@ describe("Thread: the live turn (AC-12)", () => {
     // turn completes.
     screen.getByRole("button", { name: /^Working for \d+s$/ });
 
-    await pumpUntil(() => live.topics().includes(sessionStreamTopic(SESSION_ID)));
+    await pumpUntil(() => live.topics().includes(buildSessionStreamTopic(SESSION_ID)));
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: [
-          row(4, {
+          buildTranscriptRow(4, {
             _tag: "item.completed",
             eventId: "e4",
             sessionId: SESSION_ID,
@@ -686,7 +708,7 @@ describe("Thread: the live turn (AC-12)", () => {
             status: "completed",
             detail: { name: "Bash", input: { command: "pnpm test" } },
           }),
-          row(5, {
+          buildTranscriptRow(5, {
             _tag: "turn.completed",
             eventId: "e5",
             sessionId: SESSION_ID,
@@ -706,13 +728,13 @@ describe("Thread: the live turn (AC-12)", () => {
 });
 
 describe("Thread: token tap (AC-13)", () => {
-  const openTurnRows = (): TranscriptRow[] =>
-    transcript(
-      turnStarted("t4", "2026-09-08T12:00:00.000Z"),
-      userSaid("t4", "2026-09-08T12:00:00.100Z", "u4", "Say hi"),
+  const buildOpenTurnRows = (): TranscriptRow[] =>
+    buildTranscript(
+      buildTurnStart("t4", "2026-09-08T12:00:00.000Z"),
+      buildUserMessage("t4", "2026-09-08T12:00:00.100Z", "u4", "Say hi"),
       // Only the assistant item's start, never its completion: it is the open
       // item, and its text is still arriving on the tap.
-      assistantStarted("t4", "2026-09-08T12:00:00.200Z", "a4"),
+      buildAssistantStart("t4", "2026-09-08T12:00:00.200Z", "a4"),
     );
 
   /**
@@ -743,22 +765,22 @@ describe("Thread: token tap (AC-13)", () => {
 
   it("shows concatenated tap deltas for the open item after one frame, batching N deltas into one requestAnimationFrame request", async () => {
     const { raf, runFrame } = stubFrames();
-    const busy = session({ status: "busy" });
-    const { live } = await open(busy, openTurnRows());
+    const busy = buildSession({ status: "busy" });
+    const { live } = await openApp(busy, buildOpenTurnRows());
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
     });
 
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hel" }],
       });
     });
     await settle();
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "lo" }],
       });
@@ -782,10 +804,10 @@ describe("Thread: token tap (AC-13)", () => {
     // the break between them is the layout's and nothing is written into the
     // text to make one.
     const { runFrame } = stubFrames();
-    const rows = openTurnRows();
+    const rows = buildOpenTurnRows();
     const withEarlier = [
       ...rows.slice(0, 3),
-      row(3, {
+      buildTranscriptRow(3, {
         _tag: "content.delta",
         eventId: "e3a",
         sessionId: SESSION_ID,
@@ -795,7 +817,7 @@ describe("Thread: token tap (AC-13)", () => {
         streamKind: "assistant_text",
         delta: "First answer.",
       }),
-      row(4, {
+      buildTranscriptRow(4, {
         _tag: "item.completed",
         eventId: "e3b",
         sessionId: SESSION_ID,
@@ -807,15 +829,15 @@ describe("Thread: token tap (AC-13)", () => {
       }),
       rows[3]!,
     ];
-    const { live } = await open(session({ status: "busy" }), withEarlier);
+    const { live } = await openApp(buildSession({ status: "busy" }), withEarlier);
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
     });
-    const answer = answerArea(await screen.findByText(/First answer\./));
+    const answer = findAnswerArea(await screen.findByText(/First answer\./));
 
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Second" }],
       });
@@ -830,7 +852,7 @@ describe("Thread: token tap (AC-13)", () => {
 
     // A flush inside the same item goes on filling that same span.
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: " answer." }],
       });
@@ -847,14 +869,14 @@ describe("Thread: token tap (AC-13)", () => {
     // `command_output` delta naming it is never the answer, so it is dropped
     // rather than painted where the answer renders.
     const { runFrame } = stubFrames();
-    const busy = session({ status: "busy" });
-    const { live } = await open(busy, openTurnRows());
+    const busy = buildSession({ status: "busy" });
+    const { live } = await openApp(busy, buildOpenTurnRows());
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
     });
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "reasoning_text", delta: "thinking…" }],
       });
@@ -867,15 +889,15 @@ describe("Thread: token tap (AC-13)", () => {
 
   it("lets the coalesced :stream row win over the buffer, and later taps for an item that has completed change nothing", async () => {
     const { runFrame } = stubFrames();
-    const busy = session({ status: "busy" });
-    const { live } = await open(busy, openTurnRows());
+    const busy = buildSession({ status: "busy" });
+    const { live } = await openApp(busy, buildOpenTurnRows());
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
     });
 
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hello " }],
       });
@@ -885,17 +907,17 @@ describe("Thread: token tap (AC-13)", () => {
     await screen.findByText("Hello");
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     act(() => {
       // The coalescing rule flushes a row at an item's completion (spec 04
       // §Streaming deltas are coalesced), so the row and the item's own
       // completion arrive together - which is what actually retires the item
       // as "open" and is why a tap for it afterwards has nothing left to do.
-      live.push(sessionStreamTopic(SESSION_ID), {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: [
-          row(4, {
+          buildTranscriptRow(4, {
             _tag: "content.delta",
             eventId: "e4",
             sessionId: SESSION_ID,
@@ -905,7 +927,7 @@ describe("Thread: token tap (AC-13)", () => {
             streamKind: "assistant_text",
             delta: "Hello world",
           }),
-          row(5, {
+          buildTranscriptRow(5, {
             _tag: "item.completed",
             eventId: "e5",
             sessionId: SESSION_ID,
@@ -920,11 +942,11 @@ describe("Thread: token tap (AC-13)", () => {
       });
     });
 
-    const answer = answerArea(await screen.findByText("Hello world"));
+    const answer = findAnswerArea(await screen.findByText("Hello world"));
     expect(screen.queryByText("Hello ")).toBeNull();
 
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "!!!" }],
       });
@@ -943,14 +965,14 @@ describe("Thread: token tap (AC-13)", () => {
     // tail held, and the item goes on streaming into the same tail. Any
     // answer longer than 4KB takes this path.
     const { runFrame } = stubFrames();
-    const busy = session({ status: "busy" });
-    const { live } = await open(busy, openTurnRows());
+    const busy = buildSession({ status: "busy" });
+    const { live } = await openApp(busy, buildOpenTurnRows());
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
     });
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hello " }],
       });
@@ -960,14 +982,14 @@ describe("Thread: token tap (AC-13)", () => {
     await screen.findByText("Hello");
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     act(() => {
       // The flush row alone: no `item.completed`, so a4 is still the open item.
-      live.push(sessionStreamTopic(SESSION_ID), {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: [
-          row(4, {
+          buildTranscriptRow(4, {
             _tag: "content.delta",
             eventId: "e4",
             sessionId: SESSION_ID,
@@ -983,10 +1005,10 @@ describe("Thread: token tap (AC-13)", () => {
     });
     await settle();
 
-    const answer = answerArea(await screen.findByText("Hello world"));
+    const answer = findAnswerArea(await screen.findByText("Hello world"));
 
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: ", again" }],
       });
@@ -1001,10 +1023,10 @@ describe("Thread: token tap (AC-13)", () => {
 
   it("leaves the open item's buffered tail alone when a :stream row for a different item arrives", async () => {
     // A tool item started earlier, still running when the assistant item
-    // (a4, later, so still the open one per openItemOf) began streaming.
+    // (a4, later, so still the open one per findOpenItem) began streaming.
     const rowsWithEarlierTool: TranscriptRow[] = [
-      ...openTurnRows().slice(0, 3),
-      row(3, {
+      ...buildOpenTurnRows().slice(0, 3),
+      buildTranscriptRow(3, {
         _tag: "item.started",
         eventId: "e3",
         sessionId: SESSION_ID,
@@ -1014,7 +1036,7 @@ describe("Thread: token tap (AC-13)", () => {
         kind: "command_execution",
         detail: { name: "Bash", input: { command: "pnpm test" } },
       }),
-      row(4, {
+      buildTranscriptRow(4, {
         _tag: "item.started",
         eventId: "e4",
         sessionId: SESSION_ID,
@@ -1025,31 +1047,31 @@ describe("Thread: token tap (AC-13)", () => {
       }),
     ];
     const { runFrame } = stubFrames();
-    const busy = session({ status: "busy" });
-    const { live } = await open(busy, rowsWithEarlierTool);
+    const busy = buildSession({ status: "busy" });
+    const { live } = await openApp(busy, rowsWithEarlierTool);
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
     });
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "Hello" }],
       });
     });
     await settle();
     runFrame();
-    const answer = answerArea(await screen.findByText("Hello"));
+    const answer = findAnswerArea(await screen.findByText("Hello"));
 
     // tool0 finishing is a row about a different item; a4 stays open.
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: [
-          row(5, {
+          buildTranscriptRow(5, {
             _tag: "item.completed",
             eventId: "e5",
             sessionId: SESSION_ID,
@@ -1072,11 +1094,11 @@ describe("Thread: token tap (AC-13)", () => {
 
   it("refetches the transcript and shows the refetched rows when the live overlay reports reset", async () => {
     const { runFrame } = stubFrames();
-    const busy = session({ status: "busy" });
+    const busy = buildSession({ status: "busy" });
     let transcriptCalls = 0;
     const REFETCHED: TranscriptRow[] = [
-      ...openTurnRows(),
-      row(4, {
+      ...buildOpenTurnRows(),
+      buildTranscriptRow(4, {
         _tag: "content.delta",
         eventId: "e4",
         sessionId: SESSION_ID,
@@ -1087,20 +1109,20 @@ describe("Thread: token tap (AC-13)", () => {
         delta: "Hi there, refetched.",
       }),
     ];
-    const { live } = await open(busy, openTurnRows(), {
+    const { live } = await openApp(busy, buildOpenTurnRows(), {
       [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: () => {
         transcriptCalls += 1;
-        return { body: { items: transcriptCalls === 1 ? openTurnRows() : REFETCHED } };
+        return { body: { items: transcriptCalls === 1 ? buildOpenTurnRows() : REFETCHED } };
       },
     });
 
     // A buffered tap delta is standing when the reset arrives, to prove it is
     // dropped rather than surviving into the refetched reading.
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
     });
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [
           { turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "stale buffer" },
@@ -1115,15 +1137,15 @@ describe("Thread: token tap (AC-13)", () => {
     // that is (`live.ts`'s own rule - a fresh subscription's `undefined`
     // cursor cannot be "past the end of the log").
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), { _tag: "delta", items: [], cursor: "0" });
+      live.push(buildSessionStreamTopic(SESSION_ID), { _tag: "delta", items: [], cursor: "0" });
     });
     await settle();
 
     act(() => {
-      live.fail(sessionStreamTopic(SESSION_ID), {
+      live.fail(buildSessionStreamTopic(SESSION_ID), {
         error: {
           code: "validation",
           message: "cursor is past the end of the log",
@@ -1144,22 +1166,22 @@ describe("Thread: token tap (AC-13)", () => {
   // only becomes markdown once the item's own row lands.
   it("a live tap paints plain text into the tail and the row lands as markdown", async () => {
     const { raf, runFrame } = stubFrames();
-    const { live } = await open(session({ status: "busy" }), openTurnRows());
+    const { live } = await openApp(buildSession({ status: "busy" }), buildOpenTurnRows());
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionTapTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionTapTopic(SESSION_ID));
     });
-    const column = proseColumn(await screen.findByText("Say hi"));
+    const column = findProseColumn(await screen.findByText("Say hi"));
 
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "**bo" }],
       });
     });
     await settle();
     act(() => {
-      live.push(sessionTapTopic(SESSION_ID), {
+      live.push(buildSessionTapTopic(SESSION_ID), {
         _tag: "delta",
         items: [{ turnId: "t4", itemId: "a4", streamKind: "assistant_text", delta: "ld**" }],
       });
@@ -1171,17 +1193,17 @@ describe("Thread: token tap (AC-13)", () => {
 
     // The tail reads as the literal characters the agent typed: nothing parsed
     // them on the way in.
-    expect(reading(column)).toContain("**bold**");
+    expect(readPageText(column)).toContain("**bold**");
     expect(column.querySelector("strong")).toBeNull();
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: [
-          row(4, {
+          buildTranscriptRow(4, {
             _tag: "content.delta",
             eventId: "e4",
             sessionId: SESSION_ID,
@@ -1191,7 +1213,7 @@ describe("Thread: token tap (AC-13)", () => {
             streamKind: "assistant_text",
             delta: "**bold**",
           }),
-          row(5, {
+          buildTranscriptRow(5, {
             _tag: "item.completed",
             eventId: "e5",
             sessionId: SESSION_ID,
@@ -1209,7 +1231,7 @@ describe("Thread: token tap (AC-13)", () => {
     await waitFor(() => {
       expect(within(column).getByText("bold").tagName).toBe("STRONG");
     });
-    expect(reading(column)).not.toContain("**");
+    expect(readPageText(column)).not.toContain("**");
   });
 });
 
@@ -1235,7 +1257,7 @@ describe("Thread: the assistant's prose renders markdown", () => {
       "```",
       "",
     ].join("\n");
-    const column = await openAnswer(answer);
+    const column = await openAnsweredThread(answer);
 
     expect(within(column).getByText("bold").tagName).toBe("STRONG");
     expect(within(column).getByText("inline").tagName).toBe("CODE");
@@ -1244,7 +1266,7 @@ describe("Thread: the assistant's prose renders markdown", () => {
     expect(link.getAttribute("href")).toBe("https://example.com");
 
     const items = within(within(column).getByRole("list")).getAllByRole("listitem");
-    expect(items.map((item) => reading(item))).toEqual(["one", "two"]);
+    expect(items.map((item) => readPageText(item))).toEqual(["one", "two"]);
 
     const table = within(column).getByRole("table");
     expect(within(table).getByRole("cell", { name: "2" })).toBeDefined();
@@ -1263,32 +1285,32 @@ describe("Thread: the assistant's prose renders markdown", () => {
     expect(shell).toContain("rounded-card");
 
     // None of the markup survives as characters to read.
-    const prose = reading(column);
+    const prose = readPageText(column);
     expect(prose).not.toContain("**");
     expect(prose).not.toContain("`");
     expect(prose).not.toContain("|");
   });
 
   it("raw HTML in assistant text renders as literal text", async () => {
-    const column = await openAnswer(
+    const column = await openAnsweredThread(
       "before <script>alert(1)</script> and <img src=x onerror=alert(1)> after",
     );
 
-    expect(reading(column)).toContain("<script>alert(1)</script>");
+    expect(readPageText(column)).toContain("<script>alert(1)</script>");
     expect(document.querySelector("script")).toBeNull();
     expect(column.querySelector("img")).toBeNull();
     expect(column.querySelector("[onerror]")).toBeNull();
   });
 
   it("assistant prose keeps soft breaks", async () => {
-    const column = await openAnswer("line one\nline two");
+    const column = await openAnsweredThread("line one\nline two");
 
     // A single typed newline is a CommonMark soft break, not a line break:
     // `remark-breaks` belongs to the user's bubble alone.
     expect(column.querySelectorAll("br")).toHaveLength(0);
     const paragraph = within(column).getByText(
       (_, element) =>
-        element?.tagName === "P" && reading(element as HTMLElement) === "line one line two",
+        element?.tagName === "P" && readPageText(element as HTMLElement) === "line one line two",
     );
     expect(paragraph).toBeDefined();
   });
@@ -1302,8 +1324,8 @@ describe("Thread: the assistant's prose renders markdown", () => {
 describe("Thread: the user's bubble renders markdown", () => {
   it("renders the user's bubble as markdown with typed line breaks", async () => {
     const typed = "Try **this** with `code`\nsecond line <b>not bold</b>\n\n- a\n- b";
-    await open(session({ status: "idle" }), turnWithAnswer("Sure.", typed));
-    const column = proseColumn(await screen.findByText("Sure."));
+    await openApp(buildSession({ status: "idle" }), buildAnsweredTurn("Sure.", typed));
+    const column = findProseColumn(await screen.findByText("Sure."));
 
     // The right-aligned card the bubble has always been: the flex row, and the
     // card shape on the element inside it.
@@ -1333,7 +1355,7 @@ describe("Thread: the user's bubble renders markdown", () => {
     expect(afterTheBreak.trim()).toContain("second line");
 
     // Raw HTML is characters, not markup.
-    expect(reading(bubble)).toContain("<b>not bold</b>");
+    expect(readPageText(bubble)).toContain("<b>not bold</b>");
     expect(bubble.querySelector("b")).toBeNull();
 
     const list = within(bubble).getByRole("list");
@@ -1341,7 +1363,7 @@ describe("Thread: the user's bubble renders markdown", () => {
     expect(
       within(list)
         .getAllByRole("listitem")
-        .map((item) => reading(item)),
+        .map((item) => readPageText(item)),
     ).toEqual(["a", "b"]);
   });
 });
@@ -1351,19 +1373,19 @@ describe("Thread: the transcript cache only ever grows forwards", () => {
     // The transcript log is append-only and strictly ordered, so a row at or
     // below the last one held is one the cache already has: a replay the
     // subscription resumed from, or one delta delivered twice. The probe is
-    // an `assistant_text` delta, because `turnsOf` concatenates those - a
+    // an `assistant_text` delta, because `buildTurns` concatenates those - a
     // second copy in the cache reads as the sentence said twice.
-    const { live } = await open(session({ status: "idle" }), twoCompletedTurns());
+    const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
 
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: [
-          row(16, {
+          buildTranscriptRow(16, {
             _tag: "turn.started",
             eventId: "e16",
             sessionId: SESSION_ID,
@@ -1379,7 +1401,7 @@ describe("Thread: the transcript cache only ever grows forwards", () => {
     const again = {
       _tag: "delta" as const,
       items: [
-        row(17, {
+        buildTranscriptRow(17, {
           _tag: "content.delta" as const,
           eventId: "e17",
           sessionId: SESSION_ID,
@@ -1394,13 +1416,13 @@ describe("Thread: the transcript cache only ever grows forwards", () => {
     };
 
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), again);
+      live.push(buildSessionStreamTopic(SESSION_ID), again);
     });
     await settle();
-    const answer = answerArea(await screen.findByText("One more thing."));
+    const answer = findAnswerArea(await screen.findByText("One more thing."));
 
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), again);
+      live.push(buildSessionStreamTopic(SESSION_ID), again);
     });
     // React Query notifies its observers on a macrotask, which `settle`'s
     // microtask turns never reach - so a re-render this delta did cause would
@@ -1410,23 +1432,26 @@ describe("Thread: the transcript cache only ever grows forwards", () => {
     });
 
     expect(answer.textContent).toBe("One more thing.");
-    expect(reading()).not.toContain("One more thing.One more thing.");
+    expect(readPageText()).not.toContain("One more thing.One more thing.");
   });
 });
 
 describe("Thread: live subscriptions", () => {
   it("subscribes to exactly the session's stream and tap topics while mounted, and ends them on unmount", async () => {
-    const { live, router } = await open(session({ status: "idle" }), twoCompletedTurns());
+    const { live, router } = await openApp(
+      buildSession({ status: "idle" }),
+      buildTwoCompletedTurns(),
+    );
 
     // Judged among this thread's own per-session topics: the shell mounts
     // its own subscriptions (the sidebar's `session` invalidation topic
     // among them) regardless of which screen is open, so the assertion
     // narrows to what starts with `session:` rather than the whole set.
-    const perSessionTopics = () => live.topics().filter((topic) => topic.startsWith("session:"));
+    const listSessionTopics = () => live.topics().filter((topic) => topic.startsWith("session:"));
 
     await waitFor(() => {
-      expect([...perSessionTopics()].sort()).toEqual(
-        [sessionStreamTopic(SESSION_ID), sessionTapTopic(SESSION_ID)].sort(),
+      expect([...listSessionTopics()].sort()).toEqual(
+        [buildSessionStreamTopic(SESSION_ID), buildSessionTapTopic(SESSION_ID)].sort(),
       );
     });
 
@@ -1435,7 +1460,7 @@ describe("Thread: live subscriptions", () => {
     });
 
     await waitFor(() => {
-      expect(perSessionTopics()).toEqual([]);
+      expect(listSessionTopics()).toEqual([]);
     });
   });
 
@@ -1445,17 +1470,17 @@ describe("Thread: live subscriptions", () => {
     // (staleTime Infinity). Subscribing with no cursor would mean "start at
     // the head, replay nothing", and every row written between the read and
     // the subscription would be lost for good.
-    const { live } = await open(session({ status: "busy" }), []);
+    const { live } = await openApp(buildSession({ status: "busy" }), []);
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
-    expect(live.cursorOf(sessionStreamTopic(SESSION_ID))).toBe("0");
+    expect(live.cursorOf(buildSessionStreamTopic(SESSION_ID))).toBe("0");
 
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
-        items: twoCompletedTurns(),
+        items: buildTwoCompletedTurns(),
         cursor: "15",
       });
     });
@@ -1470,15 +1495,15 @@ describe("Thread: live subscriptions", () => {
     // cursor 0 and the later one's rows can land first. The transcript is
     // merged on `position` rather than appended after whatever it last held,
     // or every row of the earlier replay would be dropped as already seen.
-    const { live } = await open(session({ status: "busy" }), []);
+    const { live } = await openApp(buildSession({ status: "busy" }), []);
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
 
-    const rows = twoCompletedTurns();
+    const rows = buildTwoCompletedTurns();
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: rows.slice(4),
         cursor: "15",
@@ -1486,7 +1511,7 @@ describe("Thread: live subscriptions", () => {
     });
     await settle();
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
         _tag: "delta",
         items: rows.slice(0, 4),
         cursor: "15",
@@ -1498,8 +1523,8 @@ describe("Thread: live subscriptions", () => {
     // reads in position order rather than in arrival order.
     const shown = await screen.findByText("Fix the login bug", { selector: "p" });
     await screen.findByText("Added a test too.");
-    expect(reading().indexOf("Fix the login bug")).toBeLessThan(
-      reading().indexOf("Added a test too."),
+    expect(readPageText().indexOf("Fix the login bug")).toBeLessThan(
+      readPageText().indexOf("Added a test too."),
     );
     expect(shown).toBeDefined();
   });
@@ -1509,29 +1534,33 @@ describe("Thread: live subscriptions", () => {
     // navigation, so per-thread state - the seeded cursor included - has to
     // be reset by hand rather than surviving as leftover component state.
     const OTHER_ID = "01a06d02-b100-7000-8000-000000000002";
-    const other = session({ id: OTHER_ID, status: "idle", title: "A second thread" });
-    const { live, router } = await open(session({ status: "idle" }), twoCompletedTurns(), {
-      [`GET /api/v1/sessions/${OTHER_ID}`]: { body: other },
-      [`GET /api/v1/sessions/${OTHER_ID}/transcript`]: { body: { items: [] } },
-    });
+    const other = buildSession({ id: OTHER_ID, status: "idle", title: "A second thread" });
+    const { live, router } = await openApp(
+      buildSession({ status: "idle" }),
+      buildTwoCompletedTurns(),
+      {
+        [`GET /api/v1/sessions/${OTHER_ID}`]: { body: other },
+        [`GET /api/v1/sessions/${OTHER_ID}/transcript`]: { body: { items: [] } },
+      },
+    );
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
     // This thread has rows on record, so its own cursor is its last position.
-    expect(live.cursorOf(sessionStreamTopic(SESSION_ID))).toBe("15");
+    expect(live.cursorOf(buildSessionStreamTopic(SESSION_ID))).toBe("15");
 
     await act(async () => {
       await router.navigate({ to: "/threads/$sessionId", params: { sessionId: OTHER_ID } });
     });
 
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(OTHER_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(OTHER_ID));
     });
     // The second thread's transcript is empty, so a correctly-scoped seed
     // starts at the beginning of its log; a leaked cursor from the thread just
     // left is the only way this could read as anything else.
-    expect(live.cursorOf(sessionStreamTopic(OTHER_ID))).toBe("0");
+    expect(live.cursorOf(buildSessionStreamTopic(OTHER_ID))).toBe("0");
   });
 });
 
@@ -1541,14 +1570,14 @@ describe("Thread: auto-scroll follows new content", () => {
    * by hand on the document's own scrolling element - the thread has no
    * scroll region of its own, the whole page does.
    */
-  const scrollElement = (): Element => document.scrollingElement ?? document.documentElement;
+  const getScrollElement = (): Element => document.scrollingElement ?? document.documentElement;
 
   const setGeometry = (values: {
     scrollTop: number;
     scrollHeight: number;
     clientHeight: number;
   }): void => {
-    const el = scrollElement();
+    const el = getScrollElement();
     Object.defineProperty(el, "scrollTop", {
       value: values.scrollTop,
       writable: true,
@@ -1559,14 +1588,14 @@ describe("Thread: auto-scroll follows new content", () => {
   };
 
   afterEach(() => {
-    const el = scrollElement();
+    const el = getScrollElement();
     delete (el as { scrollTop?: number }).scrollTop;
     delete (el as { scrollHeight?: number }).scrollHeight;
     delete (el as { clientHeight?: number }).clientHeight;
   });
 
-  const newRow = (): TranscriptRow =>
-    row(16, {
+  const buildNewRow = (): TranscriptRow =>
+    buildTranscriptRow(16, {
       _tag: "turn.started",
       eventId: "e16",
       sessionId: SESSION_ID,
@@ -1575,9 +1604,9 @@ describe("Thread: auto-scroll follows new content", () => {
     });
 
   it("rejoins the tail on a :stream delta when the reader was at the bottom", async () => {
-    const { live } = await open(session({ status: "idle" }), twoCompletedTurns());
+    const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
 
     setGeometry({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
@@ -1588,18 +1617,22 @@ describe("Thread: auto-scroll follows new content", () => {
     // time the layout effect after this delta's commit runs.
     setGeometry({ scrollTop: 900, scrollHeight: 1200, clientHeight: 100 });
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), { _tag: "delta", items: [newRow()], cursor: "16" });
+      live.push(buildSessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [buildNewRow()],
+        cursor: "16",
+      });
     });
 
     await waitFor(() => {
-      expect(scrollElement().scrollTop).toBe(1200 - 100);
+      expect(getScrollElement().scrollTop).toBe(1200 - 100);
     });
   });
 
   it("leaves the scroll position on a :stream delta when the reader had scrolled up", async () => {
-    const { live } = await open(session({ status: "idle" }), twoCompletedTurns());
+    const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
     await waitFor(() => {
-      expect(live.topics()).toContain(sessionStreamTopic(SESSION_ID));
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
     });
 
     setGeometry({ scrollTop: 0, scrollHeight: 1000, clientHeight: 100 });
@@ -1608,11 +1641,15 @@ describe("Thread: auto-scroll follows new content", () => {
 
     setGeometry({ scrollTop: 0, scrollHeight: 1200, clientHeight: 100 });
     act(() => {
-      live.push(sessionStreamTopic(SESSION_ID), { _tag: "delta", items: [newRow()], cursor: "16" });
+      live.push(buildSessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: [buildNewRow()],
+        cursor: "16",
+      });
     });
     await settle();
 
-    expect(scrollElement().scrollTop).toBe(0);
+    expect(getScrollElement().scrollTop).toBe(0);
   });
 });
 
@@ -1629,11 +1666,14 @@ describe("Thread: auto-scroll follows new content", () => {
  */
 describe("Thread: the chrome is the screen's first row", () => {
   it("reads Threads / then the session title, with a disabled … button", async () => {
-    await open(session({ status: "idle", title: "Fix the login bug" }), twoCompletedTurns());
+    await openApp(
+      buildSession({ status: "idle", title: "Fix the login bug" }),
+      buildTwoCompletedTurns(),
+    );
 
     const crumb = await waitFor(() => screen.getByText("Threads /"));
     const chrome = crumb.parentElement;
-    expect(reading(chrome)).toMatch(/^Threads \/ Fix the login bug/);
+    expect(readPageText(chrome)).toMatch(/^Threads \/ Fix the login bug/);
 
     const overflow = screen.getByRole<HTMLButtonElement>("button", { name: "…" });
     expect(chrome?.contains(overflow)).toBe(true);
@@ -1643,7 +1683,7 @@ describe("Thread: the chrome is the screen's first row", () => {
   it("truncates a long title rather than pushing the crumb or the actions out of place", async () => {
     const longTitle =
       "Fix the login bug for real this time and also the logout bug and the signup bug";
-    await open(session({ status: "idle", title: longTitle }), twoCompletedTurns());
+    await openApp(buildSession({ status: "idle", title: longTitle }), buildTwoCompletedTurns());
 
     const crumb = await waitFor(() => screen.getByText("Threads /"));
     expect(screen.getByText(longTitle).className).toContain("truncate");
@@ -1652,7 +1692,7 @@ describe("Thread: the chrome is the screen's first row", () => {
   });
 
   it("still warns about a zone this browser cannot read, the one thing the bar owes the screen", async () => {
-    await open(session({ status: "idle" }), twoCompletedTurns(), {
+    await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       "GET /api/v1/settings": {
         body: {
           controller: {},
@@ -1668,12 +1708,15 @@ describe("Thread: the chrome is the screen's first row", () => {
   });
 
   it("renders no shell title above it: no h1 and no thread · crumb anywhere", async () => {
-    await open(session({ status: "idle", title: "Fix the login bug" }), twoCompletedTurns());
+    await openApp(
+      buildSession({ status: "idle", title: "Fix the login bug" }),
+      buildTwoCompletedTurns(),
+    );
 
     await waitFor(() => {
       expect(screen.getByText("Threads /")).toBeDefined();
     });
-    expect(reading()).not.toContain("thread · ");
+    expect(readPageText()).not.toContain("thread · ");
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 });
@@ -1691,11 +1734,11 @@ describe("Thread: the chrome is the screen's first row", () => {
 describe("Thread: composer read-only fields and model switch (AC-19)", () => {
   it("renders workspace, machine and access mode as read-only values with no menu", async () => {
     const user = userEvent.setup();
-    await open(session({ status: "idle" }), twoCompletedTurns());
+    await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
-    expect(reading()).toContain("No workspace");
-    expect(reading()).toContain(RUNNER_STARTED.name);
-    expect(reading()).toContain("approval-required");
+    expect(readPageText()).toContain("No workspace");
+    expect(readPageText()).toContain(RUNNER_STARTED.name);
+    expect(readPageText()).toContain("approval-required");
 
     // None of these values ever reveals another option when interacted with -
     // the "no menu" half of the criterion. A read-only value need not be a
@@ -1714,11 +1757,11 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
 
   it("dims the model menu's other accounts with account fixed", async () => {
     const user = userEvent.setup();
-    await open(session({ status: "idle" }), twoCompletedTurns());
+    await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
 
-    expect(reading()).toContain("account fixed");
+    expect(readPageText()).toContain("account fixed");
     // The current instance's own other model stays selectable, unlike the
     // other instance's group.
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
@@ -1728,7 +1771,7 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
   // session; the pick is draft state that rides the next submission.
   it("shows the picked model in the pill without sending anything when a model of the same instance is chosen", async () => {
     const user = userEvent.setup();
-    const { api } = await open(session({ status: "idle" }), twoCompletedTurns());
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await user.click(screen.getByRole("button", { name: /claude opus 5/i }));
@@ -1747,7 +1790,7 @@ describe("Thread: composer read-only fields and model switch (AC-19)", () => {
 const INPUT_ID = "01a06d02-5000-7000-8000-000000000001";
 
 /** One queued input, ready for a busy thread's queued list. */
-const queuedInput = (overrides: Partial<Input> = {}): Input => ({
+const buildQueuedInput = (overrides: Partial<Input> = {}): Input => ({
   id: INPUT_ID,
   sessionId: SESSION_ID,
   source: "user",
@@ -1765,7 +1808,7 @@ const queuedInput = (overrides: Partial<Input> = {}): Input => ({
 describe("Thread: input queue (AC-20)", () => {
   it("sends POST /sessions/:id/input and clears the textarea once it answers opened, for an idle thread", async () => {
     const user = userEvent.setup();
-    const { api } = await open(session({ status: "idle" }), twoCompletedTurns(), {
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "opened" },
       },
@@ -1793,11 +1836,11 @@ describe("Thread: input queue (AC-20)", () => {
 
   it("shows a queued answer in a list above the composer with Steer and Cancel, read from GET /sessions/:id/inputs", async () => {
     const user = userEvent.setup();
-    const { api } = await open(session({ status: "busy" }), twoCompletedTurns(), {
+    const { api } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "queued" },
       },
-      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [queuedInput()] } },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [buildQueuedInput()] } },
     });
 
     await user.type(screen.getByRole("textbox"), "Also check the logs");
@@ -1822,9 +1865,9 @@ describe("Thread: input queue (AC-20)", () => {
     // a plain "second call empties it" counter would race that sweep instead
     // of the steer this test is actually about.
     let delivered = false;
-    const { api } = await open(session({ status: "busy" }), twoCompletedTurns(), {
+    const { api } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => ({
-        body: { items: delivered ? [] : [queuedInput()] },
+        body: { items: delivered ? [] : [buildQueuedInput()] },
       }),
       [`POST /api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}/steer`]: () => {
         delivered = true;
@@ -1854,13 +1897,13 @@ describe("Thread: input queue (AC-20)", () => {
     // See the steer test above: keyed on the cancel actually landing, not a
     // raw call count, for the same reason.
     let delivered = false;
-    const { api } = await open(session({ status: "busy" }), twoCompletedTurns(), {
+    const { api } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => ({
-        body: { items: delivered ? [] : [queuedInput()] },
+        body: { items: delivered ? [] : [buildQueuedInput()] },
       }),
       [`DELETE /api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}`]: () => {
         delivered = true;
-        return { body: queuedInput({ status: "cancelled" }) };
+        return { body: buildQueuedInput({ status: "cancelled" }) };
       },
     });
 
@@ -1882,9 +1925,9 @@ describe("Thread: input queue (AC-20)", () => {
   });
 
   it("shows a queued row's reason when the controller set one", async () => {
-    await open(session({ status: "busy" }), twoCompletedTurns(), {
+    await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: {
-        body: { items: [queuedInput({ reason: "the runner has not answered yet" })] },
+        body: { items: [buildQueuedInput({ reason: "the runner has not answered yet" })] },
       },
     });
 
@@ -1893,10 +1936,10 @@ describe("Thread: input queue (AC-20)", () => {
 
   it("refetches the queued list on the session invalidation nudge", async () => {
     let inputsCalls = 0;
-    const { live } = await open(session({ status: "busy" }), twoCompletedTurns(), {
+    const { live } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => {
         inputsCalls += 1;
-        return { body: { items: [queuedInput()] } };
+        return { body: { items: [buildQueuedInput()] } };
       },
     });
 
@@ -1917,11 +1960,11 @@ describe("Thread: input queue (AC-20)", () => {
 
   it("shows the message and keeps the row when a steer attempt answers invalid_state", async () => {
     const user = userEvent.setup();
-    await open(session({ status: "busy" }), twoCompletedTurns(), {
-      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [queuedInput()] } },
+    await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [buildQueuedInput()] } },
       [`POST /api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}/steer`]: {
         status: 409,
-        body: envelope("invalid_state", "the turn already finished"),
+        body: buildErrorBody("invalid_state", "the turn already finished"),
       },
     });
 
@@ -1936,8 +1979,8 @@ describe("Thread: input queue (AC-20)", () => {
 describe("Thread: stop control (AC-21)", () => {
   it("shows Stop on a busy thread and calls POST /sessions/:id/interrupt", async () => {
     const user = userEvent.setup();
-    const { api } = await open(session({ status: "busy" }), twoCompletedTurns(), {
-      [`POST /api/v1/sessions/${SESSION_ID}/interrupt`]: { body: session({ status: "idle" }) },
+    const { api } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
+      [`POST /api/v1/sessions/${SESSION_ID}/interrupt`]: { body: buildSession({ status: "idle" }) },
     });
 
     await user.click(screen.getByRole("button", { name: /^stop$/i }));
@@ -1953,14 +1996,14 @@ describe("Thread: stop control (AC-21)", () => {
   });
 
   it("has no Stop control on an idle thread", async () => {
-    await open(session({ status: "idle" }), twoCompletedTurns());
+    await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
   });
 
   it("has no Stop control on an exited thread", async () => {
-    await open(
-      session({ status: "exited", exitedAt: "2026-09-08T10:05:00.000Z" }),
-      twoCompletedTurns(),
+    await openApp(
+      buildSession({ status: "exited", exitedAt: "2026-09-08T10:05:00.000Z" }),
+      buildTwoCompletedTurns(),
     );
 
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
@@ -1980,7 +2023,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
 
   it("sends nothing when an option is picked, and carries the pick on the next input", async () => {
     const user = userEvent.setup();
-    const { api } = await open(session({ status: "idle" }), twoCompletedTurns(), {
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       "GET /api/v1/providers": providers,
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "opened" },
@@ -2017,7 +2060,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
 
   it("resets the picks when a model is picked, and never patches the session", async () => {
     const user = userEvent.setup();
-    const { api } = await open(session({ status: "idle" }), twoCompletedTurns(), {
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       "GET /api/v1/providers": providers,
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "opened" },
@@ -2051,12 +2094,12 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
 
   it("shows the newly picked model's own defaults rather than the stored model's options", async () => {
     const user = userEvent.setup();
-    await open(
-      session({
+    await openApp(
+      buildSession({
         status: "idle",
         modelSelection: { model: "claude-sonnet-5", options: { effort: "high" } },
       }),
-      twoCompletedTurns(),
+      buildTwoCompletedTurns(),
       { "GET /api/v1/providers": providers },
     );
 
@@ -2078,10 +2121,10 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     // answers with it - which is where the pill's own label comes from once
     // the draft pick is gone.
     let stored: Record<string, string> = {};
-    const { api } = await open(session({ status: "idle" }), twoCompletedTurns(), {
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       "GET /api/v1/providers": providers,
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({
-        body: session({
+        body: buildSession({
           status: "idle",
           modelSelection: { model: "claude-sonnet-5", options: stored },
         }),
@@ -2132,11 +2175,11 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
     });
     let holding = false;
 
-    const { api } = await open(session({ status: "idle" }), twoCompletedTurns(), {
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       "GET /api/v1/providers": providers,
       [`GET /api/v1/sessions/${SESSION_ID}`]: async () => {
         if (holding) await held;
-        return { body: session({ status: "idle", modelSelection: stored }) };
+        return { body: buildSession({ status: "idle", modelSelection: stored }) };
       },
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: (call) => {
         const body = call.body as { model: string; options: Record<string, string> };
@@ -2196,12 +2239,12 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
 
   it("shows the stored option on a fresh render: the pill's label, and the block enabled on that value (AC-7)", async () => {
     const user = userEvent.setup();
-    await open(
-      session({
+    await openApp(
+      buildSession({
         status: "idle",
         modelSelection: { model: "claude-sonnet-5", options: { effort: "high" } },
       }),
-      twoCompletedTurns(),
+      buildTwoCompletedTurns(),
       { "GET /api/v1/providers": providers },
     );
 
@@ -2224,7 +2267,7 @@ describe("Thread: model options ride the submission (AC-6, AC-7)", () => {
 });
 
 describe("Thread: an exited thread that can be resumed", () => {
-  const EXITED_RESUMABLE = session({
+  const EXITED_RESUMABLE = buildSession({
     status: "exited",
     resumable: true,
     nativeSessionId: "native-1",
@@ -2232,7 +2275,7 @@ describe("Thread: an exited thread that can be resumed", () => {
   });
 
   it("reads like an idle thread: textarea and model pill enabled, no Stop and nothing saying exited", async () => {
-    await open(EXITED_RESUMABLE, twoCompletedTurns());
+    await openApp(EXITED_RESUMABLE, buildTwoCompletedTurns());
 
     const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
     expect(textarea.disabled).toBe(false);
@@ -2242,16 +2285,16 @@ describe("Thread: an exited thread that can be resumed", () => {
     expect(pill.disabled).toBe(false);
 
     expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
-    expect(reading()).not.toMatch(/exited/i);
+    expect(readPageText()).not.toMatch(/exited/i);
   });
 
   it("sends the typed text to POST /sessions/:id/input and shows the queued row above the composer", async () => {
     const user = userEvent.setup();
-    const { api } = await open(EXITED_RESUMABLE, twoCompletedTurns(), {
+    const { api } = await openApp(EXITED_RESUMABLE, buildTwoCompletedTurns(), {
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "queued" },
       },
-      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [queuedInput()] } },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [buildQueuedInput()] } },
     });
 
     await user.type(screen.getByRole("textbox"), "Also check the logs");
@@ -2281,14 +2324,14 @@ describe("Thread: an exited thread that cannot be resumed", () => {
     ["its transcript is gone", null],
     ["its runner was retired", "native-1"],
   ])("is read-only and says %s", async (reason, nativeSessionId) => {
-    await open(
-      session({
+    await openApp(
+      buildSession({
         status: "exited",
         resumable: false,
         nativeSessionId,
         exitedAt: "2026-09-08T10:05:00.000Z",
       }),
-      twoCompletedTurns(),
+      buildTwoCompletedTurns(),
     );
 
     const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
@@ -2316,9 +2359,9 @@ describe("Composer: a model pick is pending until it is sent", () => {
     // The controller stores what the input carried, so the session read after
     // it answers with the new model - which is what retires the note.
     let stored = { model: "claude-sonnet-5", options: {} as Record<string, string> };
-    await open(session({ status: "idle" }), twoCompletedTurns(), {
+    await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({
-        body: session({ status: "idle", modelSelection: stored }),
+        body: buildSession({ status: "idle", modelSelection: stored }),
       }),
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: (call) => {
         stored = { model: (call.body as { model: string }).model, options: {} };
@@ -2326,14 +2369,14 @@ describe("Composer: a model pick is pending until it is sent", () => {
       },
     });
 
-    expect(reading()).not.toContain("model change applies on send");
+    expect(readPageText()).not.toContain("model change applies on send");
 
     await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
 
     // Unsent, so the card says so, and the pill already names what will go.
     await waitFor(() => {
-      expect(reading()).toContain("model change applies on send");
+      expect(readPageText()).toContain("model change applies on send");
     });
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
 
@@ -2343,7 +2386,7 @@ describe("Composer: a model pick is pending until it is sent", () => {
     // Once the session itself carries the model there is nothing pending to
     // warn about.
     await waitFor(() => {
-      expect(reading()).not.toContain("model change applies on send");
+      expect(readPageText()).not.toContain("model change applies on send");
     });
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
   });
@@ -2351,7 +2394,7 @@ describe("Composer: a model pick is pending until it is sent", () => {
 
 describe("Composer: what locked at start says why", () => {
   it("renders the access mode, the workspace and the machine as plain text with the reason as their tooltip", async () => {
-    await open(session({ status: "idle" }), twoCompletedTurns());
+    await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     for (const field of ["access mode", "workspace", "machine"]) {
       const locked = await screen.findByTitle(`Create a new thread to change the ${field}`);
@@ -2368,7 +2411,7 @@ describe("Composer: what locked at start says why", () => {
 
 /**
  * The permission card docked above the composer (spec 14 §The thread
- * surface, ticket #70). Every word on it comes from `approvalCard` in
+ * surface, ticket #70). Every word on it comes from `buildApprovalCard` in
  * `client-core`, so this test reads its labels from there rather than
  * restating copy `apps/web` does not author.
  */
@@ -2402,15 +2445,15 @@ describe("Thread: the permission card", () => {
   };
 
   /** A live turn whose one open item is the one `REQUEST` is about. */
-  const parkedRows = (): TranscriptRow[] => [
-    row(0, {
+  const buildParkedRows = (): TranscriptRow[] => [
+    buildTranscriptRow(0, {
       _tag: "turn.started",
       eventId: "e0",
       sessionId: SESSION_ID,
       at: "2026-09-08T11:00:00.000Z",
       turnId: "t3",
     }),
-    row(1, {
+    buildTranscriptRow(1, {
       _tag: "item.started",
       eventId: "e1",
       sessionId: SESSION_ID,
@@ -2420,7 +2463,7 @@ describe("Thread: the permission card", () => {
       kind: "user_message",
       detail: { text: "List the files" },
     }),
-    row(2, {
+    buildTranscriptRow(2, {
       _tag: "item.completed",
       eventId: "e2",
       sessionId: SESSION_ID,
@@ -2431,7 +2474,7 @@ describe("Thread: the permission card", () => {
       status: "completed",
       detail: { text: "List the files" },
     }),
-    row(3, {
+    buildTranscriptRow(3, {
       _tag: "item.started",
       eventId: "e3",
       sessionId: SESSION_ID,
@@ -2444,43 +2487,43 @@ describe("Thread: the permission card", () => {
   ];
 
   /** One answer row of the card, matched by the text `client-core` gave it. */
-  const answer = (
+  const buildAnswerMatcher = (
     request: NonNullable<Session["openRequest"]>,
     decision: string,
   ): ((name: string) => boolean) => {
-    const found = approvalCard(request).rows.find((each) => each.decision === decision);
+    const found = buildApprovalCard(request).rows.find((each) => each.decision === decision);
     if (found === undefined) throw new Error(`the card offers no ${decision} row`);
     return (name: string) => name.includes(found.label) && name.includes(found.describe);
   };
 
   /** The composer's own card: the raised box the message goes in. */
-  const composerCard = (): HTMLElement => {
+  const getComposerCard = (): HTMLElement => {
     const found = screen.getByRole("textbox").closest<HTMLElement>('[class*="bg-raised"]');
     if (found === null) throw new Error("the composer's card was not found");
     return found;
   };
 
   it("docks the card above the composer, one row per offered decision and no copy in the transcript", async () => {
-    await open(session({ status: "busy", openRequest: REQUEST }), parkedRows());
+    await openApp(buildSession({ status: "busy", openRequest: REQUEST }), buildParkedRows());
 
-    const allow = await screen.findByRole("button", { name: answer(REQUEST, "allow") });
+    const allow = await screen.findByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") });
     // One row per offered decision, and exactly one card: the transcript does
     // not repeat it.
     for (const decision of REQUEST.decisions) {
       expect(
-        screen.getAllByRole("button", { name: answer(REQUEST, decision) }),
+        screen.getAllByRole("button", { name: buildAnswerMatcher(REQUEST, decision) }),
         `${decision} does not render exactly once`,
       ).toHaveLength(1);
     }
     // The card names the command the request is about.
-    expect(reading()).toContain("ls -la");
+    expect(readPageText()).toContain("ls -la");
 
     // In the sticky foot, above the composer.
     const foot = allow.closest<HTMLElement>('[class*="sticky"]');
     expect(foot, "the card is not in the sticky foot").not.toBeNull();
-    expect(foot?.contains(composerCard())).toBe(true);
+    expect(foot?.contains(getComposerCard())).toBe(true);
     expect(
-      allow.compareDocumentPosition(composerCard()) & Node.DOCUMENT_POSITION_FOLLOWING,
+      allow.compareDocumentPosition(getComposerCard()) & Node.DOCUMENT_POSITION_FOLLOWING,
       "the composer does not follow the card",
     ).toBeTruthy();
 
@@ -2488,7 +2531,7 @@ describe("Thread: the permission card", () => {
     // 14px radius in every state and the dock tucks under it (spec 14
     // §Measurements, amended 2026-09-14). Whether it looks flush is the
     // residual manual check; the classes are what jsdom can say.
-    expect(composerCard().className).toContain("rounded-[14px]");
+    expect(getComposerCard().className).toContain("rounded-[14px]");
     const dock = allow.closest<HTMLElement>('[class*="rounded-t-[10px]"]');
     expect(dock, "the dock is not the lip mirrored").not.toBeNull();
     expect(dock?.className).toContain("bg-surface");
@@ -2497,10 +2540,10 @@ describe("Thread: the permission card", () => {
 
   it("posts the clicked decision once and drops the card when the record's open request clears", async () => {
     const user = userEvent.setup();
-    let current = session({ status: "busy", openRequest: REQUEST });
+    let current = buildSession({ status: "busy", openRequest: REQUEST });
     let release: (() => void) | undefined;
     const api = stubApi({
-      ...controller(current, parkedRows()),
+      ...buildController(current, buildParkedRows()),
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
       // Held open until the test releases it, and answering with the park
       // still on the record: the answer is a snapshot of when it was asked,
@@ -2508,7 +2551,7 @@ describe("Thread: the permission card", () => {
       [`POST /api/v1/sessions/${SESSION_ID}/respond`]: () =>
         new Promise<{ readonly body: unknown }>((resolve) => {
           release = () => {
-            resolve({ body: session({ status: "busy", openRequest: REQUEST }) });
+            resolve({ body: buildSession({ status: "busy", openRequest: REQUEST }) });
           };
         }),
     });
@@ -2518,7 +2561,9 @@ describe("Thread: the permission card", () => {
       token: "held",
     });
 
-    await user.click(await screen.findByRole("button", { name: answer(REQUEST, "allow") }));
+    await user.click(
+      await screen.findByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") }),
+    );
 
     await waitFor(() => {
       expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
@@ -2529,8 +2574,10 @@ describe("Thread: the permission card", () => {
     });
 
     // The card goes when the record does, not when the click happens.
-    expect(screen.getByRole("button", { name: answer(REQUEST, "allow") })).toBeDefined();
-    current = session({ status: "busy", openRequest: null });
+    expect(
+      screen.getByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") }),
+    ).toBeDefined();
+    current = buildSession({ status: "busy", openRequest: null });
     await waitFor(() => {
       expect(live.topics()).toContain("session");
     });
@@ -2539,7 +2586,9 @@ describe("Thread: the permission card", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") }),
+      ).toBeNull();
     });
 
     // And now the answer lands, carrying the park the controller still had
@@ -2549,19 +2598,19 @@ describe("Thread: the permission card", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+    expect(screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") })).toBeNull();
   });
 
   it("takes one answer only: a second click while the request is still open sends nothing", async () => {
     const user = userEvent.setup();
-    const current = session({ status: "busy", openRequest: REQUEST });
+    const current = buildSession({ status: "busy", openRequest: REQUEST });
     const api = stubApi({
-      ...controller(current, parkedRows()),
+      ...buildController(current, buildParkedRows()),
       [`POST /api/v1/sessions/${SESSION_ID}/respond`]: { body: current },
     });
     await renderApp({ path: `/threads/${SESSION_ID}`, api: api.fetch, token: "held" });
 
-    const allow = await screen.findByRole("button", { name: answer(REQUEST, "allow") });
+    const allow = await screen.findByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") });
     await user.click(allow);
     await waitFor(() => {
       expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
@@ -2569,7 +2618,7 @@ describe("Thread: the permission card", () => {
 
     // The card is still up - only the runner clears it - but it has had its
     // answer, and a contradictory second one would be sent and audited.
-    await user.click(screen.getByRole("button", { name: answer(REQUEST, "deny") }));
+    await user.click(screen.getByRole("button", { name: buildAnswerMatcher(REQUEST, "deny") }));
     await user.click(allow);
 
     expect(api.calls.filter((call) => call.path.endsWith("/respond"))).toHaveLength(1);
@@ -2577,32 +2626,36 @@ describe("Thread: the permission card", () => {
 
   it("reads the item the request is about as awaiting approval, in the attention hue", async () => {
     const user = userEvent.setup();
-    await open(session({ status: "busy", openRequest: REQUEST }), parkedRows());
+    await openApp(buildSession({ status: "busy", openRequest: REQUEST }), buildParkedRows());
 
     await user.click(await screen.findByRole("button", { name: /^Working for/ }));
 
     const line = screen.getByText(/awaiting approval/);
-    expect(reading(line)).toBe("command · ls -la · awaiting approval");
+    expect(readPageText(line)).toBe("command · ls -la · awaiting approval");
     expect(line.className).toContain("text-attn");
-    expect(reading()).not.toContain("· running");
+    expect(readPageText()).not.toContain("· running");
   });
 
   it("renders no card when the record carries no open request", async () => {
-    await open(session({ status: "busy", openRequest: null }), parkedRows());
+    await openApp(buildSession({ status: "busy", openRequest: null }), buildParkedRows());
 
     await screen.findByRole("textbox");
-    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
+    expect(screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") })).toBeNull();
     // The composer's radius never depends on what is above it.
-    expect(composerCard().className).toContain("rounded-[14px]");
+    expect(getComposerCard().className).toContain("rounded-[14px]");
   });
 
   it("shows a question request's questions with deny and cancel only, and says answering is not built", async () => {
-    await open(session({ status: "busy", openRequest: QUESTIONS }), parkedRows());
+    await openApp(buildSession({ status: "busy", openRequest: QUESTIONS }), buildParkedRows());
 
-    await screen.findByRole("button", { name: answer(QUESTIONS, "deny") });
-    expect(screen.getByRole("button", { name: answer(QUESTIONS, "cancel") })).toBeDefined();
-    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow") })).toBeNull();
-    expect(screen.queryByRole("button", { name: answer(REQUEST, "allow_always") })).toBeNull();
+    await screen.findByRole("button", { name: buildAnswerMatcher(QUESTIONS, "deny") });
+    expect(
+      screen.getByRole("button", { name: buildAnswerMatcher(QUESTIONS, "cancel") }),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow") })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: buildAnswerMatcher(REQUEST, "allow_always") }),
+    ).toBeNull();
 
     // The chip, the prose and what each answer would have meant: a question is
     // not an approval, and the card shows all three - as three blocks rather
@@ -2614,7 +2667,7 @@ describe("Thread: the permission card", () => {
     expect(screen.getByText("the one Hercule ships")).toBeDefined();
     // Cancel first: a reply sent while the session is parked queues behind the
     // turn instead of reaching the harness that is asking.
-    expect(reading()).toContain(
+    expect(readPageText()).toContain(
       "Answering here is not built yet. Cancel the turn, then reply in the thread.",
     );
   });
@@ -2657,7 +2710,7 @@ const R_WEBSHOP: Resource = {
 
 const SIBLING_ID = "01a06d02-b100-7000-8000-000000000002";
 
-const ephemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
+const buildEphemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
   id: "01a06d02-7200-7000-8000-000000000002",
   runnerId: RUNNER_STARTED.id,
   kind: "ephemeral",
@@ -2682,8 +2735,8 @@ const ephemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
   disposedAt: null,
 });
 
-const primaryWorkspace = (sessionIds: readonly string[]): Workspace => ({
-  ...ephemeralWorkspace(sessionIds),
+const buildPrimaryWorkspace = (sessionIds: readonly string[]): Workspace => ({
+  ...buildEphemeralWorkspace(sessionIds),
   id: "01a06d02-7200-7000-8000-000000000001",
   kind: "primary",
   checkouts: [
@@ -2699,7 +2752,7 @@ const primaryWorkspace = (sessionIds: readonly string[]): Workspace => ({
   ],
 });
 
-const SIBLING: Session = session({
+const SIBLING: Session = buildSession({
   id: SIBLING_ID,
   title: "Write the retry runbook",
   status: "busy",
@@ -2707,7 +2760,7 @@ const SIBLING: Session = session({
 });
 
 /** The world slice 3 adds around one thread: its project and its workspace. */
-const around = (
+const buildThreadWorldRoutes = (
   workspaces: readonly Workspace[],
   sessions: readonly Session[],
 ): Readonly<Record<string, Handler>> => ({
@@ -2719,7 +2772,7 @@ const around = (
   [`GET /api/v1/sessions/${SIBLING_ID}/transcript`]: { body: { items: [] } },
 });
 
-const chromeOf = async (): Promise<HTMLElement> => {
+const findThreadChrome = async (): Promise<HTMLElement> => {
   const crumb = await waitFor(() => screen.getByText(/\/$/));
   const row = crumb.parentElement;
   if (row === null) throw new Error("the crumb stands in no row");
@@ -2727,68 +2780,80 @@ const chromeOf = async (): Promise<HTMLElement> => {
 };
 
 describe("Thread: the chrome names the project and the workspace's threads (AC-21)", () => {
-  const inWorkspace = (workspaceId: string): Session =>
-    session({ status: "idle", projectId: WEBSHOP.id, workspaceId });
+  const buildSessionInWorkspace = (workspaceId: string): Session =>
+    buildSession({ status: "idle", projectId: WEBSHOP.id, workspaceId });
 
   it("crumbs the project a thread belongs to", async () => {
-    const fixture = inWorkspace(ephemeralWorkspace([SESSION_ID]).id);
-    await open(fixture, twoCompletedTurns(), around([ephemeralWorkspace([SESSION_ID])], [fixture]));
+    const fixture = buildSessionInWorkspace(buildEphemeralWorkspace([SESSION_ID]).id);
+    await openApp(
+      fixture,
+      buildTwoCompletedTurns(),
+      buildThreadWorldRoutes([buildEphemeralWorkspace([SESSION_ID])], [fixture]),
+    );
 
-    expect(reading(await chromeOf())).toMatch(/^webshop \/ Fix the login bug/);
+    expect(readPageText(await findThreadChrome())).toMatch(/^webshop \/ Fix the login bug/);
   });
 
   it("keeps Threads / on a thread that belongs to no project", async () => {
-    const fixture = session({ status: "idle", projectId: null, workspaceId: null });
-    await open(fixture, twoCompletedTurns(), around([], [fixture]));
+    const fixture = buildSession({ status: "idle", projectId: null, workspaceId: null });
+    await openApp(fixture, buildTwoCompletedTurns(), buildThreadWorldRoutes([], [fixture]));
 
-    expect(reading(await chromeOf())).toMatch(/^Threads \/ Fix the login bug/);
+    expect(readPageText(await findThreadChrome())).toMatch(/^Threads \/ Fix the login bug/);
   });
 
   it("leaves the title alone while the workspace holds one thread", async () => {
-    const workspace = ephemeralWorkspace([SESSION_ID]);
-    const fixture = inWorkspace(workspace.id);
-    await open(fixture, twoCompletedTurns(), around([workspace], [fixture]));
+    const workspace = buildEphemeralWorkspace([SESSION_ID]);
+    const fixture = buildSessionInWorkspace(workspace.id);
+    await openApp(
+      fixture,
+      buildTwoCompletedTurns(),
+      buildThreadWorldRoutes([workspace], [fixture]),
+    );
 
-    const chrome = await chromeOf();
-    expect(reading(chrome)).toContain("Fix the login bug");
+    const chrome = await findThreadChrome();
+    expect(readPageText(chrome)).toContain("Fix the login bug");
     expect(within(chrome).queryByRole("link", { name: /Write the retry runbook/ })).toBeNull();
   });
 
   it("puts the workspace's other threads beside the title, in the workspace's own order", async () => {
-    const workspace = ephemeralWorkspace([SESSION_ID, SIBLING_ID]);
-    const fixture = inWorkspace(workspace.id);
-    await open(
+    const workspace = buildEphemeralWorkspace([SESSION_ID, SIBLING_ID]);
+    const fixture = buildSessionInWorkspace(workspace.id);
+    await openApp(
       fixture,
-      twoCompletedTurns(),
-      around([workspace], [fixture, { ...SIBLING, workspaceId: workspace.id }]),
+      buildTwoCompletedTurns(),
+      buildThreadWorldRoutes([workspace], [fixture, { ...SIBLING, workspaceId: workspace.id }]),
     );
 
-    const chrome = await chromeOf();
+    const chrome = await findThreadChrome();
     const sibling = within(chrome).getByRole("link", { name: /Write the retry runbook/ });
     expect(sibling.getAttribute("href")).toBe(`/threads/${SIBLING_ID}`);
-    const text = reading(chrome);
+    const text = readPageText(chrome);
     expect(text.indexOf("Fix the login bug")).toBeLessThan(text.indexOf("Write the retry runbook"));
   });
 
   it("shows concurrent threads in a main workspace as the same tabs", async () => {
-    const workspace = primaryWorkspace([SESSION_ID, SIBLING_ID]);
-    const fixture = inWorkspace(workspace.id);
-    await open(
+    const workspace = buildPrimaryWorkspace([SESSION_ID, SIBLING_ID]);
+    const fixture = buildSessionInWorkspace(workspace.id);
+    await openApp(
       fixture,
-      twoCompletedTurns(),
-      around([workspace], [fixture, { ...SIBLING, workspaceId: workspace.id }]),
+      buildTwoCompletedTurns(),
+      buildThreadWorldRoutes([workspace], [fixture, { ...SIBLING, workspaceId: workspace.id }]),
     );
 
-    const chrome = await chromeOf();
+    const chrome = await findThreadChrome();
     expect(within(chrome).getByRole("link", { name: /Write the retry runbook/ })).toBeDefined();
   });
 
   it("offers a new thread in the same workspace", async () => {
-    const workspace = ephemeralWorkspace([SESSION_ID]);
-    const fixture = inWorkspace(workspace.id);
-    await open(fixture, twoCompletedTurns(), around([workspace], [fixture]));
+    const workspace = buildEphemeralWorkspace([SESSION_ID]);
+    const fixture = buildSessionInWorkspace(workspace.id);
+    await openApp(
+      fixture,
+      buildTwoCompletedTurns(),
+      buildThreadWorldRoutes([workspace], [fixture]),
+    );
 
-    const chrome = await chromeOf();
+    const chrome = await findThreadChrome();
     const here = within(chrome).getByRole("link", { name: "+ New thread here" });
     expect(here.getAttribute("href")).toBe(
       `/threads/new?project=${WEBSHOP.id}&workspace=${workspace.id}`,
@@ -2796,20 +2861,28 @@ describe("Thread: the chrome names the project and the workspace's threads (AC-2
   });
 
   it("offers no new thread here on a thread with no workspace", async () => {
-    const fixture = session({ status: "idle", projectId: WEBSHOP.id, workspaceId: null });
-    await open(fixture, twoCompletedTurns(), around([], [fixture]));
+    const fixture = buildSession({ status: "idle", projectId: WEBSHOP.id, workspaceId: null });
+    await openApp(fixture, buildTwoCompletedTurns(), buildThreadWorldRoutes([], [fixture]));
 
-    const chrome = await chromeOf();
+    const chrome = await findThreadChrome();
     expect(within(chrome).queryByRole("link", { name: "+ New thread here" })).toBeNull();
   });
 });
 
 describe("Draft: a draft joining a workspace (AC-21)", () => {
   it("crumbs its project, joins the tab strip last, and offers no actions", async () => {
-    const workspace = ephemeralWorkspace([SESSION_ID]);
-    const fixture = session({ status: "idle", projectId: WEBSHOP.id, workspaceId: workspace.id });
+    const workspace = buildEphemeralWorkspace([SESSION_ID]);
+    const fixture = buildSession({
+      status: "idle",
+      projectId: WEBSHOP.id,
+      workspaceId: workspace.id,
+    });
     const api = stubApi({
-      ...controller(fixture, twoCompletedTurns(), around([workspace], [fixture])),
+      ...buildController(
+        fixture,
+        buildTwoCompletedTurns(),
+        buildThreadWorldRoutes([workspace], [fixture]),
+      ),
       "GET /api/v1/connections": { body: { items: [] } },
     });
     await renderApp({
@@ -2818,8 +2891,8 @@ describe("Draft: a draft joining a workspace (AC-21)", () => {
       token: "held",
     });
 
-    const chrome = await chromeOf();
-    const text = reading(chrome);
+    const chrome = await findThreadChrome();
+    const text = readPageText(chrome);
     expect(text).toContain("webshop /");
     expect(text).toContain("New thread");
     // The draft joins the workspace's strip last, after the thread already in it.

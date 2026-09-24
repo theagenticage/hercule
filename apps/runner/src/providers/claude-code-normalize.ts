@@ -109,7 +109,7 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
  * Exported because the request kinds are read off it too: which family a tool
  * belongs to is one judgement, and two tables of tool names would disagree.
  */
-export const toolKind = (name: string): ItemKind => TOOL_KINDS[name] ?? "tool_call";
+export const classifyTool = (name: string): ItemKind => TOOL_KINDS[name] ?? "tool_call";
 
 /** The naming the SDK gives an MCP tool, and the only way to tell one apart. */
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
@@ -147,11 +147,11 @@ const cutToMessageLength = (value: string): string => value.slice(0, MAX_MESSAGE
  * payload would be a frame the protocol refuses to encode, which costs the
  * runner its socket and every session on it.
  */
-const json = (value: unknown): Schema.Json =>
+const toJson = (value: unknown): Schema.Json =>
   JSON.parse(JSON.stringify(value ?? null)) as Schema.Json;
 
 /** A count the protocol will carry: a whole number, never negative. */
-const count = (value: number | null | undefined): number =>
+const clampCount = (value: number | null | undefined): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 
 type Emit = Array<ProviderEvent>;
@@ -181,7 +181,7 @@ export const openTurn = (
   };
 };
 
-const inTurn = (state: Normalizing, out: Emit): string => {
+const ensureOpenTurn = (state: Normalizing, out: Emit): string => {
   const { turnId, events } = openTurn(state);
   out.push(...events);
   return turnId;
@@ -218,7 +218,7 @@ const closeTurn = (
   state.streamed.clear();
 };
 
-const started = (
+const buildItemStarted = (
   state: Normalizing,
   turnId: string,
   itemId: string,
@@ -233,11 +233,11 @@ const started = (
     turnId,
     itemId,
     kind,
-    ...(detail === undefined ? {} : { detail: json(detail) }),
+    ...(detail === undefined ? {} : { detail: toJson(detail) }),
   };
 };
 
-const completed = (
+const buildItemCompleted = (
   state: Normalizing,
   turnId: string,
   itemId: string,
@@ -253,10 +253,10 @@ const completed = (
   itemId,
   kind,
   status,
-  ...(detail === undefined ? {} : { detail: json(detail) }),
+  ...(detail === undefined ? {} : { detail: toJson(detail) }),
 });
 
-const delta = (
+const buildContentDelta = (
   state: Normalizing,
   turnId: string,
   itemId: string,
@@ -274,7 +274,7 @@ const delta = (
 });
 
 /** A whole item in one go: what a complete message reports that never streamed. */
-const wholeItem = (
+const buildWholeItem = (
   state: Normalizing,
   turnId: string,
   itemId: string,
@@ -282,17 +282,17 @@ const wholeItem = (
   streamKind: StreamKind,
   text: string,
 ): Emit => [
-  started(state, turnId, itemId, kind),
-  delta(state, turnId, itemId, streamKind, text),
-  completed(state, turnId, itemId, kind, "completed"),
+  buildItemStarted(state, turnId, itemId, kind),
+  buildContentDelta(state, turnId, itemId, streamKind, text),
+  buildItemCompleted(state, turnId, itemId, kind, "completed"),
 ];
 
 /** The forward-compatible catch-all: an unmapped vendor message, with its raw. */
-const unknownItem = (state: Normalizing, out: Emit): void => {
-  const turnId = inTurn(state, out);
+const emitUnknownItem = (state: Normalizing, out: Emit): void => {
+  const turnId = ensureOpenTurn(state, out);
   const itemId = state.mint();
-  out.push(started(state, turnId, itemId, "unknown"));
-  out.push(completed(state, turnId, itemId, "unknown", "completed"));
+  out.push(buildItemStarted(state, turnId, itemId, "unknown"));
+  out.push(buildItemCompleted(state, turnId, itemId, "unknown", "completed"));
 };
 
 type Streamed = Extract<SDKMessage, { type: "stream_event" }>["event"];
@@ -317,14 +317,14 @@ const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: 
             ? "reasoning"
             : undefined;
       if (kind === undefined || open === undefined) return;
-      const turnId = inTurn(state, out);
+      const turnId = ensureOpenTurn(state, out);
       const itemId = `${open.messageId}#${event.index}`;
       open.blocks.set(event.index, {
         itemId,
         kind,
         streamKind: kind === "reasoning" ? "reasoning_text" : "assistant_text",
       });
-      out.push(started(state, turnId, itemId, kind));
+      out.push(buildItemStarted(state, turnId, itemId, kind));
       return;
     }
     case "content_block_delta": {
@@ -338,14 +338,24 @@ const onStreamEvent = (state: Normalizing, event: Streamed, agent: string, out: 
             ? event.delta.thinking
             : undefined;
       if (text === undefined || text === "") return;
-      out.push(delta(state, inTurn(state, out), block.itemId, block.streamKind, text));
+      out.push(
+        buildContentDelta(state, ensureOpenTurn(state, out), block.itemId, block.streamKind, text),
+      );
       return;
     }
     case "content_block_stop": {
       const block = open?.blocks.get(event.index);
       if (block === undefined || open === undefined) return;
       open.blocks.delete(event.index);
-      out.push(completed(state, inTurn(state, out), block.itemId, block.kind, "completed"));
+      out.push(
+        buildItemCompleted(
+          state,
+          ensureOpenTurn(state, out),
+          block.itemId,
+          block.kind,
+          "completed",
+        ),
+      );
       return;
     }
     default:
@@ -360,17 +370,17 @@ const onAssistant = (
   sdk: Extract<SDKMessage, { type: "assistant" }>,
   out: Emit,
 ): void => {
-  const turnId = inTurn(state, out);
+  const turnId = ensureOpenTurn(state, out);
   // Text and reasoning that streamed are already on the wire; this message is
   // their echo. Only one that never streamed has them left to report.
   const echo = state.streamed.has(sdk.message.id);
   for (const block of sdk.message.content) {
     if (block.type === "tool_use") {
-      const kind = toolKind(block.name);
+      const kind = classifyTool(block.name);
       const itemId = block.id === "" ? state.mint() : block.id;
       state.tools.set(itemId, kind);
       out.push(
-        started(state, turnId, itemId, kind, {
+        buildItemStarted(state, turnId, itemId, kind, {
           name: block.name,
           input: block.input,
           ...(kind === "tool_call" ? { kind: isMcp(block.name) ? "mcp" : "native" } : {}),
@@ -381,7 +391,7 @@ const onAssistant = (
     if (echo) continue;
     if (block.type === "text") {
       out.push(
-        ...wholeItem(
+        ...buildWholeItem(
           state,
           turnId,
           state.mint(),
@@ -392,14 +402,21 @@ const onAssistant = (
       );
     } else if (block.type === "thinking") {
       out.push(
-        ...wholeItem(state, turnId, state.mint(), "reasoning", "reasoning_text", block.thinking),
+        ...buildWholeItem(
+          state,
+          turnId,
+          state.mint(),
+          "reasoning",
+          "reasoning_text",
+          block.thinking,
+        ),
       );
     }
   }
   if (sdk.error !== undefined) {
     const itemId = state.mint();
-    out.push(started(state, turnId, itemId, "error", { class: sdk.error }));
-    out.push(completed(state, turnId, itemId, "error", "failed", { class: sdk.error }));
+    out.push(buildItemStarted(state, turnId, itemId, "error", { class: sdk.error }));
+    out.push(buildItemCompleted(state, turnId, itemId, "error", "failed", { class: sdk.error }));
   }
 };
 
@@ -417,24 +434,31 @@ const onUser = (
 ): void => {
   const content = sdk.message.content;
   if (typeof content === "string") return;
-  const turnId = inTurn(state, out);
+  const turnId = ensureOpenTurn(state, out);
   for (const block of content) {
     if (block.type === "tool_result") {
       const itemId = block.tool_use_id === "" ? state.mint() : block.tool_use_id;
       const kind = state.tools.get(itemId) ?? "tool_call";
       state.tools.delete(itemId);
       out.push(
-        completed(state, turnId, itemId, kind, block.is_error === true ? "failed" : "completed", {
-          // Cut because a `Read` of a big file comes back whole; `raw` keeps it.
-          ...(block.content === undefined
-            ? {}
-            : {
-                content:
-                  typeof block.content === "string"
-                    ? cutToMessageLength(block.content)
-                    : block.content,
-              }),
-        }),
+        buildItemCompleted(
+          state,
+          turnId,
+          itemId,
+          kind,
+          block.is_error === true ? "failed" : "completed",
+          {
+            // Cut because a `Read` of a big file comes back whole; `raw` keeps it.
+            ...(block.content === undefined
+              ? {}
+              : {
+                  content:
+                    typeof block.content === "string"
+                      ? cutToMessageLength(block.content)
+                      : block.content,
+                }),
+          },
+        ),
       );
     }
   }
@@ -454,13 +478,13 @@ const readTurnState = (sdk: Extract<SDKMessage, { type: "result" }>): TurnState 
  */
 const readUsage = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
   const models = Object.values(sdk.modelUsage);
-  const total = (read: (used: (typeof models)[number]) => number): number =>
-    models.reduce((sum, used) => sum + count(read(used)), 0);
+  const sumTokens = (read: (used: (typeof models)[number]) => number): number =>
+    models.reduce((sum, used) => sum + clampCount(read(used)), 0);
   return {
-    inputTokens: total((used) => used.inputTokens),
-    outputTokens: total((used) => used.outputTokens),
-    cacheReadTokens: total((used) => used.cacheReadInputTokens),
-    cacheWriteTokens: total((used) => used.cacheCreationInputTokens),
+    inputTokens: sumTokens((used) => used.inputTokens),
+    outputTokens: sumTokens((used) => used.outputTokens),
+    cacheReadTokens: sumTokens((used) => used.cacheReadInputTokens),
+    cacheWriteTokens: sumTokens((used) => used.cacheCreationInputTokens),
     ...(Number.isFinite(sdk.total_cost_usd) && sdk.total_cost_usd >= 0
       ? { costUsd: sdk.total_cost_usd }
       : {}),
@@ -471,7 +495,7 @@ const readUsage = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
  * Only a failure has an error: an interrupted turn ends on `subtype: "success"`
  * carrying what the model had written, which is not why the turn stopped.
  */
-const wentWrong = (sdk: Extract<SDKMessage, { type: "result" }>): string => {
+const describeFailure = (sdk: Extract<SDKMessage, { type: "result" }>): string => {
   if (sdk.subtype !== "success" && sdk.errors.length > 0)
     return cutToMessageLength(sdk.errors.join("; "));
   if (sdk.subtype === "success" && sdk.result !== "") return cutToMessageLength(sdk.result);
@@ -525,7 +549,7 @@ const onResult = (
   sdk: Extract<SDKMessage, { type: "result" }>,
   out: Emit,
 ): void => {
-  const turnId = inTurn(state, out);
+  const turnId = ensureOpenTurn(state, out);
   const usage = readUsage(sdk);
   const turnState = readTurnState(sdk);
   const structuredResult = judgeTurn(state, sdk, turnState);
@@ -538,7 +562,7 @@ const onResult = (
   });
   closeTurn(state, out, turnId, turnState, {
     usage,
-    ...(turnState === "failed" ? { error: wentWrong(sdk) } : {}),
+    ...(turnState === "failed" ? { error: describeFailure(sdk) } : {}),
     ...(structuredResult === undefined ? {} : { structuredResult }),
   });
 };
@@ -553,15 +577,17 @@ const onSystem = (
       // The adapter emits `session.started` off it; nothing else to say.
       return;
     case "compact_boundary": {
-      const turnId = inTurn(state, out);
+      const turnId = ensureOpenTurn(state, out);
       const itemId = state.mint();
       const detail = {
         trigger: sdk.compact_metadata.trigger,
         preTokens: sdk.compact_metadata.pre_tokens,
         postTokens: sdk.compact_metadata.post_tokens,
       };
-      out.push(started(state, turnId, itemId, "context_compaction", detail));
-      out.push(completed(state, turnId, itemId, "context_compaction", "completed", detail));
+      out.push(buildItemStarted(state, turnId, itemId, "context_compaction", detail));
+      out.push(
+        buildItemCompleted(state, turnId, itemId, "context_compaction", "completed", detail),
+      );
       return;
     }
     case "api_retry":
@@ -577,7 +603,7 @@ const onSystem = (
       });
       return;
     default:
-      if (!TRIMMED.has(`system:${sdk.subtype}`)) unknownItem(state, out);
+      if (!TRIMMED.has(`system:${sdk.subtype}`)) emitUnknownItem(state, out);
       return;
   }
 };
@@ -608,7 +634,7 @@ export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<Pr
     dispatch(state, sdk, out);
   } catch {
     out.length = 0;
-    unknownItem(state, out);
+    emitUnknownItem(state, out);
   }
   if (unsolicited && state.turnId !== undefined) {
     if (out.every((event) => event._tag === "turn.started")) {
@@ -626,7 +652,7 @@ export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<Pr
   const at = out.findIndex((event) => event._tag !== "turn.started");
   const found = out[at];
   if (found !== undefined) {
-    out[at] = { ...found, raw: { source: CLAUDE_SDK_MESSAGE, payload: json(sdk) } };
+    out[at] = { ...found, raw: { source: CLAUDE_SDK_MESSAGE, payload: toJson(sdk) } };
   }
   return out;
 };
@@ -649,7 +675,7 @@ const dispatch = (state: Normalizing, sdk: SDKMessage, out: Emit): void => {
       onResult(state, sdk, out);
       return;
     default:
-      if (!TRIMMED.has(sdk.type)) unknownItem(state, out);
+      if (!TRIMMED.has(sdk.type)) emitUnknownItem(state, out);
       return;
   }
 };

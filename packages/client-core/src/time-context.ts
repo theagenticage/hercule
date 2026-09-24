@@ -38,7 +38,7 @@ type Shape = keyof typeof SHAPES;
  */
 const held = new Map<string, Intl.DateTimeFormat | null>();
 
-const formatterFor = (shape: Shape, timezone: string): Intl.DateTimeFormat | null => {
+const buildFormatter = (shape: Shape, timezone: string): Intl.DateTimeFormat | null => {
   const key = `${shape} ${timezone}`;
   const made = held.get(key);
   if (made !== undefined) return made;
@@ -54,12 +54,12 @@ const formatterFor = (shape: Shape, timezone: string): Intl.DateTimeFormat | nul
 };
 
 /** The parts of one reading, or nothing when the zone or the instant is not one. */
-const partsOf = (
+const buildPartReader = (
   shape: Shape,
   instant: Date,
   timezone: string,
 ): ((type: Intl.DateTimeFormatPartTypes) => string) | undefined => {
-  const formatter = formatterFor(shape, timezone);
+  const formatter = buildFormatter(shape, timezone);
   if (formatter === null) return undefined;
 
   let parts: readonly Intl.DateTimeFormatPart[];
@@ -76,7 +76,7 @@ const partsOf = (
  * when the instant is not a date or the zone cannot be formatted.
  */
 export const formatTimeContext = (instant: Date, timezone: string): string | undefined => {
-  const part = partsOf("context", instant, timezone);
+  const part = buildPartReader("context", instant, timezone);
   if (part === undefined) return undefined;
   return `${part("weekday")} ${part("hour")}:${part("minute")}`;
 };
@@ -87,7 +87,7 @@ export const formatTimeContext = (instant: Date, timezone: string): string | und
  * 24-hour clock are the same ones every other reading uses.
  */
 export const formatStamp = (instant: Date, timezone: string): string | undefined => {
-  const part = partsOf("stamp", instant, timezone);
+  const part = buildPartReader("stamp", instant, timezone);
   if (part === undefined) return undefined;
 
   const day = part("day");

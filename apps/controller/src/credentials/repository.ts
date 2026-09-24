@@ -27,10 +27,10 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   decodeCursor,
   encodeCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
   nowIso,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -59,7 +59,7 @@ export const USE_STAMP_INTERVAL_MS = 5 * 60 * 1000;
  * Whether a use is worth writing down. A credential that has never been stamped
  * always is; an unparseable stamp is treated as stale rather than trusted.
  */
-const worthStamping = (lastUsedAt: string | null, nowMillis: number): boolean => {
+const shouldStampLastUsed = (lastUsedAt: string | null, nowMillis: number): boolean => {
   if (lastUsedAt === null) return true;
   const stamped = Date.parse(lastUsedAt);
   return Number.isNaN(stamped) || nowMillis - stamped >= USE_STAMP_INTERVAL_MS;
@@ -181,7 +181,7 @@ const make = Effect.gen(function* () {
     renewLoginToken: (token: LoginTokenRecord): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const millis = yield* Clock.currentTimeMillis;
-        if (!worthStamping(token.lastUsedAt, millis)) return;
+        if (!shouldStampLastUsed(token.lastUsedAt, millis)) return;
         const at = new Date(millis).toISOString();
         const expiresAt = new Date(millis + LOGIN_TOKEN_LIFETIME_MS).toISOString();
         yield* sql`
@@ -260,7 +260,7 @@ const make = Effect.gen(function* () {
     touchApiKey: (key: ApiKeyRecord): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const millis = yield* Clock.currentTimeMillis;
-        if (!worthStamping(key.lastUsedAt, millis)) return;
+        if (!shouldStampLastUsed(key.lastUsedAt, millis)) return;
         const at = new Date(millis).toISOString();
         yield* sql`UPDATE api_keys SET last_used_at = ${at} WHERE id = ${uuidFromString(key.id)}`;
       }),
@@ -282,7 +282,7 @@ const make = Effect.gen(function* () {
         };
         const after =
           page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope, "string");
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["created_at", "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -294,7 +294,7 @@ const make = Effect.gen(function* () {
           WHERE user_id = ${uuidFromString(userId)} AND ${keyset}
           ${order} LIMIT ${page.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           page.limit,
           (read) => Effect.succeed(read.map(toApiKey)),

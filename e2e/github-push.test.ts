@@ -27,15 +27,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   PASSWORD,
   USERNAME,
-  apiKeyIn,
-  cli,
+  readApiKey,
+  runCli,
   completeSetup,
-  gitEnv,
-  jsonOf,
-  liveSessionsAsked,
-  releaseBinary,
+  buildGitEnv,
+  parseJsonOutput,
+  isLiveSessionTestEnabled,
+  findReleaseBinary,
   startController,
-  temporaryHome,
+  createTemporaryHome,
   type Controller,
   type Ran,
 } from "./harness";
@@ -49,14 +49,14 @@ const wanted = token !== undefined && repo !== undefined;
  * top of the token, like `e2e/session.test.ts`: a thread of its own, in
  * a worktree of the same repository, running `git push` itself.
  */
-const live = wanted && liveSessionsAsked();
+const live = wanted && isLiveSessionTestEnabled();
 
-const state = temporaryHome();
-const world = temporaryHome();
-const binary = releaseBinary();
+const state = createTemporaryHome();
+const world = createTemporaryHome();
+const binary = findReleaseBinary();
 
 /** The `HOME` the machine's git and the test's own git read, and nothing else. */
-const gitHome = temporaryHome("");
+const gitHome = createTemporaryHome("");
 /** The repository the push is made from: an empty one, with the remote's name on it. */
 const sender = join(world.home, "sender");
 
@@ -82,12 +82,12 @@ const PROVISION_DEADLINE_MS = 120_000;
 /** Long enough for a cold harness to start, run two git commands and answer. */
 const TURN_DEADLINE_MS = 300_000;
 
-const hercule = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
-  cli(args, { home: state.home, binary, stdin });
+const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
+  runCli(args, { home: state.home, binary, stdin });
 
-const ok = <A>(ran: Ran): A => {
+const expectJsonOutput = <A>(ran: Ran): A => {
   expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
-  return jsonOf(ran) as A;
+  return parseJsonOutput(ran) as A;
 };
 
 interface Workspace {
@@ -98,7 +98,7 @@ interface Workspace {
 }
 
 /** GitHub, as the token's owner. Only used to check and undo what the push did. */
-const github = (path: string, init?: RequestInit): Promise<Response> =>
+const fetchGitHub = (path: string, init?: RequestInit): Promise<Response> =>
   fetch(`https://api.github.com/repos/${repo!}${path}`, {
     ...init,
     headers: {
@@ -115,7 +115,7 @@ const github = (path: string, init?: RequestInit): Promise<Response> =>
  * what a case that deleted its own branch already leaves.
  */
 const removeBranch = async (name: string): Promise<void> => {
-  const response = await github(`/git/refs/heads/${name}`, { method: "DELETE" });
+  const response = await fetchGitHub(`/git/refs/heads/${name}`, { method: "DELETE" });
   if (response.status === 204 || response.status === 404 || response.status === 422) return;
   throw new Error(
     `${name} is still on the account: ${String(response.status)} ${await response.text()}`,
@@ -129,7 +129,7 @@ const removeBranch = async (name: string): Promise<void> => {
  * matches it also printed, which reads exactly like the search being broken.
  * The files are what is being searched, so the files are what is named.
  */
-const regularFilesIn = (where: string): ReadonlyArray<string> =>
+const listRegularFiles = (where: string): ReadonlyArray<string> =>
   readdirSync(where, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => join(entry.parentPath, entry.name));
@@ -141,11 +141,11 @@ const regularFilesIn = (where: string): ReadonlyArray<string> =>
  * token would be, and a grep that gave up on it as binary would find nothing
  * and call that clean.
  */
-const filesHolding = (
+const findFilesHolding = (
   needle: string,
   where: string,
 ): { readonly code: number; readonly files: string } => {
-  const files = regularFilesIn(where);
+  const files = listRegularFiles(where);
   // Nothing to search is not "found nothing": it is the search being pointed at
   // an empty directory, which the control below is there to catch.
   if (files.length === 0) return { code: 1, files: "" };
@@ -168,19 +168,19 @@ const filesHolding = (
  * the wrong directory, or gave up on the database as binary, would otherwise
  * read as a clean bill of health.
  */
-const holdsNoToken = (where: string): void => {
-  const control = filesHolding(apiKeyIn(where), where);
+const expectNoTokenIn = (where: string): void => {
+  const control = findFilesHolding(readApiKey(where), where);
   expect(control.code, "the search found nothing it was known to be able to find").toBe(0);
   expect(control.files).toContain(join(where, "credentials.json"));
 
-  const held = filesHolding(token!, where);
+  const held = findFilesHolding(token!, where);
   expect(held.files, "these files under the Hercule Home hold the token").toBe("");
   expect(held.code, "the search failed rather than finding nothing").toBe(1);
 };
 
 /** The helper as the machine spells it: the binary, or Bun and the dispatcher. */
 const helperCommand = (() => {
-  const built = releaseBinary();
+  const built = findReleaseBinary();
   return built === undefined
     ? `${process.execPath} ${join(import.meta.dirname, "..", "packages/hercule/src/main.ts")} git-credential`
     : `${built} git-credential`;
@@ -192,7 +192,7 @@ const helperCommand = (() => {
  * answers on, and the claim that says who is asking. Built here rather than
  * imported, because what the runner builds is what is under test.
  */
-const gitWithHelper = (
+const runGitWithHelper = (
   args: ReadonlyArray<string>,
   cwd: string,
   claim: Record<string, string>,
@@ -209,7 +209,7 @@ const gitWithHelper = (
   const ran = Bun.spawnSync(["git", ...args], {
     cwd,
     env: {
-      ...gitEnv(gitHome.home),
+      ...buildGitEnv(gitHome.home),
       HERCULE_RUNNER_SOCKET: socketPath,
       GIT_CONFIG_COUNT: String(pairs.length),
       ...Object.fromEntries(
@@ -234,9 +234,9 @@ interface Session {
 }
 
 /** Whether any machine reports a logged-in claude-code instance to spawn on. */
-const claudeLoggedIn = async (): Promise<boolean> => {
+const isClaudeLoggedIn = async (): Promise<boolean> => {
   const response = await fetch(`${url}/api/v1/providers`, {
-    headers: { authorization: `Bearer ${apiKeyIn(state.home)}` },
+    headers: { authorization: `Bearer ${readApiKey(state.home)}` },
   });
   const body = await response.text();
   expect(response.status, body).toBe(200);
@@ -252,8 +252,8 @@ const claudeLoggedIn = async (): Promise<boolean> => {
   );
 };
 
-const workspaceRead = async (id: string): Promise<Workspace> =>
-  ok<Workspace>(await hercule(["workspace", "read", id, "--json"]));
+const readWorkspace = async (id: string): Promise<Workspace> =>
+  expectJsonOutput<Workspace>(await runLoggedInCli(["workspace", "read", id, "--json"]));
 
 beforeAll(async () => {
   if (!wanted) return;
@@ -270,7 +270,7 @@ beforeAll(async () => {
   const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-  const login = await cli(
+  const login = await runCli(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-github"],
     { home: state.home, binary, stdin: PASSWORD },
   );
@@ -285,7 +285,7 @@ beforeAll(async () => {
     ["remote", "add", "origin", remote],
     ["commit", "--allow-empty", "-m", `hercule e2e ${branch}`],
   ]) {
-    const ran = Bun.spawnSync(["git", ...args], { cwd: sender, env: gitEnv(gitHome.home) });
+    const ran = Bun.spawnSync(["git", ...args], { cwd: sender, env: buildGitEnv(gitHome.home) });
     expect(ran.exitCode, ran.stderr.toString()).toBe(0);
   }
 }, 180_000);
@@ -310,8 +310,8 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
   it("clones the private repo, pushes a branch with the workspace's own env, and keeps no token", async () => {
     // The account, from the token alone. Creating it asks GitHub who the
     // token belongs to, so a connection that exists is a token that works.
-    const connection = ok<{ id: string; displayName: string }>(
-      await hercule(
+    const connection = expectJsonOutput<{ id: string; displayName: string }>(
+      await runLoggedInCli(
         [
           "connection",
           "create",
@@ -328,8 +328,8 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
     );
     expect(connection.displayName.length).toBeGreaterThan(0);
 
-    const resource = ok<{ id: string; canonicalRemote: string | null }>(
-      await hercule([
+    const resource = expectJsonOutput<{ id: string; canonicalRemote: string | null }>(
+      await runLoggedInCli([
         "resource",
         "create",
         "--kind",
@@ -344,9 +344,9 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
     expect(resource.canonicalRemote).toBe(`github.com/${repo!.toLowerCase()}`);
     resourceId = resource.id;
 
-    const runnerId = ok<{ items: ReadonlyArray<{ id: string; connectivity: string }> }>(
-      await hercule(["runner", "list", "--connectivity", "online", "--json"]),
-    ).items[0]?.id;
+    const runnerId = expectJsonOutput<{
+      items: ReadonlyArray<{ id: string; connectivity: string }>;
+    }>(await runLoggedInCli(["runner", "list", "--connectivity", "online", "--json"])).items[0]?.id;
     expect(runnerId, `no machine came online:\n${controller.output()}`).toBeDefined();
     machineId = runnerId!;
 
@@ -364,7 +364,7 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
       await fetch(`${url}/api/v1/workspaces`, {
         method: "POST",
         headers: {
-          authorization: `Bearer ${apiKeyIn(state.home)}`,
+          authorization: `Bearer ${readApiKey(state.home)}`,
           "content-type": "application/json",
         },
         body: JSON.stringify({ resourceId: resource.id, runnerId }),
@@ -391,11 +391,15 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
     // The only way out of this loop is the push landing; every other end throws
     // with what git said.
     for (;;) {
-      const pushed = gitWithHelper(["push", "-u", "origin", `HEAD:refs/heads/${branch}`], sender, {
-        HERCULE_WORKSPACE_PROVISIONING: answered.id,
-      });
+      const pushed = runGitWithHelper(
+        ["push", "-u", "origin", `HEAD:refs/heads/${branch}`],
+        sender,
+        {
+          HERCULE_WORKSPACE_PROVISIONING: answered.id,
+        },
+      );
       if (pushed.code === 0) break;
-      const now = await workspaceRead(answered.id);
+      const now = await readWorkspace(answered.id);
       if (now.status !== "provisioning") {
         throw new Error(
           `the push never landed while the workspace was being made; it reads ${now.status}` +
@@ -415,34 +419,34 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
     // The clone the machine was making needed a credential of its own, so a
     // workspace that stands is the read side of the same path.
     const deadline = Date.now() + PROVISION_DEADLINE_MS;
-    let workspace = await workspaceRead(answered.id);
+    let workspace = await readWorkspace(answered.id);
     while (workspace.status === "provisioning" && Date.now() < deadline) {
       await Bun.sleep(500);
-      workspace = await workspaceRead(answered.id);
+      workspace = await readWorkspace(answered.id);
     }
     expect(workspace.status, workspace.message ?? "").toBe("ready");
     expect(workspace.checkouts[0]?.branch).not.toBeNull();
 
     // The branch is on GitHub, and it is the commit this run made.
-    const ref = await github(`/git/ref/heads/${branch}`);
+    const ref = await fetchGitHub(`/git/ref/heads/${branch}`);
     const body = await ref.text();
     expect(ref.status, body).toBe(200);
     expect((JSON.parse(body) as { object: { sha: string } }).object.sha).toBe(
       Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: sender }).stdout.toString().trim(),
     );
 
-    const deleted = await github(`/git/refs/heads/${branch}`, { method: "DELETE" });
+    const deleted = await fetchGitHub(`/git/refs/heads/${branch}`, { method: "DELETE" });
     expect(deleted.status, await deleted.text()).toBe(204);
 
     // Nothing under the Hercule Home holds the token: not the database, not a
     // log, not a git config the machine wrote.
-    holdsNoToken(state.home);
+    expectNoTokenIn(state.home);
   }, 300_000);
   it.skipIf(!live)(
     "a real thread pushes a branch GitHub accepted on the credential the daemon answered, " +
       "and the home is left holding no token",
     async (ctx) => {
-      if (!(await claudeLoggedIn())) {
+      if (!(await isClaudeLoggedIn())) {
         ctx.skip(
           "no machine reports a logged-in claude-code instance. A session runs against the " +
             "instance's own CLAUDE_CONFIG_DIR under this throwaway home, which is empty, so " +
@@ -453,8 +457,8 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
 
       // `full-access` so the agent is not parked on an approval nobody is there
       // to answer; what is under test is the credential, not the permission card.
-      const session = ok<Session>(
-        await hercule(
+      const session = expectJsonOutput<Session>(
+        await runLoggedInCli(
           [
             "session",
             "spawn",
@@ -481,10 +485,10 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
         // The worktree comes off a clone of the private repository, which is the
         // read side of the same credential path.
         const provisioned = Date.now() + PROVISION_DEADLINE_MS;
-        let workspace = await workspaceRead(session.workspaceId!);
+        let workspace = await readWorkspace(session.workspaceId!);
         while (workspace.status === "provisioning" && Date.now() < provisioned) {
           await Bun.sleep(500);
-          workspace = await workspaceRead(session.workspaceId!);
+          workspace = await readWorkspace(session.workspaceId!);
         }
         expect(workspace.status, workspace.message ?? "").toBe("ready");
         expect(workspace.checkouts[0]?.branch).toBe(threadBranch);
@@ -495,12 +499,14 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
         const done = Date.now() + TURN_DEADLINE_MS;
         let tags: ReadonlyArray<string>;
         for (;;) {
-          tags = ok<{ items: ReadonlyArray<{ event: { _tag: string } }> }>(
-            await hercule(["transcript", "read", session.id, "--json", "--all"]),
+          tags = expectJsonOutput<{ items: ReadonlyArray<{ event: { _tag: string } }> }>(
+            await runLoggedInCli(["transcript", "read", session.id, "--json", "--all"]),
           ).items.map((row) => row.event._tag);
           if (tags.includes("turn.completed")) break;
           if (Date.now() > done) {
-            const read = ok<Session>(await hercule(["session", "read", session.id, "--json"]));
+            const read = expectJsonOutput<Session>(
+              await runLoggedInCli(["session", "read", session.id, "--json"]),
+            );
             throw new Error(
               `the thread never finished a turn; it reads ${read.status} and its transcript holds ` +
                 `${tags.join(", ") || "nothing"}`,
@@ -515,27 +521,33 @@ describe.skipIf(!wanted)("pushes GitHub accepted on Hercule's credential alone",
 
         // The branch is on GitHub, pushed by the agent with a token no file on
         // this machine holds. The transcript says what it did if it is not.
-        const ref = await github(`/git/ref/heads/${threadBranch}`);
+        const ref = await fetchGitHub(`/git/ref/heads/${threadBranch}`);
         const body = await ref.text();
         if (ref.status !== 200) {
-          const transcript = await hercule(["transcript", "read", session.id, "--json", "--all"]);
+          const transcript = await runLoggedInCli([
+            "transcript",
+            "read",
+            session.id,
+            "--json",
+            "--all",
+          ]);
           throw new Error(
             `no ${threadBranch} on GitHub (${String(ref.status)} ${body}); the thread said:\n` +
               transcript.stdout,
           );
         }
 
-        const deleted = await github(`/git/refs/heads/${threadBranch}`, { method: "DELETE" });
+        const deleted = await fetchGitHub(`/git/refs/heads/${threadBranch}`, { method: "DELETE" });
         expect(deleted.status, await deleted.text()).toBe(204);
         threadBranch = undefined;
       } finally {
-        const stopped = await hercule(["session", "stop", session.id, "--json"]);
+        const stopped = await runLoggedInCli(["session", "stop", session.id, "--json"]);
         expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
       }
 
       // Same question as the case above, now that an agent has held the
       // credential: nothing under the Hercule Home holds the token.
-      holdsNoToken(state.home);
+      expectNoTokenIn(state.home);
     },
     PROVISION_DEADLINE_MS + TURN_DEADLINE_MS + 120_000,
   );

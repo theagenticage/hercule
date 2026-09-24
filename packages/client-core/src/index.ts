@@ -5,24 +5,24 @@
  * app and the CLI import `createClient` and see promises, plain objects, and
  * the three error classes below - nothing else.
  */
-export { actorReading, type ActorReading } from "./actor-display";
+export { describeActor, type ActorReading } from "./actor-display";
 export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
-  configDraft,
-  configFields,
-  configIssues,
-  configPayload,
+  buildConfigDraft,
+  buildConfigFields,
+  readConfigIssues,
+  buildConfigPayload,
   type ConfigDraft,
   type ConfigField,
   type ConfigJson,
   type ConfigValue,
 } from "./config-fields";
 export {
-  connectionTypes,
-  credentialFieldsOf,
-  githubConnections,
-  redirectUriFor,
-  setupFlowOf,
+  listConnectionTypes,
+  listCredentialFields,
+  filterGitHubConnections,
+  buildRedirectUri,
+  decideSetupFlow,
   type ConnectionType,
   type CredentialField,
   type SetupStep,
@@ -34,41 +34,46 @@ export {
   readValidationIssues,
   RequestError,
 } from "./errors";
-export { idTail } from "./id-tail";
+export { toIdTail } from "./id-tail";
 export { joinCommand } from "./join-command";
 export {
-  retireQuestion,
-  runnerConflictField,
-  runnerDraft,
-  runnerPatch,
+  buildRetireQuestion,
+  findRunnerConflictField,
+  buildRunnerDraft,
+  buildRunnerPatch,
   type RunnerDraft,
 } from "./runner-edit";
-export { runnerFactsReading, type RunnerFactsReading } from "./runner-facts";
+export { describeRunnerFacts, type RunnerFactsReading } from "./runner-facts";
 export { createLive, type Live } from "./live/live";
-export { queryKeys, queryKeysFor, type LiveQueryKey } from "./live/keys";
-export { detectLocalRunner, loopbackEndpoints } from "./local-runner";
-export { refusalReason } from "./plugin-refusal";
-export { capacityLine, queuedSessions, RUNNING_STATUSES } from "./runner-capacity";
-export { providerRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
-export { sessionsEmptyState } from "./sessions-empty-state";
-export { nextOnboardingStep, type OnboardingStep } from "./onboarding";
+export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
+export { detectLocalRunner, listLoopbackEndpoints } from "./local-runner";
+export { describeRefusalReason } from "./plugin-refusal";
+export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
+export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
+export { decideSessionsEmptyState } from "./sessions-empty-state";
+export { findNextOnboardingStep, type OnboardingStep } from "./onboarding";
 export { formatSince, formatStamp, formatTimeContext } from "./time-context";
-export { priorityGlyph, provenanceTarget, taskRecedes, type GlyphTone } from "./task-display";
-export { threadRowsMode } from "./thread-rows";
+export {
+  readPriorityGlyph,
+  describeProvenanceTarget,
+  shouldTaskRecede,
+  type GlyphTone,
+} from "./task-display";
+export { resolveThreadRowsMode } from "./thread-rows";
 export { type AccessModeMenuItem } from "./threads/access-modes";
-export { ageOf } from "./threads/age";
-export { approvalCard } from "./threads/approval";
+export { formatAge } from "./threads/age";
+export { buildApprovalCard } from "./threads/approval";
 export { applyPick, type ComposerPick } from "./threads/apply-pick";
 export type { LoginTarget } from "./threads/catalog";
 export {
-  composerFields,
-  pendingModelNote,
+  buildComposerFields,
+  buildPendingModelNote,
   type ComposerBlocked,
   type ComposerFields,
   type MachineRow,
   type ModelPill,
 } from "./threads/composer-fields";
-export { effectiveConfig, threadConfig } from "./threads/config";
+export { computeEffectiveConfig, readThreadConfig } from "./threads/config";
 export type {
   Thread,
   ThreadCatalogs,
@@ -77,54 +82,54 @@ export type {
   ThreadPicks,
 } from "./threads/config";
 export { formatDuration } from "./threads/duration";
-export { headlineOf, lanesOf, type Lane, type LaneKind } from "./threads/lanes";
-export { threadModelField } from "./threads/model-field";
-export { modelMenu, type ModelMenu } from "./threads/model-menu";
-export { openItemOf } from "./threads/open-item";
+export { buildHeadline, buildLanes, type Lane, type LaneKind } from "./threads/lanes";
+export { buildThreadModelField } from "./threads/model-field";
+export { buildModelMenu, type ModelMenu } from "./threads/model-menu";
+export { findOpenItem } from "./threads/open-item";
 export { mergeTranscript } from "./threads/transcript";
-export { optionsLabel } from "./threads/options-label";
-export { optionsMenu } from "./threads/options-menu";
+export { buildOptionsLabel } from "./threads/options-label";
+export { buildOptionsMenu } from "./threads/options-menu";
 export { pushRecent, type RecentModel } from "./threads/recent";
-export { resumeBlockedReason } from "./threads/resume-blocked";
-export { threadRows, type ThreadRow } from "./threads/rows";
+export { findResumeBlockedReason } from "./threads/resume-blocked";
+export { buildThreadRows, type ThreadRow } from "./threads/rows";
 export {
-  threadGroups,
+  buildThreadGroups,
   type DraftPlace,
-  draftPlace,
+  decideDraftPlace,
   type ProjectGroup,
   type WorkspaceGroup,
 } from "./threads/groups";
-export { siblingTabs, type ThreadTab } from "./threads/siblings";
-export { projectPickerRows, type ProjectPickerRow } from "./threads/projects";
-export { projectTone, type ProjectTone } from "./threads/tone";
-export { branchField, type BranchField } from "./threads/branch-menu";
-export { workspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
+export { buildSiblingTabs, type ThreadTab } from "./threads/siblings";
+export { buildProjectPickerRows, type ProjectPickerRow } from "./threads/projects";
+export { pickProjectTone, type ProjectTone } from "./threads/tone";
+export { buildBranchField, type BranchField } from "./threads/branch-menu";
+export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
 export { isClonableRemote, REMOTE_REFUSAL } from "./remote";
 export {
-  composerPlaceholder,
-  draftSubject,
-  labelText,
-  phraseText,
-  preferredWorkspaceOf,
-  projectRepos,
-  repoName,
-  runnerForPick,
+  buildComposerPlaceholder,
+  findDraftSubject,
+  joinLabelText,
+  joinPhraseText,
+  parsePreferredWorkspace,
+  listProjectRepos,
+  formatRepoName,
+  findRunnerForPick,
   withBranch,
-  workspaceName,
+  formatWorkspaceName,
   type DraftSubject,
   type Phrase,
   type WorkspaceLabel,
   type WorkspacePick,
 } from "./threads/workspaces";
-export { runnerMenu } from "./threads/runner-menu";
-export { submission } from "./threads/submission";
-export { instanceDefaults, threadDefaults } from "./threads/thread-defaults";
-export { turnsOf, type ThreadItem, type ThreadTurn } from "./threads/turns";
+export { buildRunnerMenu } from "./threads/runner-menu";
+export { buildSubmission } from "./threads/submission";
+export { computeInstanceDefaults, computeThreadDefaults } from "./threads/thread-defaults";
+export { buildTurns, type ThreadItem, type ThreadTurn } from "./threads/turns";
 export {
-  browserTimezone,
+  resolveBrowserTimezone,
   FALLBACK_TIMEZONE,
   isSupportedTimezone,
-  supportedTimezones,
+  listSupportedTimezones,
 } from "./timezone";
 export { createTokenStore } from "./token-store";
 export {

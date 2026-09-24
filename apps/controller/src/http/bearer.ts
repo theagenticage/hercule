@@ -6,7 +6,9 @@
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
 /** The bearer token a request presents, or nothing when it presents none. */
-export const bearerOf = (request: HttpServerRequest.HttpServerRequest): string | undefined => {
+export const readBearerToken = (
+  request: HttpServerRequest.HttpServerRequest,
+): string | undefined => {
   const header = request.headers["authorization"];
   if (header === undefined) return undefined;
   const space = header.indexOf(" ");

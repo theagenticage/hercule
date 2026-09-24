@@ -12,14 +12,23 @@ import { join } from "node:path";
 import { Effect, Stream } from "effect";
 import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
 import type { ProviderRunnerContext } from "../index";
-import { CWD, lines, scratchHome, taggedIn, until } from "../testing";
-import { codexAdapter, type CodexSeam } from "./adapter";
+import { CWD, createLines, createScratchHome, filterByTag, waitUntil } from "../testing";
+import { makeCodexAdapter, type CodexSeam } from "./adapter";
 
-export { cleanupHomes, CWD, lines, PRIOR, settle, taggedIn, until, WAIT_MS } from "../testing";
+export {
+  cleanupHomes,
+  CWD,
+  createLines,
+  PRIOR,
+  settle,
+  filterByTag,
+  waitUntil,
+  WAIT_MS,
+} from "../testing";
 
-export const homing = (): string => scratchHome("codex");
+export const createCodexHome = (): string => createScratchHome("codex");
 
-export const contextIn = (home: string, cwd: string | null = null): ProviderRunnerContext => ({
+export const buildContext = (home: string, cwd: string | null = null): ProviderRunnerContext => ({
   cwd,
   home,
   binary: "/usr/local/bin/codex",
@@ -156,7 +165,7 @@ export type Answers = Readonly<Record<string, ((params: unknown) => unknown) | t
  * An answer that refuses the request, the way codex answers a bad one:
  * `-32600` is the code observed at 0.154.0 (`samples/errors.json`).
  */
-export const refusal = (
+export const buildRefusal = (
   message: string,
   code = -32600,
 ): { readonly error: { code: number; message: string } } => ({ error: { code, message } });
@@ -182,7 +191,7 @@ const DEFAULT_ANSWERS: Answers = {
  * it was spawned with and every request it was sent. `dies` is a server that
  * exits instead of answering.
  */
-export const scripted = (
+export const buildScriptedSeam = (
   answers: Answers = {},
   options: { readonly dies?: boolean } = {},
 ): {
@@ -197,20 +206,20 @@ export const scripted = (
   const replies: Answers = { ...DEFAULT_ANSWERS, ...answers };
   const seam: CodexSeam = {
     appServer: (command, env) => {
-      const out = lines();
-      const err = lines();
+      const out = createLines();
+      const err = createLines();
       let kills = 0;
-      let exited: (code: number) => void = () => undefined;
+      let resolveExited: (code: number) => void = () => undefined;
       const done = new Promise<number>((resolve) => {
-        exited = resolve;
+        resolveExited = resolve;
       });
       if (options.dies === true) {
         err.push("codex: app-server failed to start");
         out.end();
         err.end();
-        exited(1);
+        resolveExited(1);
       }
-      const handle = (line: string): void => {
+      const handleLine = (line: string): void => {
         const frame = JSON.parse(line) as Record<string, unknown>;
         const method = frame["method"];
         if (frame["id"] !== undefined && typeof method !== "string") {
@@ -241,12 +250,12 @@ export const scripted = (
         crash: () => {
           out.end();
           err.end();
-          exited(1);
+          resolveExited(1);
         },
       });
       return {
         write: (text: string) => {
-          for (const line of text.split("\n")) if (line.trim() !== "") handle(line);
+          for (const line of text.split("\n")) if (line.trim() !== "") handleLine(line);
         },
         stdout: out.iterable,
         stderr: err.iterable,
@@ -254,7 +263,7 @@ export const scripted = (
           kills += 1;
           out.end();
           err.end();
-          exited(143);
+          resolveExited(143);
         },
         exited: done,
       };
@@ -265,43 +274,46 @@ export const scripted = (
 };
 
 /** An adapter with its events collected, and the app-server it will reach for. */
-export const driving = (
+export const createDriving = (
   answers: Answers = {},
   cwd: string | null = CWD,
 ): {
-  readonly adapter: ReturnType<typeof codexAdapter>;
+  readonly adapter: ReturnType<typeof makeCodexAdapter>;
   readonly ctx: ProviderRunnerContext;
   readonly spawns: Array<Spawn>;
   readonly requests: Array<Sent>;
   readonly answered: Array<Answered>;
   readonly seen: Array<ProviderEvent>;
 } => {
-  const { seam, spawns, requests, answered } = scripted(answers);
-  const adapter = codexAdapter(seam);
+  const { seam, spawns, requests, answered } = buildScriptedSeam(answers);
+  const adapter = makeCodexAdapter(seam);
   const seen: Array<ProviderEvent> = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
-  return { adapter, ctx: contextIn(homing(), cwd), spawns, requests, answered, seen };
+  return { adapter, ctx: buildContext(createCodexHome(), cwd), spawns, requests, answered, seen };
 };
 
-export const sentOf = (requests: ReadonlyArray<Sent>, method: string): ReadonlyArray<unknown> =>
+export const listSentParams = (
+  requests: ReadonlyArray<Sent>,
+  method: string,
+): ReadonlyArray<unknown> =>
   requests.filter((request) => request.method === method).map((request) => request.params);
 
 /** A started session, and the app-server hosting it. */
-export const started = async (
+export const startTestSession = async (
   answers: Answers = {},
-): Promise<ReturnType<typeof driving> & { readonly server: Spawn }> => {
-  const run = driving(answers);
+): Promise<ReturnType<typeof createDriving> & { readonly server: Spawn }> => {
+  const run = createDriving(answers);
   await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
   return { ...run, server: run.spawns[0]! };
 };
 
 /** A session whose turn is running, which is what makes an input a steer. */
-export const busy = async (
+export const startBusySession = async (
   answers: Answers = {},
-): Promise<ReturnType<typeof driving> & { readonly server: Spawn }> => {
-  const run = await started(answers);
+): Promise<ReturnType<typeof createDriving> & { readonly server: Spawn }> => {
+  const run = await startTestSession(answers);
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
   run.server.push({
     method: "turn/started",
@@ -310,6 +322,9 @@ export const busy = async (
       turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" },
     },
   });
-  await until("reported the turn open", () => taggedIn(run.seen, "turn.started").length === 1);
+  await waitUntil(
+    "reported the turn open",
+    () => filterByTag(run.seen, "turn.started").length === 1,
+  );
   return run;
 };

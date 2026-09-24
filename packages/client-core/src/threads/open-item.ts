@@ -9,7 +9,7 @@
  */
 import type { TranscriptRow } from "@hercule/contract";
 
-export const openItemOf = (rows: readonly TranscriptRow[]): string | null => {
+export const findOpenItem = (rows: readonly TranscriptRow[]): string | null => {
   const started: string[] = [];
   const completed = new Set<string>();
 

@@ -32,7 +32,7 @@ const things: [ReactNode, string][] = [
   [<WorkflowGlyph key="workflow" />, "workflow"],
 ];
 
-function row([mark, meaning]: [ReactNode, string]): JSX.Element {
+function renderLegendRow([mark, meaning]: [ReactNode, string]): JSX.Element {
   return (
     <div key={meaning} className="flex items-center gap-2.5 py-[2.5px] text-fine text-muted">
       <span className="flex w-4 justify-start">{mark}</span>
@@ -81,11 +81,11 @@ export function MarksLegend(): JSX.Element {
       </PopoverTrigger>
       <PopoverContent side="right" align="end" className="w-[236px]" aria-label="Marks legend">
         <LaneLabel className="mb-1">Marks</LaneLabel>
-        {states.map(row)}
+        {states.map(renderLegendRow)}
         <div className="mt-2">
           <LaneLabel className="mb-1">Things</LaneLabel>
         </div>
-        {things.map(row)}
+        {things.map(renderLegendRow)}
         <p className="mt-2 border-t border-line-soft pt-2 text-fine text-faint">
           Toggle with <kbd className="font-mono">?</kbd> · Esc closes
         </p>

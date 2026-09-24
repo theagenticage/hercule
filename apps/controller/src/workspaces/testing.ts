@@ -14,7 +14,7 @@ import type * as Duration from "effect/Duration";
 import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import { get, post } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
+import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import { withFleet as withRunnerFleet, type Arranged, type Wire } from "../sessions/testing";
 
 /** What the one machine in these fleets reports about itself. */
@@ -48,7 +48,10 @@ export const withFleet = (
 ): Promise<void> =>
   withRunnerFleet(body, {
     plugins: [
-      fixture({ id: "providers", definitions: [providerDefinition("test-provider")] }).plugin,
+      createPluginFixture({
+        id: "providers",
+        definitions: [buildProviderDefinition("test-provider")],
+      }).plugin,
       ...(options.plugins ?? []),
     ],
     facts: FACTS,
@@ -61,7 +64,7 @@ export const withFleet = (
 /** A frame on the wire, read as the object it is rather than as a member of a union. */
 export type Frame = { readonly _tag: string } & Record<string, unknown>;
 
-export const framesTagged = (wire: Wire, tag: string): ReadonlyArray<Frame> =>
+export const listFramesTagged = (wire: Wire, tag: string): ReadonlyArray<Frame> =>
   (wire.frames as ReadonlyArray<Frame>).filter((frame) => frame._tag === tag);
 
 /** One checkout of a workspace, as the API hands it back. */
@@ -92,11 +95,11 @@ export interface WorkspaceRecord {
 }
 
 /** The error code a refusal answered with. */
-export const codeOf = async (response: Response): Promise<string> =>
+export const readErrorCode = async (response: Response): Promise<string> =>
   ((await response.json()) as { error: { code: string } }).error.code;
 
 /** A repo resource, optionally naming the Connection its token comes from. */
-export const repo = async (
+export const createRepo = async (
   arranged: Arranged,
   remote: string,
   connectionId?: string,
@@ -112,7 +115,10 @@ export const repo = async (
 };
 
 /** A workspace the controller took the request for; the machine has yet to make it. */
-export const provisioned = async (arranged: Arranged, body: unknown): Promise<WorkspaceRecord> => {
+export const provisionWorkspaceOrFail = async (
+  arranged: Arranged,
+  body: unknown,
+): Promise<WorkspaceRecord> => {
   const response = await post(arranged.harness.base, "/api/v1/workspaces", body, arranged.token);
   expect([200, 201], await response.clone().text()).toContain(response.status);
   return (await response.json()) as WorkspaceRecord;

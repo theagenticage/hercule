@@ -6,13 +6,13 @@
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CredentialAnswer } from "@hercule/protocol";
-import { helperMain, runCredentialAction, serveCredentialSocket } from "./index";
-import { cleanTemporaries, temporary } from "../workspaces/testing";
+import { answerCredentialQuestion, runCredentialAction, serveCredentialSocket } from "./index";
+import { cleanTemporaries, createTemporaryDir } from "../workspaces/testing";
 
 afterAll(cleanTemporaries);
 
 /** D-21 F5: an answer is a credential or a refusal, never a struct of maybes. */
-const answering = (
+const buildCredentialAnswer = (
   fields:
     | { readonly token: string; readonly username: string }
     | { readonly error: "unauthorized" | "no_connection" },
@@ -27,11 +27,11 @@ const GIT_ASKS = "protocol=https\nhost=github.com\npath=acme/web\n\n";
 
 const asked: Array<unknown> = [];
 
-const serving = async (
+const startCredentialSocket = async (
   answer: () => Promise<CredentialAnswer>,
 ): Promise<{ path: string; close: () => Promise<void> }> => {
   asked.length = 0;
-  const path = join(temporary("hercule-helper-"), "daemon.sock");
+  const path = join(createTemporaryDir("hercule-helper-"), "daemon.sock");
   const server = await serveCredentialSocket({
     path,
     ask: (request) => {
@@ -44,15 +44,15 @@ const serving = async (
 
 describe("what the helper prints", () => {
   it("prints exactly the two lines git reads, from the answer the daemon gave", async () => {
-    const served = await serving(() =>
+    const served = await startCredentialSocket(() =>
       Promise.resolve(
         // D-21 F5: an answer carries the credential; the git identity is the
         // session's and rides on `sessionStart`.
-        answering({ token: "ghp_the-token", username: "octocat" }),
+        buildCredentialAnswer({ token: "ghp_the-token", username: "octocat" }),
       ),
     );
 
-    const printed = await helperMain(GIT_ASKS, {
+    const printed = await answerCredentialQuestion(GIT_ASKS, {
       HERCULE_RUNNER_SOCKET: served.path,
       HERCULE_TOKEN: "the-session-token",
     });
@@ -65,9 +65,11 @@ describe("what the helper prints", () => {
   });
 
   it("prints nothing when the daemon answers empty", async () => {
-    const served = await serving(() => Promise.resolve(answering({ error: "unauthorized" })));
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ error: "unauthorized" })),
+    );
 
-    const printed = await helperMain(GIT_ASKS, {
+    const printed = await answerCredentialQuestion(GIT_ASKS, {
       HERCULE_RUNNER_SOCKET: served.path,
       HERCULE_TOKEN: "a-foreign-token",
     });
@@ -77,11 +79,13 @@ describe("what the helper prints", () => {
   });
 
   it("prints nothing, and asks nothing, without a session token in its environment", async () => {
-    const served = await serving(() =>
-      Promise.resolve(answering({ token: "ghp_the-token", username: "octocat" })),
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ token: "ghp_the-token", username: "octocat" })),
     );
 
-    const printed = await helperMain(GIT_ASKS, { HERCULE_RUNNER_SOCKET: served.path });
+    const printed = await answerCredentialQuestion(GIT_ASKS, {
+      HERCULE_RUNNER_SOCKET: served.path,
+    });
 
     expect(printed).toBe("");
     expect(asked).toEqual([]);
@@ -89,11 +93,11 @@ describe("what the helper prints", () => {
   });
 
   it("asks as the machine while the runner is provisioning a workspace", async () => {
-    const served = await serving(() =>
-      Promise.resolve(answering({ token: "ghp_the-token", username: "octocat" })),
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(buildCredentialAnswer({ token: "ghp_the-token", username: "octocat" })),
     );
 
-    const printed = await helperMain(GIT_ASKS, {
+    const printed = await answerCredentialQuestion(GIT_ASKS, {
       HERCULE_RUNNER_SOCKET: served.path,
       HERCULE_WORKSPACE_PROVISIONING: "0199e0e7-0000-7000-8000-00000000000b",
     });
@@ -107,11 +111,13 @@ describe("what the helper prints", () => {
   });
 
   it("prints nothing when a field of the answer carries a line break", async () => {
-    const served = await serving(() =>
-      Promise.resolve(answering({ token: "ghp_the-token", username: "octocat\npassword=stolen" })),
+    const served = await startCredentialSocket(() =>
+      Promise.resolve(
+        buildCredentialAnswer({ token: "ghp_the-token", username: "octocat\npassword=stolen" }),
+      ),
     );
 
-    const printed = await helperMain(GIT_ASKS, {
+    const printed = await answerCredentialQuestion(GIT_ASKS, {
       HERCULE_RUNNER_SOCKET: served.path,
       HERCULE_TOKEN: "the-session-token",
     });
@@ -123,8 +129,11 @@ describe("what the helper prints", () => {
   });
 
   it("prints nothing when there is no daemon to ask", async () => {
-    const printed = await helperMain(GIT_ASKS, {
-      HERCULE_RUNNER_SOCKET: join(temporary("hercule-helper-"), "nothing-listens-here.sock"),
+    const printed = await answerCredentialQuestion(GIT_ASKS, {
+      HERCULE_RUNNER_SOCKET: join(
+        createTemporaryDir("hercule-helper-"),
+        "nothing-listens-here.sock",
+      ),
       HERCULE_TOKEN: "the-session-token",
     });
 
@@ -133,7 +142,9 @@ describe("what the helper prints", () => {
   });
 
   it("prints nothing when the environment names no socket at all", async () => {
-    const printed = await helperMain(GIT_ASKS, { HERCULE_TOKEN: "the-session-token" });
+    const printed = await answerCredentialQuestion(GIT_ASKS, {
+      HERCULE_TOKEN: "the-session-token",
+    });
 
     expect(printed).toBe("");
   });

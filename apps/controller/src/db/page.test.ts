@@ -11,8 +11,8 @@ import {
   encodeIdCursor,
   encodeOffsetCursor,
   encodeOwnedCursor,
-  keysetOver,
-  pageOf,
+  buildKeyset,
+  buildPage,
   type CursorScope,
 } from "./page";
 
@@ -21,7 +21,7 @@ const NAMES: CursorScope = { op: "secret.query", field: "name", direction: "asc"
 const ID = "0192ce07-8c4f-7d66-afec-2482b5c9b03c";
 
 /** The decode's failure message, or `null` when it succeeded. */
-const refusal = (
+const readDecodeFailure = (
   cursor: string,
   scope: CursorScope,
   keyType: "string" | "number" = "string",
@@ -56,12 +56,16 @@ describe("keyset cursors", () => {
 
   it("refuses another listing's cursor", async () => {
     const cursor = encodeCursor(NAMES, "controller.signing-key", ID);
-    expect(await refusal(cursor, { ...KEYS, direction: "asc" })).toMatch(/not one this listing/);
+    expect(await readDecodeFailure(cursor, { ...KEYS, direction: "asc" })).toMatch(
+      /not one this listing/,
+    );
   });
 
   it("refuses its own cursor replayed under the other direction", async () => {
     const cursor = encodeCursor(KEYS, "2026-09-04T09:21:33.084Z", ID);
-    expect(await refusal(cursor, { ...KEYS, direction: "asc" })).toMatch(/different sort order/);
+    expect(await readDecodeFailure(cursor, { ...KEYS, direction: "asc" })).toMatch(
+      /different sort order/,
+    );
   });
 
   it("refuses a cursor whose walk ordered on something else, and does not call that a direction", async () => {
@@ -69,7 +73,9 @@ describe("keyset cursors", () => {
     // name, so a mismatch there is a different listing rather than a different
     // direction, and the caller is not sent looking at `--sort`.
     const cursor = encodeCursor(KEYS, "2026-09-04T09:21:33.084Z", ID);
-    expect(await refusal(cursor, { ...KEYS, field: "name" })).toMatch(/different listing/);
+    expect(await readDecodeFailure(cursor, { ...KEYS, field: "name" })).toMatch(
+      /different listing/,
+    );
   });
 
   it.each([
@@ -105,7 +111,7 @@ describe("keyset cursors", () => {
       ),
     ],
   ])("refuses %s", async (_case, cursor) => {
-    expect(await refusal(cursor, KEYS)).toMatch(/not one this listing/);
+    expect(await readDecodeFailure(cursor, KEYS)).toMatch(/not one this listing/);
   });
 });
 
@@ -114,12 +120,14 @@ const EVENTS: CursorScope = { op: "event.query", field: "id", direction: "desc" 
 const RELEVANCE: CursorScope = { op: "task.query", field: "relevance", direction: "asc" };
 
 /** The tag of the failure, or `null` when the decode succeeded. */
-const refused = <A>(effect: Effect.Effect<A, { readonly _tag: string }>): Promise<string | null> =>
+const readFailureTag = <A>(
+  effect: Effect.Effect<A, { readonly _tag: string }>,
+): Promise<string | null> =>
   Effect.runPromise(
     effect.pipe(Effect.match({ onFailure: (error) => error._tag, onSuccess: () => null })),
   );
 
-const edited = (cursor: string): string =>
+const flipCursorDirection = (cursor: string): string =>
   Buffer.from(
     Buffer.from(cursor, "base64url").toString("utf8").replace("desc", "asc"),
     "utf8",
@@ -133,30 +141,30 @@ describe("integer keyset cursors", () => {
 
   it("refuses another operation's cursor", async () => {
     const cursor = encodeIdCursor({ ...EVENTS, op: "task.query" }, 7);
-    expect(await refused(decodeIdCursor(cursor, EVENTS))).toBe("CursorError");
+    expect(await readFailureTag(decodeIdCursor(cursor, EVENTS))).toBe("CursorError");
   });
 
   it("refuses its own cursor replayed on another field or direction", async () => {
     const cursor = encodeIdCursor(EVENTS, 7);
-    expect(await refused(decodeIdCursor(cursor, { ...EVENTS, field: "createdAt" }))).toBe(
+    expect(await readFailureTag(decodeIdCursor(cursor, { ...EVENTS, field: "createdAt" }))).toBe(
       "CursorError",
     );
-    expect(await refused(decodeIdCursor(cursor, { ...EVENTS, direction: "asc" }))).toBe(
+    expect(await readFailureTag(decodeIdCursor(cursor, { ...EVENTS, direction: "asc" }))).toBe(
       "CursorError",
     );
   });
 
   it("refuses an edited cursor", async () => {
-    expect(await refused(decodeIdCursor(edited(encodeIdCursor(EVENTS, 7)), EVENTS))).toBe(
-      "CursorError",
-    );
-    expect(await refused(decodeIdCursor("not a cursor at all", EVENTS))).toBe("CursorError");
+    expect(
+      await readFailureTag(decodeIdCursor(flipCursorDirection(encodeIdCursor(EVENTS, 7)), EVENTS)),
+    ).toBe("CursorError");
+    expect(await readFailureTag(decodeIdCursor("not a cursor at all", EVENTS))).toBe("CursorError");
   });
 
   it("refuses a UUID keyset cursor, and hands its own to no other decoder", async () => {
     const uuid = encodeCursor(EVENTS, "2026-09-04T09:21:33.084Z", ID);
-    expect(await refused(decodeIdCursor(uuid, EVENTS))).toBe("CursorError");
-    expect(await refused(decodeCursor(encodeIdCursor(EVENTS, 7), EVENTS, "string"))).toBe(
+    expect(await readFailureTag(decodeIdCursor(uuid, EVENTS))).toBe("CursorError");
+    expect(await readFailureTag(decodeCursor(encodeIdCursor(EVENTS, 7), EVENTS, "string"))).toBe(
       "CursorError",
     );
   });
@@ -167,7 +175,7 @@ const TRIGGERS: CursorScope = { op: "trigger.query", field: "createdAt", directi
 const CREATED_AT = "2026-09-22T10:00:00.000Z";
 
 /** Builds an owned-row cursor with any payload, to test payloads the decoder must reject. */
-const sealOwned = (...payload: ReadonlyArray<unknown>): string =>
+const sealOwnedCursor = (...payload: ReadonlyArray<unknown>): string =>
   Buffer.from(JSON.stringify(["trigger.query", "createdAt", "desc", ...payload]), "utf8").toString(
     "base64url",
   );
@@ -189,44 +197,51 @@ describe("owned-row keyset cursors", () => {
       ID,
       "nightly",
     );
-    expect(await refused(decodeOwnedCursor(cursor, TRIGGERS))).toBe("CursorError");
+    expect(await readFailureTag(decodeOwnedCursor(cursor, TRIGGERS))).toBe("CursorError");
   });
 
   it("rejects its own cursor used with another sort field or direction", async () => {
     const cursor = encodeOwnedCursor(TRIGGERS, CREATED_AT, ID, "nightly");
-    expect(await refused(decodeOwnedCursor(cursor, { ...TRIGGERS, field: "updatedAt" }))).toBe(
-      "CursorError",
-    );
-    expect(await refused(decodeOwnedCursor(cursor, { ...TRIGGERS, direction: "asc" }))).toBe(
+    expect(
+      await readFailureTag(decodeOwnedCursor(cursor, { ...TRIGGERS, field: "updatedAt" })),
+    ).toBe("CursorError");
+    expect(await readFailureTag(decodeOwnedCursor(cursor, { ...TRIGGERS, direction: "asc" }))).toBe(
       "CursorError",
     );
   });
 
   it("rejects an edited cursor and a cursor with the wrong payload", async () => {
     expect(
-      await refused(
-        decodeOwnedCursor(edited(encodeOwnedCursor(TRIGGERS, CREATED_AT, ID, "nightly")), TRIGGERS),
+      await readFailureTag(
+        decodeOwnedCursor(
+          flipCursorDirection(encodeOwnedCursor(TRIGGERS, CREATED_AT, ID, "nightly")),
+          TRIGGERS,
+        ),
       ),
     ).toBe("CursorError");
-    expect(await refused(decodeOwnedCursor("not a cursor at all", TRIGGERS))).toBe("CursorError");
+    expect(await readFailureTag(decodeOwnedCursor("not a cursor at all", TRIGGERS))).toBe(
+      "CursorError",
+    );
     // A plain keyset cursor has no name, and a numeric sort key is not a timestamp.
-    expect(await refused(decodeOwnedCursor(encodeCursor(TRIGGERS, CREATED_AT, ID), TRIGGERS))).toBe(
-      "CursorError",
-    );
-    expect(await refused(decodeOwnedCursor(sealOwned(1757, ID, "nightly"), TRIGGERS))).toBe(
-      "CursorError",
-    );
     expect(
-      await refused(decodeOwnedCursor(sealOwned(CREATED_AT, "not-an-id", "nightly"), TRIGGERS)),
+      await readFailureTag(decodeOwnedCursor(encodeCursor(TRIGGERS, CREATED_AT, ID), TRIGGERS)),
     ).toBe("CursorError");
-    expect(await refused(decodeOwnedCursor(sealOwned(CREATED_AT, ID, 7), TRIGGERS))).toBe(
-      "CursorError",
-    );
+    expect(
+      await readFailureTag(decodeOwnedCursor(sealOwnedCursor(1757, ID, "nightly"), TRIGGERS)),
+    ).toBe("CursorError");
+    expect(
+      await readFailureTag(
+        decodeOwnedCursor(sealOwnedCursor(CREATED_AT, "not-an-id", "nightly"), TRIGGERS),
+      ),
+    ).toBe("CursorError");
+    expect(
+      await readFailureTag(decodeOwnedCursor(sealOwnedCursor(CREATED_AT, ID, 7), TRIGGERS)),
+    ).toBe("CursorError");
   });
 
   it("is rejected by the plain keyset decoder", async () => {
     const cursor = encodeOwnedCursor(TRIGGERS, CREATED_AT, ID, "nightly");
-    expect(await refused(decodeCursor(cursor, TRIGGERS, "string"))).toBe("CursorError");
+    expect(await readFailureTag(decodeCursor(cursor, TRIGGERS, "string"))).toBe("CursorError");
   });
 });
 
@@ -242,30 +257,34 @@ describe("offset cursors", () => {
 
   it("refuses another operation's cursor", async () => {
     const cursor = encodeOffsetCursor({ ...RELEVANCE, op: "event.query" }, 40);
-    expect(await refused(decodeOffsetCursor(cursor, RELEVANCE))).toBe("CursorError");
+    expect(await readFailureTag(decodeOffsetCursor(cursor, RELEVANCE))).toBe("CursorError");
   });
 
   it("refuses its own cursor replayed on another field or direction", async () => {
     const cursor = encodeOffsetCursor(RELEVANCE, 40);
-    expect(await refused(decodeOffsetCursor(cursor, { ...RELEVANCE, field: "updatedAt" }))).toBe(
-      "CursorError",
-    );
-    expect(await refused(decodeOffsetCursor(cursor, { ...RELEVANCE, direction: "desc" }))).toBe(
-      "CursorError",
-    );
+    expect(
+      await readFailureTag(decodeOffsetCursor(cursor, { ...RELEVANCE, field: "updatedAt" })),
+    ).toBe("CursorError");
+    expect(
+      await readFailureTag(decodeOffsetCursor(cursor, { ...RELEVANCE, direction: "desc" })),
+    ).toBe("CursorError");
   });
 
   it("refuses an edited cursor", async () => {
     const cursor = encodeOffsetCursor({ ...RELEVANCE, direction: "desc" }, 40);
     expect(
-      await refused(decodeOffsetCursor(edited(cursor), { ...RELEVANCE, direction: "desc" })),
+      await readFailureTag(
+        decodeOffsetCursor(flipCursorDirection(cursor), { ...RELEVANCE, direction: "desc" }),
+      ),
     ).toBe("CursorError");
-    expect(await refused(decodeOffsetCursor("not a cursor at all", RELEVANCE))).toBe("CursorError");
+    expect(await readFailureTag(decodeOffsetCursor("not a cursor at all", RELEVANCE))).toBe(
+      "CursorError",
+    );
   });
 
   it("refuses a UUID keyset cursor", async () => {
     const uuid = encodeCursor(RELEVANCE, "2026-09-04T09:21:33.084Z", ID);
-    expect(await refused(decodeOffsetCursor(uuid, RELEVANCE))).toBe("CursorError");
+    expect(await readFailureTag(decodeOffsetCursor(uuid, RELEVANCE))).toBe("CursorError");
   });
 });
 
@@ -296,11 +315,11 @@ const walkAll = (direction: "asc" | "desc", limit: number) =>
     let pages = 0;
     for (;;) {
       const after = cursor === undefined ? undefined : yield* decodeCursor(cursor, scope, "string");
-      const { keyset, order } = keysetOver(sql, ["name", "id"], after, direction);
+      const { keyset, order } = buildKeyset(sql, ["name", "id"], after, direction);
       const rows = yield* sql<{ readonly id: string; readonly name: string }>`
         SELECT id, name FROM walked WHERE ${keyset} ${order} LIMIT ${limit + 1}
       `;
-      const page = yield* pageOf(rows, limit, Effect.succeed, (last) =>
+      const page = yield* buildPage(rows, limit, Effect.succeed, (last) =>
         encodeCursor(scope, last.name, last.id),
       );
       pages++;

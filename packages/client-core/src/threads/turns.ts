@@ -50,7 +50,7 @@ const VERBS: Partial<Record<ItemKind, string>> = {
   error: "error",
 };
 
-const verbOf = (kind: ItemKind): string => VERBS[kind] ?? "unknown";
+const readItemVerb = (kind: ItemKind): string => VERBS[kind] ?? "unknown";
 
 /** Long enough to read as a summary, short enough that a whole file body never lands in a row. */
 const MAX_TARGET_LENGTH = 200;
@@ -65,7 +65,7 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
  * `detail` is adapter-owned Json (spec 06 §6.3), so every field is read
  * optionally; the fallback is the same JSON dump this always fell back to.
  */
-const textOf = (detail: Record<string, unknown>): string | undefined => {
+const findDetailText = (detail: Record<string, unknown>): string | undefined => {
   const input = asRecord(detail.input);
   const candidate =
     input?.command ??
@@ -79,12 +79,12 @@ const textOf = (detail: Record<string, unknown>): string | undefined => {
 };
 
 /** `detail` is adapter-owned Json; a plain string speaks for itself, anything else is compact JSON. */
-const summarize = (detail: unknown): string => {
+const summarizeDetail = (detail: unknown): string => {
   if (detail === undefined || detail === null) return "";
   const text =
     typeof detail === "string"
       ? detail
-      : (textOf(asRecord(detail) ?? {}) ?? JSON.stringify(detail));
+      : (findDetailText(asRecord(detail) ?? {}) ?? JSON.stringify(detail));
   const line = text.split("\n")[0] ?? "";
   return line.length > MAX_TARGET_LENGTH ? `${line.slice(0, MAX_TARGET_LENGTH)}…` : line;
 };
@@ -101,14 +101,14 @@ interface Building {
   lastAssistantItemId: string | null;
 }
 
-export const turnsOf = (
+export const buildTurns = (
   rows: readonly TranscriptRow[],
   /** The item the session's open request is about, if it has one. */
   awaitingItemId?: string,
 ): readonly ThreadTurn[] => {
   const turns = new Map<string, Building>();
 
-  const turnOf = (turnId: string, fallbackAt: string): Building => {
+  const findOrStartTurn = (turnId: string, fallbackAt: string): Building => {
     const held = turns.get(turnId);
     if (held !== undefined) return held;
     const made: Building = {
@@ -129,15 +129,15 @@ export const turnsOf = (
     const event: ProviderEvent = row.event;
     switch (event._tag) {
       case "turn.started": {
-        turnOf(event.turnId, event.at).startedAt = event.at;
+        findOrStartTurn(event.turnId, event.at).startedAt = event.at;
         break;
       }
       case "turn.completed": {
-        turnOf(event.turnId, event.at).completedAt = event.at;
+        findOrStartTurn(event.turnId, event.at).completedAt = event.at;
         break;
       }
       case "item.started": {
-        const turn = turnOf(event.turnId, event.at);
+        const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
           // A steered input opens a second `user_message` in the turn it folded
           // into (spec 06 §5), so the first one is appended to, never replaced.
@@ -148,15 +148,15 @@ export const turnsOf = (
           turn.itemIndex.set(event.itemId, turn.items.length);
           turn.items.push({
             itemId: event.itemId,
-            verb: verbOf(event.kind),
-            target: summarize(event.detail),
+            verb: readItemVerb(event.kind),
+            target: summarizeDetail(event.detail),
             result: "running",
           });
         }
         break;
       }
       case "item.completed": {
-        const turn = turnOf(event.turnId, event.at);
+        const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message" || event.kind === "assistant_message") break;
         const index = turn.itemIndex.get(event.itemId);
         if (index === undefined) break;
@@ -166,7 +166,7 @@ export const turnsOf = (
       }
       case "content.delta": {
         if (event.streamKind !== "assistant_text") break;
-        const turn = turnOf(event.turnId, event.at);
+        const turn = findOrStartTurn(event.turnId, event.at);
         // A turn holds any number of model calls (spec 06 §6.2), so its
         // assistant text can carry more than one assistant_message item; a
         // new item's first delta after another's is a paragraph break, not a

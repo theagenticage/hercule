@@ -2,10 +2,10 @@ import { useState, type JSX } from "react";
 import { Link, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import {
-  ageOf,
-  draftPlace,
-  labelText,
-  threadGroups,
+  formatAge,
+  decideDraftPlace,
+  joinLabelText,
+  buildThreadGroups,
   type DraftPlace,
   type HerculeClient,
   type Live,
@@ -32,7 +32,7 @@ import { ThreadRowView } from "../screens/thread-row";
 /**
  * The threads face: the threads grouped per project and, inside a project, per
  * workspace (spec 14 §App shell, amended by #160 and by #72). The grouping
- * itself is `threadGroups`'; what is left here is the drawing of it.
+ * itself is `buildThreadGroups`'; what is left here is the drawing of it.
  *
  * The row density is the seam the thread list is built on: what a row shows is
  * the `ui.threadRows` setting's to say, and the list reads it from here.
@@ -80,7 +80,7 @@ export function ThreadsFace({
   const draft: DraftPlace | null =
     drafted === undefined
       ? null
-      : draftPlace({
+      : decideDraftPlace({
           projectId: drafted.search.project ?? null,
           workspaceId: drafted.search.workspace ?? null,
           resources,
@@ -88,7 +88,7 @@ export function ThreadsFace({
           runnerId: localRunnerId,
           preferred: preferredWorkspace,
         });
-  const groups = threadGroups({
+  const groups = buildThreadGroups({
     sessions,
     projects,
     workspaces,
@@ -243,7 +243,7 @@ function WorkspaceLane({
             </span>
           ) : (
             <span
-              title={labelText(lane.label)}
+              title={joinLabelText(lane.label)}
               className="flex min-w-0 font-mono text-[11px] text-faint"
             >
               <span className="truncate">{lane.label.clip}</span>
@@ -252,7 +252,7 @@ function WorkspaceLane({
           )}
           {lane.workspaceId === null ? null : (
             <Plus
-              name={`New thread in ${labelText(lane.label)}`}
+              name={`New thread in ${joinLabelText(lane.label)}`}
               search={{ project: projectId, workspace: lane.workspaceId }}
               className="ml-auto opacity-0 group-hover/lane:opacity-100 focus-visible:opacity-100"
             />
@@ -264,7 +264,7 @@ function WorkspaceLane({
           key={row.id}
           mark={row.mark}
           title={row.title}
-          age={ageOf(row.activityAt, now)}
+          age={formatAge(row.activityAt, now)}
           secondLine={row.secondLine}
           sessionId={row.id}
           selected={row.id === current}

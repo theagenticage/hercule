@@ -37,9 +37,9 @@ import {
   decodeOffsetCursor,
   encodeCursor,
   encodeOffsetCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -151,7 +151,7 @@ const SORT_KEY_TYPE: Record<TaskSortField, "string" | "number"> = {
 const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 
 /** The value a row hands the next cursor, in the type its column compares as. */
-const sortKeyOf = (task: Task, field: TaskSortField): SortKey => {
+const readSortKey = (task: Task, field: TaskSortField): SortKey => {
   switch (field) {
     case "updatedAt":
       return task.updatedAt;
@@ -172,7 +172,7 @@ const sortKeyOf = (task: Task, field: TaskSortField): SortKey => {
  * that would need escaping. `undefined` when the text holds no word at all: the
  * index holds no punctuation either, so such a search can match nothing.
  */
-const matchExpression = (text: string): string | undefined => {
+const buildMatchExpression = (text: string): string | undefined => {
   const tokens = text.split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 0);
   return tokens.length === 0 ? undefined : tokens.map((token) => `"${token}"`).join(" AND ");
 };
@@ -186,13 +186,13 @@ const matchExpression = (text: string): string | undefined => {
  * filter it ran under. The terms are the expression rather than the text a
  * caller typed, so trimming the search box between pages keeps the walk.
  */
-const columnScope = (field: TaskSortField, direction: SortDirection): CursorScope => ({
+const buildColumnScope = (field: TaskSortField, direction: SortDirection): CursorScope => ({
   op: "task.query",
   field,
   direction,
 });
 
-const relevanceScope = (filter: TaskFilter, match: string): CursorScope => ({
+const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => ({
   op: "task.query",
   field: `relevance:${JSON.stringify([
     match,
@@ -208,18 +208,18 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   /** `IN` over a list, and the empty list is the condition that matches nothing. */
-  const anyOf = (column: string, values: ReadonlyArray<unknown>) =>
+  const buildAnyOfClause = (column: string, values: ReadonlyArray<unknown>) =>
     values.length === 0 ? sql`1 = 0` : sql`${sql.literal(column)} IN ${sql.in(values)}`;
 
-  const conditions = (filter: TaskFilter) => {
+  const buildConditions = (filter: TaskFilter) => {
     const clauses = [sql`tasks.deleted_at IS NULL`];
-    if (filter.status !== undefined) clauses.push(anyOf("tasks.status", filter.status));
+    if (filter.status !== undefined) clauses.push(buildAnyOfClause("tasks.status", filter.status));
     if (filter.projectId !== undefined) {
       clauses.push(sql`tasks.project_id = ${uuidFromString(filter.projectId)}`);
     }
     if (filter.labels !== undefined) {
       clauses.push(
-        sql`EXISTS (SELECT 1 FROM json_each(tasks.labels) WHERE ${anyOf("value", filter.labels)})`,
+        sql`EXISTS (SELECT 1 FROM json_each(tasks.labels) WHERE ${buildAnyOfClause("value", filter.labels)})`,
       );
     }
     if (filter.refs !== undefined) {
@@ -229,7 +229,7 @@ const make = Effect.gen(function* () {
         // where this seeks `task_provenance_ref` first and then the few ids it
         // names. The duplicate-signal check runs before every triage.
         sql`tasks.id IN (SELECT p.task_id FROM task_provenance p
-                         WHERE ${anyOf("p.ref", filter.refs)})`,
+                         WHERE ${buildAnyOfClause("p.ref", filter.refs)})`,
       );
     }
     return sql.and(clauses);
@@ -394,12 +394,12 @@ const make = Effect.gen(function* () {
       request: TaskPageRequest,
     ): Effect.Effect<Page<Task>, CursorError | SqlError> =>
       Effect.gen(function* () {
-        const where = conditions(filter);
+        const where = buildConditions(filter);
 
         if (request.order._tag === "relevance") {
-          const match = matchExpression(request.order.text);
+          const match = buildMatchExpression(request.order.text);
           if (match === undefined) return { items: [], nextCursor: undefined };
-          const scope = relevanceScope(filter, match);
+          const scope = buildRelevanceScope(filter, match);
           const offset =
             request.cursor === undefined ? 0 : yield* decodeOffsetCursor(request.cursor, scope);
           // The relevance order is bm25's, which is most negative first.
@@ -412,18 +412,18 @@ const make = Effect.gen(function* () {
           `;
           // The next page resumes by counting rows rather than off the last of
           // them, so what that row was does not come into it.
-          return yield* pageOf(rows, request.limit, hydrate, () =>
+          return yield* buildPage(rows, request.limit, hydrate, () =>
             encodeOffsetCursor(scope, offset + request.limit),
           );
         }
 
         const { field, direction } = request.order;
-        const scope = columnScope(field, direction);
+        const scope = buildColumnScope(field, direction);
         const after =
           request.cursor === undefined
             ? undefined
             : yield* decodeCursor(request.cursor, scope, SORT_KEY_TYPE[field]);
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           [SORT_COLUMN[field], "tasks.id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -433,8 +433,8 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(COLUMNS)} FROM tasks
           WHERE ${where} AND ${keyset} ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(rows, request.limit, hydrate, (last) =>
-          encodeCursor(scope, sortKeyOf(last, field), last.id),
+        return yield* buildPage(rows, request.limit, hydrate, (last) =>
+          encodeCursor(scope, readSortKey(last, field), last.id),
         );
       }),
   };

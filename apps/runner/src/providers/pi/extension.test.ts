@@ -110,7 +110,7 @@ const TYPE = { Unsafe: (schema: unknown) => schema };
  * environment is the whole input, because the adapter tells the extension
  * about the session through the environment.
  */
-const toolsRegisteredWith = (
+const listRegisteredTools = (
   env: Readonly<Record<string, string | undefined>>,
 ): ReadonlyArray<RegisteredTool> => {
   const body = EXTENSION_SOURCE.split("\n")
@@ -134,7 +134,7 @@ describe("the tool a session under an output schema answers through", () => {
   const SCHEMA_ENV = { [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(OUTPUT_SCHEMA) };
 
   it("registers it under the schema the adapter handed the session", () => {
-    const tools = toolsRegisteredWith(SCHEMA_ENV);
+    const tools = listRegisteredTools(SCHEMA_ENV);
 
     expect(tools.map((tool) => tool.name)).toEqual([SUBMIT_RESULT_TOOL]);
     // The schema passes through unchanged. If the extension rewrote it, the
@@ -143,7 +143,7 @@ describe("the tool a session under an output schema answers through", () => {
   });
 
   it("ends the agent's run on the call that answered", async () => {
-    const tools = toolsRegisteredWith(SCHEMA_ENV);
+    const tools = listRegisteredTools(SCHEMA_ENV);
 
     // Without this the agent carries on after it answers, and the turn's
     // result waits for a settle that has nothing left to say.
@@ -155,6 +155,6 @@ describe("the tool a session under an output schema answers through", () => {
   it("registers no tool for a session that was given no schema", () => {
     // A Thread answers prose. A `submit_result` on every session would be a
     // tool the model can call, and nothing would validate the call.
-    expect(toolsRegisteredWith({})).toEqual([]);
+    expect(listRegisteredTools({})).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import { CLI, NOUNS } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { parseArguments } from "./args";
-import { COMMANDS, commandAt, mentionsIn } from "./tree";
+import { COMMANDS, findCommandByWords, findMentions } from "./tree";
 
 /**
  * The table, read structurally, so this test asserts the values the contract
@@ -30,11 +30,11 @@ const table: Record<string, Row> = CLI;
 const visible = Object.entries(table).filter(([, row]) => row.hidden !== true);
 const hidden = Object.entries(table).filter(([, row]) => row.hidden === true);
 
-const rowOf = (id: string): Row => table[id]!;
-const spelling = (command: { readonly spelling: string }): string => command.spelling;
+const readRow = (id: string): Row => table[id]!;
+const readSpelling = (command: { readonly spelling: string }): string => command.spelling;
 
 /** `:name` path parameters, in the order the route writes them. */
-const pathParams = (path: string): ReadonlyArray<string> =>
+const listPathParams = (path: string): ReadonlyArray<string> =>
   [...path.matchAll(/:([A-Za-z0-9_]+)/g)].map((match) => match[1]!);
 
 /** The words the CLI reserves everywhere; no command may spell a flag with one. */
@@ -49,31 +49,33 @@ describe("the command tree", () => {
   });
 
   it("names exactly one operation per command, and spells each one once", () => {
-    const spellings = COMMANDS.map(spelling);
+    const spellings = COMMANDS.map(readSpelling);
     expect(new Set(spellings).size).toBe(spellings.length);
     expect(new Set(COMMANDS.map((command) => command.id)).size).toBe(COMMANDS.length);
   });
 
   it("answers at every command's words, and nowhere for a hidden operation", () => {
     for (const command of COMMANDS) {
-      expect(commandAt(command.words)?.id, spelling(command)).toBe(command.id);
+      expect(findCommandByWords(command.words)?.id, readSpelling(command)).toBe(command.id);
     }
     for (const [id] of hidden) {
       const [entity = "", verb = ""] = id.split(".");
-      expect(commandAt([entity, verb]), `${id} is hidden`).toBeUndefined();
+      expect(findCommandByWords([entity, verb]), `${id} is hidden`).toBeUndefined();
     }
-    expect(commandAt(["auth", "ws-ticket"])).toBeUndefined();
+    expect(findCommandByWords(["auth", "ws-ticket"])).toBeUndefined();
     // The id spelling is not a second way in.
-    expect(commandAt(["apiKey", "query"])).toBeUndefined();
-    expect(commandAt(["task", "query"])).toBeUndefined();
-    expect(commandAt(["runner", "create-join-token"])).toBeUndefined();
+    expect(findCommandByWords(["apiKey", "query"])).toBeUndefined();
+    expect(findCommandByWords(["task", "query"])).toBeUndefined();
+    expect(findCommandByWords(["runner", "create-join-token"])).toBeUndefined();
   });
 });
 
 // how every visible command is spelled.
 describe("the spelling of a command", () => {
   it("is the spelling the table writes", () => {
-    const spelled = Object.fromEntries(COMMANDS.map((command) => [command.id, spelling(command)]));
+    const spelled = Object.fromEntries(
+      COMMANDS.map((command) => [command.id, readSpelling(command)]),
+    );
     const written = Object.fromEntries(visible.map(([id, row]) => [id, row.command]));
     expect(spelled).toEqual(written);
   });
@@ -83,7 +85,7 @@ describe("the spelling of a command", () => {
     // command there is; what it asserts is that the rule is applied at all.
     for (const command of COMMANDS) {
       for (const field of command.query) {
-        expect(field.positional, `${spelling(command)}: --${field.spelling}`).toBe(false);
+        expect(field.positional, `${readSpelling(command)}: --${field.spelling}`).toBe(false);
       }
     }
   });
@@ -91,7 +93,7 @@ describe("the spelling of a command", () => {
   it("writes every word in kebab-case", () => {
     for (const command of COMMANDS) {
       for (const word of command.words) {
-        expect(word, `${spelling(command)}: ${word}`).toMatch(KEBAB);
+        expect(word, `${readSpelling(command)}: ${word}`).toMatch(KEBAB);
       }
     }
   });
@@ -100,9 +102,9 @@ describe("the spelling of a command", () => {
     for (const command of COMMANDS) {
       const flags = [...command.payload, ...command.query].map((field) => field.spelling);
       for (const flag of flags) {
-        expect(flag, `${spelling(command)}: --${flag}`).toMatch(KEBAB);
+        expect(flag, `${readSpelling(command)}: --${flag}`).toMatch(KEBAB);
       }
-      expect(new Set(flags).size, `${spelling(command)} repeats a flag`).toBe(flags.length);
+      expect(new Set(flags).size, `${readSpelling(command)} repeats a flag`).toBe(flags.length);
     }
   });
 
@@ -111,7 +113,7 @@ describe("the spelling of a command", () => {
       for (const field of [...command.payload, ...command.query]) {
         expect(
           RESERVED_FLAGS.includes(field.spelling),
-          `${spelling(command)}: --${field.spelling} is reserved`,
+          `${readSpelling(command)}: --${field.spelling} is reserved`,
         ).toBe(false);
       }
     }
@@ -122,14 +124,14 @@ describe("the spelling of a command", () => {
       const inPath = command.positionals.filter((field) => field.carriedIn === "path");
       expect(
         inPath.map((field) => field.name),
-        spelling(command),
-      ).toEqual(pathParams(command.path));
+        readSpelling(command),
+      ).toEqual(listPathParams(command.path));
       // A payload field the table writes as a bare word stands after them, and
       // nothing else is ever a bare word.
       const rest = command.positionals.slice(inPath.length);
       expect(
         rest.every((field) => field.carriedIn === "payload"),
-        `${spelling(command)}: ${rest.map((field) => field.name).join(", ")}`,
+        `${readSpelling(command)}: ${rest.map((field) => field.name).join(", ")}`,
       ).toBe(true);
     }
   });
@@ -144,10 +146,10 @@ describe("a command's fields against the schema", () => {
       const reflected = [...command.positionals, ...command.payload, ...command.query].map(
         (field) => field.name,
       );
-      const shown = Object.entries(rowOf(command.id).fields ?? {})
+      const shown = Object.entries(readRow(command.id).fields ?? {})
         .filter(([, field]) => field.hidden !== true)
         .map(([name]) => name);
-      expect(reflected.sort(), spelling(command)).toEqual(shown.sort());
+      expect(reflected.sort(), readSpelling(command)).toEqual(shown.sort());
     }
   });
 
@@ -155,7 +157,7 @@ describe("a command's fields against the schema", () => {
     const paged = COMMANDS.filter((command) => command.paged);
     expect(paged.length).toBeGreaterThan(0);
     for (const command of paged) {
-      expect(command.sortFields, spelling(command)).not.toEqual([]);
+      expect(command.sortFields, readSpelling(command)).not.toEqual([]);
     }
   });
 
@@ -163,7 +165,7 @@ describe("a command's fields against the schema", () => {
     const targets = COMMANDS.flatMap((command) =>
       [...command.positionals, ...command.payload, ...command.query]
         .filter((field) => field.resolves !== undefined)
-        .map((field) => [spelling(command), field.name, field.resolves!] as const),
+        .map((field) => [readSpelling(command), field.name, field.resolves!] as const),
     );
     expect(targets.length).toBeGreaterThan(0);
     for (const [where, name, target] of targets) {
@@ -187,7 +189,7 @@ describe("a command's fields against the schema", () => {
       ["session", "list"],
       ["agent", "list"],
     ]) {
-      const listing = commandAt(words)!;
+      const listing = findCommandByWords(words)!;
       const field = listing.query.find((one) => one.name === "permissionProfileId");
       expect(field, words.join(" ")).toBeDefined();
       expect(field!.spelling).toBe("profile");
@@ -203,16 +205,16 @@ describe("a command's fields against the schema", () => {
       const expected = command.id === "user.setPassword" ? 2 : 1;
       expect(
         stdin.length,
-        `${spelling(command)} reads ${stdin.length} fields from stdin`,
+        `${readSpelling(command)} reads ${stdin.length} fields from stdin`,
       ).toBeLessThanOrEqual(expected);
     }
-    expect(commandAt(["user", "set-password"])!.payload.filter((field) => field.stdin).length).toBe(
-      2,
-    );
+    expect(
+      findCommandByWords(["user", "set-password"])!.payload.filter((field) => field.stdin).length,
+    ).toBe(2);
   });
 
   it("reads a field's kind, its repetition, its optionality and its closed value set", () => {
-    const create = commandAt(["profile", "create"])!;
+    const create = findCommandByWords(["profile", "create"])!;
     expect(create.payload.find((field) => field.name === "name")).toMatchObject({
       kind: "string",
       repeated: false,
@@ -222,9 +224,11 @@ describe("a command's fields against the schema", () => {
     expect(grants.repeated).toBe(true);
     expect(grants.choices).toContain("permission.write");
 
-    expect(commandAt(["profile", "update"])!.payload.every((field) => field.optional)).toBe(true);
+    expect(
+      findCommandByWords(["profile", "update"])!.payload.every((field) => field.optional),
+    ).toBe(true);
 
-    expect(commandAt(["secret", "set"])!.positionals[0]?.choices).toEqual([
+    expect(findCommandByWords(["secret", "set"])!.positionals[0]?.choices).toEqual([
       "connection",
       "plugin",
       "runner",
@@ -235,8 +239,8 @@ describe("a command's fields against the schema", () => {
 });
 
 describe("the placeholders a usage line shows", () => {
-  const shapeOf = (spelled: string): string =>
-    commandAt(spelled.split(" "))!
+  const buildUsageShape = (spelled: string): string =>
+    findCommandByWords(spelled.split(" "))!
       .positionals.map((field) => `<${field.spelling}>`)
       .join(" ");
 
@@ -254,15 +258,15 @@ describe("the placeholders a usage line shows", () => {
 
   it("says whose id a positional holds where its own name would not", () => {
     expect(
-      Object.fromEntries(Object.keys(NAMED).map((spelled) => [spelled, shapeOf(spelled)])),
+      Object.fromEntries(Object.keys(NAMED).map((spelled) => [spelled, buildUsageShape(spelled)])),
     ).toEqual(NAMED);
   });
 
   it("spells every other positional <id>, and takes none where the table takes none", () => {
     for (const command of COMMANDS) {
-      const spelled = spelling(command);
+      const spelled = readSpelling(command);
       if (spelled in NAMED) continue;
-      expect(shapeOf(spelled), spelled).toMatch(/^(<id>)?$/);
+      expect(buildUsageShape(spelled), spelled).toMatch(/^(<id>)?$/);
     }
   });
 });
@@ -271,7 +275,7 @@ describe("the placeholders a usage line shows", () => {
 describe("every example in the table", () => {
   it("parses through the argument parser it is written for", async () => {
     for (const [id, row] of visible) {
-      const command = commandAt((row.command ?? "").split(" "))!;
+      const command = findCommandByWords((row.command ?? "").split(" "))!;
       for (const [index, example] of (row.examples ?? []).entries()) {
         await expect(
           parseArguments(command, example.args, () => Promise.resolve(example.stdin ?? "")),
@@ -285,7 +289,7 @@ describe("every example in the table", () => {
 // help that names a command the tree cannot answer to teaches a misspelling.
 describe("every command the table's prose names", () => {
   /** Every string a mention can hide in, addressed the way a failure should read. */
-  const prose = (): ReadonlyArray<[string, string]> => {
+  const collectProse = (): ReadonlyArray<[string, string]> => {
     const found: Array<[string, string]> = [];
     for (const [id, row] of visible) {
       found.push([`${id} help`, (row as { help?: string }).help ?? ""]);
@@ -308,8 +312,8 @@ describe("every command the table's prose names", () => {
   };
 
   it("resolves against the tree", () => {
-    for (const [where, text] of prose()) {
-      for (const mention of mentionsIn(text)) {
+    for (const [where, text] of collectProse()) {
+      for (const mention of findMentions(text)) {
         expect(
           mention.names,
           `${where} names "hercule ${mention.words.join(" ")}", which is not a command`,

@@ -34,7 +34,7 @@ const EMBEDDED = "/$bunfs/";
  * For a Hercule that has not been compiled, whose executable is Bun rather than
  * Hercule. Without this, `hercule serve` from a checkout has no local runner.
  */
-const spawnCommand = (): ReadonlyArray<string> =>
+const buildSpawnCommand = (): ReadonlyArray<string> =>
   Bun.main.startsWith(EMBEDDED)
     ? LOCAL_RUNNER_COMMAND
     : [process.execPath, Bun.main, "runner", "--local"];
@@ -67,7 +67,7 @@ export interface LocalRunnerOptions {
 }
 
 export const LOCAL_RUNNER: LocalRunnerOptions = {
-  command: spawnCommand(),
+  command: buildSpawnCommand(),
   backoff: LOCAL_RUNNER_BACKOFF,
   stopDeadline: LOCAL_RUNNER_STOP_DEADLINE,
   handshakeDeadline: HANDSHAKE_DEADLINE,
@@ -104,7 +104,7 @@ const decodeAnnouncement = Schema.decodeUnknownEffect(LocalAnnouncement);
 const encodeEnrolment = Schema.encodeUnknownSync(LocalEnrolment);
 
 /** Its own function because a supervisor on the wall clock cannot skip five minutes. */
-export const crashCounter = (
+export const createCrashCounter = (
   limit: number,
   windowMs: number,
 ): { readonly record: (at: number) => number | undefined } => {
@@ -127,10 +127,10 @@ export const crashCounter = (
  * The pipe is read whether or not anyone wants a line off it: a child whose
  * stdout filled up would block on its next log line.
  */
-const announcement = (stdout: ReadableStream<Uint8Array>): Promise<string | undefined> => {
-  let said: (line: string | undefined) => void = () => undefined;
+const readAnnouncement = (stdout: ReadableStream<Uint8Array>): Promise<string | undefined> => {
+  let resolveAnnouncement: (line: string | undefined) => void = () => undefined;
   const first = new Promise<string | undefined>((resolve) => {
-    said = resolve;
+    resolveAnnouncement = resolve;
   });
   void (async () => {
     const decoder = new TextDecoder();
@@ -147,7 +147,7 @@ const announcement = (stdout: ReadableStream<Uint8Array>): Promise<string | unde
         const newline = head.indexOf("\n");
         if (newline < 0) continue;
         heard = true;
-        said(head.slice(0, newline));
+        resolveAnnouncement(head.slice(0, newline));
         process.stdout.write(head.slice(newline + 1));
       }
     } catch (cause) {
@@ -155,7 +155,7 @@ const announcement = (stdout: ReadableStream<Uint8Array>): Promise<string | unde
       // out for it would hold the boot for half a minute.
       process.stderr.write(`hercule: the local runner's output ended: ${String(cause)}\n`);
     }
-    if (!heard) said(undefined);
+    if (!heard) resolveAnnouncement(undefined);
   })();
   return first;
 };
@@ -178,13 +178,13 @@ export const startLocalRunner = (
     let announced: string | undefined;
     let supervisor: Fiber.Fiber<void> | undefined = undefined;
     let stopping = false;
-    const loop = crashCounter(CRASH_LOOP_LIMIT, Duration.toMillis(CRASH_LOOP_WINDOW));
+    const loop = createCrashCounter(CRASH_LOOP_LIMIT, Duration.toMillis(CRASH_LOOP_WINDOW));
 
     /**
      * The drain's deadline calls `process.exit`, which runs no finalizer, and an
      * orphan would hold a credential and go on dialing nobody.
      */
-    const orphanGuard = (): void => {
+    const killOrphan = (): void => {
       child?.kill("SIGKILL");
     };
 
@@ -200,7 +200,7 @@ export const startLocalRunner = (
       child = spawned;
 
       const line = yield* Effect.raceFirst(
-        Effect.promise(() => announcement(spawned.stdout)),
+        Effect.promise(() => readAnnouncement(spawned.stdout)),
         Effect.as(Effect.sleep(options.handshakeDeadline), undefined),
       );
       // A child that said nothing died, or is wedged saying nothing; killing it
@@ -223,7 +223,7 @@ export const startLocalRunner = (
       );
 
       // A write to a child that has gone is that child's death, not a failure here.
-      const answer = (enrolment?: string): Effect.Effect<void> =>
+      const writeEnrolment = (enrolment?: string): Effect.Effect<void> =>
         Effect.ignore(
           Effect.tryPromise(async () => {
             if (enrolment !== undefined) await spawned.stdin.write(enrolment);
@@ -234,13 +234,13 @@ export const startLocalRunner = (
       if ("runnerId" in said) {
         announced = said.runnerId;
         // A pipe left open is a child that goes on waiting for an enrolment.
-        yield* answer();
+        yield* writeEnrolment();
         return spawned;
       }
       // The token is good for one enlistment and for an hour, and this child is
       // the only thing that ever sees it.
       const invitation = yield* joinTokens.create(yield* nowIso);
-      yield* answer(
+      yield* writeEnrolment(
         `${JSON.stringify(encodeEnrolment({ controllerUrl, token: invitation.token }))}\n`,
       );
       return spawned;
@@ -324,12 +324,12 @@ export const startLocalRunner = (
     // one of the ways a child comes to exist without a supervisor: however this
     // controller ends - the drain, a failure further in, a test that finished -
     // the child goes with it.
-    process.on("exit", orphanGuard);
+    process.on("exit", killOrphan);
     yield* Effect.addFinalizer(() =>
       Effect.andThen(
         stop,
         Effect.sync(() => {
-          process.off("exit", orphanGuard);
+          process.off("exit", killOrphan);
         }),
       ),
     );

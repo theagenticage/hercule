@@ -35,7 +35,7 @@ const PAT = "pat";
  * that keeps its mail private. The machine is told this once, at session start;
  * a credential exchange carries the credential and nothing else.
  */
-export const gitIdentityOf = (
+export const buildGitIdentity = (
   login: string,
 ): { readonly name: string; readonly email: string } => ({
   name: login,
@@ -61,7 +61,7 @@ const make = Effect.gen(function* () {
    * where the connection is gone, is not a GitHub one, or holds no token: each
    * is a connection that cannot authenticate a push.
    */
-  const credentialOf = (
+  const findCredential = (
     connectionId: string,
   ): Effect.Effect<Option.Option<GitCredential>, CredentialError> =>
     Effect.gen(function* () {
@@ -84,7 +84,7 @@ const make = Effect.gen(function* () {
    * what a workspace acts through is settled when it is opened, and a resource
    * that changes hands afterwards does not change what is already running.
    */
-  const heldResource = (
+  const findHeldResource = (
     runnerId: string,
     request: CredentialRequest,
     canonicalRemote: string,
@@ -129,7 +129,7 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    credentialOf,
+    findCredential,
 
     /**
      * The GitHub account a session starts with: the token it pushes with and
@@ -139,7 +139,7 @@ const make = Effect.gen(function* () {
      */
     githubAccountOf: (connectionId: string): Effect.Effect<GitCredential | undefined> =>
       Effect.map(
-        Effect.catchCause(credentialOf(connectionId), (cause) =>
+        Effect.catchCause(findCredential(connectionId), (cause) =>
           // An interruption is not an unreadable connection: a cause carrying
           // one is passed on rather than logged away, so a caller waiting on
           // this read learns it was stopped instead of reading the answer as
@@ -160,18 +160,18 @@ const make = Effect.gen(function* () {
       request: CredentialRequest,
     ): Effect.Effect<CredentialAnswer, CredentialError> =>
       Effect.gen(function* () {
-        const refuse = (error: CredentialRefusal): CredentialAnswer => ({
+        const buildRefusalAnswer = (error: CredentialRefusal): CredentialAnswer => ({
           _tag: "credentialAnswer",
           requestId: request.requestId,
           error,
         });
         const canonicalRemote = canonicalRemoteOf(request.remote);
-        if (canonicalRemote === undefined) return refuse("unauthorized");
-        const held = yield* heldResource(runnerId, request, canonicalRemote);
-        if (Option.isNone(held)) return refuse("unauthorized");
-        if (held.value.connectionId === null) return refuse("no_connection");
-        const credential = yield* credentialOf(held.value.connectionId);
-        if (Option.isNone(credential)) return refuse("no_connection");
+        if (canonicalRemote === undefined) return buildRefusalAnswer("unauthorized");
+        const held = yield* findHeldResource(runnerId, request, canonicalRemote);
+        if (Option.isNone(held)) return buildRefusalAnswer("unauthorized");
+        if (held.value.connectionId === null) return buildRefusalAnswer("no_connection");
+        const credential = yield* findCredential(held.value.connectionId);
+        if (Option.isNone(credential)) return buildRefusalAnswer("no_connection");
         return {
           _tag: "credentialAnswer",
           requestId: request.requestId,

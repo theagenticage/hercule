@@ -1,12 +1,12 @@
 /**
- * `optionsMenu(descriptors, selected)` is what the model options selector
+ * `buildOptionsMenu(descriptors, selected)` is what the model options selector
  * draws. What matters: a boolean descriptor declares no choices of its own,
  * so the menu gives it the two-way switch and says its pick goes back as a
  * boolean, and a value nobody picked reads as the descriptor's own default.
  */
 import { describe, expect, it } from "vitest";
 import type { ModelOption } from "@hercule/contract";
-import { optionsMenu } from "./options-menu";
+import { buildOptionsMenu } from "./options-menu";
 
 const EFFORT: ModelOption = {
   id: "effort",
@@ -26,9 +26,9 @@ const THINKING: ModelOption = {
   default: false,
 };
 
-describe("optionsMenu", () => {
+describe("buildOptionsMenu", () => {
   it("carries a select's own choices, and the value picked under it", () => {
-    expect(optionsMenu([EFFORT], { effort: "high" })).toEqual([
+    expect(buildOptionsMenu([EFFORT], { effort: "high" })).toEqual([
       {
         id: "effort",
         label: "Reasoning effort",
@@ -43,7 +43,7 @@ describe("optionsMenu", () => {
   });
 
   it("reads a boolean as an off/on switch, on the value it is set to", () => {
-    expect(optionsMenu([THINKING], { thinking: true })).toEqual([
+    expect(buildOptionsMenu([THINKING], { thinking: true })).toEqual([
       {
         id: "thinking",
         label: "Extended thinking",
@@ -58,6 +58,9 @@ describe("optionsMenu", () => {
   });
 
   it("falls back to each descriptor's own default where nothing was picked", () => {
-    expect(optionsMenu([EFFORT, THINKING], {}).map((row) => row.value)).toEqual(["low", "off"]);
+    expect(buildOptionsMenu([EFFORT, THINKING], {}).map((row) => row.value)).toEqual([
+      "low",
+      "off",
+    ]);
   });
 });

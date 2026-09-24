@@ -20,7 +20,7 @@ interface SchemaRow {
   readonly sql: string | null;
 }
 
-const schema = (type: string) =>
+const readSchemaRows = (type: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     return yield* sql<SchemaRow>`
@@ -29,7 +29,7 @@ const schema = (type: string) =>
   });
 
 /** The row a MATCH finds, counted, so nothing depends on how the index stores it. */
-const matches = (expression: string) =>
+const countMatches = (expression: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const rows = yield* sql<{
@@ -55,14 +55,14 @@ const insertTask = Effect.gen(function* () {
 
 describe("the Task and Project tables", () => {
   it("creates tasks, projects, task_provenance and project_resources", async () => {
-    const names = (await run(schema("table"))).map((row) => row.name);
+    const names = (await run(readSchemaRows("table"))).map((row) => row.name);
     for (const table of ["tasks", "projects", "task_provenance", "project_resources"]) {
       expect(names, `${table} is missing`).toContain(table);
     }
   });
 
   it("indexes tasks and projects only over the live rows", async () => {
-    const indexes = (await run(schema("index"))).filter(
+    const indexes = (await run(readSchemaRows("index"))).filter(
       // An index SQLite made itself for a UNIQUE or PRIMARY KEY column has no
       // SQL of its own and cannot carry a WHERE clause.
       (row) => (row.tbl_name === "tasks" || row.tbl_name === "projects") && row.sql !== null,
@@ -79,15 +79,15 @@ describe("the Task and Project tables", () => {
     const plans = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const plan = (statement: string) =>
+        const explainQueryPlan = (statement: string) =>
           Effect.map(
             sql<{ readonly detail: string }>`${sql.literal(`EXPLAIN QUERY PLAN ${statement}`)}`,
             (rows) => rows.map((row) => row.detail).join(" / "),
           );
         return {
-          sorted: yield* plan(`SELECT id FROM tasks WHERE deleted_at IS NULL
+          sorted: yield* explainQueryPlan(`SELECT id FROM tasks WHERE deleted_at IS NULL
                                ORDER BY status ASC, id ASC LIMIT 51`),
-          filtered: yield* plan(`SELECT id FROM tasks
+          filtered: yield* explainQueryPlan(`SELECT id FROM tasks
                                  WHERE deleted_at IS NULL AND status IN ('open')
                                  ORDER BY updated_at DESC, id DESC LIMIT 51`),
         };
@@ -131,12 +131,12 @@ describe("the Task and Project tables", () => {
   });
 
   it("creates the full-text index over tasks with the diacritic-folding tokenizer", async () => {
-    const fts = (await run(schema("table"))).find((row) => row.name === "tasks_fts");
+    const fts = (await run(readSchemaRows("table"))).find((row) => row.name === "tasks_fts");
     expect(fts?.sql ?? "").toMatch(/unicode61\s+remove_diacritics\s+2/);
   });
 
   it("creates the three triggers that keep the index on tasks current", async () => {
-    const triggers = await run(schema("trigger"));
+    const triggers = await run(readSchemaRows("trigger"));
     for (const name of ["tasks_fts_insert", "tasks_fts_delete", "tasks_fts_update"]) {
       expect(
         triggers.find((trigger) => trigger.name === name)?.tbl_name,
@@ -151,7 +151,11 @@ describe("the full-text index", () => {
     const [cafe, terrace, absent] = await run(
       Effect.gen(function* () {
         yield* insertTask;
-        return [yield* matches("cafe"), yield* matches("terrace"), yield* matches("permitted")];
+        return [
+          yield* countMatches("cafe"),
+          yield* countMatches("terrace"),
+          yield* countMatches("permitted"),
+        ];
       }),
     );
     expect({ cafe, terrace, absent }).toEqual({ cafe: 1, terrace: 1, absent: 0 });
@@ -163,10 +167,10 @@ describe("the full-text index", () => {
         const sql = yield* SqlClient.SqlClient;
         yield* insertTask;
         yield* sql`UPDATE tasks SET title = 'Bakery reopening'`;
-        const before = yield* matches("cafe");
-        const after = yield* matches("bakery");
+        const before = yield* countMatches("cafe");
+        const after = yield* countMatches("bakery");
         yield* sql`DELETE FROM tasks`;
-        return [before, after, yield* matches("bakery")] as const;
+        return [before, after, yield* countMatches("bakery")] as const;
       }),
     );
     expect({ before, after, gone }).toEqual({ before: 0, after: 1, gone: 0 });

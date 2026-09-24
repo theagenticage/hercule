@@ -52,7 +52,7 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
  * Input a caller can put on the wire but the types here rule out. Refusing it
  * is the service's job, so the test has to be able to hand it over.
  */
-const malformed = <T>(input: unknown): T => input as T;
+const castMalformedInput = <T>(input: unknown): T => input as T;
 
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -76,7 +76,7 @@ const DELETED = "project.deleted" as AuditKind;
  * The project an event row carries, whatever key the payload files it under.
  * The criterion pins that the row carries the snapshot, not how it spells it.
  */
-const snapshotOf = (payload: Readonly<Record<string, unknown>>, id: string) =>
+const findSnapshot = (payload: Readonly<Record<string, unknown>>, id: string) =>
   Object.values(payload).find(
     (value): value is Record<string, unknown> =>
       typeof value === "object" && value !== null && (value as { id?: unknown }).id === id,
@@ -88,11 +88,11 @@ interface Diff {
 }
 
 /** Every per-field `{old, new}` an update's payload holds, at any depth. */
-const diffsIn = (value: unknown, found: Array<Diff> = []): Array<Diff> => {
+const collectDiffs = (value: unknown, found: Array<Diff> = []): Array<Diff> => {
   if (typeof value !== "object" || value === null) return found;
   const record = value as Record<string, unknown>;
   if ("old" in record && "new" in record) found.push({ old: record["old"], new: record["new"] });
-  for (const child of Object.values(record)) diffsIn(child, found);
+  for (const child of Object.values(record)) collectDiffs(child, found);
   return found;
 };
 
@@ -103,7 +103,7 @@ interface ProjectRow {
   readonly deleted_at: string | null;
 }
 
-const names = (projects: ReadonlyArray<{ readonly name: string }>) =>
+const sortNames = (projects: ReadonlyArray<{ readonly name: string }>) =>
   projects.map((project) => project.name).sort();
 
 describe("project.create", () => {
@@ -136,7 +136,7 @@ describe("project.create", () => {
         return [
           yield* Effect.flip(projects.create({ name: "" })),
           yield* Effect.flip(projects.create({ name: "x".repeat(MAX_PROJECT_NAME_LENGTH + 1) })),
-          yield* Effect.flip(projects.create(malformed({ description: "no name" }))),
+          yield* Effect.flip(projects.create(castMalformedInput({ description: "no name" }))),
         ];
       }),
     );
@@ -189,7 +189,7 @@ describe("project.delete", () => {
       }),
     );
     expect(readError).toMatchObject({ error: { code: "not_found" } });
-    expect(names(listed)).toEqual(["Still here"]);
+    expect(sortNames(listed)).toEqual(["Still here"]);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.name).toBe("Retired");
     expect(rows[0]?.deleted_at).toMatch(TIMESTAMP);
@@ -251,7 +251,7 @@ describe("the event log", () => {
     );
     expect(entries).toHaveLength(1);
     expect(entries[0]?.actor).toBe("user");
-    expect(snapshotOf(entries[0]?.payload ?? {}, project.id)).toMatchObject({
+    expect(findSnapshot(entries[0]?.payload ?? {}, project.id)).toMatchObject({
       id: project.id,
       name: "Hercule",
       description: "d",
@@ -276,7 +276,7 @@ describe("the event log", () => {
     );
     expect(entries).toHaveLength(1);
     expect(entries[0]?.actor).toBe("user");
-    expect(diffsIn(entries[0]?.payload)).toEqual([{ old: "Old name", new: "New name" }]);
+    expect(collectDiffs(entries[0]?.payload)).toEqual([{ old: "Old name", new: "New name" }]);
     expect(JSON.stringify(entries[0]?.payload)).not.toContain("untouched description");
   });
 
@@ -293,7 +293,7 @@ describe("the event log", () => {
     );
     expect(entries).toHaveLength(1);
     expect(entries[0]?.actor).toBe("user");
-    const snapshot = snapshotOf(entries[0]?.payload ?? {}, project.id);
+    const snapshot = findSnapshot(entries[0]?.payload ?? {}, project.id);
     expect(snapshot).toMatchObject({ id: project.id, name: "Gone" });
     expect(snapshot?.["deletedAt"]).toMatch(TIMESTAMP);
   });
@@ -321,7 +321,7 @@ describe("the event log", () => {
 
 describe("project.query", () => {
   /** Walks a listing to its end, a page at a time, and returns every name. */
-  const walk = (input: QueryInput, limit: number) =>
+  const walkPages = (input: QueryInput, limit: number) =>
     Effect.gen(function* () {
       const projects = yield* ProjectService;
       const seen: Array<string> = [];
@@ -368,9 +368,12 @@ describe("project.query", () => {
       Effect.gen(function* () {
         yield* five;
         return {
-          nameAscending: yield* walk({}, 2),
-          nameDescending: yield* walk({ sort: { field: "name", direction: "desc" } }, 2),
-          updatedDescending: yield* walk({ sort: { field: "updatedAt", direction: "desc" } }, 1),
+          nameAscending: yield* walkPages({}, 2),
+          nameDescending: yield* walkPages({ sort: { field: "name", direction: "desc" } }, 2),
+          updatedDescending: yield* walkPages(
+            { sort: { field: "updatedAt", direction: "desc" } },
+            1,
+          ),
         };
       }),
     );
@@ -388,7 +391,7 @@ describe("project.query", () => {
         const page = yield* projects.query({ limit: 2, sort: { field: "name" } });
         const cursor = page.nextCursor ?? "";
         return [
-          yield* Effect.flip(projects.query(malformed({ sort: { field: "size" } }))),
+          yield* Effect.flip(projects.query(castMalformedInput({ sort: { field: "size" } }))),
           yield* Effect.flip(
             projects.query({ cursor, sort: { field: "name", direction: "desc" } }),
           ),
@@ -436,6 +439,6 @@ describe("what an update leaves alone", () => {
       }),
     );
     expect(cleared.description).toBeUndefined();
-    expect(diffsIn(entries[0]?.payload)).toEqual([{ old: "d", new: null }]);
+    expect(collectDiffs(entries[0]?.payload)).toEqual([{ old: "d", new: null }]);
   });
 });

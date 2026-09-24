@@ -4,7 +4,7 @@
  */
 import type { ProviderEvent } from "@hercule/protocol";
 import { now } from "../report";
-import { fact } from "./text";
+import { truncateFact } from "./text";
 
 /**
  * The id something is filed under, cut to what the protocol carries. An id the
@@ -12,7 +12,8 @@ import { fact } from "./text";
  * whole; a harness that named none gets one of ours instead, so what it was
  * about is still reported.
  */
-export const idOf = (given: string): string => (given === "" ? crypto.randomUUID() : fact(given));
+export const ensureId = (given: string): string =>
+  given === "" ? crypto.randomUUID() : truncateFact(given);
 
 /**
  * The user's own message, as the pair of events one item is. Every adapter
@@ -20,7 +21,7 @@ export const idOf = (given: string): string => (given === "" ? crypto.randomUUID
  * adapter knows whether the input steered a running turn: an echo cannot say
  * which input it echoes.
  */
-export const userMessage = (input: {
+export const buildUserMessage = (input: {
   readonly sessionId: string;
   readonly turnId: string;
   readonly text: string;

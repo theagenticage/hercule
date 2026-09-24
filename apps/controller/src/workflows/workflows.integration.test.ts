@@ -30,16 +30,21 @@ import {
 } from "@hercule/contract";
 import { nestInLists } from "@hercule/protocol/testing";
 import {
-  collecting,
+  collectMessages,
   del,
   expectHeld,
   get,
   onSocket,
-  readRefusal,
-  ticketFor,
-  within,
+  readErrorBody,
+  fetchTicket,
+  waitWithin,
 } from "../http/testing";
-import { agentOn, profileNamed, WAIT_DEADLINE_MS, withAgentFleet } from "../sessions/testing";
+import {
+  spawnAgentUnder,
+  readProfileNamed,
+  WAIT_DEADLINE_MS,
+  withAgentFleet,
+} from "../sessions/testing";
 import {
   ABSENT_ID,
   ACCEPTED_GITHUB_TOKEN,
@@ -336,7 +341,7 @@ describe("workflow.create with a definition", () => {
         {},
       ]) {
         const response = await createWorkflow(base, token, body);
-        const refusal = await readRefusal(response);
+        const refusal = await readErrorBody(response);
         expect(response.status, refusal.text).toBe(400);
         expect(refusal.code).toBe("validation");
       }
@@ -349,7 +354,7 @@ describe("workflow.create with an invalid source", () => {
   it("reports a YAML syntax error as one issue with an empty path, and gives its line and column", async () => {
     await withSetUpController(async ({ base, token }) => {
       const response = await createWorkflow(base, token, { source: SYNTAX_ERROR_SOURCE });
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
       expect(refusal.issues).toEqual([[]]);
@@ -363,7 +368,7 @@ describe("workflow.create with an invalid source", () => {
   it("reports a schema error at the path of the invalid field", async () => {
     await withSetUpController(async ({ base, token }) => {
       const response = await createWorkflow(base, token, { source: WRONG_KIND_SOURCE });
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
       expect(refusal.issues).toEqual([["steps", "0", "kind"]]);
@@ -379,7 +384,7 @@ describe("workflow.create with an invalid source", () => {
         [STEP_REUSING_TRIGGER_ID_SOURCE, ["steps", "1", "id"]],
       ] as const) {
         const response = await createWorkflow(base, token, { source });
-        const refusal = await readRefusal(response);
+        const refusal = await readErrorBody(response);
         expect(response.status, refusal.text).toBe(400);
         expect(refusal.code).toBe("validation");
         expect(refusal.issues).toEqual([path]);
@@ -393,7 +398,7 @@ describe("workflow.create with an invalid source", () => {
       const stepResponse = await createWorkflow(base, token, {
         source: KEBAB_CASE_STEP_ID_SOURCE,
       });
-      const stepRefusal = await readRefusal(stepResponse);
+      const stepRefusal = await readErrorBody(stepResponse);
       expect(stepResponse.status, stepRefusal.text).toBe(400);
       expect(stepRefusal.code).toBe("validation");
       expect(stepRefusal.issues).toEqual([["steps", "0", "id"]]);
@@ -402,7 +407,7 @@ describe("workflow.create with an invalid source", () => {
       const triggerResponse = await createWorkflow(base, token, {
         source: KEBAB_CASE_TRIGGER_ID_SOURCE,
       });
-      const triggerRefusal = await readRefusal(triggerResponse);
+      const triggerRefusal = await readErrorBody(triggerResponse);
       expect(triggerResponse.status, triggerRefusal.text).toBe(400);
       expect(triggerRefusal.code).toBe("validation");
       expect(triggerRefusal.issues).toEqual([["triggers", "0", "id"]]);
@@ -516,7 +521,7 @@ describe("workflow.update", () => {
         { source: buildFileTaskSource("Both"), definition: FILE_TASK_DEFINITION },
       ]) {
         const response = await updateWorkflow(base, token, workflow.id, body);
-        const refusal = await readRefusal(response);
+        const refusal = await readErrorBody(response);
         expect(response.status, refusal.text).toBe(400);
         expect(refusal.code).toBe("validation");
         expect(await readWorkflow(base, token, workflow.id)).toEqual(storedBefore);
@@ -530,7 +535,7 @@ describe("workflow.update", () => {
       await createWorkflowOrFail(base, token, { source: buildFileTaskSource("Present") });
 
       const response = await updateWorkflow(base, token, ABSENT_ID, { enabled: true });
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
     });
@@ -580,7 +585,7 @@ describe("the enabled flag", () => {
       const response = await createWorkflow(base, token, {
         source: `enabled: true\n${buildFileTaskSource("Switched on in the text")}`,
       });
-      const refusal = await readRefusal(response);
+      const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.code).toBe("validation");
       expect(refusal.issues).toContainEqual(["enabled"]);
@@ -689,7 +694,7 @@ describe("workflow.delete", () => {
       expect(deleteResponse.status, await deleteResponse.clone().text()).toBe(200);
 
       const readResponse = await get(base, `/api/v1/workflows/${workflowToDelete.id}`, token);
-      const refusal = await readRefusal(readResponse);
+      const refusal = await readErrorBody(readResponse);
       expect(readResponse.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
       expect(await queryTriggers(base, token, `?workflowId=${workflowToDelete.id}`)).toEqual([]);
@@ -894,9 +899,9 @@ describe("the actor stamped on workflow writes", () => {
   it("stamps each write a session makes with that session", async () => {
     await withAgentFleet(async (arranged) => {
       const base = arranged.harness.base;
-      const unrestrictedSession = await agentOn(
+      const unrestrictedSession = await spawnAgentUnder(
         arranged,
-        await profileNamed(arranged, "unrestricted"),
+        await readProfileNamed(arranged, "unrestricted"),
       );
       const sessionActor = `session:${unrestrictedSession.session.id}`;
 
@@ -925,7 +930,10 @@ describe("the actor stamped on workflow writes", () => {
       const storedBefore = await readWorkflow(base, arranged.token, userWorkflow.id);
       const workflowEntriesBefore = await readWorkflowEntries(base, arranged.token);
       // The shipped assistant profile has workflow.read but not workflow.write.
-      const assistantSession = await agentOn(arranged, await profileNamed(arranged, "assistant"));
+      const assistantSession = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "assistant"),
+      );
 
       for (const response of [
         await createWorkflow(base, assistantSession.token, {
@@ -934,7 +942,7 @@ describe("the actor stamped on workflow writes", () => {
         await updateWorkflow(base, assistantSession.token, userWorkflow.id, { enabled: true }),
         await deleteWorkflow(base, assistantSession.token, userWorkflow.id),
       ]) {
-        const refusal = await readRefusal(response);
+        const refusal = await readErrorBody(response);
         expect(response.status, refusal.text).toBe(403);
         expect(refusal.code).toBe("forbidden");
         expect(refusal.grant).toBe("workflow.write");
@@ -963,17 +971,23 @@ describe("reading workflows and triggers", () => {
       ];
 
       // The shipped worker profile has no workflow grant.
-      const workerSession = await agentOn(arranged, await profileNamed(arranged, "worker"));
+      const workerSession = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "worker"),
+      );
       for (const path of readPaths) {
         const response = await get(base, path, workerSession.token);
-        const refusal = await readRefusal(response);
+        const refusal = await readErrorBody(response);
         expect(response.status, `${path}: ${refusal.text}`).toBe(403);
         expect(refusal.code).toBe("forbidden");
         expect(refusal.grant).toBe("workflow.read");
       }
 
       // The shipped assistant profile has workflow.read.
-      const assistantSession = await agentOn(arranged, await profileNamed(arranged, "assistant"));
+      const assistantSession = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "assistant"),
+      );
       for (const path of readPaths) {
         const response = await get(base, path, assistantSession.token);
         expect(response.status, `${path}: ${await response.clone().text()}`).toBe(200);
@@ -985,12 +999,12 @@ describe("reading workflows and triggers", () => {
 describe("a workflow subscription", () => {
   it("receives one push with the workflow id per committed create, update and delete, and none for a failed write", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
-      const ticket = await ticketFor(base, token);
+      const ticket = await fetchTicket(base, token);
 
       await onSocket(base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const workflowPushes = yield* collecting(client, { topic: "workflow" });
+          const workflowPushes = yield* collectMessages(client, { topic: "workflow" });
           yield* Effect.promise(() => expectHeld(harness.live, 1, "workflow"));
 
           /**
@@ -999,13 +1013,19 @@ describe("a workflow subscription", () => {
            */
           const awaitPush = (count: number) =>
             Effect.promise(async () => {
-              expect(await within(1000, () => workflowPushes.received.length >= count)).toBe(true);
-              expect(await within(300, () => workflowPushes.received.length > count)).toBe(false);
+              expect(await waitWithin(1000, () => workflowPushes.received.length >= count)).toBe(
+                true,
+              );
+              expect(await waitWithin(300, () => workflowPushes.received.length > count)).toBe(
+                false,
+              );
               return workflowPushes.received[count - 1];
             });
           const expectNoPushAfter = (count: number) =>
             Effect.promise(async () => {
-              expect(await within(300, () => workflowPushes.received.length > count)).toBe(false);
+              expect(await waitWithin(300, () => workflowPushes.received.length > count)).toBe(
+                false,
+              );
             });
 
           const workflow = yield* Effect.promise(() =>
@@ -1061,7 +1081,7 @@ describe("saves that fail with a validation error instead of an internal error",
       const aliasedResponse = await createWorkflow(base, token, {
         source: "name: dangling alias\nsteps: *nowhere\n",
       });
-      const aliased = await readRefusal(aliasedResponse);
+      const aliased = await readErrorBody(aliasedResponse);
       expect(aliasedResponse.status, aliased.text).toBe(400);
       expect(aliased.code).toBe("validation");
       expect(aliased.issues).toEqual([["steps"]]);
@@ -1091,7 +1111,7 @@ describe("saves that fail with a validation error instead of an internal error",
           ],
         },
       });
-      const deep = await readRefusal(deepResponse);
+      const deep = await readErrorBody(deepResponse);
       expect(deepResponse.status, deep.text).toBe(400);
       expect(deep.code).toBe("validation");
       expect(deep.issues).toEqual([["steps", "0", "params"]]);
@@ -1106,7 +1126,7 @@ describe("saves that fail with a validation error instead of an internal error",
         source: buildFileTaskSource("On"),
         enabled: true,
       });
-      const onCreate = await readRefusal(onCreateResponse);
+      const onCreate = await readErrorBody(onCreateResponse);
       expect(onCreateResponse.status, onCreate.text).toBe(400);
       expect(onCreate.code).toBe("validation");
       expect(onCreate.issues).toEqual([["enabled"]]);
@@ -1118,7 +1138,7 @@ describe("saves that fail with a validation error instead of an internal error",
       const onUpdateResponse = await updateWorkflow(base, token, workflow.id, {
         sorce: buildFileTaskSource("Typo"),
       });
-      const onUpdate = await readRefusal(onUpdateResponse);
+      const onUpdate = await readErrorBody(onUpdateResponse);
       expect(onUpdateResponse.status, onUpdate.text).toBe(400);
       expect(onUpdate.code).toBe("validation");
       expect(onUpdate.issues).toEqual([["sorce"]]);

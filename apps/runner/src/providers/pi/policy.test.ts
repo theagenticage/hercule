@@ -16,7 +16,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { AccessMode } from "@hercule/protocol";
 import { SUBMIT_RESULT_TOOL } from "./extension";
 import { requiresApproval } from "./policy";
-import { cleanupHomes, settle, SPEC, started, taggedIn, until } from "./testing";
+import { cleanupHomes, settle, SPEC, startTestSession, filterByTag, waitUntil } from "./testing";
 
 afterAll(cleanupHomes);
 
@@ -108,14 +108,14 @@ describe("Hercule's own tool for a session's answer", () => {
 describe("what a launched pi is told about its access mode", () => {
   for (const mode of ["approval-required", "auto-accept-edits", "full-access"] as const) {
     it(`launches a ${mode} session under that mode`, async () => {
-      const run = await started({}, { ...SPEC, accessMode: mode });
+      const run = await startTestSession({}, { ...SPEC, accessMode: mode });
 
       expect(run.child.env["HERCULE_ACCESS_MODE"]).toBe(mode);
     });
   }
 
   it("never parks a shell command on a full-access session", async () => {
-    const run = await started({}, { ...SPEC, accessMode: "full-access" });
+    const run = await startTestSession({}, { ...SPEC, accessMode: "full-access" });
 
     run.child.push({ type: "agent_start" });
     run.child.push({
@@ -124,10 +124,13 @@ describe("what a launched pi is told about its access mode", () => {
       toolName: "bash",
       args: { command: "rm -rf /tmp/scratch" },
     });
-    await until("reported the command", () => taggedIn(run.seen, "item.started").length === 1);
+    await waitUntil(
+      "reported the command",
+      () => filterByTag(run.seen, "item.started").length === 1,
+    );
     await settle();
 
     // No hook runs, so pi asks nothing and nothing is docked on the composer.
-    expect(taggedIn(run.seen, "request.opened")).toEqual([]);
+    expect(filterByTag(run.seen, "request.opened")).toEqual([]);
   });
 });

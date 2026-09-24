@@ -47,7 +47,7 @@ export const runProcess: Run = (command, env) =>
     catch: (error) => (error instanceof Error ? error.message : String(error)),
   }).pipe(Effect.catch((message) => Effect.succeed({ code: 1, stdout: "", stderr: message })));
 
-const decoded = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> => {
+const decodeStream = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> => {
   const decoder = new TextDecoder();
   return (async function* () {
     for await (const chunk of stream) yield decoder.decode(chunk, { stream: true });
@@ -55,10 +55,10 @@ const decoded = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> => {
 };
 
 /** One item per line, with the trailing partial line held back until it ends. */
-const lined = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =>
+const splitLines = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =>
   (async function* () {
     let buffered = "";
-    for await (const chunk of decoded(stream)) {
+    for await (const chunk of decodeStream(stream)) {
       buffered += chunk;
       const parts = buffered.split("\n");
       buffered = parts.pop() ?? "";
@@ -71,8 +71,8 @@ const lined = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =>
 export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
   const child = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
   return {
-    stdout: decoded(child.stdout),
-    stderr: decoded(child.stderr),
+    stdout: decodeStream(child.stdout),
+    stderr: decodeStream(child.stderr),
     write: (value) => {
       // Written and flushed without waiting: the vendor is reading a line and
       // the answer comes back on the pipes, not from the write.
@@ -120,8 +120,8 @@ const spawnFramed = (
     ...(cwd === undefined || cwd === null ? {} : { cwd }),
   });
   return {
-    stdout: lined(child.stdout),
-    stderr: lined(child.stderr),
+    stdout: splitLines(child.stdout),
+    stderr: splitLines(child.stderr),
     write: (text) => {
       // Written and flushed without waiting: the answer comes back on stdout
       // under the frame's own id, not from the write.

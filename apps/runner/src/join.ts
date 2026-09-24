@@ -11,9 +11,9 @@ import { mkdirSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { runnerDirIn } from "@hercule/home";
+import { locateRunnerDir } from "@hercule/home";
 import { JoinAnswer } from "@hercule/protocol";
-import { runnerFileIn, writeRunnerFile, type RunnerFile } from "./runner-file";
+import { buildRunnerFilePath, writeRunnerFile, type RunnerFile } from "./runner-file";
 
 /** Outside the operation table, so it is written here. */
 const JOIN_PATH = "/api/v1/runners/join";
@@ -51,7 +51,7 @@ export interface Joined {
 
 const decodeAnswer = Schema.decodeUnknownEffect(JoinAnswer);
 
-const refusal = (status: number, body: string): string => {
+const parseRefusalMessage = (status: number, body: string): string => {
   try {
     const envelope = JSON.parse(body) as { error?: { message?: unknown } };
     const message = envelope.error?.message;
@@ -62,7 +62,7 @@ const refusal = (status: number, body: string): string => {
   return `the controller answered ${String(status)}`;
 };
 
-const ask = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
+const requestJoin = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
   Effect.gen(function* () {
     const call = options.fetch ?? fetch;
     const url = yield* Effect.try({
@@ -96,7 +96,7 @@ const ask = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
     });
     if (!response.ok) {
       return yield* Effect.fail(
-        new JoinError({ message: refusal(response.status, body), retryable: false }),
+        new JoinError({ message: parseRefusalMessage(response.status, body), retryable: false }),
       );
     }
     const parsed = yield* Effect.try({
@@ -116,13 +116,13 @@ const ask = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
 /** The files are written after the exchange, so a refused join leaves the home alone. */
 export const join = (options: JoinOptions): Effect.Effect<Joined, JoinError> =>
   Effect.gen(function* () {
-    const answer = yield* ask(options);
-    const runnerDir = runnerDirIn(options.home);
+    const answer = yield* requestJoin(options);
+    const runnerDir = locateRunnerDir(options.home);
     const storageName = Buffer.from(
       crypto.getRandomValues(new Uint8Array(STORAGE_NAME_BYTES)),
     ).toString("hex");
     const storageDirectory = joinPath(runnerDir, storageName);
-    const configPath = runnerFileIn(options.home);
+    const configPath = buildRunnerFilePath(options.home);
     const contents: RunnerFile = {
       runnerId: answer.runnerId,
       credential: answer.credential,

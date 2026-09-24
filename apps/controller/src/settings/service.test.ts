@@ -308,7 +308,7 @@ const withSettings = (
     { plugins: [githubPlugin, mailerPlugin] },
   );
 
-const patch = (base: string, token: string, body: unknown): Promise<Response> =>
+const patchSettings = (base: string, token: string, body: unknown): Promise<Response> =>
   send("PATCH", base, "/api/v1/settings", { body, token });
 
 const readSettings = async (base: string, token: string): Promise<SettingsState> => {
@@ -317,7 +317,7 @@ const readSettings = async (base: string, token: string): Promise<SettingsState>
   return (await response.json()) as SettingsState;
 };
 
-const refusedCode = async (response: Response): Promise<string> =>
+const readErrorCode = async (response: Response): Promise<string> =>
   ((await response.json()) as { error: { code: string } }).error.code;
 
 const connect = async (
@@ -343,7 +343,7 @@ describe("the thread workspace default", () => {
   it("takes each of the two a thread may open in, and reads it back", async () => {
     await withSettings(async (base, token) => {
       for (const value of ["primary", "ephemeral"]) {
-        const response = await patch(base, token, { user: { "thread.workspace": value } });
+        const response = await patchSettings(base, token, { user: { "thread.workspace": value } });
         expect(response.status, `${value}: ${await response.clone().text()}`).toBe(200);
         expect((await readSettings(base, token)).user["thread.workspace"]).toBe(value);
       }
@@ -377,8 +377,8 @@ describe("the thread workspace default", () => {
   it("refuses a value that is not one of the two, `none` among them", async () => {
     await withSettings(async (base, token) => {
       for (const value of ["worktree", "none"]) {
-        const response = await patch(base, token, { user: { "thread.workspace": value } });
-        expect(await refusedCode(response), value).toBe("validation");
+        const response = await patchSettings(base, token, { user: { "thread.workspace": value } });
+        expect(await readErrorCode(response), value).toBe("validation");
         expect((await readSettings(base, token)).user["thread.workspace"]).toBeUndefined();
       }
     });
@@ -390,11 +390,15 @@ describe("the GitHub connection threads use", () => {
     await withSettings(async (base, token) => {
       const github = await connect(base, token, "github/github", { pat: PAT });
 
-      const set = await patch(base, token, { user: { "thread.githubConnectionId": github } });
+      const set = await patchSettings(base, token, {
+        user: { "thread.githubConnectionId": github },
+      });
       expect(set.status, await set.clone().text()).toBe(200);
       expect((await readSettings(base, token)).user["thread.githubConnectionId"]).toBe(github);
 
-      const cleared = await patch(base, token, { user: { "thread.githubConnectionId": null } });
+      const cleared = await patchSettings(base, token, {
+        user: { "thread.githubConnectionId": null },
+      });
       expect(cleared.status, await cleared.clone().text()).toBe(200);
       expect((await readSettings(base, token)).user["thread.githubConnectionId"]).toBeNull();
     });
@@ -403,10 +407,10 @@ describe("the GitHub connection threads use", () => {
   it("refuses a connection that is not a github one", async () => {
     await withSettings(async (base, token) => {
       const mailbox = await connect(base, token, "mailer/mailbox", { token: "t" });
-      const response = await patch(base, token, {
+      const response = await patchSettings(base, token, {
         user: { "thread.githubConnectionId": mailbox },
       });
-      expect(await refusedCode(response)).toBe("validation");
+      expect(await readErrorCode(response)).toBe("validation");
       expect((await readSettings(base, token)).user["thread.githubConnectionId"]).toBeUndefined();
     });
   });
@@ -415,7 +419,7 @@ describe("the GitHub connection threads use", () => {
 describe("the workspace expiry windows", () => {
   it("takes whole positive numbers of hours and days", async () => {
     await withSettings(async (base, token) => {
-      const response = await patch(base, token, {
+      const response = await patchSettings(base, token, {
         controller: { "workspace.orphanTtlHours": 6, "workspace.idleTtlDays": 90 },
       });
       expect(response.status, await response.clone().text()).toBe(200);
@@ -430,8 +434,8 @@ describe("the workspace expiry windows", () => {
     await withSettings(async (base, token) => {
       for (const key of ["workspace.orphanTtlHours", "workspace.idleTtlDays"]) {
         for (const value of [0, -1, 1.5]) {
-          const response = await patch(base, token, { controller: { [key]: value } });
-          expect(await refusedCode(response), `${key} = ${String(value)}`).toBe("validation");
+          const response = await patchSettings(base, token, { controller: { [key]: value } });
+          expect(await readErrorCode(response), `${key} = ${String(value)}`).toBe("validation");
         }
       }
       expect(await readSettings(base, token)).toMatchObject({ controller: {} });

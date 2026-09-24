@@ -29,7 +29,7 @@ import { Settings } from "../settings";
 import {
   CRASH_LOOP_LIMIT,
   CRASH_LOOP_WINDOW,
-  crashCounter,
+  createCrashCounter,
   LOCAL_RUNNER_BACKOFF,
   LOCAL_RUNNER_COMMAND,
   LOCAL_RUNNER_STOP_DEADLINE,
@@ -44,7 +44,7 @@ afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-const temporaryHome = (): string => {
+const createTemporaryHome = (): string => {
   const home = mkdtempSync(join(tmpdir(), "hercule-local-"));
   homes.push(home);
   return home;
@@ -53,7 +53,7 @@ const temporaryHome = (): string => {
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Whether a process is still on the machine. Signal 0 asks without asking for anything. */
-const alive = (pid: number): boolean => {
+const isAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
     return true;
@@ -66,7 +66,7 @@ const alive = (pid: number): boolean => {
  * A port nothing is on, taken by binding one and letting it go. The boot needs
  * the address before it runs, because the child is told where to join.
  */
-const freePort = async (): Promise<number> => {
+const findFreePort = async (): Promise<number> => {
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });
   const port = Number(server.port);
   await server.stop(true);
@@ -154,7 +154,7 @@ interface Note {
  * children, and what the second was handed is not what the first was.
  */
 let children = 0;
-const childIn = (
+const buildStubChild = (
   home: string,
   announce: string,
   extra: ReadonlyArray<string> = [],
@@ -179,7 +179,7 @@ const childIn = (
 };
 
 /** Waits for something the child wrote, or gives up. */
-const until = async (
+const waitForNotes = async (
   notes: () => ReadonlyArray<Note>,
   ready: (all: ReadonlyArray<Note>) => boolean,
   within = 10_000,
@@ -193,7 +193,7 @@ const until = async (
  * up: the child joins over loopback the way the real one does, so what the
  * fleet ends up holding is a real row from a real join.
  */
-const bootHolding = <A>(
+const bootAndHold = <A>(
   home: string,
   port: number,
   local: LocalRunnerOptions,
@@ -262,14 +262,14 @@ describe("the command the controller spawns", () => {
 
 describe("the first boot of an empty home", () => {
   it("hands the child a join token on stdin and ends with the runner it joined as", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
-    const child = childIn(home, JSON.stringify({ join: true }));
+    const home = createTemporaryHome();
+    const port = await findFreePort();
+    const child = buildStubChild(home, JSON.stringify({ join: true }));
 
-    const seen = await bootHolding(home, port, { ...FAST, command: child.command }, () =>
+    const seen = await bootAndHold(home, port, { ...FAST, command: child.command }, () =>
       Effect.gen(function* () {
         yield* Effect.promise(() =>
-          until(child.notes, (notes) => notes.some((note) => note.what === "joined")),
+          waitForNotes(child.notes, (notes) => notes.some((note) => note.what === "joined")),
         );
         const id = String(child.notes().find((note) => note.what === "joined")?.answer?.runnerId);
         const runners = yield* runnerRepository;
@@ -320,15 +320,15 @@ describe("the first boot of an empty home", () => {
   }, 30_000);
 
   it("mints nothing and joins nothing for a child that already knows who it is", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
+    const home = createTemporaryHome();
+    const port = await findFreePort();
 
     // The first boot, so the home is no longer empty.
-    const first = childIn(home, JSON.stringify({ join: true }));
-    const before = await bootHolding(home, port, { ...FAST, command: first.command }, () =>
+    const first = buildStubChild(home, JSON.stringify({ join: true }));
+    const before = await bootAndHold(home, port, { ...FAST, command: first.command }, () =>
       Effect.gen(function* () {
         yield* Effect.promise(() =>
-          until(first.notes, (notes) => notes.some((note) => note.what === "joined")),
+          waitForNotes(first.notes, (notes) => notes.some((note) => note.what === "joined")),
         );
         return {
           minted: yield* Effect.orDie(tokensMinted),
@@ -341,11 +341,11 @@ describe("the first boot of an empty home", () => {
 
     // And the boot after it: the child reads its own `runner.json` and says who
     // it is, and the controller has nothing to hand it.
-    const again = childIn(home, JSON.stringify({ runnerId }));
-    const after = await bootHolding(home, port, { ...FAST, command: again.command }, (outcome) =>
+    const again = buildStubChild(home, JSON.stringify({ runnerId }));
+    const after = await bootAndHold(home, port, { ...FAST, command: again.command }, (outcome) =>
       Effect.gen(function* () {
         yield* Effect.promise(() =>
-          until(again.notes, (notes) => notes.some((note) => note.what === "stdin")),
+          waitForNotes(again.notes, (notes) => notes.some((note) => note.what === "stdin")),
         );
         return {
           minted: yield* Effect.orDie(tokensMinted),
@@ -366,9 +366,9 @@ describe("the first boot of an empty home", () => {
   }, 40_000);
 
   it("stops the boot when the child's first line is not one of the two it can be", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
-    const child = childIn(home, "hello, I am a runner");
+    const home = createTemporaryHome();
+    const port = await findFreePort();
+    const child = buildStubChild(home, "hello, I am a runner");
 
     const outcome = await Effect.runPromise(
       Effect.result(
@@ -394,22 +394,25 @@ describe("the first boot of an empty home", () => {
     // would put a second one beside it.
     const pid = child.notes().find((note) => note.what === "spawned")?.pid;
     expect(pid).toBeDefined();
-    for (let waited = 0; waited < 5_000 && alive(pid!); waited += 20) await delay(20);
-    expect(alive(pid!), `process ${String(pid)} outlived the boot that spawned it`).toBe(false);
+    for (let waited = 0; waited < 5_000 && isAlive(pid!); waited += 20) await delay(20);
+    expect(isAlive(pid!), `process ${String(pid)} outlived the boot that spawned it`).toBe(false);
   }, 30_000);
 
   it("puts nothing in the place of a child it was asked to stop", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
-    const child = childIn(home, JSON.stringify({ runnerId: crypto.randomUUID() }), ["--exit", "3"]);
+    const home = createTemporaryHome();
+    const port = await findFreePort();
+    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
+      "--exit",
+      "3",
+    ]);
 
     // Stopped from inside the run, while the supervisor is still watching: the
     // scope closing at the end of a boot would end the supervisor anyway, so it
     // is the only way to see that a stop is not read as a crash.
-    const spawns = await bootHolding(home, port, { ...FAST, command: child.command }, (outcome) =>
+    const spawns = await bootAndHold(home, port, { ...FAST, command: child.command }, (outcome) =>
       Effect.gen(function* () {
         yield* Effect.promise(() =>
-          until(child.notes, (notes) => notes.some((note) => note.what === "spawned")),
+          waitForNotes(child.notes, (notes) => notes.some((note) => note.what === "spawned")),
         );
         yield* outcome.localRunner!.stop;
         // Several backoffs' worth of chances to start another one.
@@ -422,8 +425,8 @@ describe("the first boot of an empty home", () => {
   }, 30_000);
 
   it("starts anyway when the child says nothing at all", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
+    const home = createTemporaryHome();
+    const port = await findFreePort();
 
     // A runner that cannot start - a `runner.json` nobody can parse, a machine
     // out of file handles - is a crash for the supervisor to answer. A
@@ -447,8 +450,8 @@ describe("the first boot of an empty home", () => {
   }, 30_000);
 
   it("gives up on a child that is alive and saying nothing, rather than waiting on it", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
+    const home = createTemporaryHome();
+    const port = await findFreePort();
 
     const started = Date.now();
     const outcome = await Effect.runPromise(
@@ -484,14 +487,17 @@ describe("supervising the child", () => {
   });
 
   it("respawns a child that exits, waiting longer each time up to the cap", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
+    const home = createTemporaryHome();
+    const port = await findFreePort();
     // It announces who it is and then dies, over and over.
-    const child = childIn(home, JSON.stringify({ runnerId: crypto.randomUUID() }), ["--exit", "3"]);
+    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
+      "--exit",
+      "3",
+    ]);
 
-    await bootHolding(home, port, { ...FAST, command: child.command }, () =>
+    await bootAndHold(home, port, { ...FAST, command: child.command }, () =>
       Effect.promise(() =>
-        until(child.notes, (notes) => notes.filter((n) => n.what === "spawned").length >= 6),
+        waitForNotes(child.notes, (notes) => notes.filter((n) => n.what === "spawned").length >= 6),
       ),
     );
 
@@ -513,10 +519,10 @@ describe("supervising the child", () => {
   }, 30_000);
 
   it("records a crash loop once for the window it happened in, and tells the alerts seam", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
+    const home = createTemporaryHome();
+    const port = await findFreePort();
     const runnerId = crypto.randomUUID();
-    const child = childIn(home, JSON.stringify({ runnerId }), ["--exit", "3"]);
+    const child = buildStubChild(home, JSON.stringify({ runnerId }), ["--exit", "3"]);
     const alerted: Array<{ runnerId: string | undefined; count: number }> = [];
 
     const audited = await Effect.runPromise(
@@ -532,7 +538,10 @@ describe("supervising the child", () => {
             // Five deaths: well past the three that make a loop, and all of
             // them inside the same five minutes.
             yield* Effect.promise(() =>
-              until(child.notes, (notes) => notes.filter((n) => n.what === "spawned").length >= 5),
+              waitForNotes(
+                child.notes,
+                (notes) => notes.filter((n) => n.what === "spawned").length >= 5,
+              ),
             );
             const sql = yield* SqlClient.SqlClient;
             return yield* sql<{
@@ -562,16 +571,20 @@ describe("supervising the child", () => {
 
 describe("stopping", () => {
   it("asks the child to stop and lets it go, without putting another in its place", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
-    const child = childIn(home, JSON.stringify({ runnerId: crypto.randomUUID() }));
+    const home = createTemporaryHome();
+    const port = await findFreePort();
+    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }));
 
-    await bootHolding(home, port, { ...FAST, command: child.command }, () =>
-      Effect.promise(() => until(child.notes, (notes) => notes.some((n) => n.what === "stdin"))),
+    await bootAndHold(home, port, { ...FAST, command: child.command }, () =>
+      Effect.promise(() =>
+        waitForNotes(child.notes, (notes) => notes.some((n) => n.what === "stdin")),
+      ),
     );
 
     // The boot returned, which means the drain has run.
-    const notes = await until(child.notes, (all) => all.some((note) => note.what === "sigterm"));
+    const notes = await waitForNotes(child.notes, (all) =>
+      all.some((note) => note.what === "sigterm"),
+    );
     expect(notes.some((note) => note.what === "sigterm")).toBe(true);
     // A child the controller stopped is not a child that crashed.
     await delay(200);
@@ -579,13 +592,18 @@ describe("stopping", () => {
   }, 30_000);
 
   it("kills a child that is still there when the drain's deadline passes", async () => {
-    const home = temporaryHome();
-    const port = await freePort();
-    const child = childIn(home, JSON.stringify({ runnerId: crypto.randomUUID() }), ["--deaf", "1"]);
+    const home = createTemporaryHome();
+    const port = await findFreePort();
+    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
+      "--deaf",
+      "1",
+    ]);
 
     const started = Date.now();
-    await bootHolding(home, port, { ...FAST, command: child.command }, () =>
-      Effect.promise(() => until(child.notes, (notes) => notes.some((n) => n.what === "stdin"))),
+    await bootAndHold(home, port, { ...FAST, command: child.command }, () =>
+      Effect.promise(() =>
+        waitForNotes(child.notes, (notes) => notes.some((n) => n.what === "stdin")),
+      ),
     );
     const took = Date.now() - started;
 
@@ -601,20 +619,20 @@ describe("counting deaths against a window", () => {
   const minute = 60_000;
 
   it("says nothing until enough of them fall together", () => {
-    const loop = crashCounter(3, 5 * minute);
+    const loop = createCrashCounter(3, 5 * minute);
     expect(loop.record(0)).toBeUndefined();
     expect(loop.record(1_000)).toBeUndefined();
     expect(loop.record(2_000)).toBe(3);
   });
 
   it("does not count deaths the window has already let go of", () => {
-    const loop = crashCounter(3, 5 * minute);
+    const loop = createCrashCounter(3, 5 * minute);
     // One an hour, for ever: a machine that is not well, but not looping.
     for (let hour = 0; hour < 10; hour++) expect(loop.record(hour * 60 * minute)).toBeUndefined();
   });
 
   it("tells the story once, and again only once the window has passed", () => {
-    const loop = crashCounter(3, 5 * minute);
+    const loop = createCrashCounter(3, 5 * minute);
     loop.record(0);
     loop.record(1);
     expect(loop.record(2)).toBe(3);

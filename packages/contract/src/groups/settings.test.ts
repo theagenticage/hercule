@@ -32,28 +32,30 @@ describe("the thread row density setting", () => {
 });
 
 describe("the bounds on a user setting that holds a list", () => {
-  const steps = (count: number) =>
+  const buildSteps = (count: number) =>
     Array.from({ length: count }, (_, index) => `step-${String(index)}`);
 
   it("takes a list at the cap and refuses the one past it", () => {
     for (const key of ["topics.order", "onboarding.completedSteps"]) {
-      expect(decode(SettingsPatch)({ user: { [key]: steps(MAX_SETTING_LIST) } })._tag).toBe(
+      expect(decode(SettingsPatch)({ user: { [key]: buildSteps(MAX_SETTING_LIST) } })._tag).toBe(
         "Success",
       );
-      expect(decode(SettingsPatch)({ user: { [key]: steps(MAX_SETTING_LIST + 1) } })._tag).toBe(
-        "Failure",
-      );
+      expect(
+        decode(SettingsPatch)({ user: { [key]: buildSteps(MAX_SETTING_LIST + 1) } })._tag,
+      ).toBe("Failure");
     }
   });
 
   it("bounds the mute list too", () => {
-    const muted = (count: number) =>
+    const buildMutedList = (count: number) =>
       Array.from({ length: count }, (_, index) => `workflow:w${String(index)}`);
-    expect(decode(SettingsPatch)({ user: { "notifications.muted": muted(1) } })._tag).toBe(
+    expect(decode(SettingsPatch)({ user: { "notifications.muted": buildMutedList(1) } })._tag).toBe(
       "Success",
     );
     expect(
-      decode(SettingsPatch)({ user: { "notifications.muted": muted(MAX_SETTING_LIST + 1) } })._tag,
+      decode(SettingsPatch)({
+        user: { "notifications.muted": buildMutedList(MAX_SETTING_LIST + 1) },
+      })._tag,
     ).toBe("Failure");
   });
 });

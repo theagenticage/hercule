@@ -44,12 +44,12 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, pageInput, refuseCursor, withTransaction } from "../db";
+import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { projectRepository, type ProjectSortField } from "./repository";
 
 /** What listing takes: how much of it, in what order. */
-const QueryInput = Schema.Struct(pageInput(PROJECT_SORT_FIELDS));
+const QueryInput = Schema.Struct(buildPageInputFields(PROJECT_SORT_FIELDS));
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
@@ -98,7 +98,7 @@ const make = Effect.gen(function* () {
   const projects = yield* projectRepository;
   const audit = yield* AuditLog;
 
-  const live = (id: string): Effect.Effect<Project, NotFound | SqlError> =>
+  const readLiveProjectOrFail = (id: string): Effect.Effect<Project, NotFound | SqlError> =>
     Effect.flatMap(
       projects.live(id),
       Option.match({
@@ -138,7 +138,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("project.read");
         const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
-        return yield* live(id);
+        return yield* readLiveProjectOrFail(id);
       }),
 
     /** Opens a place to group things under. */
@@ -195,7 +195,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const before = yield* live(id);
+            const before = yield* readLiveProjectOrFail(id);
 
             // A project without a description carries no key at all, and
             // `null` is how an edit puts it back in that state; both read as
@@ -225,7 +225,7 @@ const make = Effect.gen(function* () {
             });
             // Read back rather than merge in memory: what the caller gets is
             // then the row that was written, whatever the edit touched.
-            return yield* live(id);
+            return yield* readLiveProjectOrFail(id);
           }),
         );
       }),
@@ -247,7 +247,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const project = yield* live(id);
+            const project = yield* readLiveProjectOrFail(id);
             yield* projects.softDelete(id, at);
             // The final snapshot, because nothing can read the row afterwards.
             yield* audit.append({

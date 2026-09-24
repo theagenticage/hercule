@@ -33,7 +33,7 @@ type Printed = Record<string, string>;
  * A machine with exactly the binaries named on its PATH. The path of one is
  * derived from its name, so a test states what is installed and nothing else.
  */
-const machineWith = (printed: Printed): Machine => ({
+const buildMachine = (printed: Printed): Machine => ({
   locate: (binary) => (binary in printed ? `/usr/local/bin/${binary}` : undefined),
   version: (path) => Effect.succeed(printed[path.slice("/usr/local/bin/".length)]),
 });
@@ -52,8 +52,8 @@ const FULL: Printed = {
   pi: "1.0.0",
 };
 
-const probe = (printed: Printed, port = IDENTITY_PORT): Promise<RunnerFacts> =>
-  Effect.runPromise(probeFacts(machineWith(printed), port));
+const probePrinted = (printed: Printed, port = IDENTITY_PORT): Promise<RunnerFacts> =>
+  Effect.runPromise(probeFacts(buildMachine(printed), port));
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestClock.layer()));
@@ -63,7 +63,7 @@ const settle = TestClock.adjust(Duration.zero);
 
 describe("probing the machine", () => {
   it("reports the operating system, the architecture and the memory fitted", async () => {
-    const facts = await probe(FULL);
+    const facts = await probePrinted(FULL);
 
     expect(facts.os).toBe(platform());
     expect(facts.arch).toBe(arch());
@@ -75,24 +75,24 @@ describe("probing the machine", () => {
 
   it("reports the identity port it was given, defaulting to 4939", async () => {
     expect(IDENTITY_PORT).toBe(4939);
-    expect((await probe(FULL)).identityPort).toBe(IDENTITY_PORT);
+    expect((await probePrinted(FULL)).identityPort).toBe(IDENTITY_PORT);
     // The listener falls back to a free port when 4939 is taken, and the facts
     // say where it really ended up rather than where it meant to be.
-    expect((await probe(FULL, 51234)).identityPort).toBe(51234);
+    expect((await probePrinted(FULL, 51234)).identityPort).toBe(51234);
   });
 
   it("reads docker presence off the PATH and nothing else", async () => {
-    expect((await probe(FULL)).docker).toBe(true);
+    expect((await probePrinted(FULL)).docker).toBe(true);
 
     const { docker, ...rest } = FULL;
     expect(docker).toBeDefined();
-    expect((await probe(rest)).docker).toBe(false);
+    expect((await probePrinted(rest)).docker).toBe(false);
   });
 });
 
 describe("the toolchains a runner reports", () => {
   it("lists git and gh with the version each printed and where it found it", async () => {
-    const facts = await probe(FULL);
+    const facts = await probePrinted(FULL);
 
     expect(facts.toolchains).toEqual([
       { name: "git", version: "2.50.1", path: "/usr/local/bin/git" },
@@ -104,7 +104,7 @@ describe("the toolchains a runner reports", () => {
     const { gh, ...withoutGh } = FULL;
     expect(gh).toBeDefined();
 
-    const facts = await probe(withoutGh);
+    const facts = await probePrinted(withoutGh);
     expect(facts.toolchains.map((one) => one.name)).toEqual(["git"]);
     // The rest of the probe is unaffected: a machine with no `gh` is an
     // ordinary machine, not a broken one.
@@ -112,12 +112,12 @@ describe("the toolchains a runner reports", () => {
   });
 
   it("reports nothing at all on a machine with neither", async () => {
-    const facts = await probe({ docker: "Docker version 27.0.0, build abc" });
+    const facts = await probePrinted({ docker: "Docker version 27.0.0, build abc" });
     expect(facts.toolchains).toEqual([]);
   });
 
   it("keeps what a binary printed when it is not a version it can read", async () => {
-    const facts = await probe({
+    const facts = await probePrinted({
       ...FULL,
       git: "git: this build prints something else entirely",
     });
@@ -136,7 +136,7 @@ describe("the toolchains a runner reports", () => {
     // A wrapper script that swallows `--version`. There is no fact to state
     // about it, and an entry with an empty version is not one this protocol
     // carries: the whole report would fail to encode over one such machine.
-    const facts = await probe({ ...FULL, git: "   \n" });
+    const facts = await probePrinted({ ...FULL, git: "   \n" });
 
     expect(facts.toolchains.map((one) => one.name)).toEqual(["gh"]);
   });
@@ -209,7 +209,7 @@ describe("the provider binaries a runner reports", () => {
     const { codex, ...withoutCodex } = FULL;
     expect(codex).toBeDefined();
 
-    const facts = await probe(withoutCodex);
+    const facts = await probePrinted(withoutCodex);
     // Unlike a toolchain, an absent provider is still listed: what a fleet
     // needs to know is which machines could host a provider's sessions.
     expect(facts.providers).toEqual([
@@ -220,7 +220,7 @@ describe("the provider binaries a runner reports", () => {
   });
 
   it("lists them all as absent on a machine with none installed", async () => {
-    const facts = await probe({ git: GIT });
+    const facts = await probePrinted({ git: GIT });
     expect(facts.providers).toEqual([
       { name: "claude", present: false },
       { name: "codex", present: false },
@@ -249,12 +249,12 @@ describe("the hourly refresh", () => {
   it("says nothing while nothing about the machine has changed", async () => {
     await run(
       Effect.gen(function* () {
-        const reported = yield* probeFacts(machineWith(FULL), IDENTITY_PORT);
+        const reported = yield* probeFacts(buildMachine(FULL), IDENTITY_PORT);
         const sent: Array<RunnerFacts> = [];
 
         const loop = yield* Effect.forkChild(
           refreshFacts({
-            probe: probeFacts(machineWith(FULL), IDENTITY_PORT),
+            probe: probeFacts(buildMachine(FULL), IDENTITY_PORT),
             reported,
             send: (facts) => Effect.sync(() => void sent.push(facts)),
           }),
@@ -275,14 +275,14 @@ describe("the hourly refresh", () => {
   it("reports the whole facts once a value differs from what was reported", async () => {
     await run(
       Effect.gen(function* () {
-        const reported = yield* probeFacts(machineWith(FULL), IDENTITY_PORT);
+        const reported = yield* probeFacts(buildMachine(FULL), IDENTITY_PORT);
         const sent: Array<RunnerFacts> = [];
         // What the machine looks like now, which the test changes underneath it.
         let installed: Printed = FULL;
 
         const loop = yield* Effect.forkChild(
           refreshFacts({
-            probe: Effect.suspend(() => probeFacts(machineWith(installed), IDENTITY_PORT)),
+            probe: Effect.suspend(() => probeFacts(buildMachine(installed), IDENTITY_PORT)),
             reported,
             send: (facts) => Effect.sync(() => void sent.push(facts)),
           }),
@@ -323,13 +323,13 @@ describe("the hourly refresh", () => {
   it("stops reporting the moment it is interrupted", async () => {
     await run(
       Effect.gen(function* () {
-        const reported = yield* probeFacts(machineWith(FULL), IDENTITY_PORT);
+        const reported = yield* probeFacts(buildMachine(FULL), IDENTITY_PORT);
         const sent: Array<RunnerFacts> = [];
         let installed: Printed = FULL;
 
         const loop = yield* Effect.forkChild(
           refreshFacts({
-            probe: Effect.suspend(() => probeFacts(machineWith(installed), IDENTITY_PORT)),
+            probe: Effect.suspend(() => probeFacts(buildMachine(installed), IDENTITY_PORT)),
             reported,
             send: (facts) => Effect.sync(() => void sent.push(facts)),
           }),
@@ -353,15 +353,15 @@ describe("the adapters a runner build can drive", () => {
   it("names the providers this build has an adapter for", async () => {
     // A fact about the build, not the machine: three harnesses installed,
     // still only the two this build carries an adapter for.
-    expect((await probe(FULL)).adapters).toEqual(["claude-code", "codex", "pi"]);
-    expect((await probe({ git: GIT })).adapters).toEqual(["claude-code", "codex", "pi"]);
+    expect((await probePrinted(FULL)).adapters).toEqual(["claude-code", "codex", "pi"]);
+    expect((await probePrinted({ git: GIT })).adapters).toEqual(["claude-code", "codex", "pi"]);
   });
 
   it("still reports every provider binary with its presence beside them", async () => {
     const { codex, ...withoutCodex } = FULL;
     expect(codex).toBeDefined();
 
-    const facts = await probe(withoutCodex);
+    const facts = await probePrinted(withoutCodex);
     expect(facts.adapters).toEqual(["claude-code", "codex", "pi"]);
     // Adapters did not replace the binaries: a Codex row has to say both that
     // this build can drive one and that the machine has no `codex` to drive.

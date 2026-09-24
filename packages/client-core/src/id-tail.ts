@@ -12,4 +12,4 @@
 export const ID_TAIL = 8;
 
 /** The tail of an id: the part of it the product shows and the CLI accepts. */
-export const idTail = (id: string): string => id.slice(-ID_TAIL);
+export const toIdTail = (id: string): string => id.slice(-ID_TAIL);

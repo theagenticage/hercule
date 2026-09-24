@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { formatStamp, priorityGlyph, taskRecedes } from "@hercule/client-core";
+import { formatStamp, readPriorityGlyph, shouldTaskRecede } from "@hercule/client-core";
 import type { Task } from "@hercule/contract";
 import { ListRow, PriorityGlyph } from "@hercule/ui";
 
@@ -21,10 +21,10 @@ export function TaskRow({
   readonly selected: boolean;
   readonly onOpen: () => void;
 }): JSX.Element {
-  const glyph = priorityGlyph(task.priority);
+  const glyph = readPriorityGlyph(task.priority);
 
   return (
-    <ListRow dimmed={taskRecedes(task)} selected={selected} onClick={onOpen}>
+    <ListRow dimmed={shouldTaskRecede(task)} selected={selected} onClick={onOpen}>
       <PriorityGlyph filled={glyph.filled} tone={glyph.tone} label={`${task.priority} priority`} />
       <span
         className={`min-w-0 flex-1 truncate text-ink ${task.priority === "urgent" ? "font-urgent" : "font-emph"}`}

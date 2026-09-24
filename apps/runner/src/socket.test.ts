@@ -16,7 +16,7 @@ import { Duration, Effect, Schema } from "effect";
 import {
   PROTOCOL_VERSION,
   RunnerToController,
-  signedChallenge,
+  encodeChallengeBytes,
   type ControllerHello,
   type RunnerFacts,
   type ProbeReport,
@@ -52,10 +52,10 @@ const FACTS: RunnerFacts = {
 const RUNNER_ID = "01999999-0000-7000-8000-00000000000a";
 const ANOTHER_RUNNER_ID = "01999999-0000-7000-8000-00000000000b";
 
-const base64 = (value: Uint8Array): string => Buffer.from(value).toString("base64");
+const encodeBase64 = (value: Uint8Array): string => Buffer.from(value).toString("base64");
 
 /** The bytes standard base64 stands for, in a buffer WebCrypto will take. */
-const bytes = (encoded: string): Uint8Array<ArrayBuffer> => {
+const decodeBase64 = (encoded: string): Uint8Array<ArrayBuffer> => {
   const decoded = Buffer.from(encoded, "base64");
   const out = new Uint8Array(decoded.byteLength);
   out.set(decoded);
@@ -102,14 +102,14 @@ const waitUntil = async (ready: () => boolean): Promise<void> => {
  * can put the request ahead of the hello - and a peer that has not proved
  * itself is answered with silence, whatever it asks.
  */
-const proven = (stub: Stub): Promise<void> =>
+const waitUntilProven = (stub: Stub): Promise<void> =>
   waitUntil(() => stub.received.some((frame) => frame._tag === "watermarkReport"));
 
 const decodeRunnerFrame = (raw: unknown): RunnerMessage =>
   Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(raw));
 
 /** An Ed25519 identity, as the controller's own is. */
-const identity = async (): Promise<{
+const createIdentity = async (): Promise<{
   readonly id: string;
   readonly publicKey: string;
   readonly sign: (payload: Uint8Array<ArrayBuffer>) => Promise<string>;
@@ -118,12 +118,14 @@ const identity = async (): Promise<{
     "sign",
     "verify",
   ])) as unknown as CryptoKeyPair;
-  const publicKey = base64(new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey)));
+  const publicKey = encodeBase64(
+    new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey)),
+  );
   return {
     id: crypto.randomUUID(),
     publicKey,
     sign: async (payload) =>
-      base64(
+      encodeBase64(
         new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, pair.privateKey, payload)),
       ),
   };
@@ -165,7 +167,7 @@ const stubController = async (
     readonly signs?: (nonce: string) => Uint8Array<ArrayBuffer>;
   } = {},
 ): Promise<Stub> => {
-  const controller = await identity();
+  const controller = await createIdentity();
   const received: Array<RunnerMessage> = [];
   let open = false;
   let over = false;
@@ -202,7 +204,7 @@ const stubController = async (
           publicKey: controller.publicKey,
           nonce: frame.nonce,
           signature: await controller.sign(
-            (answers.signs ?? ((nonce) => signedChallenge(RUNNER_ID, nonce)))(frame.nonce),
+            (answers.signs ?? ((nonce) => encodeChallengeBytes(RUNNER_ID, nonce)))(frame.nonce),
           ),
         };
         socket.send(JSON.stringify(tamper(real, frame)));
@@ -232,7 +234,7 @@ const stubController = async (
 };
 
 /** What `runner.json` holds about the controller this runner belongs to. */
-const pinning = (stub: Stub, overrides: Partial<ControllerPin> = {}): ControllerPin => ({
+const buildPin = (stub: Stub, overrides: Partial<ControllerPin> = {}): ControllerPin => ({
   runnerId: RUNNER_ID,
   controllerUrl: stub.url,
   credential: "the-credential-the-join-handed-back",
@@ -268,7 +270,7 @@ const HERCULE_TOOL = {
 };
 
 /** Runs one connection to its end and reports how it ended. */
-const attempt = (
+const runConnection = (
   pin: ControllerPin,
   probe: Effect.Effect<RunnerFacts> = Effect.succeed(FACTS),
   proofDeadline: Duration.Duration = PATIENT,
@@ -293,32 +295,32 @@ const attempt = (
   );
 
 /** The error a finished connection ended with, or nothing when it ended well. */
-const failureOf = (outcome: Awaited<ReturnType<typeof attempt>> | undefined): unknown =>
+const readFailure = (outcome: Awaited<ReturnType<typeof runConnection>> | undefined): unknown =>
   outcome !== undefined && outcome._tag === "Failure" ? outcome.failure : undefined;
 
 describe("the controller a runner is willing to talk to", () => {
   it("hangs up on a hello carrying another controller's identity, saying nothing more", async () => {
-    const other = await identity();
+    const other = await createIdentity();
     const stub = await stubController((real) => ({ ...real, identityId: other.id }));
 
-    const outcome = await attempt(pinning(stub));
+    const outcome = await runConnection(buildPin(stub));
 
-    expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(outcome)).toBeInstanceOf(ControllerNotRecognised);
     // One frame and no more: the runner said hello and then stopped talking.
     expect(stub.received.map((frame) => frame._tag)).toEqual(["runnerHello"]);
     expect(await stub.ended()).toBe(true);
   });
 
   it("hangs up on a hello carrying another controller's key, saying nothing more", async () => {
-    const other = await identity();
+    const other = await createIdentity();
     // The identity id is the one the runner expects, so what it is refusing is
     // the key: an id it recognises is not licence to trust whatever key arrives
     // beside it.
     const stub = await stubController((real) => ({ ...real, publicKey: other.publicKey }));
 
-    const outcome = await attempt(pinning(stub));
+    const outcome = await runConnection(buildPin(stub));
 
-    expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(outcome)).toBeInstanceOf(ControllerNotRecognised);
     expect(stub.received.map((frame) => frame._tag)).toEqual(["runnerHello"]);
     expect(await stub.ended()).toBe(true);
   });
@@ -326,12 +328,12 @@ describe("the controller a runner is willing to talk to", () => {
   it("hangs up on a signature that is not over its nonce, saying nothing more", async () => {
     const stub = await stubController((real) => ({
       ...real,
-      signature: base64(crypto.getRandomValues(new Uint8Array(64))),
+      signature: encodeBase64(crypto.getRandomValues(new Uint8Array(64))),
     }));
 
-    const outcome = await attempt(pinning(stub));
+    const outcome = await runConnection(buildPin(stub));
 
-    expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(outcome)).toBeInstanceOf(ControllerNotRecognised);
     expect(stub.received.map((frame) => frame._tag)).toEqual(["runnerHello"]);
     expect(await stub.ended()).toBe(true);
   });
@@ -341,14 +343,14 @@ describe("the controller a runner is willing to talk to", () => {
     // controller sign anything it likes, so a signature that names another
     // runner - or names none at all - proves nothing on this connection.
     for (const signs of [
-      (nonce: string) => bytes(nonce),
-      (nonce: string) => signedChallenge(ANOTHER_RUNNER_ID, nonce),
+      (nonce: string) => decodeBase64(nonce),
+      (nonce: string) => encodeChallengeBytes(ANOTHER_RUNNER_ID, nonce),
     ]) {
       const stub = await stubController(undefined, { signs });
 
-      const outcome = await attempt(pinning(stub));
+      const outcome = await runConnection(buildPin(stub));
 
-      expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
+      expect(readFailure(outcome)).toBeInstanceOf(ControllerNotRecognised);
       expect(stub.received.map((frame) => frame._tag)).toEqual(["runnerHello"]);
       expect(await stub.ended()).toBe(true);
     }
@@ -362,9 +364,9 @@ describe("the controller a runner is willing to talk to", () => {
     const NOT_A_KEY = "AAAA";
     const stub = await stubController((real) => ({ ...real, publicKey: NOT_A_KEY }));
 
-    const outcome = await attempt(pinning(stub, { controllerPublicKey: NOT_A_KEY }));
+    const outcome = await runConnection(buildPin(stub, { controllerPublicKey: NOT_A_KEY }));
 
-    expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(outcome)).toBeInstanceOf(ControllerNotRecognised);
     expect(await stub.ended()).toBe(true);
   });
 
@@ -374,9 +376,9 @@ describe("the controller a runner is willing to talk to", () => {
     // that is under test.
     const stub = await stubController(undefined, { greet: false, ping: true });
 
-    const outcome = await attempt(pinning(stub), Effect.succeed(FACTS), DEADLINE);
+    const outcome = await runConnection(buildPin(stub), Effect.succeed(FACTS), DEADLINE);
 
-    expect(failureOf(outcome)).toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(outcome)).toBeInstanceOf(ControllerNotRecognised);
     // And it said nothing but its own hello while it waited: a peer that has
     // not proved who it is learns nothing about whether this runner is alive.
     expect(stub.received.map((frame) => frame._tag)).toEqual(["runnerHello"]);
@@ -393,27 +395,27 @@ describe("the controller a runner is willing to talk to", () => {
       somethingLater: true,
     }));
 
-    const outcome = await attempt(pinning(stub));
+    const outcome = await runConnection(buildPin(stub));
 
-    const failure = failureOf(outcome);
+    const failure = readFailure(outcome);
     expect(failure).toBeInstanceOf(ProtocolMismatch);
     expect((failure as ProtocolMismatch).message).toContain(String(PROTOCOL_VERSION + 1));
     expect(stub.received.map((frame) => frame._tag)).toEqual(["runnerHello"]);
   });
 
   it("ignores a second hello, so a proof once given cannot be taken back", async () => {
-    const other = await identity();
+    const other = await createIdentity();
     const stub = await stubController();
 
-    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
-    const pending = attempt(pinning(stub)).then((outcome) => {
+    let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
+    const pending = runConnection(buildPin(stub)).then((outcome) => {
       settled = outcome;
     });
 
     await stub.connected();
     // The proof, observed: the watermark is only sent to a peer that has proved
     // itself, so it is what says the runner accepted the real hello.
-    await proven(stub);
+    await waitUntilProven(stub);
     // A hello claiming to be somebody else, after the real one was accepted. It
     // must not be able to talk the runner out of the controller it proved.
     stub.say({
@@ -436,14 +438,14 @@ describe("the controller a runner is willing to talk to", () => {
     expect(settled, "a second hello is not something to hang up on").toBeUndefined();
     stub.hangUp();
     await pending;
-    expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
   });
 
   it("says what the machine has left as soon as the controller has proved itself", async () => {
     const stub = await stubController();
 
-    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
-    const pending = attempt(pinning(stub)).then((outcome) => {
+    let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
+    const pending = runConnection(buildPin(stub)).then((outcome) => {
       settled = outcome;
     });
 
@@ -451,7 +453,7 @@ describe("the controller a runner is willing to talk to", () => {
     // Not a minute later: a runner that has just come online with an unknown
     // disk is a runner nothing can decide to place work on. By tag rather than
     // by position: the sessions snapshot rides the same moment.
-    await proven(stub);
+    await waitUntilProven(stub);
     expect(stub.received.find((frame) => frame._tag === "watermarkReport")).toEqual({
       _tag: "watermarkReport",
       watermark: {
@@ -462,24 +464,26 @@ describe("the controller a runner is willing to talk to", () => {
 
     stub.hangUp();
     await pending;
-    expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
   });
 
   it("stays on a hello that matches what it was told to expect", async () => {
     const stub = await stubController();
 
-    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
+    let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
     // The other test that carries the short fuse: what it asserts is that the
     // fuse does not fire on a connection whose proof arrived.
-    const pending = attempt(pinning(stub), Effect.succeed(FACTS), DEADLINE).then((outcome) => {
-      settled = outcome;
-    });
+    const pending = runConnection(buildPin(stub), Effect.succeed(FACTS), DEADLINE).then(
+      (outcome) => {
+        settled = outcome;
+      },
+    );
 
     await stub.connected();
     // Waited from the proof, not from the dial: the frames below the hello are
     // only sent once the peer has proved itself, so seeing one is what says the
     // fuse is now running against a proven connection.
-    await proven(stub);
+    await waitUntilProven(stub);
     // Waited out past the deadline the runner gives an unproven peer, because
     // that deadline must not be what ends a connection whose proof arrived.
     await delay(Duration.toMillis(DEADLINE) * 4);
@@ -491,7 +495,7 @@ describe("the controller a runner is willing to talk to", () => {
     expect(settled).toBeDefined();
     // However the end of a connection reads, it is not the controller having
     // been the wrong controller.
-    expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
   });
 });
 
@@ -505,19 +509,19 @@ describe("a runner whose controller has retired it", () => {
 
   it("says so, so the daemon can stop and the operator knows to re-enlist", async () => {
     const stub = await stubController();
-    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
-    const pending = attempt(pinning(stub)).then((outcome) => {
+    let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
+    const pending = runConnection(buildPin(stub)).then((outcome) => {
       settled = outcome;
     });
 
     await stub.connected();
-    await proven(stub);
+    await waitUntilProven(stub);
     stub.hangUp(POLICY_VIOLATION, RETIRED);
     await pending;
 
     // The credential is dead, so redialling with it is the one thing this
     // connection ending must not lead to.
-    const failure = failureOf(settled) as { readonly message?: string } | undefined;
+    const failure = readFailure(settled) as { readonly message?: string } | undefined;
     expect(failure, "a retired runner's connection ended in nothing to report").toBeDefined();
     expect(failure?.message).toContain(RE_ENLIST);
   });
@@ -532,16 +536,16 @@ describe("a runner whose controller has retired it", () => {
     ];
     for (const [code, reason] of closes) {
       const stub = await stubController();
-      let settled: Awaited<ReturnType<typeof attempt>> | undefined;
-      const pending = attempt(pinning(stub)).then((outcome) => {
+      let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
+      const pending = runConnection(buildPin(stub)).then((outcome) => {
         settled = outcome;
       });
       await stub.connected();
-      await proven(stub);
+      await waitUntilProven(stub);
       stub.hangUp(code, reason);
       await pending;
 
-      const failure = failureOf(settled) as { readonly message?: string } | undefined;
+      const failure = readFailure(settled) as { readonly message?: string } | undefined;
       expect(failure?.message ?? "", `${String(code)} ${reason}`).not.toContain(RE_ENLIST);
     }
   });
@@ -556,7 +560,7 @@ describe("a controller asking for the machine's facts", () => {
   const REQUEST: RunnerFactsRequest = { _tag: "factsRequest" };
 
   /** The report the runner answers with, once it has one. */
-  const reportIn = (stub: Stub): RunnerFactsReport | undefined =>
+  const findFactsReport = (stub: Stub): RunnerFactsReport | undefined =>
     stub.received.find((frame): frame is RunnerFactsReport => frame._tag === "factsReport");
 
   it("reports what the probe finds now, not what it said at the hello", async () => {
@@ -570,24 +574,24 @@ describe("a controller asking for the machine's facts", () => {
       ],
     };
     const stub = await stubController();
-    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
-    const pending = attempt(pinning(stub), Effect.succeed(grown)).then((outcome) => {
+    let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
+    const pending = runConnection(buildPin(stub), Effect.succeed(grown)).then((outcome) => {
       settled = outcome;
     });
 
     await stub.connected();
-    await proven(stub);
+    await waitUntilProven(stub);
     stub.say(REQUEST);
 
-    await waitUntil(() => reportIn(stub) !== undefined);
+    await waitUntil(() => findFactsReport(stub) !== undefined);
     // The hourly report is sent only on a change; an answer to a request is
     // not, or the operator pressing the button on a machine nothing happened to
     // would wait for a frame that never comes.
-    expect(reportIn(stub)).toEqual({ _tag: "factsReport", facts: grown });
+    expect(findFactsReport(stub)).toEqual({ _tag: "factsReport", facts: grown });
 
     stub.hangUp();
     await pending;
-    expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
   });
 });
 
@@ -601,22 +605,22 @@ describe("a controller asking a runner to probe a provider it cannot drive", () 
     secrets: {},
   };
 
-  const reportIn = (stub: Stub): ProbeReport | undefined =>
+  const findProbeReport = (stub: Stub): ProbeReport | undefined =>
     stub.received.find((frame): frame is ProbeReport => frame._tag === "probeReport");
 
   it("answers that this build has no adapter for it, rather than leaving the caller waiting", async () => {
     const stub = await stubController();
-    let settled: Awaited<ReturnType<typeof attempt>> | undefined;
-    const pending = attempt(pinning(stub)).then((outcome) => {
+    let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
+    const pending = runConnection(buildPin(stub)).then((outcome) => {
       settled = outcome;
     });
 
     await stub.connected();
-    await proven(stub);
+    await waitUntilProven(stub);
     stub.say(REQUEST);
 
-    await waitUntil(() => reportIn(stub) !== undefined);
-    const report = reportIn(stub);
+    await waitUntil(() => findProbeReport(stub) !== undefined);
+    const report = findProbeReport(stub);
     // Correlated by request id: probes, logins and installs for several
     // instances can be in flight on one connection at once.
     expect(report?.requestId).toBe(REQUEST.requestId);
@@ -630,6 +634,6 @@ describe("a controller asking a runner to probe a provider it cannot drive", () 
 
     stub.hangUp();
     await pending;
-    expect(failureOf(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+    expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
   });
 });

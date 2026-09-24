@@ -8,25 +8,31 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration } from "effect";
-import { at, readSession, startFrames, until, WAIT_DEADLINE_MS } from "../../sessions/testing";
 import {
-  caughtUp,
-  emitted,
-  exit,
-  frameWhen,
-  healthWhen,
-  matchedInputRows,
+  at,
+  readSession,
+  waitForStartFrames,
+  waitUntil,
+  WAIT_DEADLINE_MS,
+} from "../../sessions/testing";
+import {
+  waitUntilCaughtUp,
+  emitManualEvent,
+  exitSession,
+  waitForFrameCarrying,
+  waitForHealth,
+  readMatchedInputRows,
   READS_RAW,
   buildRecordingNotifier,
   REF,
-  rowsWhen,
+  waitForMatchedInputRows,
   runEffect,
   storeCondition,
   spawnStrandedAgent,
   STRANDED_INPUT_ID,
-  subscribed,
+  subscribeAgent,
   spawnSubscriber,
-  subscriptionRow,
+  readSubscriptionRow,
   UNKNOWN_FUNCTION,
   UNRESOLVABLE,
   readCursorAndHead,
@@ -44,17 +50,17 @@ describe("the session routing table's sweep", () => {
       const resumable = await spawnSubscriber(arranged, "resumable-holder");
       const gone = await spawnStrandedAgent(arranged, "gone-holder");
 
-      const live = await subscribed(arranged, idle, REF);
-      const sleeping = await subscribed(arranged, resumable, REF);
-      const doomed = await subscribed(arranged, gone, REF);
+      const live = await subscribeAgent(arranged, idle, REF);
+      const sleeping = await subscribeAgent(arranged, resumable, REF);
+      const doomed = await subscribeAgent(arranged, gone, REF);
 
-      await exit(arranged, resumable, 2);
+      await exitSession(arranged, resumable, 2);
       expect((await readSession(arranged, resumable.session.id)).resumable).toBe(true);
-      await exit(arranged, gone, 1);
+      await exitSession(arranged, gone, 1);
       expect((await readSession(arranged, gone.session.id)).resumable).toBe(false);
 
-      const ended = await until("ended the subscription whose holder is gone", async () => {
-        const row = await subscriptionRow(arranged.harness, doomed);
+      const ended = await waitUntil("ended the subscription whose holder is gone", async () => {
+        const row = await readSubscriptionRow(arranged.harness, doomed);
         return row?.ended_at === null ? undefined : row;
       });
       expect(ended.ended_reason, "the reason names the holder that ended").toMatch(/session/i);
@@ -66,29 +72,29 @@ describe("the session routing table's sweep", () => {
       // process exited.
       await arranged.harness.reboot();
 
-      await emitted(arranged, [REF], "after the sweep");
+      await emitManualEvent(arranged, [REF], "after the sweep");
 
-      expect((await subscriptionRow(arranged.harness, live))!.ended_at).toBeNull();
-      expect((await subscriptionRow(arranged.harness, sleeping))!.ended_at).toBeNull();
+      expect((await readSubscriptionRow(arranged.harness, live))!.ended_at).toBeNull();
+      expect((await readSubscriptionRow(arranged.harness, sleeping))!.ended_at).toBeNull();
       // The idle holder is woken, and the resumable one is told to start again.
-      await frameWhen(arranged, "after the sweep");
-      await rowsWhen(arranged.harness, live, (rows) => rows.length >= 1);
-      await rowsWhen(arranged.harness, sleeping, (rows) => rows.length >= 1);
-      await startFrames(arranged, resumable.session.id, 2);
-      expect(await matchedInputRows(arranged.harness, doomed)).toEqual([]);
+      await waitForFrameCarrying(arranged, "after the sweep");
+      await waitForMatchedInputRows(arranged.harness, live, (rows) => rows.length >= 1);
+      await waitForMatchedInputRows(arranged.harness, sleeping, (rows) => rows.length >= 1);
+      await waitForStartFrames(arranged, resumable.session.id, 2);
+      expect(await readMatchedInputRows(arranged.harness, doomed)).toEqual([]);
     });
   });
 
   it("calls off an input still waiting for the holder it can no longer reach, with the same reason", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "resumable-holder");
-      const subscriptionId = await subscribed(arranged, agent, REF);
-      await exit(arranged, agent, 2);
+      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      await exitSession(arranged, agent, 2);
       expect((await readSession(arranged, agent.session.id)).resumable).toBe(true);
 
       // A row a match wrote and nothing has delivered yet: what a crash
       // between the matched input's commit and its delivery leaves behind.
-      const eventId = await emitted(arranged, [REF], "never delivered");
+      const eventId = await emitManualEvent(arranged, [REF], "never delivered");
       await runEffect(
         arranged.harness.sql`
           INSERT INTO session_inputs
@@ -107,11 +113,11 @@ describe("the session routing table's sweep", () => {
                              WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
       );
 
-      const ended = await until("ended the subscription", async () => {
-        const row = await subscriptionRow(arranged.harness, subscriptionId);
+      const ended = await waitUntil("ended the subscription", async () => {
+        const row = await readSubscriptionRow(arranged.harness, subscriptionId);
         return row?.ended_at === null ? undefined : row;
       });
-      const rows = await rowsWhen(arranged.harness, subscriptionId, (found) =>
+      const rows = await waitForMatchedInputRows(arranged.harness, subscriptionId, (found) =>
         found.every((row) => row.status !== "queued"),
       );
       const waiting = rows.find((row) => row.text === "never delivered");
@@ -128,11 +134,11 @@ describe("a condition the router cannot evaluate", () => {
     await withPipeline(
       async (arranged) => {
         const agent = await spawnSubscriber(arranged, "subscribers");
-        const subscriptionId = await subscribed(arranged, agent, REF);
+        const subscriptionId = await subscribeAgent(arranged, agent, REF);
         await storeCondition(arranged.harness, subscriptionId, UNRESOLVABLE);
 
-        await emitted(arranged, [REF], "the first failure");
-        const failed = await healthWhen(
+        await emitManualEvent(arranged, [REF], "the first failure");
+        const failed = await waitForHealth(
           arranged,
           agent,
           subscriptionId,
@@ -142,26 +148,26 @@ describe("a condition the router cannot evaluate", () => {
         expect(failed.at ?? "").not.toBe("");
 
         // A second failing evaluation refreshes the message and says nothing.
-        const second = await emitted(arranged, [REF], "the second failure");
-        await until("walked past the second event", async () => {
+        const second = await emitManualEvent(arranged, [REF], "the second failure");
+        await waitUntil("walked past the second event", async () => {
           const seen = await readCursorAndHead(arranged.harness);
           return seen.position !== null && seen.position >= second ? seen.position : undefined;
         });
-        expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
+        expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
         expect(calls.filter((call) => call.subscriptionId === subscriptionId)).toHaveLength(1);
         expect(calls[0]!.message).toBe(failed.message);
 
         // A clean evaluation returns the health to ok, and says nothing.
         await storeCondition(arranged.harness, subscriptionId, "true");
-        await emitted(arranged, [REF], "the clean one");
-        await healthWhen(arranged, agent, subscriptionId, (health) => health.state === "ok");
+        await emitManualEvent(arranged, [REF], "the clean one");
+        await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "ok");
         expect(calls.filter((call) => call.subscriptionId === subscriptionId)).toHaveLength(1);
 
         // The next failure is a new error, and is reported again.
         await storeCondition(arranged.harness, subscriptionId, UNRESOLVABLE);
-        await emitted(arranged, [REF], "the new error");
-        await healthWhen(arranged, agent, subscriptionId, (health) => health.state === "error");
-        await until("reported the new error", () =>
+        await emitManualEvent(arranged, [REF], "the new error");
+        await waitForHealth(arranged, agent, subscriptionId, (health) => health.state === "error");
+        await waitUntil("reported the new error", () =>
           calls.filter((call) => call.subscriptionId === subscriptionId).length === 2
             ? calls
             : undefined,
@@ -176,42 +182,46 @@ describe("a condition the router cannot evaluate", () => {
     await withPipeline(async (arranged) => {
       const broken = await spawnSubscriber(arranged, "broken-holder");
       const sound = await spawnSubscriber(arranged, "sound-holder");
-      const failing = await subscribed(arranged, broken, REF);
-      const working = await subscribed(arranged, sound, REF);
+      const failing = await subscribeAgent(arranged, broken, REF);
+      const working = await subscribeAgent(arranged, sound, REF);
       await storeCondition(arranged.harness, failing, UNKNOWN_FUNCTION);
 
-      const eventId = await emitted(arranged, [REF], "still delivered");
+      const eventId = await emitManualEvent(arranged, [REF], "still delivered");
 
-      const rows = await rowsWhen(arranged.harness, working, (found) => found.length >= 1);
+      const rows = await waitForMatchedInputRows(
+        arranged.harness,
+        working,
+        (found) => found.length >= 1,
+      );
       expect(rows[0]!.event_id).toBe(eventId);
-      await frameWhen(arranged, "still delivered");
-      expect(await matchedInputRows(arranged.harness, failing)).toEqual([]);
-      const health = await healthWhen(arranged, broken, failing, (one) => one.state === "error");
+      await waitForFrameCarrying(arranged, "still delivered");
+      expect(await readMatchedInputRows(arranged.harness, failing)).toEqual([]);
+      const health = await waitForHealth(arranged, broken, failing, (one) => one.state === "error");
       expect(health.message ?? "").toContain("shout");
-      expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
+      expect(await waitUntilCaughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
     });
   });
 
   it("is a no-match when it reads the original payload, which the context does not carry", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "raw-reader");
-      const subscriptionId = await subscribed(arranged, agent, REF);
+      const subscriptionId = await subscribeAgent(arranged, agent, REF);
       await storeCondition(arranged.harness, subscriptionId, READS_RAW);
 
-      const eventId = await emitted(arranged, [REF], "not for a reader of raw");
+      const eventId = await emitManualEvent(arranged, [REF], "not for a reader of raw");
 
       // Reading `raw` fails; it does not answer that there is none. A context
       // carrying the field would make this condition a plain false, and the
       // subscription's health would stay ok.
-      const health = await healthWhen(
+      const health = await waitForHealth(
         arranged,
         agent,
         subscriptionId,
         (one) => one.state === "error",
       );
       expect(health.message ?? "").toContain("raw");
-      expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
-      expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
+      expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
+      expect(await waitUntilCaughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
     });
   });
 
@@ -219,19 +229,19 @@ describe("a condition the router cannot evaluate", () => {
     await withPipeline(
       async (arranged) => {
         const agent = await spawnSubscriber(arranged, "subscribers");
-        const subscriptionId = await subscribed(arranged, agent, REF);
+        const subscriptionId = await subscribeAgent(arranged, agent, REF);
 
-        const eventId = await emitted(arranged, [REF], "over budget");
+        const eventId = await emitManualEvent(arranged, [REF], "over budget");
 
-        const health = await healthWhen(
+        const health = await waitForHealth(
           arranged,
           agent,
           subscriptionId,
           (one) => one.state === "error",
         );
         expect(health.message ?? "").toContain("budget");
-        expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
-        expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
+        expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
+        expect(await waitUntilCaughtUp(arranged.harness)).toBeGreaterThanOrEqual(eventId);
       },
       // Every evaluation on this controller is over budget, which is the only
       // lever there is: the evaluator offers no timeout and no fuel. A budget

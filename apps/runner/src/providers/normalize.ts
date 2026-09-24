@@ -23,11 +23,11 @@ export interface Envelope {
  * A real round-trip, not a cast: one `undefined` property anywhere in a vendor
  * payload would be a frame the protocol refuses to encode.
  */
-export const json = (value: unknown): Schema.Json =>
+export const toJson = (value: unknown): Schema.Json =>
   JSON.parse(JSON.stringify(value ?? null)) as Schema.Json;
 
 /** A count the protocol will carry: a whole number, never negative. */
-export const count = (value: unknown): number =>
+export const clampCount = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 
 /**
@@ -49,9 +49,9 @@ export const buildEnvelope = (
  * actually said. Not on a delta: a turn is thousands of them, and a copy on
  * each would double the stream for a payload that is the delta itself.
  */
-export const rawOf = (
+export const buildRaw = (
   source: string,
   payload: unknown,
 ): { readonly raw: { readonly source: string; readonly payload: Schema.Json } } => ({
-  raw: { source, payload: json(payload) },
+  raw: { source, payload: toJson(payload) },
 });

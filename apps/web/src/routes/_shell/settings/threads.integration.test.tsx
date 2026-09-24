@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Connection, Profile, ProviderInstance, Runner } from "@hercule/contract";
-import { envelope, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
+import { buildErrorBody, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 
 const RUNNER_LOCAL: Runner = {
   id: "01a06d02-beff-7037-9f5b-042822015952",
@@ -44,7 +44,7 @@ const DECLARED = {
   structuredOutput: "supported",
 } as const;
 
-const snapshot = (
+const buildSnapshot = (
   runnerId: string,
   models: ReadonlyArray<{ readonly slug: string; readonly name: string }>,
 ) => ({
@@ -56,7 +56,7 @@ const snapshot = (
   models: models.map((model) => ({ ...model, options: [] })),
 });
 
-const instance = (
+const buildProviderInstance = (
   id: string,
   displayName: string,
   snapshots: ProviderInstance["snapshots"],
@@ -75,20 +75,30 @@ const instance = (
 });
 
 /** Logged in on the local runner, offering two models. */
-const INSTANCE_LOCAL = instance("01a06d02-1000-7000-8000-000000000001", "Claude Code", [
-  snapshot(RUNNER_LOCAL.id, [
-    { slug: "claude-sonnet-5", name: "Sonnet 5" },
-    { slug: "claude-opus-5", name: "Opus 5" },
-  ]),
-]);
+const INSTANCE_LOCAL = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000001",
+  "Claude Code",
+  [
+    buildSnapshot(RUNNER_LOCAL.id, [
+      { slug: "claude-sonnet-5", name: "Sonnet 5" },
+      { slug: "claude-opus-5", name: "Opus 5" },
+    ]),
+  ],
+);
 
 /** Never probed on the local runner, but has one snapshot from another one. */
-const INSTANCE_ELSEWHERE = instance("01a06d02-1000-7000-8000-000000000002", "Claude Code (work)", [
-  snapshot(RUNNER_OTHER.id, [{ slug: "claude-haiku-5", name: "Haiku 5" }]),
-]);
+const INSTANCE_ELSEWHERE = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000002",
+  "Claude Code (work)",
+  [buildSnapshot(RUNNER_OTHER.id, [{ slug: "claude-haiku-5", name: "Haiku 5" }])],
+);
 
 /** Never probed anywhere. */
-const INSTANCE_UNPROBED = instance("01a06d02-1000-7000-8000-000000000003", "Claude Code (new)", []);
+const INSTANCE_UNPROBED = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000003",
+  "Claude Code (new)",
+  [],
+);
 
 const INSTANCES: readonly ProviderInstance[] = [
   INSTANCE_LOCAL,
@@ -126,7 +136,7 @@ const STORED_BASE = {
 };
 
 /** A controller that answers `settings.update` with the store the patch makes. */
-const controller = (
+const buildController = (
   user: Record<string, unknown>,
   update?: Handler,
 ): Readonly<Record<string, Handler>> => {
@@ -147,8 +157,8 @@ const controller = (
   };
 };
 
-const open = async (user: Record<string, unknown> = {}, update?: Handler) => {
-  const api = stubApi(controller(user, update));
+const openApp = async (user: Record<string, unknown> = {}, update?: Handler) => {
+  const api = stubApi(buildController(user, update));
   const app = await renderApp({
     path: "/settings/threads",
     api: api.fetch,
@@ -158,13 +168,13 @@ const open = async (user: Record<string, unknown> = {}, update?: Handler) => {
   return { ...app, api };
 };
 
-const writes = (api: { readonly calls: readonly Call[] }) =>
+const listWrites = (api: { readonly calls: readonly Call[] }) =>
   api.calls.filter((call) => call.method === "PATCH");
 
 describe("Settings > Threads defaults", () => {
   it("offers the provider instances by display name, and writes thread.instanceId and thread.model together on pick", async () => {
     const user = userEvent.setup();
-    const { api } = await open();
+    const { api } = await openApp();
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Provider instance");
     const offered = [...field.options].map((option) => option.textContent);
@@ -173,31 +183,33 @@ describe("Settings > Threads defaults", () => {
     await user.selectOptions(field, INSTANCE_ELSEWHERE.displayName);
 
     expect(await screen.findByRole("status")).toBeDefined();
-    expect(writes(api)).toHaveLength(1);
+    expect(listWrites(api)).toHaveLength(1);
     // One patch, not two: a stale model is only ever what the runner list
     // stops offering, never an artefact of switching instances. Its one
     // snapshot's one model, "Haiku 5", carries no `isDefault`, so it is the
     // fallback default.
-    expect(writes(api)[0]?.body).toEqual({
+    expect(listWrites(api)[0]?.body).toEqual({
       user: { "thread.instanceId": INSTANCE_ELSEWHERE.id, "thread.model": "claude-haiku-5" },
     });
   });
 
   it("writes only thread.instanceId when the newly picked instance has no snapshot to default from", async () => {
     const user = userEvent.setup();
-    const { api } = await open();
+    const { api } = await openApp();
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Provider instance");
     await user.selectOptions(field, INSTANCE_UNPROBED.displayName);
 
     expect(await screen.findByRole("status")).toBeDefined();
-    expect(writes(api)).toHaveLength(1);
-    expect(writes(api)[0]?.body).toEqual({ user: { "thread.instanceId": INSTANCE_UNPROBED.id } });
+    expect(listWrites(api)).toHaveLength(1);
+    expect(listWrites(api)[0]?.body).toEqual({
+      user: { "thread.instanceId": INSTANCE_UNPROBED.id },
+    });
   });
 
   it("offers the picked instance's models from the local runner's snapshot, and writes thread.model on pick", async () => {
     const user = userEvent.setup();
-    const { api } = await open();
+    const { api } = await openApp();
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Model");
     const offered = [...field.options].map((option) => option.textContent);
@@ -207,12 +219,12 @@ describe("Settings > Threads defaults", () => {
     await user.selectOptions(field, "Opus 5");
 
     expect(await screen.findByRole("status")).toBeDefined();
-    expect(writes(api)).toHaveLength(1);
-    expect(writes(api)[0]?.body).toEqual({ user: { "thread.model": "claude-opus-5" } });
+    expect(listWrites(api)).toHaveLength(1);
+    expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.model": "claude-opus-5" } });
   });
 
   it("falls back to the instance's first snapshot when none is the local runner's", async () => {
-    await open({
+    await openApp({
       "thread.instanceId": INSTANCE_ELSEWHERE.id,
       "thread.model": "claude-haiku-5",
     });
@@ -225,14 +237,14 @@ describe("Settings > Threads defaults", () => {
   });
 
   it("dims the model field when the picked instance has no snapshot at all", async () => {
-    await open({ "thread.instanceId": INSTANCE_UNPROBED.id, "thread.model": "claude-sonnet-5" });
+    await openApp({ "thread.instanceId": INSTANCE_UNPROBED.id, "thread.model": "claude-sonnet-5" });
 
     expect(await screen.findByText("log in on a runner first")).toBeDefined();
     expect(screen.queryByLabelText("Model")).toBeNull();
   });
 
   it("shows a stored slug the snapshot no longer offers, marked as not offered", async () => {
-    await open({
+    await openApp({
       "thread.instanceId": INSTANCE_LOCAL.id,
       "thread.model": "some-retired-slug",
     });
@@ -245,7 +257,7 @@ describe("Settings > Threads defaults", () => {
 
   it("writes thread.accessMode when a different mode is picked on the segmented control", async () => {
     const user = userEvent.setup();
-    const { api } = await open({ "thread.accessMode": "approval-required" });
+    const { api } = await openApp({ "thread.accessMode": "approval-required" });
 
     const group = await screen.findByRole("radiogroup", { name: /access mode/i });
     expect(within(group).getAllByRole("radio")).toHaveLength(4);
@@ -253,13 +265,13 @@ describe("Settings > Threads defaults", () => {
     await user.click(within(group).getByRole("radio", { name: "auto" }));
 
     expect(await screen.findByRole("status")).toBeDefined();
-    expect(writes(api)).toHaveLength(1);
-    expect(writes(api)[0]?.body).toEqual({ user: { "thread.accessMode": "auto" } });
+    expect(listWrites(api)).toHaveLength(1);
+    expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.accessMode": "auto" } });
   });
 
   it("offers the profiles by name, and writes thread.profileId on pick", async () => {
     const user = userEvent.setup();
-    const { api } = await open();
+    const { api } = await openApp();
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Profile");
     const offered = [...field.options].map((option) => option.textContent);
@@ -268,26 +280,26 @@ describe("Settings > Threads defaults", () => {
     await user.selectOptions(field, PROFILE_WORKER.name);
 
     expect(await screen.findByRole("status")).toBeDefined();
-    expect(writes(api)).toHaveLength(1);
-    expect(writes(api)[0]?.body).toEqual({ user: { "thread.profileId": PROFILE_WORKER.id } });
+    expect(listWrites(api)).toHaveLength(1);
+    expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.profileId": PROFILE_WORKER.id } });
   });
 
   it("shows a refused write as the API worded it", async () => {
     const user = userEvent.setup();
-    const { api } = await open(
+    const { api } = await openApp(
       {},
-      { status: 500, body: envelope("internal", "the settings table is locked") },
+      { status: 500, body: buildErrorBody("internal", "the settings table is locked") },
     );
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Profile");
     await user.selectOptions(field, PROFILE_WORKER.name);
 
     expect((await screen.findByRole("alert")).textContent).toBe("the settings table is locked");
-    expect(writes(api)).toHaveLength(1);
+    expect(listWrites(api)).toHaveLength(1);
   });
 
   it("places the four thread fields above the existing Sidebar rows control", async () => {
-    await open();
+    await openApp();
 
     const instanceField = await screen.findByLabelText("Provider instance");
     const modelField = screen.getByLabelText("Model");
@@ -352,7 +364,7 @@ const openWithConnections = async (
   connections: readonly Connection[] = [GITHUB, GITHUB_WORK, SLACK],
 ) => {
   const api = stubApi({
-    ...controller(user),
+    ...buildController(user),
     "GET /api/v1/connections": { body: { items: connections } },
   });
   const app = await renderApp({
@@ -380,8 +392,8 @@ describe("Settings > Threads: the workspace a thread opens in (AC-22)", () => {
     await user.click(within(group).getByRole("radio", { name: "New workspace" }));
 
     expect(await screen.findByRole("status")).toBeDefined();
-    expect(writes(api)).toHaveLength(1);
-    expect(writes(api)[0]?.body).toEqual({ user: { "thread.workspace": "ephemeral" } });
+    expect(listWrites(api)).toHaveLength(1);
+    expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.workspace": "ephemeral" } });
   });
 
   // D-20d: the fine print is what says a project without a source runs
@@ -417,8 +429,8 @@ describe("Settings > Threads: the GitHub account a checkout-less thread uses (AC
     await user.selectOptions(field, GITHUB_WORK.id);
 
     expect(await screen.findByRole("status")).toBeDefined();
-    expect(writes(api)).toHaveLength(1);
-    expect(writes(api)[0]?.body).toEqual({
+    expect(listWrites(api)).toHaveLength(1);
+    expect(listWrites(api)[0]?.body).toEqual({
       user: { "thread.githubConnectionId": GITHUB_WORK.id },
     });
   });
@@ -433,6 +445,6 @@ describe("Settings > Threads: the GitHub account a checkout-less thread uses (AC
     await user.selectOptions(field, "");
 
     expect(await screen.findByRole("status")).toBeDefined();
-    expect(writes(api)[0]?.body).toEqual({ user: { "thread.githubConnectionId": null } });
+    expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.githubConnectionId": null } });
   });
 });

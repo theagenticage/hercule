@@ -16,9 +16,9 @@ import type * as Scope from "effect/Scope";
 import { Result } from "effect";
 import { parseGlobalOptions, resolveHomePath } from "@hercule/home";
 import { runCredentialAction } from "./credentials";
-import { daemon } from "./daemon";
+import { runDaemon } from "./daemon";
 import { join } from "./join";
-import { local } from "./local";
+import { runLocalRunner } from "./local";
 import { providerLogins } from "./providers";
 import { sessions } from "./sessions";
 import { setController } from "./set-controller";
@@ -60,7 +60,9 @@ const untilStopped: Effect.Effect<Effect.Effect<void>, never, Scope.Scope> = Eff
  * does. Everything it logs goes to stderr, because a runner's stdout is a
  * channel the spawning controller reads one line off.
  */
-const hold = async (work: Effect.Effect<void, { readonly message: string }>): Promise<void> => {
+const runUntilStopped = async (
+  work: Effect.Effect<void, { readonly message: string }>,
+): Promise<void> => {
   const outcome = await Effect.runPromise(
     Effect.result(
       Effect.scoped(
@@ -84,7 +86,7 @@ const hold = async (work: Effect.Effect<void, { readonly message: string }>): Pr
   }
 };
 
-const misuse = (reason: string): void => {
+const reportMisuse = (reason: string): void => {
   console.error(`hercule: ${reason}`);
   console.error(USAGE);
   process.exitCode = EXIT.usage;
@@ -105,10 +107,10 @@ export async function run(argv: readonly string[]): Promise<void> {
     // Anything else is a typo, and starting a daemon is the wrong answer to one.
     const unknown = rest.find((token) => token !== "--local");
     if (unknown !== undefined) {
-      misuse(`unknown runner option \`${unknown}\``);
+      reportMisuse(`unknown runner option \`${unknown}\``);
       return;
     }
-    return await hold(verb === "--local" ? local(home) : daemon(home));
+    return await runUntilStopped(verb === "--local" ? runLocalRunner(home) : runDaemon(home));
   }
   if (verb !== "join" && verb !== "set-controller") {
     // Everything else that reaches this role came from `hercule git-credential`:
@@ -122,7 +124,7 @@ export async function run(argv: readonly string[]): Promise<void> {
 
   if (verb === "set-controller") {
     if (args.length !== 1) {
-      misuse("set-controller takes one controller URL");
+      reportMisuse("set-controller takes one controller URL");
       return;
     }
     const outcome = await Effect.runPromise(
@@ -146,15 +148,15 @@ export async function run(argv: readonly string[]): Promise<void> {
   const targets = named.filter((value) => value !== "--reserved");
   const controllerUrl = targets[0];
   if (controllerUrl === undefined) {
-    misuse("join needs the controller's URL");
+    reportMisuse("join needs the controller's URL");
     return;
   }
   if (targets.length > 1) {
-    misuse("join takes one controller URL");
+    reportMisuse("join takes one controller URL");
     return;
   }
   if (token === undefined || token === "") {
-    misuse("join needs --token <token>");
+    reportMisuse("join needs --token <token>");
     return;
   }
 

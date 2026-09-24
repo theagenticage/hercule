@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { homePaths } from "@hercule/home";
+import { buildHomePaths } from "@hercule/home";
 import { HerculeHome } from "../config";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
@@ -43,7 +43,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
             Layer.mergeAll(UsersLayer, CredentialsLayer, SettingsLayer, AuditLogLayer),
           ),
           Layer.provideMerge(TestDatabase),
-          Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
+          Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),

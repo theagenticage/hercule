@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { projectPickerRows, type HerculeClient, type ProjectPickerRow } from "@hercule/client-core";
+import {
+  buildProjectPickerRows,
+  type HerculeClient,
+  type ProjectPickerRow,
+} from "@hercule/client-core";
 import { cn } from "@hercule/ui";
 import { ProjectDot } from "./project-dot";
 import { projectsQuery, resourcesQuery, sessionsQuery, workspacesQuery } from "../app/queries";
@@ -31,9 +35,9 @@ export function ProjectPicker({
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
-  const rows = projectPickerRows({ projects, resources, workspaces, sessions });
+  const rows = buildProjectPickerRows({ projects, resources, workspaces, sessions });
 
-  const open = (projectId: string): void => {
+  const openProject = (projectId: string): void => {
     onClose();
     void navigate({ to: "/threads/new", search: { project: projectId } });
   };
@@ -59,7 +63,7 @@ export function ProjectPicker({
         const row = rows[Number(event.key) - 1];
         if (row !== undefined) {
           event.preventDefault();
-          open(row.projectId);
+          openProject(row.projectId);
         }
         return;
       }
@@ -74,7 +78,7 @@ export function ProjectPicker({
         event.preventDefault();
         const row = rows[active];
         if (row === undefined) onNewProject();
-        else open(row.projectId);
+        else openProject(row.projectId);
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -116,7 +120,7 @@ export function ProjectPicker({
             row={row}
             active={index === active}
             onPick={() => {
-              open(row.projectId);
+              openProject(row.projectId);
             }}
           />
         ))}

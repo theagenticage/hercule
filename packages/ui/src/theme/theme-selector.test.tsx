@@ -1,43 +1,43 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { memoryStorage } from "../testing";
+import { createMemoryStorage } from "../testing";
 import { ThemeSelector } from "./theme-selector";
 
 /** What the pre-paint script leaves behind is this test's starting state. */
-const painted = (theme: string | null): void => {
+const setDocumentTheme = (theme: string | null): void => {
   if (theme === null) delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
 };
 
 /** The document attribute is the one thing one render may leave on the next. */
 afterEach(() => {
-  painted(null);
+  setDocumentTheme(null);
 });
 
 describe("ThemeSelector", () => {
   it("says the system choice at rest, and opens nothing", () => {
-    vi.stubGlobal("localStorage", memoryStorage());
+    vi.stubGlobal("localStorage", createMemoryStorage());
     render(<ThemeSelector />);
     expect(screen.getByRole("button", { name: "Theme System" })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("takes its starting choice from what the document was painted with", () => {
-    vi.stubGlobal("localStorage", memoryStorage());
-    painted("dark");
+    vi.stubGlobal("localStorage", createMemoryStorage());
+    setDocumentTheme("dark");
     render(<ThemeSelector />);
     expect(screen.getByRole("button", { name: "Theme Dark" })).toBeTruthy();
   });
 
   it("paints the document and remembers a picked theme", async () => {
-    const held = memoryStorage({ "hercule:theme": "light" });
+    const held = createMemoryStorage({ "hercule:theme": "light" });
     vi.stubGlobal("localStorage", held);
-    painted("light");
+    setDocumentTheme("light");
     render(<ThemeSelector />);
 
     await userEvent.click(screen.getByRole("button", { name: "Theme Light" }));
-    await userEvent.click(option("Dark"));
+    await userEvent.click(getThemeOption("Dark"));
 
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(held.getItem("hercule:theme")).toBe("dark");
@@ -48,13 +48,13 @@ describe("ThemeSelector", () => {
   });
 
   it("returns to the machine's own appearance, remembered as no choice at all", async () => {
-    const held = memoryStorage({ "hercule:theme": "dark" });
+    const held = createMemoryStorage({ "hercule:theme": "dark" });
     vi.stubGlobal("localStorage", held);
-    painted("dark");
+    setDocumentTheme("dark");
     render(<ThemeSelector />);
 
     await userEvent.click(screen.getByRole("button", { name: "Theme Dark" }));
-    await userEvent.click(option("System"));
+    await userEvent.click(getThemeOption("System"));
 
     expect(document.documentElement.dataset.theme).toBeUndefined();
     expect(held.getItem("hercule:theme")).toBeNull();
@@ -65,7 +65,7 @@ describe("ThemeSelector", () => {
   });
 
   it("is a radio group: one option checked, and it alone in the tab order", async () => {
-    vi.stubGlobal("localStorage", memoryStorage());
+    vi.stubGlobal("localStorage", createMemoryStorage());
     render(<ThemeSelector />);
 
     await userEvent.click(screen.getByRole("button", { name: "Theme System" }));
@@ -82,7 +82,7 @@ describe("ThemeSelector", () => {
   });
 
   it("moves the check with the arrow keys, painting as it goes and staying open", async () => {
-    const held = memoryStorage();
+    const held = createMemoryStorage();
     vi.stubGlobal("localStorage", held);
     render(<ThemeSelector />);
 
@@ -103,5 +103,5 @@ describe("ThemeSelector", () => {
 });
 
 /** The one option row the open popover shows under this name. */
-const option = (name: string): HTMLElement =>
+const getThemeOption = (name: string): HTMLElement =>
   within(screen.getByRole("dialog", { name: "Theme" })).getByRole("radio", { name });

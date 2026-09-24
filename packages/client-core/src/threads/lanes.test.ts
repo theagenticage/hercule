@@ -1,11 +1,11 @@
 /**
- * `lanesOf(sessions)` buckets sessions into the five pinned lanes in their
- * fixed order, and `headlineOf(sessions, now)` reads the same buckets as one
+ * `buildLanes(sessions)` buckets sessions into the five pinned lanes in their
+ * fixed order, and `buildHeadline(sessions, now)` reads the same buckets as one
  * sentence.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
-import { headlineOf, lanesOf } from "./lanes";
+import { buildHeadline, buildLanes } from "./lanes";
 
 const BASE: Session = {
   id: "s0",
@@ -31,14 +31,14 @@ const BASE: Session = {
   unenforced: [],
 };
 
-const session = (overrides: Partial<Session> & { id: string }): Session => ({
+const buildSession = (overrides: Partial<Session> & { id: string }): Session => ({
   ...BASE,
   ...overrides,
 });
 
-describe("lanesOf", () => {
+describe("buildLanes", () => {
   it("always returns the five pinned lanes, in order, even with no sessions", () => {
-    const lanes = lanesOf([]);
+    const lanes = buildLanes([]);
 
     expect(lanes.map((lane) => lane.kind)).toEqual([
       "waiting",
@@ -51,13 +51,13 @@ describe("lanesOf", () => {
   });
 
   it("places a session of each status in its matching lane, leaving waiting and assistants empty", () => {
-    const busy = session({ id: "busy", status: "busy" });
-    const starting = session({ id: "starting", status: "starting" });
-    const queued = session({ id: "queued", status: "queued" });
-    const idle = session({ id: "idle", status: "idle" });
-    const exited = session({ id: "exited", status: "exited" });
+    const busy = buildSession({ id: "busy", status: "busy" });
+    const starting = buildSession({ id: "starting", status: "starting" });
+    const queued = buildSession({ id: "queued", status: "queued" });
+    const idle = buildSession({ id: "idle", status: "idle" });
+    const exited = buildSession({ id: "exited", status: "exited" });
 
-    const lanes = lanesOf([busy, starting, queued, idle, exited]);
+    const lanes = buildLanes([busy, starting, queued, idle, exited]);
     const byKind = Object.fromEntries(lanes.map((lane) => [lane.kind, lane.sessions]));
 
     expect(byKind.running!.map((s: Session) => s.id).sort()).toEqual([
@@ -73,15 +73,15 @@ describe("lanesOf", () => {
   });
 
   it("places an exited session that can be resumed in the idle lane, and one that cannot in settled", () => {
-    const resumable = session({
+    const resumable = buildSession({
       id: "resumable",
       status: "exited",
       resumable: true,
       nativeSessionId: "n",
     });
-    const gone = session({ id: "gone", status: "exited", resumable: false });
+    const gone = buildSession({ id: "gone", status: "exited", resumable: false });
 
-    const lanes = lanesOf([resumable, gone]);
+    const lanes = buildLanes([resumable, gone]);
     const byKind = Object.fromEntries(lanes.map((lane) => [lane.kind, lane.sessions]));
 
     expect(byKind.idle!.map((s: Session) => s.id)).toEqual(["resumable"]);
@@ -89,34 +89,34 @@ describe("lanesOf", () => {
   });
 });
 
-describe("headlineOf", () => {
+describe("buildHeadline", () => {
   const now = new Date("2026-09-08T12:00:00.000Z");
 
   it("joins running, idle and settled when every segment is nonzero", () => {
     const sessions = [
-      session({ id: "r1", status: "busy" }),
-      session({ id: "i1", status: "idle" }),
-      session({ id: "i2", status: "idle" }),
-      session({ id: "s1", status: "exited", exitedAt: "2026-09-05T12:00:00.000Z" }),
-      session({ id: "s2", status: "exited", exitedAt: "2026-09-06T12:00:00.000Z" }),
-      session({ id: "s3", status: "exited", exitedAt: "2026-09-07T12:00:00.000Z" }),
+      buildSession({ id: "r1", status: "busy" }),
+      buildSession({ id: "i1", status: "idle" }),
+      buildSession({ id: "i2", status: "idle" }),
+      buildSession({ id: "s1", status: "exited", exitedAt: "2026-09-05T12:00:00.000Z" }),
+      buildSession({ id: "s2", status: "exited", exitedAt: "2026-09-06T12:00:00.000Z" }),
+      buildSession({ id: "s3", status: "exited", exitedAt: "2026-09-07T12:00:00.000Z" }),
     ];
 
-    expect(headlineOf(sessions, now)).toBe("1 running · 2 idle · 3 settled this week");
+    expect(buildHeadline(sessions, now)).toBe("1 running · 2 idle · 3 settled this week");
   });
 
   it("omits a segment whose count is zero", () => {
     const sessions = [
-      session({ id: "r1", status: "busy" }),
-      session({ id: "s1", status: "exited", exitedAt: "2026-09-07T12:00:00.000Z" }),
+      buildSession({ id: "r1", status: "busy" }),
+      buildSession({ id: "s1", status: "exited", exitedAt: "2026-09-07T12:00:00.000Z" }),
     ];
 
-    expect(headlineOf(sessions, now)).toBe("1 running · 1 settled this week");
+    expect(buildHeadline(sessions, now)).toBe("1 running · 1 settled this week");
   });
 
   it("counts an exit that can be resumed as idle rather than as settled", () => {
     const sessions = [
-      session({
+      buildSession({
         id: "resumable",
         status: "exited",
         resumable: true,
@@ -125,36 +125,36 @@ describe("headlineOf", () => {
       }),
     ];
 
-    expect(headlineOf(sessions, now)).toBe("1 idle");
+    expect(buildHeadline(sessions, now)).toBe("1 idle");
   });
 
   it("excludes an exit more than seven days before now from the settled count", () => {
-    const recent = session({
+    const recent = buildSession({
       id: "recent",
       status: "exited",
       exitedAt: "2026-09-05T12:00:00.000Z",
     });
-    const old = session({ id: "old", status: "exited", exitedAt: "2026-08-25T00:00:00.000Z" });
+    const old = buildSession({ id: "old", status: "exited", exitedAt: "2026-08-25T00:00:00.000Z" });
 
-    expect(headlineOf([recent, old], now)).toBe("1 settled this week");
+    expect(buildHeadline([recent, old], now)).toBe("1 settled this week");
   });
 
   it("does not count an exited session with no exitedAt as settled", () => {
-    const sessions = [session({ id: "x", status: "exited", exitedAt: null })];
+    const sessions = [buildSession({ id: "x", status: "exited", exitedAt: null })];
 
-    expect(headlineOf(sessions, now)).toBe("Nothing active this week");
+    expect(buildHeadline(sessions, now)).toBe("Nothing active this week");
   });
 
   it("reads as Nothing active this week when every exit is more than seven days old", () => {
     const sessions = [
-      session({ id: "old1", status: "exited", exitedAt: "2026-08-01T00:00:00.000Z" }),
-      session({ id: "old2", status: "exited", exitedAt: "2026-07-01T00:00:00.000Z" }),
+      buildSession({ id: "old1", status: "exited", exitedAt: "2026-08-01T00:00:00.000Z" }),
+      buildSession({ id: "old2", status: "exited", exitedAt: "2026-07-01T00:00:00.000Z" }),
     ];
 
-    expect(headlineOf(sessions, now)).toBe("Nothing active this week");
+    expect(buildHeadline(sessions, now)).toBe("Nothing active this week");
   });
 
   it("reads as No sessions yet only when there is nothing at all", () => {
-    expect(headlineOf([], now)).toBe("No sessions yet");
+    expect(buildHeadline([], now)).toBe("No sessions yet");
   });
 });

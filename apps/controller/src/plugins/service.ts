@@ -29,7 +29,7 @@ import { nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
 import { AuditLog } from "../events";
 import { PluginHost } from "./host";
-import { pluginRepository, storedState } from "./repository";
+import { pluginRepository, readStoredStateOrDie } from "./repository";
 
 type MoveKind =
   | "plugin.enabled"
@@ -63,7 +63,7 @@ const make = Effect.gen(function* () {
     const states = yield* repository.states();
     const contributions = yield* repository.contributions();
     return yield* Effect.forEach(loaded, (plugin) =>
-      Effect.map(storedState(states.get(plugin.id), plugin.id), (state): PluginDetail => ({
+      Effect.map(readStoredStateOrDie(states.get(plugin.id), plugin.id), (state): PluginDetail => ({
         ...plugin,
         ...state,
         contributions: (contributions.get(plugin.id) ?? []).map(
@@ -74,7 +74,9 @@ const make = Effect.gen(function* () {
   });
 
   /** One plugin, without the grant check: a move has already been checked once. */
-  const one = (id: string): Effect.Effect<PluginDetail, NotFound | SqlError | Schema.SchemaError> =>
+  const readPluginOrFail = (
+    id: string,
+  ): Effect.Effect<PluginDetail, NotFound | SqlError | Schema.SchemaError> =>
     Effect.flatMap(details, (all) => {
       const found = all.find((detail) => detail.id === id);
       return found === undefined
@@ -86,10 +88,10 @@ const make = Effect.gen(function* () {
    * A refused plugin has no code running and no catalog rows, so there is
    * nothing for any move to act on.
    */
-  const target = (
+  const readMovablePluginOrFail = (
     id: string,
   ): Effect.Effect<PluginDetail, NotFound | Validation | SqlError | Schema.SchemaError> =>
-    Effect.flatMap(one(id), (detail) =>
+    Effect.flatMap(readPluginOrFail(id), (detail) =>
       detail.status._tag === "refused"
         ? Effect.fail(
             createValidationError(
@@ -104,11 +106,11 @@ const make = Effect.gen(function* () {
    * For a move that ends in a start. A plugin whose `register` or teardown
    * failed cannot start again in this process; only a restart clears either.
    */
-  const restartable = (
+  const readRestartablePluginOrFail = (
     id: string,
   ): Effect.Effect<PluginDetail, NotFound | Validation | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
-      const detail = yield* target(id);
+      const detail = yield* readMovablePluginOrFail(id);
       if (yield* host.startable(id)) return detail;
       const message = `the plugin ${id} needs a controller restart before it can start again`;
       return yield* Effect.fail(createValidationError([{ path: [], message }], message));
@@ -119,7 +121,7 @@ const make = Effect.gen(function* () {
    * claims what the database rolled back. Naming the plugin as a record is what
    * tells a live subscriber to refetch it.
    */
-  const write = (
+  const writeMove = (
     id: string,
     kind: MoveKind,
     change: (at: string) => Effect.Effect<void, SqlError>,
@@ -151,7 +153,7 @@ const make = Effect.gen(function* () {
     read: (id: string): Effect.Effect<PluginDetail, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.read");
-        return yield* one(id);
+        return yield* readPluginOrFail(id);
       }),
 
     /**
@@ -175,11 +177,11 @@ const make = Effect.gen(function* () {
         yield* requireGrant("plugin.enable");
         return yield* host.serialized(
           Effect.gen(function* () {
-            const detail = yield* restartable(id);
+            const detail = yield* readRestartablePluginOrFail(id);
             if (detail.enabled) return detail;
-            yield* write(id, "plugin.enabled", (at) => repository.setEnabled(id, true, at));
+            yield* writeMove(id, "plugin.enabled", (at) => repository.setEnabled(id, true, at));
             yield* host.refresh(id);
-            return yield* one(id);
+            return yield* readPluginOrFail(id);
           }),
         );
       }),
@@ -195,11 +197,11 @@ const make = Effect.gen(function* () {
         yield* requireGrant("plugin.disable");
         return yield* host.serialized(
           Effect.gen(function* () {
-            const detail = yield* target(id);
+            const detail = yield* readMovablePluginOrFail(id);
             if (!detail.enabled) return detail;
             yield* host.stop(id);
-            yield* write(id, "plugin.disabled", (at) => repository.setEnabled(id, false, at));
-            return yield* one(id);
+            yield* writeMove(id, "plugin.disabled", (at) => repository.setEnabled(id, false, at));
+            return yield* readPluginOrFail(id);
           }),
         );
       }),
@@ -219,12 +221,12 @@ const make = Effect.gen(function* () {
         );
         return yield* host.serialized(
           Effect.gen(function* () {
-            yield* restartable(id);
+            yield* readRestartablePluginOrFail(id);
             yield* host.validate(id, config);
             const stopped = yield* host.stop(id);
-            yield* write(id, "plugin.configured", (at) => repository.setConfig(id, config, at));
+            yield* writeMove(id, "plugin.configured", (at) => repository.setConfig(id, config, at));
             if (stopped) yield* host.refresh(id);
-            return yield* one(id);
+            return yield* readPluginOrFail(id);
           }),
         );
       }),
@@ -234,14 +236,14 @@ const make = Effect.gen(function* () {
         yield* requireGrant("plugin.retry");
         return yield* host.serialized(
           Effect.gen(function* () {
-            const detail = yield* restartable(id);
+            const detail = yield* readRestartablePluginOrFail(id);
             if (detail.status._tag !== "errored") {
               const message = `the plugin ${id} is not errored, so there is nothing to retry`;
               return yield* Effect.fail(createValidationError([{ path: [], message }], message));
             }
-            yield* write(id, "plugin.retried", () => Effect.void);
+            yield* writeMove(id, "plugin.retried", () => Effect.void);
             yield* host.refresh(id);
-            return yield* one(id);
+            return yield* readPluginOrFail(id);
           }),
         );
       }),
@@ -255,11 +257,11 @@ const make = Effect.gen(function* () {
         yield* requireGrant("plugin.resetState");
         return yield* host.serialized(
           Effect.gen(function* () {
-            yield* restartable(id);
+            yield* readRestartablePluginOrFail(id);
             const stopped = yield* host.stop(id);
-            yield* write(id, "plugin.stateReset", () => repository.kvWipe(id));
+            yield* writeMove(id, "plugin.stateReset", () => repository.kvWipe(id));
             if (stopped) yield* host.refresh(id);
-            return yield* one(id);
+            return yield* readPluginOrFail(id);
           }),
         );
       }),

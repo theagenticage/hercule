@@ -18,7 +18,7 @@ import { withTransaction } from "../db";
 import { PluginHost } from "../plugins";
 import type { SessionTokens } from "../permissions";
 import { RunnerConnections, runnerRepository } from "../runners";
-import { instanceSecrets, Secrets } from "../secrets";
+import { readInstanceSecrets, Secrets } from "../secrets";
 import { SessionService } from "../sessions";
 import { gitCredentials } from "../workspaces";
 
@@ -62,7 +62,7 @@ const make = Effect.gen(function* () {
               accountOf: credentials.githubAccountOf,
               secretsOf: (instanceId, providerId) =>
                 Effect.flatMap(host.providers(), (registered) =>
-                  instanceSecrets(secrets, registered, instanceId, providerId),
+                  readInstanceSecrets(secrets, registered, instanceId, providerId),
                 ),
             });
           }),

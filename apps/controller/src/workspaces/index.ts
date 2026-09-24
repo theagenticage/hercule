@@ -11,8 +11,8 @@
  * is built as a value and the controller daemon above sends it, which is what
  * keeps the domain graph a DAG - `pnpm dep-lint` fails if an edge back appears.
  */
-export { gitCredentials, gitIdentityOf, type GitCredential } from "./credentials";
-export { readyWhere, resumableWhere } from "./repository";
+export { gitCredentials, buildGitIdentity, type GitCredential } from "./credentials";
+export { buildReadyClause, buildResumableClause } from "./repository";
 export {
   WorkspaceService,
   WorkspaceServiceLayer,

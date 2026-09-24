@@ -21,17 +21,26 @@ import { Effect, Stream } from "effect";
 import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
 import type { ProviderRunnerContext } from "../index";
 import type { Ran } from "../process";
-import { CWD, lines, scratchHome, taggedIn, until } from "../testing";
-import { piAdapter, type PiSeam } from "./adapter";
+import { CWD, createLines, createScratchHome, filterByTag, waitUntil } from "../testing";
+import { makePiAdapter, type PiSeam } from "./adapter";
 
-export { cleanupHomes, CWD, lines, PRIOR, settle, taggedIn, until, WAIT_MS } from "../testing";
+export {
+  cleanupHomes,
+  CWD,
+  createLines,
+  PRIOR,
+  settle,
+  filterByTag,
+  waitUntil,
+  WAIT_MS,
+} from "../testing";
 
-export const homing = (): string => scratchHome("pi");
+export const createPiHome = (): string => createScratchHome("pi");
 
 /** Not a key: a placeholder no upstream would accept, which is the point. */
 export const TEST_ZAI_KEY = "zai-key-for-a-test-only";
 
-export const contextIn = (
+export const buildContext = (
   home: string,
   cwd: string | null = null,
   secrets: Readonly<Record<string, string>> = { zaiApiKey: TEST_ZAI_KEY },
@@ -60,7 +69,7 @@ export const SPEC: SessionSpec = {
  * thinking maps are theirs too: a level mapped to null is one the model cannot
  * be asked for, and the 5.2 line takes `off` where the 5.3 line cannot.
  */
-const zaiModel = (
+const buildZaiModel = (
   id: string,
   name: string,
   thinkingLevelMap: Readonly<Record<string, string | null>> | undefined,
@@ -106,9 +115,9 @@ const FULL_COST = { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 };
 
 const FREE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
-export const GLM_53 = zaiModel("glm-5.3", "GLM-5.3", THINKING_53, FULL_COST, 1_000_000);
+export const GLM_53 = buildZaiModel("glm-5.3", "GLM-5.3", THINKING_53, FULL_COST, 1_000_000);
 
-const GLM_53_FLASH = zaiModel(
+const GLM_53_FLASH = buildZaiModel(
   "glm-5.3-flash",
   "GLM-5.3-Flash",
   THINKING_53,
@@ -119,25 +128,25 @@ const GLM_53_FLASH = zaiModel(
 
 /** The catalog in the order pi lists it. */
 export const ZAI_MODELS: ReadonlyArray<Record<string, unknown>> = [
-  zaiModel(
+  buildZaiModel(
     "glm-4.7",
     "GLM-4.7",
     undefined,
     { input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite: 0 },
     204_800,
   ),
-  zaiModel(
+  buildZaiModel(
     "glm-5-turbo",
     "GLM-5-Turbo",
     undefined,
     { input: 1.2, output: 4, cacheRead: 0.24, cacheWrite: 0 },
     200_000,
   ),
-  zaiModel("glm-5.2", "GLM-5.2", THINKING_52, FULL_COST, 1_000_000),
-  zaiModel("glm-5.2-highspeed", "GLM-5.2 Highspeed", THINKING_52, FREE, 1_000_000),
+  buildZaiModel("glm-5.2", "GLM-5.2", THINKING_52, FULL_COST, 1_000_000),
+  buildZaiModel("glm-5.2-highspeed", "GLM-5.2 Highspeed", THINKING_52, FREE, 1_000_000),
   GLM_53,
   GLM_53_FLASH,
-  zaiModel("glm-5.3-highspeed", "GLM-5.3 Highspeed", THINKING_53, FREE, 1_000_000),
+  buildZaiModel("glm-5.3-highspeed", "GLM-5.3 Highspeed", THINKING_53, FREE, 1_000_000),
 ];
 
 const ANOTHER_PROVIDERS_MODEL = {
@@ -197,12 +206,12 @@ const DEFAULT_ANSWERS: Answers = {
 };
 
 /** What pi answers a command it will not do with, naming the field it refused. */
-export const refusal = (error: string): Record<string, unknown> => ({ success: false, error });
+export const buildRefusal = (error: string): Record<string, unknown> => ({ success: false, error });
 
 export const FAKE_PI_VERSION = "0.85.1";
 
 /** `pi auth check --provider zai --json` as pi 0.85.1 answers both branches. */
-const authCheck = (env: Readonly<Record<string, string | undefined>>): Ran =>
+const answerAuthCheck = (env: Readonly<Record<string, string | undefined>>): Ran =>
   (env["ZAI_API_KEY"] ?? "") === ""
     ? {
         code: 1,
@@ -260,21 +269,21 @@ export const buildFakePiSeam = (
     env: Readonly<Record<string, string | undefined>>,
     cwd: string | null,
   ) => {
-    const out = lines();
-    const err = lines();
+    const out = createLines();
+    const err = createLines();
     let kills = 0;
     let closed = false;
-    let exited: (code: number) => void = () => undefined;
+    let resolveExited: (code: number) => void = () => undefined;
     const done = new Promise<number>((resolve) => {
-      exited = resolve;
+      resolveExited = resolve;
     });
     if (behaviour.dies === true) {
       err.push("pi: could not start");
       out.end();
       err.end();
-      exited(1);
+      resolveExited(1);
     }
-    const handle = (line: string): void => {
+    const handleLine = (line: string): void => {
       const frame = JSON.parse(line) as Record<string, unknown>;
       const type = frame["type"];
       if (typeof type !== "string") return;
@@ -292,27 +301,27 @@ export const buildFakePiSeam = (
         }),
       );
     };
-    const leaving = (): void => {
+    const exitCleanly = (): void => {
       out.end();
       err.end();
-      exited(0);
+      resolveExited(0);
     };
     const child = {
       write: (text: string) => {
-        for (const line of text.split("\n")) if (line.trim() !== "") handle(line);
+        for (const line of text.split("\n")) if (line.trim() !== "") handleLine(line);
       },
       stdout: out.iterable,
       stderr: err.iterable,
       /** Closing stdin is what pi reads as the end of the conversation. */
       end: () => {
         closed = true;
-        if (behaviour.lingers !== true) leaving();
+        if (behaviour.lingers !== true) exitCleanly();
       },
       kill: () => {
         kills += 1;
         out.end();
         err.end();
-        exited(143);
+        resolveExited(143);
       },
       exited: done,
     };
@@ -327,7 +336,7 @@ export const buildFakePiSeam = (
         for (const line of complaints) err.push(line);
         out.end();
         err.end();
-        exited(1);
+        resolveExited(1);
       },
     });
     return child;
@@ -341,7 +350,7 @@ export const buildFakePiSeam = (
       const args = command.slice(1).join(" ");
       if (args === "--version")
         return Effect.succeed({ code: 0, stdout: `${FAKE_PI_VERSION}\n`, stderr: "" });
-      if (args === "auth check --provider zai --json") return Effect.succeed(authCheck(env));
+      if (args === "auth check --provider zai --json") return Effect.succeed(answerAuthCheck(env));
       return Effect.succeed({ code: 1, stdout: "", stderr: `unknown command: ${args}` });
     },
   };
@@ -349,11 +358,11 @@ export const buildFakePiSeam = (
 };
 
 /** An adapter with its events collected, and the fake pi it will reach for. */
-export const driving = (
+export const createDriving = (
   behaviour: FakePiBehaviour = {},
   cwd: string | null = CWD,
 ): {
-  readonly adapter: ReturnType<typeof piAdapter>;
+  readonly adapter: ReturnType<typeof makePiAdapter>;
   readonly ctx: ProviderRunnerContext;
   readonly spawns: Array<Spawn>;
   readonly sent: Array<Sent>;
@@ -361,38 +370,41 @@ export const driving = (
   readonly seen: Array<ProviderEvent>;
 } => {
   const { seam, spawns, sent, runs } = buildFakePiSeam(behaviour);
-  const adapter = piAdapter(seam);
+  const adapter = makePiAdapter(seam);
   const seen: Array<ProviderEvent> = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
-  return { adapter, ctx: contextIn(homing(), cwd), spawns, sent, runs, seen };
+  return { adapter, ctx: buildContext(createPiHome(), cwd), spawns, sent, runs, seen };
 };
 
-export const sentOf = (
+export const listSentCommands = (
   sent: ReadonlyArray<Sent>,
   type: string,
 ): ReadonlyArray<Record<string, unknown>> =>
   sent.filter((one) => one.type === type).map((one) => one.command);
 
 /** A started session, and the pi hosting it. */
-export const started = async (
+export const startTestSession = async (
   behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
-): Promise<ReturnType<typeof driving> & { readonly child: Spawn }> => {
-  const run = driving(behaviour);
+): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
+  const run = createDriving(behaviour);
   await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
-  await until("spawned a pi", () => run.spawns.length === 1);
+  await waitUntil("spawned a pi", () => run.spawns.length === 1);
   return { ...run, child: run.spawns[0]! };
 };
 
 /** A session whose turn is running, which is what makes an input a steer. */
-export const busy = async (
+export const startBusySession = async (
   behaviour: FakePiBehaviour = {},
-): Promise<ReturnType<typeof driving> & { readonly child: Spawn }> => {
-  const run = await started(behaviour);
+): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
+  const run = await startTestSession(behaviour);
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
   run.child.push({ type: "agent_start" });
-  await until("reported the turn open", () => taggedIn(run.seen, "turn.started").length === 1);
+  await waitUntil(
+    "reported the turn open",
+    () => filterByTag(run.seen, "turn.started").length === 1,
+  );
   return run;
 };

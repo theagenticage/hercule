@@ -21,10 +21,10 @@ import { GrantSchema, type Grant } from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
   nowIso,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -91,7 +91,7 @@ const encodeGrants = (name: string, grants: ReadonlyArray<Grant>) =>
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  const byId = (id: string): Effect.Effect<Option.Option<Row>, SqlError> =>
+  const findRowById = (id: string): Effect.Effect<Option.Option<Row>, SqlError> =>
     sql<Row>`SELECT id, name, grants, shipped, created_at, updated_at
              FROM permission_profiles WHERE id = ${uuidFromString(id)}`.pipe(
       Effect.map((rows) => Option.fromNullishOr(rows[0])),
@@ -133,7 +133,7 @@ const make = Effect.gen(function* () {
     getById: (
       id: string,
     ): Effect.Effect<Option.Option<PermissionProfile>, GrantsError | SqlError> =>
-      byId(id).pipe(
+      findRowById(id).pipe(
         Effect.flatMap(
           Option.match({
             onNone: () => Effect.succeedNone,
@@ -157,7 +157,7 @@ const make = Effect.gen(function* () {
         };
         const after =
           page.cursor === undefined ? undefined : yield* decodeCursor(page.cursor, scope, "string");
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["name", "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -167,7 +167,7 @@ const make = Effect.gen(function* () {
           SELECT id, name, grants, shipped, created_at, updated_at
           FROM permission_profiles WHERE ${keyset} ${order} LIMIT ${page.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           page.limit,
           (read) => Effect.forEach(read, toProfile),
@@ -216,7 +216,7 @@ const make = Effect.gen(function* () {
       changes: { readonly name?: string; readonly grants?: ReadonlyArray<Grant> },
     ): Effect.Effect<UpdateOutcome, GrantsError | SqlError> =>
       Effect.gen(function* () {
-        const existing = yield* byId(id);
+        const existing = yield* findRowById(id);
         if (Option.isNone(existing)) return { _tag: "absent" };
         const current = yield* toProfile(existing.value);
 

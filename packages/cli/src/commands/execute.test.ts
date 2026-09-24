@@ -1,15 +1,15 @@
 import { createClient } from "@hercule/client-core";
 import { describe, expect, it } from "vitest";
 import { UsageError } from "../exit";
-import { id, stubFetch, type Handler } from "../testing";
+import { buildId, stubFetch, type Handler } from "../testing";
 import { parseArguments } from "./args";
 import { execute } from "./execute";
-import { commandAt } from "./tree";
+import { findCommandByWords } from "./tree";
 
-const at = (...words: ReadonlyArray<string>) => commandAt(words)!;
-const noStdin = () => Promise.reject(new Error("stdin was read"));
+const lookUpCommand = (...words: ReadonlyArray<string>) => findCommandByWords(words)!;
+const refuseStdinRead = () => Promise.reject(new Error("stdin was read"));
 
-const wire = (handler: Handler) => {
+const stubClient = (handler: Handler) => {
   const fetch = stubFetch(handler);
   const client = createClient({ baseUrl: "http://controller.test", token: "t", fetch });
   return { fetch, client };
@@ -17,21 +17,21 @@ const wire = (handler: Handler) => {
 
 /** A join token reference, as `runner join-token list` answers with them. */
 const joinToken = (tail: string) => ({
-  id: id(tail),
+  id: buildId(tail),
   createdAt: "2026-09-15T10:00:00.000Z",
   expiresAt: "2026-09-15T11:00:00.000Z",
 });
 
 /** A session, as `session list` answers with them. */
-const session = (tail: string) => ({
-  id: id(tail),
+const buildSession = (tail: string) => ({
+  id: buildId(tail),
   title: "a thread",
   status: "idle",
   resumable: false,
-  permissionProfileId: id("dddddddd"),
+  permissionProfileId: buildId("dddddddd"),
   agentId: null,
-  instanceId: id("eeeeeeee"),
-  runnerId: id("ffffffff"),
+  instanceId: buildId("eeeeeeee"),
+  runnerId: buildId("ffffffff"),
   workspaceId: null,
   projectId: null,
   requestedAccessMode: "approval-required",
@@ -47,7 +47,7 @@ const session = (tail: string) => ({
   unenforced: [],
 });
 
-const input = (inputId: string, sessionId: string) => ({
+const buildInput = (inputId: string, sessionId: string) => ({
   id: inputId,
   sessionId,
   source: "user",
@@ -65,11 +65,11 @@ const input = (inputId: string, sessionId: string) => ({
 describe("a positional the row resolves", () => {
   it("sweeps the listing the row names, then acts on the full id", async () => {
     const token = joinToken("aaaaaaa1");
-    const { fetch, client } = wire((request) =>
+    const { fetch, client } = stubClient((request) =>
       request.path === "/api/v1/runners/join-tokens" && request.method === "GET" ? [token] : {},
     );
-    const command = at("runner", "join-token", "revoke");
-    const args = await parseArguments(command, ["0aaaaaaa1"], noStdin);
+    const command = lookUpCommand("runner", "join-token", "revoke");
+    const args = await parseArguments(command, ["0aaaaaaa1"], refuseStdinRead);
 
     await execute(client, command, args);
 
@@ -85,14 +85,14 @@ describe("a positional the row resolves", () => {
   });
 
   it("resolves a session tail and sends the input id exactly as written", async () => {
-    const row = session("bbbbbbb2");
+    const row = buildSession("bbbbbbb2");
     const inputId = "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0";
-    const { fetch, client } = wire((request) =>
+    const { fetch, client } = stubClient((request) =>
       request.path === "/api/v1/sessions" && request.method === "GET"
         ? { items: [row] }
-        : input(inputId, row.id),
+        : buildInput(inputId, row.id),
     );
-    const command = at("input", "update");
+    const command = lookUpCommand("input", "update");
     const args = await parseArguments(command, ["0bbbbbbb2", inputId], () =>
       Promise.resolve("Actually, start with the test that fails least often.\n"),
     );
@@ -115,12 +115,12 @@ describe("a positional the row resolves", () => {
  */
 describe("a flag over a structured field", () => {
   it("sends the JSON a workspace flag carries as the object it is", async () => {
-    const row = session("ccccccc3");
-    const { fetch, client } = wire(() => row);
-    const command = at("session", "spawn");
+    const row = buildSession("ccccccc3");
+    const { fetch, client } = stubClient(() => row);
+    const command = lookUpCommand("session", "spawn");
     const workspace = {
       kind: "ephemeral",
-      checkouts: [{ resourceId: id("11111111"), baseBranch: "main" }],
+      checkouts: [{ resourceId: buildId("11111111"), baseBranch: "main" }],
     };
     const args = await parseArguments(command, ["--workspace", JSON.stringify(workspace)], () =>
       Promise.resolve("Move the shared type over.\n"),
@@ -136,8 +136,8 @@ describe("a flag over a structured field", () => {
   });
 
   it("refuses a workspace that is not JSON, naming the flag, and calls nothing", async () => {
-    const { fetch } = wire(() => ({}));
-    const command = at("session", "spawn");
+    const { fetch } = stubClient(() => ({}));
+    const command = lookUpCommand("session", "spawn");
 
     await expect(
       parseArguments(command, ["--workspace", "ephemeral"], () => Promise.resolve("go\n")),
@@ -148,10 +148,10 @@ describe("a flag over a structured field", () => {
 
 describe("a field the row does not resolve", () => {
   it("refuses a tail for a Hercule id, names the full id, and calls nothing", async () => {
-    const { fetch, client } = wire(() => ({}));
+    const { fetch, client } = stubClient(() => ({}));
     // A queued input's own id: a Hercule id with no listing of its own, so a
     // tail has nothing to be resolved against and is refused rather than sent.
-    const command = at("input", "update");
+    const command = lookUpCommand("input", "update");
     const args = await parseArguments(
       command,
       ["1f3a9c2e-0000-7000-8000-000000000001", "1f3a9c2e"],
@@ -164,20 +164,20 @@ describe("a field the row does not resolve", () => {
   });
 
   it("takes a plugin id as written, because no tail could ever stand for one", async () => {
-    const { fetch, client } = wire(() => ({}));
+    const { fetch, client } = stubClient(() => ({}));
     // Hex-shaped, and still a name: plugin ids are not Hercule ids, so there is
     // no longer id this could be the end of.
-    const command = at("plugin", "read");
-    const args = await parseArguments(command, ["1f3a9c2e"], noStdin);
+    const command = lookUpCommand("plugin", "read");
+    const args = await parseArguments(command, ["1f3a9c2e"], refuseStdinRead);
 
     await execute(client, command, args).catch(() => undefined);
     expect(fetch.calls[0]?.path).toBe("/api/v1/plugins/1f3a9c2e");
   });
 
   it("still takes the id a plugin actually has", async () => {
-    const { fetch, client } = wire(() => ({}));
-    const command = at("plugin", "enable");
-    const args = await parseArguments(command, ["github"], noStdin);
+    const { fetch, client } = stubClient(() => ({}));
+    const command = lookUpCommand("plugin", "enable");
+    const args = await parseArguments(command, ["github"], refuseStdinRead);
 
     await execute(client, command, args).catch(() => undefined);
     expect(fetch.calls[0]?.path).toBe("/api/v1/plugins/github/enable");

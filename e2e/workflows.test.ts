@@ -17,23 +17,23 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   PASSWORD,
   USERNAME,
-  cli,
+  runCli,
   completeSetup,
-  jsonOk,
-  releaseBinary,
+  parseJsonOutputOrFail,
+  findReleaseBinary,
   startController,
-  temporaryHome,
+  createTemporaryHome,
   type Controller,
   type Ran,
 } from "./harness";
 
-const state = temporaryHome();
-const binary = releaseBinary();
+const state = createTemporaryHome();
+const binary = findReleaseBinary();
 
 let controller: Controller;
 
-const hercule = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
-  cli(args, { home: state.home, binary, stdin });
+const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string): Promise<Ran> =>
+  runCli(args, { home: state.home, binary, stdin });
 
 /**
  * A workflow file as a person would write it: comments, blank lines, keys in a
@@ -72,7 +72,7 @@ beforeAll(async () => {
   controller = await startController({ home: state.home, binary });
   const completed = await completeSetup({ home: state.home, url: controller.url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
-  const login = await hercule(
+  const login = await runLoggedInCli(
     [
       "login",
       controller.url,
@@ -94,11 +94,11 @@ afterAll(async () => {
 
 describe("a workflow created from stdin and read back", () => {
   it("prints the exact bytes of the file, not key-value lines", async () => {
-    const createAnswer = jsonOk<{ readonly workflow: { readonly id: string } }>(
-      await hercule(["workflow", "create", "--json"], WORKFLOW_FILE),
+    const createAnswer = parseJsonOutputOrFail<{ readonly workflow: { readonly id: string } }>(
+      await runLoggedInCli(["workflow", "create", "--json"], WORKFLOW_FILE),
     );
 
-    const printed = await hercule(["workflow", "read", createAnswer.workflow.id]);
+    const printed = await runLoggedInCli(["workflow", "read", createAnswer.workflow.id]);
     expect(printed.code, printed.stderr).toBe(0);
     expect(printed.stdout).toBe(WORKFLOW_FILE);
   }, 60_000);

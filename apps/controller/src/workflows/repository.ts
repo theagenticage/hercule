@@ -26,9 +26,9 @@ import {
   decodeOwnedCursor,
   encodeCursor,
   encodeOwnedCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -272,7 +272,7 @@ const make = Effect.gen(function* () {
           request.cursor === undefined
             ? undefined
             : yield* decodeCursor(request.cursor, scope, "string");
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["updated_at", "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -288,7 +288,7 @@ const make = Effect.gen(function* () {
           FROM workflows WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toSummary)),
@@ -368,7 +368,7 @@ const make = Effect.gen(function* () {
           request.cursor === undefined
             ? undefined
             : yield* decodeOwnedCursor(request.cursor, scope);
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["triggers.created_at", "triggers.workflow_id", "triggers.trigger_id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1]), after[2]],
@@ -392,7 +392,7 @@ const make = Effect.gen(function* () {
           WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (page) => Effect.succeed(page.map(toTrigger)),

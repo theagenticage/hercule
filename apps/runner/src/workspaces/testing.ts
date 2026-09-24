@@ -37,7 +37,7 @@ const GIT_ENV: Record<string, string> = {
 };
 
 /** Runs git and fails the test with git's own words when it is unhappy. */
-export const git = (cwd: string, ...args: ReadonlyArray<string>): string => {
+export const runGitOrThrow = (cwd: string, ...args: ReadonlyArray<string>): string => {
   const done = Bun.spawnSync(["git", ...args], { cwd, env: GIT_ENV });
   if (done.exitCode !== 0) {
     throw new Error(`git ${args.join(" ")} (in ${cwd}): ${done.stderr.toString()}`);
@@ -47,7 +47,7 @@ export const git = (cwd: string, ...args: ReadonlyArray<string>): string => {
 
 const roots: Array<string> = [];
 
-export const temporary = (prefix: string): string => {
+export const createTemporaryDir = (prefix: string): string => {
   const made = mkdtempSync(join(tmpdir(), prefix));
   roots.push(made);
   return made;
@@ -68,42 +68,42 @@ export interface Remote {
 
 /** A bare "remote" with one commit on `main`, and a working copy to grow it. */
 export const makeRemote = (): Remote => {
-  const under = temporary("hercule-remote-");
+  const under = createTemporaryDir("hercule-remote-");
   const work = join(under, "work");
   mkdirSync(work);
-  git(work, "init", "-b", "main");
+  runGitOrThrow(work, "init", "-b", "main");
   writeFileSync(join(work, "README.md"), "the repository\n");
-  git(work, "add", ".");
-  git(work, "commit", "-m", "first");
+  runGitOrThrow(work, "add", ".");
+  runGitOrThrow(work, "commit", "-m", "first");
   const path = join(under, "origin.git");
-  git(under, "clone", "--bare", work, path);
-  git(work, "remote", "add", "origin", path);
+  runGitOrThrow(under, "clone", "--bare", work, path);
+  runGitOrThrow(work, "remote", "add", "origin", path);
   return { url: `file://${path}`, path, work };
 };
 
 /** Adds a branch to the remote, and returns the commit it points at. */
 export const addBranch = (remote: Remote, branch: string, content = "on a branch\n"): string => {
-  git(remote.work, "checkout", "-b", branch);
+  runGitOrThrow(remote.work, "checkout", "-b", branch);
   writeFileSync(join(remote.work, `${branch.replaceAll("/", "-")}.txt`), content);
-  git(remote.work, "add", ".");
-  git(remote.work, "commit", "-m", `work on ${branch}`);
-  const sha = git(remote.work, "rev-parse", "HEAD");
-  git(remote.work, "push", remote.path, branch);
-  git(remote.work, "checkout", "main");
+  runGitOrThrow(remote.work, "add", ".");
+  runGitOrThrow(remote.work, "commit", "-m", `work on ${branch}`);
+  const sha = runGitOrThrow(remote.work, "rev-parse", "HEAD");
+  runGitOrThrow(remote.work, "push", remote.path, branch);
+  runGitOrThrow(remote.work, "checkout", "main");
   return sha;
 };
 
 /** A checkout the user already has: cloned from the remote, origin set to it. */
-export const userCheckout = (remote: Remote, branch = "main"): string => {
-  const under = temporary("hercule-user-checkout-");
+export const cloneUserCheckout = (remote: Remote, branch = "main"): string => {
+  const under = createTemporaryDir("hercule-user-checkout-");
   const path = join(under, "checkout");
-  git(under, "clone", remote.url, path);
-  if (branch !== "main") git(path, "checkout", branch);
+  runGitOrThrow(under, "clone", remote.url, path);
+  if (branch !== "main") runGitOrThrow(path, "checkout", branch);
   return path;
 };
 
 /** Every byte under a directory, so "nothing was written here" is checkable. */
-export const contentsOf = (dir: string): string => {
+export const hashContents = (dir: string): string => {
   const entries = readdirSync(dir, { recursive: true, encoding: "utf8" }).sort();
   const hash = createHash("sha256");
   for (const entry of entries) {
@@ -117,13 +117,13 @@ export const contentsOf = (dir: string): string => {
   return hash.digest("hex");
 };
 
-export const id = (): string => crypto.randomUUID();
+export const createId = (): string => crypto.randomUUID();
 
 type CheckoutOverrides = Partial<ProvisionCheckout> &
   Pick<ProvisionCheckout, "resourceId" | "remote">;
 
-export const checkout = (overrides: CheckoutOverrides): ProvisionCheckout => ({
-  checkoutId: id(),
+export const buildCheckout = (overrides: CheckoutOverrides): ProvisionCheckout => ({
+  checkoutId: createId(),
   subdirectory: null,
   branch: null,
   baseBranch: null,
@@ -132,13 +132,13 @@ export const checkout = (overrides: CheckoutOverrides): ProvisionCheckout => ({
   ...overrides,
 });
 
-export const provisionFrame = (options: {
+export const buildProvisionFrame = (options: {
   readonly workspaceId?: string;
   readonly kind: WorkspaceKind;
   readonly checkouts: ReadonlyArray<ProvisionCheckout>;
 }): WorkspaceProvision => ({
   _tag: "workspaceProvision",
-  workspaceId: options.workspaceId ?? id(),
+  workspaceId: options.workspaceId ?? createId(),
   kind: options.kind,
   checkouts: options.checkouts,
 });

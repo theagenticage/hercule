@@ -7,9 +7,9 @@
  * rule. What is left here is the narrower question only the controller asks:
  * whether Hercule will hand this remote to git at all.
  */
-import { canonicalRemoteOf } from "@hercule/protocol";
+import { canonicalizeRemote } from "@hercule/protocol";
 
-export { canonicalRemoteOf };
+export { canonicalizeRemote as canonicalRemoteOf };
 
 /** What git reads as an option rather than as a remote. */
 const OPTION = /^-/;
@@ -37,5 +37,5 @@ export const isClonableRemote = (remote: string): boolean => {
 };
 
 /** The last segment of a canonical remote: what a repository is called. */
-export const repoNameOf = (canonicalRemote: string): string =>
+export const extractRepoName = (canonicalRemote: string): string =>
   canonicalRemote.slice(canonicalRemote.lastIndexOf("/") + 1);

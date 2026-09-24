@@ -6,7 +6,7 @@
  * trusting it, because a database that silently fell back to the rollback
  * journal serializes every reader behind the writer. It then takes the home
  * exclusively, so "one writer process" is enforced rather than assumed
- * (`takeTheHome`).
+ * (`takeExclusiveLock`).
  *
  * Transactions are ambient: a caller wraps its write set in `withTransaction`,
  * every repository call inside sees the same transaction, a nested
@@ -21,7 +21,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlErrorReason, SqlError } from "effect/unstable/sql/SqlError";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
-import { announcing } from "./after-commit";
+import { withAnnouncements } from "./after-commit";
 
 /** The in-memory database name; tests open the real schema against it. */
 export const MEMORY = ":memory:";
@@ -87,7 +87,7 @@ const ALREADY_OPEN = (filename: string): string =>
   `${filename} is already open by another Hercule controller. One controller serves a home; ` +
   `stop the other one and try again.`;
 
-export const databaseError = (filename: string, error: unknown): DatabaseError => {
+export const createDatabaseError = (filename: string, error: unknown): DatabaseError => {
   if (error instanceof DatabaseError) return error;
   if (wasLocked(error)) {
     return new DatabaseError({ filename, message: ALREADY_OPEN(filename) });
@@ -98,7 +98,7 @@ export const databaseError = (filename: string, error: unknown): DatabaseError =
   });
 };
 
-const configure = (
+const configureConnection = (
   filename: string,
 ): Effect.Effect<void, SqlError | DatabaseError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
@@ -116,7 +116,7 @@ const configure = (
           message: `${filename} opened in journal mode ${journalMode}; Hercule requires WAL.`,
         });
       }
-      yield* takeTheHome(filename);
+      yield* takeExclusiveLock(filename);
     }
   });
 
@@ -136,9 +136,9 @@ const configure = (
  * empty write transaction here is what actually takes the home. A second
  * controller does not get this far: the driver's own first statement on the
  * connection already needs a lock this one holds, waits out the busy timeout
- * and fails with {@link databaseError}'s one line.
+ * and fails with {@link createDatabaseError}'s one line.
  */
-const takeTheHome = (
+const takeExclusiveLock = (
   filename: string,
 ): Effect.Effect<void, SqlError | DatabaseError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
@@ -146,7 +146,7 @@ const takeTheHome = (
     yield* sql`PRAGMA locking_mode = EXCLUSIVE`;
     const taken = Effect.andThen(sql`BEGIN IMMEDIATE`, sql`COMMIT`);
     yield* Effect.catchTag(taken, "SqlError", (error) =>
-      Effect.fail(databaseError(filename, error)),
+      Effect.fail(createDatabaseError(filename, error)),
     );
   });
 
@@ -161,11 +161,11 @@ const takeTheHome = (
 export const openDatabase = (
   filename: string,
 ): Layer.Layer<SqlClient.SqlClient | SqliteClient.SqliteClient, DatabaseError> =>
-  Layer.effectDiscard(configure(filename)).pipe(
+  Layer.effectDiscard(configureConnection(filename)).pipe(
     Layer.provideMerge(SqliteClient.layer({ filename, busyTimeout: BUSY_TIMEOUT })),
     Layer.catchCause(
       (cause): Layer.Layer<SqlClient.SqlClient | SqliteClient.SqliteClient, DatabaseError> =>
-        Layer.unwrap(Effect.fail(databaseError(filename, Cause.squash(cause)))),
+        Layer.unwrap(Effect.fail(createDatabaseError(filename, Cause.squash(cause)))),
     ),
   );
 
@@ -184,4 +184,4 @@ export const openDatabase = (
 export const withTransaction = <A, E, R>(
   sql: SqlClient.SqlClient,
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | SqlError, R> => announcing(sql.withTransaction(effect));
+): Effect.Effect<A, E | SqlError, R> => withAnnouncements(sql.withTransaction(effect));

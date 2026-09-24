@@ -29,7 +29,7 @@ import {
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import type { Input, Profile, Session } from "@hercule/contract";
-import { fixture, providerDefinition } from "../plugins/testing";
+import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
   completeSetup,
   get,
@@ -51,7 +51,7 @@ const SOCKET_PATH = "/api/v1/runners/socket";
 export const WAIT_DEADLINE_MS = 10_000;
 
 /** Waits for something the controller does on its own schedule, and names it. */
-export const until = async <A>(
+export const waitUntil = async <A>(
   what: string,
   look: () => A | undefined | Promise<A | undefined>,
 ): Promise<A> => {
@@ -81,7 +81,7 @@ export interface Wire {
   readonly release: (delivery: Delivery) => void;
 }
 
-export const framesOf = <T extends ControllerMessage>(
+export const listFrames = <T extends ControllerMessage>(
   wire: Wire,
   tag: T["_tag"],
 ): ReadonlyArray<T> => wire.frames.filter((frame): frame is T => frame._tag === tag);
@@ -92,18 +92,18 @@ export const framesOf = <T extends ControllerMessage>(
  * has crossed it: a test that reads `wire.frames` the moment a response lands
  * is asserting on a race rather than on an ordering.
  */
-export const framesWhen = <T extends ControllerMessage>(
+export const waitForFrames = <T extends ControllerMessage>(
   wire: Wire,
   tag: T["_tag"],
   count: number,
 ): Promise<ReadonlyArray<T>> =>
-  until(`sent ${String(count)} ${tag} frames`, () => {
-    const found = framesOf<T>(wire, tag);
+  waitUntil(`sent ${String(count)} ${tag} frames`, () => {
+    const found = listFrames<T>(wire, tag);
     return found.length >= count ? found : undefined;
   });
 
 /** Has this machine report one normalized event, on the sequence it names. */
-export const report = (wire: Wire, seq: number, event: ProviderEvent): void =>
+export const reportEvent = (wire: Wire, seq: number, event: ProviderEvent): void =>
   wire.send({ _tag: "sessionEvent", seq, event });
 
 const decodeFrame = (raw: unknown): ControllerMessage =>
@@ -124,31 +124,36 @@ const dial = (
       headers: { authorization: `Bearer ${credential}` },
     });
     const frames: Array<ControllerMessage> = [];
-    let delivery: (frame: SessionInput) => Answered = () => "opened";
+    let decideDelivery: (frame: SessionInput) => Answered = () => "opened";
     const withheld: Array<SessionInput> = [];
-    const write = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
+    const writeMessage = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
     socket.onmessage = (event) => {
       const frame = decodeFrame(JSON.parse(String(event.data)) as unknown);
       frames.push(frame);
-      if (frame._tag === "ping") write({ _tag: "pong" });
+      if (frame._tag === "ping") writeMessage({ _tag: "pong" });
       if (frame._tag === "sessionInput") {
-        const answer = delivery(frame);
+        const answer = decideDelivery(frame);
         if (typeof answer === "string") {
-          write({
+          writeMessage({
             _tag: "sessionInputResult",
             requestId: frame.requestId,
             ok: true,
             delivery: answer,
           });
         } else if (answer !== undefined) {
-          write({ _tag: "sessionInputResult", requestId: frame.requestId, ok: false, ...answer });
+          writeMessage({
+            _tag: "sessionInputResult",
+            requestId: frame.requestId,
+            ok: false,
+            ...answer,
+          });
         } else {
           withheld.push(frame);
         }
       }
       if (frame._tag === "probeRequest") {
         const request = frame satisfies ProbeRequest;
-        write({
+        writeMessage({
           _tag: "probeReport",
           requestId: request.requestId,
           instanceId: request.instanceId,
@@ -157,7 +162,7 @@ const dial = (
       }
     };
     socket.onopen = () => {
-      write({
+      writeMessage({
         _tag: "runnerHello",
         protocolVersion: PROTOCOL_VERSION,
         capabilities: [],
@@ -167,14 +172,14 @@ const dial = (
       });
       resolve({
         frames,
-        send: write,
+        send: writeMessage,
         close: () => socket.close(),
         answering: (next) => {
-          delivery = next;
+          decideDelivery = next;
         },
         release: (answer) => {
           for (const held of withheld.splice(0)) {
-            write({
+            writeMessage({
               _tag: "sessionInputResult",
               requestId: held.requestId,
               ok: true,
@@ -195,8 +200,11 @@ export interface ProviderInstance {
 }
 
 /** The instances, once every one of them has been probed on this machine. */
-const probed = async (base: string, token: string): Promise<ReadonlyArray<ProviderInstance>> =>
-  until("probed every instance", async () => {
+const waitForEveryInstanceProbed = async (
+  base: string,
+  token: string,
+): Promise<ReadonlyArray<ProviderInstance>> =>
+  waitUntil("probed every instance", async () => {
     const response = await get(base, "/api/v1/providers", token);
     const instances = (await response.json()) as ReadonlyArray<ProviderInstance>;
     return instances.every((instance) => instance.snapshots.length === 1) ? instances : undefined;
@@ -270,7 +278,7 @@ export const withFleet = (
       wires.push(again);
       return again;
     };
-    const instances = await probed(harness.base, token);
+    const instances = await waitForEveryInstanceProbed(harness.base, token);
     let machines = 1;
     const enlist = async (): Promise<Enlisted> => {
       const second = await send("POST", harness.base, "/api/v1/runners/join", {
@@ -285,7 +293,7 @@ export const withFleet = (
       machines += 1;
       // One snapshot per machine per instance, so a placement onto this one
       // has an answer to place against only once its own probes are in.
-      await until("probed the machine it just enlisted", async () => {
+      await waitUntil("probed the machine it just enlisted", async () => {
         const response = await get(harness.base, "/api/v1/providers", token);
         const all = (await response.json()) as ReadonlyArray<ProviderInstance>;
         return all.every((instance) => instance.snapshots.length >= machines) ? all : undefined;
@@ -308,21 +316,21 @@ export const withFleet = (
   }, server);
 
 /** The provider instance a fixture's provider was opened as, by that provider's id. */
-export const instanceOf = (arranged: Arranged, providerId: string): string => {
+export const findInstanceId = (arranged: Arranged, providerId: string): string => {
   const found = arranged.instances.find((instance) => instance.providerId === providerId);
   expect(found, providerId).toBeDefined();
   return found!.id;
 };
 
 /** Every session this controller holds, as the API hands them back. */
-export const sessionsOf = async (arranged: Arranged): Promise<ReadonlyArray<Session>> => {
+export const listSessions = async (arranged: Arranged): Promise<ReadonlyArray<Session>> => {
   const response = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
   return ((await response.json()) as { items: ReadonlyArray<Session> }).items;
 };
 
 /** One session's inputs, oldest first, as the API hands them back. */
-export const inputsOf = async (arranged: Arranged, id: string): Promise<ReadonlyArray<Input>> => {
+export const listInputs = async (arranged: Arranged, id: string): Promise<ReadonlyArray<Input>> => {
   const response = await get(
     arranged.harness.base,
     `/api/v1/sessions/${id}/inputs`,
@@ -332,11 +340,11 @@ export const inputsOf = async (arranged: Arranged, id: string): Promise<Readonly
   return ((await response.json()) as { items: ReadonlyArray<Input> }).items;
 };
 
-export const spawn = async (arranged: Arranged, body: unknown): Promise<Response> =>
+export const spawnSession = async (arranged: Arranged, body: unknown): Promise<Response> =>
   post(arranged.harness.base, "/api/v1/sessions", body, arranged.token);
 
-export const spawned = async (arranged: Arranged, body: unknown): Promise<Session> => {
-  const response = await spawn(arranged, body);
+export const spawnSessionOrFail = async (arranged: Arranged, body: unknown): Promise<Session> => {
+  const response = await spawnSession(arranged, body);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as Session;
 };
@@ -349,7 +357,7 @@ export const spawned = async (arranged: Arranged, body: unknown): Promise<Sessio
  * two places for the arrangement to drift while the assertions stay put.
  */
 
-const AGENT_PROVIDER = providerDefinition("full-provider", { token: "t" });
+const AGENT_PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
 
 const AGENT_FACTS = {
   os: "darwin",
@@ -370,7 +378,7 @@ export const withAgentFleet = (
   options: Omit<ServerOptions, "plugins"> = {},
 ): Promise<void> =>
   withFleet(body, {
-    plugins: [fixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin],
+    plugins: [createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin],
     facts: AGENT_FACTS,
     models: AGENT_MODELS,
     ...options,
@@ -380,7 +388,7 @@ export const withAgentFleet = (
 export const at = "2026-09-07T10:00:00.000Z";
 
 /** One of the profiles the controller ships, by the name it ships under. */
-export const profileNamed = async (arranged: Arranged, name: string): Promise<Profile> => {
+export const readProfileNamed = async (arranged: Arranged, name: string): Promise<Profile> => {
   const response = await get(arranged.harness.base, "/api/v1/profiles", arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
   const items = ((await response.json()) as { items: ReadonlyArray<Profile> }).items;
@@ -406,13 +414,13 @@ export const createProfile = async (
 };
 
 /** The start frames the controller has sent for one session, once there are this many. */
-export const startFrames = (
+export const waitForStartFrames = (
   arranged: Arranged,
   sessionId: string,
   count: number,
 ): Promise<ReadonlyArray<SessionStart>> =>
-  until(`sent ${String(count)} start frames for the session`, () => {
-    const found = framesOf<SessionStart>(arranged.wire, "sessionStart").filter(
+  waitUntil(`sent ${String(count)} start frames for the session`, () => {
+    const found = listFrames<SessionStart>(arranged.wire, "sessionStart").filter(
       (frame) => frame.sessionId === sessionId,
     );
     return found.length >= count ? found : undefined;
@@ -425,12 +433,12 @@ export const readSession = async (arranged: Arranged, id: string): Promise<Sessi
 };
 
 /** Waits until the session reads back the way the caller is waiting for. */
-export const sessionWhen = (
+export const waitForSession = (
   arranged: Arranged,
   id: string,
   ready: (session: Session) => boolean,
 ): Promise<Session> =>
-  until("moved the session", async () => {
+  waitUntil("moved the session", async () => {
     const session = await readSession(arranged, id);
     return ready(session) ? session : undefined;
   });
@@ -459,22 +467,25 @@ export interface Agent {
  * is made for the case, because a session's grants are the only way to bound
  * what the agent inside it may do.
  */
-export const agentHolding = async (
+export const spawnAgentWithGrants = async (
   arranged: Arranged,
   name: string,
   grants: ReadonlyArray<string>,
-): Promise<Agent> => agentOn(arranged, await createProfile(arranged, name, grants));
+): Promise<Agent> => spawnAgentUnder(arranged, await createProfile(arranged, name, grants));
 
-export const agentOn = async (arranged: Arranged, profile: Profile): Promise<Agent> => {
-  const opened = await spawned(arranged, { prompt: "hello", permissionProfileId: profile.id });
-  const token = readSessionToken((await startFrames(arranged, opened.id, 1))[0]!);
-  report(arranged.wire, 1, {
+export const spawnAgentUnder = async (arranged: Arranged, profile: Profile): Promise<Agent> => {
+  const opened = await spawnSessionOrFail(arranged, {
+    prompt: "hello",
+    permissionProfileId: profile.id,
+  });
+  const token = readSessionToken((await waitForStartFrames(arranged, opened.id, 1))[0]!);
+  reportEvent(arranged.wire, 1, {
     eventId: crypto.randomUUID(),
     sessionId: opened.id,
     at,
     _tag: "session.started",
     providerRefs: { nativeSessionId: "native-1" },
   });
-  const session = await sessionWhen(arranged, opened.id, (one) => one.status === "idle");
+  const session = await waitForSession(arranged, opened.id, (one) => one.status === "idle");
   return { session, token };
 };

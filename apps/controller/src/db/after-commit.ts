@@ -109,7 +109,9 @@ export const afterCommit = (settle: () => void): Effect.Effect<void> =>
  * An effect already running inside such a list adds to it instead, so the
  * announcement belongs to the outermost transaction, the one that commits.
  */
-export const announcing = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+export const withAnnouncements = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
   Effect.flatMap(
     Effect.serviceOption(Pending),
     Option.match({

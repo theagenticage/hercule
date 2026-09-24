@@ -1,8 +1,8 @@
 import { assert, describe, it } from "vitest";
-import { createTokenStore, tokenStorageKey, type StorageLike } from "./token-store";
+import { createTokenStore, buildTokenStorageKey, type StorageLike } from "./token-store";
 
 /** An in-memory stand-in for `localStorage`. */
-const memoryStorage = (): StorageLike & { readonly map: Map<string, string> } => {
+const createMemoryStorage = (): StorageLike & { readonly map: Map<string, string> } => {
   const map = new Map<string, string>();
   return {
     map,
@@ -19,13 +19,13 @@ const memoryStorage = (): StorageLike & { readonly map: Map<string, string> } =>
 describe("token store", () => {
   it("keys the token by origin", () => {
     assert.strictEqual(
-      tokenStorageKey("http://127.0.0.1:7717"),
+      buildTokenStorageKey("http://127.0.0.1:7717"),
       "hercule:token:http://127.0.0.1:7717",
     );
   });
 
   it("reads back what it wrote, per origin", () => {
-    const storage = memoryStorage();
+    const storage = createMemoryStorage();
     const here = createTokenStore("http://a.test", storage);
     const there = createTokenStore("http://b.test", storage);
 
@@ -39,7 +39,7 @@ describe("token store", () => {
   });
 
   it("removes the entry when written null", () => {
-    const storage = memoryStorage();
+    const storage = createMemoryStorage();
     const store = createTokenStore("http://a.test", storage);
     store.write("tok");
     store.write(null);
@@ -50,7 +50,7 @@ describe("token store", () => {
 });
 
 describe("a browser that denies site data", () => {
-  const denied = (): StorageLike => ({
+  const createDeniedStorage = (): StorageLike => ({
     getItem: () => {
       throw new DOMException("denied", "SecurityError");
     },
@@ -63,7 +63,7 @@ describe("a browser that denies site data", () => {
   });
 
   it("holds no token and swallows the write, rather than throwing at the caller", () => {
-    const store = createTokenStore("http://a.test", denied());
+    const store = createTokenStore("http://a.test", createDeniedStorage());
     assert.strictEqual(store.read(), null);
     assert.doesNotThrow(() => {
       store.write("tok");

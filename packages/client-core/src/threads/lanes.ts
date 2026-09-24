@@ -24,7 +24,7 @@ const takesInput = (session: Session): boolean =>
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-export const lanesOf = (sessions: readonly Session[]): readonly Lane[] => {
+export const buildLanes = (sessions: readonly Session[]): readonly Lane[] => {
   const running = sessions.filter((session) => WORKING_STATUSES.has(session.status));
   const idle = sessions.filter(takesInput);
   const settled = sessions.filter(isSettled);
@@ -38,7 +38,7 @@ export const lanesOf = (sessions: readonly Session[]): readonly Lane[] => {
   ];
 };
 
-export const headlineOf = (sessions: readonly Session[], now: Date): string => {
+export const buildHeadline = (sessions: readonly Session[], now: Date): string => {
   const running = sessions.filter((session) => WORKING_STATUSES.has(session.status)).length;
   const idle = sessions.filter(takesInput).length;
   const settled = sessions.filter(

@@ -139,7 +139,7 @@ export function Lane({ label }: { readonly label: string }): JSX.Element {
 }
 
 /** The marker column of a row that carries a provider's mark rather than a dot. */
-export const markerOf = (mark: ReactNode): ReactNode => (
+export const renderMarker = (mark: ReactNode): ReactNode => (
   <span className="flex w-4 justify-center opacity-85">{mark}</span>
 );
 

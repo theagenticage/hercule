@@ -8,6 +8,6 @@ import { spawn, type ChildProcess } from "node:child_process";
  * are broken under `bun build --compile`, and the binary must never shell out
  * to a literal `bun`.
  */
-export function spawnHercule(args: readonly string[]): ChildProcess {
+export function spawnOwnBinary(args: readonly string[]): ChildProcess {
   return spawn(process.execPath, [...args], { stdio: "inherit" });
 }

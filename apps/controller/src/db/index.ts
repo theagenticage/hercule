@@ -3,7 +3,13 @@
  * forward-only migrations.
  */
 export { afterCommit, AfterCommit, announce, type Change } from "./after-commit";
-export { DatabaseError, databaseError, MEMORY, openDatabase, withTransaction } from "./client";
+export {
+  DatabaseError,
+  createDatabaseError,
+  MEMORY,
+  openDatabase,
+  withTransaction,
+} from "./client";
 export { mintUuid, uuidFromString, uuidToString, UUID_PATTERN } from "./id";
 export {
   CursorError,
@@ -15,9 +21,9 @@ export {
   encodeIdCursor,
   encodeOffsetCursor,
   encodeOwnedCursor,
-  keysetOver,
-  pageInput,
-  pageOf,
+  buildKeyset,
+  buildPageInputFields,
+  buildPage,
   refuseCursor,
   type CursorScope,
   type Page,

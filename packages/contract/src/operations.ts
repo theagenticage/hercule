@@ -400,4 +400,4 @@ export const ALL_OPERATIONS: ReadonlyArray<Operation> = Object.entries(TABLE).ma
 export const isOperationId = (id: string): id is OperationId => id in TABLE;
 
 /** What a caller must hold to reach this operation. */
-export const requirementOf = (id: OperationId): Requirement => TABLE[id].requires;
+export const readRequirement = (id: OperationId): Requirement => TABLE[id].requires;

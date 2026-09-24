@@ -8,11 +8,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { PluginDetail } from "@hercule/contract";
 import { PluginHost, Plugins, registry } from "./index";
-import { asUser, pluginStack } from "./testing";
+import { asUser, buildPluginStack } from "./testing";
 
 /** Every call runs on a stack of its own, as the user a request would arrive as. */
 const run = <A, E>(body: Effect.Effect<A, E, Plugins | PluginHost>) =>
-  Effect.runPromise(body.pipe(Effect.provide(pluginStack()), asUser));
+  Effect.runPromise(body.pipe(Effect.provide(buildPluginStack()), asUser));
 
 /** What the derivation makes of a config schema with no settings in it. */
 const NO_SETTINGS = {

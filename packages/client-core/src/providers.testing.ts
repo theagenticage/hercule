@@ -1,6 +1,6 @@
 /**
- * Test-only, not exported from the package index. `providerRows` and
- * `sessionsEmptyState` read the same machine, so they share one arrangement of it.
+ * Test-only, not exported from the package index. `buildProviderRows` and
+ * `decideSessionsEmptyState` read the same machine, so they share one arrangement of it.
  */
 import type { ProviderInstance, Runner } from "@hercule/contract";
 
@@ -61,7 +61,7 @@ const DECLARED: ProviderInstance["declared"] = {
   structuredOutput: "supported",
 };
 
-export const instance = (
+export const buildInstance = (
   providerId: string,
   displayName: string,
   snapshots: ProviderInstance["snapshots"] = [],
@@ -80,7 +80,7 @@ export const instance = (
 });
 
 /** What the machine last reported about one instance; logged in unless overridden. */
-export const snapshot = (
+export const buildSnapshot = (
   fields: Partial<ProviderInstance["snapshots"][number]> = {},
 ): ProviderInstance["snapshots"][number] => ({
   runnerId: BARE.id,

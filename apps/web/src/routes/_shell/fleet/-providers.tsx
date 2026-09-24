@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, FormCard } from "@hercule/ui";
 import {
-  providerRows,
+  buildProviderRows,
   queryKeys,
   type HerculeClient,
   type ProviderRow,
@@ -51,7 +51,7 @@ export function Providers({
     );
   }
   if (instances.data === undefined) return null;
-  const rows = providerRows(runner, instances.data);
+  const rows = buildProviderRows(runner, instances.data);
 
   return (
     <FormCard label="Providers">

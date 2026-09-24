@@ -22,10 +22,10 @@ import type {
   TurnState,
   Usage,
 } from "@hercule/protocol";
-import { count, buildEnvelope, rawOf, type Envelope } from "../normalize";
-import { idOf } from "../events";
+import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize";
+import { ensureId } from "../events";
 import { judgeAnswer } from "../structured-result";
-import { fact, text } from "../text";
+import { truncateFact, truncateMessage } from "../text";
 import { SUBMIT_RESULT_TOOL } from "./extension";
 
 /** The one channel every raw payload from this adapter is filed under. */
@@ -172,7 +172,13 @@ export interface Normalizing {
   refusedAnswers: number;
 }
 
-const zero = (): Totals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 });
+const createZeroTotals = (): Totals => ({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  cost: 0,
+});
 
 export const buildNormalizingState = (
   sessionId: string,
@@ -186,8 +192,8 @@ export const buildNormalizingState = (
   blocks: new Map(),
   tools: new Map(),
   declined: new Set(),
-  turnTotals: zero(),
-  sessionTotals: zero(),
+  turnTotals: createZeroTotals(),
+  sessionTotals: createZeroTotals(),
   stopped: { state: "completed" },
   endedBySystem: undefined,
   announced: false,
@@ -198,29 +204,29 @@ export const buildNormalizingState = (
   refusedAnswers: 0,
 });
 
-const envelope = (state: Normalizing): Envelope =>
+const buildSessionEnvelope = (state: Normalizing): Envelope =>
   buildEnvelope(state.sessionId, { nativeSessionId: state.nativeSessionId });
 
 /** The line the event was read off, under the channel this adapter files. */
-const raw = (payload: unknown): ReturnType<typeof rawOf> => rawOf(PI_EVENT, payload);
+const buildLineRaw = (payload: unknown): ReturnType<typeof buildRaw> => buildRaw(PI_EVENT, payload);
 
 /**
  * The turn everything is filed under. pi opens a run without naming it, so an
  * event that arrives before the adapter sent anything still belongs to a turn.
  */
-const turnOf = (state: Normalizing): string => (state.turnId ??= crypto.randomUUID());
+const ensureTurnId = (state: Normalizing): string => (state.turnId ??= crypto.randomUUID());
 
-const add = (totals: Totals, usage: PiUsage | undefined): void => {
+const addUsage = (totals: Totals, usage: PiUsage | undefined): void => {
   if (usage === undefined) return;
-  totals.input += count(usage.input);
-  totals.output += count(usage.output);
-  totals.cacheRead += count(usage.cacheRead);
-  totals.cacheWrite += count(usage.cacheWrite);
+  totals.input += clampCount(usage.input);
+  totals.output += clampCount(usage.output);
+  totals.cacheRead += clampCount(usage.cacheRead);
+  totals.cacheWrite += clampCount(usage.cacheWrite);
   const cost = usage.cost?.total;
   totals.cost += typeof cost === "number" && Number.isFinite(cost) && cost > 0 ? cost : 0;
 };
 
-const usageOf = (totals: Totals): Usage => ({
+const toUsage = (totals: Totals): Usage => ({
   inputTokens: totals.input,
   outputTokens: totals.output,
   cacheReadTokens: totals.cacheRead,
@@ -228,7 +234,7 @@ const usageOf = (totals: Totals): Usage => ({
   costUsd: totals.cost,
 });
 
-const reset = (totals: Totals): void => {
+const resetTotals = (totals: Totals): void => {
   totals.input = 0;
   totals.output = 0;
   totals.cacheRead = 0;
@@ -237,7 +243,7 @@ const reset = (totals: Totals): void => {
 };
 
 /** The message that ended the run: pi's own last assistant one. */
-const lastAssistant = (event: PiEvent): PiMessage | undefined => {
+const findLastAssistant = (event: PiEvent): PiMessage | undefined => {
   const messages = event.messages ?? [];
   for (let at = messages.length - 1; at >= 0; at -= 1) {
     const message = messages[at];
@@ -250,7 +256,7 @@ const lastAssistant = (event: PiEvent): PiMessage | undefined => {
  * How a turn ends, read off the message that ended it. Anything else - a stop,
  * a tool call, a length cap - is a turn that ran to its end.
  */
-const stoppedBy = (message: PiMessage | undefined): Normalizing["stopped"] => {
+const classifyStop = (message: PiMessage | undefined): Normalizing["stopped"] => {
   const reason = message?.stopReason;
   if (reason === "aborted") return { state: "interrupted" };
   if (reason !== "error") return { state: "completed" };
@@ -266,12 +272,12 @@ const stoppedBy = (message: PiMessage | undefined): Normalizing["stopped"] => {
  * the name pi gave the thing that failed, so a class this build has not heard
  * of still reaches the user.
  */
-const failure = (state: Normalizing, name: string, message: string): ProviderEvent => ({
+const buildRuntimeError = (state: Normalizing, name: string, message: string): ProviderEvent => ({
   _tag: "runtime.error",
-  ...envelope(state),
+  ...buildSessionEnvelope(state),
   ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
-  class: fact(name),
-  ...(message === "" ? {} : { message: text(message) }),
+  class: truncateFact(name),
+  ...(message === "" ? {} : { message: truncateMessage(message) }),
 });
 
 const readText = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -291,26 +297,31 @@ const SYSTEM_ENDINGS: Readonly<
  * announced on the message that carried it. Without this, a later message that
  * only stopped would report the turn as finished normally.
  */
-const stopping = (state: Normalizing, message: PiMessage | undefined): void => {
+const recordStop = (state: Normalizing, message: PiMessage | undefined): void => {
   const ended =
-    state.endedBySystem === undefined ? stoppedBy(message) : SYSTEM_ENDINGS[state.endedBySystem];
+    state.endedBySystem === undefined ? classifyStop(message) : SYSTEM_ENDINGS[state.endedBySystem];
   if (ended.state !== "completed" || state.stopped.state === "completed") state.stopped = ended;
 };
 
 /** An answer pi cut at the model's output limit, which is not a failure. */
-const cutOff = (
+const warnIfCutOff = (
   state: Normalizing,
   message: PiMessage | undefined,
 ): ReadonlyArray<ProviderEvent> =>
   message?.stopReason === "length"
-    ? [warning(state, "the model stopped at its output limit, so its answer is cut short")]
+    ? [
+        buildRuntimeWarning(
+          state,
+          "the model stopped at its output limit, so its answer is cut short",
+        ),
+      ]
     : [];
 
-const warning = (state: Normalizing, message: string): ProviderEvent => ({
+const buildRuntimeWarning = (state: Normalizing, message: string): ProviderEvent => ({
   _tag: "runtime.warning",
-  ...envelope(state),
+  ...buildSessionEnvelope(state),
   ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
-  message: text(message),
+  message: truncateMessage(message),
 });
 
 /** The two streamed kinds of assistant content, and the item each one is. */
@@ -333,16 +344,19 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
  * The one field of a tool item a reader wants in a row: what the command ran,
  * what the patch touched, what the tool was called. `raw` holds the rest.
  */
-const toolDetail = (toolName: string, args: Record<string, unknown> | undefined): Schema.Json => {
+const buildToolDetail = (
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): Schema.Json => {
   const command = args?.["command"];
-  if (typeof command === "string") return { command: text(command) };
+  if (typeof command === "string") return { command: truncateMessage(command) };
   const path = args?.["path"];
-  if (typeof path === "string") return { path: fact(path) };
-  return { name: fact(toolName) };
+  if (typeof path === "string") return { path: truncateFact(path) };
+  return { name: truncateFact(toolName) };
 };
 
 /** What a tool has produced so far, as one piece of text. */
-const outputOf = (result: PiToolResult | undefined): string =>
+const readToolOutput = (result: PiToolResult | undefined): string =>
   (result?.content ?? []).map((part) => part.text ?? "").join("");
 
 const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEvent> => {
@@ -355,11 +369,13 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
   ];
   const block = BLOCKS[channel];
   if (block === undefined) return [];
-  const turnId = turnOf(state);
+  const turnId = ensureTurnId(state);
   if (phase === "start") {
     const itemId = crypto.randomUUID();
     state.blocks.set(index, { itemId, kind: block.kind });
-    return [{ _tag: "item.started", ...envelope(state), turnId, itemId, kind: block.kind }];
+    return [
+      { _tag: "item.started", ...buildSessionEnvelope(state), turnId, itemId, kind: block.kind },
+    ];
   }
   const running = state.blocks.get(index);
   if (running === undefined) return [];
@@ -368,7 +384,7 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     return [
       {
         _tag: "item.completed",
-        ...envelope(state),
+        ...buildSessionEnvelope(state),
         turnId,
         itemId: running.itemId,
         kind: running.kind,
@@ -380,7 +396,7 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     ? [
         {
           _tag: "content.delta",
-          ...envelope(state),
+          ...buildSessionEnvelope(state),
           turnId,
           itemId: running.itemId,
           streamKind: block.streamKind,
@@ -397,9 +413,9 @@ const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<Provider
   const item: RunningTool = {
     // A call pi named nothing gets an id of its own: filing two of them under
     // one id would make the second's output land on the first's row.
-    itemId: callId === "" ? crypto.randomUUID() : idOf(callId),
+    itemId: callId === "" ? crypto.randomUUID() : ensureId(callId),
     kind,
-    detail: toolDetail(toolName, event.args),
+    detail: buildToolDetail(toolName, event.args),
     toolName,
     args: event.args,
     seen: "",
@@ -410,9 +426,9 @@ const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<Provider
   return [
     {
       _tag: "item.started",
-      ...envelope(state),
-      ...raw(event),
-      turnId: turnOf(state),
+      ...buildSessionEnvelope(state),
+      ...buildLineRaw(event),
+      turnId: ensureTurnId(state),
       itemId: item.itemId,
       kind: item.kind,
       ...(item.detail === undefined ? {} : { detail: item.detail }),
@@ -423,7 +439,7 @@ const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<Provider
 const onToolUpdate = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEvent> => {
   const item = state.tools.get(typeof event.toolCallId === "string" ? event.toolCallId : "");
   if (item === undefined) return [];
-  const output = outputOf(event.partialResult);
+  const output = readToolOutput(event.partialResult);
   // pi's snapshot is the whole output so far, so only the piece past what was
   // already reported is new: sending the snapshot would print it all again. A
   // snapshot that is not a continuation of the last one is sent whole, because
@@ -435,8 +451,8 @@ const onToolUpdate = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     : [
         {
           _tag: "content.delta",
-          ...envelope(state),
-          turnId: turnOf(state),
+          ...buildSessionEnvelope(state),
+          turnId: ensureTurnId(state),
           itemId: item.itemId,
           streamKind: "command_output",
           delta,
@@ -464,9 +480,9 @@ const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEv
   return [
     {
       _tag: "item.completed",
-      ...envelope(state),
-      ...raw(event),
-      turnId: turnOf(state),
+      ...buildSessionEnvelope(state),
+      ...buildLineRaw(event),
+      turnId: ensureTurnId(state),
       itemId: item.itemId,
       kind: item.kind,
       status: refused ? "declined" : event.isError === true ? "failed" : "completed",
@@ -480,7 +496,7 @@ const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEv
  * is a row that spins for the rest of the session, so a block pi stopped
  * mid-stream and a tool whose result never came are reported as failed.
  */
-const abandoned = (state: Normalizing, turnId: string): ReadonlyArray<ProviderEvent> => {
+const failOpenItems = (state: Normalizing, turnId: string): ReadonlyArray<ProviderEvent> => {
   const open = [...state.blocks.values(), ...state.tools.values()];
   state.blocks.clear();
   state.tools.clear();
@@ -488,7 +504,7 @@ const abandoned = (state: Normalizing, turnId: string): ReadonlyArray<ProviderEv
   state.declined.clear();
   return open.map((item) => ({
     _tag: "item.completed",
-    ...envelope(state),
+    ...buildSessionEnvelope(state),
     turnId,
     itemId: item.itemId,
     kind: item.kind,
@@ -519,7 +535,7 @@ const judgeTurn = (state: Normalizing, ended: TurnState): StructuredResult | und
  * because a pi that died mid-turn ends it too, and the adapter is the only
  * party that hears the process go.
  */
-export const ending = (
+export const endTurn = (
   state: Normalizing,
   ended?: Normalizing["stopped"],
 ): ReadonlyArray<ProviderEvent> => {
@@ -527,7 +543,7 @@ export const ending = (
   if (turnId === undefined) return [];
   const stopped = ended ?? state.stopped;
   const cost = state.turnTotals.cost;
-  const closing = abandoned(state, turnId);
+  const closing = failOpenItems(state, turnId);
   const structuredResult = judgeTurn(state, stopped.state);
   state.turnId = undefined;
   state.announced = false;
@@ -541,15 +557,19 @@ export const ending = (
   state.refusedAnswers = 0;
   return [
     ...closing,
-    { _tag: "session.usage.updated", ...envelope(state), usage: usageOf(state.sessionTotals) },
+    {
+      _tag: "session.usage.updated",
+      ...buildSessionEnvelope(state),
+      usage: toUsage(state.sessionTotals),
+    },
     {
       _tag: "turn.completed",
-      ...envelope(state),
+      ...buildSessionEnvelope(state),
       turnId,
       state: stopped.state,
-      usage: usageOf(state.sessionTotals),
+      usage: toUsage(state.sessionTotals),
       costUsd: cost,
-      ...(stopped.error === undefined ? {} : { error: text(stopped.error) }),
+      ...(stopped.error === undefined ? {} : { error: truncateMessage(stopped.error) }),
       ...(structuredResult === undefined ? {} : { structuredResult }),
     },
   ];
@@ -574,7 +594,12 @@ export const normalize = (
       // complaints down this pipe too, and a silent skip would hide them.
       // Reported by its size rather than its content: a line pi could not
       // frame is as likely to be a credential in a stack trace as a complaint.
-      return [warning(state, `pi wrote a line of ${line.length} characters that is not an event`)];
+      return [
+        buildRuntimeWarning(
+          state,
+          `pi wrote a line of ${line.length} characters that is not an event`,
+        ),
+      ];
     }
   } else {
     event = decoded as PiEvent;
@@ -587,38 +612,38 @@ export const normalize = (
       // earlier attempts already cost.
       if (state.announced) return [];
       state.announced = true;
-      reset(state.turnTotals);
-      const turnId = turnOf(state);
+      resetTotals(state.turnTotals);
+      const turnId = ensureTurnId(state);
       return [
         {
           _tag: "turn.started",
-          ...envelope(state),
+          ...buildSessionEnvelope(state),
           turnId,
-          ...(state.model === undefined ? {} : { model: fact(state.model) }),
+          ...(state.model === undefined ? {} : { model: truncateFact(state.model) }),
         },
       ];
     }
     case "turn_end":
       // One assistant message and its tools, which is where pi prices its
       // work: both the turn's own cost and the session's run through here.
-      add(state.turnTotals, event.message?.usage);
-      add(state.sessionTotals, event.message?.usage);
-      stopping(state, event.message);
-      return cutOff(state, event.message);
+      addUsage(state.turnTotals, event.message?.usage);
+      addUsage(state.sessionTotals, event.message?.usage);
+      recordStop(state, event.message);
+      return warnIfCutOff(state, event.message);
     case "agent_end":
       // pi is about to run again under the same turn, so ending it here would
       // report an episode as over while it is still going.
       if (event.willRetry === true) {
-        return [warning(state, "pi hit an error it is retrying by itself")];
+        return [buildRuntimeWarning(state, "pi hit an error it is retrying by itself")];
       }
-      stopping(state, lastAssistant(event));
+      recordStop(state, findLastAssistant(event));
       // A run pi will not retry, that ended on an error: the turn carries the
       // state, and this is what went wrong under it.
-      if (state.stopped.state !== "failed") return cutOff(state, lastAssistant(event));
+      if (state.stopped.state !== "failed") return warnIfCutOff(state, findLastAssistant(event));
       state.reported = state.stopped.error ?? "";
-      return [failure(state, "agent_error", state.reported)];
+      return [buildRuntimeError(state, "agent_error", state.reported)];
     case "agent_settled":
-      return ending(state);
+      return endTurn(state);
     case "auto_retry_end":
       // pi gave up retrying, which is the end of the attempts rather than of
       // the turn: the settle that follows is what ends that. pi emits this
@@ -627,11 +652,11 @@ export const normalize = (
       if (event.success !== false) return [];
       return readText(event.finalError) === state.reported
         ? []
-        : [failure(state, "auto_retry_failed", readText(event.finalError))];
+        : [buildRuntimeError(state, "auto_retry_failed", readText(event.finalError))];
     case "extension_error":
       // Hercule's own extension is the only one a session loads, so this is a
       // hook that threw: the user hears it rather than reading a quiet allow.
-      return [failure(state, "extension_error", readText(event.error))];
+      return [buildRuntimeError(state, "extension_error", readText(event.error))];
     case "message_update":
       return onBlockEvent(state, event);
     case "tool_execution_start":

@@ -6,7 +6,7 @@
  */
 import type { CapabilitySnapshot, ProviderInstance, Runner } from "@hercule/contract";
 
-export const snapshotOn = (
+export const findSnapshotOn = (
   instance: ProviderInstance,
   runnerId: string | undefined,
 ): CapabilitySnapshot | undefined =>
@@ -15,7 +15,7 @@ export const snapshotOn = (
 /** The account name where it is worth naming at all: a lone account has no
  * other account to be told apart from, so it names nothing.
  */
-export const accountName = (
+export const findAccountName = (
   instances: readonly ProviderInstance[],
   instance: ProviderInstance,
 ): string | null =>
@@ -24,10 +24,10 @@ export const accountName = (
     : null;
 
 /** What to call an instance where it stands for itself in a menu. */
-export const instanceLabel = (
+export const buildInstanceLabel = (
   instances: readonly ProviderInstance[],
   instance: ProviderInstance,
-): string => accountName(instances, instance) ?? instance.displayName;
+): string => findAccountName(instances, instance) ?? instance.displayName;
 
 /** What a Log in would log in to: the account, the machine, and what to call
  * the pair, since the caller may be on another row and a credential lands on
@@ -40,7 +40,7 @@ export interface LoginTarget {
   readonly subject: string;
 }
 
-export const loginTarget = (instance: ProviderInstance, runner: Runner): LoginTarget => ({
+export const buildLoginTarget = (instance: ProviderInstance, runner: Runner): LoginTarget => ({
   instanceId: instance.id,
   runnerId: runner.id,
   subject: `${instance.displayName} on ${runner.name}`,

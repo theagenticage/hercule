@@ -83,11 +83,11 @@ const GONE = "the app-server stopped talking";
 
 const MALFORMED = "the app-server answered with an error it did not describe";
 
-const describe = (error: unknown): string =>
+const describeError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /** An error reply is the peer's to shape, and it may shape it wrongly. */
-const errorOf = (reply: unknown): RpcError => {
+const parseRpcError = (reply: unknown): RpcError => {
   if (typeof reply !== "object" || reply === null) return { message: MALFORMED };
   const { code, message } = reply as { readonly code?: unknown; readonly message?: unknown };
   return {
@@ -96,7 +96,7 @@ const errorOf = (reply: unknown): RpcError => {
   };
 };
 
-export const rpcOver = (child: RpcChild, handlers: RpcHandlers): Rpc => {
+export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
   const pending = new Map<number, Deferred.Deferred<unknown, RpcError>>();
   let next = 1;
   let gone = false;
@@ -113,7 +113,7 @@ export const rpcOver = (child: RpcChild, handlers: RpcHandlers): Rpc => {
       child.write(`${JSON.stringify(frame)}\n`);
       return undefined;
     } catch (error) {
-      const failure = describe(error);
+      const failure = describeError(error);
       if (!complained) {
         complained = true;
         handlers.onWarning(`the app-server could not be written to: ${failure}`);
@@ -128,7 +128,9 @@ export const rpcOver = (child: RpcChild, handlers: RpcHandlers): Rpc => {
     pending.delete(id);
     Deferred.doneUnsafe(
       waiting,
-      "error" in frame ? Effect.fail(errorOf(frame["error"])) : Effect.succeed(frame["result"]),
+      "error" in frame
+        ? Effect.fail(parseRpcError(frame["error"]))
+        : Effect.succeed(frame["result"]),
     );
   };
 

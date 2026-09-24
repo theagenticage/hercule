@@ -31,7 +31,7 @@ interface Read {
 }
 
 /** The profiles as they stand once the migration has run over them. */
-const migrated = (seeded: ReadonlyArray<Seeded>): Promise<ReadonlyMap<string, Read>> =>
+const seedAndMigrate = (seeded: ReadonlyArray<Seeded>): Promise<ReadonlyMap<string, Read>> =>
   Effect.runPromise(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -69,7 +69,7 @@ const SHIPPED: ReadonlyArray<Seeded> = [
 
 describe("event.audit on a database that was seeded before it existed", () => {
   it("gives it to unrestricted, keeping the rest of its grants, and says when", async () => {
-    const profiles = await migrated(SHIPPED);
+    const profiles = await seedAndMigrate(SHIPPED);
 
     expect(profiles.get("unrestricted")?.grants).toEqual([
       "task.read",
@@ -82,7 +82,7 @@ describe("event.audit on a database that was seeded before it existed", () => {
   });
 
   it("leaves a profile that already holds it alone", async () => {
-    const profiles = await migrated(SHIPPED);
+    const profiles = await seedAndMigrate(SHIPPED);
 
     expect(profiles.get("auditor")).toEqual({
       grants: ["event.read", "event.audit"],
@@ -91,7 +91,7 @@ describe("event.audit on a database that was seeded before it existed", () => {
   });
 
   it("gives it to no other profile", async () => {
-    const profiles = await migrated(SHIPPED);
+    const profiles = await seedAndMigrate(SHIPPED);
 
     expect(profiles.get("worker")).toEqual({
       grants: ["task.read", "event.read"],
@@ -103,7 +103,7 @@ describe("event.audit on a database that was seeded before it existed", () => {
     // A name is unique, so the user who wants their own `unrestricted` has
     // renamed the shipped one first. Widening a profile they wrote themselves
     // is not this migration's to do.
-    const profiles = await migrated([
+    const profiles = await seedAndMigrate([
       { name: "everything", grants: ["task.read"], shipped: true },
       { name: "unrestricted", grants: ["task.read"], shipped: false },
     ]);

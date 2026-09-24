@@ -30,7 +30,7 @@ export interface IdentityOptions {
   readonly port: number;
 }
 
-const cameToLoopback = (request: Request): boolean => {
+const isLoopbackRequest = (request: Request): boolean => {
   const host = request.headers.get("host");
   if (host === null) return false;
   // Read as a URL rather than split on the last colon, so the port comes off
@@ -43,23 +43,23 @@ const cameToLoopback = (request: Request): boolean => {
  * The CORS header names the controller's origin because that is where the asking
  * page comes from, and a plain GET needs no preflight, so it is all a browser wants.
  */
-const answer =
+const buildIdentityHandler =
   (runnerId: string, allowOrigin: string) =>
   (request: Request): Response =>
     request.method === "GET" &&
     new URL(request.url).pathname === IDENTITY_PATH &&
-    cameToLoopback(request)
+    isLoopbackRequest(request)
       ? Response.json({ runnerId }, { headers: { "access-control-allow-origin": allowOrigin } })
       : new Response(null, { status: 404 });
 
 /** Serves `GET /identity` while the scope is open, and says which port it got. */
-export const identityListener = (
+export const serveIdentity = (
   options: IdentityOptions,
 ): Effect.Effect<number, never, Scope.Scope> =>
   Effect.map(
     Effect.acquireRelease(
       Effect.gen(function* () {
-        const fetch = answer(options.runnerId, new URL(options.controllerUrl).origin);
+        const fetch = buildIdentityHandler(options.runnerId, new URL(options.controllerUrl).origin);
         const serve = (port: number) => Bun.serve({ hostname: LOOPBACK, port, fetch });
         for (let offset = 0; offset < IDENTITY_PORT_COUNT; offset += 1) {
           const port = options.port + offset;

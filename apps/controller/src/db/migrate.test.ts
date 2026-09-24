@@ -38,14 +38,14 @@ const TABLES = [
 
 type DatabaseEffect<A, E> = Effect.Effect<A, E, SqlClient.SqlClient | FileSystem>;
 
-const provided = <A, E>(filename: string, effect: DatabaseEffect<A, E>) =>
+const provideDatabase = <A, E>(filename: string, effect: DatabaseEffect<A, E>) =>
   effect.pipe(Effect.provide(openDatabase(filename)), Effect.provide(BunFileSystem.layer));
 
 const run = <A, E>(filename: string, effect: DatabaseEffect<A, E>) =>
-  Effect.runPromise(provided(filename, effect));
+  Effect.runPromise(provideDatabase(filename, effect));
 
 const runExit = <A, E>(filename: string, effect: DatabaseEffect<A, E>) =>
-  Effect.runPromiseExit(provided(filename, effect));
+  Effect.runPromiseExit(provideDatabase(filename, effect));
 
 const tableNames = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -214,7 +214,7 @@ describe("the database file", () => {
 });
 
 describe("ambient transactions", () => {
-  const insert = (key: string) =>
+  const insertSetting = (key: string) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* sql`
@@ -238,8 +238,8 @@ describe("ambient transactions", () => {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* insert("outer");
-            yield* withTransaction(sql, insert("inner"));
+            yield* insertSetting("outer");
+            yield* withTransaction(sql, insertSetting("inner"));
           }),
         );
         return yield* keys;
@@ -257,11 +257,11 @@ describe("ambient transactions", () => {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* insert("outer");
+            yield* insertSetting("outer");
             yield* withTransaction(
               sql,
               Effect.gen(function* () {
-                yield* insert("inner");
+                yield* insertSetting("inner");
                 return yield* Effect.fail("the runner said no");
               }),
             );
@@ -282,7 +282,7 @@ describe("ambient transactions", () => {
  * failure here rather than a failure everywhere.
  */
 describe("resources, workspaces and checkouts", () => {
-  const columnsOf = (table: string) =>
+  const listColumns = (table: string) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const rows = yield* sql<{
@@ -316,7 +316,7 @@ describe("resources, workspaces and checkouts", () => {
 
   it("gives a session the project it belongs to", async () => {
     const columns = await Effect.runPromise(
-      columnsOf("sessions").pipe(Effect.provide(TestDatabase)),
+      listColumns("sessions").pipe(Effect.provide(TestDatabase)),
     );
     expect(columns).toContain("project_id");
     expect(columns).toContain("workspace_id");
@@ -324,14 +324,14 @@ describe("resources, workspaces and checkouts", () => {
 
   it("points a workspace's checkouts at the resources and the workspace they belong to", async () => {
     const keys = await Effect.runPromise(foreignKeys.pipe(Effect.provide(TestDatabase)));
-    const from = (table: string) => keys.filter((key) => key.from === table);
+    const listForeignKeysFrom = (table: string) => keys.filter((key) => key.from === table);
 
     expect(
-      from("checkouts")
+      listForeignKeysFrom("checkouts")
         .map((key) => key.to)
         .sort(),
     ).toEqual(["resources", "workspaces"]);
-    expect(from("workspaces").map((key) => key.to)).toContain("runners");
+    expect(listForeignKeysFrom("workspaces").map((key) => key.to)).toContain("runners");
   });
 
   it("gives the project-to-resource join the foreign key it never had", async () => {

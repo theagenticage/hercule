@@ -23,8 +23,8 @@ import {
 } from "@hercule/protocol/testing";
 import { pi } from "./adapter";
 import type { ProviderRunnerContext } from "../index";
-import { contextIn, SPEC } from "./testing";
-import { cleanupHomes, scratchHome, taggedIn, until } from "../testing";
+import { buildContext, SPEC } from "./testing";
+import { cleanupHomes, createScratchHome, filterByTag, waitUntil } from "../testing";
 
 const binary = Bun.which("pi") ?? undefined;
 
@@ -32,7 +32,7 @@ const key = process.env["ZAI_API_KEY"] ?? "";
 
 afterAll(cleanupHomes);
 
-const scratch = (): string => scratchHome("pi-live");
+const createScratchDir = (): string => createScratchHome("pi-live");
 
 const BUDGET_MS = 180_000;
 
@@ -40,53 +40,53 @@ const BUDGET_MS = 180_000;
 const PATIENCE_MS = BUDGET_MS / 2;
 
 /** The real binary, the real key, and a directory of this run's own. */
-const liveContext = (secrets: Readonly<Record<string, string>>): ProviderRunnerContext => ({
-  ...contextIn(scratch(), scratch(), secrets),
+const buildLiveContext = (secrets: Readonly<Record<string, string>>): ProviderRunnerContext => ({
+  ...buildContext(createScratchDir(), createScratchDir(), secrets),
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
 });
 
-const specFor = (model: string): SessionSpec => ({
+const buildSpec = (model: string): SessionSpec => ({
   ...SPEC,
   modelSelection: { model, options: { thinking: "low" } },
   // No approvals to answer: this case is about the models runTurnUnderSchema at all.
   accessMode: "full-access",
 });
 
-const awaiting = (
+const waitReportingEvents = (
   seen: ReadonlyArray<ProviderEvent>,
   what: string,
   ready: () => boolean,
 ): Promise<void> =>
-  until(
+  waitUntil(
     `${what}, having reported ${seen.map((event) => event._tag).join(", ")}`,
     ready,
     PATIENCE_MS,
   );
 
-const textIn = (seen: ReadonlyArray<ProviderEvent>): string =>
-  taggedIn(seen, "content.delta")
+const readAssistantText = (seen: ReadonlyArray<ProviderEvent>): string =>
+  filterByTag(seen, "content.delta")
     .filter((event) => event.streamKind === "assistant_text")
     .map((event) => event.delta)
     .join("");
 
-const completed = (
+const listCompletedTurns = (
   seen: ReadonlyArray<ProviderEvent>,
 ): ReadonlyArray<Extract<ProviderEvent, { _tag: "turn.completed" }>> =>
-  taggedIn(seen, "turn.completed");
+  filterByTag(seen, "turn.completed");
 
-const items = (
+const listCompletedItems = (
   seen: ReadonlyArray<ProviderEvent>,
   kind: string,
 ): ReadonlyArray<Extract<ProviderEvent, { _tag: "item.completed" }>> =>
-  taggedIn(seen, "item.completed").filter((event) => event.kind === kind);
+  filterByTag(seen, "item.completed").filter((event) => event.kind === kind);
 
 describe.skipIf(binary === undefined || key === "")("a real pi session on a real GLM model", () => {
   for (const model of ["glm-5.3", "glm-5.3-flash"]) {
     it(
       `answers a prompt and runs a shell command on ${model}, and prices the turn`,
       async () => {
-        const ctx = liveContext({ zaiApiKey: key });
+        const ctx = buildLiveContext({ zaiApiKey: key });
         const sessionId = crypto.randomUUID();
         const seen: Array<ProviderEvent> = [];
         Effect.runFork(
@@ -97,14 +97,18 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
           ),
         );
 
-        await Effect.runPromise(pi.startSession(sessionId, specFor(model), ctx));
+        await Effect.runPromise(pi.startSession(sessionId, buildSpec(model), ctx));
         await Effect.runPromise(
           pi.sendInput(sessionId, { text: "Reply with exactly one word: OK" }),
         );
-        await awaiting(seen, "answered the prompt", () => completed(seen).length === 1);
+        await waitReportingEvents(
+          seen,
+          "answered the prompt",
+          () => listCompletedTurns(seen).length === 1,
+        );
 
-        expect(textIn(seen).toUpperCase()).toContain("OK");
-        const first = completed(seen)[0]!;
+        expect(readAssistantText(seen).toUpperCase()).toContain("OK");
+        const first = listCompletedTurns(seen)[0]!;
         expect(first.state).toBe("completed");
         // A priced turn is what the session view reads to show what it cost.
         expect(first.costUsd ?? 0).toBeGreaterThan(0);
@@ -114,14 +118,16 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
             text: "Run this shell command and tell me its output: echo hercule-lives",
           }),
         );
-        await awaiting(
+        await waitReportingEvents(
           seen,
           "ran the command",
-          () => items(seen, "command_execution").length >= 1 && completed(seen).length === 2,
+          () =>
+            listCompletedItems(seen, "command_execution").length >= 1 &&
+            listCompletedTurns(seen).length === 2,
         );
 
-        expect(items(seen, "command_execution")[0]?.status).toBe("completed");
-        expect(completed(seen)[1]?.costUsd ?? 0).toBeGreaterThan(0);
+        expect(listCompletedItems(seen, "command_execution")[0]?.status).toBe("completed");
+        expect(listCompletedTurns(seen)[1]?.costUsd ?? 0).toBeGreaterThan(0);
 
         await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
       },
@@ -154,14 +160,18 @@ const runTurnUnderSchema = async (
   await Effect.runPromise(
     pi.startSession(
       sessionId,
-      { ...specFor(STRUCTURED_MODEL), systemPrompt: ASSESSOR_SYSTEM_PROMPT, outputSchema },
-      liveContext({ zaiApiKey: key }),
+      { ...buildSpec(STRUCTURED_MODEL), systemPrompt: ASSESSOR_SYSTEM_PROMPT, outputSchema },
+      buildLiveContext({ zaiApiKey: key }),
     ),
   );
   await Effect.runPromise(pi.sendInput(sessionId, { text }));
-  await awaiting(seen, "answered under the schema", () => completed(seen).length === 1);
+  await waitReportingEvents(
+    seen,
+    "answered under the schema",
+    () => listCompletedTurns(seen).length === 1,
+  );
   await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
-  return completed(seen)[0]!;
+  return listCompletedTurns(seen)[0]!;
 };
 
 describe.skipIf(binary === undefined || key === "")(
@@ -204,7 +214,7 @@ describe.skipIf(binary === undefined || key === "")(
  */
 describe.skipIf(binary === undefined)("what a probe reads off a real pi", () => {
   /** What the binary on this machine says it is, which is what a probe reports. */
-  const installedVersion = (): string =>
+  const readInstalledVersion = (): string =>
     Bun.spawnSync([binary!, "--version"]).stdout.toString().trim();
 
   const getReportedThinkingLevels = (
@@ -217,13 +227,13 @@ describe.skipIf(binary === undefined)("what a probe reads off a real pi", () => 
 
   it("reports the version, the key as usable, and the models Z.ai offers", async () => {
     const probed = await Effect.runPromise(
-      pi.probe(liveContext({ zaiApiKey: "not-a-key-and-never-sent-anywhere" }), {}),
+      pi.probe(buildLiveContext({ zaiApiKey: "not-a-key-and-never-sent-anywhere" }), {}),
     );
 
     // The installed version, whatever it is: pinning one here would fail on
     // the next release rather than on anything this adapter got wrong.
     expect(probed.harnessVersion).toMatch(/^\d+\.\d+\.\d+/);
-    expect(probed.harnessVersion).toBe(installedVersion());
+    expect(probed.harnessVersion).toBe(readInstalledVersion());
     expect(probed.auth.status).toBe("ok");
     expect(probed.auth.identity).toBeUndefined();
     expect(probed.models.map((model) => model.slug)).toEqual(
@@ -238,9 +248,9 @@ describe.skipIf(binary === undefined)("what a probe reads off a real pi", () => 
   }, 60_000);
 
   it("reports a machine nobody has entered a key on as unauthenticated", async () => {
-    const probed = await Effect.runPromise(pi.probe(liveContext({}), {}));
+    const probed = await Effect.runPromise(pi.probe(buildLiveContext({}), {}));
 
-    expect(probed.harnessVersion).toBe(installedVersion());
+    expect(probed.harnessVersion).toBe(readInstalledVersion());
     expect(probed.auth.status).toBe("unauthenticated");
     expect(probed.models).toEqual([]);
   }, 60_000);

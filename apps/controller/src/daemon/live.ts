@@ -44,11 +44,11 @@ import { providerRepository, resolvedInstance } from "../providers";
 import { RunnerConnections } from "../runners";
 import {
   buildContinuingSpec,
-  requireSession,
+  readSessionOrFail,
   sessionRecordComposer,
   SessionService,
   sessionRepository,
-  validatedOptions,
+  validateOptions,
   type StoredInput,
   type StoredSession,
 } from "../sessions";
@@ -134,7 +134,7 @@ type InputError = ReadError | NotFound | InvalidState | SettingError | Schema.Sc
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
-  const one = requireSession(yield* sessionRepository);
+  const one = readSessionOrFail(yield* sessionRepository);
   const recordComposer = yield* sessionRecordComposer;
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
@@ -150,7 +150,7 @@ const make = Effect.gen(function* () {
    * should not be held to a lookup it never needed. The read is the snapshot
    * row alone, so this stays inside the transaction that writes what it decides.
    */
-  const selectionFor = (
+  const resolveModelSelection = (
     session: StoredSession,
     given: SessionSelection,
   ): Effect.Effect<ModelSelection, Validation | SqlError | Schema.SchemaError> =>
@@ -160,7 +160,7 @@ const make = Effect.gen(function* () {
       if (Object.keys(picks).length > 0) {
         const snapshots = yield* instances.snapshotsOf(session.instanceId);
         const snapshot = snapshots.find((one) => one.runnerId === session.runnerId);
-        yield* validatedOptions(snapshot?.models ?? [], model, picks);
+        yield* validateOptions(snapshot?.models ?? [], model, picks);
       }
       const carried = model === session.modelSelection.model ? session.modelSelection.options : {};
       return { model, options: { ...carried, ...picks } };
@@ -348,7 +348,7 @@ const make = Effect.gen(function* () {
             const session = yield* one(id);
             if (session.status === "exited")
               return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
-            const modelSelection = yield* selectionFor(session, given);
+            const modelSelection = yield* resolveModelSelection(session, given);
             yield* sessions.setSelection(id, modelSelection);
             return (yield* recordComposer)({ ...session, modelSelection });
           }),
@@ -392,7 +392,7 @@ const make = Effect.gen(function* () {
             const session = yield* one(id);
             const nativeSessionId =
               session.status === "exited" ? yield* resumableNativeSession(session) : undefined;
-            const modelSelection = yield* selectionFor(session, picks);
+            const modelSelection = yield* resolveModelSelection(session, picks);
             const at = yield* nowIso;
             const created = yield* sessions.takeInput({
               sessionId: id,

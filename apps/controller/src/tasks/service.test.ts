@@ -50,7 +50,7 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
  * Input a caller can put on the wire but the types here rule out. Refusing it
  * is the service's job, so the test has to be able to hand it over.
  */
-const malformed = <T>(input: unknown): T => input as T;
+const castMalformedInput = <T>(input: unknown): T => input as T;
 
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -62,7 +62,7 @@ const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
 /** A minute, so two writes never land on the same instant by accident. */
 const A_MINUTE = 60_000;
 
-const titles = (tasks: ReadonlyArray<Task>) => tasks.map((task) => task.title).sort();
+const sortTitles = (tasks: ReadonlyArray<Task>) => tasks.map((task) => task.title).sort();
 
 describe("task.create", () => {
   it("fills in the defaults and stamps one instant on the three timestamps", async () => {
@@ -94,7 +94,7 @@ describe("task.create", () => {
           yield* Effect.flip(
             tasks.create({ title: "x".repeat(MAX_TASK_TITLE_LENGTH + 1), description: "d" }),
           ),
-          yield* Effect.flip(tasks.create(malformed({ description: "d" }))),
+          yield* Effect.flip(tasks.create(castMalformedInput({ description: "d" }))),
         ];
       }),
     );
@@ -105,18 +105,18 @@ describe("task.create", () => {
     const { filled, overflow } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const label = (index: number) => `label-${String(index)}`;
+        const buildLabel = (index: number) => `label-${String(index)}`;
         const created = yield* tasks.create({
           title: "Labelled",
           description: "",
-          labels: Array.from({ length: MAX_TASK_LABELS }, (_, index) => label(index)),
+          labels: Array.from({ length: MAX_TASK_LABELS }, (_, index) => buildLabel(index)),
         });
         return {
           filled: created.labels.length,
           // Every call is under the cap and the row is at it, so what refuses
           // this is the rule about the row rather than the one about the call.
           overflow: yield* Effect.flip(
-            tasks.update({ id: created.id, addLabels: [label(MAX_TASK_LABELS)] }),
+            tasks.update({ id: created.id, addLabels: [buildLabel(MAX_TASK_LABELS)] }),
           ),
         };
       }),
@@ -317,10 +317,10 @@ describe("task.query", () => {
         };
       }),
     );
-    expect(titles(byRef)).toEqual(["open and labelled"]);
-    expect(titles(byRefs)).toEqual(["done and unlabelled", "open and labelled"]);
-    expect(titles(byLabel)).toEqual(["in progress and labelled"]);
-    expect(titles(byStatus)).toEqual(["done and unlabelled", "open and labelled"]);
+    expect(sortTitles(byRef)).toEqual(["open and labelled"]);
+    expect(sortTitles(byRefs)).toEqual(["done and unlabelled", "open and labelled"]);
+    expect(sortTitles(byLabel)).toEqual(["in progress and labelled"]);
+    expect(sortTitles(byStatus)).toEqual(["done and unlabelled", "open and labelled"]);
   });
 
   it("ands across fields: a status plus a label needs both", async () => {
@@ -333,7 +333,7 @@ describe("task.query", () => {
         };
       }),
     );
-    expect(titles(both)).toEqual(["open and labelled"]);
+    expect(sortTitles(both)).toEqual(["open and labelled"]);
     expect(neither).toEqual([]);
   });
 
@@ -341,7 +341,7 @@ describe("task.query", () => {
     const items = await run(
       Effect.flatMap(withThreeTasks, (tasks) => Effect.map(tasks.query({}), (page) => page.items)),
     );
-    expect(titles(items)).toEqual([
+    expect(sortTitles(items)).toEqual([
       "done and unlabelled",
       "in progress and labelled",
       "open and labelled",
@@ -379,7 +379,7 @@ describe("full-text search", () => {
         Effect.map(tasks.query({ text: "café naive" }), (page) => page.items),
       ),
     );
-    expect(titles(items)).toEqual(["Café Naïve espresso machine", "espresso grinder"]);
+    expect(sortTitles(items)).toEqual(["Café Naïve espresso machine", "espresso grinder"]);
   });
 
   it("never reaches a label or a ref", async () => {
@@ -390,7 +390,7 @@ describe("full-text search", () => {
     );
     // The third task carries the word only in a label and a ref, and neither its
     // title nor its description holds it.
-    expect(titles(items)).toEqual(["Café Naïve espresso machine", "espresso grinder"]);
+    expect(sortTitles(items)).toEqual(["Café Naïve espresso machine", "espresso grinder"]);
   });
 
   it("follows a retitled task: the old word stops matching and the new one starts", async () => {
@@ -408,8 +408,8 @@ describe("full-text search", () => {
     // The index is external content: nothing but the update trigger takes the
     // old terms out of it, and stale terms would answer for a row that no
     // longer holds them.
-    expect(titles(before.items)).toEqual([]);
-    expect(titles(after.items)).toEqual(["limnology survey"]);
+    expect(sortTitles(before.items)).toEqual([]);
+    expect(sortTitles(after.items)).toEqual(["limnology survey"]);
   });
 
   it("treats FTS5 operators as plain words rather than as syntax", async () => {
@@ -430,10 +430,10 @@ describe("provenance", () => {
         const created = yield* tasks.create({ title: "Provenance", description: "d" });
         return {
           onCreate: yield* Effect.flip(
-            tasks.create(malformed({ title: "t", description: "d", provenance: [{}] })),
+            tasks.create(castMalformedInput({ title: "t", description: "d", provenance: [{}] })),
           ),
           onUpdate: yield* Effect.flip(
-            tasks.update(malformed({ id: created.id, provenance: [{}] })),
+            tasks.update(castMalformedInput({ id: created.id, provenance: [{}] })),
           ),
         };
       }),
@@ -449,7 +449,7 @@ describe("provenance", () => {
         return {
           withAt: yield* Effect.flip(
             tasks.create(
-              malformed({
+              castMalformedInput({
                 title: "t",
                 description: "d",
                 provenance: [{ ref: ISSUE_REF, at: "2026-09-04T10:00:00.000Z" }],
@@ -458,7 +458,7 @@ describe("provenance", () => {
           ),
           withActor: yield* Effect.flip(
             tasks.create(
-              malformed({
+              castMalformedInput({
                 title: "t",
                 description: "d",
                 provenance: [{ ref: ISSUE_REF, actor: "session:0199e0e7-0002-7000-8000-00000000" }],
@@ -497,7 +497,9 @@ describe("external refs", () => {
         for (const ref of ["GitHub:issue:x", "github:issue", "github:issue:a b"]) {
           errors.push(
             yield* Effect.flip(
-              tasks.create(malformed({ title: "t", description: "d", provenance: [{ ref }] })),
+              tasks.create(
+                castMalformedInput({ title: "t", description: "d", provenance: [{ ref }] }),
+              ),
             ),
           );
         }
@@ -521,7 +523,7 @@ describe("external refs", () => {
         return (yield* tasks.query({ refs: [ISSUE_REF] })).items;
       }),
     );
-    expect(titles(items)).toEqual(["first", "second"]);
+    expect(sortTitles(items)).toEqual(["first", "second"]);
   });
 });
 
@@ -530,17 +532,17 @@ describe("external refs", () => {
  * transaction wait looks like from inside one operation, and it is what makes
  * two reads in one operation impossible to confuse with one.
  */
-const ticking = (): Clock.Clock => {
+const createTickingClock = (): Clock.Clock => {
   let millis = Date.parse("2026-09-04T10:00:00.000Z");
-  const next = () => (millis += 1000);
-  const nanos = () => BigInt(millis) * 1_000_000n;
+  const advanceClock = () => (millis += 1000);
+  const readNanos = () => BigInt(millis) * 1_000_000n;
   return {
-    currentTimeMillisUnsafe: next,
-    currentTimeMillis: Effect.sync(next),
-    currentTimeNanosUnsafe: nanos,
-    currentTimeNanos: Effect.sync(nanos),
-    monotonicTimeNanosUnsafe: nanos,
-    monotonicTimeNanos: Effect.sync(nanos),
+    currentTimeMillisUnsafe: advanceClock,
+    currentTimeMillis: Effect.sync(advanceClock),
+    currentTimeNanosUnsafe: readNanos,
+    currentTimeNanos: Effect.sync(readNanos),
+    monotonicTimeNanosUnsafe: readNanos,
+    monotonicTimeNanos: Effect.sync(readNanos),
     sleep: () => Effect.void,
   };
 };
@@ -550,7 +552,7 @@ const runTicking = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     effect.pipe(
       Effect.provideService(CurrentActor, USER),
       Effect.provide(layer),
-      Effect.provideService(Clock.Clock, ticking()),
+      Effect.provideService(Clock.Clock, createTickingClock()),
     ),
   );
 
@@ -674,7 +676,7 @@ const withSeven = Effect.gen(function* () {
 });
 
 /** Every title the walk hands out, page by page, until it says there is no more. */
-const walk = (tasks: TaskService["Service"], input: QueryInput) =>
+const walkPages = (tasks: TaskService["Service"], input: QueryInput) =>
   Effect.gen(function* () {
     const seen: Array<string> = [];
     let cursor: string | undefined = undefined;
@@ -695,8 +697,8 @@ describe("paging", () => {
       Effect.gen(function* () {
         const tasks = yield* withSeven;
         return {
-          keyset: yield* walk(tasks, { limit: 2 }),
-          relevance: yield* walk(tasks, { limit: 2, text: "prose" }),
+          keyset: yield* walkPages(tasks, { limit: 2 }),
+          relevance: yield* walkPages(tasks, { limit: 2, text: "prose" }),
         };
       }),
     );
@@ -842,7 +844,7 @@ describe("the project a task belongs to", () => {
         return (yield* tasks.query({ projectId: uuidToString(id) })).items;
       }),
     );
-    expect(titles(items)).toEqual(["inside"]);
+    expect(sortTitles(items)).toEqual(["inside"]);
   });
 });
 
@@ -854,7 +856,7 @@ describe("the priority order", () => {
         for (const priority of ["low", "urgent", "normal", "high"] as const) {
           yield* tasks.create({ title: priority, description: "d", priority });
         }
-        return yield* walk(yield* TaskService, {
+        return yield* walkPages(yield* TaskService, {
           limit: 1,
           sort: { field: "priority", direction: "asc" },
         });

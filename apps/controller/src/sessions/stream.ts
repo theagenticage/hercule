@@ -56,7 +56,7 @@ export interface StreamRow {
   readonly event: ProviderEvent;
 }
 
-export const track = (from: Omit<Tracked, "buffers">): Tracked => ({
+export const startTracking = (from: Omit<Tracked, "buffers">): Tracked => ({
   ...from,
   buffers: new Map(),
 });
@@ -65,15 +65,16 @@ export const track = (from: Omit<Tracked, "buffers">): Tracked => ({
  * Two stream kinds on one item are two runs of text, so the key carries both.
  * The NUL separator is what no vendor id contains, so ids cannot collide.
  */
-const keyOf = (itemId: string, streamKind: StreamKind): string => `${itemId}\u0000${streamKind}`;
+const buildBufferKey = (itemId: string, streamKind: StreamKind): string =>
+  `${itemId}\u0000${streamKind}`;
 
-const flushed = (held: Held): StreamRow => ({
+const toFlushedRow = (held: Held): StreamRow => ({
   seq: held.seq,
   at: held.first.at,
   event: { ...held.first, delta: held.text },
 });
 
-const statusAfter = (event: ProviderEvent): SessionStatus | undefined => {
+const computeStatusAfter = (event: ProviderEvent): SessionStatus | undefined => {
   switch (event._tag) {
     case "session.started":
       return "idle";
@@ -99,7 +100,7 @@ const statusAfter = (event: ProviderEvent): SessionStatus | undefined => {
  * client watching the session a refetch. A resolution names its own request,
  * so one for a park that is no longer open leaves the open one alone.
  */
-export const openRequestAfter = (
+export const computeOpenRequestAfter = (
   event: ProviderEvent,
   open: OpenRequest | null,
 ): OpenRequest | null | undefined => {
@@ -132,23 +133,23 @@ export const fold = (
   const buffers = new Map(tracked.buffers);
   const rows: Array<StreamRow> = [];
 
-  const flush = (itemId?: string): void => {
+  const flushBuffers = (itemId?: string): void => {
     for (const [key, held] of buffers) {
       if (itemId !== undefined && held.first.itemId !== itemId) continue;
-      rows.push(flushed(held));
+      rows.push(toFlushedRow(held));
       buffers.delete(key);
     }
   };
 
   if (event._tag === "content.delta") {
-    const key = keyOf(event.itemId, event.streamKind);
+    const key = buildBufferKey(event.itemId, event.streamKind);
     const held = buffers.get(key);
     const grown: Held =
       held === undefined
         ? { first: event, text: event.delta, seq }
         : { first: held.first, text: held.text + event.delta, seq };
     if (grown.text.length >= DELTA_FLUSH_BYTES) {
-      rows.push(flushed(grown));
+      rows.push(toFlushedRow(grown));
       buffers.delete(key);
     } else {
       buffers.set(key, grown);
@@ -159,9 +160,13 @@ export const fold = (
   }
 
   // The three moments held text has nothing more coming for it.
-  if (event._tag === "item.completed") flush(event.itemId);
-  if (event._tag === "turn.completed" || event._tag === "session.exited") flush();
+  if (event._tag === "item.completed") flushBuffers(event.itemId);
+  if (event._tag === "turn.completed" || event._tag === "session.exited") flushBuffers();
 
   rows.push({ seq, at: event.at, event });
-  return { rows, status: statusAfter(event), next: { lastSeq: seq, base: tracked.base, buffers } };
+  return {
+    rows,
+    status: computeStatusAfter(event),
+    next: { lastSeq: seq, base: tracked.base, buffers },
+  };
 };

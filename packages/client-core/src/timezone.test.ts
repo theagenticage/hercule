@@ -1,14 +1,14 @@
 import { assert, describe, it } from "vitest";
 import {
-  browserTimezone,
+  resolveBrowserTimezone,
   FALLBACK_TIMEZONE,
   isSupportedTimezone,
-  supportedTimezones,
+  listSupportedTimezones,
 } from "./timezone";
 
 describe("the zones this runtime knows", () => {
   it("lists zones its own formatter accepts", () => {
-    const zones = supportedTimezones();
+    const zones = listSupportedTimezones();
     assert.isAbove(zones.length, 100);
     for (const zone of [zones[0]!, zones[zones.length - 1]!, "UTC"]) {
       assert.doesNotThrow(() => new Intl.DateTimeFormat("en-US", { timeZone: zone }));
@@ -30,26 +30,28 @@ describe("the zones this runtime knows", () => {
   });
 
   it("hands back the same list every time", () => {
-    assert.strictEqual(supportedTimezones(), supportedTimezones());
+    assert.strictEqual(listSupportedTimezones(), listSupportedTimezones());
   });
 });
 
-describe("browserTimezone", () => {
+describe("resolveBrowserTimezone", () => {
   it("reads the zone from the resolver it is given", () => {
     assert.strictEqual(
-      browserTimezone(() => "Europe/Amsterdam"),
+      resolveBrowserTimezone(() => "Europe/Amsterdam"),
       "Europe/Amsterdam",
     );
   });
 
   it("answers UTC when the runtime reports a zone it cannot format", () => {
     assert.strictEqual(
-      browserTimezone(() => "Europe/Nowhere"),
+      resolveBrowserTimezone(() => "Europe/Nowhere"),
       FALLBACK_TIMEZONE,
     );
   });
 
   it("answers a zone the formatter accepts, from the running environment", () => {
-    assert.doesNotThrow(() => new Intl.DateTimeFormat("en-US", { timeZone: browserTimezone() }));
+    assert.doesNotThrow(
+      () => new Intl.DateTimeFormat("en-US", { timeZone: resolveBrowserTimezone() }),
+    );
   });
 });

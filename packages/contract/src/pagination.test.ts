@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import { pageParams, sortFieldsOf, sortParam } from "./pagination";
+import { pageParams, readSortFields, sortParam } from "./pagination";
 
 const decode =
   <S extends Schema.Codec<unknown, unknown>>(schema: S) =>
@@ -53,9 +53,9 @@ describe("pageParams", () => {
   });
 
   it("publishes the sortable fields, so a client can render them", () => {
-    expect(sortFieldsOf(Params)).toEqual(["name"]);
-    expect(sortFieldsOf(pageParams(["createdAt"]))).toEqual(["createdAt"]);
-    expect(sortFieldsOf(Schema.Struct({}))).toEqual([]);
-    expect(sortFieldsOf(undefined)).toEqual([]);
+    expect(readSortFields(Params)).toEqual(["name"]);
+    expect(readSortFields(pageParams(["createdAt"]))).toEqual(["createdAt"]);
+    expect(readSortFields(Schema.Struct({}))).toEqual([]);
+    expect(readSortFields(undefined)).toEqual([]);
   });
 });

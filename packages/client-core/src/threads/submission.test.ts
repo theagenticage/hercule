@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
-import { submission } from "./submission";
+import { buildSubmission } from "./submission";
 
 const CONFIG = {
   instanceId: "instance-claude-code",
@@ -46,9 +46,9 @@ const DRAFT = { kind: "draft" as const, config: CONFIG };
 const ACTIVE = { kind: "active" as const, session: SESSION };
 const MESSAGE = { text: "ship it" };
 
-describe("submission: a draft thread", () => {
+describe("buildSubmission: a draft thread", () => {
   it("spawns with the draft's config, no workspace and the config's profile", () => {
-    expect(submission(DRAFT, {}, MESSAGE)).toEqual({
+    expect(buildSubmission(DRAFT, {}, MESSAGE)).toEqual({
       kind: "spawn",
       input: {
         prompt: "ship it",
@@ -64,7 +64,7 @@ describe("submission: a draft thread", () => {
 
   it("overlays the picks made since the draft was built", () => {
     expect(
-      submission(
+      buildSubmission(
         DRAFT,
         { model: "claude-opus-5", options: {}, accessMode: "full-access", runnerId: "r-remote" },
         MESSAGE,
@@ -84,9 +84,9 @@ describe("submission: a draft thread", () => {
   });
 });
 
-describe("submission: an active thread", () => {
+describe("buildSubmission: an active thread", () => {
   it("sends the text alone when nothing was picked", () => {
-    expect(submission(ACTIVE, {}, MESSAGE)).toEqual({
+    expect(buildSubmission(ACTIVE, {}, MESSAGE)).toEqual({
       kind: "input",
       sessionId: SESSION.id,
       payload: { text: "ship it" },
@@ -94,7 +94,7 @@ describe("submission: an active thread", () => {
   });
 
   it("sends a picked model with the text", () => {
-    expect(submission(ACTIVE, { model: "claude-opus-5" }, MESSAGE)).toEqual({
+    expect(buildSubmission(ACTIVE, { model: "claude-opus-5" }, MESSAGE)).toEqual({
       kind: "input",
       sessionId: SESSION.id,
       payload: { text: "ship it", model: "claude-opus-5" },
@@ -102,7 +102,7 @@ describe("submission: an active thread", () => {
   });
 
   it("sends picked options with the text", () => {
-    expect(submission(ACTIVE, { options: { effort: "high" } }, MESSAGE)).toEqual({
+    expect(buildSubmission(ACTIVE, { options: { effort: "high" } }, MESSAGE)).toEqual({
       kind: "input",
       sessionId: SESSION.id,
       payload: { text: "ship it", options: { effort: "high" } },
@@ -111,7 +111,7 @@ describe("submission: an active thread", () => {
 
   it("sends both when both were picked", () => {
     expect(
-      submission(ACTIVE, { model: "claude-opus-5", options: { effort: "high" } }, MESSAGE),
+      buildSubmission(ACTIVE, { model: "claude-opus-5", options: { effort: "high" } }, MESSAGE),
     ).toEqual({
       kind: "input",
       sessionId: SESSION.id,
@@ -121,7 +121,7 @@ describe("submission: an active thread", () => {
 
   it("carries no other key, whatever else the picks hold", () => {
     expect(
-      submission(ACTIVE, { accessMode: "full-access", runnerId: "r-remote" }, MESSAGE),
+      buildSubmission(ACTIVE, { accessMode: "full-access", runnerId: "r-remote" }, MESSAGE),
     ).toEqual({ kind: "input", sessionId: SESSION.id, payload: { text: "ship it" } });
   });
 });
@@ -143,9 +143,9 @@ const IN_PROJECT = {
   workspace: { kind: "primary" as const, resourceId: "res-webshop" },
 };
 
-describe("submission: the project and the workspace (AC-17)", () => {
+describe("buildSubmission: the project and the workspace (AC-17)", () => {
   it("carries the project and the main workspace the draft works in", () => {
-    expect(submission({ kind: "draft", config: IN_PROJECT }, {}, MESSAGE)).toEqual({
+    expect(buildSubmission({ kind: "draft", config: IN_PROJECT }, {}, MESSAGE)).toEqual({
       kind: "spawn",
       input: {
         prompt: "ship it",
@@ -162,7 +162,7 @@ describe("submission: the project and the workspace (AC-17)", () => {
   });
 
   it("carries the branch the main workspace is to be switched to", () => {
-    const input = submission(
+    const input = buildSubmission(
       {
         kind: "draft",
         config: {
@@ -182,7 +182,7 @@ describe("submission: the project and the workspace (AC-17)", () => {
   });
 
   it("carries one checkout per repo, with the base branch each starts from", () => {
-    const input = submission(
+    const input = buildSubmission(
       {
         kind: "draft",
         config: {
@@ -217,7 +217,7 @@ describe("submission: the project and the workspace (AC-17)", () => {
 
   it("carries the workspace a thread joins", () => {
     expect(
-      submission(
+      buildSubmission(
         {
           kind: "draft",
           config: { ...IN_PROJECT, workspace: { kind: "existing", workspaceId: "ws-run-3f1" } },
@@ -229,7 +229,7 @@ describe("submission: the project and the workspace (AC-17)", () => {
   });
 
   it("sends no workspace at all for a thread that works without a checkout", () => {
-    const sent = submission(
+    const sent = buildSubmission(
       { kind: "draft", config: { ...IN_PROJECT, workspace: { kind: "none" } } },
       {},
       MESSAGE,
@@ -242,7 +242,7 @@ describe("submission: the project and the workspace (AC-17)", () => {
   });
 
   it("sends neither key for a draft in no project that has resolved no workspace", () => {
-    const sent = submission(
+    const sent = buildSubmission(
       { kind: "draft", config: { ...IN_PROJECT, projectId: null, workspace: null } },
       {},
       MESSAGE,
@@ -255,7 +255,7 @@ describe("submission: the project and the workspace (AC-17)", () => {
 
   it("overlays a workspace picked since the draft was built", () => {
     expect(
-      submission(
+      buildSubmission(
         { kind: "draft", config: IN_PROJECT },
         { workspace: { kind: "ephemeral", checkouts: [{ resourceId: "res-webshop" }] } },
         MESSAGE,
@@ -267,7 +267,7 @@ describe("submission: the project and the workspace (AC-17)", () => {
 
   it("sends nothing of the workspace on an active thread, whose placement is fixed", () => {
     expect(
-      submission(ACTIVE, { workspace: { kind: "none" }, projectId: "p-webshop" }, MESSAGE),
+      buildSubmission(ACTIVE, { workspace: { kind: "none" }, projectId: "p-webshop" }, MESSAGE),
     ).toEqual({ kind: "input", sessionId: SESSION.id, payload: { text: "ship it" } });
   });
 });

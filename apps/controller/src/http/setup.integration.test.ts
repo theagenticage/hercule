@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { PASSWORD, SETUP_TOKEN, send, withServer } from "./testing";
 
-const complete = (base: string, username: string) =>
+const completeSetupAs = (base: string, username: string) =>
   send("POST", base, "/api/v1/setup/complete", {
     body: { username, password: PASSWORD, timezone: "Europe/Amsterdam" },
     token: SETUP_TOKEN,
@@ -16,7 +16,7 @@ describe("setup.complete over HTTP", () => {
   it("finishes first run once, however many callers race with the same token", async () => {
     await withServer(async ({ base, audit, sql }) => {
       const responses = await Promise.all(
-        ["alice", "bob", "carol", "dave"].map((username) => complete(base, username)),
+        ["alice", "bob", "carol", "dave"].map((username) => completeSetupAs(base, username)),
       );
 
       const accepted = responses.filter((response) => response.status === 200);

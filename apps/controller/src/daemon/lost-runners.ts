@@ -17,7 +17,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../db";
 import { runnerRepository } from "../runners";
 import { SessionService } from "../sessions";
-import { absorbing } from "./absorbing";
+import { absorbFailures } from "./absorbing";
 
 /**
  * How often the sweep runs. The bound it applies is a session's absolute
@@ -56,7 +56,7 @@ export const sweepSessionsOnLostRunners: Effect.Effect<
     Effect.flatMap(runners.connected(), (connected) => sessions.endOnLostRunners(connected)),
   );
   while (true) {
-    yield* absorbing("The sweep for sessions on lost runners failed", pass);
+    yield* absorbFailures("The sweep for sessions on lost runners failed", pass);
     yield* Effect.sleep(interval);
   }
 });

@@ -7,13 +7,13 @@
  *
  * The ids read as words by default. A suite whose records travel over the API
  * is decoded against the contract, which takes UUIDv7 and nothing else, so
- * `threadsWorld` takes one id per slot and the world is built around them.
+ * `buildThreadsWorld` takes one id per slot and the world is built around them.
  */
 import type { Project, Resource, Runner, Session, Workspace } from "@hercule/contract";
 
 export const AT = "2026-09-10T09:00:00.000Z";
 
-export const runner = (id: string, name: string): Runner => ({
+export const buildRunner = (id: string, name: string): Runner => ({
   id,
   name,
   connectivity: "online",
@@ -28,7 +28,7 @@ export const runner = (id: string, name: string): Runner => ({
   lastSeenAt: AT,
 });
 
-export const project = (id: string, name: string): Project => ({
+export const buildProject = (id: string, name: string): Project => ({
   id,
   name,
   createdAt: AT,
@@ -40,7 +40,7 @@ export const project = (id: string, name: string): Project => ({
  * from the other: canonicalizing a remote is the system's own rule, and a
  * fixture that re-implements it backwards is a second rule to keep in step.
  */
-export const repo = (
+export const buildRepo = (
   id: string,
   remote: string | null,
   canonicalRemote: string | null,
@@ -59,7 +59,7 @@ export const repo = (
   updatedAt: AT,
 });
 
-export const checkout = (
+export const buildCheckout = (
   resourceId: string,
   /** Null where the machine could not read one, which the record carries (D-21). */
   branch: string | null,
@@ -75,7 +75,7 @@ export const checkout = (
   defaultBranch,
 });
 
-export const workspace = (over: Partial<Workspace> & { id: string }): Workspace => ({
+export const buildWorkspace = (over: Partial<Workspace> & { id: string }): Workspace => ({
   runnerId: SLOTS.moss,
   kind: "primary",
   status: "ready",
@@ -90,7 +90,7 @@ export const workspace = (over: Partial<Workspace> & { id: string }): Workspace 
   ...over,
 });
 
-export const session = (over: Partial<Session> & { id: string }): Session => ({
+export const buildSession = (over: Partial<Session> & { id: string }): Session => ({
   title: "A thread",
   status: "idle",
   resumable: false,
@@ -162,43 +162,46 @@ export interface ThreadsWorld {
   readonly RUN_3F1: Workspace;
 }
 
-export const threadsWorld = (ids: Partial<WorldIds> = {}): ThreadsWorld => {
+export const buildThreadsWorld = (ids: Partial<WorldIds> = {}): ThreadsWorld => {
   const id = { ...SLOTS, ...ids };
-  const WEBSHOP = repo(id.webshop, "git@github.com:acme/webshop.git", "github.com/acme/webshop", [
-    id.webshopProject,
-  ]);
+  const WEBSHOP = buildRepo(
+    id.webshop,
+    "git@github.com:acme/webshop.git",
+    "github.com/acme/webshop",
+    [id.webshopProject],
+  );
   return {
-    MOSS: runner(id.moss, "moss"),
-    COVE: runner(id.cove, "cove"),
-    WEBSHOP_PROJECT: project(id.webshopProject, "webshop"),
-    OPS_PROJECT: project(id.opsProject, "ops"),
+    MOSS: buildRunner(id.moss, "moss"),
+    COVE: buildRunner(id.cove, "cove"),
+    WEBSHOP_PROJECT: buildProject(id.webshopProject, "webshop"),
+    OPS_PROJECT: buildProject(id.opsProject, "ops"),
     WEBSHOP,
-    INFRA: repo(id.infra, "git@github.com:acme/ops-infra.git", "github.com/acme/ops-infra", [
+    INFRA: buildRepo(id.infra, "git@github.com:acme/ops-infra.git", "github.com/acme/ops-infra", [
       id.opsProject,
     ]),
-    RUNBOOKS: repo(
+    RUNBOOKS: buildRepo(
       id.runbooks,
       "git@github.com:acme/ops-runbooks.git",
       "github.com/acme/ops-runbooks",
       [id.opsProject],
     ),
-    PRIMARY: workspace({
+    PRIMARY: buildWorkspace({
       id: id.primary,
       runnerId: id.moss,
       checkouts: [
         {
-          ...checkout(WEBSHOP.id, "main", ["main", "release/2.4", "hercule/run-3f1"]),
+          ...buildCheckout(WEBSHOP.id, "main", ["main", "release/2.4", "hercule/run-3f1"]),
           checkoutId: id.primaryCheckout,
         },
       ],
     }),
-    RUN_3F1: workspace({
+    RUN_3F1: buildWorkspace({
       id: id.run3f1,
       runnerId: id.moss,
       kind: "ephemeral",
       checkouts: [
         {
-          ...checkout(WEBSHOP.id, "hercule/run-3f1"),
+          ...buildCheckout(WEBSHOP.id, "hercule/run-3f1"),
           checkoutId: id.run3f1Checkout,
           form: "worktree",
         },
@@ -218,4 +221,4 @@ export const {
   RUNBOOKS,
   PRIMARY,
   RUN_3F1,
-} = threadsWorld();
+} = buildThreadsWorld();

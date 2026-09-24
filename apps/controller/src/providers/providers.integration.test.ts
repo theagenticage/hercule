@@ -7,7 +7,7 @@ import { Effect, Fiber, Schema } from "effect";
 import type { LiveMessage } from "@hercule/contract";
 import { secret, type Plugin, type ProviderDefinition } from "@hercule/plugin-host";
 import {
-  collecting,
+  collectMessages,
   completeSetup,
   del,
   expectHeld,
@@ -15,29 +15,29 @@ import {
   onSocket,
   post,
   send,
-  settleLive,
-  ticketFor,
+  waitForLiveToSettle,
+  fetchTicket,
   withServer,
-  within,
+  waitWithin,
   type ServerHarness,
 } from "../http/testing";
-import { fixture, providerDefinition } from "../plugins/testing";
+import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 
-const ALPHA = providerDefinition("alpha-provider", { token: "alpha-default" });
-const BETA = providerDefinition("beta-provider", { token: "beta-default" });
+const ALPHA = buildProviderDefinition("alpha-provider", { token: "alpha-default" });
+const BETA = buildProviderDefinition("beta-provider", { token: "beta-default" });
 
 const SINGLE = {
-  ...providerDefinition("single-provider", { token: "the-only-one" }),
+  ...buildProviderDefinition("single-provider", { token: "the-only-one" }),
   supportsMultipleInstances: false,
 };
 
-const registry = (): ReadonlyArray<Plugin> => [
-  fixture({ id: "alpha", definitions: [ALPHA] }).plugin,
-  fixture({ id: "beta", definitions: [BETA] }).plugin,
+const buildPlugins = (): ReadonlyArray<Plugin> => [
+  createPluginFixture({ id: "alpha", definitions: [ALPHA] }).plugin,
+  createPluginFixture({ id: "beta", definitions: [BETA] }).plugin,
 ];
 
 const withProviders = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
-  withServer(body, { plugins: registry() });
+  withServer(body, { plugins: buildPlugins() });
 
 interface ProviderInstance {
   readonly id: string;
@@ -58,31 +58,34 @@ interface ProviderInstance {
 /** An id that is well-formed and belongs to nobody. */
 const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
 
-const list = async (base: string, token: string): Promise<ReadonlyArray<ProviderInstance>> => {
+const listInstances = async (
+  base: string,
+  token: string,
+): Promise<ReadonlyArray<ProviderInstance>> => {
   const response = await get(base, "/api/v1/providers", token);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as ReadonlyArray<ProviderInstance>;
 };
 
-const byProvider = (
+const filterByProvider = (
   instances: ReadonlyArray<ProviderInstance>,
   providerId: string,
 ): ReadonlyArray<ProviderInstance> =>
   instances.filter((instance) => instance.providerId === providerId);
 
-const read = async (base: string, token: string, id: string): Promise<ProviderInstance> => {
+const readInstance = async (base: string, token: string, id: string): Promise<ProviderInstance> => {
   const response = await get(base, `/api/v1/providers/${id}`, token);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as ProviderInstance;
 };
 
-const create = (base: string, token: string, body: unknown): Promise<Response> =>
+const createInstance = (base: string, token: string, body: unknown): Promise<Response> =>
   post(base, "/api/v1/providers", body, token);
 
-const patch = (base: string, token: string, id: string, body: unknown): Promise<Response> =>
+const patchInstance = (base: string, token: string, id: string, body: unknown): Promise<Response> =>
   send("PATCH", base, `/api/v1/providers/${id}`, { body, token });
 
-const created = async (response: Response): Promise<ProviderInstance> => {
+const parseCreatedInstance = async (response: Response): Promise<ProviderInstance> => {
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as ProviderInstance;
 };
@@ -91,12 +94,12 @@ interface ApiError {
   readonly error: { readonly code: string; readonly message?: string; readonly details?: unknown };
 }
 
-const refusal = async (response: Response, status: number): Promise<ApiError> => {
+const readApiError = async (response: Response, status: number): Promise<ApiError> => {
   expect(response.status, await response.clone().text()).toBe(status);
   return (await response.json()) as ApiError;
 };
 
-const providerAudit = (
+const readProviderAudit = (
   sql: ServerHarness["sql"],
 ): Promise<ReadonlyArray<{ readonly kind: string; readonly actor: string | null }>> =>
   Effect.runPromise(
@@ -106,7 +109,7 @@ const providerAudit = (
     ),
   );
 
-const lastProviderPayload = (sql: ServerHarness["sql"]): Promise<Record<string, unknown>> =>
+const readLastProviderPayload = (sql: ServerHarness["sql"]): Promise<Record<string, unknown>> =>
   Effect.runPromise(
     Effect.orDie(
       Effect.map(
@@ -122,14 +125,14 @@ describe("GET /providers after a boot", () => {
     await withProviders(async ({ base }) => {
       const token = await completeSetup(base);
 
-      const instances = await list(base, token);
+      const instances = await listInstances(base, token);
 
       expect(instances.map((instance) => instance.providerId).sort()).toEqual([
         "alpha-provider",
         "beta-provider",
       ]);
       for (const definition of [ALPHA, BETA]) {
-        const [instance] = byProvider(instances, definition.id);
+        const [instance] = filterByProvider(instances, definition.id);
         expect(instance?.config, definition.id).toEqual(definition.defaultConfig);
         expect(instance?.snapshots, definition.id).toEqual([]);
         expect(instance?.name, definition.id).toBe(definition.displayName);
@@ -140,33 +143,33 @@ describe("GET /providers after a boot", () => {
   it("leaves the instances exactly as they were on a second boot", async () => {
     await withProviders(async ({ base, reboot }) => {
       const token = await completeSetup(base);
-      const before = await list(base, token);
+      const before = await listInstances(base, token);
 
       await reboot();
 
-      expect(await list(base, token)).toEqual(before);
+      expect(await listInstances(base, token)).toEqual(before);
     });
   });
 
   it("gives a provider whose only instance was deleted a fresh one at the next boot", async () => {
     await withProviders(async ({ base, reboot }) => {
       const token = await completeSetup(base);
-      const [alpha] = byProvider(await list(base, token), "alpha-provider");
+      const [alpha] = filterByProvider(await listInstances(base, token), "alpha-provider");
       expect(alpha).toBeDefined();
 
       expect((await del(base, `/api/v1/providers/${alpha!.id}`, token)).status).toBe(200);
-      expect((await list(base, token)).map((instance) => instance.providerId)).toEqual([
+      expect((await listInstances(base, token)).map((instance) => instance.providerId)).toEqual([
         "beta-provider",
       ]);
 
       await reboot();
 
-      const after = await list(base, token);
+      const after = await listInstances(base, token);
       expect(after.map((instance) => instance.providerId).sort()).toEqual([
         "alpha-provider",
         "beta-provider",
       ]);
-      const replacement = byProvider(after, "alpha-provider");
+      const replacement = filterByProvider(after, "alpha-provider");
       expect(replacement).toHaveLength(1);
       expect(replacement[0]?.id).not.toBe(alpha!.id);
       expect(replacement[0]?.config).toEqual(ALPHA.defaultConfig);
@@ -179,8 +182,8 @@ describe("the writes on /providers", () => {
     await withProviders(async ({ base, sql }) => {
       const token = await completeSetup(base);
 
-      const instance = await created(
-        await create(base, token, {
+      const instance = await parseCreatedInstance(
+        await createInstance(base, token, {
           providerId: "alpha-provider",
           name: "second account",
           config: { token: "a-second-token" },
@@ -192,16 +195,16 @@ describe("the writes on /providers", () => {
         name: "second account",
         config: { token: "a-second-token" },
       });
-      expect(await read(base, token, instance.id)).toMatchObject({
+      expect(await readInstance(base, token, instance.id)).toMatchObject({
         id: instance.id,
         name: "second account",
         config: { token: "a-second-token" },
         declared: ALPHA.declared,
       });
-      expect(byProvider(await list(base, token), "alpha-provider")).toHaveLength(2);
+      expect(filterByProvider(await listInstances(base, token), "alpha-provider")).toHaveLength(2);
 
       // Two rows precede this one: the boot opened an instance per provider.
-      expect((await providerAudit(sql)).at(-1)).toEqual({
+      expect((await readProviderAudit(sql)).at(-1)).toEqual({
         kind: "provider.created",
         actor: "user",
       });
@@ -211,11 +214,11 @@ describe("the writes on /providers", () => {
   it("refuses a config the provider's schema rejects, naming the field, and changes nothing", async () => {
     await withProviders(async ({ base, sql }) => {
       const token = await completeSetup(base);
-      const before = await list(base, token);
-      const [alpha] = byProvider(before, "alpha-provider");
+      const before = await listInstances(base, token);
+      const [alpha] = filterByProvider(before, "alpha-provider");
 
-      const rejected = await refusal(
-        await create(base, token, {
+      const rejected = await readApiError(
+        await createInstance(base, token, {
           providerId: "alpha-provider",
           name: "no token",
           config: {},
@@ -225,16 +228,18 @@ describe("the writes on /providers", () => {
       expect(rejected.error.code).toBe("validation");
       expect(JSON.stringify(rejected.error)).toContain("token");
 
-      const patched = await refusal(
-        await patch(base, token, alpha!.id, { config: { token: 42 } }),
+      const patched = await readApiError(
+        await patchInstance(base, token, alpha!.id, { config: { token: 42 } }),
         400,
       );
       expect(patched.error.code).toBe("validation");
       expect(JSON.stringify(patched.error)).toContain("token");
 
-      expect(await list(base, token)).toEqual(before);
-      expect(await read(base, token, alpha!.id)).toMatchObject({ config: ALPHA.defaultConfig });
-      expect(await providerAudit(sql)).toEqual([
+      expect(await listInstances(base, token)).toEqual(before);
+      expect(await readInstance(base, token, alpha!.id)).toMatchObject({
+        config: ALPHA.defaultConfig,
+      });
+      expect(await readProviderAudit(sql)).toEqual([
         { kind: "provider.created", actor: "system" },
         { kind: "provider.created", actor: "system" },
       ]);
@@ -245,8 +250,8 @@ describe("the writes on /providers", () => {
     await withProviders(async ({ base }) => {
       const token = await completeSetup(base);
 
-      const rejected = await refusal(
-        await create(base, token, {
+      const rejected = await readApiError(
+        await createInstance(base, token, {
           providerId: "gamma-provider",
           name: "gamma",
           config: { token: "t" },
@@ -255,22 +260,24 @@ describe("the writes on /providers", () => {
       );
 
       expect(rejected.error.code).toBe("validation");
-      expect(byProvider(await list(base, token), "gamma-provider")).toEqual([]);
+      expect(filterByProvider(await listInstances(base, token), "gamma-provider")).toEqual([]);
     });
   });
 
   it("updates the name and the config", async () => {
     await withProviders(async ({ base }) => {
       const token = await completeSetup(base);
-      const [alpha] = byProvider(await list(base, token), "alpha-provider");
+      const [alpha] = filterByProvider(await listInstances(base, token), "alpha-provider");
 
-      const renamed = await patch(base, token, alpha!.id, { name: "work account" });
+      const renamed = await patchInstance(base, token, alpha!.id, { name: "work account" });
       expect(renamed.status, await renamed.clone().text()).toBe(200);
       expect(await renamed.json()).toMatchObject({ id: alpha!.id, name: "work account" });
 
-      const reconfigured = await patch(base, token, alpha!.id, { config: { token: "rotated" } });
+      const reconfigured = await patchInstance(base, token, alpha!.id, {
+        config: { token: "rotated" },
+      });
       expect(reconfigured.status, await reconfigured.clone().text()).toBe(200);
-      expect(await read(base, token, alpha!.id)).toMatchObject({
+      expect(await readInstance(base, token, alpha!.id)).toMatchObject({
         name: "work account",
         config: { token: "rotated" },
       });
@@ -282,8 +289,8 @@ describe("the writes on /providers", () => {
       async ({ base }) => {
         const token = await completeSetup(base);
 
-        const refused = await refusal(
-          await create(base, token, {
+        const refused = await readApiError(
+          await createInstance(base, token, {
             providerId: "single-provider",
             name: "second account",
             config: { token: "another" },
@@ -292,32 +299,40 @@ describe("the writes on /providers", () => {
         );
 
         expect(refused.error.code).toBe("validation");
-        expect(byProvider(await list(base, token), "single-provider")).toHaveLength(1);
+        expect(filterByProvider(await listInstances(base, token), "single-provider")).toHaveLength(
+          1,
+        );
       },
-      { plugins: [fixture({ id: "single", definitions: [SINGLE] }).plugin] },
+      { plugins: [createPluginFixture({ id: "single", definitions: [SINGLE] }).plugin] },
     );
   });
 
   it("deletes the instance, and reads not_found afterwards", async () => {
     await withProviders(async ({ base, sql }) => {
       const token = await completeSetup(base);
-      const [alpha] = byProvider(await list(base, token), "alpha-provider");
+      const [alpha] = filterByProvider(await listInstances(base, token), "alpha-provider");
 
       const deleted = await del(base, `/api/v1/providers/${alpha!.id}`, token);
       expect(deleted.status, await deleted.clone().text()).toBe(200);
 
       // The log is kept for months, and an instance's config is where a
       // provider's secrets go.
-      expect(await lastProviderPayload(sql)).toEqual({
+      expect(await readLastProviderPayload(sql)).toEqual({
         instanceId: alpha!.id,
         providerId: "alpha-provider",
         name: alpha!.name,
       });
 
-      expect(byProvider(await list(base, token), "alpha-provider")).toEqual([]);
-      const gone = await refusal(await get(base, `/api/v1/providers/${alpha!.id}`, token), 404);
+      expect(filterByProvider(await listInstances(base, token), "alpha-provider")).toEqual([]);
+      const gone = await readApiError(
+        await get(base, `/api/v1/providers/${alpha!.id}`, token),
+        404,
+      );
       expect(gone.error.code).toBe("not_found");
-      const never = await refusal(await get(base, `/api/v1/providers/${UNKNOWN_ID}`, token), 404);
+      const never = await readApiError(
+        await get(base, `/api/v1/providers/${UNKNOWN_ID}`, token),
+        404,
+      );
       expect(never.error.code).toBe("not_found");
     });
   });
@@ -329,40 +344,40 @@ describe("what a live subscriber is told about a provider instance", () => {
       const token = await completeSetup(harness.base);
       // The boot opened an instance per provider, and that announcement is
       // still in flight when the listener comes up.
-      await settleLive();
-      const ticket = await ticketFor(harness.base, token);
+      await waitForLiveToSettle();
+      const ticket = await fetchTicket(harness.base, token);
 
       let seen: ReadonlyArray<LiveMessage> = [];
       let subject = "";
       await onSocket(harness.base, (client) =>
         Effect.gen(function* () {
           yield* client.hello({ v: 1, ticket });
-          const providers = yield* collecting(client, { topic: "provider" });
+          const providers = yield* collectMessages(client, { topic: "provider" });
           yield* Effect.promise(() => expectHeld(harness.live, 1, "provider"));
 
           // Changes are coalesced over a short window, so two writes back to
           // back would arrive as one message.
           const instance = yield* Effect.promise(() =>
-            create(harness.base, token, {
+            createInstance(harness.base, token, {
               providerId: "alpha-provider",
               name: "second account",
               config: { token: "a-second-token" },
-            }).then(created),
+            }).then(parseCreatedInstance),
           );
           subject = instance.id;
           const writes: ReadonlyArray<() => Promise<Response>> = [
-            () => patch(harness.base, token, instance.id, { name: "renamed" }),
+            () => patchInstance(harness.base, token, instance.id, { name: "renamed" }),
             () => del(harness.base, `/api/v1/providers/${instance.id}`, token),
           ];
           expect(
-            yield* Effect.promise(() => within(2000, () => providers.received.length > 0)),
+            yield* Effect.promise(() => waitWithin(2000, () => providers.received.length > 0)),
           ).toBe(true);
           for (const [index, write] of writes.entries()) {
             const response = yield* Effect.promise(write);
             expect(response.status, yield* Effect.promise(() => response.text())).toBe(200);
             expect(
               yield* Effect.promise(() =>
-                within(2000, () => providers.received.length > index + 1),
+                waitWithin(2000, () => providers.received.length > index + 1),
               ),
             ).toBe(true);
           }
@@ -396,7 +411,7 @@ describe("what an instance says about its secret-valued fields", () => {
   const KEY_VALUE = "a-paid-credential-nobody-else-holds";
 
   const KEYED: ProviderDefinition = {
-    ...providerDefinition("keyed-provider", { token: "keyed-default" }),
+    ...buildProviderDefinition("keyed-provider", { token: "keyed-default" }),
     configSchema: Schema.Struct({
       token: Schema.String,
       zaiApiKey: secret({ title: KEY_TITLE, description: KEY_DESCRIPTION }),
@@ -406,8 +421,8 @@ describe("what an instance says about its secret-valued fields", () => {
   const withKeyed = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
     withServer(body, {
       plugins: [
-        fixture({ id: "keyed", definitions: [KEYED] }).plugin,
-        fixture({ id: "plain", definitions: [ALPHA] }).plugin,
+        createPluginFixture({ id: "keyed", definitions: [KEYED] }).plugin,
+        createPluginFixture({ id: "plain", definitions: [ALPHA] }).plugin,
       ],
     });
 
@@ -420,26 +435,30 @@ describe("what an instance says about its secret-valued fields", () => {
   it("names the field in the plugin's words and says it is not set yet", async () => {
     await withKeyed(async ({ base }) => {
       const token = await completeSetup(base);
-      const [keyed] = byProvider(await list(base, token), "keyed-provider");
+      const [keyed] = filterByProvider(await listInstances(base, token), "keyed-provider");
 
       expect(keyed?.secretFields).toEqual([
         { name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set: false },
       ]);
-      expect((await read(base, token, keyed!.id)).secretFields).toEqual(keyed!.secretFields);
+      expect((await readInstance(base, token, keyed!.id)).secretFields).toEqual(
+        keyed!.secretFields,
+      );
       // A provider that marked nothing secret says so rather than saying nothing.
-      expect(byProvider(await list(base, token), "alpha-provider")[0]?.secretFields).toEqual([]);
+      expect(
+        filterByProvider(await listInstances(base, token), "alpha-provider")[0]?.secretFields,
+      ).toEqual([]);
     });
   });
 
   it("says the key is set once it is, and never hands the value back", async () => {
     await withKeyed(async ({ base }) => {
       const token = await completeSetup(base);
-      const [keyed] = byProvider(await list(base, token), "keyed-provider");
+      const [keyed] = filterByProvider(await listInstances(base, token), "keyed-provider");
 
       const stored = await setKey(base, token, keyed!.id, KEY_VALUE);
       expect(stored.status, await stored.clone().text()).toBe(200);
 
-      const after = await read(base, token, keyed!.id);
+      const after = await readInstance(base, token, keyed!.id);
       expect(after.secretFields).toEqual([
         { name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set: true },
       ]);
@@ -447,7 +466,7 @@ describe("what an instance says about its secret-valued fields", () => {
       // Not in the config either: a secret-marked field is never stored there.
       expect(after.config).toEqual(KEYED.defaultConfig);
 
-      const listed = byProvider(await list(base, token), "keyed-provider");
+      const listed = filterByProvider(await listInstances(base, token), "keyed-provider");
       expect(listed[0]?.secretFields).toEqual(after.secretFields);
       expect(JSON.stringify(listed)).not.toContain(KEY_VALUE);
     });
@@ -456,10 +475,10 @@ describe("what an instance says about its secret-valued fields", () => {
   it("refuses a secret-marked field written into the config, naming it, and stores nothing", async () => {
     await withKeyed(async ({ base }) => {
       const token = await completeSetup(base);
-      const [keyed] = byProvider(await list(base, token), "keyed-provider");
+      const [keyed] = filterByProvider(await listInstances(base, token), "keyed-provider");
 
-      const rejected = await refusal(
-        await patch(base, token, keyed!.id, {
+      const rejected = await readApiError(
+        await patchInstance(base, token, keyed!.id, {
           config: { token: "keyed-default", zaiApiKey: KEY_VALUE },
         }),
         400,
@@ -470,7 +489,7 @@ describe("what an instance says about its secret-valued fields", () => {
       // The rejection must not be the place the value gets written down.
       expect(JSON.stringify(rejected.error)).not.toContain(KEY_VALUE);
 
-      const after = await read(base, token, keyed!.id);
+      const after = await readInstance(base, token, keyed!.id);
       expect(after.config).toEqual(KEYED.defaultConfig);
       expect(after.secretFields).toEqual([
         { name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set: false },
@@ -480,7 +499,7 @@ describe("what an instance says about its secret-valued fields", () => {
   it("takes the stored credential with it when the instance is deleted", async () => {
     await withKeyed(async ({ base }) => {
       const token = await completeSetup(base);
-      const [keyed] = byProvider(await list(base, token), "keyed-provider");
+      const [keyed] = filterByProvider(await listInstances(base, token), "keyed-provider");
       const stored = await setKey(base, token, keyed!.id, KEY_VALUE);
       expect(stored.status, await stored.clone().text()).toBe(200);
 

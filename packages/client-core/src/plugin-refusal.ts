@@ -6,7 +6,7 @@
  */
 import type { PluginRefusalReason } from "@hercule/contract";
 
-export const refusalReason = (reason: PluginRefusalReason): string => {
+export const describeRefusalReason = (reason: PluginRefusalReason): string => {
   if (reason.kind === "hostApi") {
     return `Built against host API ${String(reason.actual)}; this controller speaks ${String(reason.expected)}.`;
   }

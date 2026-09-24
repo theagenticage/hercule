@@ -19,22 +19,22 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  apiKeyIn,
-  cli,
+  readApiKey,
+  runCli,
   completeSetup,
-  jsonOk,
-  liveSessionsAsked,
+  parseJsonOutputOrFail,
+  isLiveSessionTestEnabled,
   LOGIN_DEADLINE_MS,
-  loginLent,
+  isLoginAvailable,
   PASSWORD,
   prepareLoggedInInstance,
   ROOT,
-  saidIn,
-  sessionOf,
+  collectAssistantText,
+  readSession,
   startController,
-  temporaryHome,
-  transcriptOf,
-  untilTag,
+  createTemporaryHome,
+  readTranscript,
+  waitForTranscriptTag,
   USERNAME,
   type Controller,
   type Page,
@@ -43,9 +43,9 @@ import {
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not quietly spend a subscription. */
-const wanted = liveSessionsAsked();
+const wanted = isLiveSessionTestEnabled();
 
-const state = temporaryHome();
+const state = createTemporaryHome();
 const binary = join(ROOT, "hercule");
 
 let controller: Controller;
@@ -93,8 +93,8 @@ let ready: Ready | undefined;
 
 const prepare = async (): Promise<Ready> => {
   const { snapshot } = await prepareLoggedInInstance({ home: state.home, binary, url, apiKey });
-  const profiles = jsonOk<Page<Profile>>(
-    await cli(["profile", "list", "--json", "--all"], { home: state.home, binary }),
+  const profiles = parseJsonOutputOrFail<Page<Profile>>(
+    await runCli(["profile", "list", "--json", "--all"], { home: state.home, binary }),
   ).items;
   // `worker` holds `subscription.write`, which is the grant the pattern needs.
   const worker = profiles.find((one) => one.name === "worker");
@@ -107,10 +107,10 @@ const prepare = async (): Promise<Ready> => {
 };
 
 /** Waits until the session is idle, which is the turn ending for good. */
-const untilIdle = async (id: string): Promise<void> => {
+const waitUntilIdle = async (id: string): Promise<void> => {
   const deadline = Date.now() + TURN_DEADLINE_MS;
   for (;;) {
-    const session = await sessionOf({ home: state.home, binary, id });
+    const session = await readSession({ home: state.home, binary, id });
     if (session.status === "idle") return;
     if (Date.now() > deadline) {
       throw new Error(`the session read ${session.status} rather than idle`);
@@ -120,20 +120,20 @@ const untilIdle = async (id: string): Promise<void> => {
 };
 
 /** How many turns the transcript holds, which is what a wake-up adds one to. */
-const turnsIn = (rows: ReadonlyArray<Row>): number =>
+const countTurns = (rows: ReadonlyArray<Row>): number =>
   rows.filter((row) => row.event._tag === "turn.started").length;
 
 /** The transcript once a turn after `before` has started. */
-const untilAnotherTurn = async (id: string, before: number): Promise<ReadonlyArray<Row>> => {
+const waitForAnotherTurn = async (id: string, before: number): Promise<ReadonlyArray<Row>> => {
   const deadline = Date.now() + WAKE_DEADLINE_MS;
   for (;;) {
-    const rows = await transcriptOf({ home: state.home, binary, id });
-    if (turnsIn(rows) > before) return rows;
+    const rows = await readTranscript({ home: state.home, binary, id });
+    if (countTurns(rows) > before) return rows;
     if (Date.now() > deadline) {
-      const session = await sessionOf({ home: state.home, binary, id });
+      const session = await readSession({ home: state.home, binary, id });
       throw new Error(
         `no second turn within ${String(WAKE_DEADLINE_MS / 1000)}s: the session reads ` +
-          `${session.status} and said:\n${saidIn(rows)}`,
+          `${session.status} and said:\n${collectAssistantText(rows)}`,
       );
     }
     await Bun.sleep(1_000);
@@ -153,14 +153,14 @@ beforeAll(async () => {
   const completed = await completeSetup({ home: state.home, url, binary });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 
-  const login = await cli(
+  const login = await runCli(
     ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-subscription-wake"],
     { home: state.home, binary, stdin: PASSWORD },
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
-  apiKey = apiKeyIn(state.home);
+  apiKey = readApiKey(state.home);
 
-  if (!loginLent()) return;
+  if (!isLoginAvailable()) return;
   ready = await prepare();
 }, LOGIN_DEADLINE_MS * 2);
 
@@ -182,8 +182,8 @@ describe.skipIf(!wanted)("an event waking a session that subscribed to it", () =
         return;
       }
 
-      const session = jsonOk<Session>(
-        await cli(
+      const session = parseJsonOutputOrFail<Session>(
+        await runCli(
           [
             "session",
             "spawn",
@@ -200,7 +200,7 @@ describe.skipIf(!wanted)("an event waking a session that subscribed to it", () =
         ),
       );
 
-      const first = await untilTag({
+      const first = await waitForTranscriptTag({
         home: state.home,
         binary,
         id: session.id,
@@ -208,24 +208,25 @@ describe.skipIf(!wanted)("an event waking a session that subscribed to it", () =
         timeoutMs: TURN_DEADLINE_MS,
       });
       // The agent ended its turn rather than waiting, which is the pattern.
-      await untilIdle(session.id);
-      const before = turnsIn(first);
+      await waitUntilIdle(session.id);
+      const before = countTurns(first);
 
       // The user's own credential, from a terminal, with no session involved.
-      const emitted = await cli(
+      const emitted = await runCli(
         ["event", "emit", "--kind", KIND, "--payload", PAYLOAD, "--ref", REF, "--json"],
         { home: state.home, binary },
       );
       expect(emitted.code, `${emitted.stdout}\n${emitted.stderr}`).toBe(0);
 
-      const woken = await untilAnotherTurn(session.id, before);
+      const woken = await waitForAnotherTurn(session.id, before);
 
       // What the woken turn was opened with: the rendered event, carrying the
       // kind, what happened, and where a person opens it.
       const delivered = JSON.stringify(woken.slice(first.length));
-      expect(delivered, `the woken turn did not carry the event:\n${saidIn(woken)}`).toContain(
-        KIND,
-      );
+      expect(
+        delivered,
+        `the woken turn did not carry the event:\n${collectAssistantText(woken)}`,
+      ).toContain(KIND);
       expect(delivered).toContain(TITLE);
       expect(delivered).toContain(PR_URL);
     },

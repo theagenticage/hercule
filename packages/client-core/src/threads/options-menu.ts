@@ -21,7 +21,7 @@ export interface ModelOptionRow {
   readonly boolean: boolean;
 }
 
-export const optionsMenu = (
+export const buildOptionsMenu = (
   descriptors: readonly ModelOption[],
   selected: Readonly<Record<string, string | boolean>>,
 ): readonly ModelOptionRow[] =>

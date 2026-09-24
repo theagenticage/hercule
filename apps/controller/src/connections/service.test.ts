@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
-import { homePaths, HerculeHome } from "../config";
+import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 /** The real service over the real repositories, a `:memory:` database and a key file. */
-const stack = () => {
+const buildStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-connection-service-"));
   homes.push(home);
   return ConnectionServiceLayer.pipe(
@@ -38,7 +38,7 @@ const stack = () => {
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HerculeHome, homePaths(home, join(home, "data")))),
+    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
 };
 
@@ -46,7 +46,7 @@ describe("the grant check", () => {
   it("runs before anything else, for the in-process caller the transport never gated", async () => {
     const failure = await Effect.runPromise(
       Effect.flatMap(ConnectionService, (connection) => Effect.flip(connection.query({}))).pipe(
-        Effect.provide(stack()),
+        Effect.provide(buildStack()),
       ),
     );
 

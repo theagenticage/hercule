@@ -2,7 +2,7 @@ import { useState, type JSX } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  githubConnections,
+  filterGitHubConnections,
   isClonableRemote,
   queryKeys,
   REMOTE_REFUSAL,
@@ -36,9 +36,9 @@ export function NewProject({
 }): JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const accounts = githubConnections(useQuery(connectionsQuery(client)).data?.items ?? []).map(
-    (connection) => ({ id: connection.id, label: connection.label }),
-  );
+  const accounts = filterGitHubConnections(
+    useQuery(connectionsQuery(client)).data?.items ?? [],
+  ).map((connection) => ({ id: connection.id, label: connection.label }));
 
   const [name, setName] = useState("");
   const [sources, setSources] = useState<readonly SourceDraft[]>([]);
@@ -54,7 +54,7 @@ export function NewProject({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.resources() }),
   });
 
-  const patch = (key: string, next: Partial<SourceDraft>): void => {
+  const patchSource = (key: string, next: Partial<SourceDraft>): void => {
     setSources((current) =>
       current.map((source) => (source.key === key ? { ...source, ...next } : source)),
     );
@@ -112,10 +112,10 @@ export function NewProject({
             : { setupCommand: source.setupCommand.trim() }),
           projectIds: [id],
         });
-        patch(source.key, { createdId: resource.id, message: null });
+        patchSource(source.key, { createdId: resource.id, message: null });
       } catch (error) {
         refused = true;
-        patch(source.key, { message: readErrorMessage(error) });
+        patchSource(source.key, { message: readErrorMessage(error) });
       }
     }
     if (refused) return;
@@ -145,7 +145,7 @@ export function NewProject({
           },
         ]);
       }}
-      onChangeSource={patch}
+      onChangeSource={patchSource}
       onRemoveSource={(key) => {
         setSources((current) => current.filter((source) => source.key !== key));
       }}

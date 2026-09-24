@@ -26,13 +26,13 @@ export interface Substrate {
 }
 
 /** What a machine's git must never take from whoever started the daemon. */
-const inherited = (name: string): boolean => !name.startsWith("GIT_") && name !== "SSH_ASKPASS";
+const isInherited = (name: string): boolean => !name.startsWith("GIT_") && name !== "SSH_ASKPASS";
 
-export const substrateEnv = (
+export const buildSubstrateEnv = (
   base: Readonly<Record<string, string | undefined>>,
   gitEnv?: Readonly<Record<string, string>>,
 ): GitEnv => ({
-  ...Object.fromEntries(Object.entries(base).filter(([name]) => inherited(name))),
+  ...Object.fromEntries(Object.entries(base).filter(([name]) => isInherited(name))),
   ...gitEnv,
   // A machine's git never has a person at it: a prompt would hang provisioning
   // rather than fail it.

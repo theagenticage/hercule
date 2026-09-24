@@ -22,7 +22,7 @@ export type ModelOptions = ModelSelection["options"];
  * with it is refused - which is how a slug nobody recognises is caught here,
  * even though the slug itself is left to the machine to refuse.
  */
-export const validatedOptions = (
+export const validateOptions = (
   models: ReadonlyArray<ModelDescriptor>,
   model: string,
   given: ModelOptions,
@@ -62,7 +62,9 @@ const MINUTE_MS = 60_000;
 export const DEFAULT_ABSOLUTE_TIMEOUT_MS = DEFAULT_ABSOLUTE_TIMEOUT_MINUTES * MINUTE_MS;
 
 /** The two clocks a session starts under, whole minutes turned into the milliseconds the wire carries. */
-export const timeoutsFrom = (controller: ScopeSettings<"controller">): SessionSpec["timeouts"] => ({
+export const buildTimeouts = (
+  controller: ScopeSettings<"controller">,
+): SessionSpec["timeouts"] => ({
   inactivityMs:
     (controller["session.inactivityTimeoutMinutes"] ?? DEFAULT_INACTIVITY_TIMEOUT_MINUTES) *
     MINUTE_MS,
@@ -92,5 +94,5 @@ export const buildContinuingSpec = (
   ...parent,
   modelSelection,
   continue: { nativeSessionId, mode },
-  timeouts: timeoutsFrom(controller),
+  timeouts: buildTimeouts(controller),
 });

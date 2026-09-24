@@ -8,30 +8,30 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
-import { BARE, instance, snapshot } from "../providers.testing";
+import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
 import { applyPick } from "./apply-pick";
 import type { ThreadConfig } from "./config";
 
-const runner = (overrides: Partial<Runner> & { id: string }): Runner => ({
+const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
   ...BARE,
   ...overrides,
 });
 
-const LOCAL = runner({ id: "r-local", name: "moss" });
-const REMOTE = runner({ id: "r-remote", name: "cove" });
+const LOCAL = buildRunner({ id: "r-local", name: "moss" });
+const REMOTE = buildRunner({ id: "r-remote", name: "cove" });
 
 const SONNET = { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] };
 const OPUS = { slug: "claude-opus-5", name: "Claude Opus 5", options: [] };
 const GPT = { slug: "gpt-5", name: "GPT-5", isDefault: true, options: [] };
 
-const CLAUDE = instance("claude-code", "Claude Code", [
-  snapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS] }),
+const CLAUDE = buildInstance("claude-code", "Claude Code", [
+  buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS] }),
 ]);
 
 /** Logged in on the remote machine only, so an instance pick moves the runner too. */
-const CODEX = instance("codex", "Codex", [
-  snapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
-  snapshot({ runnerId: REMOTE.id, models: [GPT] }),
+const CODEX = buildInstance("codex", "Codex", [
+  buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
+  buildSnapshot({ runnerId: REMOTE.id, models: [GPT] }),
 ]);
 
 const CATALOGS: {

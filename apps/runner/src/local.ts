@@ -13,10 +13,10 @@ import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
-import { daemon, type ToolingUnavailable } from "./daemon";
+import { runDaemon, type ToolingUnavailable } from "./daemon";
 import type { RunnerRetired } from "./socket";
 import { join, JoinError } from "./join";
-import { readRunnerFile, runnerFileIn, type NotEnrolled } from "./runner-file";
+import { readRunnerFile, buildRunnerFilePath, type NotEnrolled } from "./runner-file";
 
 const JOIN_RETRY_INTERVAL = Duration.millis(250);
 
@@ -81,18 +81,18 @@ const enrol = (home: string): Effect.Effect<void, JoinError> =>
     );
   });
 
-export const local = (
+export const runLocalRunner = (
   home: string,
 ): Effect.Effect<void, NotEnrolled | JoinError | RunnerRetired | ToolingUnavailable> =>
   Effect.gen(function* () {
     // Whether the file is there, not whether it reads: a machine holding an
     // unparseable `runner.json` should say so rather than enlist again.
-    if (existsSync(runnerFileIn(home))) {
+    if (existsSync(buildRunnerFilePath(home))) {
       const enrolled = yield* readRunnerFile(home);
       yield* announce({ runnerId: enrolled.runnerId });
     } else {
       yield* announce({ join: true });
       yield* enrol(home);
     }
-    return yield* daemon(home);
+    return yield* runDaemon(home);
   });

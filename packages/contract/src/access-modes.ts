@@ -22,7 +22,7 @@ export const ACCESS_MODE_CHAIN: readonly AccessMode[] = [
  * `approval-required` is not native on this provider, so there is nothing to
  * fall back to.
  */
-export const nearestSupportedAccessMode = (
+export const findNearestSupportedAccessMode = (
   requested: AccessMode,
   declared: DeclaredCapabilities["accessModes"],
 ): AccessMode | undefined => {

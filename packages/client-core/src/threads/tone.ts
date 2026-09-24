@@ -21,7 +21,7 @@ export type ProjectTone = "hercule" | "ops";
 
 const TONES: readonly ProjectTone[] = ["hercule", "ops"];
 
-export const projectTone = (projectId: string, projects: readonly Project[]): ProjectTone => {
+export const pickProjectTone = (projectId: string, projects: readonly Project[]): ProjectTone => {
   const index = projects.findIndex((each) => each.id === projectId);
   // A project the listing does not hold has no neighbours to differ from.
   return index < 0 ? TONES[0]! : TONES[index % TONES.length]!;

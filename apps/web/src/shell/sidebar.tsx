@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
-import { threadRowsMode, type HerculeClient, type Live } from "@hercule/client-core";
+import { resolveThreadRowsMode, type HerculeClient, type Live } from "@hercule/client-core";
 import type { SettingsState } from "@hercule/contract";
 import {
   Logo,
@@ -11,7 +11,7 @@ import {
   ThemeSelector,
   cn,
 } from "@hercule/ui";
-import { HERCULE_NAV, SEPARATOR, faceForPath, type Face, type NavItem } from "./nav";
+import { ORCHESTRATION_NAV, SEPARATOR, chooseFaceForPath, type Face, type NavItem } from "./nav";
 import { Pulse } from "./pulse";
 import { ThreadsFace } from "./threads-face";
 
@@ -80,7 +80,7 @@ function NavLink({
   );
 }
 
-function HerculeFace({
+function OrchestrationFace({
   pathname,
   counts,
 }: {
@@ -89,7 +89,7 @@ function HerculeFace({
 }): JSX.Element {
   return (
     <nav className="flex flex-col gap-px" aria-label="Hercule">
-      {HERCULE_NAV.map((item, index) =>
+      {ORCHESTRATION_NAV.map((item, index) =>
         item === SEPARATOR ? (
           // The hairline between the work screens and the machinery behind them.
           <div key={`separator-${String(index)}`} className="mx-2.5 my-2 h-px bg-line-soft" />
@@ -132,8 +132,8 @@ export function Sidebar({
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [override, setOverride] = useState<{ path: string; face: Face } | null>(null);
 
-  const face = override?.path === pathname ? override.face : faceForPath(pathname);
-  const rows = threadRowsMode(settings.user["ui.threadRows"]);
+  const face = override?.path === pathname ? override.face : chooseFaceForPath(pathname);
+  const rows = resolveThreadRowsMode(settings.user["ui.threadRows"]);
 
   return (
     <div className="sticky top-0 flex h-dvh w-[244px] shrink-0 flex-col border-r border-line-soft bg-surface px-2.5 pt-3.5 pb-3">
@@ -151,7 +151,7 @@ export function Sidebar({
       >
         <SegmentedControlItem value="threads">Threads</SegmentedControlItem>
         <SegmentedControlItem
-          value="hercule"
+          value="orchestration"
           className="inline-flex items-center justify-center gap-1.5"
         >
           Hercule
@@ -168,7 +168,7 @@ export function Sidebar({
           live={live}
         />
       ) : (
-        <HerculeFace pathname={pathname} counts={NO_COUNTS} />
+        <OrchestrationFace pathname={pathname} counts={NO_COUNTS} />
       )}
 
       <div className="mt-auto flex flex-col gap-1.5 pt-2.5">

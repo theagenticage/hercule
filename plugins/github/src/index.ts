@@ -27,7 +27,8 @@ const USER_URL = "https://api.github.com/user";
 /** GitHub refuses a request without one, so it is part of the contract. */
 const USER_AGENT = "Hercule";
 
-const refused = (message: string) => Effect.fail(new ConnectionValidationFailed({ message }));
+const failValidation = (message: string) =>
+  Effect.fail(new ConnectionValidationFailed({ message }));
 
 /** The one field of the answer this plugin reads; the rest of it is GitHub's. */
 const Account = Schema.Struct({ login: Schema.String });
@@ -48,17 +49,19 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
         "user-agent": USER_AGENT,
       },
     });
-    if (response.status === 401) return yield* refused("GitHub rejected the token.");
+    if (response.status === 401) return yield* failValidation("GitHub rejected the token.");
     if (response.status !== 200) {
-      return yield* refused(`GitHub answered ${String(response.status)}.`);
+      return yield* failValidation(`GitHub answered ${String(response.status)}.`);
     }
     const account = yield* decodeAccount(yield* response.json).pipe(
-      Effect.catchTag("SchemaError", () => refused("GitHub answered without naming an account.")),
+      Effect.catchTag("SchemaError", () =>
+        failValidation("GitHub answered without naming an account."),
+      ),
     );
     return { displayName: account.login };
   }).pipe(
     Effect.catchTag("HttpClientError", (error) =>
-      refused(`GitHub could not be reached: ${error.message}`),
+      failValidation(`GitHub could not be reached: ${error.message}`),
     ),
   );
 

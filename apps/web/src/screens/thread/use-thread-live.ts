@@ -14,16 +14,16 @@
  */
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import { mergeTranscript, openItemOf, queryKeys, type Live } from "@hercule/client-core";
+import { mergeTranscript, findOpenItem, queryKeys, type Live } from "@hercule/client-core";
 import {
-  sessionStreamTopic,
-  sessionTapTopic,
+  buildSessionStreamTopic,
+  buildSessionTapTopic,
   type TapItem,
   type TranscriptRow,
 } from "@hercule/contract";
 
 /** The item a row's event names, or nothing for an event that names none (a turn boundary). */
-const itemIdOf = (event: TranscriptRow["event"]): string | undefined =>
+const readItemId = (event: TranscriptRow["event"]): string | undefined =>
   "itemId" in event ? event.itemId : undefined;
 
 export const useThreadLive = (
@@ -59,7 +59,7 @@ export const useThreadLive = (
   // a side effect: this only mirrors the answer into the ref the tap handler
   // reads synchronously, and drops whatever was buffered for an item that
   // just stopped being the open one.
-  const openItemId = useMemo(() => openItemOf(rows), [rows]);
+  const openItemId = useMemo(() => findOpenItem(rows), [rows]);
   useEffect(() => {
     if (openItemId !== openItemIdRef.current) clearTail();
     openItemIdRef.current = openItemId;
@@ -85,7 +85,7 @@ export const useThreadLive = (
     const cursor = held?.at(-1)?.position ?? 0;
 
     const unsubscribe = live.subscribe(
-      sessionStreamTopic(sessionId),
+      buildSessionStreamTopic(sessionId),
       (delta) => {
         if (delta.gone) {
           unsubscribe();
@@ -109,7 +109,7 @@ export const useThreadLive = (
         // A row for the open item wins over whatever the tail held for it -
         // a row for any other item (another item starting, a turn boundary)
         // leaves the open item's own buffered tail exactly as it was.
-        if (items.some((item) => itemIdOf(item.event) === openItemIdRef.current)) clearTail();
+        if (items.some((item) => readItemId(item.event) === openItemIdRef.current)) clearTail();
         // Merged on `position`, not appended after the last row held: a row
         // this cache already has is the same row and is left alone, and one it
         // does not is placed in order however late it arrives. Two
@@ -126,7 +126,7 @@ export const useThreadLive = (
   }, [live, queryClient, sessionId, clearTail]);
 
   useEffect(() => {
-    const unsubscribe = live.subscribe(sessionTapTopic(sessionId), (delta) => {
+    const unsubscribe = live.subscribe(buildSessionTapTopic(sessionId), (delta) => {
       if (delta.gone) {
         unsubscribe();
         return;

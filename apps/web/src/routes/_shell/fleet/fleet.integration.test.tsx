@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hercule/client-core";
-import { reading, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
+import { readPageText, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 import { CONTROLLER_VERSION, GIB, MOSS, ZONE, type Fixture } from "./-fixtures";
 
 /** A machine somewhere else, running an older binary than the controller. */
@@ -63,17 +63,17 @@ interface TokenFixture {
 }
 
 /** A token minted a moment ago, running out in `minutes`. */
-const outstanding = (id: string, minutes: number): TokenFixture => ({
+const buildOutstandingToken = (id: string, minutes: number): TokenFixture => ({
   id,
   createdAt: new Date(Date.now() - 60_000).toISOString(),
   expiresAt: new Date(Date.now() + minutes * 60_000).toISOString(),
 });
 
-const EXPIRING_SOON = outstanding("01a06d02-e100-7c00-8a00-000000000001", 12);
-const EXPIRING_LATER = outstanding("01a06d02-e100-7c00-8a00-000000000002", 55);
+const EXPIRING_SOON = buildOutstandingToken("01a06d02-e100-7c00-8a00-000000000001", 12);
+const EXPIRING_LATER = buildOutstandingToken("01a06d02-e100-7c00-8a00-000000000002", 55);
 
 /** A controller holding the fleet given, and answering for itself. */
-const controller = (
+const buildController = (
   runners: readonly Fixture[],
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
@@ -102,14 +102,14 @@ const controller = (
   ...extra,
 });
 
-const open = async (
+const openApp = async (
   runners: readonly Fixture[],
   options: {
     readonly extra?: Readonly<Record<string, Handler>>;
     readonly local?: string | null;
   } = {},
 ) => {
-  const api = stubApi(controller(runners, options.extra));
+  const api = stubApi(buildController(runners, options.extra));
   const app = await renderApp({
     path: "/fleet",
     api: api.fetch,
@@ -120,7 +120,7 @@ const open = async (
 };
 
 /** The fleet listings the screen made, oldest first. */
-const listings = (api: { readonly calls: readonly Call[] }) =>
+const listRunnerReads = (api: { readonly calls: readonly Call[] }) =>
   api.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/runners");
 
 /**
@@ -131,7 +131,7 @@ const listings = (api: { readonly calls: readonly Call[] }) =>
  * parent still says nothing about any other machine. What comes back is
  * everything the screen says about that one runner, whatever it is built from.
  */
-const rowFor = async (name: string, others: readonly string[]): Promise<HTMLElement> => {
+const findRunnerRow = async (name: string, others: readonly string[]): Promise<HTMLElement> => {
   const found = await screen.findAllByText(new RegExp(name));
   let row = found.reduce((left, right) =>
     (left.textContent ?? "").length <= (right.textContent ?? "").length ? left : right,
@@ -165,17 +165,18 @@ const showsExpiry = (text: string, token: TokenFixture): boolean => {
   return stamp !== undefined && text.includes(stamp);
 };
 
-const revokes = (): readonly HTMLElement[] => screen.queryAllByRole("button", { name: /revoke/i });
+const queryRevokeButtons = (): readonly HTMLElement[] =>
+  screen.queryAllByRole("button", { name: /revoke/i });
 
 /** The link a row carries, whether it wraps the row or sits inside it. */
-const linkIn = (row: HTMLElement): HTMLAnchorElement | null =>
+const findRowLink = (row: HTMLElement): HTMLAnchorElement | null =>
   row.closest("a") ?? row.querySelector("a");
 
 describe("Fleet", () => {
   it("shows what each machine is and what it reported about itself", async () => {
-    await open([MOSS, HETZNER]);
+    await openApp([MOSS, HETZNER]);
 
-    const moss = reading(await rowFor(MOSS.name, [HETZNER.name]));
+    const moss = readPageText(await findRunnerRow(MOSS.name, [HETZNER.name]));
     expect(moss).toContain("online");
     expect(moss).toContain(CONTROLLER_VERSION);
     expect(moss).toContain("gpu");
@@ -187,7 +188,7 @@ describe("Fleet", () => {
     expect(showsSize(moss, MOSS.facts!.totalMemoryBytes), `memory in: ${moss}`).toBe(true);
     expect(showsSize(moss, MOSS.watermark!.diskFreeBytes), `free disk in: ${moss}`).toBe(true);
 
-    const hetzner = reading(await rowFor(HETZNER.name, [MOSS.name]));
+    const hetzner = readPageText(await findRunnerRow(HETZNER.name, [MOSS.name]));
     expect(hetzner).toContain("unreachable");
     expect(hetzner).toContain("linux");
     expect(hetzner).toContain("x64");
@@ -199,26 +200,26 @@ describe("Fleet", () => {
   });
 
   it("warns on the machine whose binary is not the controller's, and only there", async () => {
-    await open([MOSS, HETZNER]);
+    await openApp([MOSS, HETZNER]);
 
     // The wording is the screen's; what has to be there is that the row says
     // its binary is not the controller's, rather than only printing a number
     // the reader would have to compare themselves.
     const skew = /skew|mismatch|differ|out of date|behind|ahead|older|newer|not the controller/i;
-    const hetzner = reading(await rowFor(HETZNER.name, [MOSS.name]));
+    const hetzner = readPageText(await findRunnerRow(HETZNER.name, [MOSS.name]));
     expect(hetzner).toContain(HETZNER.version);
     expect(hetzner, "the older binary is called out").toMatch(skew);
 
     // The machine on the controller's own version says nothing about skew.
-    const moss = reading(await rowFor(MOSS.name, [HETZNER.name]));
+    const moss = readPageText(await findRunnerRow(MOSS.name, [HETZNER.name]));
     expect(moss).not.toMatch(skew);
   });
 
   it("keeps its shape when no machine has joined", async () => {
-    await open([]);
+    await openApp([]);
 
-    expect(reading()).toContain("no runner has joined yet");
-    expect(reading()).toContain(
+    expect(readPageText()).toContain("no runner has joined yet");
+    expect(readPageText()).toContain(
       "A runner probes the machine it runs on and reports what it found. Until one joins, Hercule knows nothing about this machine.",
     );
     expect(screen.getByText("Add machine")).toBeTruthy();
@@ -227,34 +228,40 @@ describe("Fleet", () => {
 
 describe("Fleet > this machine", () => {
   it("marks the machine the browser is on, and only that one", async () => {
-    await open([MOSS, HETZNER], { local: MOSS.id });
+    await openApp([MOSS, HETZNER], { local: MOSS.id });
 
     await waitFor(async () => {
-      expect(reading(await rowFor(MOSS.name, [HETZNER.name]))).toContain("this machine");
+      expect(readPageText(await findRunnerRow(MOSS.name, [HETZNER.name]))).toContain(
+        "this machine",
+      );
     });
-    expect(reading(await rowFor(HETZNER.name, [MOSS.name]))).not.toContain("this machine");
+    expect(readPageText(await findRunnerRow(HETZNER.name, [MOSS.name]))).not.toContain(
+      "this machine",
+    );
   });
 
   it("marks nothing when no machine on this browser answers", async () => {
-    await open([MOSS, HETZNER], { local: null });
+    await openApp([MOSS, HETZNER], { local: null });
 
     await screen.findAllByText(new RegExp(MOSS.name));
     // Detection resolves on its own turn, so the absence is given the time a
     // present sub-label would have taken to arrive.
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(reading()).not.toContain("this machine");
+    expect(readPageText()).not.toContain("this machine");
   });
 });
 
 describe("Fleet > add machine", () => {
   it("mints a token and shows the command that spends it", async () => {
     const user = userEvent.setup();
-    const { api } = await open([MOSS]);
+    const { api } = await openApp([MOSS]);
 
     await user.click(screen.getByRole("button", { name: /add machine/i }));
 
     await waitFor(() => {
-      expect(reading()).toContain(`hercule runner join ${window.location.origin} --token ${TOKEN}`);
+      expect(readPageText()).toContain(
+        `hercule runner join ${window.location.origin} --token ${TOKEN}`,
+      );
     });
     expect(
       api.calls.filter(
@@ -262,67 +269,71 @@ describe("Fleet > add machine", () => {
       ).length,
     ).toBeGreaterThan(0);
     // The command that predates the join exchange is not what is shown.
-    expect(reading()).not.toContain("hercule runner --controller");
+    expect(readPageText()).not.toContain("hercule runner --controller");
   });
 });
 
 describe("Fleet > live", () => {
   /** One invalidation, in the shape the contract puts on the wire. */
-  const invalidate = (kind: string, ids: readonly string[]) => ({ _tag: "invalidate", ids, kind });
+  const buildInvalidation = (kind: string, ids: readonly string[]) => ({
+    _tag: "invalidate",
+    ids,
+    kind,
+  });
 
   it("shows that a machine has become unreachable when it does so elsewhere", async () => {
     // A second machine, so what the changed row says is read off that row and
     // not off a page that has the word on it somewhere.
     const OTHER: Fixture = { ...HETZNER, connectivity: "offline" };
     let held: readonly Fixture[] = [MOSS, OTHER];
-    const { api, live } = await open(held, {
+    const { api, live } = await openApp(held, {
       extra: { "GET /api/v1/runners": () => ({ body: { items: held } }) },
     });
 
-    expect(reading(await rowFor(MOSS.name, [OTHER.name]))).toContain("online");
+    expect(readPageText(await findRunnerRow(MOSS.name, [OTHER.name]))).toContain("online");
     await waitFor(() => {
       expect(live.topics()).toContain("runner");
     });
-    const before = listings(api).length;
+    const before = listRunnerReads(api).length;
 
     held = [{ ...MOSS, connectivity: "unreachable" }, OTHER];
     act(() => {
-      live.push("runner", invalidate("updated", [MOSS.id]));
+      live.push("runner", buildInvalidation("updated", [MOSS.id]));
     });
 
     await waitFor(async () => {
-      expect(reading(await rowFor(MOSS.name, [OTHER.name]))).toContain("unreachable");
+      expect(readPageText(await findRunnerRow(MOSS.name, [OTHER.name]))).toContain("unreachable");
     });
     // The row came from a fresh listing, not from the push itself.
-    expect(listings(api).length).toBeGreaterThan(before);
+    expect(listRunnerReads(api).length).toBeGreaterThan(before);
   });
 });
 
 describe("Fleet > outstanding tokens", () => {
   it("lists the tokens still waiting to be spent, and when each runs out", async () => {
-    await open([MOSS], {
+    await openApp([MOSS], {
       extra: { "GET /api/v1/runners/join-tokens": { body: [EXPIRING_SOON, EXPIRING_LATER] } },
     });
 
     await waitFor(() => {
-      expect(revokes()).toHaveLength(2);
+      expect(queryRevokeButtons()).toHaveLength(2);
     });
-    const shown = reading();
+    const shown = readPageText();
     expect(showsExpiry(shown, EXPIRING_SOON), `the first expiry in: ${shown}`).toBe(true);
     expect(showsExpiry(shown, EXPIRING_LATER), `the second expiry in: ${shown}`).toBe(true);
   });
 
   it("offers nothing to take back when no token is outstanding", async () => {
-    await open([MOSS]);
+    await openApp([MOSS]);
 
     await screen.findByRole("button", { name: /add machine/i });
-    expect(revokes()).toEqual([]);
+    expect(queryRevokeButtons()).toEqual([]);
   });
 
   it("takes a token back, and drops it from the list", async () => {
     const user = userEvent.setup();
     let held: readonly TokenFixture[] = [EXPIRING_SOON, EXPIRING_LATER];
-    const { api } = await open([MOSS], {
+    const { api } = await openApp([MOSS], {
       extra: {
         "GET /api/v1/runners/join-tokens": () => ({ body: held }),
         [`DELETE /api/v1/runners/join-tokens/${EXPIRING_SOON.id}`]: () => {
@@ -337,9 +348,9 @@ describe("Fleet > outstanding tokens", () => {
     });
 
     await waitFor(() => {
-      expect(revokes()).toHaveLength(2);
+      expect(queryRevokeButtons()).toHaveLength(2);
     });
-    const first = revokes()[0];
+    const first = queryRevokeButtons()[0];
     expect(first).toBeDefined();
     await user.click(first!);
 
@@ -359,53 +370,53 @@ describe("Fleet > outstanding tokens", () => {
     const survivor = revoked === EXPIRING_SOON ? EXPIRING_LATER : EXPIRING_SOON;
 
     await waitFor(() => {
-      expect(revokes()).toHaveLength(1);
+      expect(queryRevokeButtons()).toHaveLength(1);
     });
-    expect(showsExpiry(reading(), survivor)).toBe(true);
-    expect(showsExpiry(reading(), revoked!)).toBe(false);
+    expect(showsExpiry(readPageText(), survivor)).toBe(true);
+    expect(showsExpiry(readPageText(), revoked!)).toBe(false);
   });
 });
 
 describe("Fleet > add machine > personal", () => {
   it("puts the reserved flag on the command the machine will run", async () => {
     const user = userEvent.setup();
-    await open([MOSS]);
+    await openApp([MOSS]);
 
     await user.click(screen.getByRole("button", { name: /add machine/i }));
     const plain = `hercule runner join ${window.location.origin} --token ${TOKEN}`;
     await waitFor(() => {
-      expect(reading()).toContain(plain);
+      expect(readPageText()).toContain(plain);
     });
-    expect(reading()).not.toContain("--reserved");
+    expect(readPageText()).not.toContain("--reserved");
 
     await user.click(screen.getByRole("checkbox", { name: /personal machine/i }));
 
     await waitFor(() => {
-      expect(reading()).toContain(`${plain} --reserved`);
+      expect(readPageText()).toContain(`${plain} --reserved`);
     });
 
     // The flag is the tick's, so unticking takes it back off.
     await user.click(screen.getByRole("checkbox", { name: /personal machine/i }));
     await waitFor(() => {
-      expect(reading()).not.toContain("--reserved");
+      expect(readPageText()).not.toContain("--reserved");
     });
-    expect(reading()).toContain(plain);
+    expect(readPageText()).toContain(plain);
   });
 });
 
 describe("Fleet > opening a machine", () => {
   it("says where each machine stands and leads to the machine itself", async () => {
-    await open([MOSS, SIRIUS]);
+    await openApp([MOSS, SIRIUS]);
 
-    const moss = await rowFor(MOSS.name, [SIRIUS.name]);
-    expect(reading(moss)).toContain(MOSS.connectivity);
-    expect(linkIn(moss)?.getAttribute("href")).toBe(`/fleet/${MOSS.id}`);
+    const moss = await findRunnerRow(MOSS.name, [SIRIUS.name]);
+    expect(readPageText(moss)).toContain(MOSS.connectivity);
+    expect(findRowLink(moss)?.getAttribute("href")).toBe(`/fleet/${MOSS.id}`);
 
     // A machine on its way out says so: its lifecycle is the reason a reader
     // would open it, and it is not what its connectivity says.
-    const sirius = await rowFor(SIRIUS.name, [MOSS.name]);
-    expect(reading(sirius)).toContain(SIRIUS.connectivity);
-    expect(reading(sirius)).toContain(SIRIUS.lifecycle);
-    expect(linkIn(sirius)?.getAttribute("href")).toBe(`/fleet/${SIRIUS.id}`);
+    const sirius = await findRunnerRow(SIRIUS.name, [MOSS.name]);
+    expect(readPageText(sirius)).toContain(SIRIUS.connectivity);
+    expect(readPageText(sirius)).toContain(SIRIUS.lifecycle);
+    expect(findRowLink(sirius)?.getAttribute("href")).toBe(`/fleet/${SIRIUS.id}`);
   });
 });

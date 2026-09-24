@@ -13,8 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { runnerDirIn } from "@hercule/home";
-import { daemon } from "./daemon";
+import { locateRunnerDir } from "@hercule/home";
+import { runDaemon } from "./daemon";
 
 const homes: Array<string> = [];
 
@@ -22,18 +22,18 @@ afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-const temporaryHome = (): string => {
+const createTemporaryHome = (): string => {
   const home = mkdtempSync(join(tmpdir(), "hercule-daemon-"));
   homes.push(home);
   return home;
 };
 
 /** A home holding a `runner.json` that points at this address. */
-const enrolledAt = (controllerUrl: string): string => {
-  const home = temporaryHome();
-  mkdirSync(runnerDirIn(home), { recursive: true });
+const createEnrolledHome = (controllerUrl: string): string => {
+  const home = createTemporaryHome();
+  mkdirSync(locateRunnerDir(home), { recursive: true });
   writeFileSync(
-    join(runnerDirIn(home), "runner.json"),
+    join(locateRunnerDir(home), "runner.json"),
     JSON.stringify({
       runnerId: "0199e0e7-0000-7000-8000-000000000000",
       credential: "the-credential-the-join-handed-back",
@@ -48,13 +48,13 @@ const enrolledAt = (controllerUrl: string): string => {
 
 describe("the runner daemon", () => {
   it("says which file a machine that never joined is missing", async () => {
-    const home = temporaryHome();
+    const home = createTemporaryHome();
 
-    const outcome = await Effect.runPromise(Effect.result(daemon(home)));
+    const outcome = await Effect.runPromise(Effect.result(runDaemon(home)));
 
     expect(outcome._tag).toBe("Failure");
     const message = outcome._tag === "Failure" ? outcome.failure.message : "";
-    expect(message).toContain(join(runnerDirIn(home), "runner.json"));
+    expect(message).toContain(join(locateRunnerDir(home), "runner.json"));
     expect(message).toContain("hercule runner join");
   });
 
@@ -62,9 +62,9 @@ describe("the runner daemon", () => {
     ["is not a URL at all", "not-a-url"],
     ["is a scheme the socket cannot dial", "mailto:a@b.c"],
   ])("refuses to start when the stored controllerUrl %s", async (_case, controllerUrl) => {
-    const home = enrolledAt(controllerUrl);
+    const home = createEnrolledHome(controllerUrl);
 
-    const outcome = await Effect.runPromise(Effect.result(daemon(home)));
+    const outcome = await Effect.runPromise(Effect.result(runDaemon(home)));
 
     expect(outcome._tag).toBe("Failure");
     const message = outcome._tag === "Failure" ? outcome.failure.message : "";
@@ -88,12 +88,12 @@ describe("the runner daemon", () => {
     });
 
     try {
-      const home = enrolledAt(`http://127.0.0.1:${String(server.port)}`);
+      const home = createEnrolledHome(`http://127.0.0.1:${String(server.port)}`);
       // The loop retries for ever, so it runs only for as long as it takes the
       // first attempt to reach the listener.
       await Effect.runPromise(
         Effect.raceFirst(
-          Effect.ignore(daemon(home)),
+          Effect.ignore(runDaemon(home)),
           Effect.promise(async () => {
             for (let attempt = 0; attempt < 200 && seen.length === 0; attempt++) {
               await new Promise((resolve) => setTimeout(resolve, 10));
@@ -107,7 +107,7 @@ describe("the runner daemon", () => {
       // Put there on the way up, before any session could be placed here: a
       // session whose `PATH` names this directory and finds nothing in it has
       // no way to call Hercule at all (spec 15 section 2).
-      const link = join(runnerDirIn(home), "bin", "hercule");
+      const link = join(locateRunnerDir(home), "bin", "hercule");
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
       expect(readlinkSync(link)).toBe(process.execPath);
     } finally {
@@ -136,12 +136,12 @@ describe("the runner daemon", () => {
     });
 
     try {
-      const home = enrolledAt(`http://127.0.0.1:${String(server.port)}`);
+      const home = createEnrolledHome(`http://127.0.0.1:${String(server.port)}`);
       // The listener lives as long as the daemon does, so it is asked from
       // inside the race rather than after it.
       const answered = await Effect.runPromise(
         Effect.raceFirst(
-          Effect.as(Effect.ignore(daemon(home)), undefined as unknown),
+          Effect.as(Effect.ignore(runDaemon(home)), undefined as unknown),
           Effect.promise(async () => {
             const said = await hello;
             const answer = await fetch(

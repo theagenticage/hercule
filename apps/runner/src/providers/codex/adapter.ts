@@ -27,16 +27,23 @@ import {
 } from "@hercule/protocol";
 import type { LoginCommand } from "../login";
 import type { ProviderAdapter, ProviderRunnerContext } from "../index";
-import { probeFailed } from "../probe";
-import { userMessage } from "../events";
+import { buildFailedProbe } from "../probe";
+import { buildUserMessage } from "../events";
 import { runProcess, spawnAppServer, type Run } from "../process";
-import { text } from "../text";
+import { truncateMessage } from "../text";
 import { now } from "../../report";
 import { ASKED, type Asked } from "./approvals";
-import { normalize, pathsOf, buildNormalizingState, type Normalizing } from "./normalize";
-import { codexInstall, handshake, probing, saidBy, STANDARD_TIER, type AppServer } from "./probe";
+import { normalize, readChangedPaths, buildNormalizingState, type Normalizing } from "./normalize";
 import {
-  rpcOver,
+  makeCodexInstall,
+  initializeAppServer,
+  makeProbe,
+  describeRpcError,
+  STANDARD_TIER,
+  type AppServer,
+} from "./probe";
+import {
+  makeRpc,
   type AppServerSpawn,
   type NotificationFrame,
   type RpcError,
@@ -192,7 +199,7 @@ const backoff = Schedule.exponential(BACKOFF).pipe(
  * server refused on its merits would be refused three more times, four seconds
  * later.
  */
-const retrying = <A>(request: Effect.Effect<A, RpcError>): Effect.Effect<A, RpcError> =>
+const retryWhileOverloaded = <A>(request: Effect.Effect<A, RpcError>): Effect.Effect<A, RpcError> =>
   Effect.retry(request, {
     schedule: backoff,
     times: RETRIES,
@@ -200,7 +207,7 @@ const retrying = <A>(request: Effect.Effect<A, RpcError>): Effect.Effect<A, RpcE
   });
 
 /** Which thread a frame is about, where it names one at all. */
-const threadIn = (params: unknown): string | undefined => {
+const readThreadId = (params: unknown): string | undefined => {
   const threadId = (params as { readonly threadId?: unknown } | null | undefined)?.threadId;
   return typeof threadId === "string" ? threadId : undefined;
 };
@@ -216,14 +223,14 @@ const buildDeveloperInstructions = (systemPrompt: string | undefined, skill: str
   [systemPrompt, skill].filter((part) => part !== undefined && part !== "").join("\n\n");
 
 /** Turn input is text only: attachments are the open item in spec 16 section B. */
-const textInput = (text: string): UserInput => ({ type: "text", text, text_elements: [] });
+const buildTextInput = (text: string): UserInput => ({ type: "text", text, text_elements: [] });
 
 /** What the device login prints for the user to type: four characters, a dash, five. */
 const USER_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/;
 
-export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
+export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
-  // run here and keeps `adapterFor` the synchronous lookup every other caller
+  // run here and keeps `findAdapter` the synchronous lookup every other caller
   // already treats it as.
   const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
   const sessions = new Map<string, Held>();
@@ -243,12 +250,12 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /** The session this host serves, once it has a thread open. */
-  const sessionOf = (host: Host): Held | undefined =>
+  const findHostSession = (host: Host): Held | undefined =>
     host.sessionId === undefined ? undefined : sessions.get(host.sessionId);
 
   /** A thread belongs to one app-server, so only that host's session is asked. */
-  const sessionOn = (host: Host, threadId: string): Held | undefined => {
-    const held = sessionOf(host);
+  const findThreadSession = (host: Host, threadId: string): Held | undefined => {
+    const held = findHostSession(host);
     return held?.binding.nativeSessionId === threadId ? held : undefined;
   };
 
@@ -260,14 +267,14 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * reported as started - a warning naming it would arrive before it does.
    */
   const warn = (host: Host, message: string): void => {
-    const held = sessionOf(host);
+    const held = findHostSession(host);
     if (held === undefined) return;
     emit({
       _tag: "runtime.warning",
       eventId: crypto.randomUUID(),
       sessionId: held.binding.sessionId,
       at: now(),
-      message: text(message),
+      message: truncateMessage(message),
     });
   };
 
@@ -275,14 +282,14 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * Ends the app-server a session was given: the host is that session's alone,
    * so nothing is left running with its token in it.
    */
-  const release = (host: Host): void => {
+  const releaseHost = (host: Host): void => {
     if (host.sessionId !== undefined && hosts.get(host.sessionId) === host) {
       hosts.delete(host.sessionId);
     }
     host.kill();
   };
 
-  const exit = (held: Held, reason: ExitReason): void => {
+  const exitSession = (held: Held, reason: ExitReason): void => {
     // By identity: a stop waits on the harness, and a thread the server closed
     // or an app-server that died in that window has already ended this session.
     // A second exit would be a second row for one end.
@@ -295,13 +302,13 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       at: now(),
       reason,
     });
-    release(held.host);
+    releaseHost(held.host);
   };
 
   /** An app-server that stopped on its own takes the session it held with it. */
-  const gone = (host: Host): void => {
-    const held = sessionOf(host);
-    if (held !== undefined) exit(held, "process_exit");
+  const onHostGone = (host: Host): void => {
+    const held = findHostSession(host);
+    if (held !== undefined) exitSession(held, "process_exit");
   };
 
   /**
@@ -311,7 +318,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * what keeps Claude's Keychain lookup working, which a relocated `HOME`
    * breaks.
    */
-  const envFor = (ctx: ProviderRunnerContext): Record<string, string | undefined> => {
+  const prepareEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined> => {
     const codexHome = join(ctx.home, "codex");
     const neutral = join(ctx.home, "home");
     for (const directory of [codexHome, neutral]) {
@@ -331,22 +338,22 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       // into a start failure, and the updater is off because a harness that
       // updated itself would run a version nobody chose.
       [binary, "app-server", "--strict-config", "-c", "check_for_update_on_startup=false"],
-      envFor(ctx),
+      prepareEnv(ctx),
     );
-    const remember = (line: string): void => {
+    const rememberComplaint = (line: string): void => {
       complaints.push(line);
       if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();
     };
     void (async () => {
       try {
-        for await (const line of child.stderr) if (line.trim() !== "") remember(line);
+        for await (const line of child.stderr) if (line.trim() !== "") rememberComplaint(line);
       } catch {
         // A child killed mid-read has nothing more to complain about, and what
         // it already said is still worth reporting.
       }
     })();
     const host: Host = {
-      rpc: rpcOver(child, {
+      rpc: makeRpc(child, {
         // Nothing a vendor writes may take the reader down, and a request that
         // threw on its way through is still a request that must be answered:
         // dropping it would hang the turn and the connection both.
@@ -354,7 +361,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
           try {
             onServerRequest(host, frame);
           } catch {
-            refuse(host, frame, {
+            refuseRequest(host, frame, {
               code: INVALID_REQUEST,
               message: `Hercule could not read the ${frame.method} it was asked`,
             });
@@ -371,7 +378,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
           }
         },
         onWarning: (message) => {
-          remember(message);
+          rememberComplaint(message);
           warn(host, message);
         },
       }),
@@ -380,8 +387,8 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       sessionId,
     };
     void child.exited.then(
-      () => gone(host),
-      () => gone(host),
+      () => onHostGone(host),
+      () => onHostGone(host),
     );
     Effect.runFork(host.rpc.pump);
     return host;
@@ -398,9 +405,9 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       catch: (error) => (error instanceof Error ? error.message : String(error)),
     });
 
-  const probe = probing(openHost);
+  const probe = makeProbe(openHost);
 
-  const hostFor = (
+  const startSessionHost = (
     sessionId: string,
     ctx: ProviderRunnerContext,
     binary: string,
@@ -415,12 +422,12 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         stale.kill();
       }
       return Effect.flatMap(openHost(ctx, binary, sessionId), (host) =>
-        Effect.matchEffect(handshake(host), {
+        Effect.matchEffect(initializeAppServer(host), {
           // Registered only once it has answered: a host kept under a session
           // id without a handshake is one nothing could talk to, and its child
           // would outlive the runner.
           onFailure: (error) => {
-            const said = saidBy(host, error);
+            const said = describeRpcError(host, error);
             host.kill();
             return Effect.fail(said);
           },
@@ -433,13 +440,13 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     });
 
   const onNotification = (host: Host, frame: NotificationFrame): void => {
-    const threadId = threadIn(frame.params);
-    const held = threadId === undefined ? undefined : sessionOn(host, threadId);
+    const threadId = readThreadId(frame.params);
+    const held = threadId === undefined ? undefined : findThreadSession(host, threadId);
     if (held === undefined) return;
     // The thread is unloaded and its rollout is on disk, which is what makes
     // this the one exit a later session can carry on from (spec 06 section 4.1).
     if (frame.method === "thread/closed") {
-      exit(held, "idle_unload");
+      exitSession(held, "idle_unload");
       return;
     }
     for (const event of normalize(held.state, frame)) emit(event);
@@ -451,7 +458,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       if (item.type !== "fileChange") return;
       if (frame.method === "item/completed") held.fileChanges.delete(item.id);
       else {
-        held.fileChanges.set(item.id, pathsOf(item));
+        held.fileChanges.set(item.id, readChangedPaths(item));
       }
       return;
     }
@@ -475,14 +482,14 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         cancelWaiting(held);
         const open = held.open;
         held.open = undefined;
-        if (open !== undefined) cancelled(held, open);
+        if (open !== undefined) cancelPark(held, open);
         held.fileChanges.clear();
       }
     }
   };
 
   /** Tells Codex a park is over, in its own terms. Every request is answered. */
-  const cancelled = (held: Held, park: Park): void => {
+  const cancelPark = (held: Held, park: Park): void => {
     held.host.rpc.answer(park.id, park.asked.replies("cancel", park.params));
   };
 
@@ -491,7 +498,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * these existed, so there is nothing to report over.
    */
   const cancelWaiting = (held: Held): void => {
-    for (const park of held.waiting.splice(0)) cancelled(held, park);
+    for (const park of held.waiting.splice(0)) cancelPark(held, park);
   };
 
   /** Puts the session on a park: exactly one is open at a time. */
@@ -511,7 +518,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * says the park is over, and the next request Codex is waiting on takes the
    * slot it left.
    */
-  const resolving = (held: Held, park: Park, decision: ApprovalDecision): void => {
+  const resolvePark = (held: Held, park: Park, decision: ApprovalDecision): void => {
     held.open = undefined;
     held.host.rpc.answer(park.id, park.asked.replies(decision, park.params));
     emit({
@@ -530,7 +537,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * Answered, not dropped: a request left hanging is a turn that never ends,
    * with nothing said anywhere.
    */
-  const refuse = (host: Host, frame: ServerRequestFrame, error: RpcError): void => {
+  const refuseRequest = (host: Host, frame: ServerRequestFrame, error: RpcError): void => {
     host.rpc.answer(frame.id, { error });
   };
 
@@ -548,19 +555,19 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     }
     const asked = ASKED[frame.method];
     if (asked === undefined) {
-      refuse(host, frame, {
+      refuseRequest(host, frame, {
         code: METHOD_NOT_FOUND,
         message: `Hercule does not answer ${frame.method}`,
       });
       warn(host, `the app-server asked for ${frame.method}, which this runner build cannot answer`);
       return;
     }
-    const threadId = threadIn(frame.params);
-    const held = threadId === undefined ? undefined : sessionOn(host, threadId);
+    const threadId = readThreadId(frame.params);
+    const held = threadId === undefined ? undefined : findThreadSession(host, threadId);
     // A thread nobody here holds has no one to ask and no one to tell: a
     // warning for it would go to every other session on this app-server.
     if (threadId === undefined || held === undefined) {
-      refuse(host, frame, {
+      refuseRequest(host, frame, {
         code: INVALID_REQUEST,
         message: `no session on this runner is on thread ${String(threadId)}`,
       });
@@ -583,7 +590,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * Ends the running turn, if the adapter believes there is one. A refusal
    * means the turn is already over, which is the same outcome.
    */
-  const interrupting = (held: Held): Effect.Effect<void> =>
+  const interruptTurn = (held: Held): Effect.Effect<void> =>
     held.turnId === undefined
       ? Effect.void
       : Effect.ignore(
@@ -596,7 +603,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
           ),
         );
 
-  const hosting = (sessionId: string): Effect.Effect<Held, string> =>
+  const getHostedSession = (sessionId: string): Effect.Effect<Held, string> =>
     Effect.suspend(() => {
       const held = sessions.get(sessionId);
       return held === undefined
@@ -611,7 +618,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * than tracked here: a selection changed and changed back would otherwise be
    * remembered as no change at all.
    */
-  const opening = (held: Held, input: TurnInput): Effect.Effect<SendResult, string> =>
+  const startTurn = (held: Held, input: TurnInput): Effect.Effect<SendResult, string> =>
     Effect.gen(function* () {
       // Codex takes the schema per turn and not per thread, so every turn of
       // the session carries the schema. If it were sent once, the second turn
@@ -619,8 +626,8 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       const schema = held.state.outputSchema;
       const params: TurnStartParams = {
         threadId: held.binding.nativeSessionId,
-        input: [textInput(input.text)],
-        ...modelParams(input.modelSelection),
+        input: [buildTextInput(input.text)],
+        ...buildModelParams(input.modelSelection),
         // The cast is safe because nothing here reads the value back. The
         // schema crosses the wire as the JSON the controller stored, and
         // Codex's own JSON type is the mutable type ts-rs writes.
@@ -632,7 +639,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
       const before = held.state.model;
       if (input.modelSelection !== undefined) held.state.model = input.modelSelection.model;
       const answer = yield* Effect.mapError(
-        retrying(held.host.rpc.request("turn/start", params)),
+        retryWhileOverloaded(held.host.rpc.request("turn/start", params)),
         (error) => {
           // No turn opened, so the selection it would have run under is not
           // what the next one reports.
@@ -649,16 +656,16 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * it ended between the belief and the call. The caller opens a turn instead,
    * because input is never bounced.
    */
-  const steering = (
+  const steerTurn = (
     held: Held,
     text: string,
     expectedTurnId: string,
   ): Effect.Effect<SendResult | undefined> =>
     Effect.match(
-      retrying(
+      retryWhileOverloaded(
         held.host.rpc.request("turn/steer", {
           threadId: held.binding.nativeSessionId,
-          input: [textInput(text)],
+          input: [buildTextInput(text)],
           expectedTurnId,
         } satisfies TurnSteerParams),
       ),
@@ -676,19 +683,19 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * Hercule's own name for the tier Codex runs on by default and is not an id
    * Codex knows, so selecting it sends no `serviceTier` field.
    */
-  const tierOf = (selected: unknown): string | undefined =>
+  const readServiceTier = (selected: unknown): string | undefined =>
     typeof selected === "string" && selected !== STANDARD_TIER ? selected : undefined;
 
   /**
    * A selection as Codex takes it. The option ids are the ones the probe put on
    * the model descriptor, so a composer that offers one sends it back by name.
    */
-  const modelParams = (
+  const buildModelParams = (
     selection: ModelSelection | undefined,
   ): Pick<TurnStartParams, "model" | "effort" | "serviceTier"> => {
     if (selection === undefined) return {};
     const effort = selection.options["effort"];
-    const tier = tierOf(selection.options["serviceTier"]);
+    const tier = readServiceTier(selection.options["serviceTier"]);
     return {
       model: selection.model,
       ...(typeof effort === "string" ? { effort } : {}),
@@ -707,7 +714,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * restriction, and the Agent record and the Session record both report the
    * field as unenforced, so no behaviour is substituted in silence.
    */
-  const threadParams = (
+  const buildThreadParams = (
     spec: SessionSpec,
     ctx: ProviderRunnerContext,
   ): Pick<
@@ -720,7 +727,7 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     | "approvalsReviewer"
     | "developerInstructions"
   > => {
-    const tier = tierOf(spec.modelSelection.options["serviceTier"]);
+    const tier = readServiceTier(spec.modelSelection.options["serviceTier"]);
     return {
       cwd: ctx.cwd,
       model: spec.modelSelection.model,
@@ -740,30 +747,30 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
     // takes nothing from it and does not name the argument.
     probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> =>
       ctx.binary === undefined
-        ? Effect.succeed(probeFailed(null, `no ${CODEX_BINARY} on this machine`))
+        ? Effect.succeed(buildFailedProbe(null, `no ${CODEX_BINARY} on this machine`))
         : probe(ctx, ctx.binary),
 
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(`no ${CODEX_BINARY} on this machine`);
-        const host = yield* hostFor(sessionId, ctx, binary);
+        const host = yield* startSessionHost(sessionId, ctx, binary);
         const carried = spec.continue;
         const opened = yield* Effect.matchEffect(
           carried === undefined
             ? host.rpc.request("thread/start", {
-                ...threadParams(spec, ctx),
+                ...buildThreadParams(spec, ctx),
                 ephemeral: false,
               } satisfies ThreadStartParams)
             : host.rpc.request(carried.mode === "resume" ? "thread/resume" : "thread/fork", {
                 threadId: carried.nativeSessionId,
-                ...threadParams(spec, ctx),
+                ...buildThreadParams(spec, ctx),
               } satisfies ThreadResumeParams & ThreadForkParams),
           {
             onFailure: (error: RpcError) => {
               // A thread that never opens gives the host back rather than
               // leaving a process nobody talks to.
-              release(host);
+              releaseHost(host);
               return Effect.fail(error.message);
             },
             // A fork is a thread of its own, so the id answered with is the
@@ -801,15 +808,15 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
     sendInput: (sessionId: string, input: TurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
-        const held = yield* hosting(sessionId);
+        const held = yield* getHostedSession(sessionId);
         const running = held.turnId;
         const steered =
-          running === undefined ? undefined : yield* steering(held, input.text, running);
-        const sent = steered ?? (yield* opening(held, input));
+          running === undefined ? undefined : yield* steerTurn(held, input.text, running);
+        const sent = steered ?? (yield* startTurn(held, input));
         // In flight from the answer, not from the notification that follows it:
         // an input arriving in between would open a second turn.
         held.turnId = sent.turnId;
-        for (const event of userMessage({
+        for (const event of buildUserMessage({
           sessionId,
           turnId: sent.turnId,
           text: input.text,
@@ -834,8 +841,8 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         const open = held.open;
         // The stream says the open park was cancelled, because that is what
         // ended it.
-        if (open !== undefined) resolving(held, open, "cancel");
-        return interrupting(held);
+        if (open !== undefined) resolvePark(held, open, "cancel");
+        return interruptTurn(held);
       }),
 
     respondToRequest: (
@@ -861,10 +868,10 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         // waiting is announced to a user who could only watch it die.
         const ending = park.asked.endsTurn.includes(decision);
         if (ending) cancelWaiting(held);
-        resolving(held, park, decision);
+        resolvePark(held, park, decision);
         // Only where the answer shape cannot carry the refusal itself: every
         // other row says "stopped" to Codex in its own terms.
-        return ending ? interrupting(held) : Effect.void;
+        return ending ? interruptTurn(held) : Effect.void;
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
@@ -877,8 +884,8 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
         // otherwise go on working in the workspace between the exit and its own
         // kill, with every notification about it going nowhere.
         return Effect.andThen(
-          interrupting(held),
-          Effect.sync(() => exit(held, reason)),
+          interruptTurn(held),
+          Effect.sync(() => exitSession(held, reason)),
         );
       }),
 
@@ -892,12 +899,15 @@ export const codexAdapter = (seam: CodexSeam): ProviderAdapter => {
      */
     login: (ctx: ProviderRunnerContext, binary: string): LoginCommand => ({
       command: [binary, "login", "--device-auth"],
-      env: envFor(ctx),
+      env: prepareEnv(ctx),
       userCode: USER_CODE,
     }),
 
-    install: codexInstall(seam.run),
+    install: makeCodexInstall(seam.run),
   };
 };
 
-export const codex: ProviderAdapter = codexAdapter({ appServer: spawnAppServer, run: runProcess });
+export const codex: ProviderAdapter = makeCodexAdapter({
+  appServer: spawnAppServer,
+  run: runProcess,
+});

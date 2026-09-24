@@ -1,8 +1,8 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { Button, Checkbox, Field, Input, LaneLabel, Select, StringList } from "@hercule/ui";
 import {
-  configDraft,
-  configPayload,
+  buildConfigDraft,
+  buildConfigPayload,
   type ConfigDraft,
   type ConfigField,
   type ConfigJson,
@@ -35,16 +35,16 @@ export function ConfigForm({
   readonly onEdit: () => void;
   readonly onSave: (config: ConfigJson) => void;
 }): JSX.Element {
-  const [draft, setDraft] = useState<ConfigDraft>(() => configDraft(fields, config));
+  const [draft, setDraft] = useState<ConfigDraft>(() => buildConfigDraft(fields, config));
 
-  const set = (name: string, value: ConfigValue): void => {
+  const setField = (name: string, value: ConfigValue): void => {
     onEdit();
     setDraft((current) => ({ ...current, [name]: value }));
   };
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();
-    onSave(configPayload(fields, draft, config));
+    onSave(buildConfigPayload(fields, draft, config));
   };
 
   return (
@@ -64,7 +64,7 @@ export function ConfigForm({
           value={draft[field.name] ?? ""}
           error={issues[field.name]}
           onChange={(value) => {
-            set(field.name, value);
+            setField(field.name, value);
           }}
         />
       ))}

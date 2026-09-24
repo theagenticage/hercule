@@ -87,11 +87,11 @@ describe("the mark family", () => {
   });
 
   it("draws the decision mark a hair heavier than the rest of the family", () => {
-    const weight = (svg: SVGSVGElement) => svg.getAttribute("stroke-width");
+    const readStrokeWidth = (svg: SVGSVGElement) => svg.getAttribute("stroke-width");
     const { container: decision } = render(<DecisionMark />);
     const { container: done } = render(<DoneMark />);
-    expect(weight(done.querySelector("svg")!)).toBe("1.15");
-    expect(weight(decision.querySelector("svg")!)).toBe("1.35");
+    expect(readStrokeWidth(done.querySelector("svg")!)).toBe("1.15");
+    expect(readStrokeWidth(decision.querySelector("svg")!)).toBe("1.35");
   });
 
   it("gives the working mark three bars that a stylesheet can animate", () => {

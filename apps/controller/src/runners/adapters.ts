@@ -17,7 +17,7 @@ const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything
 export const requireOnline = (runner: RunnerDetail): Effect.Effect<void, InvalidState> =>
   runner.connectivity === "online" ? Effect.void : Effect.fail(createInvalidStateError(NOT_ONLINE));
 
-export const noAdapterFor = (providerId: string): string =>
+export const describeNoAdapter = (providerId: string): string =>
   `no adapter for ${providerId} in this runner build`;
 
 /** Online, and carrying an adapter for this provider. */
@@ -30,5 +30,7 @@ export const requireAdapter = (
   Effect.flatMap(requireOnline(runner), () =>
     (runner.facts?.adapters ?? []).includes(providerId)
       ? Effect.void
-      : Effect.fail(createValidationError([{ path: [field], message: noAdapterFor(providerId) }])),
+      : Effect.fail(
+          createValidationError([{ path: [field], message: describeNoAdapter(providerId) }]),
+        ),
   );

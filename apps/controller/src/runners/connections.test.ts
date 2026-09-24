@@ -22,7 +22,7 @@ import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
-import { newConnection, RunnerConnections, RunnerConnectionsLayer } from "./connections";
+import { mintConnection, RunnerConnections, RunnerConnectionsLayer } from "./connections";
 import { runnerRepository } from "./repository";
 
 const layer = RunnerConnectionsLayer.pipe(
@@ -36,7 +36,7 @@ interface Arranged {
   readonly lifecycle?: RunnerLifecycle;
 }
 
-const fleetOf = (rows: ReadonlyArray<Arranged>) =>
+const insertFleet = (rows: ReadonlyArray<Arranged>) =>
   Effect.gen(function* () {
     const runners = yield* runnerRepository;
     const at = yield* nowIso;
@@ -60,7 +60,7 @@ describe("the fleet a stopped controller left behind", () => {
         const connections = yield* RunnerConnections;
         const runners = yield* runnerRepository;
         const audit = yield* AuditLog;
-        const arranged = yield* fleetOf([
+        const arranged = yield* insertFleet([
           { connectivity: "online" },
           { connectivity: "offline" },
           { connectivity: "online" },
@@ -133,9 +133,9 @@ describe("a draining runner whose socket drops", () => {
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
         const runners = yield* runnerRepository;
-        const [runner] = yield* fleetOf([{ connectivity: "offline", lifecycle: "draining" }]);
+        const [runner] = yield* insertFleet([{ connectivity: "offline", lifecycle: "draining" }]);
 
-        const connection = newConnection();
+        const connection = mintConnection();
         yield* connections.greeted(runner!.id, connection, HELD, {
           binaryVersion: "0.1.0",
           protocolVersion: 1,
@@ -161,10 +161,10 @@ describe("a report from a connection the runner has replaced", () => {
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
         const runners = yield* runnerRepository;
-        const [runner] = yield* fleetOf([{ connectivity: "offline" }]);
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
 
-        const older = newConnection();
-        const newer = newConnection();
+        const older = mintConnection();
+        const newer = mintConnection();
         yield* connections.greeted(runner!.id, older, HELD, {
           binaryVersion: "0.1.0",
           protocolVersion: 1,

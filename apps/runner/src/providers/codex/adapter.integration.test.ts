@@ -42,7 +42,7 @@ afterAll(() => {
   for (const directory of scratch.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-const scratchDir = (label: string): string => {
+const createScratchDir = (label: string): string => {
   const made = mkdtempSync(join(tmpdir(), `hercule-codex-${label}-`));
   scratch.push(made);
   return made;
@@ -53,16 +53,16 @@ const scratchDir = (label: string): string => {
  * `CODEX_HOME` at the home's own `codex/` directory, so that is where the
  * credential has to be for the session to be logged in at all.
  */
-const homeWithLogin = (): string => {
-  const home = scratchDir("home");
+const createHomeWithLogin = (): string => {
+  const home = createScratchDir("home");
   const codexHome = join(home, "codex");
   mkdirSync(codexHome, { recursive: true, mode: 0o700 });
   copyFileSync(join(borrowed!, "auth.json"), join(codexHome, "auth.json"));
   return home;
 };
 
-const contextFor = (home: string): ProviderRunnerContext => ({
-  cwd: scratchDir("cwd"),
+const buildContext = (home: string): ProviderRunnerContext => ({
+  cwd: createScratchDir("cwd"),
   home,
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
@@ -83,7 +83,7 @@ const ready =
  */
 const probed = !ready
   ? undefined
-  : await Effect.runPromise(codex.probe(contextFor(homeWithLogin()), {}));
+  : await Effect.runPromise(codex.probe(buildContext(createHomeWithLogin()), {}));
 
 const authed = probed?.auth.status === "ok";
 
@@ -101,7 +101,7 @@ const SESSION_SPEC: SessionSpec = {
 /** Long enough for a cold app-server to start, connect and answer one prompt. */
 const TURN_DEADLINE = Duration.seconds(120);
 
-const until = async (
+const waitForEvent = async (
   seen: ReadonlyArray<ProviderEvent>,
   tag: ProviderEvent["_tag"],
 ): Promise<void> => {
@@ -140,13 +140,13 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
       codex.startSession(
         sessionId,
         { ...SESSION_SPEC, systemPrompt: ASSESSOR_SYSTEM_PROMPT, outputSchema },
-        contextFor(homeWithLogin()),
+        buildContext(createHomeWithLogin()),
       ),
     );
     await Effect.runPromise(codex.sendInput(sessionId, { text }));
-    await until(seen, "turn.completed");
+    await waitForEvent(seen, "turn.completed");
     await Effect.runPromise(codex.stopSession(sessionId, "stopped"));
-    await until(seen, "session.exited");
+    await waitForEvent(seen, "session.exited");
     return seen.find(
       (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
         event._tag === "turn.completed",

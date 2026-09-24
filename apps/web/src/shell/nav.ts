@@ -2,7 +2,7 @@ import type { ComponentType } from "react";
 import { RunGlyph, TaskGlyph, WorkflowGlyph, type MarkProps } from "@hercule/ui";
 
 /** Which sidebar face a screen belongs to. */
-export type Face = "threads" | "hercule";
+export type Face = "threads" | "orchestration";
 
 /** One item of the orchestration nav, or the hairline between its two halves. */
 export interface NavItem {
@@ -18,8 +18,8 @@ export interface NavItem {
 
 export const SEPARATOR = "separator" as const;
 
-/** The Hercule face, in its pinned order. */
-export const HERCULE_NAV: readonly (NavItem | typeof SEPARATOR)[] = [
+/** The items of the orchestration face, in their pinned order. */
+export const ORCHESTRATION_NAV: readonly (NavItem | typeof SEPARATOR)[] = [
   { to: "/intake", label: "Intake", count: "intake" },
   { to: "/check-in", label: "Check-in", count: "checkin" },
   { to: "/tasks", label: "Tasks", glyph: TaskGlyph },
@@ -50,7 +50,7 @@ export const SETTINGS_NAV: readonly { readonly to: string; readonly label: strin
  * the threads side; everything else is orchestration, so the segmented switch
  * is what puts threads back.
  */
-export const faceForPath = (pathname: string): Face =>
+export const chooseFaceForPath = (pathname: string): Face =>
   pathname === "/" || pathname === "/sessions" || pathname.startsWith("/threads/")
     ? "threads"
-    : "hercule";
+    : "orchestration";

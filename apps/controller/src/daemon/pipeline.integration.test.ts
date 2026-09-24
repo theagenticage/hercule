@@ -7,19 +7,19 @@
  * `hercule serve` forks.
  */
 import { describe, expect, it, vi } from "vitest";
-import { createProfile, at, until, WAIT_DEADLINE_MS } from "../sessions/testing";
+import { createProfile, at, waitUntil, WAIT_DEADLINE_MS } from "../sessions/testing";
 import {
   BURST,
   buildPayload,
-  caughtUp,
-  emitted,
+  waitUntilCaughtUp,
+  emitManualEvent,
   KIND,
-  matchedInputRows,
+  readMatchedInputRows,
   REF,
-  rowsWhen,
+  waitForMatchedInputRows,
   runEffect,
   storeCondition,
-  subscribed,
+  subscribeAgent,
   spawnSubscriber,
   readCursorAndHead,
   withPipeline,
@@ -32,11 +32,15 @@ describe("the event pipeline's tick", () => {
   it("writes one matched input for a matched subscription, and walks its cursor past the event", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribed(arranged, agent, REF);
+      const subscriptionId = await subscribeAgent(arranged, agent, REF);
 
-      const eventId = await emitted(arranged, [REF], "The lid does not close");
+      const eventId = await emitManualEvent(arranged, [REF], "The lid does not close");
 
-      const rows = await rowsWhen(arranged.harness, subscriptionId, (found) => found.length >= 1);
+      const rows = await waitForMatchedInputRows(
+        arranged.harness,
+        subscriptionId,
+        (found) => found.length >= 1,
+      );
       expect(rows).toHaveLength(1);
       expect(rows[0]!.source).toBe("subscription");
       expect(rows[0]!.event_id).toBe(eventId);
@@ -50,7 +54,7 @@ describe("the event pipeline's tick", () => {
       // The cursor ends at the event, which is the end of the log: it is read
       // against the head rather than against the id alone, so an entry
       // appended by anything else in the meantime is not read as a defect.
-      const position = await caughtUp(arranged.harness);
+      const position = await waitUntilCaughtUp(arranged.harness);
       expect(position).toBeGreaterThanOrEqual(eventId);
     });
   });
@@ -58,8 +62,8 @@ describe("the event pipeline's tick", () => {
   it("walks a burst wider than one batch to the end of the log, rather than one batch a tick", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "burst-holder");
-      const subscriptionId = await subscribed(arranged, agent, REF);
-      await caughtUp(arranged.harness);
+      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      await waitUntilCaughtUp(arranged.harness);
 
       // Two and a half batches, appended in one statement so the router finds
       // them all waiting rather than a few per pass as they arrive. They are
@@ -80,7 +84,7 @@ describe("the event pipeline's tick", () => {
           FROM counted`,
       );
 
-      const rows = await rowsWhen(
+      const rows = await waitForMatchedInputRows(
         arranged.harness,
         subscriptionId,
         (found) => found.length >= BURST,
@@ -94,10 +98,10 @@ describe("the event pipeline's tick", () => {
   it("writes nothing a second time, however often the cursor is rewound over the same events", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribed(arranged, agent, REF);
-      const eventId = await emitted(arranged, [REF], "The lid does not close");
-      await rowsWhen(arranged.harness, subscriptionId, (found) => found.length >= 1);
-      const settled = await caughtUp(arranged.harness);
+      const subscriptionId = await subscribeAgent(arranged, agent, REF);
+      const eventId = await emitManualEvent(arranged, [REF], "The lid does not close");
+      await waitForMatchedInputRows(arranged.harness, subscriptionId, (found) => found.length >= 1);
+      const settled = await waitUntilCaughtUp(arranged.harness);
 
       // The crash between the commit of the matched inputs and the advance of
       // the cursor, three times over.
@@ -106,23 +110,23 @@ describe("the event pipeline's tick", () => {
           arranged.harness.sql`UPDATE event_cursors SET position = ${eventId - 1}
                                WHERE consumer = 'router'`,
         );
-        await until("walked the log again", async () => {
+        await waitUntil("walked the log again", async () => {
           const seen = await readCursorAndHead(arranged.harness);
           return seen.position !== null && seen.position >= settled ? seen.position : undefined;
         });
-        const rows = await matchedInputRows(arranged.harness, subscriptionId);
+        const rows = await readMatchedInputRows(arranged.harness, subscriptionId);
         expect(rows, `pass ${String(pass)}`).toHaveLength(1);
         expect(rows[0]!.event_id).toBe(eventId);
       }
 
-      expect(await caughtUp(arranged.harness)).toBeGreaterThanOrEqual(settled);
+      expect(await waitUntilCaughtUp(arranged.harness)).toBeGreaterThanOrEqual(settled);
     });
   });
 
   it("writes no matched input for an audit entry, whatever a subscription's condition says, and passes it", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "subscribers");
-      const subscriptionId = await subscribed(arranged, agent, REF);
+      const subscriptionId = await subscribeAgent(arranged, agent, REF);
       // A condition that admits everything, so a row that is not written is
       // the population's doing and not the condition's.
       await storeCondition(arranged.harness, subscriptionId, "true");
@@ -136,16 +140,20 @@ describe("the event pipeline's tick", () => {
       );
       const entryId = entries[0]!.id;
 
-      await until("walked past the audit entry", async () => {
+      await waitUntil("walked past the audit entry", async () => {
         const seen = await readCursorAndHead(arranged.harness);
         return seen.position !== null && seen.position >= entryId ? seen.position : undefined;
       });
-      expect(await matchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
+      expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
 
       // The same subscription does get a row for a pipeline event, so the
       // silence above is about the population and not about a dead router.
-      const eventId = await emitted(arranged, [REF], "The lid does not close");
-      const rows = await rowsWhen(arranged.harness, subscriptionId, (found) => found.length >= 1);
+      const eventId = await emitManualEvent(arranged, [REF], "The lid does not close");
+      const rows = await waitForMatchedInputRows(
+        arranged.harness,
+        subscriptionId,
+        (found) => found.length >= 1,
+      );
       expect(rows.map((row) => row.event_id)).toEqual([eventId]);
     });
   });

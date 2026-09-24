@@ -33,9 +33,14 @@ import {
 } from "@hercule/contract";
 import { HOST_API, registerConnectionType, type Plugin } from "@hercule/plugin-host";
 import { lintOutputSchema } from "@hercule/protocol";
-import { get, post, readRefusal } from "../http/testing";
+import { get, post, readErrorBody } from "../http/testing";
 import { NOTE_APPEND_ACTION, NOTE_APPEND_ACTION_ID, notesPlugin } from "../plugins/testing";
-import { agentOn, profileNamed, WAIT_DEADLINE_MS, withAgentFleet } from "../sessions/testing";
+import {
+  spawnAgentUnder,
+  readProfileNamed,
+  WAIT_DEADLINE_MS,
+  withAgentFleet,
+} from "../sessions/testing";
 import {
   ABSENT_ID,
   ACCEPTED_GITHUB_TOKEN,
@@ -169,7 +174,7 @@ const expectErrorsAt = async (
 
   const response = await createWorkflow(base, token, { source });
   expect(response.status, `${fixture.description}: ${await response.clone().text()}`).toBe(400);
-  const error = await readRefusal(response);
+  const error = await readErrorBody(response);
   expect(error.code, fixture.description).toBe("validation");
   expect(sortIssuePaths(error.issues), fixture.description).toEqual(sortIssuePaths(fixture.paths));
 
@@ -1230,7 +1235,7 @@ describe("the agent steps", () => {
 
       const response = await createWorkflow(base, token, { source });
       expect(response.status, await response.clone().text()).toBe(400);
-      const error = await readRefusal(response);
+      const error = await readErrorBody(response);
       expect(error.code).toBe("validation");
       expect(error.issues).toHaveLength(findings.length);
       for (const path of error.issues) {
@@ -1611,7 +1616,7 @@ describe("the trigger rules", () => {
 
       const saved = await createWorkflow(base, token, { source });
       expect(saved.status).toBe(400);
-      const error = await readRefusal(saved);
+      const error = await readErrorBody(saved);
       expect(error.issues).toHaveLength(5);
       // Each message lists five inputs and a count of the rest. A message that
       // listed every input would make the response about 200 kB.
@@ -2009,7 +2014,7 @@ describe("workflow.validate", () => {
       ]) {
         const response = await validateWorkflow(base, token, body);
         expect(response.status, await response.clone().text()).toBe(400);
-        expect((await readRefusal(response)).code).toBe("validation");
+        expect((await readErrorBody(response)).code).toBe("validation");
       }
     });
   });
@@ -2173,17 +2178,23 @@ describe("the grant that validation and the catalogs need", () => {
       ];
 
       // The shipped worker profile has no workflow grant at all.
-      const workerSession = await agentOn(arranged, await profileNamed(arranged, "worker"));
+      const workerSession = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "worker"),
+      );
       for (const [operation, read] of reads) {
         const response = await read(workerSession.token);
-        const error = await readRefusal(response);
+        const error = await readErrorBody(response);
         expect(response.status, `${operation}: ${error.text}`).toBe(403);
         expect(error.code, operation).toBe("forbidden");
         expect(error.grant, operation).toBe("workflow.read");
       }
 
       // The shipped assistant profile has workflow.read.
-      const assistantSession = await agentOn(arranged, await profileNamed(arranged, "assistant"));
+      const assistantSession = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "assistant"),
+      );
       for (const [operation, read] of reads) {
         const response = await read(assistantSession.token);
         expect(response.status, `${operation}: ${await response.clone().text()}`).toBe(200);

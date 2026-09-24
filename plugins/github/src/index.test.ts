@@ -21,7 +21,7 @@ import type {
 import { github } from "./index";
 
 /** Runs `register` and hands back everything the plugin contributed. */
-const registered = async (
+const collectContributions = async (
   plugin: Plugin,
 ): Promise<{
   readonly types: ReadonlyArray<ConnectionTypeContribution>;
@@ -53,7 +53,7 @@ interface Stub {
   readonly requests: Array<HttpClientRequest.HttpClientRequest>;
 }
 
-const stub = (
+const stubHttpClient = (
   answer: (
     request: HttpClientRequest.HttpClientRequest,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>,
@@ -67,8 +67,8 @@ const stub = (
 };
 
 /** A stub that answers every request with this status and body. */
-const answering = (status: number, body: unknown): Stub =>
-  stub((request) =>
+const stubAnswer = (status: number, body: unknown): Stub =>
+  stubHttpClient((request) =>
     Effect.succeed(
       HttpClientResponse.fromWeb(
         request,
@@ -83,24 +83,24 @@ const answering = (status: number, body: unknown): Stub =>
 const PAT = "ghp_a-real-looking-token";
 
 /** The one type the plugin contributes, for the tests that drive its `validate`. */
-const connectionType = async (): Promise<ConnectionTypeContribution> => {
-  const contribution = (await registered(github)).types[0];
+const readConnectionType = async (): Promise<ConnectionTypeContribution> => {
+  const contribution = (await collectContributions(github)).types[0];
   if (contribution === undefined) throw new Error("the plugin registered no connection type");
   return contribution;
 };
 
 /** Runs `validate` against a stub and hands back what it answered, either way. */
-const validating = async (
+const runValidate = async (
   of: Stub,
 ): Promise<Result.Result<{ readonly displayName: string }, { readonly message: string }>> => {
-  const type = await connectionType();
+  const type = await readConnectionType();
   return Effect.runPromise(
     Effect.result(type.validate({ pat: PAT })).pipe(Effect.provide(of.layer)),
   );
 };
 
 /** The message a refusal carries, for the tests about what it says. */
-const messageOf = (
+const readFailureMessage = (
   outcome: Result.Result<{ readonly displayName: string }, { readonly message: string }>,
 ): string => {
   if (!Result.isFailure(outcome)) throw new Error("validate was expected to fail");
@@ -133,7 +133,7 @@ describe("what the github plugin registers", () => {
       capabilities: ["connections", "event-sources"],
     });
 
-    const contributions = (await registered(github)).types;
+    const contributions = (await collectContributions(github)).types;
 
     expect(contributions).toHaveLength(1);
     expect(contributions[0]).toMatchObject({
@@ -151,7 +151,7 @@ describe("what the github plugin registers", () => {
   });
 
   it("contributes one event source declaring the whole kind roster", async () => {
-    const sources = (await registered(github)).sources;
+    const sources = (await collectContributions(github)).sources;
 
     expect(sources).toHaveLength(1);
     expect(sources[0]?.id).toBe("github");
@@ -165,9 +165,9 @@ describe("what the github plugin registers", () => {
 
 describe("what the github plugin makes of GitHub's answer", () => {
   it("asks who the token belongs to, as GitHub requires the question to be asked", async () => {
-    const of = answering(200, { login: "octocat" });
+    const of = stubAnswer(200, { login: "octocat" });
 
-    const outcome = await validating(of);
+    const outcome = await runValidate(of);
 
     expect(outcome).toMatchObject({ success: { displayName: "octocat" } });
     const request = of.requests[0];
@@ -179,19 +179,19 @@ describe("what the github plugin makes of GitHub's answer", () => {
   });
 
   it("says the token was rejected when GitHub says the credentials are bad", async () => {
-    const outcome = await validating(answering(401, { message: "Bad credentials" }));
+    const outcome = await runValidate(stubAnswer(401, { message: "Bad credentials" }));
 
-    expect(messageOf(outcome)).toContain("rejected");
+    expect(readFailureMessage(outcome)).toContain("rejected");
   });
 
   it("names the status when GitHub is broken", async () => {
-    const outcome = await validating(answering(500, { message: "Server Error" }));
+    const outcome = await runValidate(stubAnswer(500, { message: "Server Error" }));
 
-    expect(messageOf(outcome)).toContain("500");
+    expect(readFailureMessage(outcome)).toContain("500");
   });
 
   it("fails, saying something, when the request never got there", async () => {
-    const of = stub((request) =>
+    const of = stubHttpClient((request) =>
       Effect.fail(
         new HttpClientError.HttpClientError({
           reason: new HttpClientError.TransportError({
@@ -202,8 +202,8 @@ describe("what the github plugin makes of GitHub's answer", () => {
       ),
     );
 
-    const outcome = await validating(of);
+    const outcome = await runValidate(of);
 
-    expect(messageOf(outcome).length).toBeGreaterThan(0);
+    expect(readFailureMessage(outcome).length).toBeGreaterThan(0);
   });
 });

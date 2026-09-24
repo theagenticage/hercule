@@ -50,39 +50,39 @@ export function resolveHomePath(
 }
 
 /** Where `config.toml` lives; known before any config has been read. */
-export function configFileIn(home: string): string {
+export function locateConfigFile(home: string): string {
   return join(home, "config.toml");
 }
 
 /** Where the CLI credential file lives; mode 0600, `{ url, apiKey }`. */
-export function credentialsFileIn(home: string): string {
+export function locateCredentialsFile(home: string): string {
   return join(home, "credentials.json");
 }
 
 /** Where the runner keeps its own material state: `runner.json`, and its storage directories. */
-export function runnerDirIn(home: string): string {
+export function locateRunnerDir(home: string): string {
   return join(home, "runner");
 }
 
 /** Where `setup-url` lives; known without reading any config. */
-export function setupUrlFileIn(home: string): string {
+export function locateSetupUrlFile(home: string): string {
   return join(home, "setup-url");
 }
 
 /** The home layout for a home directory and an already-resolved Data Root. */
-export function homePaths(home: string, dataDir: string): HomePaths {
+export function buildHomePaths(home: string, dataDir: string): HomePaths {
   const resolvedDataDir = isAbsolute(dataDir) ? dataDir : resolve(home, dataDir);
   return {
     home,
-    configFile: configFileIn(home),
-    credentialsFile: credentialsFileIn(home),
+    configFile: locateConfigFile(home),
+    credentialsFile: locateCredentialsFile(home),
     dataDir: resolvedDataDir,
     databaseFile: join(resolvedDataDir, DATABASE_FILE_NAME),
-    runnerDir: runnerDirIn(home),
+    runnerDir: locateRunnerDir(home),
     logsDir: join(home, "logs"),
     backupsDir: join(home, "backups"),
     tlsDir: join(home, "tls"),
-    setupUrlFile: setupUrlFileIn(home),
+    setupUrlFile: locateSetupUrlFile(home),
     masterKeyFile: join(home, "master.key"),
   };
 }

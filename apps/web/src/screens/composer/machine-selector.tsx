@@ -18,7 +18,7 @@ const STATE_HUE: Record<MachineRow["state"], string> = {
  * much of the machine is taken. Nothing else is said there - what is true of
  * the machine belongs under it, where there is room for the reason.
  */
-const stateAndCapacity = (row: MachineRow): JSX.Element => (
+const renderStateAndCapacity = (row: MachineRow): JSX.Element => (
   <>
     <span className={STATE_HUE[row.state]}>{row.state}</span>
     {/* The space is a character rather than a gap, so the row reads the way
@@ -32,7 +32,7 @@ const stateAndCapacity = (row: MachineRow): JSX.Element => (
  * thread lands on, one held back - and every reason it is dimmed. A machine
  * that does not hold the repo yet is still pickable: it clones on first use.
  */
-const subLine = (row: MachineRow): string =>
+const describeMachine = (row: MachineRow): string =>
   [
     row.isLocal ? "this machine" : null,
     row.isDefault ? "default" : null,
@@ -81,8 +81,8 @@ export function MachineSelector({
         <MenuRow
           key={row.runnerId}
           name={row.name}
-          note={stateAndCapacity(row)}
-          sub={subLine(row)}
+          note={renderStateAndCapacity(row)}
+          sub={describeMachine(row)}
           inert={row.dimmed !== null}
           current={row.current}
           onPick={() => {

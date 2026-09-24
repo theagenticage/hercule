@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { browserTimezone } from "@hercule/client-core";
-import { envelope, renderApp, stubApi, type Answer, type Handler } from "../app/testing";
+import { resolveBrowserTimezone } from "@hercule/client-core";
+import { buildErrorBody, renderApp, stubApi, type Answer, type Handler } from "../app/testing";
 
 /** A controller on its first run, which is over once setup has answered. */
-const firstRun = (complete: Answer): Readonly<Record<string, Handler>> => {
+const buildFirstRunController = (complete: Answer): Readonly<Record<string, Handler>> => {
   let done = false;
   return {
     "GET /api/v1/setup": () => ({ body: { complete: done } }),
@@ -34,7 +34,7 @@ describe("the setup screen", () => {
   });
 
   it("sends the browser's timezone with the account, without asking for it", async () => {
-    const api = stubApi(firstRun({ body: { token: "minted" } }));
+    const api = stubApi(buildFirstRunController({ body: { token: "minted" } }));
     const { client } = await renderApp({ path: "/setup?token=one-time", api: api.fetch });
 
     await fillIn("rogier", "hunter2hunter2");
@@ -47,7 +47,7 @@ describe("the setup screen", () => {
     expect(complete.body).toEqual({
       username: "rogier",
       password: "hunter2hunter2",
-      timezone: browserTimezone(),
+      timezone: resolveBrowserTimezone(),
     });
     await waitFor(() => {
       expect(client.getToken()).toBe("minted");
@@ -55,7 +55,7 @@ describe("the setup screen", () => {
   });
 
   it("takes the spent token out of the address bar and out of the back button", async () => {
-    const api = stubApi(firstRun({ body: { token: "minted" } }));
+    const api = stubApi(buildFirstRunController({ body: { token: "minted" } }));
     const { router } = await renderApp({ path: "/setup?token=one-time", api: api.fetch });
 
     await fillIn("rogier", "hunter2hunter2");
@@ -69,7 +69,10 @@ describe("the setup screen", () => {
 
   it("shows what the API said when it refuses", async () => {
     const api = stubApi(
-      firstRun({ status: 401, body: envelope("unauthenticated", "the setup token has expired") }),
+      buildFirstRunController({
+        status: 401,
+        body: buildErrorBody("unauthenticated", "the setup token has expired"),
+      }),
     );
     const { router } = await renderApp({ path: "/setup?token=stale", api: api.fetch });
 
@@ -80,7 +83,7 @@ describe("the setup screen", () => {
   });
 
   it("refuses a password the contract would refuse, without asking the API", async () => {
-    const api = stubApi(firstRun({ body: { token: "minted" } }));
+    const api = stubApi(buildFirstRunController({ body: { token: "minted" } }));
     await renderApp({ path: "/setup?token=one-time", api: api.fetch });
 
     await fillIn("rogier", "short");

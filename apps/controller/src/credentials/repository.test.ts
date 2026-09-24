@@ -38,7 +38,7 @@ const withUser = Effect.gen(function* () {
   return { user, credentials };
 });
 
-const page = (over: Partial<{ limit: number; cursor: string | undefined }> = {}) => ({
+const buildPageRequest = (over: Partial<{ limit: number; cursor: string | undefined }> = {}) => ({
   limit: over.limit ?? 50,
   cursor: over.cursor,
   direction: "desc" as const,
@@ -146,7 +146,7 @@ describe("api keys", () => {
           yield* credentials.revokeApiKey(user.id, key.id),
           yield* credentials.revokeApiKey(user.id, key.id),
           yield* credentials.findApiKey(hashToken(token)),
-          yield* credentials.listApiKeys(user.id, page()),
+          yield* credentials.listApiKeys(user.id, buildPageRequest()),
         ] as const;
       }),
     );
@@ -195,7 +195,7 @@ describe("api keys", () => {
         for (;;) {
           const result: Page<ApiKeyRecord> = yield* credentials.listApiKeys(
             user.id,
-            page({ limit: 2, cursor }),
+            buildPageRequest({ limit: 2, cursor }),
           );
           expect(result.items.length).toBeLessThanOrEqual(2);
           names.push(...result.items.map((item) => item.name));
@@ -203,7 +203,7 @@ describe("api keys", () => {
           if (cursor === undefined) break;
         }
 
-        const all = yield* credentials.listApiKeys(user.id, page());
+        const all = yield* credentials.listApiKeys(user.id, buildPageRequest());
         return [names, all.items.map((item) => item.name)] as const;
       }),
     );
@@ -239,7 +239,10 @@ describe("api keys", () => {
     const error = await runError(
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
-        return yield* credentials.listApiKeys(user.id, page({ cursor: "bm90LWEtY3Vyc29y" }));
+        return yield* credentials.listApiKeys(
+          user.id,
+          buildPageRequest({ cursor: "bm90LWEtY3Vyc29y" }),
+        );
       }),
     );
     expect(error._tag).toBe("CursorError");
@@ -249,7 +252,7 @@ describe("api keys", () => {
 /**
  * The throttle on `last_used_at`: a use inside the interval writes nothing, a
  * use past it writes. Both directions are asserted, so inverting the
- * comparison in `worthStamping` fails one of them.
+ * comparison in `shouldStampLastUsed` fails one of them.
  */
 describe("use stamps", () => {
   it("renews a login bearer at most once per interval", async () => {

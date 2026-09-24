@@ -19,9 +19,9 @@ import type {
 import {
   decodeCursor,
   encodeCursor,
-  keysetOver,
+  buildKeyset,
   mintUuid,
-  pageOf,
+  buildPage,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -97,12 +97,12 @@ const DEFAULT_DISK_WATERMARK_BYTES = 10 * 1024 ** 3;
  * The cap the fleet answers with. A machine that has not reported yet is taken
  * for the smallest one there is rather than for no capacity at all.
  */
-const effectiveCap = (override: number | null, facts: RunnerFacts | null): number =>
+const computeEffectiveCap = (override: number | null, facts: RunnerFacts | null): number =>
   override ??
   (facts === null ? 1 : Math.max(1, Math.floor(facts.totalMemoryBytes / BYTES_PER_SESSION)));
 
 /** The watermark dispatch admits placements against. */
-const effectiveWatermark = (override: number | null): number =>
+const computeEffectiveWatermark = (override: number | null): number =>
   override ?? DEFAULT_DISK_WATERMARK_BYTES;
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
@@ -116,7 +116,10 @@ const buildCursorScope = (direction: SortDirection): CursorScope => ({
  * page it is on: one row written by another version must not take a whole fleet
  * listing with it.
  */
-const documentIn = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, what: string) => {
+const buildDocumentDecoder = <S extends Schema.ConstraintDecoder<unknown>>(
+  schema: S,
+  what: string,
+) => {
   const decode = Schema.decodeUnknownExit(Schema.fromJsonString(schema));
   return (id: string, column: string | null): Effect.Effect<S["Type"] | null> => {
     if (column === null) return Effect.succeed(null);
@@ -132,9 +135,9 @@ const documentIn = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, what
   };
 };
 
-const factsIn = documentIn(RunnerFacts, "facts");
-const watermarkIn = documentIn(RunnerWatermark, "watermark");
-const capabilitiesIn = documentIn(RunnerCapabilities, "negotiated capabilities");
+const factsIn = buildDocumentDecoder(RunnerFacts, "facts");
+const watermarkIn = buildDocumentDecoder(RunnerWatermark, "watermark");
+const capabilitiesIn = buildDocumentDecoder(RunnerCapabilities, "negotiated capabilities");
 
 const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
   Effect.gen(function* () {
@@ -150,8 +153,8 @@ const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
       labels: JSON.parse(row.labels) as ReadonlyArray<string>,
       facts,
       watermark: yield* watermarkIn(id, row.watermark),
-      maxConcurrentSessions: effectiveCap(row.max_concurrent_sessions, facts),
-      diskWatermarkBytes: effectiveWatermark(row.disk_watermark_bytes),
+      maxConcurrentSessions: computeEffectiveCap(row.max_concurrent_sessions, facts),
+      diskWatermarkBytes: computeEffectiveWatermark(row.disk_watermark_bytes),
       lastSeenAt: row.last_seen_at,
     };
   });
@@ -175,7 +178,7 @@ const toDetail = (row: RunnerRow): Effect.Effect<RunnerDetail> =>
  * of behind a machine's back - and two spellings of "online" would be two
  * different answers.
  */
-export const onlineWhere = (alias: string): string =>
+export const buildOnlineClause = (alias: string): string =>
   `${alias}.connectivity = 'online' AND ${alias}.lifecycle = 'active'`;
 
 const make = Effect.gen(function* () {
@@ -234,7 +237,7 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM runners
-          WHERE ${sql.literal(onlineWhere("runners"))} AND reserved = 0
+          WHERE ${sql.literal(buildOnlineClause("runners"))} AND reserved = 0
         `,
         (rows) => new Set(rows.map((row) => uuidToString(row.id))),
       ),
@@ -326,7 +329,7 @@ const make = Effect.gen(function* () {
           readonly disk_watermark_bytes: number | null;
         }>`SELECT watermark, disk_watermark_bytes FROM runners WHERE id = ${key}`;
         const was = yield* watermarkIn(id, rows[0]?.watermark ?? null);
-        const effective = effectiveWatermark(rows[0]?.disk_watermark_bytes ?? null);
+        const effective = computeEffectiveWatermark(rows[0]?.disk_watermark_bytes ?? null);
         yield* sql`UPDATE runners
                    SET watermark = ${JSON.stringify(watermark)}, updated_at = ${at}
                    WHERE id = ${key}`;
@@ -384,7 +387,7 @@ const make = Effect.gen(function* () {
           request.cursor === undefined
             ? undefined
             : yield* decodeCursor(request.cursor, scope, "string");
-        const { keyset, order } = keysetOver(
+        const { keyset, order } = buildKeyset(
           sql,
           ["name", "id"],
           after === undefined ? undefined : [after[0], uuidFromString(after[1])],
@@ -404,7 +407,7 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(COLUMNS)} FROM runners
           WHERE ${sql.and(clauses)} ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* pageOf(
+        return yield* buildPage(
           rows,
           request.limit,
           (page) => Effect.forEach(page, toRunner),

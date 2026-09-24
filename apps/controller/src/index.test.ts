@@ -32,7 +32,7 @@ describe("the stop request", () => {
    * would take the runner down with it if the handler ever came off early,
    * which is precisely the failure this is about.
    */
-  const signal = (name: "SIGINT" | "SIGTERM"): void => {
+  const sendSignal = (name: "SIGINT" | "SIGTERM"): void => {
     process.emit(name);
   };
 
@@ -48,14 +48,14 @@ describe("the stop request", () => {
           Effect.gen(function* () {
             const stopped = yield* untilStopped;
 
-            signal("SIGTERM");
+            sendSignal("SIGTERM");
             yield* stopped;
 
             // The drain is under way. Both signals still land on Hercule - the
             // handlers are still installed - and neither of them stops it
             // again.
-            signal("SIGTERM");
-            signal("SIGINT");
+            sendSignal("SIGTERM");
+            sendSignal("SIGINT");
             yield* stopped;
           }),
         ),

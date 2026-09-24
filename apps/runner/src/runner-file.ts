@@ -8,7 +8,7 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { runnerDirIn } from "@hercule/home";
+import { locateRunnerDir } from "@hercule/home";
 
 export const CONTROLLER_URL_SCHEMES: ReadonlyArray<string> = ["http:", "https:"];
 
@@ -33,7 +33,8 @@ export type RunnerFile = Schema.Schema.Type<typeof RunnerFile>;
 
 const RUNNER_FILE_NAME = "runner.json";
 
-export const runnerFileIn = (home: string): string => joinPath(runnerDirIn(home), RUNNER_FILE_NAME);
+export const buildRunnerFilePath = (home: string): string =>
+  joinPath(locateRunnerDir(home), RUNNER_FILE_NAME);
 
 export class NotEnrolled extends Schema.TaggedError<NotEnrolled>()("NotEnrolled", {
   message: Schema.String,
@@ -62,7 +63,7 @@ export const writeRunnerFile = (path: string, contents: RunnerFile): void => {
 
 export const readRunnerFile = (home: string): Effect.Effect<RunnerFile, NotEnrolled> =>
   Effect.gen(function* () {
-    const path = runnerFileIn(home);
+    const path = buildRunnerFilePath(home);
     const raw = yield* Effect.try({
       try: () => JSON.parse(readFileSync(path, "utf8")) as unknown,
       catch: () =>

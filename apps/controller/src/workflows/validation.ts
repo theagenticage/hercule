@@ -43,9 +43,9 @@ import {
 import { lintOutputSchema } from "@hercule/protocol";
 import { CRON_TICK_EVENT_KIND, type DeclaredEventKindWithConnectionType } from "../events";
 import {
-  checkCondition,
-  checkExpression,
-  checkTemplate,
+  validateCondition,
+  validateExpression,
+  validateTemplate,
   isTemplate,
   type ExpressionError,
   type ExpressionScope,
@@ -128,7 +128,7 @@ const checkExpressionMap = (
 ): Effect.Effect<ReadonlyArray<Issue>> =>
   Effect.map(
     Effect.forEach(Object.entries(expressions ?? {}), ([name, source]) =>
-      listCheckIssues([...path, name], checkExpression(source, scope)),
+      listCheckIssues([...path, name], validateExpression(source, scope)),
     ),
     (issues) => issues.flat(),
   );
@@ -379,7 +379,7 @@ const checkFilter = (trigger: Trigger, index: number): Effect.Effect<ReadonlyArr
     ? Effect.succeed([])
     : listCheckIssues(
         ["triggers", String(index), "source", "filter"],
-        checkCondition(trigger.source.filter, "event"),
+        validateCondition(trigger.source.filter, "event"),
       );
 
 /** Checks one trigger, its expressions included. Returns every issue found. */
@@ -403,11 +403,11 @@ const checkTrigger = (
     expressionChecks.push(
       listCheckIssues(
         [...path, "correlation", "event"],
-        checkExpression(trigger.correlation.event, "event"),
+        validateExpression(trigger.correlation.event, "event"),
       ),
       listCheckIssues(
         [...path, "correlation", "run"],
-        checkExpression(trigger.correlation.run, "run"),
+        validateExpression(trigger.correlation.run, "run"),
       ),
       checkExpressionMap(trigger.outputs, "event", [...path, "outputs"]),
     );
@@ -649,9 +649,9 @@ const checkStep = (
     Effect.all([
       step.condition === undefined
         ? Effect.succeed([])
-        : listCheckIssues([...path, "condition"], checkCondition(step.condition, "run")),
+        : listCheckIssues([...path, "condition"], validateCondition(step.condition, "run")),
       ...templates.map((template) =>
-        listCheckIssues(template.path, checkTemplate(template.template)),
+        listCheckIssues(template.path, validateTemplate(template.template)),
       ),
     ]),
     (expressionIssues) => [...issues, ...expressionIssues.flat()],
@@ -662,7 +662,10 @@ const checkStep = (
 const checkEdgeCondition = (edge: Edge, index: number): Effect.Effect<ReadonlyArray<Issue>> =>
   edge.condition === undefined
     ? Effect.succeed([])
-    : listCheckIssues(["edges", String(index), "condition"], checkCondition(edge.condition, "run"));
+    : listCheckIssues(
+        ["edges", String(index), "condition"],
+        validateCondition(edge.condition, "run"),
+      );
 
 /**
  * Returns the only warning a definition can get: it has a signal trigger and

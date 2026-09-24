@@ -34,7 +34,7 @@ afterAll(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-const emptyHome = (): string => {
+const createTemporaryHome = (): string => {
   const home = mkdtempSync(join(tmpdir(), "hercule-claude-probe-"));
   homes.push(home);
   return home;
@@ -48,9 +48,9 @@ const emptyHome = (): string => {
  * Made on first use, so a run that skips every case here writes nothing.
  */
 let tool: ProviderRunnerContext["herculeTool"] | undefined;
-const TOOL = (): ProviderRunnerContext["herculeTool"] => {
+const prepareTool = (): ProviderRunnerContext["herculeTool"] => {
   if (tool === undefined) {
-    const under = emptyHome();
+    const under = createTemporaryHome();
     const {
       herculeTool: { claudePluginDir },
     } = prepareTooling({
@@ -64,7 +64,7 @@ const TOOL = (): ProviderRunnerContext["herculeTool"] => {
   return tool;
 };
 
-const installedVersion = async (path: string): Promise<string> => {
+const readInstalledVersion = async (path: string): Promise<string> => {
   const child = Bun.spawn([path, "--version"], { stdout: "pipe", stderr: "ignore" });
   const printed = await new Response(child.stdout).text();
   await child.exited;
@@ -78,11 +78,11 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
     async () => {
       const context: ProviderRunnerContext = {
         cwd: null,
-        home: emptyHome(),
+        home: createTemporaryHome(),
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "" },
         secrets: {},
-        herculeTool: TOOL(),
+        herculeTool: prepareTool(),
       };
 
       const started = Date.now();
@@ -93,7 +93,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
       // and telling that apart from a broken harness is the whole point.
       expect(probed.auth.status, probed.auth.message ?? "").toBe("unauthenticated");
       expect(probed.auth.identity).toBeUndefined();
-      expect(probed.harnessVersion).toBe(await installedVersion(binary!));
+      expect(probed.harnessVersion).toBe(await readInstalledVersion(binary!));
       // The catalogue is probed, never authored: an empty one would leave the
       // composer with nothing to offer on a perfectly good machine.
       expect(probed.models.length).toBeGreaterThan(0);
@@ -135,7 +135,7 @@ const SPEC: SessionSpec = {
 /** Long enough for a cold CLI to start, connect and answer one short prompt. */
 const TURN_DEADLINE = Duration.seconds(90);
 
-const until = async (
+const waitForEvent = async (
   seen: ReadonlyArray<ProviderEvent>,
   tag: ProviderEvent["_tag"],
 ): Promise<void> => {
@@ -169,7 +169,7 @@ const authed =
               binary,
               env: process.env,
               secrets: {},
-              herculeTool: TOOL(),
+              herculeTool: prepareTool(),
             },
             {},
           ),
@@ -185,7 +185,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
         Stream.runForEach(claudeCode.events, (event) => Effect.sync(() => void seen.push(event))),
       );
 
-      const context = contextFor(emptyHome());
+      const context = buildContext(createTemporaryHome());
 
       const binding = await Effect.runPromise(claudeCode.startSession(SESSION, SPEC, context));
       expect(binding.sessionId).toBe(SESSION);
@@ -198,7 +198,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
         }),
       );
 
-      await until(seen, "turn.completed");
+      await waitForEvent(seen, "turn.completed");
 
       const tags = seen.map((event) => event._tag);
       expect(tags[0]).toBe("session.started");
@@ -213,7 +213,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
       expect(tags).toContain("session.usage.updated");
 
       await Effect.runPromise(claudeCode.stopSession(SESSION, "stopped"));
-      await until(seen, "session.exited");
+      await waitForEvent(seen, "session.exited");
       const exited = seen.find((event) => event._tag === "session.exited");
       expect(exited?._tag === "session.exited" ? exited.reason : undefined).toBe("stopped");
       expect(await Effect.runPromise(claudeCode.listSessions)).toEqual([]);
@@ -238,7 +238,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
 const PROJECTS = join(CONFIG_DIR, "projects");
 
 /** Every transcript under the instance home, wherever the CLI filed it. */
-const transcripts = (): ReadonlyArray<string> =>
+const listTranscripts = (): ReadonlyArray<string> =>
   !existsSync(PROJECTS)
     ? []
     : readdirSync(PROJECTS, { withFileTypes: true })
@@ -249,17 +249,17 @@ const transcripts = (): ReadonlyArray<string> =>
             .map((name) => join(PROJECTS, entry.name, name)),
         );
 
-const transcriptOf = (nativeSessionId: string): string | undefined =>
-  transcripts().find((path) => basename(path) === `${nativeSessionId}.jsonl`);
+const findTranscript = (nativeSessionId: string): string | undefined =>
+  listTranscripts().find((path) => basename(path) === `${nativeSessionId}.jsonl`);
 
 /**
  * The CLI writes the transcript as it goes, so a file that is not there the
  * instant a turn completed is waited for rather than declared missing.
  */
-const untilTranscript = async (nativeSessionId: string): Promise<string | undefined> => {
+const waitForTranscript = async (nativeSessionId: string): Promise<string | undefined> => {
   const deadline = Date.now() + Duration.toMillis(TURN_DEADLINE);
   for (;;) {
-    const found = transcriptOf(nativeSessionId);
+    const found = findTranscript(nativeSessionId);
     if (found !== undefined || Date.now() > deadline) return found;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
@@ -270,9 +270,9 @@ const untilTranscript = async (nativeSessionId: string): Promise<string | undefi
  * directory - a login lives there and nowhere else - and, where one is set, the
  * other route to an authenticated session.
  */
-const contextFor = (
+const buildContext = (
   cwd: string,
-  herculeTool: ProviderRunnerContext["herculeTool"] = TOOL(),
+  herculeTool: ProviderRunnerContext["herculeTool"] = prepareTool(),
 ): ProviderRunnerContext => ({
   cwd,
   home: CONFIG_DIR,
@@ -306,14 +306,15 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
   it(
     "forks under the native id Hercule minted, and resumes under the parent's own",
     async () => {
-      const context = contextFor(emptyHome());
+      const context = buildContext(createTemporaryHome());
 
       /** Reads back out of a transcript, so a fork can be told from a fresh session. */
       const marker = `hercule-fork-probe-${crypto.randomUUID().slice(0, 8)}`;
-      const asking = (text: string) => `Reply with the single word ready. Use no tools. ${text}`;
+      const buildPrompt = (text: string) =>
+        `Reply with the single word ready. Use no tools. ${text}`;
 
       /** One session: start it, say one thing, wait the turn out, stop it. */
-      const oneTurn = async (
+      const runOneTurn = async (
         sessionId: string,
         spec: SessionSpec,
         text: string,
@@ -321,21 +322,21 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
         const seen = collectEvents();
         const binding = await Effect.runPromise(claudeCode.startSession(sessionId, spec, context));
         await Effect.runPromise(claudeCode.sendInput(sessionId, { text }));
-        await until(seen, "turn.completed");
+        await waitForEvent(seen, "turn.completed");
         await Effect.runPromise(claudeCode.stopSession(sessionId, "stopped"));
-        await until(seen, "session.exited");
+        await waitForEvent(seen, "session.exited");
         return binding.nativeSessionId;
       };
 
-      const parent = await oneTurn(PARENT, SPEC, asking(marker));
-      const parentFile = await untilTranscript(parent);
+      const parent = await runOneTurn(PARENT, SPEC, buildPrompt(marker));
+      const parentFile = await waitForTranscript(parent);
       expect(
         parentFile,
         `no transcript for the parent session ${parent} under ${PROJECTS}`,
       ).not.toBe(undefined);
       const before = readFileSync(parentFile!, "utf8");
       expect(before).toContain(marker);
-      const known = new Set(transcripts());
+      const known = new Set(listTranscripts());
 
       // Hercule names the forked session itself, because in streaming-input mode
       // the CLI says nothing at all until a first turn arrives.
@@ -348,13 +349,13 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
         ),
       );
       expect(minted.nativeSessionId).not.toBe(parent);
-      await Effect.runPromise(claudeCode.sendInput(FORKED, { text: asking("second") }));
-      await until(forkSeen, "turn.completed");
+      await Effect.runPromise(claudeCode.sendInput(FORKED, { text: buildPrompt("second") }));
+      await waitForEvent(forkSeen, "turn.completed");
       await Effect.runPromise(claudeCode.stopSession(FORKED, "stopped"));
-      await until(forkSeen, "session.exited");
+      await waitForEvent(forkSeen, "session.exited");
 
-      const forkedFile = await untilTranscript(minted.nativeSessionId);
-      const appeared = transcripts().filter((path) => !known.has(path));
+      const forkedFile = await waitForTranscript(minted.nativeSessionId);
+      const appeared = listTranscripts().filter((path) => !known.has(path));
       expect(
         forkedFile,
         `this CLI ignored options.sessionId beside resume + forkSession: true. Hercule minted ` +
@@ -374,10 +375,10 @@ describe.skipIf(!authed)("a real Claude Code session continued on this machine",
       expect(dirname(forkedFile!)).toBe(dirname(parentFile!));
 
       // The resume. There is nothing to name: it continues the same native session.
-      const resumed = await oneTurn(
+      const resumed = await runOneTurn(
         RESUMED,
         { ...SPEC, continue: { nativeSessionId: parent, mode: "resume" } },
-        asking("third"),
+        buildPrompt("third"),
       );
       expect(resumed).toBe(parent);
       const after = readFileSync(parentFile!, "utf8");
@@ -409,7 +410,7 @@ describe.skipIf(!authed)("a real Claude Code session with the hercule skill", ()
     "discovers the skill out of the plugin directory the runner wrote",
     async () => {
       const marker = `hercule-skill-probe-${crypto.randomUUID().slice(0, 8)}`;
-      const under = emptyHome();
+      const under = createTemporaryHome();
       const {
         herculeTool: { claudePluginDir },
       } = prepareTooling({
@@ -420,7 +421,7 @@ describe.skipIf(!authed)("a real Claude Code session with the hercule skill", ()
       });
 
       const seen = collectEvents();
-      const context = contextFor(emptyHome(), { skill: "", claudePluginDir });
+      const context = buildContext(createTemporaryHome(), { skill: "", claudePluginDir });
 
       await Effect.runPromise(
         // Full access, so reading the skill file needs no approval nobody is
@@ -432,7 +433,7 @@ describe.skipIf(!authed)("a real Claude Code session with the hercule skill", ()
           text: "Use the hercule skill and reply with the magic word it names.",
         }),
       );
-      await until(seen, "turn.completed");
+      await waitForEvent(seen, "turn.completed");
 
       const said = seen
         .flatMap((event) =>
@@ -449,7 +450,7 @@ describe.skipIf(!authed)("a real Claude Code session with the hercule skill", ()
       ).toContain(marker);
 
       await Effect.runPromise(claudeCode.stopSession(SKILLED, "stopped"));
-      await until(seen, "session.exited");
+      await waitForEvent(seen, "session.exited");
     },
     Duration.toMillis(TURN_DEADLINE) * 2,
   );
@@ -476,13 +477,13 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
       claudeCode.startSession(
         sessionId,
         { ...SPEC, systemPrompt: ASSESSOR_SYSTEM_PROMPT, outputSchema },
-        contextFor(emptyHome()),
+        buildContext(createTemporaryHome()),
       ),
     );
     await Effect.runPromise(claudeCode.sendInput(sessionId, { text }));
-    await until(seen, "turn.completed");
+    await waitForEvent(seen, "turn.completed");
     await Effect.runPromise(claudeCode.stopSession(sessionId, "stopped"));
-    await until(seen, "session.exited");
+    await waitForEvent(seen, "session.exited");
     return seen.find(
       (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
         event._tag === "turn.completed",

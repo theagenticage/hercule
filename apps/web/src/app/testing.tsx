@@ -14,8 +14,8 @@ import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient, createLive, type FetchLike, type Live } from "@hercule/client-core";
 import type { Runner } from "@hercule/contract";
-import { StubSocket, openInto } from "@hercule/client-core/testing";
-import { memoryStorage } from "@hercule/ui/testing";
+import { StubSocket, stubWebSocketInto } from "@hercule/client-core/testing";
+import { createMemoryStorage } from "@hercule/ui/testing";
 import { createAppRouter } from "./router";
 import { followLiveStatus } from "./live-status";
 
@@ -44,7 +44,7 @@ export interface Answer {
 export type Handler = Answer | ((call: Call) => Answer | Promise<Answer>);
 
 /** The error envelope as the API sends it; only a `validation` refusal carries issues. */
-export const envelope = (code: string, message: string): { error: unknown } => ({
+export const buildErrorBody = (code: string, message: string): { error: unknown } => ({
   error: {
     code,
     message,
@@ -90,7 +90,10 @@ export const stubApi = (
     const handler = handlers[key] ?? HOUSEKEEPING[key];
     const answer: Answer =
       handler === undefined
-        ? { status: 404, body: envelope("not_found", `no stub for ${call.method} ${call.path}`) }
+        ? {
+            status: 404,
+            body: buildErrorBody("not_found", `no stub for ${call.method} ${call.path}`),
+          }
         : typeof handler === "function"
           ? await handler(call)
           : handler;
@@ -156,7 +159,7 @@ afterEach(async () => {
 });
 
 /** The page's text with its whitespace collapsed, the way a reader sees it. */
-export const reading = (element: HTMLElement | null = document.body): string =>
+export const readPageText = (element: HTMLElement | null = document.body): string =>
   (element?.textContent ?? "").replace(/\s+/g, " ").trim();
 
 /**
@@ -219,10 +222,10 @@ export const renderApp = async ({
    */
   readonly detectLocalRunner?: (runners: ReadonlyArray<Runner>) => Promise<string | null>;
 }) => {
-  vi.stubGlobal("localStorage", memoryStorage(storage));
+  vi.stubGlobal("localStorage", createMemoryStorage(storage));
   const client = createClient({ baseUrl: BASE_URL, fetch: api, token });
   const sockets: StubSocket[] = [];
-  const live = createLive({ client, baseUrl: BASE_URL, webSocket: openInto(sockets) });
+  const live = createLive({ client, baseUrl: BASE_URL, webSocket: stubWebSocketInto(sockets) });
   started.push(live);
   const liveStub: LiveStub = {
     topics: () =>

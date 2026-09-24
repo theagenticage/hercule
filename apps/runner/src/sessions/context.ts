@@ -7,8 +7,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import type { SessionStart } from "@hercule/protocol";
-import { gitCredentialEnv } from "../credentials";
-import { substrateEnv, switchBranch, type Workspaces } from "../workspaces";
+import { buildGitCredentialEnv } from "../credentials";
+import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
 
 /** The facts about this machine a session is resolved against. */
@@ -48,7 +48,7 @@ export interface Resolved {
  * account's login, or none, because the macOS Keychain item is keyed by the
  * real home (spec 06 section 9.1); isolation is `CLAUDE_CONFIG_DIR`'s job.
  */
-const instanceEnv = (config: unknown): Record<string, string> => {
+const readInstanceEnv = (config: unknown): Record<string, string> => {
   const env = (config as { readonly env?: unknown } | null)?.env;
   if (typeof env !== "object" || env === null) return {};
   return Object.fromEntries(
@@ -75,10 +75,10 @@ const instanceEnv = (config: unknown): Record<string, string> => {
  * started the daemon exported for themselves would otherwise answer for the
  * agent, or take the helper below away from it.
  */
-const envFor = (machine: Machine, frame: SessionStart): Record<string, string | undefined> => ({
-  ...substrateEnv(machine.baseEnv),
-  ...instanceEnv(frame.config),
-  ...gitCredentialEnv({ socketPath: machine.socketPath, identity: frame.gitIdentity }),
+const buildEnv = (machine: Machine, frame: SessionStart): Record<string, string | undefined> => ({
+  ...buildSubstrateEnv(machine.baseEnv),
+  ...readInstanceEnv(frame.config),
+  ...buildGitCredentialEnv({ socketPath: machine.socketPath, identity: frame.gitIdentity }),
   ...(frame.ghToken === undefined ? {} : { GH_TOKEN: frame.ghToken }),
   HERCULE_API_URL: machine.controllerUrl,
   HERCULE_TOKEN: frame.token,
@@ -97,7 +97,7 @@ const envFor = (machine: Machine, frame: SessionStart): Record<string, string | 
 });
 
 /** Whatever the filesystem refused, said in the words a session's reader sees. */
-const tried = <A>(work: () => A): Effect.Effect<A, string> =>
+const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
   Effect.try({
     try: work,
     catch: (error) => (error instanceof Error ? error.message : String(error)),
@@ -109,14 +109,14 @@ const tried = <A>(work: () => A): Effect.Effect<A, string> =>
  * (spec 06 section 9.1). The rest of spec 06 section 4.2 - empty setting
  * sources, auto memory off, strict MCP - is the adapter's to apply.
  */
-const place = (
+const placeSession = (
   frame: SessionStart,
   machine: Machine,
 ): Effect.Effect<{ readonly cwd: string; readonly scratch: string | undefined }, string> =>
   Effect.gen(function* () {
     const { workspaceId } = frame.spec;
     if (workspaceId === null) {
-      return yield* tried(() => {
+      return yield* tryFilesystem(() => {
         const scratch = joinPath(machine.scratchDir, frame.sessionId);
         // Emptied rather than merely made: "empty" is the whole property, and a
         // directory left behind by a session of the same id is not that.
@@ -136,21 +136,21 @@ const place = (
       // Never forced: a switch git refuses is uncommitted work of the user's,
       // and losing it is worse than not starting the session.
       const switched = yield* Effect.promise(() =>
-        switchBranch(workspace.cwd, branch, substrateEnv(machine.baseEnv)),
+        switchBranch(workspace.cwd, branch, buildSubstrateEnv(machine.baseEnv)),
       );
       if (!switched.ok) return yield* Effect.fail(switched.stderr);
     }
     return { cwd: workspace.cwd, scratch: undefined };
   });
 
-export const resolve = (
+export const resolveSessionContext = (
   frame: SessionStart,
   machine: Machine,
   binaryName: string,
 ): Effect.Effect<Resolved, string> =>
   Effect.gen(function* () {
-    const placed = yield* place(frame, machine);
-    const home = yield* tried(() => {
+    const placed = yield* placeSession(frame, machine);
+    const home = yield* tryFilesystem(() => {
       const dir = joinPath(machine.providersDir, frame.spec.instanceId);
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       return dir;
@@ -161,7 +161,7 @@ export const resolve = (
         cwd: placed.cwd,
         home,
         binary: machine.binaryOf(binaryName),
-        env: envFor(machine, frame),
+        env: buildEnv(machine, frame),
         // Handed to the adapter and layered into nothing: a credential belongs
         // in whichever variable the harness reads, which only the adapter knows.
         secrets: frame.secrets,

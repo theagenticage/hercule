@@ -4,10 +4,10 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { FormCard, useMinuteClock } from "@hercule/ui";
 import {
   FALLBACK_TIMEZONE,
-  ageOf,
-  capacityLine,
+  formatAge,
+  describeCapacity,
   isSupportedTimezone,
-  queuedSessions,
+  listQueuedSessions,
 } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
@@ -82,11 +82,11 @@ function RunnerPage(): JSX.Element {
       >
         <RunnerFacts runner={runner} />
         <SessionQueue
-          line={capacityLine(runner, sessions)}
-          queue={queuedSessions(sessions).map((session) => ({
+          line={describeCapacity(runner, sessions)}
+          queue={listQueuedSessions(sessions).map((session) => ({
             id: session.id,
             title: session.title,
-            age: ageOf(session.createdAt, now),
+            age: formatAge(session.createdAt, now),
           }))}
         />
         <EditForm client={client} runner={runner} />

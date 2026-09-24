@@ -57,7 +57,7 @@ const REJECTED = "that account is not one this type can act as";
 /** A `state` of the right shape that no start ever minted. */
 const ABSENT_STATE = "zzzz".repeat(16);
 
-const json = (body: unknown, status = 200): Response =>
+const buildJsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /** A token endpoint's answer, per grant type, as a test decides it. */
@@ -78,18 +78,18 @@ interface AuthServer {
  * and records what it was asked, which is what the callback and refresh tests
  * assert against.
  */
-const authServer = (): AuthServer => {
+const createAuthServer = (): AuthServer => {
   const requests: Array<Record<string, string>> = [];
   const answers: Answers = {
     authorization_code: () =>
-      json({
+      buildJsonResponse({
         access_token: FIRST_TOKEN,
         refresh_token: "refresh-1",
         token_type: "bearer",
         expires_in: 3600,
       }),
     refresh_token: () =>
-      json({
+      buildJsonResponse({
         access_token: REFRESHED_TOKEN,
         refresh_token: "refresh-2",
         token_type: "bearer",
@@ -106,7 +106,9 @@ const authServer = (): AuthServer => {
       const form = Object.fromEntries(new URLSearchParams(await request.text()));
       requests.push(form);
       const answer = answers[form["grant_type"] ?? ""];
-      return answer === undefined ? json({ error: "unsupported_grant_type" }, 400) : answer();
+      return answer === undefined
+        ? buildJsonResponse({ error: "unsupported_grant_type" }, 400)
+        : answer();
     },
   });
 
@@ -136,7 +138,7 @@ interface TestPlugin {
  * judges the access token it was handed; a credentials type is here only so a
  * start against the wrong kind of setup has something to be refused for.
  */
-const typePlugin = (options: {
+const buildConnectionTypePlugin = (options: {
   readonly id: string;
   readonly type: string;
   readonly oauth?: AuthServer;
@@ -190,13 +192,13 @@ const typePlugin = (options: {
 };
 
 /** The registry every test boots, built afresh so no context outlives its test. */
-const plugins = (provider: AuthServer) => ({
-  oauth: typePlugin({ id: "oauthy", type: "oauth-type", oauth: provider }),
-  second: typePlugin({ id: "second", type: "second-type", oauth: provider }),
-  pasted: typePlugin({ id: "pasted", type: "pasted-type" }),
+const buildPlugins = (provider: AuthServer) => ({
+  oauth: buildConnectionTypePlugin({ id: "oauthy", type: "oauth-type", oauth: provider }),
+  second: buildConnectionTypePlugin({ id: "second", type: "second-type", oauth: provider }),
+  pasted: buildConnectionTypePlugin({ id: "pasted", type: "pasted-type" }),
 });
 
-type Registry = ReturnType<typeof plugins>;
+type Registry = ReturnType<typeof buildPlugins>;
 
 const withOAuth = async (
   body: (
@@ -206,8 +208,8 @@ const withOAuth = async (
     provider: AuthServer,
   ) => Promise<void>,
 ): Promise<void> => {
-  const provider = authServer();
-  const registry = plugins(provider);
+  const provider = createAuthServer();
+  const registry = buildPlugins(provider);
   try {
     await withServer(
       async (harness) => {
@@ -241,7 +243,11 @@ const setClientSecret = async (base: string, token: string, pluginId: string): P
   expect(response.status, await response.clone().text()).toBe(200);
 };
 
-const start = (base: string, token: string, body: Record<string, unknown>): Promise<Response> =>
+const startOAuth = (
+  base: string,
+  token: string,
+  body: Record<string, unknown>,
+): Promise<Response> =>
   post(
     base,
     "/api/v1/oauth/start",
@@ -250,25 +256,25 @@ const start = (base: string, token: string, body: Record<string, unknown>): Prom
   );
 
 /** Starts a setup and hands back the authorization URL it answered with. */
-const started = async (
+const startOAuthOrFail = async (
   base: string,
   token: string,
   body: Record<string, unknown> = {},
 ): Promise<URL> => {
-  const response = await start(base, token, body);
+  const response = await startOAuth(base, token, body);
   expect(response.status, await response.clone().text()).toBe(200);
   const { authorizationUrl } = (await response.json()) as { authorizationUrl: string };
   return new URL(authorizationUrl);
 };
 
 /** The callback as the browser reaches it: server root, no bearer, no redirect followed. */
-const callback = (base: string, query: Record<string, string>): Promise<Response> =>
+const sendOAuthCallback = (base: string, query: Record<string, string>): Promise<Response> =>
   fetch(`${base}/oauth/callback?${new URLSearchParams(query).toString()}`, {
     redirect: "manual",
     headers: { connection: "close" },
   });
 
-const connections = async (
+const listConnections = async (
   base: string,
   token: string,
 ): Promise<ReadonlyArray<ConnectionRecord>> => {
@@ -277,15 +283,15 @@ const connections = async (
   return ((await response.json()) as { items: ReadonlyArray<ConnectionRecord> }).items;
 };
 
-const errorOf = async (response: Response): Promise<ErrorBody["error"]> =>
+const readError = async (response: Response): Promise<ErrorBody["error"]> =>
   ((await response.json()) as ErrorBody).error;
 
 /** The S256 transformation the provider would apply to check the verifier. */
-const challengeFor = (verifier: string): string =>
+const computeChallenge = (verifier: string): string =>
   createHash("sha256").update(verifier).digest("base64url");
 
 /** The runtime surface the host handed a plugin at its last activation. */
-const surfaceOf = (of: TestPlugin) => {
+const readConnectionsSurface = (of: TestPlugin) => {
   const ctx = of.contexts.at(-1);
   if (ctx === undefined) throw new Error("the plugin was never activated");
   if (ctx.connections === undefined) throw new Error("the plugin was given no connections surface");
@@ -296,14 +302,14 @@ const surfaceOf = (of: TestPlugin) => {
 const connect = async (base: string, token: string): Promise<ConnectionRecord> => {
   await setClientId(base, token, "oauthy");
   await setClientSecret(base, token, "oauthy");
-  const url = await started(base, token);
-  const response = await callback(base, {
+  const url = await startOAuthOrFail(base, token);
+  const response = await sendOAuthCallback(base, {
     state: url.searchParams.get("state") ?? "",
     code: "the-code",
   });
   expect(response.status, response.headers.get("location") ?? "").toBe(302);
   expect(response.headers.get("location")).toBe("/connections?oauth=ok");
-  const [one] = await connections(base, token);
+  const [one] = await listConnections(base, token);
   if (one === undefined) throw new Error("the callback created no connection");
   return one;
 };
@@ -314,7 +320,7 @@ describe("POST /oauth/start", () => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
 
-      const url = await started(base, token);
+      const url = await startOAuthOrFail(base, token);
 
       expect(`${url.origin}${url.pathname}`).toBe(`${provider.base}/authorize`);
       const query = url.searchParams;
@@ -337,8 +343,8 @@ describe("POST /oauth/start", () => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
 
-      const first = await started(base, token);
-      const second = await started(base, token);
+      const first = await startOAuthOrFail(base, token);
+      const second = await startOAuthOrFail(base, token);
 
       expect(first.searchParams.get("state")).not.toBe(second.searchParams.get("state"));
       expect(first.searchParams.get("code_challenge")).not.toBe(
@@ -351,10 +357,10 @@ describe("POST /oauth/start", () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientSecret(base, token, "oauthy");
 
-      const response = await start(base, token, {});
+      const response = await startOAuth(base, token, {});
 
       expect(response.status).toBe(409);
-      const error = await errorOf(response);
+      const error = await readError(response);
       expect(error.code).toBe("invalid_state");
       expect(error.message).toContain("oauthy");
     });
@@ -364,10 +370,10 @@ describe("POST /oauth/start", () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "second");
 
-      const response = await start(base, token, { type: "second/second-type" });
+      const response = await startOAuth(base, token, { type: "second/second-type" });
 
       expect(response.status).toBe(409);
-      const error = await errorOf(response);
+      const error = await readError(response);
       expect(error.code).toBe("invalid_state");
       expect(error.message).toContain("second");
     });
@@ -379,13 +385,13 @@ describe("POST /oauth/start", () => {
       await setClientId(base, token, "second");
       await setClientSecret(base, token, "second");
 
-      const response = await start(base, token, {
+      const response = await startOAuth(base, token, {
         type: "second/second-type",
         connectionId: before.id,
       });
 
       expect(response.status).toBe(400);
-      expect(await errorOf(response)).toMatchObject({ code: "validation" });
+      expect(await readError(response)).toMatchObject({ code: "validation" });
     });
   });
 
@@ -394,9 +400,9 @@ describe("POST /oauth/start", () => {
       await setClientId(base, token, "pasted");
       await setClientSecret(base, token, "pasted");
 
-      const response = await start(base, token, { type: "pasted/pasted-type" });
+      const response = await startOAuth(base, token, { type: "pasted/pasted-type" });
 
-      expect(await errorOf(response)).toMatchObject({ code: "validation" });
+      expect(await readError(response)).toMatchObject({ code: "validation" });
     });
   });
 });
@@ -406,9 +412,9 @@ describe("GET /oauth/callback", () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
-      const url = await started(base, token, { label: "work", labels: ["Code"] });
+      const url = await startOAuthOrFail(base, token, { label: "work", labels: ["Code"] });
 
-      const response = await callback(base, {
+      const response = await sendOAuthCallback(base, {
         state: url.searchParams.get("state") ?? "",
         code: "the-code",
       });
@@ -426,11 +432,11 @@ describe("GET /oauth/callback", () => {
       });
       // The verifier is the proof the challenge was made from: hashing it the
       // way the provider would must land back on what the start published.
-      expect(challengeFor(exchange?.["code_verifier"] ?? "")).toBe(
+      expect(computeChallenge(exchange?.["code_verifier"] ?? "")).toBe(
         url.searchParams.get("code_challenge"),
       );
 
-      const listed = await connections(base, token);
+      const listed = await listConnections(base, token);
       expect(listed).toHaveLength(1);
       expect(listed[0]).toMatchObject({
         type: "oauthy/oauth-type",
@@ -452,35 +458,35 @@ describe("GET /oauth/callback", () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
-      const url = await started(base, token);
+      const url = await startOAuthOrFail(base, token);
 
-      const response = await callback(base, {
+      const response = await sendOAuthCallback(base, {
         state: url.searchParams.get("state") ?? "",
         error: "access_denied",
       });
 
       expect(response.status).toBe(302);
       expect(response.headers.get("location")).toBe("/connections?oauth=denied");
-      expect(await connections(base, token)).toEqual([]);
+      expect(await listConnections(base, token)).toEqual([]);
     });
   });
 
   it("writes nothing when the connection it was reconnecting is gone", async () => {
     await withOAuth(async ({ base }, _registry, token) => {
       const before = await connect(base, token);
-      const url = await started(base, token, { connectionId: before.id });
+      const url = await startOAuthOrFail(base, token, { connectionId: before.id });
       expect(
         (await send("DELETE", base, `/api/v1/connections/${before.id}`, { token })).status,
       ).toBe(200);
 
-      const response = await callback(base, {
+      const response = await sendOAuthCallback(base, {
         state: url.searchParams.get("state") ?? "",
         code: "another-code",
       });
 
       expect(response.status).toBe(302);
       expect(response.headers.get("location")).toBe("/connections?oauth=expired");
-      expect(await connections(base, token)).toEqual([]);
+      expect(await listConnections(base, token)).toEqual([]);
       const secrets = await get(
         base,
         `/api/v1/secrets?ownerKind=connection&ownerId=${before.id}`,
@@ -494,16 +500,16 @@ describe("GET /oauth/callback", () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
-      const url = await started(base, token);
+      const url = await startOAuthOrFail(base, token);
       const state = url.searchParams.get("state") ?? "";
-      expect((await callback(base, { state, code: "the-code" })).status).toBe(302);
+      expect((await sendOAuthCallback(base, { state, code: "the-code" })).status).toBe(302);
 
-      const again = await callback(base, { state, code: "the-code" });
+      const again = await sendOAuthCallback(base, { state, code: "the-code" });
 
       expect(again.status).toBe(302);
       expect(again.headers.get("location")).not.toBe("/connections?oauth=ok");
       expect(again.headers.get("location")).toMatch(/^\/connections\?oauth=/);
-      expect(await connections(base, token)).toHaveLength(1);
+      expect(await listConnections(base, token)).toHaveLength(1);
     });
   });
 
@@ -511,7 +517,7 @@ describe("GET /oauth/callback", () => {
     await withOAuth(async ({ base, sql }, _registry, token) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
-      const url = await started(base, token);
+      const url = await startOAuthOrFail(base, token);
       const state = url.searchParams.get("state") ?? "";
       // The setup's ten minutes cannot be waited out, so the pending row is
       // aged instead - the only part of this a test cannot arrange from outside.
@@ -521,15 +527,15 @@ describe("GET /oauth/callback", () => {
         ),
       );
 
-      const unknown = await callback(base, { state: ABSENT_STATE, code: "the-code" });
-      const expired = await callback(base, { state, code: "the-code" });
+      const unknown = await sendOAuthCallback(base, { state: ABSENT_STATE, code: "the-code" });
+      const expired = await sendOAuthCallback(base, { state, code: "the-code" });
 
       for (const response of [unknown, expired]) {
         expect(response.status).toBe(302);
         expect(response.headers.get("location")).toMatch(/^\/connections\?oauth=/);
         expect(response.headers.get("location")).not.toBe("/connections?oauth=ok");
       }
-      expect(await connections(base, token)).toEqual([]);
+      expect(await listConnections(base, token)).toEqual([]);
     });
   });
 
@@ -537,10 +543,11 @@ describe("GET /oauth/callback", () => {
     await withOAuth(async ({ base }, _registry, token, provider) => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
-      provider.answers["authorization_code"] = () => json({ error: "invalid_grant" }, 400);
-      const url = await started(base, token);
+      provider.answers["authorization_code"] = () =>
+        buildJsonResponse({ error: "invalid_grant" }, 400);
+      const url = await startOAuthOrFail(base, token);
 
-      const response = await callback(base, {
+      const response = await sendOAuthCallback(base, {
         state: url.searchParams.get("state") ?? "",
         code: "the-code",
       });
@@ -548,7 +555,7 @@ describe("GET /oauth/callback", () => {
       expect(response.status).toBe(302);
       expect(response.headers.get("location")).toMatch(/^\/connections\?oauth=/);
       expect(response.headers.get("location")).not.toBe("/connections?oauth=ok");
-      expect(await connections(base, token)).toEqual([]);
+      expect(await listConnections(base, token)).toEqual([]);
     });
   });
 
@@ -557,17 +564,17 @@ describe("GET /oauth/callback", () => {
       await setClientId(base, token, "oauthy");
       await setClientSecret(base, token, "oauthy");
       provider.answers["authorization_code"] = () =>
-        json({ access_token: UNUSABLE_TOKEN, token_type: "bearer", expires_in: 3600 });
-      const url = await started(base, token);
+        buildJsonResponse({ access_token: UNUSABLE_TOKEN, token_type: "bearer", expires_in: 3600 });
+      const url = await startOAuthOrFail(base, token);
 
-      const response = await callback(base, {
+      const response = await sendOAuthCallback(base, {
         state: url.searchParams.get("state") ?? "",
         code: "the-code",
       });
 
       expect(response.status).toBe(302);
       expect(response.headers.get("location")).not.toBe("/connections?oauth=ok");
-      expect(await connections(base, token)).toEqual([]);
+      expect(await listConnections(base, token)).toEqual([]);
     });
   });
 
@@ -575,25 +582,25 @@ describe("GET /oauth/callback", () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       const before = await connect(base, token);
       await Effect.runPromise(
-        surfaceOf(registry.oauth).report(before.id, { status: "needs-reauth" }),
+        readConnectionsSurface(registry.oauth).report(before.id, { status: "needs-reauth" }),
       );
       provider.answers["authorization_code"] = () =>
-        json({
+        buildJsonResponse({
           access_token: "good-second",
           refresh_token: "refresh-9",
           token_type: "bearer",
           expires_in: 3600,
         });
 
-      const url = await started(base, token, { connectionId: before.id });
-      const response = await callback(base, {
+      const url = await startOAuthOrFail(base, token, { connectionId: before.id });
+      const response = await sendOAuthCallback(base, {
         state: url.searchParams.get("state") ?? "",
         code: "another-code",
       });
 
       expect(response.status).toBe(302);
       expect(response.headers.get("location")).toBe("/connections?oauth=ok");
-      const listed = await connections(base, token);
+      const listed = await listConnections(base, token);
       expect(listed).toHaveLength(1);
       expect(listed[0]).toMatchObject({
         id: before.id,
@@ -601,7 +608,7 @@ describe("GET /oauth/callback", () => {
         displayName: "acct:good-second",
       });
       expect(
-        await Effect.runPromise(surfaceOf(registry.oauth).credentials(before.id)),
+        await Effect.runPromise(readConnectionsSurface(registry.oauth).credentials(before.id)),
       ).toMatchObject({ accessToken: "good-second" });
     });
   });
@@ -612,9 +619,9 @@ describe("the access token a plugin asks the core for", () => {
    * An exchange whose token is not worth handing over: a second is well inside
    * the margin the core refreshes within, so it is stale the moment it lands.
    */
-  const expiringNow = (provider: AuthServer): void => {
+  const makeTokensExpireNow = (provider: AuthServer): void => {
     provider.answers["authorization_code"] = () =>
-      json({
+      buildJsonResponse({
         access_token: FIRST_TOKEN,
         refresh_token: "refresh-1",
         token_type: "bearer",
@@ -627,7 +634,9 @@ describe("the access token a plugin asks the core for", () => {
       const one = await connect(base, token);
       const asked = provider.requests.length;
 
-      const credentials = await Effect.runPromise(surfaceOf(registry.oauth).credentials(one.id));
+      const credentials = await Effect.runPromise(
+        readConnectionsSurface(registry.oauth).credentials(one.id),
+      );
 
       expect(credentials).toMatchObject({ accessToken: FIRST_TOKEN });
       expect(provider.requests).toHaveLength(asked);
@@ -636,9 +645,9 @@ describe("the access token a plugin asks the core for", () => {
 
   it("is refreshed when it has run out, and the fresh one is kept", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
-      expiringNow(provider);
+      makeTokensExpireNow(provider);
       const one = await connect(base, token);
-      const surface = surfaceOf(registry.oauth);
+      const surface = readConnectionsSurface(registry.oauth);
 
       const refreshed = await Effect.runPromise(surface.credentials(one.id));
 
@@ -662,9 +671,9 @@ describe("the access token a plugin asks the core for", () => {
 
   it("is refreshed once when two callers find the same spent token at the same moment", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
-      expiringNow(provider);
+      makeTokensExpireNow(provider);
       const one = await connect(base, token);
-      const surface = surfaceOf(registry.oauth);
+      const surface = readConnectionsSurface(registry.oauth);
 
       const both = await Effect.runPromise(
         Effect.all([surface.credentials(one.id), surface.credentials(one.id)], {
@@ -685,14 +694,14 @@ describe("the access token a plugin asks the core for", () => {
 
   it("fails, and leaves the connection alone, when the provider cannot be reached", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
-      expiringNow(provider);
+      makeTokensExpireNow(provider);
       const one = await connect(base, token);
       // Nothing is listening on that port any more, which is what a name that
       // does not resolve and a network that drops both come back as.
       await provider.stop();
 
       const failure = await Effect.runPromise(
-        Effect.flip(surfaceOf(registry.oauth).credentials(one.id)),
+        Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
       );
 
       expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
@@ -704,12 +713,12 @@ describe("the access token a plugin asks the core for", () => {
 
   it("fails, and leaves the connection needing reauthentication, when the refresh is refused", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
-      expiringNow(provider);
+      makeTokensExpireNow(provider);
       const one = await connect(base, token);
-      provider.answers["refresh_token"] = () => json({ error: "invalid_grant" }, 400);
+      provider.answers["refresh_token"] = () => buildJsonResponse({ error: "invalid_grant" }, 400);
 
       const failure = await Effect.runPromise(
-        Effect.flip(surfaceOf(registry.oauth).credentials(one.id)),
+        Effect.flip(readConnectionsSurface(registry.oauth).credentials(one.id)),
       );
 
       expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });

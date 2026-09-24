@@ -51,7 +51,7 @@ const CARRIED = {
  */
 const SHARED_PREFIX = "0199e0e77b21";
 
-const idOf = (tail: string): string => `${SHARED_PREFIX}${tail}`;
+const buildId = (tail: string): string => `${SHARED_PREFIX}${tail}`;
 
 /**
  * One row per old `state`, then a duplicated name whose two rows differ only in
@@ -63,13 +63,13 @@ const SEEDED: ReadonlyArray<{
   readonly state: string;
   readonly id: string;
 }> = [
-  { name: "online-one", state: "online", id: idOf("70008000000000000001") },
-  { name: "offline-one", state: "offline", id: idOf("70008000000000000002") },
-  { name: "unreachable-one", state: "unreachable", id: idOf("70008000000000000003") },
-  { name: "draining-one", state: "draining", id: idOf("70008000000000000004") },
-  { name: "retired-one", state: "retired", id: idOf("70008000000000000005") },
-  { name: "iris", state: "online", id: idOf("7000800000000a1b2c3d") },
-  { name: "iris", state: "offline", id: idOf("7000800000004e5f6a7b") },
+  { name: "online-one", state: "online", id: buildId("70008000000000000001") },
+  { name: "offline-one", state: "offline", id: buildId("70008000000000000002") },
+  { name: "unreachable-one", state: "unreachable", id: buildId("70008000000000000003") },
+  { name: "draining-one", state: "draining", id: buildId("70008000000000000004") },
+  { name: "retired-one", state: "retired", id: buildId("70008000000000000005") },
+  { name: "iris", state: "online", id: buildId("7000800000000a1b2c3d") },
+  { name: "iris", state: "offline", id: buildId("7000800000004e5f6a7b") },
 ];
 
 /**
