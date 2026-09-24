@@ -33,6 +33,7 @@ interface Fixture {
   readonly provenance: readonly {
     readonly ref?: string;
     readonly eventId?: number;
+    readonly runId?: string;
     readonly at: string;
     readonly actor: string;
   }[];
@@ -304,6 +305,24 @@ describe("Tasks > the drawer", () => {
     expect(second.textContent).not.toContain("session:01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb");
     const thread = await within(second).findByRole("link", { name: "session 7c82ebeb" });
     expect(thread.getAttribute("href")).toBe("/threads/01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb");
+  });
+
+  it("shows a run actor by the tail of its id, as a link to the run's page", async () => {
+    const user = userEvent.setup();
+    const runId = "01a06d02-c222-7a0e-8b3d-9c1f1f3a9c2e";
+    const filed: Fixture = {
+      ...PRUNE,
+      id: "01a06d02-bf35-73be-8c1f-7c82ebeb9204",
+      title: "Filed by a run",
+      provenance: [{ runId, at: "2026-09-04T15:21:31.701Z", actor: `run:${runId}` }],
+    };
+    await openApp([filed]);
+
+    await user.click(getTaskRow(filed.title));
+    const drawer = await screen.findByRole("dialog");
+    expect(drawer.textContent).not.toContain(`run:${runId}`);
+    const run = await within(drawer).findByRole("link", { name: "run 1f3a9c2e" });
+    expect(run.getAttribute("href")).toBe(`/runs/${runId}`);
   });
 
   it("moves a task from any status to any other", async () => {

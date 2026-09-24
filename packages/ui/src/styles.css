@@ -322,11 +322,27 @@
   animation: hercule-thread-shimmer 2.4s linear infinite;
 }
 
+/* A run's graph: the dashes of the edge into the running step flow toward
+   it, so the eye follows the run to where it is. One dash and its gap are
+   9px, so moving the pattern by 9px loops without a jump. Reduced motion
+   keeps the dashes and stops them. */
+@keyframes hercule-edge-flow {
+  to {
+    stroke-dashoffset: -9;
+  }
+}
+
+.hercule-edge-flow {
+  stroke-dasharray: 5 4;
+  animation: hercule-edge-flow 0.7s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hercule-equalizer rect,
   .hercule-drawer,
   .hercule-live-dot,
-  .hercule-thread-shimmer {
+  .hercule-thread-shimmer,
+  .hercule-edge-flow {
     animation: none;
   }
 

@@ -329,6 +329,7 @@ export {
   FailureReason,
   Run,
   RUN_SORT_FIELDS,
+  RUN_STATUSES,
   RunFilter,
   RunInputs,
   RunOrigin,

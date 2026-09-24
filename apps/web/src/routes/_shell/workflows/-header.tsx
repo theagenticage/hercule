@@ -90,24 +90,33 @@ const STATUS_TONE: Readonly<Record<WorkflowHeaderStatus["tone"], string>> = {
 
 /**
  * Renders the right side of a workflow's header: the result of the last save
- * or delete, Delete (for a stored workflow only), and Save. While a question
- * shows, these are hidden instead of unmounted, so the focus can return to
- * the button that opened the question.
+ * or delete, then Run, Delete and Save. Run and Delete are there for a stored
+ * workflow only, because a new one has nothing to run or delete yet. While a
+ * question shows, these are hidden instead of unmounted, so the focus can
+ * return to the button that opened the question.
+ *
+ * A run uses the saved workflow, so Run cannot be pressed while the text has
+ * unsaved changes, and its tooltip says why.
  */
 export function WorkflowHeaderActions({
   isHidden,
   status,
-  canDelete,
+  isStored,
+  isRunDisabled,
   isDeleteDisabled,
   isSaveDisabled,
+  onRun,
   onDelete,
   onSave,
 }: {
   readonly isHidden: boolean;
   readonly status: WorkflowHeaderStatus | undefined;
-  readonly canDelete: boolean;
+  /** Whether the workflow is stored, so that it can be run and deleted. */
+  readonly isStored: boolean;
+  readonly isRunDisabled: boolean;
   readonly isDeleteDisabled: boolean;
   readonly isSaveDisabled: boolean;
+  readonly onRun: () => void;
   readonly onDelete: () => void;
   readonly onSave: () => void;
 }): JSX.Element {
@@ -122,10 +131,19 @@ export function WorkflowHeaderActions({
           {status.text}
         </span>
       )}
-      {canDelete ? (
-        <Button disabled={isDeleteDisabled} onClick={onDelete}>
-          Delete
-        </Button>
+      {isStored ? (
+        <>
+          <Button
+            aria-disabled={isRunDisabled}
+            title={isRunDisabled ? "Save first: a run uses the saved workflow." : undefined}
+            onClick={onRun}
+          >
+            Run
+          </Button>
+          <Button disabled={isDeleteDisabled} onClick={onDelete}>
+            Delete
+          </Button>
+        </>
       ) : null}
       {/* `aria-disabled` instead of `disabled`, so Save keeps the focus while
           the save is in flight and after it finishes. A `disabled` button

@@ -9,7 +9,7 @@
  * under. If the two were written apart they would drift, and the only symptom
  * would be a screen that silently stops updating.
  */
-import type { MutableLiveTopic, TaskFilter } from "@hercule/contract";
+import type { MutableLiveTopic, RunFilter, TaskFilter } from "@hercule/contract";
 
 /** A cache key. This package does not read it; the app's query client does. */
 export type LiveQueryKey = ReadonlyArray<unknown>;
@@ -74,6 +74,8 @@ export const queryKeys = {
   eventKinds: (): LiveQueryKey => ["event-kinds"],
   /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
   agents: (): LiveQueryKey => ["agents"],
+  runs: (filter?: RunFilter): LiveQueryKey => (filter === undefined ? ["runs"] : ["runs", filter]),
+  run: (id?: string): LiveQueryKey => (id === undefined ? ["run"] : ["run", id]),
   /** Keyed on the loopback endpoints detection asks, because the result depends on them. */
   localRunner: (endpoints: ReadonlyArray<string>): LiveQueryKey => ["local-runner", endpoints],
 } as const;
@@ -130,6 +132,14 @@ export const buildQueryKeys = (
     return ids.length === 0
       ? [queryKeys.workflows(), queryKeys.workflow()]
       : [queryKeys.workflows(), ...ids.map((id) => queryKeys.workflow(id))];
+  }
+  // Any run change refetches the run list, whatever its filter. A run's own
+  // page is refetched only when the push lists its id, or when the push
+  // lists no ids.
+  if (topic === "run") {
+    return ids.length === 0
+      ? [queryKeys.runs(), queryKeys.run()]
+      : [queryKeys.runs(), ...ids.map((id) => queryKeys.run(id))];
   }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed.

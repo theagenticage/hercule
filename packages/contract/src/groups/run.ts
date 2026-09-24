@@ -35,7 +35,7 @@ import { Authenticated } from "../security";
 import { WorkflowDefinition } from "./workflow-definition";
 
 /** The statuses of a run, in the order a run moves through them. */
-const RUN_STATUSES = ["pending", "running", "completed", "failed", "cancelled"] as const;
+export const RUN_STATUSES = ["pending", "running", "completed", "failed", "cancelled"] as const;
 
 export const RunStatus = Schema.Literals(RUN_STATUSES);
 
@@ -176,6 +176,8 @@ export const RUN_SORT_FIELDS = ["createdAt"] as const;
  * name. The controller checks them against the declarations.
  */
 export const RunInputs = Schema.Record(Schema.String, Schema.Json);
+
+export type RunInputs = Schema.Schema.Type<typeof RunInputs>;
 
 /** The input of `workflow.run`, besides the workflow id in the path. */
 const WorkflowRunInput = closedStruct({

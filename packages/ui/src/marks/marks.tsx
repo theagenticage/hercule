@@ -109,6 +109,48 @@ export function CancelledMark(props: MarkProps): JSX.Element {
   return <Mark name="cancelled" paint="text-faint" drawing={<path d="M2.75 6h6.5" />} {...props} />;
 }
 
+/**
+ * The states a piece of work moves through, spelled as runs and step records
+ * spell their statuses, and `unreached` for a step that has no record yet.
+ */
+export type WorkState = "pending" | "running" | "completed" | "failed" | "cancelled" | "unreached";
+
+/**
+ * The hue of the words beside a state mark: the live hue while the work runs,
+ * the fail hue once it failed, and no hue of its own otherwise, so the caller
+ * keeps its usual ink. Color appears at word scale only, and every screen that
+ * shows a state takes its hue from here.
+ */
+export const WORK_STATE_HUES: Readonly<Record<WorkState, string | undefined>> = {
+  pending: undefined,
+  running: "text-live",
+  completed: undefined,
+  failed: "text-fail",
+  cancelled: undefined,
+  unreached: undefined,
+};
+
+/**
+ * Renders the state mark for a piece of work: queued for `pending`, working,
+ * done, failed or cancelled. Work the run has not reached has no mark.
+ */
+export function WorkStateMark({ state }: { readonly state: WorkState }): JSX.Element | null {
+  switch (state) {
+    case "pending":
+      return <QueuedMark />;
+    case "running":
+      return <WorkingMark />;
+    case "completed":
+      return <DoneMark />;
+    case "failed":
+      return <FailedMark />;
+    case "cancelled":
+      return <CancelledMark />;
+    case "unreached":
+      return null;
+  }
+}
+
 export function TaskGlyph(props: MarkProps): JSX.Element {
   return (
     <Mark

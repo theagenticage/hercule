@@ -197,9 +197,7 @@ export function TaskDetail({
                       {describeProvenanceTarget(entry)}
                     </span>
                     <span className="flex items-baseline gap-2 font-mono text-fine">
-                      {actor.sessionId === undefined ? (
-                        <span className="text-faint">{actor.label}</span>
-                      ) : (
+                      {actor.sessionId !== undefined ? (
                         <Link
                           to="/threads/$sessionId"
                           params={{ sessionId: actor.sessionId }}
@@ -207,6 +205,16 @@ export function TaskDetail({
                         >
                           {actor.label}
                         </Link>
+                      ) : actor.runId !== undefined ? (
+                        <Link
+                          to="/runs/$runId"
+                          params={{ runId: actor.runId }}
+                          className="text-ink underline decoration-line underline-offset-[3px]"
+                        >
+                          {actor.label}
+                        </Link>
+                      ) : (
+                        <span className="text-faint">{actor.label}</span>
                       )}
                       <span className="shrink-0 text-faint tabular-nums">
                         {formatStamp(new Date(entry.at), timezone) ?? entry.at}

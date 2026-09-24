@@ -189,6 +189,45 @@ describe("POST /workflows/{id}/run", () => {
     });
   });
 
+  it("says in one sentence what is wrong with a value that fails its schema, and where inside it", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: {
+          name: "Schema messages",
+          inputs: [
+            { name: "title", schema: { type: "string", minLength: 1 }, required: true },
+            {
+              name: "limits",
+              schema: { type: "object", properties: { hours: { type: "number" } } },
+              required: false,
+            },
+          ],
+          steps: [buildCreateStep("create")],
+        },
+      });
+
+      const response = await requestRun(base, token, workflow.id, {
+        inputs: { title: "", limits: { hours: "two" } },
+      });
+      const issues = await expectRefusedAt(harness, response, [
+        ["inputs", "title"],
+        ["inputs", "limits"],
+      ]);
+
+      const messageAt = (name: string): string =>
+        issues.find((issue) => issue.path[1] === name)?.message ?? "";
+      // The issue sits at the input already, so a violation of the value
+      // itself names no location, and the sentence ends in one period.
+      expect(messageAt("title")).toMatch(
+        /^This value does not match the input's schema: [^#]*[^.]\.$/,
+      );
+      // A violation inside the value names the key it is at.
+      expect(messageAt("limits")).toMatch(
+        /^This value does not match the input's schema: #\/hours: .*[^.]\.$/,
+      );
+    });
+  });
+
   it("refuses a connection input that names a missing, wrong-type or disabled Connection", async () => {
     await withSetUpController(
       async ({ harness, base, token }) => {

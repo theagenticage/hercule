@@ -44,6 +44,48 @@ export {
   type RunnerDraft,
 } from "./runner-edit";
 export { describeRunnerFacts, type RunnerFactsReading } from "./runner-facts";
+export {
+  describeFailureReason,
+  describeRunOrigin,
+  describeRunStatus,
+  describeStepState,
+  formatElapsed,
+  isRunLive,
+  measureElapsed,
+  shouldRunRecede,
+  type RunOriginReading,
+  type WorkState,
+} from "./run-display";
+export {
+  buildRunGraph,
+  buildStepRows,
+  buildTimeline,
+  type EdgeTravel,
+  type RunGraph,
+  type RunGraphEdge,
+  type RunGraphNode,
+  type StepProgress,
+  type StepRow,
+  type Timeline,
+  type TimelineBar,
+  type TimelineTick,
+} from "./run-graph";
+export {
+  buildRunInputDraft,
+  buildRunInputs,
+  hasConnectionField,
+  readRunForm,
+  readRunFormLoadIssues,
+  readRunInputIssues,
+  UNREADABLE_NUMBER,
+  type ConnectionChoice,
+  type RunFormReading,
+  type RunInputDraft,
+  type RunInputField,
+  type RunInputIssues,
+  type RunInputsReading,
+  type RunInputValue,
+} from "./run-inputs";
 export { createLive, type Live } from "./live/live";
 export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
 export { detectLocalRunner, listLoopbackEndpoints } from "./local-runner";
@@ -52,7 +94,7 @@ export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
 export { decideSessionsEmptyState } from "./sessions-empty-state";
 export { findNextOnboardingStep, type OnboardingStep } from "./onboarding";
-export { formatSince, formatStamp, formatTimeContext } from "./time-context";
+export { formatPreciseStamp, formatSince, formatStamp, formatTimeContext } from "./time-context";
 export {
   readPriorityGlyph,
   describeProvenanceTarget,

@@ -244,9 +244,11 @@ const checkAgainstSchema = (
 ): string | undefined => {
   try {
     const violation = findJsonSchemaViolation(schema, value);
-    return violation === undefined
-      ? undefined
-      : `This value does not match the input's schema: ${violation}.`;
+    if (violation === undefined) return undefined;
+    // The issue already sits at the input's path, so a violation of the
+    // input's value itself needs no location; one inside it names the key.
+    const where = violation.location === "#" ? "" : `${violation.location}: `;
+    return `This value does not match the input's schema: ${where}${violation.message.replace(/\.$/, "")}.`;
   } catch {
     return "The input's schema is not a JSON Schema the controller can check values with. Correct the schema in the workflow.";
   }

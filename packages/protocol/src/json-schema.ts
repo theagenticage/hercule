@@ -29,30 +29,46 @@ const findDeepestUnit = (units: ReadonlyArray<OutputUnit>): OutputUnit | undefin
   );
 
 /**
- * Formats an error unit as `<location>: <message>`. A closed object rejects an
+ * Where a value breaks its schema, and why.
+ *
+ * `location` is a JSON Pointer into the value, `#` for the value itself and
+ * `#/title` for its `title` key. `message` is the validator's sentence.
+ */
+export interface JsonSchemaViolation {
+  readonly location: string;
+  readonly message: string;
+}
+
+/**
+ * Returns the violation an error unit reports. A closed object rejects an
  * undeclared key through a `false` boolean schema, whose own message is only
  * "false boolean schema". The real problem is that the key is not allowed, and
  * the location already names the key.
  */
-const describeError = (unit: OutputUnit): string =>
-  unit.keyword === "false"
-    ? `${unit.instanceLocation}: the schema does not allow this key`
-    : `${unit.instanceLocation}: ${unit.error}`;
+const buildViolation = (unit: OutputUnit): JsonSchemaViolation => ({
+  location: unit.instanceLocation,
+  message: unit.keyword === "false" ? "the schema does not allow this key" : unit.error,
+});
 
 /**
  * Checks `value` against `schema`. Returns `undefined` when the value is
- * valid, and otherwise one line that says where the value is wrong and why.
+ * valid, and otherwise where the value is wrong and why.
  *
  * The validator short-circuits: it stops at the first branch that fails.
  * Every unit it returns describes that one failure, reported again at each
- * level above it, so the line comes from the deepest unit.
+ * level above it, so the violation comes from the deepest unit.
  *
  * Throws when the validator cannot use the schema; a caller whose schema was
  * not checked beforehand catches that.
  */
-export const findJsonSchemaViolation = (schema: object, value: unknown): string | undefined => {
+export const findJsonSchemaViolation = (
+  schema: object,
+  value: unknown,
+): JsonSchemaViolation | undefined => {
   const checked = new Validator(schema, DRAFT, true).validate(value);
   if (checked.valid) return undefined;
   const unit = findDeepestUnit(checked.errors);
-  return unit === undefined ? "the value does not satisfy the schema" : describeError(unit);
+  return unit === undefined
+    ? { location: "#", message: "the value does not satisfy the schema" }
+    : buildViolation(unit);
 };

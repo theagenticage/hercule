@@ -35,5 +35,8 @@ export const judgeAnswer = (schema: OutputSchema, answer: HarnessAnswer): Struct
       value: answer.value as Extract<StructuredResult, { outcome: "ok" }>["value"],
     };
   }
-  return { outcome: "schema-failure", reason: violation.slice(0, MAX_MESSAGE_LENGTH) };
+  return {
+    outcome: "schema-failure",
+    reason: `${violation.location}: ${violation.message}`.slice(0, MAX_MESSAGE_LENGTH),
+  };
 };

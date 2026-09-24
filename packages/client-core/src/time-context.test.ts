@@ -1,5 +1,5 @@
 import { assert, describe, it } from "vitest";
-import { formatSince, formatStamp, formatTimeContext } from "./time-context";
+import { formatPreciseStamp, formatSince, formatStamp, formatTimeContext } from "./time-context";
 
 /** Monday 2026-09-07, 07:14 UTC. */
 const MONDAY_MORNING = new Date("2026-09-07T07:14:00Z");
@@ -101,5 +101,31 @@ describe("formatter caching", () => {
     });
 
     assert.strictEqual(count, 1);
+  });
+});
+
+describe("formatPreciseStamp", () => {
+  it("formats to the second in the given zone", () => {
+    assert.strictEqual(
+      formatPreciseStamp(new Date("2026-09-07T07:14:05Z"), "Europe/Amsterdam"),
+      "7 Sep 09:14:05",
+    );
+  });
+
+  it("leaves the day out when it is the day of the other instant, in the given zone", () => {
+    const ended = new Date("2026-09-07T07:14:09Z");
+    assert.strictEqual(formatPreciseStamp(ended, "UTC", MONDAY_MORNING), "07:14:09");
+    // 23:30 UTC on the 6th is already the 7th in Amsterdam.
+    const late = new Date("2026-09-06T23:30:00Z");
+    assert.strictEqual(formatPreciseStamp(ended, "Europe/Amsterdam", late), "09:14:09");
+    assert.strictEqual(formatPreciseStamp(ended, "UTC", late), "7 Sep 07:14:09");
+  });
+
+  it("keeps the day when the other instant is the same day of another year", () => {
+    const lastYear = new Date("2025-09-07T07:14:00Z");
+    assert.strictEqual(
+      formatPreciseStamp(new Date("2026-09-07T07:14:09Z"), "UTC", lastYear),
+      "7 Sep 07:14:09",
+    );
   });
 });
