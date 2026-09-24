@@ -9,6 +9,10 @@
  * never waits on a runner. The sweep decides and the runner deletes the
  * files. The sweep skips a runner that is not connected, so its files are not
  * changed behind its back; a later pass handles them.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -30,18 +34,13 @@ import {
   type Validation,
   type Workspace,
 } from "@hercule/contract";
-import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
-import { withTransaction } from "../db";
-import { RunnerConnections } from "../runners";
-import { WorkspaceService } from "../workspaces";
-import { absorbFailures, forkAndAbsorbFailures } from "./absorbing";
-
-const Identified = Schema.Struct({ id: Id });
-
-type Identified = Schema.Schema.Type<typeof Identified>;
+import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../../actor";
+import { withTransaction } from "../../db";
+import { RunnerConnections } from "../../runners";
+import { WorkspaceService } from "../../workspaces";
+import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
 
 const decodeProvision = Schema.decodeUnknownEffect(WorkspaceProvisionInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 type WorkspaceError = Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError;
 
@@ -112,10 +111,11 @@ const make = Effect.gen(function* () {
       }),
 
     /** Disposes of a workspace: marks the row gone, then tells the runner to delete it. */
-    disposeWorkspace: (input: Identified): Effect.Effect<Record<string, never>, WorkspaceError> =>
+    disposeWorkspace: (
+      id: Id,
+    ): Effect.Effect<Record<string, never>, Exclude<WorkspaceError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.dispose");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         // The check and the write are one transaction, so a session that starts
         // in the workspace at the same time is either rejected or starts after
         // the dispose.

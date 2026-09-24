@@ -253,10 +253,10 @@ describe("task.delete", () => {
           title: "Retire the placeholder screen",
           description: "d",
         });
-        const result = yield* tasks.delete({ id: created.id });
+        const result = yield* tasks.delete(created.id);
         return {
           result,
-          readError: yield* Effect.flip(tasks.read({ id: created.id })),
+          readError: yield* Effect.flip(tasks.read(created.id)),
           listed: (yield* tasks.query({})).items,
           found: (yield* tasks.query({ text: "placeholder" })).items,
           entries: yield* audit.listByKind("task.deleted"),
@@ -277,8 +277,8 @@ describe("task.delete", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const created = yield* tasks.create({ title: "Delete me", description: "d" });
-        yield* tasks.delete({ id: created.id });
-        return yield* tasks.delete({ id: created.id });
+        yield* tasks.delete(created.id);
+        return yield* tasks.delete(created.id);
       }),
     );
     expect(error).toMatchObject({ error: { code: "not_found" } });
@@ -693,7 +693,7 @@ describe("the event log", () => {
         const tasks = yield* TaskService;
         const audit = yield* AuditLog;
         const created = yield* tasks.create({ title: "Gone", description: "d" });
-        yield* tasks.delete({ id: created.id });
+        yield* tasks.delete(created.id);
         return { task: created, entries: yield* audit.listByKind("task.deleted") };
       }),
     );
@@ -712,7 +712,7 @@ describe("the event log", () => {
         const audit = yield* AuditLog;
         yield* Effect.ignore(tasks.create({ title: "", description: "d" }));
         yield* Effect.ignore(tasks.update({ id: UNKNOWN_ID, title: "x" }));
-        yield* Effect.ignore(tasks.delete({ id: UNKNOWN_ID }));
+        yield* Effect.ignore(tasks.delete(UNKNOWN_ID));
         return {
           created: yield* audit.listByKind("task.created"),
           updated: yield* audit.listByKind("task.updated"),

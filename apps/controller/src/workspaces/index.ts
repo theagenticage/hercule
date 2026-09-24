@@ -13,9 +13,4 @@
  */
 export { gitCredentials, buildGitIdentity, type GitCredential } from "./credentials";
 export { buildReadyClause, buildResumableClause } from "./repository";
-export {
-  WorkspaceService,
-  WorkspaceServiceLayer,
-  type Identified,
-  type QueryInput,
-} from "./service";
+export { WorkspaceService, WorkspaceServiceLayer, type QueryInput } from "./service";

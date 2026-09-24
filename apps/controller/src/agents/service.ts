@@ -18,6 +18,10 @@
  *
  * Every mutation writes one event in the transaction that writes the row. The
  * actor is stamped here, on the event envelope.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -66,14 +70,9 @@ const UpdateInput = Schema.Struct({ id: Id, ...AgentUpdateInput.fields });
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(AgentCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 export interface AgentPage {
   readonly items: ReadonlyArray<Agent>;
@@ -239,10 +238,9 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (input: Identified): Effect.Effect<Agent, ReadError | NotFound> =>
+    read: (id: Id): Effect.Effect<Agent, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const composeRecord = yield* agentRecordComposer;
         return composeRecord(yield* readAgentOrFail(id));
       }),
@@ -360,12 +358,9 @@ const make = Effect.gen(function* () {
      * delete: the session is history, and it runs on its own copy of every
      * value the agent gave it.
      */
-    delete: (
-      input: Identified,
-    ): Effect.Effect<Record<string, never>, WriteError | NotFound | InvalidState> =>
+    delete: (id: Id): Effect.Effect<Record<string, never>, WriteError | NotFound | InvalidState> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         yield* withTransaction(
           sql,
           Effect.gen(function* () {

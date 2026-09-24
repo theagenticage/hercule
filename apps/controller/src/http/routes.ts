@@ -172,12 +172,12 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
     const connections = yield* ConnectionService;
     return handlers
       .handle("query", ({ query }) => withApiErrors(connections.query(query)))
-      .handle("read", ({ params }) => withApiErrors(connections.read(params)))
+      .handle("read", ({ params }) => withApiErrors(connections.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(connections.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(connections.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(connections.delete(params)))
+      .handle("delete", ({ params }) => withApiErrors(connections.delete(params.id)))
       .handle("setCredentials", ({ params, payload }) =>
         withApiErrors(connections.setCredentials({ id: params.id, ...payload })),
       )
@@ -190,12 +190,12 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
     const tasks = yield* TaskService;
     return handlers
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
-      .handle("read", ({ params }) => withApiErrors(tasks.read(params)))
+      .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(tasks.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(tasks.delete(params)));
+      .handle("delete", ({ params }) => withApiErrors(tasks.delete(params.id)));
   }),
 );
 
@@ -204,12 +204,12 @@ const agentRoutes = HttpApiBuilder.group(api, "agent", (handlers) =>
     const agents = yield* AgentService;
     return handlers
       .handle("query", ({ query }) => withApiErrors(agents.query(query)))
-      .handle("read", ({ params }) => withApiErrors(agents.read(params)))
+      .handle("read", ({ params }) => withApiErrors(agents.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(agents.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(agents.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(agents.delete(params)));
+      .handle("delete", ({ params }) => withApiErrors(agents.delete(params.id)));
   }),
 );
 
@@ -218,12 +218,12 @@ const projectRoutes = HttpApiBuilder.group(api, "project", (handlers) =>
     const projects = yield* ProjectService;
     return handlers
       .handle("query", ({ query }) => withApiErrors(projects.query(query)))
-      .handle("read", ({ params }) => withApiErrors(projects.read(params)))
+      .handle("read", ({ params }) => withApiErrors(projects.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(projects.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(projects.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(projects.delete(params)));
+      .handle("delete", ({ params }) => withApiErrors(projects.delete(params.id)));
   }),
 );
 
@@ -232,12 +232,12 @@ const resourceRoutes = HttpApiBuilder.group(api, "resource", (handlers) =>
     const resources = yield* ResourceService;
     return handlers
       .handle("query", ({ query }) => withApiErrors(resources.query(query)))
-      .handle("read", ({ params }) => withApiErrors(resources.read(params)))
+      .handle("read", ({ params }) => withApiErrors(resources.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(resources.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(resources.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(resources.delete(params)));
+      .handle("delete", ({ params }) => withApiErrors(resources.delete(params.id)));
   }),
 );
 
@@ -249,9 +249,9 @@ const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
     const provisioning = yield* Provisioning;
     return handlers
       .handle("query", ({ query }) => withApiErrors(workspaces.query(query)))
-      .handle("read", ({ params }) => withApiErrors(workspaces.read(params)))
+      .handle("read", ({ params }) => withApiErrors(workspaces.read(params.id)))
       .handle("provision", ({ payload }) => withApiErrors(provisioning.provisionWorkspace(payload)))
-      .handle("dispose", ({ params }) => withApiErrors(provisioning.disposeWorkspace(params)));
+      .handle("dispose", ({ params }) => withApiErrors(provisioning.disposeWorkspace(params.id)));
   }),
 );
 
@@ -261,7 +261,7 @@ const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
     const enrichment = yield* Enrichment;
     return handlers
       .handle("query", ({ query }) => withApiErrors(events.query(query)))
-      .handle("read", ({ params }) => withApiErrors(events.read(params)))
+      .handle("read", ({ params }) => withApiErrors(events.read(params.id)))
       .handle("emit", ({ payload }) => withApiErrors(events.emit(payload)))
       .handle("enrich", ({ params, payload }) =>
         withApiErrors(enrichment.enrichEvent({ id: params.id, ...payload })),
@@ -275,7 +275,7 @@ const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) 
     return handlers
       .handle("query", ({ query }) => withApiErrors(subscriptions.query(query)))
       .handle("create", ({ payload }) => withApiErrors(subscriptions.create(payload)))
-      .handle("cancel", ({ params }) => withApiErrors(subscriptions.cancel(params)));
+      .handle("cancel", ({ params }) => withApiErrors(subscriptions.cancel(params.id)));
   }),
 );
 
@@ -284,12 +284,12 @@ const workflowRoutes = HttpApiBuilder.group(api, "workflow", (handlers) =>
     const workflows = yield* WorkflowService;
     return handlers
       .handle("query", ({ query }) => withApiErrors(workflows.query(query)))
-      .handle("read", ({ params }) => withApiErrors(workflows.read(params)))
+      .handle("read", ({ params }) => withApiErrors(workflows.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(workflows.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(workflows.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(workflows.delete(params)))
+      .handle("delete", ({ params }) => withApiErrors(workflows.delete(params.id)))
       .handle("validate", ({ payload }) => withApiErrors(workflows.validate(payload)));
   }),
 );
@@ -305,8 +305,8 @@ const runRoutes = HttpApiBuilder.group(api, "run", (handlers) =>
     return handlers
       .handle("start", ({ payload }) => withApiErrors(engine.startRun(payload)))
       .handle("query", ({ query }) => withApiErrors(runs.query(query)))
-      .handle("read", ({ params }) => withApiErrors(runs.read(params)))
-      .handle("cancel", ({ params }) => withApiErrors(engine.cancelRun(params)));
+      .handle("read", ({ params }) => withApiErrors(runs.read(params.id)))
+      .handle("cancel", ({ params }) => withApiErrors(engine.cancelRun(params.id)));
   }),
 );
 
@@ -352,16 +352,16 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
     const retirement = yield* Retirement;
     return handlers
       .handle("query", ({ query }) => withApiErrors(runners.query(query)))
-      .handle("read", ({ params }) => withApiErrors(runners.read(params)))
+      .handle("read", ({ params }) => withApiErrors(runners.read(params.id)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(runners.update({ id: params.id, ...payload })),
       )
-      .handle("drain", ({ params }) => withApiErrors(runners.drain(params)))
-      .handle("undrain", ({ params }) => withApiErrors(runners.undrain(params)))
+      .handle("drain", ({ params }) => withApiErrors(runners.drain(params.id)))
+      .handle("undrain", ({ params }) => withApiErrors(runners.undrain(params.id)))
       .handle("retire", ({ params, payload }) =>
         withApiErrors(retirement.retireRunner({ id: params.id, ...payload })),
       )
-      .handle("refreshFacts", ({ params }) => withApiErrors(runners.refreshFacts(params)))
+      .handle("refreshFacts", ({ params }) => withApiErrors(runners.refreshFacts(params.id)))
       .handle("probe", ({ params, payload }) =>
         withApiErrors(providers.probe({ runnerId: params.id, ...payload })),
       )
@@ -370,7 +370,7 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
       )
       .handle("createJoinToken", () => withApiErrors(runners.createJoinToken()))
       .handle("queryJoinTokens", () => withApiErrors(runners.queryJoinTokens()))
-      .handle("revokeJoinToken", ({ params }) => withApiErrors(runners.revokeJoinToken(params)));
+      .handle("revokeJoinToken", ({ params }) => withApiErrors(runners.revokeJoinToken(params.id)));
   }),
 );
 
@@ -395,12 +395,12 @@ const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
     const providers = yield* ProviderService;
     return handlers
       .handle("query", () => withApiErrors(providers.query()))
-      .handle("read", ({ params }) => withApiErrors(providers.read(params)))
+      .handle("read", ({ params }) => withApiErrors(providers.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(providers.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(providers.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(providers.delete(params)))
+      .handle("delete", ({ params }) => withApiErrors(providers.delete(params.id)))
       .handle("login", ({ params, payload }) =>
         withApiErrors(providers.login({ id: params.id, ...payload })),
       )
@@ -423,7 +423,7 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
     const live = yield* Live;
     return handlers
       .handle("query", ({ query }) => withApiErrors(sessions.query(query)))
-      .handle("read", ({ params }) => withApiErrors(sessions.read(params)))
+      .handle("read", ({ params }) => withApiErrors(sessions.read(params.id)))
       .handle("spawn", ({ payload }) => withApiErrors(placement.placeSession(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(live.update({ id: params.id, ...payload })),
@@ -431,11 +431,11 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
       .handle("input", ({ params, payload }) =>
         withApiErrors(live.input({ id: params.id, ...payload })),
       )
-      .handle("interrupt", ({ params }) => withApiErrors(live.interrupt(params)))
+      .handle("interrupt", ({ params }) => withApiErrors(live.interrupt(params.id)))
       .handle("respond", ({ params, payload }) =>
         withApiErrors(live.respond({ id: params.id, ...payload })),
       )
-      .handle("stop", ({ params }) => withApiErrors(live.stop(params)))
+      .handle("stop", ({ params }) => withApiErrors(live.stop(params.id)))
       .handle("continue", ({ params, payload }) =>
         withApiErrors(placement.continueSession({ id: params.id, ...payload })),
       );
@@ -459,8 +459,10 @@ const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
       .handle("update", ({ params, payload }) =>
         withApiErrors(sessions.updateInput({ ...params, ...payload })),
       )
-      .handle("cancel", ({ params }) => withApiErrors(sessions.cancelInput(params)))
-      .handle("steer", ({ params }) => withApiErrors(live.steer(params)));
+      .handle("cancel", ({ params }) =>
+        withApiErrors(sessions.cancelInput(params.id, params.inputId)),
+      )
+      .handle("steer", ({ params }) => withApiErrors(live.steer(params.id, params.inputId)));
   }),
 );
 

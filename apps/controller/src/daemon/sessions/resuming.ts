@@ -12,10 +12,10 @@ import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { createInvalidStateError, type InvalidState } from "@hercule/contract";
-import { isLoggedIn, NO_PLACEMENT, providerRepository } from "../providers";
-import { DRAINING, RETIRED, runnerRepository } from "../runners";
-import type { StoredSession } from "../sessions";
-import { WorkspaceService } from "../workspaces";
+import { isLoggedIn, NO_PLACEMENT, providerRepository } from "../../providers";
+import { DRAINING, RETIRED, runnerRepository } from "../../runners";
+import type { StoredSession } from "../../sessions";
+import { WorkspaceService } from "../../workspaces";
 
 const STILL_LIVE = "that session is still live; stop it first";
 

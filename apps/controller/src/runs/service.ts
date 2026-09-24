@@ -4,6 +4,10 @@
  * Starting a run crosses domains - it reads a workflow, checks Connections,
  * and later calls other domains' services from each step - so it lives in the
  * controller daemon's run engine, not here.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -46,14 +50,6 @@ export interface RunPage {
   readonly items: ReadonlyArray<RunSummary>;
   readonly nextCursor?: string;
 }
-
-/** The input of the operations on one run: its id. */
-const Identified = Schema.Struct({ id: Id });
-
-type Identified = Schema.Schema.Type<typeof Identified>;
-
-/** Decodes the input of an operation on one run, for the operations that did not come through a transport. */
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 /**
  * Checks whether a run or a step record can still change: it is pending or
@@ -110,12 +106,9 @@ const make = Effect.gen(function* () {
      * Returns a run with its frozen plan, its inputs and every step record.
      * Fails with `NotFound` if no run has the id.
      */
-    read: (
-      input: Identified,
-    ): Effect.Effect<Run, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    read: (id: Id): Effect.Effect<Run, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("run.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const found = yield* runs.read(id);
         if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError("no such run"));
         return found.value;

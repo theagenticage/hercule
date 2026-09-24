@@ -8,6 +8,10 @@
  * way round. Anything the runner is told about must be something a caller can
  * read back, edit or cancel, and the runner's reply is written where the
  * caller reads it. No transaction stays open while waiting for that reply.
+ *
+ * A method that takes only ids does not decode them again: the transport has
+ * already decoded a request's ids against the contract, and a caller inside
+ * the controller passes ids it read from stored rows.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -35,12 +39,12 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../actor";
-import { nowIso, withTransaction } from "../db";
-import { AuditLog } from "../events";
-import type { PluginHost } from "../plugins";
-import { providerRepository, resolvedInstance } from "../providers";
-import { RunnerConnections } from "../runners";
+import { currentStamp, requireGrant } from "../../actor";
+import { nowIso, withTransaction } from "../../db";
+import { AuditLog } from "../../events";
+import type { PluginHost } from "../../plugins";
+import { providerRepository, resolvedInstance } from "../../providers";
+import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
   readSessionOrFail,
@@ -50,15 +54,11 @@ import {
   validateOptions,
   type StoredInput,
   type StoredSession,
-} from "../sessions";
-import { Settings, type SettingError } from "../settings";
-import type { WorkspaceService } from "../workspaces";
+} from "../../sessions";
+import { Settings, type SettingError } from "../../settings";
+import type { WorkspaceService } from "../../workspaces";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
-
-const Identified = Schema.Struct({ id: Id });
-
-type Identified = Schema.Schema.Type<typeof Identified>;
 
 const InputInput = Schema.Struct({ id: Id, ...SESSION_INPUT_FIELDS });
 
@@ -72,14 +72,8 @@ const RespondInput = Schema.Struct({ id: Id, ...SESSION_RESPOND_FIELDS });
 
 type RespondInput = Schema.Schema.Type<typeof RespondInput>;
 
-const InputIdentified = Schema.Struct({ id: Id, inputId: Id });
-
-type InputIdentified = Schema.Schema.Type<typeof InputIdentified>;
-
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 const decodeInput = Schema.decodeUnknownEffect(InputInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
-const decodeInputIdentified = Schema.decodeUnknownEffect(InputIdentified);
 const decodeRespond = Schema.decodeUnknownEffect(RespondInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
@@ -440,18 +434,14 @@ const make = Effect.gen(function* () {
      * - the session is not busy;
      * - the session's provider does not support steering.
      */
-    steer: (input: InputIdentified): Effect.Effect<SessionInputOutcome, InputError> =>
+    steer: (sessionId: Id, inputId: Id): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.steer");
-        const { id, inputId } = yield* Effect.mapError(
-          decodeInputIdentified(input),
-          createDecodeValidationError,
-        );
-        const session = yield* one(id);
+        const session = yield* one(sessionId);
         // Look the row up before checking the session's status, so an input id
         // from another session fails with not_found, whatever this session's
         // status is.
-        const row = yield* sessions.queuedInput(id, inputId);
+        const row = yield* sessions.queuedInput(sessionId, inputId);
         if (session.status !== "busy") return yield* Effect.fail(createInvalidStateError(NOT_BUSY));
         const { definition } = yield* resolved(session.instanceId);
         if (definition.declared.steering !== "native") {
@@ -475,10 +465,9 @@ const make = Effect.gen(function* () {
      * that has already passed. The adapter knows, and its interrupt does
      * nothing when there is no turn to end.
      */
-    interrupt: (input: Identified): Effect.Effect<Session, InputError> =>
+    interrupt: (id: Id): Effect.Effect<Session, Exclude<InputError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("session.interrupt");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const session = yield* one(id);
         if (session.status === "exited")
           return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
@@ -562,10 +551,9 @@ const make = Effect.gen(function* () {
      * A queued session has no harness yet, and its runner was never told
      * about it, so it is ended directly without sending anything.
      */
-    stop: (input: Identified): Effect.Effect<Session, InputError> =>
+    stop: (id: Id): Effect.Effect<Session, Exclude<InputError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("session.stop");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const session = yield* one(id);
         if (session.status === "exited")
           return yield* Effect.fail(createInvalidStateError(HAS_EXITED));

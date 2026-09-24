@@ -34,7 +34,6 @@ export {
   RETIRED,
   RunnerService,
   RunnerServiceLayer,
-  type Identified,
   type MoveError,
   type QueryInput,
   type RetireInput,

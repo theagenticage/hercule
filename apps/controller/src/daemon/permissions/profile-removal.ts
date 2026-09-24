@@ -23,11 +23,11 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { agentRepository } from "../agents";
-import { requireGrant } from "../actor";
-import { refuseCursor, withTransaction } from "../db";
-import { Profiles, type GrantsError } from "../permissions";
-import { LIVE_SESSION_STATUSES, sessionRepository } from "../sessions";
+import { agentRepository } from "../../agents";
+import { requireGrant } from "../../actor";
+import { refuseCursor, withTransaction } from "../../db";
+import { Profiles, type GrantsError } from "../../permissions";
+import { LIVE_SESSION_STATUSES, sessionRepository } from "../../sessions";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

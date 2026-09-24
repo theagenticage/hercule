@@ -16,6 +16,10 @@
  * outside Hercule, and a pointer nobody wants can simply go. The delete fails
  * while a workspace still uses the resource, because that workspace is a
  * checkout on a runner.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -64,14 +68,9 @@ const UpdateInput = Schema.Struct({ id: Id, ...RESOURCE_UPDATE_FIELDS });
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(ResourceCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 export interface ResourcePage {
   readonly items: ReadonlyArray<Resource>;
@@ -228,10 +227,9 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (input: Identified): Effect.Effect<Resource, ReadError | NotFound> =>
+    read: (id: Id): Effect.Effect<Resource, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("resource.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* Effect.flatMap(readStoredResourceOrFail(id), readResourceRecord);
       }),
 
@@ -401,11 +399,13 @@ const make = Effect.gen(function* () {
       }),
 
     delete: (
-      input: Identified,
-    ): Effect.Effect<Record<string, never>, ReadError | NotFound | InvalidState> =>
+      id: Id,
+    ): Effect.Effect<
+      Record<string, never>,
+      Exclude<ReadError | NotFound | InvalidState, Validation>
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("resource.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

@@ -111,7 +111,7 @@ One pnpm workspace. Every package is `@hercule/*`, `"type": "module"`, and expor
 
 ### Source layout
 
-Source is organized **by domain**, not by type: one folder per domain, named with the CONTEXT.md word for it, and its `index.ts` is the boundary other domains import through. `db/` and `config/` are the two infrastructure exceptions, sitting under every domain; in the controller, `daemon/` - the controller daemon - is the one layer above the domains, holding every sequence that crosses two of them or reaches a runner. Tests sit next to the code they test and are told apart by name: a unit test is `foo.test.ts` beside `foo.ts`, and an integration test - one that drives several modules together through a single entry point, an HTTP transport or the whole rendered app - is `<entry>.integration.test.ts` beside the module it enters. End-to-end tests run against the compiled binary and live in `e2e/` at the repository root. See [ADR 0033](docs/adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).
+Source is organized **by domain**, not by type: one folder per domain, named with the CONTEXT.md word for it, and its `index.ts` is the boundary other domains import through. `db/` and `config/` are the two infrastructure exceptions, sitting under every domain; in the controller, `daemon/` - the controller daemon - is the one layer above the domains, holding every sequence that crosses two of them or reaches a runner. The controller daemon has one folder per concern (`sessions/`, `events/`, `workspaces/`, `runners/`, `permissions/`, `runs/`), each with an `index.ts` the rest of the controller daemon imports it through; its top level keeps only `boot.ts`, `index.ts`, `testing.ts` and the helpers more than one folder uses. A new use case goes in the folder of its concern. Tests sit next to the code they test and are told apart by name: a unit test is `foo.test.ts` beside `foo.ts`, and an integration test - one that drives several modules together through a single entry point, an HTTP transport or the whole rendered app - is `<entry>.integration.test.ts` beside the module it enters. End-to-end tests run against the compiled binary and live in `e2e/` at the repository root. See [ADR 0033](docs/adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).
 
 #### Web app layout
 
@@ -133,7 +133,7 @@ pnpm install
 pnpm typecheck   # tsc over the backend, packages/ui, and apps/web
 pnpm lint        # eslint --max-warnings 0, then prettier --check
 pnpm test        # vitest across every package: the backend on Bun, the React packages on Node
-pnpm dep-lint    # the runner entrypoint links no controller package; the controller's domains form a DAG
+pnpm dep-lint    # the runner entrypoint links no controller package; the controller's domains, and the controller daemon's folders, form a DAG
 ```
 
 Then the packaging pair, which CI runs after those four. `pnpm test:binary` runs the

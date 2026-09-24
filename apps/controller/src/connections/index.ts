@@ -17,7 +17,6 @@ export {
   ConnectionServiceLayer,
   type ConnectionPage,
   type CredentialsInput,
-  type Identified,
   type QueryInput,
   type UpdateInput,
 } from "./service";

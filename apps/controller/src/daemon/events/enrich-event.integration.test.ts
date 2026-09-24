@@ -7,8 +7,8 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration } from "effect";
-import { post } from "../http/testing";
-import { readSession, WAIT_DEADLINE_MS } from "../sessions/testing";
+import { post } from "../../http/testing";
+import { readSession, WAIT_DEADLINE_MS } from "../../sessions/testing";
 import {
   waitUntilCaughtUp,
   emitManualEvent,
@@ -24,7 +24,7 @@ import {
   spawnSubscriber,
   readSubscriptionRow,
   withPipeline,
-} from "./testing";
+} from "../testing";
 
 /**
  * Longer than any test here runs, so the pipeline never ticks, and the test

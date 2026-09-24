@@ -13,10 +13,10 @@
  */
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SessionService } from "../../sessions";
-import { EvaluationErrorNotifier } from "../../subscriptions";
+import { SessionService } from "../../../sessions";
+import { EvaluationErrorNotifier } from "../../../subscriptions";
 import type { Delivery, RoutingTable } from "../event-router";
-import { Live } from "../live";
+import { Live } from "../../sessions";
 import { queuedInputDelivery } from "./queued-input-delivery";
 import { sessionRoutingTable } from "./session-routing-table";
 

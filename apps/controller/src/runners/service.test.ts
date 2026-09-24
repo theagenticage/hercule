@@ -75,7 +75,7 @@ describe("a caller with no actor", () => {
   it("is forbidden from query and read without infra.read, before anything is looked up", async () => {
     const errors = await Promise.all([
       runError(Effect.flatMap(RunnerService, (runners) => runners.query({}))),
-      runError(Effect.flatMap(RunnerService, (runners) => runners.read({ id: UNKNOWN_ID }))),
+      runError(Effect.flatMap(RunnerService, (runners) => runners.read(UNKNOWN_ID))),
     ]);
     for (const error of errors) {
       expect(error).toMatchObject({
@@ -121,10 +121,10 @@ describe("the errors the service returns on its own", () => {
 
         const errors = yield* Effect.forEach(
           [
-            runners.drain({ id: draining.id }),
-            runners.drain({ id: retired.id }),
-            runners.undrain({ id: active.id }),
-            runners.undrain({ id: retired.id }),
+            runners.drain(draining.id),
+            runners.drain(retired.id),
+            runners.undrain(active.id),
+            runners.undrain(retired.id),
             runners.retire({ id: retired.id }),
           ],
           Effect.flip,
@@ -133,7 +133,7 @@ describe("the errors the service returns on its own", () => {
         return {
           errors,
           after: yield* Effect.forEach([active, draining, retired], (runner) =>
-            Effect.map(runners.read({ id: runner.id }), (row) => row.lifecycle),
+            Effect.map(runners.read(runner.id), (row) => row.lifecycle),
           ),
           trail: yield* Effect.forEach(
             ["runner.drained", "runner.undrained", "runner.retired"] as const,
@@ -157,7 +157,7 @@ describe("the errors the service returns on its own", () => {
         const taken = yield* Effect.flip(runners.update({ id: iris.id, name: "atlas" }));
         return {
           taken,
-          refused: yield* runners.read({ id: iris.id }),
+          refused: yield* runners.read(iris.id),
           // Names are case-sensitive: the fleet stores what the user typed.
           cased: yield* runners.update({ id: iris.id, name: "Atlas" }),
           free: yield* runners.update({ id: iris.id, name: "vega" }),
@@ -181,7 +181,7 @@ describe("the errors the service returns on its own", () => {
         yield* (yield* Settings).setDefaultRunnerId(chosen.id, yield* nowIso);
         return {
           error: yield* Effect.flip(runners.update({ id: chosen.id, reserved: true })),
-          after: yield* runners.read({ id: chosen.id }),
+          after: yield* runners.read(chosen.id),
         };
       }),
     );

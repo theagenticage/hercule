@@ -6,6 +6,9 @@
  *
  * Input is decoded here rather than trusted, because a built-in workflow
  * action calls these methods directly, and the same limits apply either way.
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -60,10 +63,6 @@ const UpdateInput = Schema.Struct({ id: Id, ...RUNNER_EDIT_FIELDS });
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const RetireInput = Schema.Struct({ id: Id, ...RUNNER_RETIRE_FIELDS });
 
 export type RetireInput = Schema.Schema.Type<typeof RetireInput>;
@@ -79,7 +78,6 @@ export interface Retired extends RunnerDetail {
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 const decodeRetire = Schema.decodeUnknownEffect(RetireInput);
 
 export interface RunnerPage {
@@ -175,7 +173,7 @@ const make = Effect.gen(function* () {
    * entry. Each passes its own operation, so each checks its own grant.
    */
   const moveLifecycle = (
-    input: Identified,
+    id: Id,
     move: {
       readonly operation: "runner.drain" | "runner.undrain";
       readonly from: RunnerLifecycle;
@@ -186,7 +184,6 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<RunnerDetail, MoveError> =>
     Effect.gen(function* () {
       yield* requireGrant(move.operation);
-      const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
       return yield* withTransaction(
         sql,
         Effect.gen(function* () {
@@ -235,14 +232,10 @@ const make = Effect.gen(function* () {
       }),
 
     read: (
-      input: Identified,
-    ): Effect.Effect<
-      RunnerDetail,
-      Unauthenticated | Forbidden | Validation | NotFound | SqlError
-    > =>
+      id: Id,
+    ): Effect.Effect<RunnerDetail, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* readRunnerOrFail(id);
       }),
 
@@ -353,8 +346,8 @@ const make = Effect.gen(function* () {
      * Takes a runner out of service without stopping it: it finishes the
      * sessions it is running and gets no new ones. `undrain` reverses it.
      */
-    drain: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
-      moveLifecycle(input, {
+    drain: (id: Id): Effect.Effect<RunnerDetail, MoveError> =>
+      moveLifecycle(id, {
         operation: "runner.drain",
         from: "active",
         to: "draining",
@@ -362,9 +355,9 @@ const make = Effect.gen(function* () {
         kind: "runner.drained",
       }),
 
-    undrain: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
+    undrain: (id: Id): Effect.Effect<RunnerDetail, MoveError> =>
       Effect.gen(function* () {
-        const detail = yield* moveLifecycle(input, {
+        const detail = yield* moveLifecycle(id, {
           operation: "runner.undrain",
           from: "draining",
           to: "active",
@@ -439,10 +432,9 @@ const make = Effect.gen(function* () {
      * something changed, so this is the only way to see a newly installed
      * provider CLI without waiting up to an hour.
      */
-    refreshFacts: (input: Identified): Effect.Effect<RunnerDetail, MoveError> =>
+    refreshFacts: (id: Id): Effect.Effect<RunnerDetail, Exclude<MoveError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.refreshFacts");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         const before = yield* readRunnerOrFail(id);
         yield* requireOnline(before);
         if (!(yield* connections.refreshedFacts(id))) {
@@ -496,14 +488,10 @@ const make = Effect.gen(function* () {
 
     /** Revokes a join token that has not been spent. Fails with `NotFound` when there is no such open token. */
     revokeJoinToken: (
-      input: Identified,
-    ): Effect.Effect<
-      Record<string, never>,
-      Unauthenticated | Forbidden | Validation | NotFound | SqlError
-    > =>
+      id: Id,
+    ): Effect.Effect<Record<string, never>, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.revokeJoinToken");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

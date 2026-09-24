@@ -16,13 +16,13 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { withTransaction } from "../db";
-import { PluginHost } from "../plugins";
-import type { SessionTokens } from "../permissions";
-import { RunnerConnections, runnerRepository } from "../runners";
-import { readInstanceSecrets, Secrets } from "../secrets";
-import { SessionService } from "../sessions";
-import { gitCredentials } from "../workspaces";
+import { withTransaction } from "../../db";
+import { PluginHost } from "../../plugins";
+import type { SessionTokens } from "../../permissions";
+import { RunnerConnections, runnerRepository } from "../../runners";
+import { readInstanceSecrets, Secrets } from "../../secrets";
+import { SessionService } from "../../sessions";
+import { gitCredentials } from "../../workspaces";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

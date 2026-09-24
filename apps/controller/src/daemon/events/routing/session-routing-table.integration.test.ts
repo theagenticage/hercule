@@ -14,7 +14,7 @@ import {
   waitForStartFrames,
   waitUntil,
   WAIT_DEADLINE_MS,
-} from "../../sessions/testing";
+} from "../../../sessions/testing";
 import {
   waitUntilCaughtUp,
   emitManualEvent,
@@ -38,7 +38,7 @@ import {
   readCursorAndHead,
   withPipeline,
   type Notified,
-} from "../testing";
+} from "../../testing";
 
 /** Long enough for a fleet, three sessions and several ticks. */
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 20_000 });

@@ -21,6 +21,10 @@
  *
  * Audit entries are not written here. The audit writer appends those, one row
  * per mutation, inside that mutation's transaction.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -35,7 +39,7 @@ import {
   DEFAULT_PAGE_LIMIT,
   EventEmitInput,
   EVENT_SORT_FIELDS,
-  EventId,
+  type EventId,
   Id,
   MAX_EVENT_KIND_LENGTH,
   MAX_PAGE_LIMIT,
@@ -87,13 +91,8 @@ const QueryInput = Schema.Struct({
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
-const Identified = Schema.Struct({ id: EventId });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeEmit = Schema.decodeUnknownEffect(EventEmitInput, { errors: "all" });
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 /** One page of the log, in the contract's shape. */
 export interface EventPage {
@@ -241,12 +240,9 @@ const make = Effect.gen(function* () {
      * Returns one entry by its position in the log. Fails with `NotFound` if
      * there is no such entry, or if the caller may not see it.
      */
-    read: (
-      input: Identified,
-    ): Effect.Effect<Event, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
+    read: (id: EventId): Effect.Effect<Event, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("event.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         // An entry this caller may not see fails as if it did not exist: a
         // hidden row and an id past the head of the log get the same error, so
         // the log's contents cannot be probed by id.

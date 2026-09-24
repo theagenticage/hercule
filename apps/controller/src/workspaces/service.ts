@@ -23,6 +23,10 @@
  * the controller daemon sends it once the rows are committed. If a runner never
  * receives the frame, the workspace stays `provisioning`, and both the sweep
  * and the user treat it as a workspace that never came up.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -92,12 +96,7 @@ const QueryInput = Schema.Struct({
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 
 export interface WorkspacePage {
   readonly items: ReadonlyArray<Workspace>;
@@ -515,10 +514,9 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (input: Identified): Effect.Effect<Workspace, ReadError | NotFound> =>
+    read: (id: Id): Effect.Effect<Workspace, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* Effect.flatMap(readStoredWorkspaceOrFail(id), readWorkspaceRecord);
       }),
 

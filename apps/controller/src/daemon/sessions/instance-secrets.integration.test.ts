@@ -12,8 +12,8 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
 import { secret, type Plugin, type ProviderDefinition } from "@hercule/plugin-host";
 import type { ModelDescriptor, ProbeRequest, RunnerFacts, SessionStart } from "@hercule/protocol";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
-import { send } from "../http/testing";
+import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
+import { send } from "../../http/testing";
 import {
   listFrames,
   waitForFrames,
@@ -23,7 +23,7 @@ import {
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
   type Arranged,
-} from "../sessions/testing";
+} from "../../sessions/testing";
 
 const KEY_TITLE = "Z.ai API key";
 const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";

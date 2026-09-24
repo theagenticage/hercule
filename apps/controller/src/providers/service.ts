@@ -6,6 +6,10 @@
  * A row whose provider this build does not have is not listed and cannot be
  * read, but the row is kept, so a later build that has the provider again
  * finds it.
+ *
+ * A method that takes only an id does not decode it again: the transport has
+ * already decoded a request's id against the contract, and a caller inside
+ * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -104,10 +108,6 @@ const UpdateInput = Schema.Struct({ id: Id, ...ProviderInstanceUpdateInput.field
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
-const Identified = Schema.Struct({ id: Id });
-
-export type Identified = Schema.Schema.Type<typeof Identified>;
-
 const ProbeInput = Schema.Struct({ runnerId: Id, instanceId: Id });
 
 export type ProbeInput = Schema.Schema.Type<typeof ProbeInput>;
@@ -118,7 +118,6 @@ export type InstallInput = Schema.Schema.Type<typeof InstallInput>;
 
 const decodeCreate = Schema.decodeUnknownEffect(ProviderInstanceCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
-const decodeIdentified = Schema.decodeUnknownEffect(Identified);
 const decodeLogin = Schema.decodeUnknownEffect(LoginInput);
 const decodeLoginCode = Schema.decodeUnknownEffect(LoginCodeInput);
 const decodeProbe = Schema.decodeUnknownEffect(ProbeInput);
@@ -334,10 +333,9 @@ const make = Effect.gen(function* () {
         return yield* all;
       }),
 
-    read: (input: Identified): Effect.Effect<ProviderInstance, WriteError> =>
+    read: (id: Id): Effect.Effect<ProviderInstance, Exclude<WriteError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.read");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* readInstanceOrFail(id);
       }),
 
@@ -604,10 +602,9 @@ const make = Effect.gen(function* () {
      * has can still be deleted. If this was the provider's only instance, the
      * next boot creates a new default one.
      */
-    delete: (input: Identified): Effect.Effect<Record<string, never>, WriteError> =>
+    delete: (id: Id): Effect.Effect<Record<string, never>, Exclude<WriteError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.delete");
-        const { id } = yield* Effect.mapError(decodeIdentified(input), createDecodeValidationError);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

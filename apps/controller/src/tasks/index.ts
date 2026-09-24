@@ -2,7 +2,6 @@
 export {
   TaskService,
   TaskServiceLayer,
-  type Identified,
   type QueryInput,
   type TaskPage,
   type UpdateInput,

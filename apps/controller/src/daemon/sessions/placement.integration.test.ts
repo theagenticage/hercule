@@ -14,8 +14,8 @@ import {
   type ModelDescriptor,
   type RunnerFacts,
 } from "@hercule/protocol";
-import { get, post, send } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { get, post, send } from "../../http/testing";
+import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
 import {
   spawnAgentUnder,
   findInstanceId,
@@ -30,8 +30,8 @@ import {
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
   type Arranged,
-} from "../sessions/testing";
-import { listFramesTagged, readWorkspace, createRepo } from "../workspaces/testing";
+} from "../../sessions/testing";
+import { listFramesTagged, readWorkspace, createRepo } from "../../workspaces/testing";
 
 /** A provider that supports everything natively, and is not the thread default. */
 const ALPHA: ProviderDefinition = buildProviderDefinition("alpha-provider", { token: "t" });

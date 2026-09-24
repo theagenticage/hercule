@@ -20,6 +20,5 @@ export {
   ProviderLoginDeadline,
   ProviderService,
   ProviderServiceLayer,
-  type Identified,
   type UpdateInput,
 } from "./service";

@@ -177,7 +177,7 @@ const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
  * requirement, so an operation with a rule of its own can be recognised here.
  *
  * `session.spawn` has three such rules. All three are enforced in
- * `daemon/placement.ts` and not here, because each needs the decoded payload,
+ * `daemon/sessions/placement.ts` and not here, because each needs the decoded payload,
  * and this check runs before the decode:
  *
  * - any actor that holds the grant may spawn from an Agent, but only the user

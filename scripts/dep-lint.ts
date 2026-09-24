@@ -25,6 +25,8 @@
  * `src/daemon/`, the controller daemon, is what keeps that graph acyclic: it is
  * the layer above the domains, and holds every sequence that crosses two
  * domains or reaches a runner. Only `http/` imports it; no domain may.
+ * Inside it, the same two rules hold one level down: its folders form a DAG,
+ * and one folder reaches another only through that folder's `index.ts`.
  *
  * One rule is about the workspace, not an import graph: the Agent SDK's eight
  * per-platform CLI packages (one is 196 MB) are excluded at install, and the
@@ -36,7 +38,7 @@
  * uses the optional entrypoint to point the script at its fixtures.
  */
 import { readdir, rm } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -141,8 +143,8 @@ console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the gr
 
 /**
  * The controller's domains, as a graph over the folders under `src/`: every
- * file in a domain is that domain, and an import of `../<other>` is an edge
- * from this domain to that one. `db/` and `config/` are infrastructure every
+ * file in a domain is that domain, at any depth, and an import that resolves
+ * to `src/<other>` is an edge from this domain to that one. `db/` and `config/` are infrastructure every
  * domain may import, and the check does not treat them as sources of edges.
  * `daemon/` is a node like any other here. No separate rule stops a domain
  * from importing it; such an import is caught only when it closes a cycle.
@@ -150,13 +152,13 @@ console.log(`dep-lint: ${entrypoint} is clean (${graph.length} modules in the gr
 const controllerSrc = `${root}apps/controller/src`;
 
 /**
- * Lists the controller's domain folders. Returns an empty list when there is
- * no controller to read: `scripts/dep-lint.test.ts` tests the store rules by
- * copying this script into a root of its own, and a rule about a missing
- * directory has nothing to check.
+ * Lists the folders directly inside `dir`. Returns an empty list when `dir`
+ * does not exist: `scripts/dep-lint.test.ts` tests the store rules by copying
+ * this script into a root of its own, and a rule about a missing directory
+ * has nothing to check.
  */
-const listDomains = async (): Promise<ReadonlyArray<string>> => {
-  const entries = await readdir(controllerSrc, { withFileTypes: true }).catch(() => undefined);
+const listFolders = async (dir: string): Promise<ReadonlyArray<string>> => {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => undefined);
   return entries === undefined
     ? []
     : entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
@@ -177,19 +179,24 @@ const listShippedFiles = async (dir: string): Promise<ReadonlyArray<string>> =>
     .filter((entry) => entry.isFile() && isShipped(entry.name))
     .map((entry) => resolve(entry.parentPath, entry.name));
 
-const domains = await listDomains();
+const domains = await listFolders(controllerSrc);
 
 /**
- * Returns the domain an import specifier reaches, when it is exactly
- * `../<domain>`: the domain's index, which is the boundary other domains
+ * Returns the domain an import in `file` reaches, when the specifier resolves
+ * to `src/<domain>`: the domain's index, which is the boundary other domains
  * import it through, and the module whose evaluation order matters here. A
- * deep `../<domain>/<file>` reaches one module and never loads that index, so
- * it is not an edge between the two domains.
+ * deep `<domain>/<file>` reaches one module and never loads that index, so it
+ * is not an edge between the two domains.
+ *
+ * The specifier is resolved against the importing file rather than read as
+ * text, because a file one folder down, such as `daemon/sessions/placement.ts`,
+ * reaches the sessions domain as `../../sessions`, while its own `../sessions`
+ * is a folder inside the controller daemon and no domain at all.
  */
-const findReachedDomain = (specifier: string): string | undefined => {
-  const match = /^\.\.\/([^/]+)$/.exec(specifier);
-  const named = match?.[1];
-  return named !== undefined && domains.includes(named) ? named : undefined;
+const findReachedDomain = (file: string, specifier: string): string | undefined => {
+  if (!specifier.startsWith(".")) return undefined;
+  const reached = relative(controllerSrc, resolve(dirname(file), specifier));
+  return domains.includes(reached) ? reached : undefined;
 };
 
 const edges = new Map<string, Set<string>>();
@@ -201,7 +208,7 @@ for (const domain of domains) {
     // `scanImports` drops `import type`, which creates no runtime edge: a type
     // that crosses a domain boundary cannot be evaluated too early.
     for (const record of transpiler.scanImports(text)) {
-      const other = findReachedDomain(record.path);
+      const other = findReachedDomain(file, record.path);
       if (other !== undefined && other !== domain) out.add(other);
     }
   }
@@ -209,35 +216,38 @@ for (const domain of domains) {
 }
 
 /**
- * Returns the first cycle a depth-first search finds, as the path around it,
- * or `undefined` when there is none.
+ * Returns the first cycle a depth-first search of `edges` finds, as the path
+ * around it, or `undefined` when there is none.
  */
-const findCycle = (): ReadonlyArray<string> | undefined => {
+const findCycle = (
+  nodes: ReadonlyArray<string>,
+  edges: ReadonlyMap<string, ReadonlySet<string>>,
+): ReadonlyArray<string> | undefined => {
   const open = new Set<string>();
   const done = new Set<string>();
   const path: Array<string> = [];
-  const walk = (domain: string): ReadonlyArray<string> | undefined => {
-    if (open.has(domain)) return [...path.slice(path.indexOf(domain)), domain];
-    if (done.has(domain)) return undefined;
-    open.add(domain);
-    path.push(domain);
-    for (const next of edges.get(domain) ?? []) {
+  const walk = (node: string): ReadonlyArray<string> | undefined => {
+    if (open.has(node)) return [...path.slice(path.indexOf(node)), node];
+    if (done.has(node)) return undefined;
+    open.add(node);
+    path.push(node);
+    for (const next of edges.get(node) ?? []) {
       const found = walk(next);
       if (found !== undefined) return found;
     }
     path.pop();
-    open.delete(domain);
-    done.add(domain);
+    open.delete(node);
+    done.add(node);
     return undefined;
   };
-  for (const domain of domains) {
-    const found = walk(domain);
+  for (const node of nodes) {
+    const found = walk(node);
     if (found !== undefined) return found;
   }
   return undefined;
 };
 
-const cycle = domains.length === 0 ? undefined : findCycle();
+const cycle = domains.length === 0 ? undefined : findCycle(domains, edges);
 if (cycle !== undefined) {
   console.error("dep-lint: the controller's domains import each other in a cycle:");
   console.error(`    ${cycle.join(" -> ")}`);
@@ -252,6 +262,89 @@ if (cycle !== undefined) {
 
 if (domains.length > 0) {
   console.log(`dep-lint: the controller's ${String(domains.length)} domains form a DAG.`);
+}
+
+/**
+ * The controller daemon's own graph. The domain graph above treats `daemon/`
+ * as one node, so it cannot see how the daemon's folders use each other. Here
+ * each folder of `daemon/` is a node, and so is each file at its top level.
+ * The top level is not one node, because `index.ts` imports every folder and
+ * every folder imports `absorbing.ts`: one node for both would be a cycle by
+ * construction.
+ *
+ * Two rules hold (ADR 0033, amendment of 2026-09-24):
+ *
+ * - the nodes form a DAG, for the same reason the domains do;
+ * - a file reaches another folder only through that folder's `index.ts`,
+ *   which is the folder's boundary.
+ *
+ * Like the domain graph, this one reads runtime imports only: `scanImports`
+ * drops `import type`.
+ */
+const daemonSrc = resolve(controllerSrc, "daemon");
+
+const daemonFolders = await listFolders(daemonSrc);
+
+/**
+ * Returns the node of the controller daemon that a path inside `daemon/`
+ * belongs to: `<folder>/` for anything in a folder, or `<name>.ts` for a file
+ * at the top level. The path is a file, or an import specifier resolved
+ * against its file, which has no extension.
+ */
+const findDaemonNode = (path: string): string => {
+  const [first = ""] = relative(daemonSrc, path).split(sep);
+  return daemonFolders.includes(first) ? `${first}/` : `${first.replace(/\.ts$/, "")}.ts`;
+};
+
+const daemonEdges = new Map<string, Set<string>>();
+const deepImports: Array<string> = [];
+for (const file of daemonFolders.length === 0 ? [] : await listShippedFiles(daemonSrc)) {
+  const from = findDaemonNode(file);
+  const out = daemonEdges.get(from) ?? new Set<string>();
+  daemonEdges.set(from, out);
+  const transpiler = new Bun.Transpiler({ loader: "ts" });
+  for (const record of transpiler.scanImports(await Bun.file(file).text())) {
+    if (!record.path.startsWith(".")) continue;
+    const reached = resolve(dirname(file), record.path);
+    const inside = relative(daemonSrc, reached);
+    if (inside.startsWith("..")) continue;
+    const to = findDaemonNode(reached);
+    if (to === from) continue;
+    out.add(to);
+    const folder = to.slice(0, -1);
+    if (to.endsWith("/") && inside !== folder && inside !== join(folder, "index")) {
+      deepImports.push(`${relative(daemonSrc, file)} imports "${record.path}"`);
+    }
+  }
+}
+
+const daemonCycle = findCycle([...daemonEdges.keys()], daemonEdges);
+if (daemonCycle !== undefined) {
+  console.error("dep-lint: the controller daemon's folders import each other in a cycle:");
+  console.error(`    ${daemonCycle.join(" -> ")}`);
+  console.error(
+    "A folder of the controller daemon is imported through its index, so a cycle between " +
+      "two folders has the same load-order hazard as one between domains. Move the shared " +
+      "piece into the folder that owns it, or into a top-level file both may import.",
+  );
+  process.exit(1);
+}
+
+if (deepImports.length > 0) {
+  console.error("dep-lint: a file of the controller daemon reaches past another folder's index:");
+  for (const deep of deepImports) console.error(`    ${deep}`);
+  console.error(
+    "A folder's index.ts is its boundary. Import the folder itself, such as " +
+      '"../sessions", and export what is needed from its index.ts.',
+  );
+  process.exit(1);
+}
+
+if (daemonFolders.length > 0) {
+  console.log(
+    `dep-lint: the controller daemon's ${String(daemonFolders.length)} folders form a DAG ` +
+      "and are imported through their index.",
+  );
 }
 
 const SDK = "@anthropic-ai/claude-agent-sdk";
