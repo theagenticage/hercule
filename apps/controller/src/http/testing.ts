@@ -15,6 +15,7 @@ import type * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as Fiber from "effect/Fiber";
+import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -44,7 +45,7 @@ import {
   EventRoutingInterval,
   LostRunnerSweepInterval,
   resumeUnfinishedRuns,
-  RunEngine,
+  RunFibers,
   SessionInputDeadline,
   WorkspaceSweepInterval,
 } from "../daemon";
@@ -288,12 +289,16 @@ export const withServer = (
           yield* ensureProviderInstances;
         });
         yield* bootSteps;
-        // A restart first stops every run's fiber, as a stopping controller
-        // does, and resumes the unfinished runs after the boot's steps, as
-        // the real controller does when it starts serving (`serve`).
-        const engine = yield* RunEngine;
+        // A restart first interrupts every run's fiber and waits until they
+        // have stopped, as a stopping controller does, and resumes the
+        // unfinished runs after the boot's steps, as the real controller
+        // does when it starts serving (`serve`).
+        const runFibers = yield* RunFibers;
         const reboot: RebootArranger = yield* makeRepeatable(
-          Effect.andThen(engine.stopExecutingRuns, Effect.andThen(bootSteps, resumeUnfinishedRuns)),
+          Effect.andThen(
+            FiberMap.clear(runFibers),
+            Effect.andThen(bootSteps, resumeUnfinishedRuns),
+          ),
         );
         let listening = serve(bundle);
         const provideIfSet = <A>(key: Context.Reference<A>, value: A | undefined): void => {

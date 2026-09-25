@@ -44,7 +44,7 @@ export {
 } from "./events";
 export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
 export { Inbound, InboundLayer, Retirement, RetirementLayer } from "./runners";
-export { resumeUnfinishedRuns, RunEngine, RunEngineLayer } from "./runs";
+export { resumeUnfinishedRuns, RunEngine, RunEngineLayer, RunFibers } from "./runs";
 export {
   DispatchLayer,
   Live,

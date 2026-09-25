@@ -130,6 +130,19 @@ const INTERRUPTED: EngineStepError = {
 const describeEnding = (status: RunStatus): string =>
   status === "cancelled" ? "has already been cancelled" : `has already ${status}`;
 
+/**
+ * The fibers executing runs, by run id. A run has at most one.
+ *
+ * It is a service of its own, beside the run engine, so that the test
+ * harness can stop every run's fiber to simulate a controller restart
+ * without a new process. A real controller never clears it: closing its
+ * scope when the controller stops interrupts the fibers, and the rows stay
+ * as they are for `resumeUnfinishedRuns` to continue from.
+ */
+export class RunFibers extends Context.Service<RunFibers, FiberMap.FiberMap<string>>()(
+  "hercule/controller/daemon/RunFibers",
+) {}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runs = yield* runRepository;
@@ -137,8 +150,7 @@ const make = Effect.gen(function* () {
   // executes on a fiber of the engine's own, not of the request that started
   // it, so the listener is provided to that fiber here.
   const afterCommitListener = yield* AfterCommit;
-  /** The fiber executing each run, by run id. A run has at most one. */
-  const runFibers = yield* FiberMap.make<string>();
+  const runFibers = yield* RunFibers;
   const forkRun = yield* FiberMap.runtime(runFibers)<never>();
   // The fiber that executes a new run is started through a function the
   // engine defines below, which itself calls `startRun` for the `run.start`
@@ -551,18 +563,6 @@ const make = Effect.gen(function* () {
     resumeUnfinishedRuns: Effect.map(runs.listUnfinished(), (ids) => {
       for (const runId of ids) executeInBackground(runId);
     }),
-
-    /**
-     * Interrupts every fiber executing a run, and waits until they have
-     * stopped. This is what happens to them when the controller stops: the
-     * rows stay as they are, for `resumeUnfinishedRuns` to continue from.
-     *
-     * Only the test harness calls it: it stops the fibers, then resumes the
-     * unfinished runs, to simulate a controller restart without a new process.
-     * A real shutdown needs no call, because closing the service's scope
-     * interrupts the fibers.
-     */
-    stopExecutingRuns: FiberMap.clear(runFibers),
   };
 });
 
@@ -572,10 +572,12 @@ export class RunEngine extends Context.Service<RunEngine, Effect.Success<typeof 
 ) {}
 
 export const RunEngineLayer: Layer.Layer<
-  RunEngine,
+  RunEngine | RunFibers,
   never,
   SqlClient.SqlClient | WorkflowService | TaskService | PluginHost | Settings | AfterCommit
-> = Layer.effect(RunEngine)(make);
+> = Layer.effect(RunEngine)(make).pipe(
+  Layer.provideMerge(Layer.effect(RunFibers)(FiberMap.make<string>())),
+);
 
 /**
  * Resumes every unfinished run, as the controller does when it starts
