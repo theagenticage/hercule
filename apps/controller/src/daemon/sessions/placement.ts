@@ -78,6 +78,13 @@ const NO_SUCH_PROFILE = "no such permission profile";
 
 const NO_SUCH_AGENT = "no such agent";
 
+/**
+ * The error message for a spawn from an assistant. An assistant's sessions
+ * are started by its conversation, never by a spawn.
+ */
+const ASSISTANT_SPAWN_REFUSED =
+  "an assistant's sessions belong to its conversation; send it a message with conversation.send";
+
 /** The error message when a session spawns from an Agent with more grants than the session has. */
 const NOT_ITS_GRANTS =
   "a session may only spawn from an agent whose profile grants no more than its own; " +
@@ -238,7 +245,8 @@ const make = Effect.gen(function* () {
   /**
    * Reads the Agent a spawn names, and the permission profile it gives its
    * sessions. Fails with not found when the Agent does not exist, and with an
-   * invalid state error when its profile no longer exists.
+   * invalid state error when it is an assistant or its profile no longer
+   * exists.
    *
    * The profile is read, not trusted from the agent row. The session's token
    * carries that profile, and a deleted profile would give a token that
@@ -254,6 +262,9 @@ const make = Effect.gen(function* () {
       const row = yield* agents.read(agentId);
       if (Option.isNone(row)) return yield* Effect.fail(createNotFoundError(NO_SUCH_AGENT));
       const agent = row.value;
+      if (agent.kind === "assistant") {
+        return yield* Effect.fail(createInvalidStateError(ASSISTANT_SPAWN_REFUSED));
+      }
       const profile = yield* profiles.getById(agent.permissionProfileId);
       if (Option.isNone(profile)) {
         return yield* Effect.fail(
@@ -597,7 +608,7 @@ const make = Effect.gen(function* () {
           kind: "session.spawned",
           projectId: decoded.projectId,
           workspace: decoded.workspace,
-          fallbackGithubConnectionId: defaults["thread.githubConnectionId"] ?? undefined,
+          fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
           payload: {
             instanceId,
             runnerId: hosting.runnerId,

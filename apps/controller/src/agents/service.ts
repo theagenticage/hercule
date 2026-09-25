@@ -7,6 +7,10 @@
  * is rejected only while a session this agent spawned has not exited. After that
  * the agent's id on those rows is lineage only.
  *
+ * An assistant is an agent too, with an agent row of kind `assistant`. These
+ * operations read that row, so every session's `agentId` resolves, but they
+ * do not list it and refuse to change it: the assistant operations own it.
+ *
  * An agent names a provider instance and a permission profile, which are rows
  * in other domains. Both are checked at create and at update, because an
  * agent that names a row that does not exist would spawn nothing, and the user
@@ -30,7 +34,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { AccessMode, ModelSelection } from "@hercule/protocol";
+import type { AccessMode } from "@hercule/protocol";
 import {
   AGENT_SORT_FIELDS,
   AgentCreateInput,
@@ -55,8 +59,8 @@ import { nowIso, buildPageInputFields, refuseCursor, withTransaction } from "../
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
-import { providerRepository, listUnenforcedFields } from "../providers";
 import { LIVE_SESSION_STATUSES, sessionRepository } from "../sessions";
+import { buildAgentFieldChecks, buildModelSelection } from "./fields";
 import { agentRepository, type AgentEdit, type StoredAgent } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -90,37 +94,13 @@ const DEFAULT_ACCESS_MODE: AccessMode = "full-access";
 
 const NO_SUCH_AGENT = "no such agent";
 
-const NO_SUCH_PROFILE = "no such permission profile";
-
-const NO_SUCH_INSTANCE = "no such provider instance";
-
-/** The message for options sent without a model, and what to send instead. */
-const NO_MODEL_FOR_OPTIONS =
-  "options belong to one model, so send model too: " +
-  "the slug of the agent's current model, or of the model you are switching to";
-
 /**
- * Combines the two API fields, `model` and `options`, into the one selection
- * the record stores. Returns `undefined` when the call sets neither: on an
- * update the stored selection stays as it was, and on a create the agent uses
- * the instance's default model. Returns null when `model` is null.
- *
- * Fails with `Validation` if options are sent without a model. A choice
- * belongs to the model that offers it. If the choice were kept and moved to
- * another model, the agent would run with a value that model never declared.
+ * The message for an agent update or delete of an assistant's agent row. An
+ * assistant has more rows than its agent row, and only the assistant
+ * operations keep them together.
  */
-const buildModelSelection = (
-  model: string | null | undefined,
-  options: ModelSelection["options"] | undefined,
-): Effect.Effect<ModelSelection | null | undefined, Validation> => {
-  if (typeof model !== "string" && options !== undefined) {
-    return Effect.fail(
-      createValidationError([{ path: ["options"], message: NO_MODEL_FOR_OPTIONS }]),
-    );
-  }
-  if (model === undefined) return Effect.succeed(undefined);
-  return Effect.succeed(model === null ? null : { model, options: options ?? {} });
-};
+const ASSISTANT_CHANGE_REFUSED =
+  "this agent is an assistant; use assistant.update or assistant.delete";
 
 /**
  * The errors every operation can fail with. `SchemaError` comes from the
@@ -139,70 +119,9 @@ const make = Effect.gen(function* () {
   // enforces `session.query` on the caller, and deleting an agent is not a
   // read of anybody's sessions.
   const sessions = yield* sessionRepository;
-  const instances = yield* providerRepository;
-  const host = yield* PluginHost;
-  const profiles = yield* PermissionProfiles;
+  const { buildAgentRecordComposer, readProviderIdOrFail, validateProfileExists } =
+    yield* buildAgentFieldChecks;
   const audit = yield* AuditLog;
-
-  /**
-   * Returns a function that builds the API record from a stored agent, with
-   * `unenforced` computed from the provider's declaration. The provider
-   * catalog is read once from memory, so one function serves a whole page as
-   * well as a single agent.
-   */
-  const agentRecordComposer = Effect.map(
-    host.providers(),
-    (definitions) =>
-      ({ providerId, ...agent }: StoredAgent): Agent => ({
-        ...agent,
-        unenforced: listUnenforcedFields(definitions, providerId, agent.disallowedTools),
-      }),
-  );
-
-  /**
-   * Returns the provider id of the instance an agent names. Fails with
-   * `Validation` if the instance does not exist, or if this build does not
-   * include its provider. It does not check what the machines that host the
-   * provider can do now: an agent is a stored configuration, not a placement.
-   */
-  const readProviderIdOrFail = (instanceId: string): Effect.Effect<string, WriteError> =>
-    Effect.gen(function* () {
-      const instance = yield* instances.one(instanceId);
-      if (Option.isNone(instance)) {
-        return yield* Effect.fail(
-          createValidationError([{ path: ["instanceId"], message: NO_SUCH_INSTANCE }]),
-        );
-      }
-      const providerId = instance.value.providerId;
-      const definitions = yield* host.providers();
-      if (!definitions.some((definition) => definition.id === providerId)) {
-        return yield* Effect.fail(
-          createValidationError([
-            {
-              path: ["instanceId"],
-              message:
-                `this build carries no ${providerId} provider; ` +
-                "name an instance of a provider this build carries",
-            },
-          ]),
-        );
-      }
-      return providerId;
-    });
-
-  /**
-   * Checks that a `permissionProfileId` matches a profile before it is
-   * written. Fails with `Validation` if it does not.
-   */
-  const validateProfileExists = (profileId: string): Effect.Effect<void, WriteError> =>
-    Effect.gen(function* () {
-      const profile = yield* profiles.getById(profileId);
-      if (Option.isNone(profile)) {
-        return yield* Effect.fail(
-          createValidationError([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
-        );
-      }
-    });
 
   /** Returns the stored agent, or fails with `NotFound` if no agent has this id. */
   const readAgentOrFail = (id: string): Effect.Effect<StoredAgent, NotFound | SqlError> =>
@@ -212,6 +131,19 @@ const make = Effect.gen(function* () {
         onNone: () => Effect.fail(createNotFoundError(NO_SUCH_AGENT)),
         onSome: Effect.succeed,
       }),
+    );
+
+  /**
+   * Returns the stored agent for a write. Fails with `NotFound` if no agent
+   * has this id, and with `InvalidState` if the agent belongs to an assistant.
+   */
+  const readPlainAgentOrFail = (
+    id: string,
+  ): Effect.Effect<StoredAgent, NotFound | InvalidState | SqlError> =>
+    Effect.flatMap(readAgentOrFail(id), (agent) =>
+      agent.kind === "assistant"
+        ? Effect.fail(createInvalidStateError(ASSISTANT_CHANGE_REFUSED))
+        : Effect.succeed(agent),
     );
 
   return {
@@ -229,9 +161,12 @@ const make = Effect.gen(function* () {
             cursor,
             direction: sort?.direction ?? DEFAULT_DIRECTION,
             permissionProfileId,
+            // An assistant is chatted with, not spawned from, so agent pickers
+            // must never offer one.
+            kind: "agent",
           }),
         );
-        const composeRecord = yield* agentRecordComposer;
+        const composeRecord = yield* buildAgentRecordComposer;
         return {
           items: listing.items.map(composeRecord),
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
@@ -241,7 +176,7 @@ const make = Effect.gen(function* () {
     read: (id: Id): Effect.Effect<Agent, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.read");
-        const composeRecord = yield* agentRecordComposer;
+        const composeRecord = yield* buildAgentRecordComposer;
         return composeRecord(yield* readAgentOrFail(id));
       }),
 
@@ -255,7 +190,7 @@ const make = Effect.gen(function* () {
         yield* requireGrant("agent.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         const selection = yield* buildModelSelection(decoded.model, decoded.options);
-        const composeRecord = yield* agentRecordComposer;
+        const composeRecord = yield* buildAgentRecordComposer;
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -270,6 +205,7 @@ const make = Effect.gen(function* () {
             // `updatedAt` is equal to its `createdAt`.
             const at = yield* nowIso;
             const agent = yield* agents.insert({
+              kind: "agent",
               providerId,
               name: decoded.name,
               systemPrompt: decoded.systemPrompt,
@@ -302,10 +238,10 @@ const make = Effect.gen(function* () {
     /**
      * Updates an agent and returns it. Only sessions spawned afterwards use the
      * new values. Fails with `Validation` if no field is set or a named
-     * instance or profile does not exist, and with `NotFound` if the agent
-     * does not exist.
+     * instance or profile does not exist, with `NotFound` if the agent does
+     * not exist, and with `InvalidState` if the agent belongs to an assistant.
      */
-    update: (input: UpdateInput): Effect.Effect<Agent, WriteError | NotFound> =>
+    update: (input: UpdateInput): Effect.Effect<Agent, WriteError | NotFound | InvalidState> =>
       Effect.gen(function* () {
         yield* requireGrant("agent.update");
         const { id, model, options, ...named } = yield* Effect.mapError(
@@ -322,10 +258,14 @@ const make = Effect.gen(function* () {
             createValidationError([{ path: [], message: "name a field to change" }]),
           );
         }
-        const composeRecord = yield* agentRecordComposer;
+        const composeRecord = yield* buildAgentRecordComposer;
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // Read first, so that an unknown id fails with `not_found` instead
+            // of an update that changes no rows and reports success, and an
+            // assistant is refused before its fields are checked.
+            yield* readPlainAgentOrFail(id);
             // Inside the write set. A profile or an instance that is deleted
             // between the check and the update would leave the agent naming a
             // row that is gone.
@@ -334,9 +274,6 @@ const make = Effect.gen(function* () {
               yield* validateProfileExists(edit.permissionProfileId);
             }
             const at = yield* nowIso;
-            // Read only so that an unknown id fails with `not_found`, instead
-            // of an update that changes no rows and reports success.
-            yield* readAgentOrFail(id);
             yield* agents.update(id, edit, at);
             yield* audit.append({
               kind: "agent.updated",
@@ -353,10 +290,10 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Deletes an agent. Fails with `InvalidState` while a session this agent
-     * spawned has not exited. Such a session keeps the agent's id after the
-     * delete: the session is history, and it runs on its own copy of every
-     * value the agent gave it.
+     * Deletes an agent. Fails with `InvalidState` if the agent belongs to an
+     * assistant, or while a session this agent spawned has not exited. Such a
+     * session keeps the agent's id after the delete: the session is history,
+     * and it runs on its own copy of every value the agent gave it.
      */
     delete: (id: Id): Effect.Effect<Record<string, never>, WriteError | NotFound | InvalidState> =>
       Effect.gen(function* () {
@@ -365,7 +302,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const agent = yield* readAgentOrFail(id);
+            const agent = yield* readPlainAgentOrFail(id);
             // The oldest session this agent spawned that has not exited. It is
             // named in the error, so the user knows which session to end.
             const live = yield* refuseCursor(

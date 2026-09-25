@@ -218,12 +218,12 @@ function Threads(): JSX.Element {
         <Field id="thread-github" label="GitHub account for threads without a checkout">
           <Select
             id="thread-github"
-            value={settings.user["thread.githubConnectionId"] ?? ""}
+            value={settings.user["github.defaultConnectionId"] ?? ""}
             onChange={(event) => {
               // The setting is nullable, so "No account" clears it rather than
               // storing an empty string, which the contract's `Id` rejects.
               const picked = event.target.value;
-              save({ user: { "thread.githubConnectionId": picked === "" ? null : picked } });
+              save({ user: { "github.defaultConnectionId": picked === "" ? null : picked } });
             }}
           >
             <option value="">No account</option>

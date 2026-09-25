@@ -23,11 +23,13 @@ import {
   type Internal,
 } from "@hercule/contract";
 import { AgentService, AgentServiceLayer } from "../agents";
+import { AssistantService, AssistantServiceLayer } from "../assistants";
 import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
+import { ConversationService, ConversationServiceLayer } from "../conversations";
 import { Controller, ControllerLayer } from "../controller";
 import {
   DispatchLayer,
@@ -210,6 +212,28 @@ const agentRoutes = HttpApiBuilder.group(api, "agent", (handlers) =>
         withApiErrors(agents.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(agents.delete(params.id)));
+  }),
+);
+
+const assistantRoutes = HttpApiBuilder.group(api, "assistant", (handlers) =>
+  Effect.gen(function* () {
+    const assistants = yield* AssistantService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(assistants.query(query)))
+      .handle("read", ({ params }) => withApiErrors(assistants.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(assistants.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(assistants.update({ id: params.id, ...payload })),
+      );
+  }),
+);
+
+const conversationRoutes = HttpApiBuilder.group(api, "conversation", (handlers) =>
+  Effect.gen(function* () {
+    const conversations = yield* ConversationService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(conversations.query(query)))
+      .handle("read", ({ params }) => withApiErrors(conversations.read(params.id)));
   }),
 );
 
@@ -511,7 +535,13 @@ const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCat
  * which a layer provided here would prevent.
  */
 export const operationLayers = Layer.mergeAll(
-  SetupLayer,
+  // Setup creates the first assistant, and an assistant's create makes its
+  // conversation, so each is provided to the one that uses it rather than
+  // merged next to it.
+  SetupLayer.pipe(
+    Layer.provideMerge(AssistantServiceLayer),
+    Layer.provideMerge(ConversationServiceLayer),
+  ),
   AuthLayer,
   ApiKeysLayer,
   UserLayer,
@@ -588,6 +618,8 @@ export const handlerLayers = Layer.mergeAll(
   controllerRoutes,
   taskRoutes,
   agentRoutes,
+  assistantRoutes,
+  conversationRoutes,
   projectRoutes,
   resourceRoutes,
   workspaceRoutes,

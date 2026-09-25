@@ -41,6 +41,7 @@ import {
   type WorkflowIssues,
 } from "@hercule/contract";
 import { lintOutputSchema } from "@hercule/protocol";
+import type { AgentKind } from "../agents";
 import { CRON_TICK_EVENT_KIND, type DeclaredEventKindWithConnectionType } from "../events";
 import {
   validateCondition,
@@ -62,8 +63,8 @@ export interface ResolvedReferences {
   readonly actions: ReadonlyMap<string, RegisteredWorkflowAction>;
   /** The event kinds a trigger can listen for, by kind. */
   readonly eventKinds: ReadonlyMap<string, DeclaredEventKindWithConnectionType>;
-  /** The ids of the Agents that the definition refers to and that exist. */
-  readonly agentIds: ReadonlySet<string>;
+  /** The kind of each Agent that the definition refers to and that exists, by Agent id. */
+  readonly agentKindById: ReadonlyMap<string, AgentKind>;
   /** The qualified type of each Connection that the definition refers to and that exists, by Connection id. */
   readonly connectionTypeById: ReadonlyMap<string, string>;
   /** The qualified name of every Connection type of an active plugin. */
@@ -598,11 +599,44 @@ const listActionIssues = (
 };
 
 /**
- * Validates an agent step's Agent and output schema. The Agent must exist, and
- * the output schema must stay within the JSON Schema subset that every
- * provider accepts, with one issue per broken rule. A session runs the same
- * lint when it spawns, so a step that passes here does not fail at its first
- * turn.
+ * Checks the Agent an agent step names. Returns one issue if no Agent has the
+ * id, or if the Agent is an assistant, and none otherwise. An assistant's
+ * sessions belong to its conversation, so a step that named one would save
+ * cleanly and then fail every run when the session is placed.
+ */
+const listAgentReferenceIssues = (
+  agentId: string,
+  path: ReadonlyArray<string>,
+  references: ResolvedReferences,
+): ReadonlyArray<Issue> => {
+  switch (references.agentKindById.get(agentId)) {
+    case "agent":
+      return [];
+    case "assistant":
+      return [
+        {
+          path,
+          message:
+            "This id is an assistant's. An agent step runs a session of an Agent, and an assistant's sessions belong to its conversation. Write the id of an Agent that is not an assistant.",
+        },
+      ];
+    case undefined:
+      return [
+        {
+          path,
+          message:
+            "No Agent has this id. An agent step runs a session of an Agent. Write the id of an Agent that exists.",
+        },
+      ];
+  }
+};
+
+/**
+ * Validates an agent step's Agent and output schema. The Agent must exist and
+ * must not be an assistant. The output schema must stay within the JSON
+ * Schema subset that every provider accepts, with one issue per broken rule.
+ * A session runs the same lint when it spawns, so a step that passes here
+ * does not fail at its first turn.
  */
 const listAgentIssues = (
   step: AgentStep,
@@ -611,15 +645,7 @@ const listAgentIssues = (
 ): ReadonlyArray<Issue> => {
   const path = ["steps", String(index)];
   return [
-    ...(references.agentIds.has(step.agent)
-      ? []
-      : [
-          {
-            path: [...path, "agent"],
-            message:
-              "No Agent has this id. An agent step runs a session of an Agent. Write the id of an Agent that exists.",
-          },
-        ]),
+    ...listAgentReferenceIssues(step.agent, [...path, "agent"], references),
     ...(step.outputSchema === undefined
       ? []
       : lintOutputSchema(step.outputSchema).map((finding) => ({

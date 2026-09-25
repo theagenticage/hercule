@@ -1,3 +1,4 @@
 /** Agents: the named, reusable configurations sessions are spawned from. */
-export { agentRepository, type StoredAgent } from "./repository";
+export { buildAgentFieldChecks, buildModelSelection } from "./fields";
+export { agentRepository, type AgentKind, type StoredAgent } from "./repository";
 export { AgentService, AgentServiceLayer } from "./service";

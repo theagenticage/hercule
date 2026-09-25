@@ -173,6 +173,14 @@ const COMMANDS: Record<string, string> = {
   "agent.update": "agent update",
   "agent.delete": "agent delete",
 
+  "assistant.query": "assistant list",
+  "assistant.read": "assistant read",
+  "assistant.create": "assistant create",
+  "assistant.update": "assistant update",
+
+  "conversation.query": "conversation list",
+  "conversation.read": "conversation read",
+
   "session.query": "session list",
   "session.read": "session read",
   "session.spawn": "session spawn",
@@ -211,6 +219,8 @@ const STDIN_FIELDS = [
   "project.update description",
   "agent.create systemPrompt",
   "agent.update systemPrompt",
+  "assistant.create systemPrompt",
+  "assistant.update systemPrompt",
   "session.spawn prompt",
   "session.continue prompt",
   "session.input text",
@@ -286,6 +296,16 @@ const RESOLVES: Record<string, string> = {
   "agent.update instanceId": "provider.query",
   "agent.update permissionProfileId": "profile.query",
   "agent.delete id": "agent.query",
+
+  "assistant.read id": "assistant.query",
+  "assistant.create instanceId": "provider.query",
+  "assistant.create permissionProfileId": "profile.query",
+  "assistant.update id": "assistant.query",
+  "assistant.update instanceId": "provider.query",
+  "assistant.update permissionProfileId": "profile.query",
+
+  "conversation.query assistantId": "assistant.query",
+  "conversation.read id": "conversation.query",
 
   "session.query agentId": "agent.query",
   "session.query permissionProfileId": "profile.query",

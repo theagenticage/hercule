@@ -416,7 +416,7 @@ describe("Settings > Threads: the workspace a thread opens in", () => {
 });
 
 describe("Settings > Threads: the GitHub account for threads without a checkout", () => {
-  it("offers only the github connections and writes thread.githubConnectionId on pick", async () => {
+  it("offers only the github connections and writes github.defaultConnectionId on pick", async () => {
     const user = userEvent.setup();
     const { api } = await openWithConnections();
 
@@ -433,13 +433,13 @@ describe("Settings > Threads: the GitHub account for threads without a checkout"
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
     expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.githubConnectionId": GITHUB_WORK.id },
+      user: { "github.defaultConnectionId": GITHUB_WORK.id },
     });
   });
 
   it("clears the setting rather than storing an empty id when no account is picked", async () => {
     const user = userEvent.setup();
-    const { api } = await openWithConnections({ "thread.githubConnectionId": GITHUB.id });
+    const { api } = await openWithConnections({ "github.defaultConnectionId": GITHUB.id });
 
     const field = await screen.findByLabelText<HTMLSelectElement>(
       "GitHub account for threads without a checkout",
@@ -447,6 +447,6 @@ describe("Settings > Threads: the GitHub account for threads without a checkout"
     await user.selectOptions(field, "");
 
     expect(await screen.findByRole("status")).toBeDefined();
-    expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.githubConnectionId": null } });
+    expect(listWrites(api)[0]?.body).toEqual({ user: { "github.defaultConnectionId": null } });
   });
 });

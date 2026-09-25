@@ -54,8 +54,11 @@ const PositiveMinutes = Schema.Int.check(Schema.isGreaterThan(0));
 /** A count of at least one. */
 const PositiveCount = Schema.Int.check(Schema.isGreaterThan(0));
 
-/** A time of day in the user timezone setting, `HH:MM` on a 24-hour clock. */
-const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/));
+/**
+ * A time of day, `HH:MM` on a 24-hour clock. The timezone it is read in is set
+ * by the field that holds it, and documented there.
+ */
+export const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/));
 
 /** The target of a notification mute. */
 const MuteTarget = Schema.NonEmptyString.check(
@@ -99,6 +102,11 @@ export const SETTING_VALUES = {
     "session.inactivityTimeoutMinutes": PositiveMinutes,
     /** How long a session may run in total before the runner ends it. */
     "session.absoluteTimeoutMinutes": PositiveMinutes,
+    /**
+     * How long a session that unloads when idle may sit with no turn before
+     * its runner stops it, to be resumed at the next message.
+     */
+    "session.idleUnloadMinutes": PositiveMinutes,
     /** How long an ephemeral workspace nothing references is kept, in hours. */
     "workspace.orphanTtlHours": PositiveHours,
     /** How long an ephemeral workspace nothing has worked in is kept, in days. */
@@ -131,8 +139,11 @@ export const SETTING_VALUES = {
      * repos opens with no workspace, whatever this setting holds.
      */
     "thread.workspace": ThreadWorkspace,
-    /** The GitHub Connection a thread with no checkout of its own acts through. */
-    "thread.githubConnectionId": Schema.NullOr(Id),
+    /**
+     * The GitHub Connection that a Thread with no workspace, and an
+     * assistant's conversation session, act through.
+     */
+    "github.defaultConnectionId": Schema.NullOr(Id),
     /** The density of a thread row in the sidebar: `meta` unless set otherwise. */
     "ui.threadRows": ThreadRows,
   },

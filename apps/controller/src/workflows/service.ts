@@ -274,7 +274,7 @@ const make = Effect.gen(function* () {
         eventKinds: new Map(
           (yield* eventKinds.list()).map((eventKind) => [eventKind.kind, eventKind]),
         ),
-        agentIds: yield* agents.readExistingIds(listReferencedAgentIds(definition)),
+        agentKindById: yield* agents.readKinds(listReferencedAgentIds(definition)),
         connectionTypeById: yield* connections.readTypes(listReferencedConnectionIds(definition)),
         connectionTypes: new Set(yield* host.listActiveConnectionTypes()),
       };

@@ -16,23 +16,38 @@
  * Every check happens inside that one transaction, so concurrent calls with
  * the same token create one user rather than one each.
  *
- * Two things setup does not do here: the default assistant, which has no table
- * yet, and the onboarding steps beyond the timezone, which are the web app's.
+ * The default assistant, `Hercule`, is created in that same transaction, so a
+ * finished setup always has an assistant to chat with. It is created from its
+ * name alone, like any other, and stamped with the new user.
+ *
+ * The onboarding steps beyond the timezone are the web app's, not setup's.
  */
 import { rmSync } from "node:fs";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as Schema from "effect/Schema";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { createInvalidStateError, type InvalidState } from "@hercule/contract";
-import { USER_ACTOR } from "../actor";
+import {
+  Forbidden,
+  Unauthenticated,
+  Validation,
+  createInvalidStateError,
+  type InvalidState,
+} from "@hercule/contract";
+import { CurrentActor, USER_ACTOR } from "../actor";
+import { AssistantService } from "../assistants";
 import { HerculeHome } from "../config";
 import { Credentials, hashToken, mintToken } from "../credentials";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import type { GrantsError } from "../permissions";
 import { Settings, type SettingError } from "../settings";
 import { hashPassword, PasswordCost, Users } from "../users";
+
+/** The name of the assistant setup creates. */
+const DEFAULT_ASSISTANT_NAME = "Hercule";
 
 /** The input of `setup.complete`. */
 export interface CompleteInput {
@@ -49,6 +64,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const paths = yield* HerculeHome;
   const cost = yield* PasswordCost;
+  const assistants = yield* AssistantService;
 
   const row = sql<{
     readonly token_hash: string | null;
@@ -73,14 +89,19 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Creates the user, finishes onboarding and returns a bearer token, so the
-     * caller is logged in when this returns. Fails with `InvalidState` when
-     * setup is already complete. The transport gate verifies the setup token
-     * before this runs.
+     * Creates the user and the default assistant, finishes onboarding and
+     * returns a bearer token, so the caller is logged in when this returns.
+     * The transport gate verifies the setup token before this runs. Fails
+     * with `InvalidState` when setup is already complete, or when there is no
+     * provider instance for the assistant to run on. Either failure writes
+     * nothing, so setup can be tried again.
      */
     complete: (
       input: CompleteInput,
-    ): Effect.Effect<{ readonly token: string }, InvalidState | SettingError | SqlError> =>
+    ): Effect.Effect<
+      { readonly token: string },
+      InvalidState | SettingError | GrantsError | Schema.SchemaError | SqlError
+    > =>
       Effect.gen(function* () {
         // Hashing a password takes tens of milliseconds and SQLite has one
         // writer, so it happens before the transaction opens, never inside it.
@@ -114,7 +135,26 @@ const make = Effect.gen(function* () {
             // Inside the transaction because the caller is logged in when this
             // returns: if the token cannot be stored, setup did not happen,
             // rather than finishing with no token to return.
-            yield* credentials.issueLoginToken(user.id, hashToken(token));
+            const tokenHash = hashToken(token);
+            const login = yield* credentials.issueLoginToken(user.id, tokenHash);
+            // No request credential exists yet, so the new user acts through
+            // the login token just issued.
+            yield* assistants.create({ name: DEFAULT_ASSISTANT_NAME }).pipe(
+              Effect.provideService(CurrentActor, {
+                _tag: "user",
+                userId: user.id,
+                credential: { kind: "login", id: login.id, tokenHash },
+              }),
+              // The user holds every grant and the name is valid, so any of
+              // these errors here is a bug rather than something to report.
+              Effect.catchIf(
+                (error) =>
+                  error instanceof Forbidden ||
+                  error instanceof Unauthenticated ||
+                  error instanceof Validation,
+                Effect.die,
+              ),
+            );
           }),
         );
 
@@ -141,5 +181,5 @@ export class Setup extends Context.Service<Setup, Effect.Success<typeof make>>()
 export const SetupLayer: Layer.Layer<
   Setup,
   never,
-  SqlClient.SqlClient | Users | Credentials | Settings | HerculeHome | AuditLog
+  SqlClient.SqlClient | Users | Credentials | Settings | HerculeHome | AuditLog | AssistantService
 > = Layer.effect(Setup)(make);

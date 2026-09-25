@@ -52,6 +52,22 @@ import { completeSetup, get, send, withServer, type ServerHarness } from "../htt
 // checks the values the controller actually uses.
 import { RUNNER_PING_INTERVAL, RUNNER_SILENCE_LIMIT } from "./socket";
 
+/**
+ * Completes setup, then deletes every provider instance, and returns the login
+ * token setup returned.
+ *
+ * Setup needs a provider instance, because it creates the default assistant
+ * on one. But the controller probes every provider instance on each runner
+ * that connects, and a probe request is a frame these tests would read where
+ * they expect another. With no instance left, a connecting runner is sent no
+ * probe, so every frame a test reads is one the test caused.
+ */
+const completeSetupWithNoProviderInstance = async (harness: ServerHarness): Promise<string> => {
+  const token = await completeSetup(harness.base);
+  await Effect.runPromise(Effect.orDie(harness.sql.unsafe(`DELETE FROM provider_instances`)));
+  return token;
+};
+
 /** The path a runner connects to, on the same host and port as the API. */
 const SOCKET_PATH = "/api/v1/runners/socket";
 
@@ -364,7 +380,7 @@ describe("opening the runner socket", () => {
 
   it("rejects every credential that is not an active runner's, and opens no socket", async () => {
     await withServer(async (harness) => {
-      const user = await completeSetup(harness.base);
+      const user = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
       const headers: ReadonlyArray<[string, string | undefined]> = [
         ["missing", undefined],
@@ -401,7 +417,7 @@ describe("opening the runner socket", () => {
 describe("the hello exchange", () => {
   it("replies with a signature over the runner's nonce and marks the runner online", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
 
       const { wire, sent, answer } = await greet(harness.base, joined.credential, {
@@ -453,7 +469,7 @@ describe("the hello exchange", () => {
 
   it("brings a runner with a different binary version online anyway", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
 
       const { wire } = await greet(harness.base, joined.credential, {
@@ -476,7 +492,7 @@ describe("the hello exchange", () => {
 
   it("closes the connection on a hello with another protocol version, with a reason, and leaves the row unchanged", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
 
       const wire = await dial(harness.base, joined.credential);
@@ -520,7 +536,7 @@ describe("what a connection leaves behind", () => {
   it("marks a runner unreachable when the controller closed its connection", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         expect(
@@ -583,7 +599,7 @@ describe("what a connection leaves behind", () => {
   it("closes the older connection when a runner connects again, and keeps the runner online", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
 
         const older = await greet(harness.base, joined.credential);
@@ -628,7 +644,7 @@ describe("the liveness check", () => {
   it("pings on the interval, and every pong updates the runner's last-seen time", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -668,7 +684,7 @@ describe("the liveness check", () => {
   it("keeps a runner that answers online, for longer than the silence limit", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -694,7 +710,7 @@ describe("the liveness check", () => {
   it("marks a runner that stops answering unreachable, with the system as the actor", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -732,7 +748,7 @@ describe("the liveness check", () => {
   it("marks a runner that sent a goodbye offline, and one that vanished unreachable", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
 
         const announced = await greet(harness.base, joined.credential);
@@ -832,7 +848,7 @@ describe("what a runner reports about its machine", () => {
   it("stores the watermark a runner reports and returns it on the runner", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -923,7 +939,7 @@ describe("what a runner reports about its machine", () => {
   it("records a runner whose first report shows no room left", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         await waitForRunner(
@@ -953,7 +969,7 @@ describe("what a runner reports about its machine", () => {
   it("stores facts a runner reports after its hello", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -994,7 +1010,7 @@ describe("what a runner reports about its machine", () => {
   it("caps sessions at one per 2 GiB until the owner sets a cap", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         // The cap can only be computed once the runner has reported its
         // memory, which it does in its hello.
@@ -1046,7 +1062,7 @@ describe("what a runner reports about its machine", () => {
   it("keeps the runner readable when its stored watermark cannot be decoded", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         await waitForRunner(
@@ -1085,7 +1101,7 @@ describe("what a runner reports about its machine", () => {
   it("stores nothing a connection reports before its hello", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         // A credential proves a runner joined, not that this connection is
         // that runner speaking the protocol. Until the hello arrives, a report
@@ -1110,7 +1126,7 @@ describe("what a runner reports about its machine", () => {
   it("ignores pongs from a connection that never sends a hello, and closes it", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         // A credential, a socket, and no hello. It answers every ping, which is
         // the only way a connection could look alive without a hello.
@@ -1136,7 +1152,7 @@ describe("what a runner reports about its machine", () => {
   it("does not update the last-seen time on a report; only a pong does", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -1181,7 +1197,7 @@ describe("what the controller stopping does to its local runner", () => {
   it("marks the runner offline, never unreachable, when the child is asked to stop", async () => {
     const home = mkdtempSync(join(tmpdir(), "hercule-local-child-"));
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const child = Bun.spawn(
         [process.execPath, "run", HERCULE, "runner", "--local", "--home", home],
         { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
@@ -1246,7 +1262,7 @@ describe("retiring a runner with an open connection", () => {
 
   it("closes the open connection with the reason that the runner was retired", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
       const { wire } = await greet(harness.base, joined.credential);
       expect(
@@ -1273,7 +1289,7 @@ describe("retiring a runner with an open connection", () => {
 
   it("rejects the retired credential at the upgrade, and says it was retired", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
 
       expect((await retireRunner(harness.base, token, joined.runnerId)).status).toBe(200);
@@ -1322,7 +1338,7 @@ describe("refreshing a runner's facts on demand", () => {
 
   it("asks the online runner, and returns the runner with the facts it reported", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
       const { wire } = await greet(harness.base, joined.credential);
       try {
@@ -1355,7 +1371,7 @@ describe("refreshing a runner's facts on demand", () => {
 
   it("returns on a report with nothing new, rather than waiting for a change", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
       const { wire } = await greet(harness.base, joined.credential);
       try {
@@ -1385,7 +1401,7 @@ describe("refreshing a runner's facts on demand", () => {
   it("is not answered by a probe report whose request id guesses the facts key", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         try {
@@ -1419,7 +1435,7 @@ describe("refreshing a runner's facts on demand", () => {
 
   it("rejects a runner that is not online, and sends that connection nothing", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
       // A credential and a socket, but no hello: a connection exists, but the
       // other end is not yet a runner the controller can ask anything.
@@ -1443,7 +1459,7 @@ describe("refreshing a runner's facts on demand", () => {
 
   it("answers two callers waiting at once with the same report", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetup(harness.base);
+      const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
       const { wire } = await greet(harness.base, joined.credential);
       try {
@@ -1476,7 +1492,7 @@ describe("refreshing a runner's facts on demand", () => {
   it("answers a caller still waiting when the report arrives after another caller timed out", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         try {
@@ -1513,7 +1529,7 @@ describe("refreshing a runner's facts on demand", () => {
   it("sends a new request after one that was never answered, and the next report arrives", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         try {
@@ -1551,7 +1567,7 @@ describe("refreshing a runner's facts on demand", () => {
   it("fails for a runner that never reports, and says how long it waited", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetup(harness.base);
+        const token = await completeSetupWithNoProviderInstance(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         try {

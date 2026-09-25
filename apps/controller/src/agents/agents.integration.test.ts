@@ -14,8 +14,8 @@ import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
-import type { Agent as AgentRecord, Session } from "@hercule/contract";
-import { del, get, post, send } from "../http/testing";
+import type { Agent as AgentRecord, Assistant, Session } from "@hercule/contract";
+import { del, get, post, readErrorBody, send } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
   spawnAgentUnder,
@@ -587,6 +587,100 @@ describe("the permission profile an agent spawns under", () => {
 
       expect(refused.code).toBe("invalid_state");
       expect(refused.text).toContain(profile.id);
+    });
+  });
+});
+
+describe("an assistant seen through the agent operations", () => {
+  const ASSISTANT_REFUSAL = "this agent is an assistant; use assistant.update or assistant.delete";
+  const SPAWN_REFUSAL =
+    "an assistant's sessions belong to its conversation; send it a message with conversation.send";
+
+  /** Creates an assistant from a name alone. */
+  const createAssistant = async (arranged: Arranged): Promise<Assistant> => {
+    const response = await post(
+      arranged.harness.base,
+      "/api/v1/assistants",
+      { name: "Ada" },
+      arranged.token,
+    );
+    expect(response.ok, await response.clone().text()).toBe(true);
+    return (await response.json()) as Assistant;
+  };
+
+  it("lists a plain agent and no assistant", async () => {
+    await withFleet(async (arranged) => {
+      await createAssistant(arranged);
+      const plain = await createAgentForInstance(
+        arranged,
+        findInstanceId(arranged, "claude-provider"),
+      );
+
+      expect((await listAgents(arranged)).map((agent) => agent.id)).toEqual([plain.id]);
+    });
+  });
+
+  it("reads an assistant's agent fields, and none of its assistant fields", async () => {
+    await withFleet(async (arranged) => {
+      const assistant = await createAssistant(arranged);
+
+      const read = await readAgent(arranged, assistant.id);
+      expect(read).toMatchObject({
+        id: assistant.id,
+        name: assistant.name,
+        systemPrompt: assistant.systemPrompt,
+        instanceId: assistant.instanceId,
+        permissionProfileId: assistant.permissionProfileId,
+        accessMode: assistant.accessMode,
+        disallowedTools: assistant.disallowedTools,
+      });
+      expect(read).not.toHaveProperty("heartbeat");
+      expect(read).not.toHaveProperty("rotation");
+      expect(read).not.toHaveProperty("reply");
+    });
+  });
+
+  it("refuses to update or delete an assistant, and points at the assistant operations", async () => {
+    await withFleet(async (arranged) => {
+      const assistant = await createAssistant(arranged);
+
+      const updated = await readErrorBody(
+        await updateAgent(arranged, assistant.id, { name: "Bea" }),
+      );
+      expect(updated.code, updated.text).toBe("invalid_state");
+      expect(updated.message).toBe(ASSISTANT_REFUSAL);
+
+      // The refusal comes before the fields are checked, so an edit that
+      // would also be invalid still points at the assistant operations.
+      const invalid = await readErrorBody(
+        await updateAgent(arranged, assistant.id, { instanceId: NOBODY }),
+      );
+      expect(invalid.code, invalid.text).toBe("invalid_state");
+      expect(invalid.message).toBe(ASSISTANT_REFUSAL);
+
+      const deleted = await readErrorBody(
+        await del(arranged.harness.base, `/api/v1/agents/${assistant.id}`, arranged.token),
+      );
+      expect(deleted.code, deleted.text).toBe("invalid_state");
+      expect(deleted.message).toBe(ASSISTANT_REFUSAL);
+    });
+  });
+
+  it("refuses to spawn a session from an assistant, and writes no session", async () => {
+    await withFleet(async (arranged) => {
+      const assistant = await createAssistant(arranged);
+
+      const refused = await readErrorBody(
+        await post(
+          arranged.harness.base,
+          "/api/v1/sessions",
+          { agentId: assistant.id, prompt: "assess this" },
+          arranged.token,
+        ),
+      );
+      expect(refused.code, refused.text).toBe("invalid_state");
+      expect(refused.message).toBe(SPAWN_REFUSAL);
+      expect(await listSessions(arranged, "")).toEqual([]);
     });
   });
 });

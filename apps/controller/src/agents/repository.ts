@@ -26,9 +26,17 @@ import {
   type Page,
 } from "../db";
 
+/**
+ * Whether an agent row is a plain agent or the agent part of an assistant. The
+ * agent operations refuse to change an assistant's row, and read this column
+ * to know, so this domain never reads the assistants domain's table.
+ */
+export type AgentKind = "agent" | "assistant";
+
 /** An agent as it is stored. `unenforced` is computed on every read and is not stored. */
 export interface StoredAgent {
   readonly id: string;
+  readonly kind: AgentKind;
   /**
    * The provider behind its instance, used to work out what that provider will
    * not enforce; `null` once the instance is gone.
@@ -62,9 +70,12 @@ export interface NewAgent extends Omit<
 /**
  * The columns an edit may set. An absent column is left as it was. Derived from
  * the stored agent for the same reason: a column added there becomes a column
- * an edit may set, unless it is the id, the provider or a timestamp.
+ * an edit may set, unless it is the id, the kind, the provider or a timestamp.
+ * The kind is fixed at insert: a plain agent never becomes an assistant.
  */
-export type AgentEdit = Partial<Omit<StoredAgent, "id" | "providerId" | "createdAt" | "updatedAt">>;
+export type AgentEdit = Partial<
+  Omit<StoredAgent, "id" | "kind" | "providerId" | "createdAt" | "updatedAt">
+>;
 
 export interface AgentPageRequest {
   readonly limit: number;
@@ -72,10 +83,13 @@ export interface AgentPageRequest {
   readonly direction: SortDirection;
   /** Only the agents that spawn their sessions under this profile. */
   readonly permissionProfileId: string | undefined;
+  /** Only the agents of this kind. */
+  readonly kind: AgentKind | undefined;
 }
 
 interface AgentRow {
   readonly id: Uint8Array;
+  readonly kind: string;
   readonly provider_id: string | null;
   readonly name: string;
   readonly system_prompt: string;
@@ -89,7 +103,7 @@ interface AgentRow {
 }
 
 const COLUMNS =
-  "id, name, system_prompt, instance_id, permission_profile_id, access_mode, " +
+  "id, kind, name, system_prompt, instance_id, permission_profile_id, access_mode, " +
   "model_selection, disallowed_tools, created_at, updated_at, " +
   // The provider behind the instance, which determines whether the agent's
   // disallowed tools are enforced.
@@ -97,6 +111,7 @@ const COLUMNS =
 
 const toAgent = (row: AgentRow): StoredAgent => ({
   id: uuidToString(row.id),
+  kind: row.kind as AgentKind,
   providerId: row.provider_id,
   name: row.name,
   systemPrompt: row.system_prompt,
@@ -125,25 +140,41 @@ const make = Effect.gen(function* () {
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toAgent),
       ),
 
-    /** Returns the subset of `ids` that belong to an existing Agent, using one query. */
-    readExistingIds: (ids: ReadonlyArray<string>): Effect.Effect<ReadonlySet<string>, SqlError> =>
+    /** Returns the agents with these ids, using one query, in no particular order. */
+    readMany: (ids: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<StoredAgent>, SqlError> =>
       ids.length === 0
-        ? Effect.succeed(new Set())
+        ? Effect.succeed([])
         : Effect.map(
-            sql<{ readonly id: Uint8Array }>`
-              SELECT id FROM agents WHERE id IN ${sql.in(ids.map(uuidFromString))}
+            sql<AgentRow>`
+              SELECT ${sql.literal(COLUMNS)} FROM agents WHERE id IN ${sql.in(ids.map(uuidFromString))}
             `,
-            (rows) => new Set(rows.map((row) => uuidToString(row.id))),
+            (rows) => rows.map(toAgent),
+          ),
+
+    /**
+     * Returns the kind of each of `ids` that names an existing agent row, by
+     * id, using one query. An id that names no row is not in the map.
+     */
+    readKinds: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, AgentKind>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array; readonly kind: string }>`
+              SELECT id, kind FROM agents WHERE id IN ${sql.in(ids.map(uuidFromString))}
+            `,
+            (rows) => new Map(rows.map((row) => [uuidToString(row.id), row.kind as AgentKind])),
           ),
 
     insert: (agent: NewAgent): Effect.Effect<StoredAgent, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
-          INSERT INTO agents (id, name, system_prompt, instance_id, permission_profile_id,
+          INSERT INTO agents (id, kind, name, system_prompt, instance_id, permission_profile_id,
                               access_mode, model_selection, disallowed_tools,
                               created_at, updated_at)
-          VALUES (${id}, ${agent.name}, ${agent.systemPrompt},
+          VALUES (${id}, ${agent.kind}, ${agent.name}, ${agent.systemPrompt},
                   ${uuidFromString(agent.instanceId)},
                   ${uuidFromString(agent.permissionProfileId)}, ${agent.accessMode},
                   ${agent.model === null ? null : JSON.stringify(agent.model)},
@@ -151,6 +182,7 @@ const make = Effect.gen(function* () {
         `;
         return {
           id: uuidToString(id),
+          kind: agent.kind,
           providerId: agent.providerId,
           name: agent.name,
           systemPrompt: agent.systemPrompt,
@@ -211,6 +243,7 @@ const make = Effect.gen(function* () {
         if (request.permissionProfileId !== undefined) {
           clauses.push(sql`permission_profile_id = ${uuidFromString(request.permissionProfileId)}`);
         }
+        if (request.kind !== undefined) clauses.push(sql`kind = ${request.kind}`);
         const rows = yield* sql<AgentRow>`
           SELECT ${sql.literal(COLUMNS)} FROM agents WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}

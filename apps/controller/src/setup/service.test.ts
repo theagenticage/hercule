@@ -5,10 +5,25 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths } from "@hercule/home";
+import type { Assistant, Conversation } from "@hercule/contract";
+import { AssistantService } from "../assistants";
 import { HerculeHome } from "../config";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
+import {
+  PASSWORD,
+  SETUP_TOKEN,
+  USERNAME,
+  completeSetup,
+  get,
+  post,
+  readErrorBody,
+  send,
+  withServer,
+  type ServerHarness,
+} from "../http/testing";
+import { buildProviderDefinition, createPluginFixture } from "../plugins/testing";
 import { Settings, SettingsLayer } from "../settings";
 import { PasswordCost, TEST_PASSWORD_PARAMS, Users, UsersLayer, verifyPassword } from "../users";
 import { Setup, SetupLayer } from "./service";
@@ -26,6 +41,15 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
+/**
+ * Stands in for the assistant service. These unit tests cover the user, the
+ * token and the setup state; the default assistant needs the provider
+ * instances of a booted controller, so the tests over HTTP below cover it.
+ */
+const AssistantStub = Layer.mock(AssistantService)({
+  create: () => Effect.succeed({} as Assistant),
+});
+
 type Deps = Setup | Users | Credentials | Settings | AuditLog | SqlClient.SqlClient;
 
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
@@ -40,7 +64,13 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
       Effect.provide(
         SetupLayer.pipe(
           Layer.provideMerge(
-            Layer.mergeAll(UsersLayer, CredentialsLayer, SettingsLayer, AuditLogLayer),
+            Layer.mergeAll(
+              UsersLayer,
+              CredentialsLayer,
+              SettingsLayer,
+              AuditLogLayer,
+              AssistantStub,
+            ),
           ),
           Layer.provideMerge(TestDatabase),
           Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
@@ -175,5 +205,146 @@ describe("setup.complete", () => {
     );
 
     expect(outcome).toMatchObject({ error: { code: "invalid_state" } });
+  });
+});
+
+/*
+ * The tests below cover the default assistant setup creates. They run the whole
+ * controller over HTTP, with three provider instances, because the assistant's
+ * defaults come from the provider instances and permission profiles a booted
+ * controller has.
+ */
+const PROVIDERS = [
+  buildProviderDefinition("claude-provider", { token: "t" }),
+  buildProviderDefinition("codex-provider", { token: "t" }),
+  buildProviderDefinition("pi-provider", { token: "t" }),
+];
+
+const withProviders = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
+  withServer(body, {
+    plugins: [createPluginFixture({ id: "providers", definitions: PROVIDERS }).plugin],
+  });
+
+/** Sends `setup.complete` with the setup token, as the onboarding screen does. */
+const requestSetup = (harness: ServerHarness): Promise<Response> =>
+  send("POST", harness.base, "/api/v1/setup/complete", {
+    body: { username: USERNAME, password: PASSWORD, timezone: "Europe/Amsterdam" },
+    token: SETUP_TOKEN,
+  });
+
+/** Returns the first page of `assistant.query`. */
+const listAssistants = async (
+  harness: ServerHarness,
+  token: string,
+): Promise<ReadonlyArray<Assistant>> => {
+  const response = await get(harness.base, "/api/v1/assistants", token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { items: ReadonlyArray<Assistant> }).items;
+};
+
+/** Counts the rows of one table, straight from the database. */
+const countRows = (harness: ServerHarness, table: string): Promise<number> =>
+  Effect.runPromise(
+    Effect.orDie(
+      Effect.map(
+        harness.sql<{
+          readonly count: number;
+        }>`SELECT count(*) AS count FROM ${harness.sql(table)}`,
+        (rows) => rows[0]!.count,
+      ),
+    ),
+  );
+
+describe("the default assistant", () => {
+  it("is created by setup as Hercule, with the defaults of a name-only create, and its web conversation", async () => {
+    await withProviders(async (harness) => {
+      const token = await completeSetup(harness.base);
+
+      const assistants = await listAssistants(harness, token);
+      expect(assistants.map((assistant) => assistant.name)).toEqual(["Hercule"]);
+      const hercule = assistants[0]!;
+
+      // A create from a name alone gets every default, so the default
+      // assistant must match it in everything but its identity.
+      const response = await post(harness.base, "/api/v1/assistants", { name: "Ada" }, token);
+      expect(response.ok, await response.clone().text()).toBe(true);
+      const ada = (await response.json()) as Assistant;
+      const identity = ["id", "name", "createdAt", "updatedAt"];
+      const withoutIdentity = (assistant: Assistant) =>
+        Object.fromEntries(Object.entries(assistant).filter(([key]) => !identity.includes(key)));
+      expect(withoutIdentity(hercule)).toEqual(withoutIdentity(ada));
+
+      const conversations = await get(
+        harness.base,
+        `/api/v1/conversations?assistantId=${hercule.id}`,
+        token,
+      );
+      expect(conversations.status, await conversations.clone().text()).toBe(200);
+      const items = ((await conversations.json()) as { items: ReadonlyArray<Conversation> }).items;
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        assistantId: hercule.id,
+        channel: "web",
+        containerKey: null,
+      });
+    });
+  });
+
+  it("is stamped with the new user", async () => {
+    await withProviders(async (harness) => {
+      await completeSetup(harness.base);
+
+      const created = await harness.audit("assistant.created");
+      expect(created.map((entry) => entry.actor)).toEqual(["user"]);
+    });
+  });
+
+  it("rolls the whole setup back when the assistant cannot be written, and returns the error", async () => {
+    await withProviders(async (harness) => {
+      // A trigger stands in for any failure of the assistant insert: it makes
+      // the real insert fail inside setup's transaction.
+      await Effect.runPromise(
+        Effect.orDie(
+          harness.sql`CREATE TRIGGER fail_assistant_insert BEFORE INSERT ON assistants
+                      BEGIN SELECT RAISE(ABORT, 'forced assistant insert failure'); END`,
+        ),
+      );
+
+      const refused = await requestSetup(harness);
+      expect(refused.ok).toBe(false);
+      expect((await readErrorBody(refused)).code).toBeTypeOf("string");
+
+      const state = await get(harness.base, "/api/v1/setup");
+      expect(await state.json()).toEqual({ complete: false });
+      for (const table of ["users", "user_settings", "assistants", "conversations"]) {
+        expect(await countRows(harness, table), table).toBe(0);
+      }
+
+      // Setup is still open: once the insert can succeed, the same token
+      // completes it.
+      await Effect.runPromise(Effect.orDie(harness.sql`DROP TRIGGER fail_assistant_insert`));
+      const retried = await requestSetup(harness);
+      expect(retried.status, await retried.clone().text()).toBe(200);
+    });
+  });
+
+  it("fails setup with invalid_state when there is no provider instance, and writes nothing", async () => {
+    await withProviders(async (harness) => {
+      // The boot opens one instance per provider, so the test deletes them
+      // all to stand for a build that opened none.
+      await Effect.runPromise(Effect.orDie(harness.sql`DELETE FROM provider_instances`));
+
+      const refused = await requestSetup(harness);
+      expect(refused.status).toBe(409);
+      const error = await readErrorBody(refused);
+      expect(error.code).toBe("invalid_state");
+      expect(error.message).toContain("add a provider instance first");
+
+      const state = await get(harness.base, "/api/v1/setup");
+      expect(await state.json()).toEqual({ complete: false });
+      for (const table of ["users", "login_tokens", "assistants", "conversations"]) {
+        expect(await countRows(harness, table), table).toBe(0);
+      }
+    });
   });
 });

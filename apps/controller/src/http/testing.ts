@@ -57,6 +57,7 @@ import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import { masterKeyLayer, secretsLayer } from "../secrets";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
+import { createPluginFixture } from "../plugins/testing";
 import {
   ensureProviderInstances,
   ProviderLoginDeadline,
@@ -144,6 +145,18 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
+
+/**
+ * Returns the plugins a test controller boots: the test's own, plus a
+ * provider plugin when none of the test's plugins offers providers. Setup
+ * creates the default assistant, which needs a provider instance, so a
+ * controller with no provider cannot finish setup. The provider plugin is
+ * built per call, so it holds nothing from a controller that has finished.
+ */
+const buildPluginRegistry = (plugins: ReadonlyArray<Plugin>): ReadonlyArray<Plugin> =>
+  plugins.some((plugin) => plugin.manifest.capabilities.includes("providers"))
+    ? plugins
+    : [...plugins, createPluginFixture({ id: "test" }).plugin];
 
 /** Returns an address `fetch` can use; the server binds an ephemeral port on loopback. */
 export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
@@ -253,7 +266,10 @@ export interface ServerOptions {
    * nothing, so a test that checks notifications passes its own.
    */
   readonly evaluationErrorNotifier?: Layer.Layer<EvaluationErrorNotifier>;
-  /** The plugin registry. The real one is compiled in, so a test passes its own. */
+  /**
+   * The plugin registry. The real one is compiled in, so a test passes its
+   * own. A provider plugin is added when none of these offers providers.
+   */
   readonly plugins?: ReadonlyArray<Plugin>;
 }
 
@@ -285,7 +301,9 @@ export const withServer = (
           yield* cancelStrandedInputsAndReportLostWakeUps;
           yield* Effect.flatMap(ControllerIdentity, (identity) => identity.ensure);
           yield* seed;
-          yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? []));
+          yield* Effect.flatMap(PluginHost, (host) =>
+            host.boot(buildPluginRegistry(options.plugins ?? [])),
+          );
           yield* ensureProviderInstances;
         });
         yield* bootSteps;

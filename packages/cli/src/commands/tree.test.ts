@@ -197,6 +197,15 @@ describe("a command's fields against the schema", () => {
     }
   });
 
+  it("lets conversation list filter by assistant", () => {
+    const field = findCommandByWords(["conversation", "list"])?.query.find(
+      (one) => one.name === "assistantId",
+    );
+    expect(field).toBeDefined();
+    expect(field!.spelling).toBe("assistant");
+    expect(field!.resolves).toBe("assistant.query");
+  });
+
   it("takes at most one field from stdin, except the two passwords", () => {
     for (const command of COMMANDS) {
       const stdin = [...command.positionals, ...command.payload, ...command.query].filter(
@@ -254,6 +263,9 @@ describe("the placeholders a usage line shows", () => {
     "input cancel": "<session-id> <input-id>",
     "input steer": "<session-id> <input-id>",
     "transcript read": "<session-id>",
+    "assistant read": "<assistant-id>",
+    "assistant update": "<assistant-id>",
+    "conversation read": "<conversation-id>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

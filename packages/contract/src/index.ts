@@ -149,6 +149,21 @@ export {
   UnenforcedSpecField,
 } from "./groups/agent";
 export {
+  ASSISTANT_SORT_FIELDS,
+  Assistant,
+  AssistantCreateInput,
+  AssistantReply,
+  AssistantUpdateInput,
+  Heartbeat,
+  Rotation,
+} from "./groups/assistant";
+export {
+  CONVERSATION_SORT_FIELDS,
+  Conversation,
+  ConversationChannel,
+  ConversationFilter,
+} from "./groups/conversation";
+export {
   ApprovalDecision,
   MAX_PROMPT_LENGTH,
   MAX_SPAWN_CHECKOUTS,

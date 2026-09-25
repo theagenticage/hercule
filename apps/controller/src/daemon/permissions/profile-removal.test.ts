@@ -66,10 +66,19 @@ const insertSession = (profileId: string, status: string) =>
     `;
   });
 
-/** Inserts an agent that spawns its sessions under this profile. */
-const insertAgent = (profileId: string, name: string, at: string) =>
+/**
+ * Inserts an agent row that spawns its sessions under this profile. With the
+ * kind `assistant` it stands for an assistant's agent row.
+ */
+const insertAgent = (
+  profileId: string,
+  name: string,
+  at: string,
+  kind: "agent" | "assistant" = "agent",
+) =>
   Effect.flatMap(agentRepository, (agents) =>
     agents.insert({
+      kind,
       providerId: "claude-provider",
       name,
       systemPrompt: "do the work",
@@ -171,6 +180,23 @@ describe("profile.delete", () => {
 
     expect(error).toMatchObject({ error: { code: "invalid_state" } });
     expect(readRefusalMessage(error)).toContain("the-elder");
+    expect(readRefusalMessage(error)).toContain("agent.update");
+  });
+
+  it("points at assistant.update when the agent using the profile is an assistant", async () => {
+    const error = await runError(
+      Effect.gen(function* () {
+        const profiles = yield* Profiles;
+        const removal = yield* ProfileRemoval;
+        const created = yield* profiles.create({ name: "reviewer", grants: READER });
+        yield* insertAgent(created.id, "Ada", "2026-09-15T10:00:00.000Z", "assistant");
+        return yield* removal.deleteProfile({ id: created.id });
+      }),
+    );
+
+    expect(error).toMatchObject({ error: { code: "invalid_state" } });
+    expect(readRefusalMessage(error)).toContain("the assistant Ada");
+    expect(readRefusalMessage(error)).toContain("assistant.update");
   });
 
   /**
