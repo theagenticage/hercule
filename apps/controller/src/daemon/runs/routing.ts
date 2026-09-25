@@ -117,6 +117,9 @@ export const isStepConditionMet = (
 /**
  * Returns every step that `from` holds or has a path of edges to, `from`
  * included.
+ *
+ * `@hercule/client-core`'s `run-graph.ts` keeps a copy of this function,
+ * because the web app cannot import the controller.
  */
 const collectReachableSteps = (
   plan: WorkflowDefinition,

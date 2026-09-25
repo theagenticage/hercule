@@ -3,7 +3,10 @@
  * words for its status and its failure, and how long it and its steps took.
  *
  * The rules live here with a test rather than inside a component, so the run
- * list and a run's page can never describe the same run differently.
+ * list and a run's page use the same words for a run's status and failure.
+ * The page says more than the list in one place: for a run that failed at an
+ * edge, the list names only the failed step, and the page also names the
+ * edge, because only the page has the run's plan.
  */
 import type { FailureReason, Run, RunOrigin, RunStatus, StepStatus } from "@hercule/contract";
 import { describeActor, type ActorReading } from "./actor-display";
@@ -204,14 +207,23 @@ type PlanEdge = NonNullable<Run["plan"]["edges"]>[number];
  * `maxTraversals` it reached, or whose condition could not be evaluated.
  * Returns `undefined` for a run that did not fail, or that failed at a step
  * rather than at an edge.
+ */
+export const findFailedEdge = (run: Run): PlanEdge | undefined => {
+  const index = readFailedEdgeIndex(run);
+  return index === undefined ? undefined : run.plan.edges?.[index];
+};
+
+/**
+ * Returns the index in `plan.edges` of the edge a failed run failed at, or
+ * `undefined` for a run that did not fail at an edge.
  *
  * The `controller-error` check is there for the type: that kind of failure
  * has no `failedEdgeIndex`, so the check narrows the run to the failures
  * that do.
  */
-export const findFailedEdge = (run: Run): PlanEdge | undefined =>
+export const readFailedEdgeIndex = (run: Run): number | undefined =>
   run.status === "failed" && run.failureReason !== "controller-error"
-    ? run.plan.edges?.[run.failedEdgeIndex ?? -1]
+    ? run.failedEdgeIndex
     : undefined;
 
 /**

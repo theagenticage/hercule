@@ -554,7 +554,11 @@ const make = Effect.gen(function* () {
      * Interrupts every fiber executing a run, and waits until they have
      * stopped. This is what happens to them when the controller stops: the
      * rows stay as they are, for `resumeUnfinishedRuns` to continue from.
-     * The test harness calls it to restart the controller in place.
+     *
+     * Only the test harness calls it: it stops the fibers, then resumes the
+     * unfinished runs, to simulate a controller restart without a new process.
+     * A real shutdown needs no call, because closing the service's scope
+     * interrupts the fibers.
      */
     stopExecutingRuns: FiberMap.clear(runFibers),
   };

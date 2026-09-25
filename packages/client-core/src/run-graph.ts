@@ -7,7 +7,13 @@
  * timeline agree on every step's state.
  */
 import type { Run, RunStatus, StepError, StepRecord } from "@hercule/contract";
-import { isRunLive, readTimestamps, type Timestamps, type WorkState } from "./run-display";
+import {
+  isRunLive,
+  readFailedEdgeIndex,
+  readTimestamps,
+  type Timestamps,
+  type WorkState,
+} from "./run-display";
 import {
   buildIndexedWorkflowGraph,
   type WorkflowGraphEdge,
@@ -104,6 +110,9 @@ const groupRecordsByStep = (
  * Returns every step that `from` holds or has a path of edges to, `from`
  * included. Conditions and `maxTraversals` are ignored, as the controller
  * does when it decides whether a step can still run.
+ *
+ * A copy of `collectReachableSteps` in the controller's
+ * `daemon/runs/routing.ts`, because the web app cannot import the controller.
  */
 const collectReachableSteps = (
   edges: ReadonlyArray<WorkflowGraphEdge>,
@@ -135,11 +144,7 @@ export const buildRunGraph = (run: Run): RunGraph => {
   const records = groupRecordsByStep(run.steps);
   const current = new Map([...records].map(([stepId, own]) => [stepId, findCurrentRecord(own)]));
   const stepIds = new Set(run.plan.steps.map((step) => step.id));
-  // The check narrows the type: a `controller-error` failure has no `failedEdgeIndex`.
-  const failedEdgeIndex =
-    run.status === "failed" && run.failureReason !== "controller-error"
-      ? run.failedEdgeIndex
-      : undefined;
+  const failedEdgeIndex = readFailedEdgeIndex(run);
   const isOverLimitRun = run.status === "failed" && run.failureReason === "iteration-limit";
   const isLive = isRunLive(run.status);
   // The steps that can still run: those with a pending or running record,

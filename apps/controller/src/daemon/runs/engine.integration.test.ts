@@ -543,7 +543,7 @@ describe("a run interrupted by a restart", () => {
     });
   });
 
-  it("fails a run with controller-error, at its current step, when executing it fails for a reason of the controller's own", async () => {
+  it("fails a run with controller-error, at the step record it was executing, when executing it fails for a reason of the controller's own", async () => {
     await withSetUpController(async ({ harness, base, token }) => {
       const workflow = await createWorkflowOrFail(base, token, {
         definition: FILE_AND_START_DEFINITION,

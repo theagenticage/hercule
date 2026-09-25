@@ -39,9 +39,9 @@ const PENDING_RUN_ID = "0199f0b7-0000-7000-8000-00000000c001";
 
 /**
  * Two entry steps that both wait, and a step after the first that would
- * create a task. Whether the engine runs the two entry steps one at a time or
- * together, at least one is running and the other is pending or running when
- * the test cancels.
+ * create a task. The engine runs the two entry steps side by side. The test
+ * cancels once one of them is running, when the other is running too or still
+ * pending, about to start.
  */
 const buildHeldDefinition = (held: HeldAction) => ({
   name: "Wait, then file a task",

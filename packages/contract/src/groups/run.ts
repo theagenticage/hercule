@@ -268,7 +268,9 @@ export type Run = Schema.Schema.Type<typeof Run>;
 
 /**
  * One run in the run list: the run without its plan, step records and
- * output, which are long. `run.read` returns them.
+ * output, which are long. `run.read` returns them. A run that failed at an
+ * edge keeps `failedEdgeIndex` and `failureMessage` here too, but a summary
+ * has no plan to look the edge up in.
  */
 export const RunSummary = Schema.Union(
   buildRunStatusVariants(
