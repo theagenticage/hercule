@@ -279,6 +279,30 @@ describe("describeRunnerWait", () => {
     );
   });
 
+  it("names the plan's workspace actions under a pending workspace step of a run no runner has taken yet", () => {
+    const waiting: Run = {
+      ...UNPINNED,
+      plan: {
+        ...UNPINNED.plan,
+        steps: [...UNPINNED.plan.steps, { id: "push", kind: "action", action: "git.push" }],
+      },
+      steps: [
+        { stepId: "commit", iteration: 1, status: "pending" },
+        { stepId: "note", iteration: 1, status: "pending" },
+      ],
+    };
+    const actions = [...ACTIONS, { id: "git.push", runsIn: "workspace" }] as const;
+    assert.deepStrictEqual(describeRunnerWait(waiting, undefined, actions, "UTC"), {
+      stepIds: new Set(["commit"]),
+      text: "Waiting for a runner that can run git.commit and git.push",
+    });
+    // Once a runner has taken the run, its pending steps no longer wait.
+    assert.strictEqual(
+      describeRunnerWait({ ...waiting, runnerId: RUNNER_ID }, OFFLINE, actions, "UTC"),
+      undefined,
+    );
+  });
+
   it("says nothing when no step waits for a runner", () => {
     const noteOnly: Run = {
       ...PINNED,

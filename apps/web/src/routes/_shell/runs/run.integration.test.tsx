@@ -846,6 +846,27 @@ describe("A run's page > its runner and workspace", () => {
       expect(readPageText(getStepsRegion())).not.toContain("Waiting for runner");
     });
   });
+
+  it("shows what runner a pending workspace step waits for while no runner has taken the run", async () => {
+    const unpinned: Run = {
+      ...RUNNING_RUN,
+      plan: PINNED_RUN.plan,
+      steps: [
+        CREATE_DONE,
+        { stepId: "note", iteration: 1, status: "running", startedAt: T0 },
+        { stepId: "start", iteration: 1, status: "pending" },
+      ],
+    };
+    await openRunPage(unpinned, {
+      overrides: { "GET /api/v1/workflow-actions": { body: ACTIONS } },
+    });
+
+    await findPageHeader();
+    expect(readPageText(getStepRow("start"))).toContain(
+      "Waiting for a runner that can run git.commit",
+    );
+    expect(readPageText(getStepRow("note"))).not.toContain("Waiting for");
+  });
 });
 
 describe("A run's page > what happens to its workspace", () => {

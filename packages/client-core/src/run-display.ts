@@ -263,30 +263,44 @@ export const describeUnstartedStep = (
 export const describeStepState = (state: WorkState, runStatus: RunStatus): string =>
   state !== "unreached" ? state : isRunLive(runStatus) ? "not started" : "not reached";
 
-/** The steps of a run that wait for the run's runner, and the line each of them shows. */
+/** The steps of a run that wait for a runner, and the line each of them shows. */
 export interface RunnerWait {
-  /** The ids of the running steps whose action runs in the run's workspace. */
+  /**
+   * The ids of the steps that wait: the running workspace steps of a run
+   * whose runner is offline, or the pending workspace steps of a run that no
+   * runner has taken yet.
+   */
   readonly stepIds: ReadonlySet<string>;
-  /** "Waiting for runner mac-mini to reconnect (offline since 25 Sep 14:02)". */
+  /**
+   * "Waiting for runner mac-mini to reconnect (offline since 25 Sep 14:02)",
+   * or "Waiting for a runner that can run git.commit".
+   */
   readonly text: string;
 }
 
+/** Joins action ids the way a sentence lists them: "git.commit, git.push and git.tag". */
+const ACTION_LIST_FORMAT = new Intl.ListFormat("en-GB", { type: "conjunction" });
+
 /**
- * Returns which running steps of a run wait for the run's runner to come
- * back, and the line they show: "Waiting for runner mac-mini to reconnect
- * (offline since 25 Sep 14:02)", with the time in `timezone`. The part in
- * brackets is left out when the runner has never been seen.
+ * Returns which steps of a running run wait for a runner, and the line they
+ * show, with times in `timezone`. A step waits only when its action runs in
+ * the workspace, which `actions`, the action catalog, tells. A step that runs
+ * on the controller, or whose action is no longer in the catalog, never
+ * waits. There are two waits:
  *
- * A step waits when its action runs in the workspace, which `actions`, the
- * action catalog, tells. The run's workspace steps all run on the runner the
- * run is pinned to, and the controller waits for that runner without limit.
- * A step that runs on the controller, or whose action is no longer in the
- * catalog, does not wait.
+ * - The run is pinned to a runner that is not online. Its running workspace
+ *   steps wait for that runner without limit, because every workspace step
+ *   of a run runs on the runner the run is pinned to. The line is "Waiting
+ *   for runner mac-mini to reconnect (offline since 25 Sep 14:02)"; the part
+ *   in brackets is left out when the runner has never been seen.
+ * - The run is not pinned to a runner yet. Its first workspace step stays
+ *   pending until a runner that can run every workspace action of the plan
+ *   is online and free to take the run. The line names those actions:
+ *   "Waiting for a runner that can run git.commit and git.push".
  *
- * Returns `undefined` when no step waits for a runner: the run is not
- * running, it is not pinned to a runner, its runner is online, or none of
- * its running steps runs in the workspace. `runner` is the run's runner as
- * last read; a runner with another id is ignored.
+ * Returns `undefined` when no step waits: the run is not running, its runner
+ * is online, or none of its waiting steps runs in the workspace. `runner` is
+ * the run's runner as last read; a runner with another id is ignored.
  */
 export const describeRunnerWait = (
   run: Run,
@@ -294,22 +308,38 @@ export const describeRunnerWait = (
   actions: ReadonlyArray<Pick<WorkflowAction, "id" | "runsIn">>,
   timezone: string,
 ): RunnerWait | undefined => {
-  if (run.status !== "running" || runner === undefined || runner.id !== run.runnerId) {
-    return undefined;
-  }
-  if (runner.connectivity === "online") return undefined;
+  if (run.status !== "running") return undefined;
   const workspaceActionIds = new Set(
     actions.filter((action) => action.runsIn === "workspace").map((action) => action.id),
   );
-  const stepIds = new Set(
-    run.steps
-      .filter((record) => record.status === "running")
-      .map((record) => record.stepId)
-      .filter((stepId) => {
-        const step = run.plan.steps.find((each) => each.id === stepId);
-        return step?.kind === "action" && workspaceActionIds.has(step.action);
-      }),
-  );
+  const listWorkspaceStepIds = (status: StepStatus): ReadonlySet<string> =>
+    new Set(
+      run.steps
+        .filter((record) => record.status === status)
+        .map((record) => record.stepId)
+        .filter((stepId) => {
+          const step = run.plan.steps.find((each) => each.id === stepId);
+          return step?.kind === "action" && workspaceActionIds.has(step.action);
+        }),
+    );
+
+  if (run.runnerId === undefined) {
+    const stepIds = listWorkspaceStepIds("pending");
+    if (stepIds.size === 0) return undefined;
+    const planActionIds = new Set(
+      run.plan.steps.flatMap((step) =>
+        step.kind === "action" && workspaceActionIds.has(step.action) ? [step.action] : [],
+      ),
+    );
+    return {
+      stepIds,
+      text: `Waiting for a runner that can run ${ACTION_LIST_FORMAT.format(planActionIds)}`,
+    };
+  }
+
+  if (runner === undefined || runner.id !== run.runnerId) return undefined;
+  if (runner.connectivity === "online") return undefined;
+  const stepIds = listWorkspaceStepIds("running");
   if (stepIds.size === 0) return undefined;
   const waiting = `Waiting for runner ${runner.name} to reconnect`;
   const since =

@@ -13,8 +13,9 @@ import { StepCells, StepErrorLine, StepWaitLine } from "./step-parts";
 /**
  * Renders the steps of a run as a list: one row per step record, then the steps the
  * run has not reached. A row shows the step's mark, id, action, state and
- * duration, and under it its error, or while it runs in the workspace and
- * the run waits for its runner, the line that says so. A row with an output opens to show it.
+ * duration, and under it its error, or, while the step waits for a runner to
+ * run it in the run's workspace, a line explaining which runner it waits for.
+ * A row with an output opens to show it.
  */
 export function StepList({
   lines,
@@ -24,7 +25,7 @@ export function StepList({
 }: {
   readonly lines: ReadonlyArray<StepLine>;
   readonly runStatus: RunStatus;
-  /** The running steps that wait for the run's runner to reconnect, and the line they show. */
+  /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
   readonly now: number;

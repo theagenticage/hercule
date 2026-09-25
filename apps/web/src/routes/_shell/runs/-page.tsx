@@ -74,7 +74,7 @@ export function RunPage({
   readonly workspaceLabel: string | undefined;
   /** What the page shows and offers about the run's workspace. */
   readonly workspaceReading: RunWorkspaceReading;
-  /** The running steps that wait for the run's runner to reconnect, and the line they show. */
+  /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
   readonly timezone: string;
   readonly stepsView: StepsView;

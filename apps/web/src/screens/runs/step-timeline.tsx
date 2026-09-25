@@ -52,8 +52,8 @@ const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
  * bar from its start to its end, or to now while it runs, then the steps the
  * run has not reached. The axis ends at now while the run is live, and where
  * the run ended once it has ended; a vertical line marks that end. Under a
- * row is its error, or, while it runs in the workspace and the run waits for
- * its runner, the line that says so.
+ * row is its error, or, while the step waits for a runner to run it in the
+ * run's workspace, a line explaining which runner it waits for.
  *
  * The ticks are as close together as the axis's width lets their labels be,
  * so the timeline measures its axis, and measures it again when it resizes.
@@ -64,7 +64,7 @@ export function StepTimeline({
   now,
 }: {
   readonly run: Run;
-  /** The running steps that wait for the run's runner to reconnect, and the line they show. */
+  /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
   readonly now: number;

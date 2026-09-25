@@ -31,7 +31,7 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
   // Loads the run, the runner and workspace it is pinned to, and the action
   // catalog before the page renders, so the page never waits on them. The
   // catalog tells which steps run in the workspace, and so which ones wait
-  // for an offline runner.
+  // for a runner.
   loader: async ({ context: { client, queryClient }, params }) => {
     const [run] = await Promise.all([
       queryClient.ensureQueryData(runQuery(client, params.runId)).catch((error: unknown) => {

@@ -49,8 +49,9 @@ export function StepErrorLine({ error }: { readonly error: StepError }): JSX.Ele
 }
 
 /**
- * Renders the line under a running step that waits for the run's runner, when
- * `runnerWait` names the step, and nothing otherwise.
+ * Renders the line under a pending or running step that waits for a runner,
+ * when `runnerWait` names the step, and nothing otherwise. The state check
+ * keeps the line off the step's earlier records, which have ended.
  */
 export function StepWaitLine({
   line,
@@ -59,7 +60,8 @@ export function StepWaitLine({
   readonly line: StepLine;
   readonly runnerWait: RunnerWait | undefined;
 }): JSX.Element | null {
-  if (line.state !== "running" || runnerWait?.stepIds.has(line.stepId) !== true) return null;
+  const isLive = line.state === "pending" || line.state === "running";
+  if (!isLive || runnerWait?.stepIds.has(line.stepId) !== true) return null;
   return <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">{runnerWait.text}</p>;
 }
 
