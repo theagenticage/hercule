@@ -744,7 +744,7 @@ export const CLI = {
   },
   "workspace.dispose": {
     command: "workspace dispose",
-    help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main workspace is never torn down.",
+    help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main workspace is never torn down. Use it to delete the workspace a failed or cancelled run kept for inspection before its window ends.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -755,7 +755,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "a main workspace is never torn down, and a workspace that is already gone has nothing left to tear down",
+        "a main workspace is never torn down, a workspace that is already gone has nothing left to tear down, and the workspace of a run that has not finished stays until the run is cancelled",
     },
   },
 

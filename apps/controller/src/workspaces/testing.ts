@@ -21,7 +21,12 @@ import {
 } from "@hercule/plugin-host";
 import { get, post } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
-import { withFleet as withRunnerFleet, type Arranged, type Wire } from "../sessions/testing";
+import {
+  waitUntil,
+  withFleet as withRunnerFleet,
+  type Arranged,
+  type Wire,
+} from "../sessions/testing";
 
 /** The runner facts the single runner in these fleets reports. */
 export const FACTS: RunnerFacts = {
@@ -196,4 +201,31 @@ export const readWorkspace = async (arranged: Arranged, id: string): Promise<Wor
   const response = await get(arranged.harness.base, `/api/v1/workspaces/${id}`, arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as WorkspaceRecord;
+};
+
+/**
+ * Reports a workspace ready over the runner socket, with every checkout on
+ * `main`, as a runner does once it has provisioned it. Returns the workspace
+ * once the controller has recorded it as ready.
+ */
+export const reportWorkspaceReady = async (
+  arranged: Arranged,
+  id: string,
+): Promise<WorkspaceRecord> => {
+  const workspace = await readWorkspace(arranged, id);
+  arranged.wire.send({
+    _tag: "workspaceReport",
+    workspaceId: id,
+    status: "ready",
+    checkouts: workspace.checkouts.map((checkout) => ({
+      checkoutId: String(checkout.checkoutId),
+      branch: "main",
+      branches: ["main"],
+      defaultBranch: "main",
+    })),
+  });
+  return await waitUntil("made the workspace ready", async () => {
+    const one = await readWorkspace(arranged, id);
+    return one.status === "ready" ? one : undefined;
+  });
 };

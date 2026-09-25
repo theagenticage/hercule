@@ -339,7 +339,7 @@ const runRoutes = HttpApiBuilder.group(api, "run", (handlers) =>
       .handle("start", ({ payload }) => withApiErrors(runs.start(payload)))
       .handle("query", ({ query }) => withApiErrors(runs.query(query)))
       .handle("read", ({ params }) => withApiErrors(runs.read(params.id)))
-      .handle("cancel", ({ params }) => withApiErrors(runs.cancel(params.id)));
+      .handle("cancel", ({ params, payload }) => withApiErrors(runs.cancel(params.id, payload)));
   }),
 );
 

@@ -51,4 +51,13 @@ export default Effect.gen(function* () {
   yield* sql`
     CREATE INDEX runs_pinned_running ON runs (runner_id) WHERE status = 'running'
   `;
+
+  // Finds the run whose workspace a workspace is. The workspace sweep reads
+  // it for every ephemeral workspace it considers, and `workspace.dispose`
+  // reads it before it removes one: what happens to a run's workspace depends
+  // on how the run ended. The index is partial because most runs never have
+  // a workspace.
+  yield* sql`
+    CREATE INDEX runs_workspace ON runs (workspace_id) WHERE workspace_id IS NOT NULL
+  `;
 });

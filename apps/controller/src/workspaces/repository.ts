@@ -90,7 +90,8 @@ export interface CheckoutState {
 
 /**
  * One ephemeral workspace the sweep considers: how many sessions are running
- * in it, how many could still be resumed in it, and when it was last used.
+ * in it, how many could still be resumed in it, when it was last used, and,
+ * for the workspace of a run, how that run ended.
  */
 export interface SweepCandidate {
   readonly id: string;
@@ -98,6 +99,13 @@ export interface SweepCandidate {
   readonly liveSessions: number;
   readonly resumableSessions: number;
   readonly usedAt: string;
+  /** The finished run whose workspace this is; absent for a workspace no run opened. */
+  readonly run?: {
+    readonly status: "completed" | "failed" | "cancelled";
+    /** Whether the user who cancelled the run chose to keep its workspace. */
+    readonly keepsWorkspace: boolean;
+    readonly finishedAt: string;
+  };
 }
 
 /**
@@ -506,14 +514,15 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns every ephemeral workspace the sweep could act on: each one that
-     * is ready, on a runner that is online to receive the dispose frame, and
+     * still has files on its runner (`ready`, or `failed`, whose files may be
+     * on disk), on a runner that is online to receive the dispose frame, and
      * not the workspace of an unfinished run. The service decides from the
-     * counts which ones to keep.
+     * counts, and from how the workspace's run ended, which ones to keep.
      *
-     * A run's workspace is left out whatever its age, because a run can sleep
-     * between two steps for longer than any expiry window. Only a running run
-     * holds a workspace, and the run is matched on its runner first so SQLite
-     * reads the `runs_pinned_running` index rather than every run.
+     * An unfinished run's workspace is left out whatever its age, because a
+     * run can sleep between two steps for longer than any expiry window. Each
+     * workspace belongs to at most one run, found through the
+     * `runs_workspace` index.
      */
     sweepCandidates: (): Effect.Effect<ReadonlyArray<SweepCandidate>, SqlError> =>
       Effect.map(
@@ -523,19 +532,22 @@ const make = Effect.gen(function* () {
           readonly live: number;
           readonly resumable: number;
           readonly used_at: string;
+          readonly run_status: "completed" | "failed" | "cancelled" | null;
+          readonly keep_workspace: number | null;
+          readonly finished_at: string | null;
         }>`
           SELECT w.id, w.runner_id,
                  (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id
                   AND s.status IN ('queued', 'starting', 'idle', 'busy')) AS live,
                  (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id
                   AND ${sql.literal(buildResumableClause("s"))}) AS resumable,
-                 COALESCE(w.last_used_at, w.created_at) AS used_at
+                 COALESCE(w.last_used_at, w.created_at) AS used_at,
+                 runs.status AS run_status, runs.keep_workspace, runs.finished_at
           FROM workspaces w JOIN runners r ON r.id = w.runner_id
-          WHERE w.kind = 'ephemeral' AND w.status = 'ready'
+            LEFT JOIN runs ON runs.workspace_id = w.id
+          WHERE w.kind = 'ephemeral' AND w.status IN ('ready', 'failed')
             AND ${sql.literal(buildOnlineClause("r"))}
-            AND NOT EXISTS (SELECT 1 FROM runs
-                            WHERE runs.runner_id = w.runner_id AND runs.status = 'running'
-                              AND runs.workspace_id = w.id)
+            AND (runs.id IS NULL OR runs.status NOT IN ('pending', 'running'))
         `,
         (rows) =>
           rows.map((row) => ({
@@ -544,7 +556,32 @@ const make = Effect.gen(function* () {
             liveSessions: row.live,
             resumableSessions: row.resumable,
             usedAt: row.used_at,
+            ...(row.run_status === null
+              ? {}
+              : {
+                  run: {
+                    status: row.run_status,
+                    keepsWorkspace: row.keep_workspace === 1,
+                    // The query keeps only finished runs, and the run engine
+                    // writes `finished_at` in the same update that ends a run.
+                    finishedAt: row.finished_at as string,
+                  },
+                }),
           })),
+      ),
+
+    /**
+     * Returns whether the run whose workspace this is has not finished yet.
+     * It is `false` for a workspace no run opened.
+     */
+    isRunUnfinishedIn: (workspaceId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runs
+          WHERE workspace_id = ${uuidFromString(workspaceId)}
+            AND status IN ('pending', 'running')
+        `,
+        (rows) => rows.length > 0,
       ),
 
     list: (

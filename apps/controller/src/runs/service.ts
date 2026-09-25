@@ -24,8 +24,10 @@ import {
   RUN_SORT_FIELDS,
   RunFilter,
   type Forbidden,
+  type InvalidState,
   type NotFound,
   type Run,
+  type RunCancelInput,
   type RunSummary,
   type Unauthenticated,
   type Validation,
@@ -33,10 +35,10 @@ import {
 import { requireGrant } from "../actor";
 import { buildPageInputFields, refuseCursor, type AfterCommit } from "../db";
 import type { PluginHost } from "../plugins";
-import type { Settings } from "../settings";
+import type { SettingError, Settings } from "../settings";
 import type { TaskService } from "../tasks";
 import type { WorkflowService } from "../workflows";
-import type { WorkspaceService } from "../workspaces";
+import { WorkspaceService } from "../workspaces";
 import { makeRunEngine } from "./engine";
 import type { RunExecutor } from "./executor";
 import { runRepository } from "./repository";
@@ -60,10 +62,32 @@ export interface RunPage {
 const make = Effect.gen(function* () {
   const runs = yield* runRepository;
   const engine = yield* makeRunEngine;
+  const workspaces = yield* WorkspaceService;
+
+  /**
+   * Returns the run with `workspaceKeptUntil` added when its ephemeral
+   * workspace is kept for inspection: the run failed, or was cancelled by a
+   * user who kept the workspace. Every other run is returned as it is.
+   */
+  const addWorkspaceKeptUntil = (run: Run): Effect.Effect<Run, SettingError | SqlError> =>
+    Effect.gen(function* () {
+      if (run.workspaceId === undefined || run.plan.workspace?.kind !== "ephemeral") return run;
+      if (run.status !== "failed" && run.status !== "cancelled") return run;
+      if (run.status === "cancelled" && !(yield* runs.keepsWorkspace(run.id))) return run;
+      return { ...run, workspaceKeptUntil: yield* workspaces.computeKeptUntil(run.finishedAt) };
+    });
 
   return {
     start: engine.start,
-    cancel: engine.cancel,
+
+    /** `run.cancel`: cancels a run and returns it, as the run engine's `cancel` describes. */
+    cancel: (
+      id: Id,
+      input: RunCancelInput,
+    ): Effect.Effect<
+      Run,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SettingError | SqlError
+    > => Effect.flatMap(engine.cancel(id, input), addWorkspaceKeptUntil),
     resumeUnfinished: engine.resumeUnfinished,
     completeStep: engine.completeStep,
     failWorkspace: engine.failWorkspace,
@@ -103,12 +127,14 @@ const make = Effect.gen(function* () {
      * Returns a run with its frozen plan, its inputs and every step record.
      * Fails with `NotFound` if no run has the id.
      */
-    read: (id: Id): Effect.Effect<Run, Unauthenticated | Forbidden | NotFound | SqlError> =>
+    read: (
+      id: Id,
+    ): Effect.Effect<Run, Unauthenticated | Forbidden | NotFound | SettingError | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("run.read");
         const found = yield* runs.read(id);
         if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError("no such run"));
-        return found.value;
+        return yield* addWorkspaceKeptUntil(found.value);
       }),
   };
 });

@@ -69,7 +69,11 @@ export type RunOutcome =
       /** The output of the terminal step that ended the run, when one did. */
       readonly output?: Schema.Json | undefined;
     }
-  | { readonly status: "cancelled" }
+  | {
+      readonly status: "cancelled";
+      /** Keeps the run's ephemeral workspace for inspection instead of deleting it. */
+      readonly keepWorkspace: boolean;
+    }
   | {
       readonly status: "failed";
       readonly failureReason: Exclude<FailureReason, "controller-error" | "workspace-failed">;
@@ -427,6 +431,19 @@ const make = Effect.gen(function* () {
           `;
           return Option.some(toRun(row, steps, traversals));
         }),
+      ),
+
+    /**
+     * Returns whether the user who cancelled a run chose to keep its
+     * workspace. It is `false` for a run that was not cancelled, and for an
+     * unknown id.
+     */
+    keepsWorkspace: (id: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly keep_workspace: number }>`
+          SELECT keep_workspace FROM runs WHERE id = ${uuidFromString(id)}
+        `,
+        (rows) => rows[0]?.keep_workspace === 1,
       ),
 
     /**
@@ -821,6 +838,7 @@ const make = Effect.gen(function* () {
             failed_edge_index = ${failedEdge?.index ?? null},
             failure_message = ${failedEdge?.message ?? null},
             output = ${ending.status === "completed" && ending.output !== undefined ? JSON.stringify(ending.output) : null},
+            keep_workspace = ${ending.status === "cancelled" && ending.keepWorkspace ? 1 : 0},
             finished_at = ${at}
           WHERE id = ${uuidFromString(id)} AND status IN ('pending', 'running')
         `;

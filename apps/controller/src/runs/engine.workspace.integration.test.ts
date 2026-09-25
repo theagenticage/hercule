@@ -308,7 +308,7 @@ describe("a workspace step", () => {
           { runnerId, ...notARun },
         ]);
 
-        yield* runs.cancel(runId);
+        yield* runs.cancel(runId, {});
         expect(recorded.stops).toEqual([{ runnerId, ...key }]);
         expect(yield* runs.listEndedWorkspaceSteps(runnerId, [key])).toEqual([
           { runnerId, ...key },

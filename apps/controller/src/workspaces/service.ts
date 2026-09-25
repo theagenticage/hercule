@@ -88,7 +88,12 @@ import {
   buildProvisionFrame,
   type OpeningCheckout,
 } from "./provisioning";
-import { workspaceRepository, type StoredCheckout, type StoredWorkspace } from "./repository";
+import {
+  workspaceRepository,
+  type StoredCheckout,
+  type StoredWorkspace,
+  type SweepCandidate,
+} from "./repository";
 
 const QueryInput = Schema.Struct({
   ...WorkspaceFilter.fields,
@@ -112,6 +117,13 @@ const DEFAULT_ORPHAN_TTL_HOURS = 24;
 
 /** How long an ephemeral workspace with a resumable session is kept unused, in days. */
 const DEFAULT_IDLE_TTL_DAYS = 30;
+
+/**
+ * How long the ephemeral workspace of a failed run, or of a run cancelled
+ * with its workspace kept, is kept for inspection after the run finished, in
+ * days.
+ */
+const DEFAULT_FAILED_RUN_TTL_DAYS = 14;
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -161,6 +173,9 @@ const ALREADY_GONE = "that workspace is already gone";
 const describeLiveSessions = (sessions: number): string =>
   `${String(sessions)} session(s) in that workspace have not exited; stop them first`;
 
+const RUN_UNFINISHED =
+  "that workspace belongs to a run that has not finished; cancel the run first, and choose there whether to keep its workspace";
+
 /**
  * Where a session that asked for a workspace will work, once the rows are
  * written. It holds:
@@ -193,34 +208,71 @@ interface Settled {
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
-/** Why the sweep disposed of a workspace, as opposed to a user disposing of it. */
-type Expiry = "orphan" | "idle";
+/**
+ * Why the sweep disposed of a workspace, as opposed to a user disposing of
+ * it. The audit entry records it, so a reader can tell which rule applied:
+ *
+ * - `orphan`: no session can resume in it, and the orphan window ended
+ * - `idle`: a session could still resume in it, and the idle window ended
+ * - `run-completed`: it was the workspace of a run that completed
+ * - `run-cancelled`: it was the workspace of a run cancelled without keeping it
+ * - `run-failed`: it was the workspace of a failed run, and the failed-run
+ *   window ended
+ * - `run-kept`: it was the workspace of a run cancelled with its workspace
+ *   kept, and the failed-run window ended
+ */
+type Expiry = "orphan" | "idle" | "run-completed" | "run-cancelled" | "run-failed" | "run-kept";
 
-/** One workspace the sweep may dispose of, and the window it outlived. */
+/** One workspace the sweep may dispose of, and the rule that applied. */
 interface Expired {
   readonly id: string;
   readonly reason: Expiry;
 }
 
 /**
- * Decides whether a workspace has expired, and returns the window it outlived,
- * or `undefined` if it has not expired. A workspace with a running session
- * never expires. A thread that can still be resumed keeps its worktree,
- * because that worktree holds its work, so its workspace outlives the orphan
- * window and expires only on the longer idle window.
+ * Returns the time a finished run's workspace, kept for inspection, is due
+ * for deletion: the time the run finished plus the failed-run window.
+ */
+const computeKeptUntil = (finishedAt: string, controller: ScopeSettings<"controller">): string =>
+  new Date(
+    Date.parse(finishedAt) +
+      (controller["workspace.failedRunTtlDays"] ?? DEFAULT_FAILED_RUN_TTL_DAYS) * DAY_MS,
+  ).toISOString();
+
+/**
+ * Decides whether a workspace is due for deletion, and returns the rule that
+ * applied, or `undefined` if the workspace stays. A workspace with a running
+ * session always stays.
+ *
+ * The workspace of a finished run follows how the run ended: it is deleted at
+ * once when the run completed, or was cancelled by a user who did not keep
+ * it. After a failure, or a cancel that kept it, it stays for the failed-run
+ * window, so the user can look at what the run left behind.
+ *
+ * Any other workspace belongs to threads. A thread that can still be resumed
+ * keeps its worktree, because that worktree holds its work, so its workspace
+ * outlives the orphan window and expires only on the longer idle window.
  */
 const decideExpiry = (
-  candidate: { readonly liveSessions: number; readonly resumableSessions: number },
-  idleFor: number,
+  candidate: SweepCandidate,
+  now: number,
   controller: ScopeSettings<"controller">,
 ): Expiry | undefined => {
   if (candidate.liveSessions > 0) return undefined;
-  const reason: Expiry = candidate.resumableSessions > 0 ? "idle" : "orphan";
+  const { run } = candidate;
+  if (run !== undefined) {
+    if (run.status === "completed") return "run-completed";
+    if (run.status === "cancelled" && !run.keepsWorkspace) return "run-cancelled";
+    const due = Date.parse(computeKeptUntil(run.finishedAt, controller));
+    if (now <= due) return undefined;
+    return run.status === "failed" ? "run-failed" : "run-kept";
+  }
+  const reason = candidate.resumableSessions > 0 ? "idle" : "orphan";
   const window =
     reason === "idle"
       ? (controller["workspace.idleTtlDays"] ?? DEFAULT_IDLE_TTL_DAYS) * DAY_MS
       : (controller["workspace.orphanTtlHours"] ?? DEFAULT_ORPHAN_TTL_HOURS) * HOUR_MS;
-  return idleFor > window ? reason : undefined;
+  return now - Date.parse(candidate.usedAt) > window ? reason : undefined;
 };
 
 const make = Effect.gen(function* () {
@@ -604,6 +656,9 @@ const make = Effect.gen(function* () {
      * - it is already deleted or lost
      * - a session in it has not exited, because removing the directory would
      *   break a running harness
+     * - it is the workspace of a run that has not finished, because the run's
+     *   next steps work in it. Cancelling the run is the way to stop it, and
+     *   the cancel asks whether to keep the workspace.
      */
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
@@ -612,6 +667,9 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createInvalidStateError(PRIMARY_STANDS));
         if (workspace.status === "deleted" || workspace.status === "lost") {
           return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
+        }
+        if (yield* workspaces.isRunUnfinishedIn(id)) {
+          return yield* Effect.fail(createInvalidStateError(RUN_UNFINISHED));
         }
         const living = (yield* workspaces.sessionIdsOf([id])).get(id) ?? [];
         if (living.length > 0)
@@ -632,15 +690,25 @@ const make = Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         const due: Array<Expired> = [];
         for (const candidate of candidates) {
-          const reason = decideExpiry(candidate, now - Date.parse(candidate.usedAt), controller);
+          const reason = decideExpiry(candidate, now, controller);
           if (reason !== undefined) due.push({ id: candidate.id, reason });
         }
         return due;
       }),
 
     /**
+     * Returns when the sweep deletes the ephemeral workspace of a run that
+     * finished at `finishedAt` and keeps its workspace for inspection: after
+     * a failure, or a cancel that kept it. The window is the controller
+     * setting `workspace.failedRunTtlDays`, read now, so a change to the
+     * setting moves the time.
+     */
+    computeKeptUntil: (finishedAt: string): Effect.Effect<string, SettingError | SqlError> =>
+      Effect.map(settings.all(), (controller) => computeKeptUntil(finishedAt, controller)),
+
+    /**
      * Returns the workspace if the sweep may still dispose of it, or
-     * `undefined` if it is no longer ready or a session is running in it. A
+     * `undefined` if its files are gone or a session is running in it. A
      * sweep reads every candidate up front, and a session can start in one
      * while an earlier one is being disposed of. A workspace with a running
      * harness in it is never disposed of.
@@ -648,7 +716,12 @@ const make = Effect.gen(function* () {
     sweepable: (id: string): Effect.Effect<StoredWorkspace | undefined, SqlError> =>
       Effect.gen(function* () {
         const found = yield* workspaces.one(id);
-        if (Option.isNone(found) || found.value.status !== "ready") return undefined;
+        if (
+          Option.isNone(found) ||
+          (found.value.status !== "ready" && found.value.status !== "failed")
+        ) {
+          return undefined;
+        }
         const living = (yield* workspaces.sessionIdsOf([id])).get(id) ?? [];
         return living.length > 0 ? undefined : found.value;
       }),

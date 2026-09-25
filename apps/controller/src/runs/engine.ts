@@ -101,9 +101,11 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import {
+  createDecodeValidationError,
   createInvalidStateError,
   createNotFoundError,
   Id,
+  RunCancelInput,
   type FailureReason,
   type Forbidden,
   type InvalidState,
@@ -112,6 +114,7 @@ import {
   type RunStatus,
   type StepError,
   type Unauthenticated,
+  type Validation,
   type WorkflowDefinition,
 } from "@hercule/contract";
 import type { WorkspaceStepKey, WorkspaceStepOutcome } from "@hercule/protocol";
@@ -272,6 +275,8 @@ const listWorkspaceStepsToStop = (
     .filter((record) => isWorkspaceStep(run.plan, record.stepId))
     .map(({ stepId, iteration }) => ({ runnerId, runId: run.id, stepId, iteration }));
 };
+
+const decodeCancel = Schema.decodeUnknownEffect(RunCancelInput);
 
 /** Describes how a run ended, for the refusal to cancel it. */
 const describeEnding = (status: RunStatus): string =>
@@ -948,17 +953,30 @@ export const makeRunEngine = Effect.gen(function* () {
      * further down, with their step records. Then the Run Executor stops
      * their executions, which aborts the signal of a plugin action in
      * flight, and the runners are asked to stop the workspace steps that
-     * were running (see `writeRunEnding`). A step whose action ends after the cancel cannot end its
-     * record any more, and no later step starts.
+     * were running (see `writeRunEnding`). A step whose action ends after
+     * the cancel cannot end its record any more, and no later step starts.
      *
-     * Fails with `NotFound` for an unknown run, and with `InvalidState` for a
-     * run that has already ended.
+     * `input.keepWorkspace` is recorded on the run and on every run cancelled
+     * with it. The workspace sweep reads it: a kept ephemeral workspace stays
+     * for the failed-run window, and any other is deleted by the next sweep.
+     *
+     * Fails with `Validation` for an input that does not match
+     * `RunCancelInput`, with `NotFound` for an unknown run, and with
+     * `InvalidState` for a run that has already ended.
      */
     cancel: (
       id: Id,
-    ): Effect.Effect<Run, Unauthenticated | Forbidden | NotFound | InvalidState | SqlError> =>
+      input: RunCancelInput,
+    ): Effect.Effect<
+      Run,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("run.cancel");
+        const { keepWorkspace = false } = yield* Effect.mapError(
+          decodeCancel(input),
+          createDecodeValidationError,
+        );
         return yield* commitUninterruptibly(
           sql,
           Effect.gen(function* () {
@@ -977,7 +995,7 @@ export const makeRunEngine = Effect.gen(function* () {
             const at = yield* nowIso;
             const cancelled = [id, ...(yield* runs.listUnfinishedDescendants(id))];
             for (const runId of cancelled) {
-              yield* writeRunEnding(runId, { status: "cancelled" }, at);
+              yield* writeRunEnding(runId, { status: "cancelled", keepWorkspace }, at);
             }
             yield* afterCommit(() => executor.stop(cancelled));
             // The same transaction found the run above, and runs are never
