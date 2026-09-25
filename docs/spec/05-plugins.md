@@ -90,7 +90,7 @@ Built-in contributions live in the **same catalog**. The five built-in workflow 
 ### Where plugins run
 
 - In-process, **controller-only**, in v1. There is no plugin host on runners.
-- Runner-side provider execution (spawning harness CLIs, speaking the Agent SDK, app-server and pi SDK protocols) is **built-in runner code written plugin-shaped**: one narrow `ProviderAdapter` per provider, no cross-provider leakage, keyed by `providerId` to the `ProviderDefinition` the plugin registered on the controller ([./06-providers.md](./06-providers.md)). It is lifted into the plugins post-v1 once three real providers have taught the hooks.
+- Runner-side provider execution (spawning harness CLIs, speaking the Agent SDK, app-server and pi SDK protocols) is **built-in runner code written plugin-shaped**: one narrow `ProviderAdapter` per provider, no cross-provider leakage, keyed by `providerId` to the `ProviderDefinition` the plugin registered on the controller ([./06-providers.md](./06-providers.md)). It is lifted into the plugins post-v1 once three real providers have taught the hooks. *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257): workspace actions, such as `git.commit`, are built-in runner code written plugin-shaped in the same way, [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md).)*
 - The host API is shaped for later isolation and third-party loading: dependencies are handed in through the host, never imported from the controller; nothing crosses the host API that cannot be serialized (no live DB handles, no controller service objects, no functions in either direction other than the hooks themselves). A plugin that follows these rules runs unchanged out-of-process later.
 
 ## 4. Extension points and contribution interfaces
@@ -206,7 +206,14 @@ The v1 rosters (the words follow the entity-verb shape of the operation vocabula
 | `github` | `github/issue.read`, `github/issue.comment`, `github/issue.update` (labels, assignees, state); `github/pr.read`, `github/pr.comment`, `github/pr.review` (approve / request-changes / comment), `github/pr.update` (labels, reviewers, draft/ready, base), `github/pr.merge` (method, delete-branch), `github/pr.create` (from an already-pushed branch) |
 | `gmail` | `gmail/message.read` (full body, parsed text + html), `gmail/thread.read`, `gmail/message.search` (Gmail query syntax, headers only), `gmail/message.send`, `gmail/message.reply` (in-thread), `gmail/message.modify` (add/remove labels: archive, mark read, star) |
 
-Anything git (clone, push, branch) is not an action: it happens in the run's workspace. Gmail bodies stay out of ingest and are fetched on demand through `gmail/message.read` / `gmail/thread.read` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2).
+~~Anything git (clone, push, branch) is not an action: it happens in the run's workspace.~~ *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257); [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md): git is a built-in workspace action, below.)* Gmail bodies stay out of ingest and are fetched on demand through `gmail/message.read` / `gmail/thread.read` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2).
+
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257); [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md).)* **Git is a built-in workspace action, implemented in the runner.**
+
+- Every action in the catalog says where it runs, `runsIn: "controller" | "workspace"` ([./07-workflows.md](./07-workflows.md) section 8). A workspace action runs on the run's runner, in the run's workspace.
+- The git actions are workspace actions: `git.commit` now, `git.push` with [#259](https://github.com/theagenticage/hercule/issues/259). They are core actions, unprefixed. Their code is built into the runner, written plugin-shaped, the way provider adapters are (section 3, "Where plugins run"). The controller holds only their catalog entries.
+- **Plugins cannot contribute workspace actions in v1.** Plugins run only on the controller ([ADR 0006](../adr/0006-plugins-request-capabilities-and-register-contributions-in-code.md)), and a workspace action runs on a runner. So there is no contribution shape for one: `WorkflowActionContribution` has no `runsIn` field, and every action a plugin registers runs on the controller.
+- Cloning a checkout and naming its branch are still not actions: they happen when the run's workspace is provisioned ([./07-workflows.md](./07-workflows.md) section 4.4).
 
 ## 5. Host API and plugin capabilities
 
@@ -424,3 +431,4 @@ ADRs:
 - [ADR 0026 - Workflow actions may call the public API as the run](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md)
 - [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
 - [ADR 0034 - A catalog contribution is identified by its qualified id](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)
+- [ADR 0035 - An action declares where it runs](../adr/0035-an-action-declares-where-it-runs.md)

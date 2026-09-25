@@ -48,6 +48,18 @@ The controller authors a `SessionSpec` that carries `workspaceId` (or `null` for
 
 *(Amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162).)* A resume rides the existing `SessionStart` for the same `sessionId`, with `spec.continue = { nativeSessionId, mode: "resume" }`, the session's current `modelSelection`, and a fresh token; no new frame.
 
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257); [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md).)* **Workspace steps add four frames.** A workspace step is a step of a run whose action runs in the run's workspace on a runner, such as `git.commit` ([./07-workflows.md](./07-workflows.md) section 4.4). Every frame names its step by the **step key** `{ runId, stepId, iteration }`.
+
+- Controller to runner: `WorkspaceStepStart { runId, stepId, iteration, workspaceId, action, input, resourceId?, gitIdentity? }`. It carries everything the runner needs, because the runner holds no Hercule state: the action's id, its `input` as the controller stored it on the step record, the checkout to work in when the workspace has more than one, and who a commit is made as (the workspace's designated Connection, as `SessionStart` carries it; absent when no Connection backs the workspace).
+- Controller to runner: `WorkspaceStepStop { steps }`: stop these steps if they are still running. There is no reply: a step the runner does not have, or has finished, needs nothing done.
+- Runner to controller: `WorkspaceStepResult { runId, stepId, iteration, outcome }`, sent once the step has finished. `outcome` is `{ status: "completed", output }` or `{ status: "failed", code, message }`. `code` is one of `action_failed` (the action ran and failed), `timeout` (it ran past its deadline and was stopped), `unsupported_action` (this runner's build does not implement it) and `interrupted` (it was stopped before it finished).
+- Runner to controller: `WorkspaceStepsReport { steps }`: the steps the runner is running now, sent on connect like `SessionsReport`. The controller stops each one whose record is no longer `running`.
+- A frame lists at most 256 step keys, which only refuses a nonsense frame.
+
+Delivery is idempotent by the step key, not sequenced. The controller sends a `WorkspaceStepStart` again whenever it cannot know whether the runner has the step: on every connect, for every workspace step still `running` in a run pinned to that runner. The runner ignores a repeated start while the step runs, answers it with the stored result once the step has finished, and runs it only when it has no trace of it. So a result lost with a dropped socket is answered again on the next connect. While the run's workspace is still `provisioning`, the controller sends the workspace's provision frame before the start. It rebuilds that frame from the workspace's rows, the checkout's base branch included, so a repeated provision is identical to the first. The runner keeps each step's result in a file outside every checkout, `<runner storage>/step-results/<workspaceId>/<runId>-<stepId>-<iteration>.json`, so a commit never picks it up. The files of a workspace are deleted when the workspace is disposed. A primary workspace is never disposed, so there a step's file is deleted once the controller no longer owes the step: the report's answer shows its record ended, or a `WorkspaceStepStop` for it arrives.
+
+`PROTOCOL_VERSION` stays 1. The frames are sent only to a runner that implements them; [#258](https://github.com/theagenticage/hercule/issues/258) makes that a checked rule, with the workspace actions a runner lists at hello (section 2.2's capability list).
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.
@@ -148,6 +160,13 @@ No load balancing, no migration, no failover.
 
 *(Amended 2026-09-17, [#208](https://github.com/theagenticage/hercule/issues/208).)* Steps 3 and 4 are **not implemented as written**: a request that names no runner is placed on any placeable runner holding a logged-in snapshot for the instance, and neither the fleet default nor the controller's local runner is consulted. The ladder above is what the system is to do; tracked in [#210](https://github.com/theagenticage/hercule/issues/210).
 
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* **Run pinning until the ladder is built.** A run is pinned to a runner in the transaction that starts its first workspace step ([./07-workflows.md](./07-workflows.md) section 4.4). Until [#210](https://github.com/theagenticage/hercule/issues/210) replaces it with the ladder above, the rule is:
+
+- The run is pinned to a **placeable** runner: `online`, `active`, and not reserved. A reserved runner is never picked, because a run names no runner (section 5.5).
+- For a `primary` policy, a placeable runner that already holds a `ready` main workspace of the policy's resource is preferred, so the run works in the clone the user already has there.
+- When no runner is placeable, the step record stays `pending` and the run sleeps. It is not failed: the controller wakes every run that waits for a runner when a runner connects. [#258](https://github.com/theagenticage/hercule/issues/258) adds the capability part: a runner must also implement every workspace action in the plan.
+- From then on the run is pinned, as section 5.2 says of any work: every later workspace step goes to the same runner. A run whose runner is `offline` or `unreachable` waits for it with no time limit. Cancelling the run, or retiring the runner, are the only ways out; retiring fails the run with `workspace-failed`.
+
 ### 5.2 Pin once landed
 
 - A Workspace is pinned to the runner it was provisioned on.
@@ -243,13 +262,13 @@ Non-repo resources get no workspaces in v1: folder resources need a versioning s
 
 ### 6.4 Checkouts, cache and provisioning
 
-- **Bare cache.** Each runner keeps one bare git cache per resource, under its storage directory. Ephemeral checkouts are git worktrees off that cache, on the branch the run names (default `hercule/run-<runId>`, a template on the workflow's workspace policy; [07-workflows.md](./07-workflows.md) section 4.4). No worktree pooling.
+- **Bare cache.** Each runner keeps one bare git cache per resource, under its storage directory. Ephemeral checkouts are git worktrees off that cache, on the branch the run names ~~(default `hercule/run-<runId>`, a template on the workflow's workspace policy; [07-workflows.md](./07-workflows.md) section 4.4)~~. No worktree pooling. *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* The branch has a fixed name. A run's ephemeral checkout is on `hercule/run-<runId>`, and a thread's is on `hercule/thread-<last 8 of the session id>` ([07-workflows.md](./07-workflows.md) section 4.4).
 - **Primary.** Always a standalone clone with `origin` pointing at the real remote, cloned once from the cache with hardlink object sharing and then pointed at the remote. ~~*Adopt in place*: an existing local checkout the user points at becomes the primary, untouched, and seeds the runner's bare cache locally.~~ *(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* **Struck: adopt-in-place is not built.** `workspace.provision` takes `{resourceId, runnerId}` and no path; a checkout the user already has on that machine is never read, written or taken over. The consequences are deliberate and are the reason it went: nothing the controller holds could rebuild a frame naming a folder, so a provisioning frame could never be re-sent to a machine that was away; the machine had to read the folder's `origin` to decide whether it was the right repository at all; and "Hercule never writes under a folder you did not give it" is a promise with no exception to explain.
 - Primaries, caches and ephemerals all live under the runner's storage directory.
 - Git's one-branch-one-worktree guard applies uniformly across a runner's ephemerals; primaries are standalone clones, so the guard never spans the two kinds.
 - Git credentials for clone, fetch and push derive from the checkout's Connection and are delivered on demand, never written to runner disk; mechanics in [13-security](./13-security.md) ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)).
 
-Branch naming is pinned in [07-workflows.md](./07-workflows.md) section 4.4: default `hercule/run-<runId>`, overridable per workflow, renamable by the agent; "task branch" is a shipped-workflow convention.
+Branch naming is pinned in [07-workflows.md](./07-workflows.md) section 4.4: ~~default `hercule/run-<runId>`, overridable per workflow,~~ renamable by the agent; "task branch" is a shipped-workflow convention. *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* A run's branch is always `hercule/run-<runId>`; the workspace policy has no branch template. A thread's branch is `hercule/thread-<last 8 of the session id>`, so the two kinds never share a name.
 
 ### 6.5 Setup command and `.workspaceinclude`
 
@@ -279,6 +298,8 @@ A retired runner's workspaces are marked `lost` in the controller (section 7); t
 *(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* The reaper is a **controller sweep the runner executes**: every ten minutes the controller disposes, by the same frame `workspace.dispose` uses, every ephemeral workspace on an online runner that is either orphaned for longer than `workspace.orphanTtlHours` (default **24 hours**) or idle for longer than `workspace.idleTtlDays` (default **30 days**), both controller settings. The runner never decides on its own: it lacks the facts the rule is written in - session status, resumability, last activity. A thread's worktree is its work, so a workspace whose threads are still resumable is not orphaned and expires only on the idle TTL, which the user can raise. A workspace on an offline or unreachable runner waits for the next sweep after it returns. The **14-day** window below is a rule about runs - it keeps a failed run's ephemerals until the run is dismissed - and v1 has no runs, so it is unimplemented; the sweep knows only the orphan and idle TTLs.
 
 Reaper TTLs (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)): orphaned ephemerals are reaped after **24 hours**; the ephemerals of failed runs are kept until the failed run is dismissed or **14 days**, whichever comes first - the run record keeps a "workspace reaped" note so a stale failed run never pretends its files still exist. Both are controller-wide settings.
+
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* **Runs now have workspaces, and the sweep leaves an unfinished run's workspace alone.** The sweep never disposes of a workspace whose run is `pending` or `running`, however long the run has waited. A run can wait for its runner with no time limit (section 5.1), and its workspace holds the work of the steps already done. What happens to a run's workspace once the run ends - deleted on clean completion, kept after a failure, the 14-day window above - is [#260](https://github.com/theagenticage/hercule/issues/260). Until #260 lands, a finished run's ephemeral workspace is orphaned and falls to the 24-hour orphan rule.
 
 ## 7. Runner lifecycle and connectivity
 
@@ -390,5 +411,6 @@ ADRs:
 - [ADR 0005 - Promotion is migration behind a stable controller identity](../adr/0005-promotion-is-migration-behind-a-stable-controller-identity.md)
 - [ADR 0016 - Git credentials derive from connections](../adr/0016-git-credentials-derive-from-connections.md) (referenced)
 - [ADR 0018 - Hercule ships as one self-contained binary](../adr/0018-hercule-ships-as-one-self-contained-binary.md) (referenced)
+- [ADR 0035 - An action declares where it runs](../adr/0035-an-action-declares-where-it-runs.md) (workspace steps and their frames, run pinning)
 
 Research: `research/provider-portability.md` (branch `research/provider-portability`).

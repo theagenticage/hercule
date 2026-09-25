@@ -268,6 +268,8 @@ Decision and rationale: [ADR 0016](../adr/0016-git-credentials-derive-from-conne
 - The helper answers with a **username hint** from the Connection so git's credential matching distinguishes accounts on the same host. One workspace can therefore mix GitHub accounts at the git level (multi-repo workspaces with one checkout per Resource). This matches Git Credential Manager's own multi-account guidance.
 - Commit author = per-checkout `user.name` / `user.email` from the Connection, injected the same way.
 
+*(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* Per-checkout commit authors are not built yet. The author of every commit - one a session's agent makes, and one the `git.commit` workspace action makes - comes from the workspace's **designated** Connection (section 9.3). In a multi-repo workspace whose checkouts use different Connections, every checkout's commits carry that one author until per-checkout identity is built. Credentials are already per checkout (above); only the author is not.
+
 ### 9.3 `gh` and `GH_TOKEN`
 
 - The `gh` CLI acts as one account per host per process (confirmed as of gh 2.40+). Each session gets `GH_TOKEN` injected from the **workspace's designated Connection**, so `gh` works out of the box.
@@ -281,6 +283,17 @@ Identity follows the repo, never the agent, in v1. Per-agent git identity (an ag
 ### 9.5 Non-GitHub remotes
 
 Runner-local, user-managed auth (`ssh` keys, `git credential` stores the user configures on the machine) remains the documented fallback for remotes that are not GitHub Connections. Hercule does not manage those credentials.
+
+### 9.6 Workspace actions
+
+*(Added 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257).)* A workspace action is a workflow action that runs in a run's workspace on the run's runner ([./07-workflows.md](./07-workflows.md) section 8, [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md)). A workflow can be fired by an external event, such as a GitHub issue or an email, so its templates carry text an outsider wrote. The rules below keep that text from ever becoming a command on the runner's machine.
+
+- **Argument lists, never shell strings.** Every process a workspace action starts is started from an argument list, with no shell. A template fills an argument and nothing else. An issue titled `fix; rm -rf ~` becomes a commit message as one argument to `git commit`; no shell reads it, so the `rm` never runs. Paths come after `--`, so a path that starts with `-` is never read as an option.
+- **Process group.** Each process leads its own process group. Stopping a step sends SIGTERM to the whole group, waits 5 seconds, then sends SIGKILL. The grace period lets git remove its `index.lock`, so a stopped step does not leave the checkout locked.
+- **One step per workspace.** A workspace runs one workspace step at a time, so two parallel steps never collide on `index.lock`.
+- **Deadline.** Each action has a 10-minute deadline. Past it the step is stopped as above and fails with `timeout`.
+- **Little output is kept.** A failed step's message holds the tail of git's stderr. Nothing else of stdout or stderr is kept.
+- **Credentials.** `git.commit` needs none. The credentials for a push arrive with `git.push` ([#259](https://github.com/theagenticage/hercule/issues/259)), through the helper of section 9.1.
 
 ## 10. Taint and provenance in assistant memory
 
@@ -355,5 +368,6 @@ ADRs:
 - [ADR 0017 - The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)
 - [ADR 0020 - Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
 - [ADR 0021 - One operation vocabulary, coarse grants, explicit routes](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)
+- [ADR 0035 - An action declares where it runs](../adr/0035-an-action-declares-where-it-runs.md) (workspace actions, section 9.6)
 
 Research: `research/provider-portability.md` (branch `research/provider-portability`), `research/connection-setup-ux.md` (branch `research/connection-setup-ux`), `research/assistant-systems.md` (branch `research/assistant-systems`).
