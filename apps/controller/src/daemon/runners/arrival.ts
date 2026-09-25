@@ -3,8 +3,10 @@
  * still owes it, rebuilt from the rows, because anything sent while it was
  * away was lost. In order:
  *
- * 1. the provision of every workspace on it that is still provisioning;
- * 2. every workspace step still running on it;
+ * 1. the provision of every workspace on it that is still provisioning and
+ *    has no step running in it;
+ * 2. every workspace step still running on it, each after the provision of
+ *    its workspace when that workspace is still provisioning;
  * 3. then the runs waiting for a runner are woken, because this one may be
  *    able to take them.
  *
@@ -30,12 +32,14 @@ const make = Effect.gen(function* () {
   /** Sends a runner that has just connected the work owed to it, and wakes the runs waiting for one. */
   const sendOwedWork = (runnerId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
+      const steps = yield* runs.listOwedWorkspaceSteps(runnerId);
+      // Starting a step sends its workspace's provision first, so those
+      // workspaces are left out here rather than provisioned twice.
+      const startedWorkspaceIds = new Set(steps.map((step) => step.workspaceId));
       for (const frame of yield* workspaces.listOwedProvisioning(runnerId)) {
-        yield* connections.tell(runnerId, frame);
+        if (!startedWorkspaceIds.has(frame.workspaceId)) yield* connections.tell(runnerId, frame);
       }
-      for (const step of yield* runs.listOwedWorkspaceSteps(runnerId)) {
-        yield* workspaceSteps.start(step);
-      }
+      for (const step of steps) yield* workspaceSteps.start(step);
       yield* runs.wakeRunsWaitingForRunner();
     });
 
