@@ -22,6 +22,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
+import type * as Schema from "effect/Schema";
 import type { Run, WorkflowDefinition } from "@hercule/contract";
 import { evaluateCondition, type ExpressionError } from "../../expressions";
 import { isUnfinished } from "../../runs";
@@ -35,7 +36,11 @@ export type RoutedRun = Pick<Run, "plan" | "inputs" | "steps" | "edgeTraversals"
 /** How the run goes on after a routing decision. */
 export type RoutingEnding =
   | { readonly _tag: "continues" }
-  | { readonly _tag: "completed" }
+  | {
+      readonly _tag: "completed";
+      /** The output of the terminal step that ended the run, when one did. */
+      readonly output?: Schema.Json;
+    }
   | {
       readonly _tag: "failed";
       /**
@@ -179,9 +184,14 @@ const listReadyJoins = (
  * finished, by completing or by being skipped. `run` must already hold that
  * record as finished.
  *
- * The step's outgoing edges are taken in plan order. An edge whose condition
- * is false does nothing. An edge whose condition is absent or true is
- * followed: its count goes up by one, and a `join: any` target gets a new
+ * A `terminal` step whose record completed ends the run: the run completes
+ * with that record's output, and none of the step's outgoing edges is looked
+ * at, so a terminal step can never fail its own run at an edge. A terminal
+ * step that was skipped routes like any other skipped step.
+ *
+ * Otherwise the step's outgoing edges are taken in plan order. An edge whose
+ * condition is false does nothing. An edge whose condition is absent or true
+ * is followed: its count goes up by one, and a `join: any` target gets a new
  * record, while a `join: all` target only notes that the edge fired. The run
  * fails at the first edge whose condition cannot be decided, or that has been
  * followed as often as its `maxTraversals` allows; the edges after it are not
@@ -195,6 +205,21 @@ export const decideRouting = (
   finishedStepId: string,
 ): Effect.Effect<RoutingDecision> =>
   Effect.gen(function* () {
+    const step = run.plan.steps.find((candidate) => candidate.id === finishedStepId);
+    if (step?.terminal === true) {
+      // A step's records finish in iteration order, so the finished record
+      // with the highest iteration is the one that has just finished.
+      const finished = run.steps
+        .filter((record) => record.stepId === finishedStepId && !isUnfinished(record.status))
+        .reduce((latest, record) => (record.iteration > latest.iteration ? record : latest));
+      if (finished.status === "completed") {
+        return {
+          traversedEdgeIndexes: [],
+          readyStepIds: [],
+          ending: { _tag: "completed", output: finished.output },
+        };
+      }
+    }
     const edges = run.plan.edges ?? [];
     const context = buildRunContext(run);
     const traversals = [...run.edgeTraversals];

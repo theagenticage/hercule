@@ -189,6 +189,28 @@ const expectFinishedRun = (run: Run): void => {
 };
 
 /**
+ * Reads the run over and over until `holds` returns true for it, and returns
+ * that read. `what` describes the state waited for, and names it in the
+ * error when the run never gets there. Every read is compared with the read
+ * before it, so a status that moves backwards fails the test.
+ */
+export const waitForRun = async (
+  base: string,
+  token: string,
+  id: string,
+  what: string,
+  holds: (run: Run) => boolean,
+): Promise<Run> => {
+  let previous: Run | undefined;
+  return waitUntil(what, async () => {
+    const run = await readRun(base, token, id);
+    if (previous !== undefined) expectMovedForward(previous, run);
+    previous = run;
+    return holds(run) ? run : undefined;
+  });
+};
+
+/**
  * Reads the run over and over until its status is final, and returns the
  * final read. Every read is compared with the read before it, and the final
  * read is checked with `expectFinishedRun`.
@@ -376,23 +398,34 @@ export interface HeldAction {
   readonly contexts: ReadonlyArray<ActionContext>;
   /** Ends every execution that is waiting, and makes every later one return at once. */
   readonly release: () => void;
+  /**
+   * Ends every waiting execution of the step `stepId`, and leaves the
+   * executions of other steps waiting. A later execution of that step waits
+   * again, so a test can release the iterations of one step one by one.
+   */
+  readonly releaseStep: (stepId: string) => void;
 }
 
 /**
  * Builds a plugin `hold` with one action `hold/wait`. The action takes a
  * `label` and returns `{ released: true }` once the test calls `release`, or
- * once its cancel signal aborts.
+ * `releaseStep` with the step's id, or once its cancel signal aborts.
  *
  * It returns normally on abort, rather than failing, so a test can check that
  * a cancelled run ignores what an action returns after the cancel.
  */
 export const buildHeldAction = (): HeldAction => {
   const contexts: Array<ActionContext> = [];
-  const waiting: Array<() => void> = [];
+  let waiting: Array<{ readonly stepId: string; readonly finish: () => void }> = [];
   let released = false;
   const release = (): void => {
     released = true;
-    for (const finish of waiting.splice(0)) finish();
+    for (const { finish } of waiting.splice(0)) finish();
+  };
+  const releaseStep = (stepId: string): void => {
+    const matching = waiting.filter((execution) => execution.stepId === stepId);
+    waiting = waiting.filter((execution) => execution.stepId !== stepId);
+    for (const { finish } of matching) finish();
   };
   const plugin = buildActionPlugin("hold", {
     id: "wait",
@@ -410,11 +443,11 @@ export const buildHeldAction = (): HeldAction => {
           resume(Effect.succeed({ released: true }));
         };
         if (released) return finish();
-        waiting.push(finish);
+        waiting.push({ stepId: context.run.stepId, finish });
         context.signal.addEventListener("abort", finish);
       }),
   });
-  return { plugin, actionId: "hold/wait", contexts, release };
+  return { plugin, actionId: "hold/wait", contexts, release, releaseStep };
 };
 
 /** Builds a step that calls the held action. */

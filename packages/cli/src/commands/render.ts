@@ -10,6 +10,7 @@ import {
   describeRunOrigin,
   describeStepDuration,
   formatAge,
+  readJsonObject,
   readTimestamps,
 } from "@hercule/client-core";
 import {
@@ -325,11 +326,29 @@ const describeFailure = (run: Run): Record<string, string> => {
 };
 
 /**
+ * Returns the lines of a run's output under an `output` heading, or no lines
+ * for a run without one: only a run that a terminal step ended has an
+ * output. An object with fields prints as `key  value` lines, like the
+ * inputs; any other value prints as JSON on one line.
+ */
+const renderRunOutput = (run: Run): ReadonlyArray<string> => {
+  if (run.status !== "completed" || run.output === undefined) return [];
+  const fields = readJsonObject(run.output);
+  return [
+    "",
+    "output",
+    ...(fields !== undefined && Object.keys(fields).length > 0
+      ? renderKeyValues(fields, formatKeepingIds)
+      : [JSON.stringify(run.output)]),
+  ];
+};
+
+/**
  * Returns the lines printed for `run read`: a summary of the run, the inputs
- * it started with, and a table with one row per step record. A run with no
- * inputs or no step records prints "none" under that heading. The plan and
- * the steps' outputs are left out, because they are long; `--json` prints
- * them.
+ * it started with, the run's output when it has one, and a table with one
+ * row per step record. A run with no inputs or no step records prints "none"
+ * under that heading. The plan and the steps' outputs are left out, because
+ * they are long; `--json` prints them.
  */
 const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...renderKeyValues(
@@ -349,6 +368,7 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
   ...(Object.keys(run.inputs).length === 0
     ? ["none"]
     : renderKeyValues(run.inputs, formatKeepingIds)),
+  ...renderRunOutput(run),
   "",
   "steps",
   ...(run.steps.length === 0

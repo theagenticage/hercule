@@ -248,3 +248,49 @@ describe("buildRunContext", () => {
     expect(context).toEqual({ inputs: { target: 3 }, steps: { count: { output: { n: 2 } } } });
   });
 });
+
+describe("a terminal step", () => {
+  /** `root` leads to `finish`, a terminal step, which leads to `after`; `side` runs beside it. */
+  const PLAN = buildPlan(
+    ["root", "finish", "after", "side"],
+    [
+      { from: "root", to: "finish" },
+      { from: "finish", to: "after" },
+    ],
+  );
+  const TERMINAL: WorkflowDefinition = {
+    ...PLAN,
+    steps: PLAN.steps.map((step) => (step.id === "finish" ? { ...step, terminal: true } : step)),
+  };
+
+  it("completes the run with its output when it completes, follows none of its edges, and ignores active records", () => {
+    const decision = routeAfter(
+      TERMINAL,
+      [buildCompleted("root"), buildPending("side"), buildCompleted("finish", 1, { id: "t_1" })],
+      [1, 0],
+      "finish",
+    );
+    expect(decision).toEqual({
+      traversedEdgeIndexes: [],
+      readyStepIds: [],
+      ending: { _tag: "completed", output: { id: "t_1" } },
+    });
+  });
+
+  it("routes like any other step when it was skipped", () => {
+    const decision = routeAfter(
+      TERMINAL,
+      [
+        buildCompleted("root"),
+        { stepId: "finish", iteration: 1, status: "skipped", finishedAt: at },
+      ],
+      [1, 0],
+      "finish",
+    );
+    expect(decision).toEqual({
+      traversedEdgeIndexes: [1],
+      readyStepIds: ["after"],
+      ending: { _tag: "continues" },
+    });
+  });
+});

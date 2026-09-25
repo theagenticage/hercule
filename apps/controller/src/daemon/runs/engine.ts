@@ -3,10 +3,14 @@
  *
  * A run is only rows (the runs domain). Starting a run (`start.ts`) writes the
  * run and a step record for each entry step, and returns. The engine then
- * executes the run on a fiber of its own:
+ * executes the run on a fiber of its own, the run's scheduler. The scheduler
+ * reads the run and starts a child fiber for each step that has a pending
+ * record, so steps on parallel branches run at the same time. A step never
+ * has two records running: a record queued behind a running one of the same
+ * step starts after it, in iteration order. Each child fiber:
  *
- * 1. It reads the run and takes its first step record that is pending, or
- *    running because a restart cut it off.
+ * 1. Takes one step record that is pending, or running because a restart
+ *    cut it off.
  * 2. The start transaction: it reads the run again and evaluates the step's
  *    condition. If the condition holds, or the step has none, the record
  *    moves to `running`. If it is false, the record moves to `skipped` and
@@ -22,15 +26,19 @@
  * 5. The end transaction: it ends the step record, reads the run again, and
  *    routes it (`routing.ts`): it follows the edges whose conditions hold,
  *    adds the records of the steps that are ready, and completes or fails
- *    the run when routing says so.
- * 6. It repeats until the run has ended.
+ *    the run when routing says so. A `terminal` step that completes ends
+ *    the run with its output, without following its edges.
+ *
+ * Each time a child fiber ends, the scheduler reads the run again and starts
+ * the child fibers that are now ready, until the run has ended. Then it
+ * interrupts the child fibers still executing, as a cancel does.
  *
  * Every routing decision is made in a start or an end transaction, against
  * rows read inside it, so the decision and its writes commit together. A
  * built-in action's effect and the end of its step record commit together
  * too, so a crash never leaves the effect committed with the step still
  * unfinished. A failed step, or a template that cannot be rendered, fails the
- * run and cancels the step records that have not run.
+ * run and cancels every step record that is still pending or running.
  *
  * Nothing about a run is held only in memory. When the controller starts, it
  * resumes every run that is pending or running from its rows. A built-in
@@ -40,7 +48,8 @@
  * committed and the action took no effect. A `wait` step waits only for the
  * time it had left. A plugin's action reaches outside the controller, so its
  * step record found `running` may or may not have taken effect; runs never
- * retry such an action, and the step fails with the code `interrupted`.
+ * retry such an action, and the step fails with the code `interrupted`. When
+ * several were running, the first fails and the run cancels the others.
  *
  * Cancelling a run ends it, its unfinished step records, and every unfinished
  * run its steps started, directly or further down, in one transaction. Then
@@ -49,103 +58,55 @@
  * step record any more, so the run stays cancelled and no later step starts.
  *
  * If executing a run fails for a reason of the controller's own, such as a
- * database error or a bug, the run fails with `controller-error`, at its
- * current step if it has one, rather than staying `running` until the next
- * restart.
- *
- * A run executes its ready steps one at a time, in the order their records
- * were created. The actions it can call all write to the one database, so
- * running them side by side would not finish any sooner.
+ * database error or a bug, the run fails with `controller-error` rather than
+ * staying `running` until the next restart: at the step whose child fiber
+ * failed, or with no failed step when the scheduler itself failed.
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract, and a caller inside
  * the controller passes an id it read from a stored row.
  */
 import * as Cause from "effect/Cause";
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createInvalidStateError,
   createNotFoundError,
-  formatIssue,
   Id,
-  isApiError,
-  listDecodeIssues,
   type FailureReason,
   type Forbidden,
   type InvalidState,
   type NotFound,
   type Run,
-  type RunStartInput,
   type RunStatus,
   type StepError,
-  type TaskCreateInput,
-  type TaskFilter,
   type Unauthenticated,
 } from "@hercule/contract";
-import { ActionError, type WorkflowActionContribution } from "@hercule/plugin-host";
-import { CurrentActor, requireGrant, type RunActor } from "../../actor";
+import { requireGrant } from "../../actor";
 import { AfterCommit, afterCommit, nowIso, withTransaction } from "../../db";
-import { renderTemplates } from "../../expressions";
+import { isBuiltInActionId, type PluginHost } from "../../plugins";
 import {
-  isBuiltInActionId,
-  PluginHost,
-  type BuiltInActionId,
-  type RegisteredWorkflowAction,
-} from "../../plugins";
-import {
-  findCurrentStepRecord,
   isUnfinished,
+  listNextStepRecords,
   runRepository,
-  StepRecordEnded,
   type RunOutcome,
+  type UnfinishedStepRecord,
 } from "../../runs";
 import type { Settings } from "../../settings";
-import { TaskService } from "../../tasks";
+import type { TaskService } from "../../tasks";
 import type { WorkflowService } from "../../workflows";
 import { absorbFailures } from "../absorbing";
-import { buildRunContext, decideRouting, isStepConditionMet } from "./routing";
+import { decideRouting, isStepConditionMet } from "./routing";
 import { makeRunStart } from "./start";
-
-/**
- * The codes of the step errors the engine writes itself. A step whose action
- * failed keeps the action's own code instead: the code of an API error, such
- * as `not_found` or `cap_exceeded`, or the code of a plugin's `ActionError`.
- *
- * - `not_found`: the step's action is not in the catalog, or has nothing to
- *   call.
- * - `expression_error`: the step's condition, or a template in its params,
- *   could not be evaluated, or the condition gave something other than true
- *   or false.
- * - `validation`: the rendered params do not match the action's input schema.
- * - `unexpected`: the action failed with something that is neither an API
- *   error nor an `ActionError`, such as a bug, or the controller could not
- *   carry out the run at this step.
- * - `interrupted`: the controller stopped while a plugin's action was
- *   running.
- */
-type EngineStepErrorCode =
-  "not_found" | "expression_error" | "validation" | "unexpected" | "interrupted";
-
-/** A step error the engine writes itself. */
-interface EngineStepError extends StepError {
-  readonly code: EngineStepErrorCode;
-}
-
-/** The error of a step whose action is not in the catalog, or has nothing to call. */
-const buildActionUnavailableError = (action: string): EngineStepError => ({
-  code: "not_found",
-  message: `The action ${action} is not available.`,
-});
+import { makeStepExecution, type EngineStepError, type StepAttempt } from "./step";
 
 /**
  * The step error for a run that could not be carried out at this step for a
@@ -158,12 +119,6 @@ const UNEXPECTED_RUN_FAILURE: EngineStepError = {
     "The controller could not carry out the run at this step. The controller's log has the details.",
 };
 
-/** The step error for an action that failed with something other than one of the API's errors, such as a bug. */
-const UNEXPECTED_ACTION_FAILURE: EngineStepError = {
-  code: "unexpected",
-  message: "The action failed unexpectedly. The controller's log has the details.",
-};
-
 /** The step error for a plugin action's step record that a restart cut off while the action ran. */
 const INTERRUPTED: EngineStepError = {
   code: "interrupted",
@@ -171,106 +126,13 @@ const INTERRUPTED: EngineStepError = {
     "The controller stopped while this step's action was running, so it may or may not have taken effect. Runs never retry an action; start a new run if it is needed.",
 };
 
-/** One attempt at a step, as far as ending it needs: which step, which attempt, and when it started, if it has. */
-interface StepAttempt {
-  readonly stepId: string;
-  readonly iteration: number;
-  readonly startedAt?: string;
-}
-
-/**
- * A built-in action, as the engine calls it.
- *
- * `inTransaction` is true for an action whose effect commits in the
- * transaction that ends its step record. It is false for `wait`, which must
- * hold no transaction while it waits; its step record ends in a transaction
- * of its own afterwards.
- *
- * `execute` gets the step's params decoded with the action's input schema,
- * and the moment the step record started, which `wait` counts from.
- */
-interface BuiltInActionHandler {
-  readonly inTransaction: boolean;
-  readonly execute: (
-    input: unknown,
-    step: { readonly startedAt: string },
-  ) => Effect.Effect<unknown, unknown>;
-}
-
-/**
- * Returns the error a step record stores for a failed action: a plugin's
- * `ActionError` as it is, and one of the API's errors, the ones the built-in
- * actions' services fail with, as its code and message. Returns `undefined`
- * for anything else.
- */
-const describeActionFailure = (failure: unknown): StepError | undefined => {
-  if (failure instanceof ActionError) return { code: failure.code, message: failure.message };
-  if (!isApiError(failure)) return undefined;
-  const { code, message } = failure.error;
-  const issues = failure.error.code === "validation" ? failure.error.details.issues : [];
-  return {
-    code,
-    message: issues.length === 0 ? message : `${message}: ${issues.map(formatIssue).join("; ")}`,
-  };
-};
-
-/**
- * Calls a plugin's action with a signal that aborts when the run is
- * cancelled, and returns its result encoded with the action's output schema.
- * Fails with the action's `ActionError`, or with an `ActionError` of code
- * `unexpected` when the result does not match the output schema: later steps
- * read the output, so a result of the wrong shape must not be stored as if
- * the step had succeeded.
- *
- * Cancelling a run interrupts the fiber that executes it, and the signal
- * passes that on to whatever the action waits on outside the controller.
- */
-const executePluginAction = (
-  action: RegisteredWorkflowAction,
-  execute: WorkflowActionContribution["execute"],
-  input: unknown,
-  run: { readonly runId: string; readonly stepId: string },
-): Effect.Effect<unknown, ActionError> =>
-  Effect.suspend(() => {
-    const cancelled = new AbortController();
-    return Effect.flatMap(
-      Effect.onInterrupt(execute(input, { run, signal: cancelled.signal }), () =>
-        Effect.sync(() => cancelled.abort()),
-      ),
-      (output) =>
-        Effect.mapError(
-          Schema.encodeUnknownEffect(action.output as Schema.Codec<unknown>)(output),
-          (error) =>
-            new ActionError({
-              code: "unexpected",
-              message: `The action returned a value that does not match its output schema: ${listDecodeIssues(error).map(formatIssue).join("; ")}`,
-            }),
-        ),
-    );
-  });
-
 /** Describes how a run ended, for the refusal to cancel it. */
 const describeEnding = (status: RunStatus): string =>
   status === "cancelled" ? "has already been cancelled" : `has already ${status}`;
 
-/**
- * Waits `seconds` from `startedAt`, and returns `{}`. A step that a restart
- * cut off waits only for the time it had left, and not at all if that time
- * has passed. Cancelling the run interrupts the wait.
- */
-const waitFrom = (startedAt: string, seconds: number): Effect.Effect<Record<string, never>> =>
-  Effect.gen(function* () {
-    const now = yield* Clock.currentTimeMillis;
-    const remaining = Date.parse(startedAt) + seconds * 1000 - now;
-    yield* Effect.sleep(Duration.millis(Math.max(0, remaining)));
-    return {};
-  });
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const runs = yield* runRepository;
-  const tasks = yield* TaskService;
-  const host = yield* PluginHost;
   // The listener that publishes a committed change on the live topics. A run
   // executes on a fiber of the engine's own, not of the request that started
   // it, so the listener is provided to that fiber here.
@@ -293,42 +155,6 @@ const make = Effect.gen(function* () {
    */
   const commitUninterruptibly = <A, E>(effect: Effect.Effect<A, E>) =>
     Effect.uninterruptible(withTransaction(sql, effect));
-
-  /**
-   * The built-in actions, by id. Each but `wait` calls the same service
-   * method as the operation of the same id, so a step can do nothing an API
-   * request cannot.
-   *
-   * They are here rather than on the action catalog's entries (plugins
-   * domain) because an action's code must reach the domain it acts on, and
-   * the catalog sits below those domains. The `run.start` action starts a
-   * run, which only this engine can do, and no domain may import the
-   * controller daemon.
-   */
-  const builtInActions: Record<BuiltInActionId, BuiltInActionHandler> = {
-    "task.create": {
-      inTransaction: true,
-      execute: (input) => tasks.create(input as TaskCreateInput),
-    },
-    "task.update": {
-      inTransaction: true,
-      execute: (input) => {
-        // A request sends the task id in the path; a step has no path, so it
-        // sends the id as taskId.
-        const { taskId, ...fields } = input as { readonly taskId: string };
-        return tasks.update({ id: taskId, ...fields });
-      },
-    },
-    // The action returns the first page. A step reads it to decide what the
-    // run does next, and the first page is enough for that.
-    "task.query": { inTransaction: true, execute: (input) => tasks.query(input as TaskFilter) },
-    "run.start": { inTransaction: true, execute: (input) => startRun(input as RunStartInput) },
-    wait: {
-      inTransaction: false,
-      execute: (input, step) =>
-        waitFrom(step.startedAt, (input as { readonly seconds: number }).seconds),
-    },
-  };
 
   /**
    * Ends a run: cancels every step record of it that is still pending or
@@ -405,7 +231,7 @@ const make = Effect.gen(function* () {
       yield* runs.insertSteps(runId, decision.readyStepIds, at);
       const { ending } = decision;
       if (ending._tag === "completed") {
-        yield* writeRunEnding(runId, { status: "completed" }, at);
+        yield* writeRunEnding(runId, { status: "completed", output: ending.output }, at);
       } else if (ending._tag === "failed") {
         yield* writeRunEnding(
           runId,
@@ -445,6 +271,17 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const at = yield* nowIso;
           const run = Option.getOrThrow(yield* runs.read(runId));
+          // The scheduler never starts a record of a step that has one
+          // running, so this only catches a bug in the scheduler. It is
+          // checked here, against rows read in the transaction, because a
+          // step with two running records would corrupt the run.
+          if (
+            run.steps.some((other) => other.stepId === record.stepId && other.status === "running")
+          ) {
+            return yield* Effect.die(
+              `step ${record.stepId} of run ${runId} would have two running records`,
+            );
+          }
           const met = yield* Effect.result(isStepConditionMet(run, record.stepId));
           if (Result.isFailure(met)) {
             yield* writeStepFailure(
@@ -472,190 +309,149 @@ const make = Effect.gen(function* () {
       () => Effect.succeedNone,
     );
 
-  /**
-   * Executes one running step record of a run, and records how it ended. A
-   * failure of the step fails the run. This effect itself fails only with a
-   * database error, which is the controller's failure rather than the
-   * step's. Does nothing more once the step record has ended some other way,
-   * for example because the run was cancelled.
-   *
-   * A built-in action's effect and the end of its step record commit in one
-   * transaction, except for `wait`. A plugin's action reaches outside the
-   * controller, so it is called after its record's `running` commits and
-   * outside any transaction, and its record ends in a transaction of its own.
-   */
-  const executeStep = (run: Run, attempt: Required<StepAttempt>): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      // Starting the run checked that every step is an action step, and
-      // the plan never changes.
-      const step = run.plan.steps.find((candidate) => candidate.id === attempt.stepId);
-      if (step === undefined || step.kind !== "action") {
-        return yield* Effect.die(`the plan of run ${run.id} has no action step ${attempt.stepId}`);
-      }
-      const { startedAt } = attempt;
-      const rendered = yield* Effect.result(
-        renderTemplates(step.params ?? {}, buildRunContext(run)),
-      );
-      if (Result.isFailure(rendered)) {
-        return yield* failRun(
-          run.id,
-          attempt,
-          { code: "expression_error", message: rendered.failure.message },
-          "expression-error",
-        );
-      }
-      const catalogEntry = (yield* host.listActiveWorkflowActions()).find(
-        (action) => action.id === step.action,
-      );
-      if (catalogEntry === undefined) {
-        return yield* failRun(
-          run.id,
-          attempt,
-          buildActionUnavailableError(step.action),
-          "step-failed",
-        );
-      }
-      const decoded = Schema.decodeUnknownResult(catalogEntry.input as Schema.Codec<unknown>)(
-        rendered.success,
-        { errors: "all", onExcessProperty: "error" },
-      );
-      if (Result.isFailure(decoded)) {
-        return yield* failRun(
-          run.id,
-          attempt,
-          {
-            code: "validation",
-            message: `The rendered params do not match the action's input: ${listDecodeIssues(decoded.failure).map(formatIssue).join("; ")}`,
-          },
-          "step-failed",
-        );
-      }
-      const actor: RunActor = { _tag: "run", runId: run.id, stepId: attempt.stepId };
-      const completeStep = (output: unknown) =>
-        Effect.gen(function* () {
-          const finishedAt = yield* nowIso;
-          yield* runs.finishStep(
-            run.id,
-            attempt,
-            { status: "completed", output },
-            { startedAt, finishedAt },
-          );
-          yield* routeAfterStep(run.id, attempt.stepId, finishedAt);
-        });
-      // Returns the error to fail the step with, or `undefined` when
-      // something else ended the step while its action ran, such as a
-      // cancel. That ending stands, and a built-in action's effect rolled
-      // back with its transaction. A database error is the controller's
-      // failure, not the action's, so it fails this effect instead.
-      const decideStepError = (
-        cause: Cause.Cause<unknown>,
-      ): Effect.Effect<StepError | undefined, SqlError> => {
-        if (Cause.hasInterrupts(cause)) return Effect.interrupt;
-        const error = Option.getOrUndefined(Cause.findErrorOption(cause));
-        if (error instanceof StepRecordEnded) return Effect.succeed(undefined);
-        if (isSqlError(error)) return Effect.fail(error);
-        const described = describeActionFailure(error);
-        return described === undefined
-          ? Effect.as(
-              Effect.logError(`Step ${attempt.stepId} of run ${run.id} failed`, cause),
-              UNEXPECTED_ACTION_FAILURE,
-            )
-          : Effect.succeed(described);
-      };
-      // A built-in action is called through the engine's own handlers, and
-      // a plugin's action through the `execute` its plugin registered.
-      const builtIn = isBuiltInActionId(step.action) ? builtInActions[step.action] : undefined;
-      const pluginExecute = catalogEntry.execute;
-      let execute: Effect.Effect<void, unknown>;
-      if (builtIn !== undefined) {
-        const called = Effect.provideService(
-          builtIn.execute(decoded.success, { startedAt }),
-          CurrentActor,
-          actor,
-        );
-        execute = builtIn.inTransaction
-          ? commitUninterruptibly(Effect.flatMap(called, completeStep))
-          : Effect.flatMap(called, (output) => commitUninterruptibly(completeStep(output)));
-      } else if (pluginExecute !== undefined) {
-        execute = Effect.flatMap(
-          executePluginAction(catalogEntry, pluginExecute, decoded.success, {
-            runId: run.id,
-            stepId: attempt.stepId,
-          }),
-          (output) => commitUninterruptibly(completeStep(output)),
-        );
-      } else {
-        return yield* failRun(
-          run.id,
-          attempt,
-          buildActionUnavailableError(step.action),
-          "step-failed",
-        );
-      }
-      const failure = yield* Effect.catchCause(Effect.as(execute, undefined), decideStepError);
-      if (failure !== undefined) yield* failRun(run.id, attempt, failure, "step-failed");
-    });
+  const executeStep = yield* makeStepExecution({
+    startRun,
+    commitUninterruptibly,
+    failRun,
+    routeAfterStep,
+  });
 
   /**
-   * Executes a run from its rows until it has ended, one step record at a
-   * time. Reads the run again after each step, because routing adds the
-   * records of the steps after it.
+   * Executes one step record of a run, on a child fiber of the run's
+   * scheduler (see `executeRun`). A pending record is started first (see
+   * `startStepRecord`). A running record is one a restart cut off, and only
+   * a built-in action's record gets here that way: it is executed again.
+   *
+   * If executing the record fails for a reason of the controller's own, such
+   * as a database error or a bug, the run fails with `controller-error` at
+   * this record, which fails with the code `unexpected`. This effect fails
+   * only when that ending cannot be written either.
+   */
+  const executeRecord = (run: Run, record: UnfinishedStepRecord): Effect.Effect<void, SqlError> =>
+    Effect.catchCause(
+      Effect.gen(function* () {
+        if (record.status === "running") return yield* executeStep(run, record);
+        const started = yield* startStepRecord(run.id, record);
+        if (Option.isSome(started)) {
+          yield* executeStep(started.value.run, { ...record, startedAt: started.value.startedAt });
+        }
+      }),
+      (cause) =>
+        Cause.hasInterrupts(cause)
+          ? Effect.failCause(cause)
+          : Effect.andThen(
+              Effect.logError(
+                `Executing step ${record.stepId} of run ${run.id} failed, so the run fails`,
+                cause,
+              ),
+              failRun(run.id, record, UNEXPECTED_RUN_FAILURE, "controller-error"),
+            ),
+    );
+
+  /**
+   * Executes a run from its rows until it has ended. This is the run's
+   * scheduler.
+   *
+   * Each step's next record (see `listNextStepRecords`) executes on a child
+   * fiber of its own (see `executeRecord`), so steps on parallel branches run
+   * at the same time. A step has at most one child fiber, so a record queued
+   * behind a running one of the same step waits until that one has ended.
+   *
+   * Each time a child fiber ends, the scheduler reads the run again, because
+   * that child's transactions may have added records or ended the run. It
+   * never decides from an older read: which records are ready is always read
+   * from the rows after the last child's writes committed.
+   *
+   * When the run has ended, the scheduler returns, and closing its scope
+   * interrupts the child fibers still executing: a `wait` stops, and a
+   * plugin's action sees its signal abort. Interrupting the scheduler, when
+   * the run is cancelled or the controller stops, interrupts them the same
+   * way.
    */
   const executeRun = (runId: string): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      for (;;) {
-        const found = yield* runs.read(runId);
-        if (Option.isNone(found)) return;
-        const run = found.value;
-        if (!isUnfinished(run.status)) return;
-        if (run.status === "pending") {
-          yield* commitUninterruptibly(Effect.flatMap(nowIso, (at) => runs.start(runId, at)));
-        }
-        const current = findCurrentStepRecord(run.steps);
-        if (current === undefined) {
-          // Routing completes a run in the transaction that ends its last
-          // record. An earlier engine completed it in a transaction of its
-          // own, so a restart between the two leaves such a run with nothing
-          // to execute.
-          return yield* commitUninterruptibly(
-            Effect.flatMap(nowIso, (at) => writeRunEnding(runId, { status: "completed" }, at)),
-          );
-        }
-        if (current.status === "running") {
-          const step = run.plan.steps.find((candidate) => candidate.id === current.stepId);
-          if (!(step?.kind === "action" && isBuiltInActionId(step.action))) {
-            return yield* failRun(runId, current, INTERRUPTED, "step-failed");
+    Effect.scoped(
+      Effect.gen(function* () {
+        const endedChildren = yield* Queue.unbounded<{
+          readonly record: UnfinishedStepRecord;
+          readonly exit: Exit.Exit<void, SqlError>;
+        }>();
+        // The steps whose record a child fiber is executing. Only this loop
+        // changes the set, so it is never stale.
+        const busySteps = new Set<string>();
+        for (;;) {
+          const found = yield* runs.read(runId);
+          if (Option.isNone(found)) return;
+          const run = found.value;
+          if (!isUnfinished(run.status)) return;
+          if (run.status === "pending") {
+            yield* commitUninterruptibly(Effect.flatMap(nowIso, (at) => runs.start(runId, at)));
           }
-          yield* executeStep(run, current);
-          continue;
+          const ready = listNextStepRecords(run.steps).filter(
+            (record) => !busySteps.has(record.stepId),
+          );
+          // A running record with no child fiber executing it was cut off by
+          // a restart. A plugin's action may or may not have taken effect, so
+          // the first such record fails the run, which cancels the others.
+          const cutOff = ready.find((record) => {
+            const step = run.plan.steps.find((candidate) => candidate.id === record.stepId);
+            return (
+              record.status === "running" &&
+              !(step?.kind === "action" && isBuiltInActionId(step.action))
+            );
+          });
+          if (cutOff !== undefined) {
+            yield* failRun(runId, cutOff, INTERRUPTED, "step-failed");
+            continue;
+          }
+          for (const record of ready) {
+            busySteps.add(record.stepId);
+            yield* Effect.forkScoped(
+              Effect.onExit(executeRecord(run, record), (exit) =>
+                Queue.offer(endedChildren, { record, exit }),
+              ),
+            );
+          }
+          if (busySteps.size === 0) {
+            // Routing completes a run in the transaction that ends its last
+            // record. An earlier engine completed it in a transaction of its
+            // own, so a restart between the two leaves such a run with
+            // nothing to execute.
+            return yield* commitUninterruptibly(
+              Effect.flatMap(nowIso, (at) => writeRunEnding(runId, { status: "completed" }, at)),
+            );
+          }
+          const ended = yield* Queue.take(endedChildren);
+          busySteps.delete(ended.record.stepId);
+          if (Exit.isSuccess(ended.exit)) continue;
+          // Children are interrupted only after the scheduler has left this
+          // loop, by returning or by being interrupted itself. So a child
+          // that ended interrupted while the loop still runs interrupted
+          // itself, for example a plugin's action that ended in its own
+          // interrupt. Nothing else would end that child's record, and the
+          // run would stay running, so the run fails at it.
+          if (!Cause.hasInterrupts(ended.exit.cause)) {
+            return yield* Effect.failCause(ended.exit.cause);
+          }
+          yield* Effect.logError(
+            `Executing step ${ended.record.stepId} of run ${runId} was interrupted, so the run fails`,
+            ended.exit.cause,
+          );
+          yield* failRun(runId, ended.record, UNEXPECTED_RUN_FAILURE, "controller-error");
         }
-        const started = yield* startStepRecord(runId, current);
-        if (Option.isSome(started)) {
-          yield* executeStep(started.value.run, { ...current, startedAt: started.value.startedAt });
-        }
-      }
-    });
+      }),
+    );
 
   /**
-   * Fails a run that could not be carried out for a reason of the
+   * Fails a run that its scheduler could not carry out for a reason of the
    * controller's own, such as a database error or a bug, with
-   * `controller-error`: at its current step, which fails with the code
-   * `unexpected`, or as a whole if no step is current.
+   * `controller-error` and no failed step: the error was not at any one step.
    */
   const failRunUnexpectedly = (runId: string): Effect.Effect<void, SqlError> =>
-    Effect.gen(function* () {
-      const found = yield* runs.read(runId);
-      if (Option.isNone(found)) return;
-      const current = findCurrentStepRecord(found.value.steps);
-      if (current !== undefined) {
-        return yield* failRun(runId, current, UNEXPECTED_RUN_FAILURE, "controller-error");
-      }
-      yield* commitUninterruptibly(
-        Effect.flatMap(nowIso, (at) =>
-          writeRunEnding(runId, { status: "failed", failureReason: "controller-error" }, at),
-        ),
-      );
-    });
+    commitUninterruptibly(
+      Effect.flatMap(nowIso, (at) =>
+        writeRunEnding(runId, { status: "failed", failureReason: "controller-error" }, at),
+      ),
+    );
 
   /**
    * Starts executing a run on a fiber of the engine's own, unless a fiber
@@ -753,6 +549,14 @@ const make = Effect.gen(function* () {
     resumeUnfinishedRuns: Effect.map(runs.listUnfinished(), (ids) => {
       for (const runId of ids) executeInBackground(runId);
     }),
+
+    /**
+     * Interrupts every fiber executing a run, and waits until they have
+     * stopped. This is what happens to them when the controller stops: the
+     * rows stay as they are, for `resumeUnfinishedRuns` to continue from.
+     * The test harness calls it to restart the controller in place.
+     */
+    stopExecutingRuns: FiberMap.clear(runFibers),
   };
 });
 

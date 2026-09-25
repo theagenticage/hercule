@@ -63,7 +63,11 @@ export type StepOutcome =
 
 /** How a run ends. */
 export type RunOutcome =
-  | { readonly status: "completed" }
+  | {
+      readonly status: "completed";
+      /** The output of the terminal step that ended the run, when one did. */
+      readonly output?: Schema.Json | undefined;
+    }
   | { readonly status: "cancelled" }
   | {
       readonly status: "failed";
@@ -108,6 +112,7 @@ interface RunRow {
   readonly failed_step_id: string | null;
   readonly failed_edge_index: number | null;
   readonly failure_message: string | null;
+  readonly output: string | null;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly finished_at: string | null;
@@ -266,7 +271,8 @@ const parseStatusColumns = (row: StatusColumns) => {
  * Maps a run row, its step rows and its traversal rows to a `Run`. The JSON
  * columns are parsed without being decoded again: the run engine wrote them
  * from values that were already validated. An edge with no traversal row
- * has been followed 0 times.
+ * has been followed 0 times. A completed run has an `output` only when its
+ * `output` column is set; a JSON `null` output is a set column.
  */
 const toRun = (
   row: RunRow,
@@ -276,6 +282,7 @@ const toRun = (
   const plan = JSON.parse(row.plan) as WorkflowDefinition;
   const edgeTraversals = (plan.edges ?? []).map(() => 0);
   for (const traversal of traversals) edgeTraversals[traversal.edge_index] = traversal.count;
+  const status = parseStatusColumns(row);
   return {
     id: uuidToString(row.id),
     workflowId: row.workflow_id === null ? null : uuidToString(row.workflow_id),
@@ -285,7 +292,9 @@ const toRun = (
     steps: steps.map(toStepRecord),
     edgeTraversals,
     createdAt: row.created_at,
-    ...parseStatusColumns(row),
+    ...(status.status === "completed" && row.output !== null
+      ? { ...status, output: JSON.parse(row.output) as Schema.Json }
+      : status),
   };
 };
 
@@ -618,6 +627,7 @@ const make = Effect.gen(function* () {
             failed_step_id = ${ending.status === "failed" ? (ending.failedStepId ?? null) : null},
             failed_edge_index = ${ending.status === "failed" ? (ending.failedEdgeIndex ?? null) : null},
             failure_message = ${ending.status === "failed" ? (ending.failureMessage ?? null) : null},
+            output = ${ending.status === "completed" && ending.output !== undefined ? JSON.stringify(ending.output) : null},
             finished_at = ${at}
           WHERE id = ${uuidFromString(id)} AND status IN ('pending', 'running')
         `;

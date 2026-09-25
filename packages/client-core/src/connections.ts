@@ -9,6 +9,7 @@
  * an operation of their own.
  */
 import { GITHUB_CONNECTION_TYPE, type Connection, type PluginDetail } from "@hercule/contract";
+import { readJsonObject } from "./json-shape";
 
 /**
  * Returns the GitHub connections: the accounts a repo can be cloned through.
@@ -61,15 +62,6 @@ export interface ConnectionType {
 }
 
 /**
- * Returns `value` as an object, or `undefined` when it is not one. A
- * contribution's definition arrives as untyped JSON.
- */
-const asDefinition = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-
-/**
  * Returns the connection types declared in the plugin list. There is no
  * separate operation for them: a type is a plugin contribution, so the plugin
  * list the plugins screen already fetches contains every type. Disabled
@@ -83,12 +75,13 @@ export const listConnectionTypes = (
     plugin.contributions
       .filter((contribution) => contribution.extensionPoint === "connection-type")
       .flatMap((contribution) => {
-        const definition = asDefinition(contribution.definition);
+        // A contribution's definition arrives as untyped JSON.
+        const definition = readJsonObject(contribution.definition);
         const type = definition?.["type"];
         const displayName = definition?.["displayName"];
         if (typeof type !== "string" || typeof displayName !== "string") return [];
         const setup = definition?.["setup"];
-        const configSchema = asDefinition(definition?.["configSchema"]);
+        const configSchema = readJsonObject(definition?.["configSchema"]);
         return [
           {
             type,

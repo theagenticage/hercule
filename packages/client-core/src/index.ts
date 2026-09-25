@@ -35,6 +35,7 @@ export {
   RequestError,
 } from "./errors";
 export { toIdTail } from "./id-tail";
+export { readJsonObject } from "./json-shape";
 export { joinCommand } from "./join-command";
 export {
   buildRetireQuestion,

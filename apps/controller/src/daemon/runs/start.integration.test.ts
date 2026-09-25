@@ -370,14 +370,6 @@ describe("the graphs a run accepts", () => {
           },
           path: ["triggers", "0"],
         },
-        {
-          element: "terminal",
-          definition: {
-            name: "Terminal",
-            steps: [buildCreateStep("first", { terminal: true })],
-          },
-          path: ["steps", "0", "terminal"],
-        },
       ];
 
       for (const { element, definition, path } of fixtures) {
@@ -396,24 +388,36 @@ describe("the graphs a run accepts", () => {
       const workflow = await createWorkflowOrFail(base, token, {
         definition: {
           name: "Two unsupported elements",
-          steps: [
-            buildCreateStep("first", { terminal: true }),
-            { id: "review", kind: "agent", agent: agentId, prompt: "Review the task." },
+          triggers: [
+            {
+              id: "task_changed",
+              kind: "signal",
+              source: { kind: "task.updated" },
+              correlation: { event: "event.payload.taskId", run: "steps.first.output.id" },
+            },
           ],
-          edges: [{ from: "first", to: "review" }],
+          steps: [
+            buildCreateStep("first"),
+            { id: "review", kind: "agent", agent: agentId, prompt: "Review the task." },
+            buildCreateStep("follow_up"),
+          ],
+          edges: [
+            { from: "first", to: "review" },
+            { from: "task_changed", to: "follow_up" },
+          ],
         },
       });
 
       const response = await requestRun(base, token, workflow.id);
 
       await expectRefusedAt(harness, response, [
-        ["steps", "0", "terminal"],
+        ["triggers", "0"],
         ["steps", "1"],
       ]);
     });
   });
 
-  it("runs each routing element to completion: conditions, join, maxTraversals, several incoming edges and an entry step an edge leads into", async () => {
+  it("runs each routing element to completion: conditions, join, maxTraversals, several incoming edges, an entry step an edge leads into and terminal", async () => {
     await withSetUpController(async ({ base, token }) => {
       const fixtures: ReadonlyArray<{
         readonly element: string;
@@ -514,6 +518,14 @@ describe("the graphs a run accepts", () => {
             ["second", 1, "completed"],
             ["second", 2, "completed"],
           ],
+        },
+        {
+          element: "terminal",
+          definition: {
+            name: "Terminal",
+            steps: [buildCreateStep("first", { terminal: true })],
+          },
+          records: [["first", 1, "completed"]],
         },
       ];
 

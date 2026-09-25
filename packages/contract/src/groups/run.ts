@@ -174,7 +174,8 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  *
  * - `pending`: no timestamp but `createdAt`.
  * - `running`: `startedAt`.
- * - `completed`: `startedAt` and `finishedAt`.
+ * - `completed`: `startedAt` and `finishedAt`, and the fields only a
+ *   completed run has (`output`), which `completedFields` holds.
  * - `failed` at a step (`expression-error`, `step-failed` or
  *   `iteration-limit`): `failedStepId`, `startedAt` and `finishedAt`, and
  *   `failedEdgeIndex` and `failureMessage` when the run failed at an edge.
@@ -184,12 +185,19 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  *
  * A run and a run summary share these rules, so both are built from here.
  */
-const buildRunStatusVariants = <const Fields extends Schema.Struct.Fields>(fields: Fields) =>
+const buildRunStatusVariants = <
+  const Fields extends Schema.Struct.Fields,
+  const CompletedFields extends Schema.Struct.Fields,
+>(
+  fields: Fields,
+  completedFields: CompletedFields,
+) =>
   [
     Schema.Struct({ ...fields, status: Schema.Literal("pending") }),
     Schema.Struct({ ...fields, status: Schema.Literal("running"), startedAt: Timestamp }),
     Schema.Struct({
       ...fields,
+      ...completedFields,
       status: Schema.Literal("completed"),
       startedAt: Timestamp,
       finishedAt: Timestamp,
@@ -228,41 +236,53 @@ const buildRunStatusVariants = <const Fields extends Schema.Struct.Fields>(field
 
 /** A run, with its frozen plan and every step record in the order they were created. */
 export const Run = Schema.Union(
-  buildRunStatusVariants({
-    id: Id,
-    /** The workflow the run was started from. It stays set after that workflow is deleted. */
-    workflowId: Schema.NullOr(Id),
-    /** The workflow definition as it was when the run started. */
-    plan: WorkflowDefinition,
-    /** The inputs the run started with, with defaults applied. An optional input with no value is absent. */
-    inputs: Schema.Record(Schema.String, Schema.Json),
-    origin: RunOrigin,
-    steps: Schema.Array(StepRecord),
-    /**
-     * How many times the run has followed each edge: one count per edge of
-     * `plan.edges`, in the same order, zeros included.
-     */
-    edgeTraversals: Schema.Array(Schema.Int),
-    createdAt: Timestamp,
-  }),
+  buildRunStatusVariants(
+    {
+      id: Id,
+      /** The workflow the run was started from. It stays set after that workflow is deleted. */
+      workflowId: Schema.NullOr(Id),
+      /** The workflow definition as it was when the run started. */
+      plan: WorkflowDefinition,
+      /** The inputs the run started with, with defaults applied. An optional input with no value is absent. */
+      inputs: Schema.Record(Schema.String, Schema.Json),
+      origin: RunOrigin,
+      steps: Schema.Array(StepRecord),
+      /**
+       * How many times the run has followed each edge: one count per edge of
+       * `plan.edges`, in the same order, zeros included.
+       */
+      edgeTraversals: Schema.Array(Schema.Int),
+      createdAt: Timestamp,
+    },
+    {
+      /**
+       * The output of the terminal step that ended the run. Absent when the run
+       * completed without a terminal step, because every branch had finished.
+       */
+      output: Schema.optionalKey(Schema.Json),
+    },
+  ),
 );
 
 export type Run = Schema.Schema.Type<typeof Run>;
 
 /**
- * One run in the run list: the run without its plan and step records, which
- * are long. `run.read` returns them.
+ * One run in the run list: the run without its plan, step records and
+ * output, which are long. `run.read` returns them.
  */
 export const RunSummary = Schema.Union(
-  buildRunStatusVariants({
-    id: Id,
-    /** The workflow the run was started from, or null for a workflow sent with `run.start`. */
-    workflowId: Schema.NullOr(Id),
-    /** The workflow's name as it was when the run started, from the run's plan. */
-    workflowName: Schema.String,
-    origin: RunOrigin,
-    createdAt: Timestamp,
-  }),
+  buildRunStatusVariants(
+    {
+      id: Id,
+      /** The workflow the run was started from, or null for a workflow sent with `run.start`. */
+      workflowId: Schema.NullOr(Id),
+      /** The workflow's name as it was when the run started, from the run's plan. */
+      workflowName: Schema.String,
+      origin: RunOrigin,
+      createdAt: Timestamp,
+    },
+    {},
+  ),
 );
 
 export type RunSummary = Schema.Schema.Type<typeof RunSummary>;

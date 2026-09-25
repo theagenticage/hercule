@@ -147,7 +147,7 @@ The controller emits events about its own state, connection-less, through the sa
 
 | Kind | Payload | Emitted when |
 |---|---|---|
-| `run.completed` | `{runId, workflowId?, triggerId?, origin, inputs, outputs, taskId?, triggerEventId?, startedAt, finishedAt}`; `outputs` = the terminal step's output, `taskId` = the run's Task link | a run reaches `completed` |
+| `run.completed` | `{runId, workflowId?, triggerId?, origin, inputs, ~~outputs~~ output?, taskId?, triggerEventId?, startedAt, finishedAt}`; ~~`outputs`~~ `output` = the terminal step's output, absent when the run completed without a terminal step, the name the run record uses *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*, `taskId` = the run's Task link | a run reaches `completed` |
 | `run.failed` | the `run.completed` fields plus `failureReason`, `failedStepId?` and `failedEdgeIndex?`, the index in the plan's edges of the edge the run failed at, and `failureMessage?`, why that edge failed *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))* | a run reaches `failed` |
 | `run.cancelled` | the `run.completed` fields | a run reaches `cancelled` (not a failure: a failure-notification workflow must not fire on a deliberate cancel) |
 | `task.created` | full Task snapshot | a Task is created |
@@ -156,7 +156,7 @@ The controller emits events about its own state, connection-less, through the sa
 
 CEL routes on them like any event: `event.changes.status.new == "done"`, `has(event.changes.status)`. Kinds grow additively (e.g. learning workflows over run outcomes); no finer-grained task kinds exist. Task event shapes are owned by [./09-tasks.md](./09-tasks.md).
 
-The payload set is pinned by [Plugin contribution interfaces](https://github.com/theagenticage/hercule/issues/41): the run-record subset above plus `outputs` and `taskId?`, so "done means merged" and check-in workflows route without a lookup.
+The payload set is pinned by [Plugin contribution interfaces](https://github.com/theagenticage/hercule/issues/41): the run-record subset above plus ~~`outputs`~~ `output?` *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))* and `taskId?`, so "done means merged" and check-in workflows route without a lookup.
 
 Batching is the emitter's job: a workflow that reacts to CI results or reviews subscribes to a per-suite or per-review kind, not per-check or per-comment ones, because a run processes one signal firing per iteration ([./07-workflows.md](./07-workflows.md) section 4.3). The v1 GitHub kind roster ([./05-plugins.md](./05-plugins.md)) must offer those coarse kinds.
 

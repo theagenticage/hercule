@@ -79,29 +79,26 @@ const listUnsupportedElements = (
   );
   const stepIssues = definition.steps.flatMap((step: PlanStep, index): ReadonlyArray<Issue> => {
     const path = ["steps", String(index)];
-    const issues: Array<Issue> = [];
     if (step.kind === "agent") {
-      issues.push({
-        path: [...path, "kind"],
-        message: "Runs cannot run agent steps yet. Only action steps can run.",
-      });
-    } else if (actions.find((action) => action.id === step.action)?.connection !== undefined) {
-      // Which of a step's params names the Connection is not settled yet, and
-      // an action called without its Connection would fail in ways its
-      // author never planned for.
-      issues.push({
-        path: [...path, "action"],
-        message:
-          "Runs cannot call an action that acts through a Connection yet. Remove this step to run this workflow.",
-      });
+      return [
+        {
+          path: [...path, "kind"],
+          message: "Runs cannot run agent steps yet. Only action steps can run.",
+        },
+      ];
     }
-    if (step.terminal !== undefined) {
-      issues.push({
-        path: [...path, "terminal"],
-        message: "Runs cannot end at a terminal step yet. Remove terminal to run this workflow.",
-      });
-    }
-    return issues;
+    // Which of a step's params names the Connection is not settled yet, and
+    // an action called without its Connection would fail in ways its author
+    // never planned for.
+    return actions.find((action) => action.id === step.action)?.connection === undefined
+      ? []
+      : [
+          {
+            path: [...path, "action"],
+            message:
+              "Runs cannot call an action that acts through a Connection yet. Remove this step to run this workflow.",
+          },
+        ];
   });
   return [...triggerIssues, ...stepIssues];
 };

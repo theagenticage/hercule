@@ -408,6 +408,42 @@ describe("hercule run", () => {
     ]);
   });
 
+  it("prints the output of a run that a terminal step ended, under the inputs", () => {
+    const readOutput = (output: unknown): ReadonlyArray<string> => {
+      const lines = renderHuman(
+        {
+          kind: "value",
+          value: {
+            id: RUN,
+            workflowId: null,
+            plan: { name: "End early", steps: [] },
+            inputs: {},
+            origin: { kind: "manual", actor: "user" },
+            status: "completed",
+            output,
+            steps: [],
+            edgeTraversals: [],
+            createdAt: "2026-09-24T10:00:00.000Z",
+            startedAt: "2026-09-24T10:00:00.000Z",
+            finishedAt: "2026-09-24T10:00:00.010Z",
+          },
+        },
+        lookUpCommand("run", "read"),
+      );
+      return lines.slice(lines.indexOf("inputs"), lines.indexOf("steps"));
+    };
+    expect(readOutput({ id: RUN, title: "Fix login" })).toEqual([
+      "inputs",
+      "none",
+      "",
+      "output",
+      `id     ${RUN}`,
+      "title  Fix login",
+      "",
+    ]);
+    expect(readOutput(null)).toEqual(["inputs", "none", "", "output", "null", ""]);
+  });
+
   it("describes who started a run in the words the web app uses", () => {
     const readStartedBy = (origin: Record<string, unknown>): string | undefined =>
       renderHuman(
