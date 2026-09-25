@@ -110,9 +110,15 @@ const renderKeyValues = (
   const entries = flatten(value);
   if (entries.length === 0) return ["ok"];
   const width = Math.max(...entries.map(([key]) => key.length));
-  // Trim like the table's lines, so a key with an empty value has no trailing
-  // padding.
-  return entries.map(([key, item]) => `${key.padEnd(width)}  ${formatValue(item)}`.trimEnd());
+  // A value of several lines keeps its later lines under its first one, in the
+  // value column. Trim like the table's lines, so a key with an empty value has
+  // no trailing padding.
+  const indent = " ".repeat(width + 2);
+  return entries.flatMap(([key, item]) =>
+    formatValue(item)
+      .split("\n")
+      .map((line, index) => `${index === 0 ? key.padEnd(width) + "  " : indent}${line}`.trimEnd()),
+  );
 };
 
 /**
@@ -120,13 +126,18 @@ const renderKeyValues = (
  * The run commands print ids in full, as `run start` prints the id it
  * starts, so an id a reader copies from `run read`, such as a Connection an
  * input names, works in every other command.
+ *
+ * A list that holds an object or a list prints as indented JSON over several
+ * lines, the way the CLI prints JSON elsewhere, because one line of nested
+ * JSON is hard to read.
  */
-const formatKeepingIds = (item: unknown): string =>
-  typeof item === "string"
-    ? item
-    : Array.isArray(item)
-      ? item.map(formatKeepingIds).join(",")
-      : formatCell(item);
+const formatKeepingIds = (item: unknown): string => {
+  if (typeof item === "string") return item;
+  if (!Array.isArray(item)) return formatCell(item);
+  return item.some((element) => typeof element === "object" && element !== null)
+    ? JSON.stringify(item, null, 2)
+    : item.map(formatKeepingIds).join(",");
+};
 
 const isPage = (
   value: unknown,
@@ -333,7 +344,7 @@ const describeFailure = (run: Run): Record<string, string> => {
  * Returns the lines of a run's output under an `output` heading, or no lines
  * for a run without one: only a run that a terminal step ended has an
  * output. An object with fields prints as `key  value` lines, like the
- * inputs; any other value prints as JSON on one line.
+ * inputs; any other value prints as indented JSON.
  */
 const renderRunOutput = (run: Run): ReadonlyArray<string> => {
   if (run.status !== "completed" || run.output === undefined) return [];
@@ -343,7 +354,7 @@ const renderRunOutput = (run: Run): ReadonlyArray<string> => {
     "output",
     ...(fields !== undefined && Object.keys(fields).length > 0
       ? renderKeyValues(fields, formatKeepingIds)
-      : [JSON.stringify(run.output)]),
+      : JSON.stringify(run.output, null, 2).split("\n")),
   ];
 };
 

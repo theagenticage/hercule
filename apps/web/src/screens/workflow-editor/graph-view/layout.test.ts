@@ -12,6 +12,8 @@ import {
   computeGraphLayout,
   computePaneHeight,
   LARGEST_PLACED_ZOOM,
+  LEGIBLE_ZOOM,
+  MIN_ZOOM,
   type EdgeRoute,
   type Point,
   type Size,
@@ -177,6 +179,31 @@ describe("computeGraphLayout", () => {
     expect(readNode(layout, "open_task").x + CARD.width).toBeLessThan(readNode(layout, "review").x);
     expectHandleToHandle(layout, "e0", "start", "open_task");
     expectHandleToHandle(layout, "e1", "open_task", "review");
+    expectClearDrawing(layout, edges);
+  });
+
+  it("lines up the nodes of one rank on their left edge, so the edges into them are equally long", () => {
+    // `triage` fans out to a wide and a narrow node, which share a rank.
+    const edges = [
+      { id: "e0", from: "triage", to: "wide" },
+      { id: "e1", from: "triage", to: "narrow" },
+    ];
+    const layout = computeGraphLayout(
+      [
+        { id: "triage", ...CARD },
+        { id: "wide", width: 240, height: CARD.height },
+        { id: "narrow", ...CARD },
+      ],
+      edges,
+      SIDE_MARGIN,
+    );
+
+    expect(readNode(layout, "narrow").x).toBe(readNode(layout, "wide").x);
+    const lengthIn = (id: string) => {
+      const points = readRoute(layout, id).points;
+      return points.at(-1)!.x - points.at(-2)!.x;
+    };
+    expect(lengthIn("e1")).toBe(lengthIn("e0"));
     expectClearDrawing(layout, edges);
   });
 
@@ -387,7 +414,7 @@ describe("computeDrawingViewport", () => {
 
     // Three cards in a row fit the pane at the largest zoom, centred.
     const small: Size = { width: 520, height: 52 };
-    expect(computeDrawingViewport(pane, small)).toEqual({
+    expect(computeDrawingViewport(pane, small, LEGIBLE_ZOOM)).toEqual({
       x: (1200 - 520 * LARGEST_PLACED_ZOOM) / 2,
       y: (800 - 52 * LARGEST_PLACED_ZOOM) / 2,
       zoom: LARGEST_PLACED_ZOOM,
@@ -395,24 +422,37 @@ describe("computeDrawingViewport", () => {
 
     // A drawing that fits only slightly above the legible zoom gets the largest zoom that fits.
     const wide: Size = { width: 1052, height: 200 };
-    expect(computeDrawingViewport(pane, wide).zoom).toBeCloseTo((1200 - 2 * 16) / 1052);
+    expect(computeDrawingViewport(pane, wide, LEGIBLE_ZOOM).zoom).toBeCloseTo(
+      (1200 - 2 * 16) / 1052,
+    );
 
     // A drawing a little wider than the pane is scaled down until it fits:
     // five step cards of a run in the 258px-high pane of a run's page.
     const run: Size = { width: 1215, height: 52 };
     const runPane: Size = { width: 970, height: 258 };
-    const fitted = computeDrawingViewport(runPane, run);
+    const fitted = computeDrawingViewport(runPane, run, LEGIBLE_ZOOM);
     expect(fitted.zoom).toBeCloseTo((970 - 2 * 16) / 1215);
     expect(fitted.x).toBeCloseTo(16);
 
     // A drawing that fits only at a smaller zoom gets the legible zoom and
     // starts at the pane's left edge. It is still centred vertically, where it fits.
     const large: Size = { width: 2000, height: 300 };
-    expect(computeDrawingViewport(pane, large)).toEqual({
+    expect(computeDrawingViewport(pane, large, LEGIBLE_ZOOM)).toEqual({
       x: 16,
       y: (800 - 300 * 0.75) / 2,
       zoom: 0.75,
     });
+  });
+
+  it("shows the whole drawing, however small that makes it, when the smallest zoom allows", () => {
+    // The demo workflow in the editor's split view: its graph half is about
+    // 800px wide, and the drawing needs a zoom below the legible one to fit.
+    const pane: Size = { width: 800, height: 900 };
+    const demo: Size = { width: 1320, height: 124 };
+    const placed = computeDrawingViewport(pane, demo, MIN_ZOOM);
+    expect(placed.zoom).toBeCloseTo((800 - 2 * 16) / 1320);
+    expect(placed.x).toBeCloseTo(16);
+    expect(placed.x + demo.width * placed.zoom).toBeLessThanOrEqual(pane.width);
   });
 });
 
@@ -428,7 +468,7 @@ describe("computePaneHeight", () => {
     expect(computePaneHeight(1595, plan, RANGE)).toBe(Math.ceil(124 * zoom + ROOM));
     // The pane shows the drawing whole: placed in a pane of that height, it fills the width.
     const pane = { width: 1595, height: computePaneHeight(1595, plan, RANGE) };
-    expect(computeDrawingViewport(pane, plan)).toEqual({
+    expect(computeDrawingViewport(pane, plan, LEGIBLE_ZOOM)).toEqual({
       x: 16,
       y: (pane.height - 124 * zoom) / 2,
       zoom,

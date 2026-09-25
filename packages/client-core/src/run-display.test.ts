@@ -198,11 +198,19 @@ describe("findFailedEdge", () => {
 });
 
 describe("describeUnstartedStep", () => {
-  it("describes why a step has no bar, for a pending, a cancelled and a skipped step only", () => {
-    assert.strictEqual(describeUnstartedStep("pending"), "pending");
-    assert.strictEqual(describeUnstartedStep("cancelled"), "cancelled before it started");
-    assert.strictEqual(describeUnstartedStep("skipped"), "skipped");
-    assert.strictEqual(describeUnstartedStep("unreached"), undefined);
+  it("describes why a step has no bar, for a pending, a cancelled, a skipped and a never reached step", () => {
+    assert.strictEqual(describeUnstartedStep("pending", "running"), "pending");
+    assert.strictEqual(
+      describeUnstartedStep("cancelled", "cancelled"),
+      "cancelled before it started",
+    );
+    assert.strictEqual(describeUnstartedStep("skipped", "completed"), "skipped");
+    assert.strictEqual(describeUnstartedStep("unreached", "completed"), "not reached");
+    assert.strictEqual(describeUnstartedStep("completed", "completed"), undefined);
+  });
+
+  it("says nothing of a step a live run has not reached yet, because the run may still reach it", () => {
+    assert.strictEqual(describeUnstartedStep("unreached", "running"), undefined);
   });
 });
 

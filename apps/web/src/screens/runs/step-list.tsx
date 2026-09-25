@@ -2,6 +2,7 @@ import { useState, type JSX } from "react";
 import { describeStepState, describeStepDuration, type StepLine } from "@hercule/client-core";
 import type { RunStatus } from "@hercule/contract";
 import { WORK_STATE_HUES, cn } from "@hercule/ui";
+import { JsonText } from "./json-text";
 import { StepCells, StepErrorLine } from "./step-parts";
 
 /**
@@ -68,9 +69,10 @@ export function StepList({
             )}
             {line.error === undefined ? null : <StepErrorLine error={line.error} />}
             {isOpen ? (
-              <pre className="mr-2.5 mb-2.5 ml-[42px] rounded-control border border-line-soft bg-raised px-3 py-2 font-mono text-fine leading-5 wrap-break-word whitespace-pre-wrap text-ink">
-                {JSON.stringify(output, null, 2)}
-              </pre>
+              <JsonText
+                value={output}
+                className="mr-2.5 mb-2.5 ml-[42px] rounded-control border border-line-soft bg-raised px-3 py-2"
+              />
             ) : null}
           </li>
         );

@@ -46,6 +46,7 @@ import {
   computeGraphLayout,
   computePaneHeight,
   LARGEST_PLACED_ZOOM,
+  MIN_ZOOM,
   type EdgeRoute,
   type Point,
   type Size,
@@ -154,7 +155,6 @@ export const WORKFLOW_EDGE_STYLE: EdgeStyle = {
 /** Returns the style of every edge of a workflow, `WORKFLOW_EDGE_STYLE`. */
 const decideWorkflowEdgeStyle = (): EdgeStyle => WORKFLOW_EDGE_STYLE;
 
-const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 1.5;
 /** The padding around the drawing for "Fit to view", as a fraction of the pane. */
 const FIT_PADDING = 0.08;
@@ -363,10 +363,10 @@ function WorkflowEdgeCurve({ id, data }: EdgeProps<DrawnWorkflowEdge>): JSX.Elem
               gap: LABEL_GAP,
               paddingInline: LABEL_PADDING,
             }}
-            // The background covers the curve only behind the text. The
-            // padding is outside the background, so the curve stays visible
-            // right up to the text.
-            className="pointer-events-auto absolute flex items-center bg-surface bg-clip-content font-mono text-fine leading-none whitespace-nowrap text-muted tabular-nums"
+            // The background, in the pane's colour, covers the curve behind
+            // the text and its padding, so the curve stops short of the text
+            // instead of running into it.
+            className="pointer-events-auto absolute flex items-center bg-surface font-mono text-fine leading-none whitespace-nowrap text-muted tabular-nums"
           >
             {edge.condition === undefined ? null : (
               <>
@@ -458,8 +458,8 @@ function ArrowMarker({
 }
 
 /**
- * Sets the viewport that `computeDrawingViewport` returns: never below a
- * readable zoom, and a small drawing scaled up.
+ * Sets the viewport that `computeDrawingViewport` returns: never below
+ * `smallestZoom`, and a small drawing scaled up.
  *
  * The drawing is placed again when the pane resizes, and when the structure
  * changes (a node or edge is added or removed, or an edge connects different
@@ -472,8 +472,10 @@ function ArrowMarker({
 function DrawingPlacement({
   size,
   structure,
+  smallestZoom,
 }: {
   readonly size: Size;
+  readonly smallestZoom: number;
   /** A key that encodes which nodes the edges connect. Ids and labels are not part of it. */
   readonly structure: string;
 }): JSX.Element {
@@ -482,11 +484,13 @@ function DrawingPlacement({
   const paneHeight = useStore((state) => state.height);
   const placeInPane = useEffectEvent(() => {
     if (paneWidth === 0 || paneHeight === 0) return;
-    void setViewport(computeDrawingViewport({ width: paneWidth, height: paneHeight }, size));
+    void setViewport(
+      computeDrawingViewport({ width: paneWidth, height: paneHeight }, size, smallestZoom),
+    );
   });
   useEffect(() => {
     placeInPane();
-  }, [paneWidth, paneHeight, structure]);
+  }, [paneWidth, paneHeight, structure, smallestZoom]);
   const fitToView = () => {
     if (paneWidth === 0 || paneHeight === 0) return;
     void setViewport(
@@ -535,6 +539,7 @@ export function GraphView<
   decideEdgeStyle = decideWorkflowEdgeStyle,
   describeEdgeBadge = describeTraversalLimit,
   heightRange,
+  smallestPlacedZoom = MIN_ZOOM,
   className,
 }: {
   readonly graph: {
@@ -557,6 +562,12 @@ export function GraphView<
    * `computePaneHeight`). Without them, the pane fills its parent.
    */
   readonly heightRange?: { readonly min: number; readonly max: number };
+  /**
+   * The smallest zoom the drawing is placed at when it opens. By default the
+   * whole drawing shows, however small. A pane with a `heightRange` passes
+   * `LEGIBLE_ZOOM`, the zoom its height is computed for.
+   */
+  readonly smallestPlacedZoom?: number;
   /** A class for the pane, such as its border. */
   readonly className?: string;
 }): JSX.Element {
@@ -692,7 +703,11 @@ export function GraphView<
         elementsSelectable={false}
         proOptions={{ hideAttribution: true }}
       >
-        <DrawingPlacement size={drawing.size} structure={drawing.structure} />
+        <DrawingPlacement
+          size={drawing.size}
+          structure={drawing.structure}
+          smallestZoom={smallestPlacedZoom}
+        />
       </ReactFlow>
     </div>
   );

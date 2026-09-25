@@ -608,6 +608,50 @@ describe("hercule run", () => {
       "",
     ]);
     expect(readOutput(null)).toEqual(["inputs", "none", "", "output", "null", ""]);
+    expect(readOutput([1, 2])).toEqual([
+      "inputs",
+      "none",
+      "",
+      "output",
+      "[",
+      "  1,",
+      "  2",
+      "]",
+      "",
+    ]);
+  });
+
+  it("prints a list of objects in a run's output as indented JSON under the value column", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: RUN,
+          workflowId: null,
+          plan: { name: "File", steps: [] },
+          inputs: {},
+          origin: { kind: "manual", actor: "user" },
+          status: "completed",
+          output: { labels: ["a", "b"], provenance: [{ runId: RUN }] },
+          steps: [],
+          edgeTraversals: [],
+          createdAt: "2026-09-24T10:00:00.000Z",
+          startedAt: "2026-09-24T10:00:00.000Z",
+          finishedAt: "2026-09-24T10:00:00.010Z",
+        },
+      },
+      lookUpCommand("run", "read"),
+    );
+    expect(lines.slice(lines.indexOf("output"), lines.indexOf("steps"))).toEqual([
+      "output",
+      "labels      a,b",
+      "provenance  [",
+      "              {",
+      `                "runId": "${RUN}"`,
+      "              }",
+      "            ]",
+      "",
+    ]);
   });
 
   it("describes who started a run in the words the web app uses", () => {

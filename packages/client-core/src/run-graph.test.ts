@@ -1,6 +1,6 @@
 import { assert, describe, it } from "vitest";
 import type { Run, StepRecord } from "@hercule/contract";
-import { buildRunGraph, buildStepLines, buildTimeline } from "./run-graph";
+import { buildRunGraph, buildStepLines, buildTimeline, type Timeline } from "./run-graph";
 
 const START = "2026-09-24T12:00:00.000Z";
 const at = (ms: number): string => new Date(Date.parse(START) + ms).toISOString();
@@ -515,26 +515,11 @@ describe("buildTimeline", () => {
     );
   });
 
-  it("centres each label on its tick unless that would reach past an end of the axis", () => {
-    const timeline = buildTimeline(run, Date.parse(START) + 43, WIDE);
-    assert.deepStrictEqual(
-      timeline.ticks.map((tick) => tick.align),
-      ["start", "center", "center", "center", "center"],
-    );
-    // "20s" at 20 of 20.04 seconds is 0.05 characters from the end of a
-    // 24-character axis, so centring it would reach past the end.
-    const nearEnd = buildTimeline(endRun(at(20_040)), 0, 24);
-    assert.deepStrictEqual(
-      nearEnd.ticks.map((tick) => tick.align),
-      ["start", "center", "end"],
-    );
-  });
-
   it("spaces the ticks wider on a narrow axis, so the labels do not touch", () => {
-    // A 20-second run on the axis of a 525px steps panel: 153px, or 24 characters
-    // of 10.5px IBM Plex Mono. A tick every 5 seconds would put "15s" and the
-    // "20s" that ends the axis one and a half characters apart.
-    const narrow = buildTimeline(endRun(at(20_000)), 0, 24);
+    // A 20-second run on an axis 100px wide: 16 characters of 10.5px IBM
+    // Plex Mono. A tick every 5 seconds would put the centred labels "15s"
+    // and "20s" one character apart.
+    const narrow = buildTimeline(endRun(at(20_000)), 0, 16);
     assert.deepStrictEqual(
       narrow.ticks.map((tick) => [tick.label, tick.position]),
       [
@@ -550,8 +535,7 @@ describe("buildTimeline", () => {
     );
   });
 
-  it("keeps every label inside the axis and two characters from the next, at any width and length", () => {
-    const shares = { start: 0, center: 0.5, end: 1 } as const;
+  it("keeps every centred label two characters from the next, at any width and length", () => {
     for (const elapsedMs of [
       7, 43, 950, 4_300, 20_000, 20_040, 23_000, 95_000, 150_000, 5_400_000, 90_000_000,
     ]) {
@@ -560,20 +544,14 @@ describe("buildTimeline", () => {
         const context = `${String(elapsedMs)}ms at ${String(width)}`;
         assert.strictEqual(ticks[0]?.label, "0", context);
         for (const tick of ticks) {
-          const length = [...tick.label].length;
-          const left = tick.position * width - length * shares[tick.align];
           assert.isAtMost(tick.position, 1, `${tick.label} past the end, ${context}`);
-          // The lone tick at 0 of an axis too narrow for any step may be wider than the axis.
-          if (ticks.length === 1) continue;
-          assert.isAtLeast(left, -1e-9, `${tick.label} before the start, ${context}`);
-          assert.isAtMost(left + length, width + 1e-9, `${tick.label} after the end, ${context}`);
         }
         for (const [index, tick] of ticks.slice(1).entries()) {
           const previous = ticks[index]!;
           const space =
             (tick.position - previous.position) * width -
-            [...previous.label].length * (1 - shares[previous.align]) -
-            [...tick.label].length * shares[tick.align];
+            [...previous.label].length / 2 -
+            [...tick.label].length / 2;
           // The tolerance absorbs floating-point rounding at an exact fit.
           assert.isAtLeast(space, 2 - 1e-9, `${previous.label} and ${tick.label}, ${context}`);
         }
@@ -582,13 +560,13 @@ describe("buildTimeline", () => {
   });
 
   it("ends a 23-second run's axis at 23 seconds, past its last tick", () => {
-    const timeline = buildTimeline(endRun(at(23_000)), 0, 24);
+    const timeline = buildTimeline(endRun(at(23_000)), 0, 16);
     assert.deepStrictEqual(
-      timeline.ticks.map((tick) => [tick.label, tick.position, tick.align]),
+      timeline.ticks.map((tick) => [tick.label, tick.position]),
       [
-        ["0", 0, "start"],
-        ["10s", 10 / 23, "center"],
-        ["20s", 20 / 23, "center"],
+        ["0", 0],
+        ["10s", 10 / 23],
+        ["20s", 20 / 23],
       ],
     );
   });
@@ -622,12 +600,51 @@ describe("buildTimeline", () => {
     );
   });
 
-  it("places a skipped record where it was skipped, and no other record", () => {
+  it("gives a line a bar or a note, and says nothing of a step a live run may still reach", () => {
+    const readNotes = (timeline: Timeline) =>
+      timeline.lines.map((each) => [each.line.stepId, each.bar !== undefined, each.note?.text]);
+    // `query` waits to start; `update` may still be reached.
+    assert.deepStrictEqual(readNotes(buildTimeline(run, Date.parse(START) + 43, WIDE)), [
+      ["create", true, undefined],
+      ["label", true, undefined],
+      ["query", false, "pending"],
+      ["update", false, undefined],
+    ]);
+    // The cancel stopped `label` while it ran, and reached `query` before it started.
+    const cancelled: Run = {
+      ...FIELDS,
+      status: "cancelled",
+      startedAt: START,
+      finishedAt: at(40),
+      steps: [
+        STEPS[0]!,
+        {
+          stepId: "label",
+          iteration: 1,
+          status: "cancelled",
+          startedAt: at(12),
+          finishedAt: at(40),
+        },
+        { stepId: "query", iteration: 1, status: "cancelled", finishedAt: at(40) },
+      ],
+    };
+    assert.deepStrictEqual(readNotes(buildTimeline(cancelled, 0, WIDE)), [
+      ["create", true, undefined],
+      ["label", true, undefined],
+      ["query", false, "cancelled before it started"],
+      ["update", false, "not reached"],
+    ]);
+  });
+
+  it("notes a skipped record where it was skipped, and a step never reached at the end of the axis", () => {
     const timeline = buildTimeline(DEMO_COMPLETED, 0, WIDE);
-    const skippedAt = timeline.lines.map((each) => [each.line.stepId, each.skippedAt]);
+    const notes = timeline.lines.map((each) => [each.line.stepId, each.note]);
     assert.deepStrictEqual(
-      skippedAt.filter(([, at]) => at !== undefined),
-      [["escalate", 0.4]],
+      notes.filter(([, note]) => note !== undefined),
+      [
+        ["escalate", { text: "skipped", position: 0.4 }],
+        ["reuse", { text: "not reached", position: 1 }],
+      ],
     );
   });
 });

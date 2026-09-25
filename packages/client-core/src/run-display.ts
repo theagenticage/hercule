@@ -227,22 +227,30 @@ export const readFailedEdgeIndex = (run: Run): number | undefined =>
     : undefined;
 
 /**
- * Returns the text the timeline shows where a step with no bar would be: "pending"
- * for a step waiting to start, "cancelled before it started" for one the run's
- * cancel reached first, "skipped" for one whose condition was false, and
- * nothing for any other step.
+ * Returns the text the timeline shows where a step with no bar would be:
+ * - "pending" for a step waiting to start;
+ * - "cancelled before it started" for one the run's cancel reached first;
+ * - "skipped" for one whose condition was false;
+ * - "not reached" for a step the run ended without reaching.
+ *
+ * Returns `undefined` for a step with a bar, and for a step a live run has
+ * not reached yet, because the run may still reach it.
  */
-export const describeUnstartedStep = (state: WorkState): string | undefined => {
+export const describeUnstartedStep = (
+  state: WorkState,
+  runStatus: RunStatus,
+): string | undefined => {
   switch (state) {
     case "pending":
     case "skipped":
       return state;
     case "cancelled":
       return "cancelled before it started";
+    case "unreached":
+      return isRunLive(runStatus) ? undefined : "not reached";
     case "running":
     case "completed":
     case "failed":
-    case "unreached":
       return undefined;
   }
 };

@@ -8,6 +8,7 @@
  */
 import type { Run, RunStatus, StepError, StepRecord } from "@hercule/contract";
 import {
+  describeUnstartedStep,
   isRunLive,
   readFailedEdgeIndex,
   readTimestamps,
@@ -260,22 +261,12 @@ export const buildStepLines = (run: Pick<Run, "plan" | "steps">): ReadonlyArray<
   ];
 };
 
-/**
- * Which end of a tick's label stands at the tick. A label is centred on its
- * tick unless centring it would reach past an end of the axis:
- * - `start`: the label starts at its tick. The tick at 0 is aligned so.
- * - `end`: the label ends at its tick. A tick at or near the end of the axis is
- *   aligned so.
- * - `center`: the label is centred on its tick.
- */
-export type TickAlign = "start" | "center" | "end";
-
 /** A mark on the time axis. */
 export interface TimelineTick {
   /** Where the tick is, as a fraction of the axis. */
   readonly position: number;
+  /** The label, centred on the tick. */
   readonly label: string;
-  readonly align: TickAlign;
 }
 
 /** A step record's bar: where it starts and ends, as fractions of the axis. */
@@ -300,8 +291,20 @@ export interface TimelineLine {
   readonly line: StepLine;
   /** The bar of a record that started, or `undefined` for one that has not. */
   readonly bar: TimelineBar | undefined;
-  /** Where a skipped record was skipped, as a fraction of the axis, or `undefined` for any other record. */
-  readonly skippedAt: number | undefined;
+  /** The text a line with no bar shows on its track, or `undefined` for none. A line has a bar or a note, never both. */
+  readonly note: TimelineNote | undefined;
+}
+
+/**
+ * The text a line with no bar shows, such as "skipped", and where it stands:
+ * where a skipped record was skipped, and at the end of the axis for any
+ * other line. The note ends at its position, but only by the same fraction of
+ * its width as its position is of the axis, so it stays inside the axis.
+ */
+export interface TimelineNote {
+  readonly text: string;
+  /** A fraction of the axis. */
+  readonly position: number;
 }
 
 /**
@@ -372,43 +375,24 @@ const listTickSteps = (spanMs: number): ReadonlyArray<number> => [
 ];
 
 /**
- * Decides how to align a label `length` characters long whose tick is at
- * `position` on an axis `axisWidth` characters wide: centred, unless that
- * would reach past the start or the end of the axis.
+ * Builds a tick every `step` milliseconds on an axis `spanMs` long, from 0 up
+ * to the last one inside the axis.
  */
-const decideTickAlign = (position: number, length: number, axisWidth: number): TickAlign => {
-  const centre = position * axisWidth;
-  if (centre - length / 2 < 0) return "start";
-  if (centre + length / 2 > axisWidth) return "end";
-  return "center";
-};
-
-/**
- * Builds a tick every `step` milliseconds on an axis `spanMs` long and
- * `axisWidth` characters wide, from 0 up to the last one inside the axis.
- */
-const buildTicks = (step: number, spanMs: number, axisWidth: number): ReadonlyArray<TimelineTick> =>
+const buildTicks = (step: number, spanMs: number): ReadonlyArray<TimelineTick> =>
   Array.from({ length: Math.floor(spanMs / step) + 1 }, (_, index) => {
     const position = (index * step) / spanMs;
-    const label = formatTickLabel(index * step);
-    return { position, label, align: decideTickAlign(position, [...label].length, axisWidth) };
+    return { position, label: formatTickLabel(index * step) };
   });
 
 /**
- * Checks that ticks `spacing` characters apart keep their labels at least
- * `LABEL_GAP_CHARACTERS` apart, when the longest label is `longestLabel`
- * characters long.
- *
- * The closest two labels can come is a centred label followed by one aligned
- * to end at its tick at the end of the axis: half of one label and all of the
- * other stand between the two ticks. The check assumes both are the longest
- * label. That asks for a little more space than the labels need, but the
- * answer does not depend on where the last tick falls. So while a run is
- * live, its step only ever grows, and the ticks never flip back to a shorter
- * step as the run grows.
+ * Checks that ticks `spacing` characters apart keep their centred labels at
+ * least `LABEL_GAP_CHARACTERS` apart, when the longest label is
+ * `longestLabel` characters long. The check assumes both labels are the
+ * longest, so while a run is live and its axis grows, the ticks never flip
+ * back to a shorter step.
  */
 const areLabelsApart = (spacing: number, longestLabel: number): boolean =>
-  spacing >= 1.5 * longestLabel + LABEL_GAP_CHARACTERS;
+  spacing >= longestLabel + LABEL_GAP_CHARACTERS;
 
 /**
  * Builds the ticks of an axis `spanMs` long and `axisWidth` characters wide.
@@ -421,11 +405,11 @@ const areLabelsApart = (spacing: number, longestLabel: number): boolean =>
 const buildTimeAxis = (spanMs: number, axisWidth: number): ReadonlyArray<TimelineTick> => {
   for (const step of listTickSteps(spanMs)) {
     if (Math.floor(spanMs / step) > MAX_TICKS) continue;
-    const ticks = buildTicks(step, spanMs, axisWidth);
+    const ticks = buildTicks(step, spanMs);
     const longestLabel = Math.max(...ticks.map((tick) => [...tick.label].length));
     if (areLabelsApart((step / spanMs) * axisWidth, longestLabel)) return ticks;
   }
-  return [{ position: 0, label: formatTickLabel(0), align: "start" }];
+  return [{ position: 0, label: formatTickLabel(0) }];
 };
 
 /**
@@ -450,21 +434,33 @@ export const buildTimeline = (run: Run, now: number, axisWidthInCharacters: numb
   return {
     ticks: buildTimeAxis(spanMs, axisWidthInCharacters),
     elapsedMs,
-    lines: buildStepLines(run).map((line) => ({
-      line,
-      skippedAt:
-        line.state === "skipped" && line.finishedAt !== undefined
-          ? measureFraction(Date.parse(line.finishedAt))
-          : undefined,
-      bar:
-        line.startedAt === undefined
+    lines: buildStepLines(run).map((line) => {
+      // A cancelled record that started has a bar, and so no note.
+      const text =
+        line.startedAt === undefined ? describeUnstartedStep(line.state, run.status) : undefined;
+      const note =
+        text === undefined
           ? undefined
           : {
-              start: measureFraction(Date.parse(line.startedAt)),
-              end: measureFraction(
-                line.finishedAt === undefined ? end : Date.parse(line.finishedAt),
-              ),
-            },
-    })),
+              text,
+              position:
+                line.state === "skipped" && line.finishedAt !== undefined
+                  ? measureFraction(Date.parse(line.finishedAt))
+                  : 1,
+            };
+      return {
+        line,
+        note,
+        bar:
+          line.startedAt === undefined
+            ? undefined
+            : {
+                start: measureFraction(Date.parse(line.startedAt)),
+                end: measureFraction(
+                  line.finishedAt === undefined ? end : Date.parse(line.finishedAt),
+                ),
+              },
+      };
+    }),
   };
 };

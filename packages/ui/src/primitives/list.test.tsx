@@ -30,6 +30,21 @@ describe("Drawer", () => {
     expect(dialog.textContent).toContain("Inside");
   });
 
+  it("dims the room kept for the page's scrollbar while it is open", () => {
+    const { rerender } = render(
+      <Drawer open onClose={() => {}} title="Details">
+        Inside
+      </Drawer>,
+    );
+    expect(document.documentElement.hasAttribute("data-drawer-open")).toBe(true);
+    rerender(
+      <Drawer open={false} onClose={() => {}} title="Details">
+        Inside
+      </Drawer>,
+    );
+    expect(document.documentElement.hasAttribute("data-drawer-open")).toBe(false);
+  });
+
   it("closes on Escape", async () => {
     const onClose = vi.fn();
     render(

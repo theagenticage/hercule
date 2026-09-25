@@ -51,6 +51,19 @@ export function Drawer({
     };
   }, [open, opener]);
 
+  // The page keeps room for its scrollbar (see `scrollbar-gutter` in the
+  // stylesheet), and a fixed backdrop cannot cover that room. While the
+  // drawer is open, the stylesheet dims the page's own background, which is
+  // what shows in the room, to match the backdrop.
+  useEffect(() => {
+    if (!open) return;
+    const root = document.documentElement;
+    root.toggleAttribute("data-drawer-open", true);
+    return () => {
+      root.removeAttribute("data-drawer-open");
+    };
+  }, [open]);
+
   if (!open) return null;
 
   return (

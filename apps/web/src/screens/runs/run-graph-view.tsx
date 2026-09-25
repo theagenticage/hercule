@@ -29,6 +29,7 @@ import {
   CARD_PADDING,
   CardText,
   GraphView,
+  LEGIBLE_ZOOM,
   measureMonoText,
   WORKFLOW_EDGE_STYLE,
   WorkflowNodeCard,
@@ -146,6 +147,7 @@ export function RunGraphView({
         decideEdgeStyle={decideRunEdgeStyle}
         describeEdgeBadge={describeRunEdgeBadge}
         heightRange={PANE_HEIGHT_RANGE}
+        smallestPlacedZoom={LEGIBLE_ZOOM}
         className="overflow-hidden rounded-card border border-line bg-surface"
       />
     </RunMomentContext>

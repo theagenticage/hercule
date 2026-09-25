@@ -97,8 +97,12 @@
   --attn-soft: rgba(138, 97, 22, 0.09);
   --project-hercule: #7d7ab0;
   --project-ops: #a67f92;
-  /* The colour an overlay uses to dim the page behind it. */
-  --scrim: rgba(23, 26, 33, 0.22);
+  /* The colour an overlay uses to dim the page behind it: the scrim ink at the
+     scrim strength. The two parts are kept apart so the drawer can also mix
+     them into an opaque colour for the scrollbar's room. */
+  --scrim-ink: rgb(23, 26, 33);
+  --scrim-strength: 22%;
+  --scrim: color-mix(in srgb, var(--scrim-ink) var(--scrim-strength), transparent);
 
   /* Syntax highlighting colours for code, such as a workflow's YAML. Keys are
      blue, quoted strings are olive, and comments and punctuation are grey in
@@ -145,7 +149,8 @@
     --attn-soft: rgba(208, 161, 71, 0.12);
     --project-hercule: #9490c9;
     --project-ops: #bd93a8;
-    --scrim: rgba(0, 0, 0, 0.45);
+    --scrim-ink: rgb(0, 0, 0);
+    --scrim-strength: 45%;
 
     --syn-key: oklch(80% 0.075 255);
     --syn-string: oklch(80% 0.07 117);
@@ -177,7 +182,8 @@
   --attn-soft: rgba(208, 161, 71, 0.12);
   --project-hercule: #9490c9;
   --project-ops: #bd93a8;
-  --scrim: rgba(0, 0, 0, 0.45);
+  --scrim-ink: rgb(0, 0, 0);
+  --scrim-strength: 45%;
 
   --syn-key: oklch(80% 0.075 255);
   --syn-string: oklch(80% 0.07 117);
@@ -238,6 +244,15 @@
      trackpad, the browser keeps no room and nothing changes. */
   html {
     scrollbar-gutter: stable;
+  }
+  /* The room kept for the scrollbar shows the root's background colour, which
+     a fixed backdrop cannot cover. While a drawer is open, that colour is the
+     page background with the scrim mixed in, so the dimming reaches the
+     window's edge. It must be a plain colour: the browser paints no
+     background image in that room. The body paints its own background over the
+     rest of the page. */
+  html[data-drawer-open] {
+    background-color: color-mix(in srgb, var(--scrim-ink) var(--scrim-strength), var(--bg));
   }
   body {
     background: var(--bg);

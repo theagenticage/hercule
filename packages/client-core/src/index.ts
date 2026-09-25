@@ -36,6 +36,7 @@ export {
 } from "./errors";
 export { toIdTail } from "./id-tail";
 export { readJsonObject } from "./json-shape";
+export { listJsonLines, type JsonLine } from "./json-lines";
 export { joinCommand } from "./join-command";
 export {
   buildRetireQuestion,
@@ -68,7 +69,6 @@ export {
   type RunGraphNode,
   type StepProgress,
   type StepLine,
-  type TickAlign,
   type Timeline,
 } from "./run-graph";
 export {
