@@ -60,6 +60,15 @@ Delivery is idempotent by the step key, not sequenced. The controller sends a `W
 
 `PROTOCOL_VERSION` stays 1. The frames are sent only to a runner that implements them; [#258](https://github.com/theagenticage/hercule/issues/258) makes that a checked rule, with the workspace actions a runner lists at hello (section 2.2's capability list).
 
+*(Amended 2026-09-25, [#258](https://github.com/theagenticage/hercule/issues/258).)* **The capability list holds one capability per workspace action**, spelled `action:<id>`, for example `action:git.commit`. `buildWorkspaceActionCapability` in `@hercule/protocol` is the one place that spelling is written.
+
+- The runner lists one for each workspace action its build implements, derived from its own registry of workspace actions.
+- The controller lists one for each workspace action in its catalog (every action with `runsIn: "workspace"`), derived from the catalog.
+- Neither list is kept by hand. The controller stores the intersection as the runner's `negotiatedCapabilities`, as before, so a runner on an older build negotiates only the workspace actions it has.
+- Run pinning reads the negotiated list (section 5.1). The runner's `unsupported_action` answer stays as the last line of defence.
+
+Versions are still not compared, and section 2.4 is unchanged: the only hard refusal at hello is an incompatible protocol version. A runner that lacks a workspace action stays online and takes every other placement.
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.
@@ -166,6 +175,13 @@ No load balancing, no migration, no failover.
 - For a `primary` policy, a placeable runner that already holds a `ready` main workspace of the policy's resource is preferred, so the run works in the clone the user already has there.
 - When no runner is placeable, the step record stays `pending` and the run sleeps. It is not failed: the controller wakes every run that waits for a runner when a runner connects. [#258](https://github.com/theagenticage/hercule/issues/258) adds the capability part: a runner must also implement every workspace action in the plan.
 - From then on the run is pinned, as section 5.2 says of any work: every later workspace step goes to the same runner. A run whose runner is `offline` or `unreachable` waits for it with no time limit. Cancelling the run, or retiring the runner, are the only ways out; retiring fails the run with `workspace-failed`.
+
+*(Amended 2026-09-25, [#258](https://github.com/theagenticage/hercule/issues/258).)* **The capability filter in run pinning.** A run is pinned only to a runner whose negotiated capabilities (section 2.2) hold every workspace action in the plan, not just the one about to run, because every later workspace step goes to the same runner.
+
+- **At `run.start`**, a plan whose workspace actions no runner that is not retired offers is refused with `validation`, naming the missing actions: "No runner can run git.commit; update a runner to this version." When each action is offered by some runner but no runner offers them all, every workspace action in the plan is named. An offline, draining or reserved runner still counts, because it may take the run later.
+- A plan that some runner offers, but no placeable one, starts, and its step record stays `pending` until a capable runner is placeable, as above.
+- **At pinning time**, if every runner that offered the plan's workspace actions has been retired since the run started, the run fails with `workspace-failed` at the step about to start, with the same message. Retiring a runner wakes every run waiting for a runner, so such a run fails at once rather than waiting for a runner that will never come.
+- A run that is already pinned is not checked again. If its runner comes back on a build without the action, the runner answers the step with `unsupported_action`.
 
 ### 5.2 Pin once landed
 
