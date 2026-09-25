@@ -746,6 +746,18 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the id of a workspace's designated Connection: the account the
+     * work in it commits and pushes as. Returns `null` when no Connection
+     * backs the workspace, or when there is no such workspace. The controller
+     * daemon reads it to put the commit author on a workspace step, the way a
+     * session start does.
+     */
+    readDesignatedConnectionId: (workspaceId: string): Effect.Effect<string | null, SqlError> =>
+      Effect.map(workspaces.one(workspaceId), (found) =>
+        Option.isNone(found) ? null : found.value.designatedConnectionId,
+      ),
+
+    /**
      * Marks a workspace as used just now, which keeps the sweep from disposing
      * of it. The controller daemon calls this when a session in the workspace
      * starts or exits, because that is what counts as use.
