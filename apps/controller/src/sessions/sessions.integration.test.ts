@@ -61,10 +61,16 @@ import {
   waitForStartFrames,
   waitUntil,
   WAIT_DEADLINE_MS,
+  withAgentFleet,
   withFleet as sharedWithFleet,
   type Arranged,
   type Wire,
 } from "./testing";
+import {
+  readDefaultConversation,
+  sendMessage,
+  waitForConversationSessions,
+} from "../conversations/testing";
 
 /** A provider that supports everything natively: the instance a plain spawn uses. */
 const FULL = buildProviderDefinition("full-provider", { token: "t" });
@@ -1808,6 +1814,66 @@ describe("session.query and session.read", () => {
 });
 
 /**
+ * The `conversationId` filter: the sessions that answered one conversation,
+ * made through `conversation.send`. The newest of them is the conversation's
+ * current session, which the web app reads with `limit=1`.
+ */
+describe("session.query by conversation", () => {
+  it("lists a conversation's sessions newest first, and no Thread", async () => {
+    await withAgentFleet(async (arranged) => {
+      const base = arranged.harness.base;
+      const { conversation } = await readDefaultConversation(arranged);
+      await sendMessage(arranged, conversation.id, "hi");
+      const [older] = await waitForConversationSessions(arranged, conversation.id, 1);
+      await waitForStartFrames(arranged, older!.id, 1);
+      // An exit before the runner reported a native id leaves nothing to
+      // resume, so the next line places a new session.
+      reportEvent(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: older!.id,
+        at,
+        _tag: "session.exited",
+        reason: "crash",
+      });
+      await waitForSession(arranged, older!.id, (one) => one.status === "exited" && !one.resumable);
+      await sendMessage(arranged, conversation.id, "again");
+      const [newer] = await waitForConversationSessions(arranged, conversation.id, 2);
+      const thread = await spawnSessionOrFail(arranged, { prompt: "a thread" });
+
+      const listing = await get(
+        base,
+        `/api/v1/sessions?conversationId=${conversation.id}`,
+        arranged.token,
+      );
+      expect(listing.status, await listing.clone().text()).toBe(200);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items.map((one) => one.id)).toEqual([newer!.id, older!.id]);
+
+      const current = await get(
+        base,
+        `/api/v1/sessions?conversationId=${conversation.id}&sort=createdAt:desc&limit=1`,
+        arranged.token,
+      );
+      expect(current.status, await current.clone().text()).toBe(200);
+      expect(
+        ((await current.json()) as { items: ReadonlyArray<Session> }).items.map((one) => one.id),
+      ).toEqual([newer!.id]);
+
+      const nobody = await get(
+        base,
+        "/api/v1/sessions?conversationId=0199e0e7-9999-7000-8000-000000000000",
+        arranged.token,
+      );
+      expect(nobody.status, await nobody.clone().text()).toBe(200);
+      expect(((await nobody.json()) as { items: ReadonlyArray<Session> }).items).toEqual([]);
+
+      // A Thread answers no conversation.
+      expect((await readSession(arranged, thread.id)).conversationId).toBeNull();
+    });
+  });
+});
+
+/**
  * The transcript over HTTP: the rows ingest wrote, encoded through the
  * contract, in position order and one page at a time.
  */
@@ -1996,6 +2062,47 @@ describe("session.stop", () => {
       const entries = await arranged.harness.audit("session.stopped");
       expect(entries).toHaveLength(1);
       expect(entries[0]?.actor).toBe("user");
+    });
+  });
+
+  it("ends a queued session once when several stops race, and returns the session as it is now", async () => {
+    await withFleet(async (arranged) => {
+      // The runner's only slot is taken, so the second session waits in the
+      // queue with no runner holding it.
+      const capped = await send(
+        "PATCH",
+        arranged.harness.base,
+        `/api/v1/runners/${arranged.runnerId}`,
+        {
+          body: { maxConcurrentSessions: 1 },
+          token: arranged.token,
+        },
+      );
+      expect(capped.status, await capped.clone().text()).toBe(200);
+      await startSession(arranged, "take the slot");
+      const queued = await spawnSessionOrFail(arranged, { prompt: "wait" });
+      expect(queued.status).toBe("queued");
+
+      // Each stop can read the session as queued before another one ends it.
+      // The stops that lose the race change nothing and record nothing.
+      const responses = await Promise.all(
+        Array.from({ length: 4 }, () => stopSession(arranged, queued.id)),
+      );
+
+      const answered = responses.filter((one) => one.status === 200);
+      expect(answered.length).toBeGreaterThan(0);
+      for (const response of answered) {
+        expect(await response.json()).toMatchObject({ id: queued.id, status: "exited" });
+      }
+      for (const response of responses.filter((one) => one.status !== 200)) {
+        expect(response.status, await response.clone().text()).toBe(409);
+      }
+      expect(await arranged.harness.audit("session.stopped")).toHaveLength(1);
+      expect(
+        listFrames<SessionStopFrame>(arranged.wire, "sessionStop").filter(
+          (frame) => frame.sessionId === queued.id,
+        ),
+      ).toEqual([]);
     });
   });
 

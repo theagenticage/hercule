@@ -41,6 +41,7 @@ import { HerculeHome } from "../config";
 import { ConnectionServiceLayer, ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
 import {
+  AssistantStopDeadline,
   cancelStrandedInputsAndReportLostWakeUps,
   EventRoutingInterval,
   LostRunnerSweepInterval,
@@ -67,6 +68,8 @@ import {
   ProviderServiceLayer,
 } from "../providers";
 import { SessionServiceLayer } from "../sessions";
+import { AssistantSessionEndingsLayer } from "../assistants";
+import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { EvaluationErrorNotifier, EvaluationErrorNotifierLayer } from "../subscriptions";
 import { SettingsLayer } from "../settings";
@@ -109,7 +112,11 @@ const buildServices = (home: string, notifier: Layer.Layer<EvaluationErrorNotifi
       Layer.mergeAll(
         PluginsLayer,
         ProviderServiceLayer,
-        SessionServiceLayer,
+        // Joined to the assistants domain's notices, as the real boot does.
+        SessionServiceLayer.pipe(
+          Layer.provide(AssistantSessionEndingsLayer),
+          Layer.provide(ConversationMessagesLayer),
+        ),
         WorkspaceServiceLayer,
         ConnectionServiceLayer,
         ResourceServiceLayer,
@@ -248,6 +255,8 @@ export interface ServerOptions {
   readonly loginDeadline?: Duration.Duration;
   /** How long a delivered input waits for the runner to report what it did with it. */
   readonly inputDeadline?: Duration.Duration;
+  /** How long `assistant.delete` waits for a session to stop. The default 30 seconds is too long for a test. */
+  readonly assistantStopDeadline?: Duration.Duration;
   /** The default ten minutes is longer than a test can wait. */
   readonly workspaceSweepInterval?: Duration.Duration;
   /** The default second is too long for a test that waits several ticks. */
@@ -328,6 +337,7 @@ export const withServer = (
         provideIfSet(ProviderProbeInterval, options.probeInterval);
         provideIfSet(ProviderLoginDeadline, options.loginDeadline);
         provideIfSet(SessionInputDeadline, options.inputDeadline);
+        provideIfSet(AssistantStopDeadline, options.assistantStopDeadline);
         provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
         provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
         provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);

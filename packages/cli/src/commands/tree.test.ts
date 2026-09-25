@@ -206,6 +206,21 @@ describe("a command's fields against the schema", () => {
     expect(field!.resolves).toBe("assistant.query");
   });
 
+  it("lets session list filter by conversation", () => {
+    const field = findCommandByWords(["session", "list"])?.query.find(
+      (one) => one.name === "conversationId",
+    );
+    expect(field).toBeDefined();
+    expect(field!.spelling).toBe("conversation");
+    expect(field!.resolves).toBe("conversation.query");
+  });
+
+  it("reads the text conversation send sends from stdin", () => {
+    const send = findCommandByWords(["conversation", "send"]);
+    expect(send).toBeDefined();
+    expect(send!.payload.find((field) => field.name === "text")?.stdin).toBe(true);
+  });
+
   it("takes at most one field from stdin, except the two passwords", () => {
     for (const command of COMMANDS) {
       const stdin = [...command.positionals, ...command.payload, ...command.query].filter(
@@ -265,7 +280,10 @@ describe("the placeholders a usage line shows", () => {
     "transcript read": "<session-id>",
     "assistant read": "<assistant-id>",
     "assistant update": "<assistant-id>",
+    "assistant delete": "<assistant-id>",
     "conversation read": "<conversation-id>",
+    "conversation message list": "<conversation-id>",
+    "conversation send": "<conversation-id>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

@@ -13,6 +13,7 @@ const BASE: Session = {
   resumable: false,
   permissionProfileId: "profile-unrestricted",
   agentId: null,
+  conversationId: null,
   instanceId: "instance-claude-code",
   runnerId: "runner-1",
   workspaceId: null,

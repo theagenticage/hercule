@@ -68,6 +68,19 @@ interface Live {
    */
   absolute: Fiber.Fiber<void> | undefined;
   /**
+   * How long this session may sit between turns before it is stopped with
+   * `idle_unload`. Undefined when its spec sets no limit, and then the session
+   * is never stopped for being idle.
+   */
+  readonly idleMs: number | undefined;
+  /**
+   * The fiber that stops the session once it has sat `idleMs` with no open
+   * turn. It is forked when the session starts and when a turn completes, and
+   * interrupted by the next input, turn or open request. Undefined whenever
+   * no such wait is running.
+   */
+  idle: Fiber.Fiber<void> | undefined;
+  /**
    * Whether the adapter has started this session yet. A stop requested while
    * the session is still `starting` cannot go to the adapter, which does not
    * hold the session yet, so it waits in `pendingStop` instead.
@@ -179,11 +192,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
       Effect.ignoreCause(Effect.suspend(() => connection.send(frame)));
 
-    /** Interrupts both timer fibers of a session entry and removes its scratch directory. */
+    /** Interrupts every timer fiber of a session entry and removes its scratch directory. */
     const tearDownSession = (held: Live): Effect.Effect<void> =>
       Effect.gen(function* () {
         if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
         if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
+        yield* cancelIdleUnload(held);
         discardScratch(held.scratch);
       });
 
@@ -234,6 +248,50 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       });
 
     /**
+     * Starts the wait that stops an idle session with `idle_unload` after
+     * `idleMs`. It is called whenever the session is left with no open turn:
+     *
+     * - when the session starts, because a session resumed to take queued
+     *   input may start before the input reaches it, and may never get it;
+     * - when a turn completes;
+     * - when the harness refuses input to a session with no open turn.
+     *
+     * Does nothing when the spec sets no `idleMs`, when a wait is already
+     * running, or when the entry was torn down, since a wait armed on a torn
+     * down entry would never be interrupted.
+     */
+    const armIdleUnload = (held: Live, sessionId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const idleMs = held.idleMs;
+        if (idleMs === undefined || held.idle !== undefined) return;
+        if (live.get(sessionId) !== held) return;
+        held.idle = yield* Effect.forkDetach(
+          Effect.andThen(
+            Effect.sleep(Duration.millis(idleMs)),
+            Effect.suspend(() => {
+              held.idle = undefined;
+              // Compare by identity: by the time the wait ends, the entry for
+              // this id may have been removed or replaced by a new start.
+              if (live.get(sessionId) !== held) return Effect.void;
+              return requestStop(sessionId, held, "idle_unload");
+            }),
+          ),
+        );
+      });
+
+    /**
+     * Interrupts the idle wait of a session, if one is running. New input or a
+     * new turn means the session is in use again, so it must not be unloaded.
+     */
+    const cancelIdleUnload = (held: Live): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const fiber = held.idle;
+        if (fiber === undefined) return Effect.void;
+        held.idle = undefined;
+        return Fiber.interrupt(fiber);
+      });
+
+    /**
      * Reads a primary workspace's branches again and sends the result to the
      * controller. A session in a primary workspace may switch branches, and
      * this report is how the controller learns about it.
@@ -258,8 +316,14 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           const held = live.get(event.sessionId);
           if (held !== undefined) {
             switch (event._tag) {
+              case "session.started":
+                if (!held.turnOpen && !held.parked) yield* armIdleUnload(held, event.sessionId);
+                break;
               case "turn.started":
                 held.turnOpen = true;
+                // A turn the harness opened on its own also ends the idle
+                // wait, not only an input frame.
+                yield* cancelIdleUnload(held);
                 break;
               case "turn.completed":
                 held.turnOpen = false;
@@ -267,9 +331,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                 // it on this event, and a `parked` flag left set here would
                 // stop every later turn from being watched.
                 held.parked = false;
+                yield* armIdleUnload(held, event.sessionId);
                 break;
               case "request.opened":
                 held.parked = true;
+                // A session waiting on its user is in use, however long the
+                // user takes to answer.
+                yield* cancelIdleUnload(held);
                 break;
               case "request.resolved":
                 held.parked = false;
@@ -398,6 +466,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                   turnOpen: false,
                   parked: false,
                   absolute: undefined,
+                  idleMs: frame.spec.timeouts.idleMs,
+                  idle: undefined,
                   phase: "starting",
                   pendingStop: undefined,
                 };
@@ -529,10 +599,24 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         if (held === undefined) {
           return refuseInput(`session ${frame.sessionId} is not running on this runner`);
         }
-        return held.adapter.sendInput(frame.sessionId, frame.input).pipe(
+        // Input the harness refused opens no turn, so a session that was idle
+        // before it is still idle and gets its wait back.
+        const refuseHeldInput = (message: string): Effect.Effect<void> =>
+          Effect.andThen(
+            refuseInput(message),
+            Effect.suspend(() =>
+              held.turnOpen || held.parked ? Effect.void : armIdleUnload(held, frame.sessionId),
+            ),
+          );
+        // Cancel the idle wait before the input reaches the harness. The turn
+        // this input opens may start only after the wait would have ended.
+        return Effect.andThen(
+          cancelIdleUnload(held),
+          held.adapter.sendInput(frame.sessionId, frame.input),
+        ).pipe(
           Effect.flatMap((sent) => sendInputResult({ ok: true, delivery: sent.delivery })),
-          Effect.catch(refuseInput),
-          Effect.catchCause((cause) => refuseInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
+          Effect.catch(refuseHeldInput),
+          Effect.catchCause((cause) => refuseHeldInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
         );
       },
 

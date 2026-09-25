@@ -517,6 +517,22 @@ describe("a session on the assistant profile", () => {
     });
   });
 
+  it("reads a conversation's messages", async () => {
+    await withFleet(async (arranged) => {
+      const { token } = await spawnAgentUnder(
+        arranged,
+        await readProfileNamed(arranged, "assistant"),
+      );
+      const base = arranged.harness.base;
+      const { conversation } = await readDefaultAssistant(base, token);
+
+      const messages = await get(base, `/api/v1/conversations/${conversation.id}/messages`, token);
+
+      expect(messages.status, await messages.clone().text()).toBe(200);
+      expect(await messages.json()).toEqual({ items: [] });
+    });
+  });
+
   it("is forbidden to create or update an assistant, and the refusal names agent.write", async () => {
     await withFleet(async (arranged) => {
       const { token } = await spawnAgentUnder(

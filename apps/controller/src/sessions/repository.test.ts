@@ -8,6 +8,9 @@
  * - the last page ends the paging;
  * - a cursor works only for the sort direction it was created for;
  * - one session's transcript never shows another session's rows.
+ *
+ * The other tests check the status and token rules of single writes, and
+ * the profile filter of the session list.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
@@ -15,6 +18,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
+import { inputRepository } from "./inputs";
 import { LIVE_SESSION_STATUSES, sessionRepository, type StoredStreamRow } from "./repository";
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
@@ -37,6 +41,7 @@ const insertSession = (permissionProfileId: string) =>
       title: "a session",
       permissionProfileId,
       agentId: undefined,
+      conversationId: undefined,
       instanceId: mintId(),
       runnerId: mintId(),
       requestedAccessMode: "approval-required",
@@ -332,6 +337,7 @@ describe("listing the sessions on one profile", () => {
           agentId: undefined,
           permissionProfileId: profileId,
           thread: undefined,
+          conversationId: undefined,
         });
         return { listed: page.items, profileId, live };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
@@ -339,5 +345,122 @@ describe("listing the sessions on one profile", () => {
 
     expect(listed.map((one) => one.id)).toEqual([live]);
     expect(listed[0]?.permissionProfileId).toBe(profileId);
+  });
+});
+
+describe("ending a queued session", () => {
+  it("ends a session that is still queued", async () => {
+    const { ended, status } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        const ended = yield* sessions.endQueued(sessionId, at);
+        const row = yield* sessions.one(sessionId);
+        return { ended, status: Option.map(row, (one) => one.status) };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    // The returned row is the session as it was just before it ended.
+    expect(Option.map(ended, (one) => one.status)).toEqual(Option.some("queued"));
+    expect(status).toEqual(Option.some("exited"));
+  });
+
+  it("leaves a session that dispatch has started since it was read, and returns nothing", async () => {
+    // A stop reads the session as queued, then dispatch starts it before the
+    // stop's write. The runner now holds the session, so only the runner can
+    // end it, and the stop must go to the runner instead.
+    const { ended, status, tokenHash } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const { sessionId } = yield* insertStartedSession("hash-starting");
+        const ended = yield* sessions.endQueued(sessionId, at);
+        const row = yield* sessions.one(sessionId);
+        return {
+          ended,
+          status: Option.map(row, (one) => one.status),
+          tokenHash: yield* readTokenHash(sessionId),
+        };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(ended).toEqual(Option.none());
+    expect(status).toEqual(Option.some("starting"));
+    expect(tokenHash).toBe("hash-starting");
+  });
+});
+
+/**
+ * Inserts a runner and an exited session on it that can be resumed: its
+ * native transcript is known and it has no workspace. Returns the session's id.
+ */
+const insertResumableSession = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const sessions = yield* sessionRepository;
+  const runner = mintUuid();
+  yield* sql`
+    INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                         credential_hash, created_at, updated_at)
+    VALUES (${runner}, ${uuidToString(runner)}, 'online', 'active', 0, '[]', 'a hash', ${at}, ${at})
+  `;
+  const sessionId = mintId();
+  const instanceId = mintId();
+  yield* sessions.insert({
+    id: sessionId,
+    title: "a session",
+    permissionProfileId: mintId(),
+    agentId: undefined,
+    conversationId: undefined,
+    instanceId,
+    runnerId: uuidToString(runner),
+    requestedAccessMode: "approval-required",
+    accessMode: "approval-required",
+    workspaceId: null,
+    projectId: undefined,
+    checkoutBranch: undefined,
+    githubConnectionId: undefined,
+    spec: "{}",
+    modelSelection: { model: "clever", options: {} },
+    parentSessionId: undefined,
+    at,
+  });
+  yield* sessions.bind(sessionId, uuidToString(runner), instanceId, "native-1");
+  yield* sessions.moved(sessionId, "exited", at);
+  return sessionId;
+});
+
+describe("resuming an exited session", () => {
+  it("does nothing when no input is waiting for it", async () => {
+    // A resume decided before a delete, or before a newer session took the
+    // conversation, can land after the waiting input was cancelled. The
+    // session must stay exited rather than start a process with nothing to do.
+    const { resumed, status } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* insertResumableSession;
+        const resumed = yield* sessions.resume(sessionId, "{}", at);
+        const row = yield* sessions.one(sessionId);
+        return { resumed, status: Option.map(row, (one) => one.status) };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(resumed).toBe(false);
+    expect(status).toEqual(Option.some("exited"));
+  });
+
+  it("puts the session back on the queue when an input is waiting for it", async () => {
+    const { resumed, status } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const inputs = yield* inputRepository;
+        const sessionId = yield* insertResumableSession;
+        yield* inputs.insert({ sessionId, source: "user", actor: "user", text: "hi", at });
+        const resumed = yield* sessions.resume(sessionId, "{}", at);
+        const row = yield* sessions.one(sessionId);
+        return { resumed, status: Option.map(row, (one) => one.status) };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(resumed).toBe(true);
+    expect(status).toEqual(Option.some("queued"));
   });
 });

@@ -13,12 +13,16 @@
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 
+/**
+ * Runs `effect`, and logs its failure with `failureMessage` instead of
+ * passing it on. An interrupt is passed on unchanged.
+ */
 export const absorbFailures = <E>(
-  what: string,
+  failureMessage: string,
   effect: Effect.Effect<void, E>,
 ): Effect.Effect<void, E> =>
   Effect.catchCause(effect, (cause) =>
-    Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logError(what, cause),
+    Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logError(failureMessage, cause),
   );
 
 /**
@@ -29,6 +33,6 @@ export const absorbFailures = <E>(
  * that the wait does not hold up the next item.
  */
 export const forkAndAbsorbFailures = <E>(
-  what: string,
+  failureMessage: string,
   effect: Effect.Effect<void, E>,
-): Effect.Effect<void> => Effect.asVoid(Effect.forkChild(absorbFailures(what, effect)));
+): Effect.Effect<void> => Effect.asVoid(Effect.forkChild(absorbFailures(failureMessage, effect)));

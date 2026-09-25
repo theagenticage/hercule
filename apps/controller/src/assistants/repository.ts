@@ -118,6 +118,9 @@ const make = Effect.gen(function* () {
       );
     },
 
+    delete: (agentId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`DELETE FROM assistants WHERE agent_id = ${uuidFromString(agentId)}`),
+
     list: (
       request: AssistantPageRequest,
     ): Effect.Effect<Page<StoredAssistantFields>, CursorError | SqlError> =>

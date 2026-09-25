@@ -40,6 +40,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../../actor";
+import { AssistantMessages } from "../../assistants";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import type { PluginHost } from "../../plugins";
@@ -101,6 +102,14 @@ const REFUSED = "that session's runner rejected the input";
 
 const NOT_BUSY = "only a busy session can be steered";
 
+/**
+ * The refusal of `session.input` on a session that answers an assistant's
+ * conversation. Every message the owner gives such a session must be stored
+ * in the conversation, and only `conversation.send` stores it there.
+ */
+const USE_CONVERSATION_SEND =
+  "this session belongs to an assistant's conversation; send the message with conversation.send";
+
 const STEERING_UNSUPPORTED =
   "that session's provider does not support steering into a running turn";
 
@@ -137,6 +146,7 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const audit = yield* AuditLog;
   const { dispatch } = yield* Dispatch;
+  const assistantMessages = yield* AssistantMessages;
 
   /**
    * Returns the model selection to use: the given model, or the session's
@@ -226,17 +236,18 @@ const make = Effect.gen(function* () {
    * it ran under before its harness exited.
    */
   const buildResumeSpec = (
-    sessionId: string,
+    session: StoredSession,
     modelSelection: ModelSelection,
     nativeSessionId: string,
   ): Effect.Effect<string, NotFound | SqlError | SettingError | Schema.SchemaError> =>
     Effect.gen(function* () {
       const spec = buildContinuingSpec(
-        yield* sessions.readSpec(sessionId),
+        yield* sessions.readSpec(session.id),
         yield* settings.all(),
         modelSelection,
         nativeSessionId,
         "resume",
+        session.conversationId,
       );
       return JSON.stringify(encodeSpec(spec));
     });
@@ -261,79 +272,196 @@ const make = Effect.gen(function* () {
       );
     });
 
+  /**
+   * Delivers the queued inputs of a session, after some other caller stored
+   * them.
+   *
+   * The rows are already committed when this runs, so nothing is sent for a
+   * write that could roll back. What happens depends on the session's
+   * status, exactly as for an input a person types:
+   *
+   * - an idle session is sent its oldest queued input;
+   * - an exited session whose transcript can still be resumed goes back on
+   *   the queue with a resume spec, and its inputs are sent when it becomes
+   *   idle after the restart;
+   * - an exited session that cannot be resumed is handed to the assistants
+   *   domain's `dropUnresumableInput`, which decides what happens to its
+   *   input;
+   * - a session with any other status, such as busy, is left alone, because
+   *   its inputs are sent when it next becomes idle.
+   *
+   * A session whose runner is not connected gets nothing. The row stays
+   * queued, where a reader can see it was not delivered, and the next caller
+   * tries again. When such a session has ended for good, the session routing
+   * table's sweep ends the subscription that wrote the input.
+   *
+   * Inputs from a subscription match are not the only ones that get here. An
+   * input a person typed that the runner rejected, or whose session went
+   * idle without the controller seeing it, is retried on every tick for as
+   * long as the session can take it. The check for an input already sent and
+   * unanswered keeps those retries to one row at a time.
+   */
+  const deliverQueuedInput = (
+    sessionId: string,
+  ): Effect.Effect<void, NotFound | SqlError | SettingError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const session = yield* one(sessionId);
+      if (session.status === "idle") {
+        // The runner takes one input per turn. An input is already sent and
+        // unanswered, so its turn has not started yet, and a second input
+        // sent now would have to be held by the runner. The next pass sends
+        // it, once the runner has reported what it did with the first.
+        if (yield* sessions.holdsInputOnTheWire(sessionId)) return;
+        // A runner that is not connected cannot be sent anything. Claiming a
+        // row only to put it straight back would rewrite the row, and notify
+        // every client watching the session, on every pass while the runner
+        // is away. With a connection, the flush sends the session's oldest
+        // queued row, whoever wrote it. So a typed input whose delivery
+        // failed is retried first, and a matched input waits behind it, as
+        // in any queue.
+        if (!(yield* connections.holdsConnection(session.runnerId))) return;
+        return yield* flush(sessionId);
+      }
+      if (session.status !== "exited") return;
+      const check = yield* resumableNativeSession(session).pipe(
+        Effect.map((nativeSessionId) => ({ nativeSessionId })),
+        Effect.catchIf(
+          (error): error is InvalidState => error instanceof InvalidState,
+          (refused) => Effect.succeed({ refusal: refused.error.message }),
+        ),
+      );
+      if ("refusal" in check) {
+        return yield* assistantMessages.dropUnresumableInput(session, check.refusal);
+      }
+      const resumeSpec = yield* buildResumeSpec(
+        session,
+        session.modelSelection,
+        check.nativeSessionId,
+      );
+      const moved = yield* withTransaction(
+        sql,
+        Effect.flatMap(nowIso, (at) => sessions.resume(sessionId, resumeSpec, at, true)),
+      );
+      // Another caller already resumed the session. Dispatching again would
+      // place it twice.
+      if (!moved) return;
+      // After the commit: dispatch sends a frame to the runner, and a
+      // transaction never waits on anything outside the database.
+      yield* dispatch(session.runnerId);
+    });
+
+  /**
+   * Stops a session that has not exited, as the actor behind the current
+   * request, and writes the `session.stopped` audit entry. Returns what
+   * happened:
+   *
+   * - `ended`: the session was queued, so no runner held it, and it has
+   *   exited now;
+   * - `told`: the runner was told to stop the session, and the session exits
+   *   when the runner reports the exit;
+   * - `exited`: the session was read as queued, but something else ended it
+   *   before this stop could, so nothing was sent and nothing was written;
+   * - `unreachable`: the runner is not connected, so nothing was sent and
+   *   nothing was written.
+   *
+   * A session read as queued may have been sent to its runner since. Only a
+   * session still queued is ended directly; any other is stopped through its
+   * runner.
+   */
+  const stopSession = (
+    session: StoredSession,
+  ): Effect.Effect<"ended" | "told" | "exited" | "unreachable", NotFound | SqlError> =>
+    Effect.gen(function* () {
+      const actor = yield* currentStamp;
+      const payload = { sessionId: session.id, runnerId: session.runnerId };
+      if (session.status === "queued") {
+        const ended = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            if (yield* sessions.endQueued(session.id, at)) {
+              yield* audit.append({ kind: "session.stopped", actor, payload, at });
+              return "ended" as const;
+            }
+            // The session left `queued` after it was read. If it has exited,
+            // this stop changes nothing and records nothing. Otherwise
+            // dispatch sent it to its runner, which is told to stop it below.
+            return (yield* one(session.id)).status === "exited" ? ("exited" as const) : undefined;
+          }),
+        );
+        if (ended !== undefined) return ended;
+      }
+      if (!(yield* connections.tell(session.runnerId, sessions.stopping(session.id)))) {
+        return "unreachable";
+      }
+      yield* withTransaction(
+        sql,
+        Effect.flatMap(nowIso, (at) =>
+          audit.append({ kind: "session.stopped", actor, payload, at }),
+        ),
+      );
+      return "told";
+    });
+
   return {
     flush,
 
+    deliverQueuedInput,
+
     /**
-     * Delivers the queued inputs of a session, after some other caller stored
-     * them.
+     * Queues `text` as the user's input to a session that answers an
+     * assistant's conversation, inside the caller's transaction. Returns the
+     * delivery, which the caller runs after its commit:
      *
-     * The rows are already committed when this runs, so nothing is sent for a
-     * write that could roll back. What happens depends on the session's
-     * status, exactly as for an input a person types:
+     * - a session that has exited but can be resumed goes back on the queue
+     *   in place, with a resume spec, in the same transaction; its delivery
+     *   dispatches it, and the input is sent once the resumed harness is idle;
+     * - any other session gets its delivery from `deliverQueuedInput`, which
+     *   sends the input at once to an idle session and leaves it queued for a
+     *   busy or starting one.
      *
-     * - an idle session is sent its oldest queued input;
-     * - an exited session whose transcript can still be resumed goes back on
-     *   the queue with a resume spec, and its inputs are sent when it becomes
-     *   idle after the restart;
-     * - a session with any other status, such as busy, is left alone, because
-     *   its inputs are sent when it next becomes idle.
-     *
-     * A session whose runner is not connected gets nothing, and neither does a
-     * session that has ended for good. The row stays queued, where a reader can
-     * see it was not delivered, and the next caller tries again. For a session
-     * that has ended for good, the session routing table's sweep ends the
-     * subscription that wrote the input.
-     *
-     * Inputs from a subscription match are not the only ones that get here. An
-     * input a person typed that the runner rejected, or whose session went
-     * idle without the controller seeing it, is retried on every tick for as
-     * long as the session can take it. The check for an input already sent and
-     * unanswered keeps those retries to one row at a time.
+     * Returns `none`, and stores nothing, when the session has exited and
+     * cannot be resumed. The check and the write share the caller's
+     * transaction, so nothing can change the answer in between. It checks no
+     * grant: the caller is an operation that has checked its own.
      */
-    deliverQueuedInput: (
+    queueConversationInput: (
       sessionId: string,
-    ): Effect.Effect<void, NotFound | SqlError | SettingError | Schema.SchemaError> =>
+      text: string,
+    ): Effect.Effect<
+      Option.Option<Effect.Effect<void, NotFound | SqlError | SettingError | Schema.SchemaError>>,
+      NotFound | SqlError | SettingError | Schema.SchemaError
+    > =>
       Effect.gen(function* () {
         const session = yield* one(sessionId);
-        if (session.status === "idle") {
-          // The runner takes one input per turn. An input is already sent and
-          // unanswered, so its turn has not started yet, and a second input
-          // sent now would have to be held by the runner. The next pass sends
-          // it, once the runner has reported what it did with the first.
-          if (yield* sessions.holdsInputOnTheWire(sessionId)) return;
-          // A runner that is not connected cannot be sent anything. Claiming a
-          // row only to put it straight back would rewrite the row, and notify
-          // every client watching the session, on every pass while the runner
-          // is away. With a connection, the flush sends the session's oldest
-          // queued row, whoever wrote it. So a typed input whose delivery
-          // failed is retried first, and a matched input waits behind it, as
-          // in any queue.
-          if (!(yield* connections.holdsConnection(session.runnerId))) return;
-          return yield* flush(sessionId);
+        let nativeSessionId: string | undefined;
+        if (session.status === "exited") {
+          const resumed = yield* resumableNativeSession(session).pipe(
+            Effect.map(Option.some),
+            Effect.catchIf(
+              (error): error is InvalidState => error instanceof InvalidState,
+              () => Effect.succeed(Option.none<string>()),
+            ),
+          );
+          if (Option.isNone(resumed)) return Option.none();
+          nativeSessionId = resumed.value;
         }
-        if (session.status !== "exited") return;
-        const nativeSessionId = yield* Effect.catchIf(
-          Effect.asSome(resumableNativeSession(session)),
-          (error): error is InvalidState => error instanceof InvalidState,
-          () => Effect.succeedNone,
-        );
-        if (Option.isNone(nativeSessionId)) return;
-        const resumeSpec = yield* buildResumeSpec(
+        yield* sessions.takeInput({
           sessionId,
-          session.modelSelection,
-          nativeSessionId.value,
+          modelSelection: session.modelSelection,
+          resumeSpec:
+            nativeSessionId === undefined
+              ? undefined
+              : yield* buildResumeSpec(session, session.modelSelection, nativeSessionId),
+          text,
+          at: yield* nowIso,
+          claimed: false,
+        });
+        return Option.some(
+          nativeSessionId === undefined
+            ? deliverQueuedInput(sessionId)
+            : dispatch(session.runnerId),
         );
-        const moved = yield* withTransaction(
-          sql,
-          Effect.flatMap(nowIso, (at) => sessions.resume(sessionId, resumeSpec, at, true)),
-        );
-        // Another caller already resumed the session. Dispatching again would
-        // place it twice.
-        if (!moved) return;
-        // After the commit: dispatch sends a frame to the runner, and a
-        // transaction never waits on anything outside the database.
-        yield* dispatch(session.runnerId);
       }),
 
     /**
@@ -400,6 +528,9 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const session = yield* one(id);
+            if (session.conversationId !== null) {
+              return yield* Effect.fail(createInvalidStateError(USE_CONVERSATION_SEND));
+            }
             const nativeSessionId =
               session.status === "exited" ? yield* resumableNativeSession(session) : undefined;
             const modelSelection = yield* resolveModelSelection(session, picks);
@@ -410,7 +541,7 @@ const make = Effect.gen(function* () {
               resumeSpec:
                 nativeSessionId === undefined
                   ? undefined
-                  : yield* buildResumeSpec(id, modelSelection, nativeSessionId),
+                  : yield* buildResumeSpec(session, modelSelection, nativeSessionId),
               text,
               at,
               claimed: session.status === "idle",
@@ -544,12 +675,14 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Stops the session's harness. Returns the session. The session moves to
-     * `exited` when the runner reports the exit, not here: there is no way yet
-     * to end a session whose exit the runner never confirms.
+     * Stops the session's harness. Returns the session as it is after the
+     * stop. The session moves to `exited` when the runner reports the exit,
+     * not here: there is no way yet to end a session whose exit the runner
+     * never confirms.
      *
      * A queued session has no harness yet, and its runner was never told
-     * about it, so it is ended directly without sending anything.
+     * about it, so it is ended directly without sending anything, and the
+     * returned session has exited.
      */
     stop: (id: Id): Effect.Effect<Session, Exclude<InputError, Validation>> =>
       Effect.gen(function* () {
@@ -557,43 +690,12 @@ const make = Effect.gen(function* () {
         const session = yield* one(id);
         if (session.status === "exited")
           return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
-        if (session.status === "queued") {
-          return yield* withTransaction(
-            sql,
-            Effect.gen(function* () {
-              const at = yield* nowIso;
-              yield* sessions.endQueued(id, at);
-              yield* audit.append({
-                kind: "session.stopped",
-                actor: yield* currentStamp,
-                payload: { sessionId: id, runnerId: session.runnerId },
-                at,
-              });
-              return (yield* recordComposer)({
-                ...session,
-                status: "exited" as const,
-                exitedAt: at,
-              });
-            }),
-          );
-        }
-        if (!(yield* connections.tell(session.runnerId, sessions.stopping(id)))) {
-          return yield* Effect.fail(createInvalidStateError(GONE));
-        }
-        const actor = yield* currentStamp;
-        yield* withTransaction(
-          sql,
-          Effect.flatMap(nowIso, (at) =>
-            audit.append({
-              kind: "session.stopped",
-              actor,
-              payload: { sessionId: id, runnerId: session.runnerId },
-              at,
-            }),
-          ),
-        );
-        return (yield* recordComposer)(session);
+        const stopped = yield* stopSession(session);
+        if (stopped === "unreachable") return yield* Effect.fail(createInvalidStateError(GONE));
+        return (yield* recordComposer)(yield* one(id));
       }),
+
+    stopSession,
   };
 });
 
@@ -604,11 +706,13 @@ const make = Effect.gen(function* () {
  * - `update`, `input`, `steer`, `interrupt`, `respond` and `stop` are
  *   operations. Each checks its own grant and decodes its own input, and a
  *   route handler calls it directly.
- * - `flush` and `deliverQueuedInput` check no grant. Both send a row that is
- *   already stored: `flush` when a session goes idle, `deliverQueuedInput`
- *   when something else has just stored a row. The grant was checked when the
- *   row was stored, so putting either on a route would let anyone who can
- *   reach the API call it.
+ * - `flush`, `deliverQueuedInput`, `queueConversationInput` and
+ *   `stopSession` check no grant. The first two send a row that is already
+ *   stored: `flush` when a session goes idle, `deliverQueuedInput` when
+ *   something else has just stored a row. The grant was checked when the row
+ *   was stored. The other two are the shared work of an operation that
+ *   checks its own grant. Putting any of them on a route would let anyone who
+ *   can reach the API call it.
  */
 export class Live extends Context.Service<Live, Effect.Success<typeof make>>()(
   "hercule/controller/daemon/Live",
@@ -625,4 +729,5 @@ export const LiveLayer: Layer.Layer<
   | Settings
   | AuditLog
   | Dispatch
+  | AssistantMessages
 > = Layer.effect(Live)(make);

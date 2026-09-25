@@ -324,12 +324,27 @@ const TABLE = {
     method: "PATCH",
     path: "/api/v1/assistants/:id",
   },
+  "assistant.delete": {
+    requires: "agent.write",
+    method: "DELETE",
+    path: "/api/v1/assistants/:id",
+  },
 
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
   "conversation.read": {
     requires: "agent.read",
     method: "GET",
     path: "/api/v1/conversations/:id",
+  },
+  "conversation.queryMessages": {
+    requires: "agent.read",
+    method: "GET",
+    path: "/api/v1/conversations/:id/messages",
+  },
+  "conversation.send": {
+    requires: "agent.write",
+    method: "POST",
+    path: "/api/v1/conversations/:id/messages",
   },
 
   "session.query": { requires: "session.read", method: "GET", path: "/api/v1/sessions" },

@@ -1,7 +1,9 @@
 /**
- * The assistant operations: `assistant.query`, `read`, `create` and `update`.
+ * The assistant operations: `assistant.query`, `read`, `create`, `update` and
+ * `delete`. The conversation messages an assistant's sessions write are
+ * `AssistantMessages`.
  *
- * An assistant is an agent the user chats with. It is stored as two rows that
+ * An assistant is an agent the user talks to through a conversation. It is stored as two rows that
  * share one id: an agent row of kind `assistant`, written through the agents
  * domain, and a row in the `assistants` table with the heartbeat, the
  * rotation and the reply mode. Every write here changes both rows in one
@@ -13,7 +15,7 @@
  * the permission profile is the shipped `assistant` profile.
  *
  * Every assistant gets its web conversation in the transaction that creates
- * it, so the chat has something to open from the start.
+ * it, so the web app has a conversation to open from the start.
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract.
@@ -51,11 +53,12 @@ import {
   type StoredAgent,
 } from "../agents";
 import { ConversationService } from "../conversations";
-import { buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
+import { announce, buildPageInputFields, nowIso, refuseCursor, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository } from "../providers";
+import { SessionService, sessionRepository } from "../sessions";
 import {
   DEFAULT_ACCESS_MODE,
   DEFAULT_DISALLOWED_TOOLS,
@@ -70,6 +73,7 @@ import {
   type AssistantFieldsEdit,
   type StoredAssistantFields,
 } from "./repository";
+import { AssistantSessions } from "./sessions";
 
 const QueryInput = Schema.Struct(buildPageInputFields(ASSISTANT_SORT_FIELDS));
 
@@ -92,6 +96,16 @@ export interface AssistantPage {
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
 const NO_SUCH_ASSISTANT = "no such assistant";
+
+/**
+ * The refusal of a delete when a message started one of the assistant's
+ * sessions again while the delete waited for the sessions to stop.
+ */
+const ANSWERING_AGAIN =
+  "the assistant started answering a new message while it was being deleted; delete it again";
+
+/** Why the queued inputs of a deleted assistant's sessions were cancelled. */
+const ASSISTANT_DELETED = "the assistant was deleted";
 
 /**
  * The errors every operation can fail with. `SchemaError` comes from the
@@ -122,6 +136,9 @@ const make = Effect.gen(function* () {
   const profiles = yield* PermissionProfiles;
   const conversations = yield* ConversationService;
   const audit = yield* AuditLog;
+  const sessions = yield* AssistantSessions;
+  const sessionService = yield* SessionService;
+  const sessionRows = yield* sessionRepository;
   const { buildAgentRecordComposer, readProviderIdOrFail, validateProfileExists } =
     yield* buildAgentFieldChecks;
 
@@ -169,6 +186,10 @@ const make = Effect.gen(function* () {
     }
     return { id: oldest.id, providerId: oldest.providerId };
   });
+
+  /** Records a change to the assistant, so every client showing it reads it again. */
+  const nudge = (id: string, kind: "created" | "updated" | "deleted"): Effect.Effect<void> =>
+    announce({ _tag: "record", topic: "assistant", id, kind });
 
   /**
    * Returns the id of the shipped `assistant` permission profile. A shipped
@@ -291,6 +312,7 @@ const make = Effect.gen(function* () {
               containerKey: null,
               at,
             });
+            yield* nudge(agent.id, "created");
             yield* audit.append({
               kind: "assistant.created",
               actor: yield* currentStamp,
@@ -353,6 +375,7 @@ const make = Effect.gen(function* () {
             // change, because the assistant's `updatedAt` is the agent row's.
             yield* agents.update(id, agentEdit, at);
             if (Object.keys(fieldsEdit).length > 0) yield* assistants.update(id, fieldsEdit);
+            yield* nudge(id, "updated");
             yield* audit.append({
               kind: "assistant.updated",
               actor: yield* currentStamp,
@@ -363,6 +386,64 @@ const make = Effect.gen(function* () {
             });
             const { agent, fields } = yield* readAssistantOrFail(id);
             return composeAssistant(composeAgent, agent, fields);
+          }),
+        );
+      }),
+
+    /**
+     * Deletes an assistant, its agent row, its conversations and their
+     * messages, and cancels any input still queued on its sessions. Its
+     * sessions and their transcripts stay, as history.
+     *
+     * First, outside any transaction, every session of its conversations
+     * that has not exited is stopped, and the delete waits for each to exit.
+     * That is usually only the current session, but an older one can still be
+     * running, for example while its stop is under way.
+     * Only then are the rows deleted, in one transaction. Fails with:
+     *
+     * - `NotFound` if the assistant does not exist;
+     * - `InvalidState` if a session does not stop in time, or a message
+     *   started a session again while the delete waited. Nothing is deleted.
+     */
+    delete: (id: Id): Effect.Effect<Record<string, never>, WriteError | NotFound | InvalidState> =>
+      Effect.gen(function* () {
+        yield* requireGrant("assistant.delete");
+        yield* readAssistantOrFail(id);
+        // Stopping waits on a runner, and a transaction never waits on
+        // anything outside the database.
+        for (const conversation of yield* conversations.listForAssistant(id)) {
+          for (const session of yield* sessionRows.listLiveInConversation(conversation.id)) {
+            yield* sessions.stop(session.id);
+          }
+        }
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const { agent } = yield* readAssistantOrFail(id);
+            const owned = yield* conversations.listForAssistant(id);
+            for (const conversation of owned) {
+              const live = yield* sessionRows.listLiveInConversation(conversation.id);
+              if (live.length > 0) {
+                return yield* Effect.fail(createInvalidStateError(ANSWERING_AGAIN));
+              }
+              // An exited session can still hold input, such as a message
+              // held for a session the runner unloaded while idle. Left
+              // queued, it would resume the session after the assistant is
+              // gone.
+              yield* sessionService.cancelConversationInputs(conversation.id, ASSISTANT_DELETED);
+              yield* conversations.delete(conversation.id);
+            }
+            yield* assistants.delete(id);
+            yield* agents.delete(id);
+            const at = yield* nowIso;
+            yield* nudge(id, "deleted");
+            yield* audit.append({
+              kind: "assistant.deleted",
+              actor: yield* currentStamp,
+              payload: { agentId: id, name: agent.name },
+              at,
+            });
+            return {};
           }),
         );
       }),
@@ -378,5 +459,11 @@ export class AssistantService extends Context.Service<
 export const AssistantServiceLayer: Layer.Layer<
   AssistantService,
   never,
-  SqlClient.SqlClient | AuditLog | PermissionProfiles | PluginHost | ConversationService
+  | SqlClient.SqlClient
+  | AuditLog
+  | PermissionProfiles
+  | PluginHost
+  | ConversationService
+  | SessionService
+  | AssistantSessions
 > = Layer.effect(AssistantService)(make);

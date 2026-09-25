@@ -1,9 +1,14 @@
 /**
- * Reads a session's transcript as a log rather than as pages: the position of
- * its newest row, and the rows after a given position. The
- * `session:<id>:stream` live topic uses these to replay and follow the
- * transcript, the same way `apps/controller/src/events/log.ts` reads the event
- * log for the `event` topic.
+ * Reads a session's transcript as a log rather than as pages:
+ *
+ * - the position of its newest row, and the rows after a given position. The
+ *   `session:<id>:stream` live topic uses these to replay and follow the
+ *   transcript, the same way `apps/controller/src/events/log.ts` reads the
+ *   event log for the `event` topic;
+ * - the assistant text of one turn or one item, which the assistants domain
+ *   turns into conversation replies. It reads only the rows since the turn's
+ *   or the item's start, walking back from the newest row, so its cost does
+ *   not grow with the length of the session.
  *
  * `transcript.read` reads the same table through
  * `sessionRepository.transcript`. That operation uses an opaque keyset cursor,
@@ -67,3 +72,83 @@ export const readTranscriptRowsAfter = (
         event: JSON.parse(row.event) as ProviderEvent,
       })),
   );
+
+/** The assistant text of one item of a turn. */
+interface AssistantText {
+  readonly itemId: string;
+  readonly text: string;
+}
+
+/**
+ * Returns the assistant text streamed so far, one entry per item, in the
+ * order the items began. Each entry joins the item's stored delta rows,
+ * because an item longer than the delta flush size is stored as several rows.
+ * An item with no assistant text, such as a command, has no entry.
+ *
+ * - Without `itemId`, it reads the turn's text, from the turn's `turn.started`
+ *   row on.
+ * - With `itemId`, it reads only that item's text, from the item's
+ *   `item.started` row on.
+ *
+ * The start row is found by walking the session's rows back from the newest.
+ * The walk stops at the first row that is the start row, any `turn.started`,
+ * or another turn's `turn.completed`. So neither the walk nor the read ever
+ * covers more than the current turn, and a caller that reads each item as it
+ * completes reads each item once. When the walk stops anywhere other than the
+ * start row, the start row is missing, and it returns no entries.
+ *
+ * Only rows already written are read, so a caller that reads inside the
+ * transaction applying a turn's end also sees the rows that end flushed.
+ */
+export const readAssistantTexts = (
+  sql: SqlClient.SqlClient,
+  sessionId: string,
+  turnId: string,
+  itemId?: string,
+): Effect.Effect<ReadonlyArray<AssistantText>, SqlError> =>
+  Effect.gen(function* () {
+    const session = uuidFromString(sessionId);
+    const found = yield* sql<{
+      readonly position: number;
+      readonly tag: string;
+      readonly turnId: string | null;
+      readonly itemId: string | null;
+    }>`
+      SELECT position, json_extract(event, '$._tag') AS tag,
+             json_extract(event, '$.turnId') AS turnId, json_extract(event, '$.itemId') AS itemId
+      FROM session_stream
+      WHERE session_id = ${session}
+        AND (json_extract(event, '$._tag') = 'turn.started'
+             OR (json_extract(event, '$._tag') = 'turn.completed'
+                 AND json_extract(event, '$.turnId') <> ${turnId})
+             ${
+               itemId === undefined
+                 ? sql``
+                 : sql`OR (json_extract(event, '$._tag') = 'item.started'
+                           AND json_extract(event, '$.itemId') = ${itemId})`
+             })
+      ORDER BY position DESC LIMIT 1
+    `;
+    const start = found[0];
+    const isStartRow =
+      start !== undefined &&
+      start.turnId === turnId &&
+      (itemId === undefined
+        ? start.tag === "turn.started"
+        : start.tag === "item.started" && start.itemId === itemId);
+    if (!isStartRow) return [];
+    const rows = yield* sql<{ readonly itemId: string; readonly delta: string }>`
+      SELECT json_extract(event, '$.itemId') AS itemId, json_extract(event, '$.delta') AS delta
+      FROM session_stream
+      WHERE session_id = ${session}
+        AND position > ${start.position}
+        AND json_extract(event, '$._tag') = 'content.delta'
+        AND json_extract(event, '$.streamKind') = 'assistant_text'
+        AND json_extract(event, '$.turnId') = ${turnId}
+        ${itemId === undefined ? sql`` : sql`AND json_extract(event, '$.itemId') = ${itemId}`}
+      ORDER BY position
+    `;
+    const byItem = new Map<string, string>();
+    for (const row of rows) byItem.set(row.itemId, (byItem.get(row.itemId) ?? "") + row.delta);
+    return [...byItem].map(([id, text]) => ({ itemId: id, text }));
+  });

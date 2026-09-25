@@ -93,6 +93,7 @@ interface Fake {
   /** Every `stopSession` call, with the reason its caller gave. */
   readonly stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }>;
   readonly emit: (event: ProviderEvent) => void;
+  /** The error every later start and input fails with, when set. */
   fails: string | undefined;
   /** A harness that throws where nothing declared it could. */
   dies: boolean;
@@ -159,6 +160,7 @@ const createFake = (): Fake => {
       sendInput: (sessionId, input): Effect.Effect<SendResult, string> =>
         Effect.suspend(() => {
           if (!held.has(sessionId)) return Effect.fail(`session ${sessionId} is not running here`);
+          if (fake.fails !== undefined) return Effect.fail(fake.fails);
           inputs.push(input);
           return Effect.succeed({ turnId: TURN, delivery: "opened" });
         }),
@@ -1146,6 +1148,212 @@ describe("a session that has run for as long as it may", () => {
       { sessionId: SESSION, reason: "stopped" },
       { sessionId: SESSION, reason: "absolute_timeout" },
     ]);
+  });
+});
+
+/**
+ * Tests the idle unload: a session that sits between turns for `idleMs` is
+ * stopped with `idle_unload`, which leaves its native state behind so it can
+ * be resumed later. The timer is generic. The session here is a plain one,
+ * with no conversation or assistant anywhere in its spec: the runner knows
+ * nothing about why a spec carries `idleMs`.
+ */
+const IDLE_MS = 60_000;
+
+const IDLE_START: SessionStart = {
+  ...START,
+  spec: { ...SPEC, timeouts: { ...SPEC.timeouts, idleMs: IDLE_MS } },
+};
+
+describe("a session that sits idle between turns", () => {
+  it("is stopped with idle_unload once idleMs has passed since its turn completed", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        yield* TestClock.adjust(IDLE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("is stopped with idle_unload once idleMs has passed since it started, when no turn opens", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        // A session resumed to take queued input starts before the input
+        // reaches it, and the input may never come.
+        yield* supervisor.start(IDLE_START);
+        yield* awaitForwarded(sent, 1);
+
+        yield* TestClock.adjust(IDLE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("is kept by an input frame, and waits idleMs again after the turn that input opened", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        yield* TestClock.adjust(IDLE_MS / 2);
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "still there?" },
+        });
+
+        // The first timer would fire now. The harness has not opened the new
+        // turn yet, so only the input frame can have cancelled the timer.
+        yield* TestClock.adjust(IDLE_MS / 2);
+        expect(fake.stops).toEqual([]);
+
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-2"));
+        yield* awaitForwarded(sent, 4);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-2"));
+        yield* awaitForwarded(sent, 5);
+
+        yield* TestClock.adjust(IDLE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.inputs).toEqual([{ text: "still there?" }]);
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("waits idleMs again after its harness refuses an input frame", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        // The input frame cancels the wait, and the refused input opens no
+        // turn, so the session is idle again from the refusal on.
+        yield* TestClock.adjust(IDLE_MS / 2);
+        fake.fails = "the harness is busy";
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "still there?" },
+        });
+
+        yield* TestClock.adjust(IDLE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.inputs).toEqual([]);
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("is left alone while parked on a permission request, however long it waits", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitRequestOpened(fake, "r-1"));
+        yield* awaitForwarded(sent, 3);
+
+        // A user who takes their time to answer does not lose the session.
+        yield* TestClock.adjust(IDLE_MS * 100);
+        expect(fake.stops).toEqual([]);
+
+        // Once the request is answered and the turn is over, the timer runs.
+        // Without this part, the test would also pass with no timer at all.
+        yield* Effect.sync(() => emitRequestResolved(fake, "r-1"));
+        yield* awaitForwarded(sent, 4);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 5);
+        yield* TestClock.adjust(IDLE_MS);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("is never unloaded when its spec has no idleMs", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runWithRelayOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        // Up to the absolute deadline, which is the only limit left.
+        yield* TestClock.adjust(ABSOLUTE_MS - 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([]);
+    expect(listExitReasons(sent)).toEqual([]);
   });
 });
 

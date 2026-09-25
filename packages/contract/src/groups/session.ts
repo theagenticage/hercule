@@ -71,6 +71,11 @@ export const Session = Schema.Struct({
   permissionProfileId: Id,
   /** The Agent this session was spawned from; `null` for a Thread. Kept only as a record of origin. */
   agentId: Schema.NullOr(Id),
+  /**
+   * The assistant's conversation this session answers; `null` for any other
+   * session. Kept after the conversation is deleted, as a record of origin.
+   */
+  conversationId: Schema.NullOr(Id),
   instanceId: Id,
   /** The runner the session started on. A session never moves to another runner. */
   runnerId: Id,
@@ -291,6 +296,8 @@ export const SessionFilter = Schema.Struct({
   agentId: Schema.optionalKey(Id),
   /** Only the sessions carrying this Permission Profile, whichever Agent spawned them. */
   permissionProfileId: Schema.optionalKey(Id),
+  /** Only the sessions of this conversation. */
+  conversationId: Schema.optionalKey(Id),
   /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
   thread: Schema.optionalKey(Schema.Boolean),
 });

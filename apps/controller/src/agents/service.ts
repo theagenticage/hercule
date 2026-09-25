@@ -314,6 +314,7 @@ const make = Effect.gen(function* () {
                 runnerId: undefined,
                 agentId: id,
                 permissionProfileId: undefined,
+                conversationId: undefined,
                 thread: undefined,
               }),
             );

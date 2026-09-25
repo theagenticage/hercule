@@ -74,6 +74,16 @@ export const queryKeys = {
   eventKinds: (): LiveQueryKey => ["event-kinds"],
   /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
   agents: (): LiveQueryKey => ["agents"],
+  assistants: (): LiveQueryKey => ["assistants"],
+  assistant: (id?: string): LiveQueryKey => (id === undefined ? ["assistant"] : ["assistant", id]),
+  conversations: (): LiveQueryKey => ["conversations"],
+  conversation: (id?: string): LiveQueryKey =>
+    id === undefined ? ["conversation"] : ["conversation", id],
+  /** Every page of one conversation's messages, whatever the sort. */
+  conversationMessages: (conversationId?: string): LiveQueryKey =>
+    conversationId === undefined
+      ? ["conversation-messages"]
+      : ["conversation-messages", conversationId],
   runs: (filter?: RunFilter): LiveQueryKey => (filter === undefined ? ["runs"] : ["runs", filter]),
   run: (id?: string): LiveQueryKey => (id === undefined ? ["run"] : ["run", id]),
   /** Keyed on the loopback endpoints detection asks, because the result depends on them. */
@@ -140,6 +150,25 @@ export const buildQueryKeys = (
     return ids.length === 0
       ? [queryKeys.runs(), queryKeys.run()]
       : [queryKeys.runs(), ...ids.map((id) => queryKeys.run(id))];
+  }
+  // Any assistant change refetches the list. An assistant's own page is
+  // refetched only when the push lists its id, or when the push lists no ids.
+  if (topic === "assistant") {
+    return ids.length === 0
+      ? [queryKeys.assistants(), queryKeys.assistant()]
+      : [queryKeys.assistants(), ...ids.map((id) => queryKeys.assistant(id))];
+  }
+  // A conversation push means the conversation was created or deleted, or a
+  // message was stored in it. The list, the conversation and its messages are
+  // refetched; the messages because a new one is the usual reason for the push.
+  if (topic === "conversation") {
+    return ids.length === 0
+      ? [queryKeys.conversations(), queryKeys.conversation(), queryKeys.conversationMessages()]
+      : [
+          queryKeys.conversations(),
+          ...ids.map((id) => queryKeys.conversation(id)),
+          ...ids.map((id) => queryKeys.conversationMessages(id)),
+        ];
   }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed.

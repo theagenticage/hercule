@@ -33,6 +33,7 @@ import { gitCredentials } from "../workspaces";
 import type { GitCredential } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
+import { SessionEndings } from "./endings";
 import { SessionService, SessionServiceLayer, type Starting } from "./service";
 
 /** Temporary Hercule Homes for the master key, deleted after each test. */
@@ -68,9 +69,20 @@ const buildHomeLayer = (): Layer.Layer<HerculeHome> =>
 const buildRealSecretsLayer = () =>
   secretsLayer.pipe(Layer.provide(masterKeyLayer("file").pipe(Layer.provide(buildHomeLayer()))));
 
+/** Ignores every ending: these tests do not look at what another domain does with one. */
+const ignoreEndings = Layer.succeed(
+  SessionEndings,
+  SessionEndings.of({ sessionEnded: () => Effect.void }),
+);
+
 const layer = SessionServiceLayer.pipe(
   Layer.provideMerge(
-    Layer.mergeAll(AuditLogLayer, SessionTokensLayer, buildHostLayer(buildRealSecretsLayer())),
+    Layer.mergeAll(
+      AuditLogLayer,
+      SessionTokensLayer,
+      ignoreEndings,
+      buildHostLayer(buildRealSecretsLayer()),
+    ),
   ),
   Layer.provideMerge(TestDatabase),
 );
@@ -134,6 +146,7 @@ const insertQueuedSession = (
       title: "a session",
       permissionProfileId: options.permissionProfileId ?? mintId(),
       agentId: undefined,
+      conversationId: undefined,
       instanceId: options.instanceId,
       runnerId,
       workspaceId: null,
@@ -183,7 +196,13 @@ const buildGatedCredentialStack = (
   );
   return SessionServiceLayer.pipe(
     Layer.provideMerge(
-      Layer.mergeAll(AuditLogLayer, SessionTokensLayer, gatedSecrets, buildHostLayer(gatedSecrets)),
+      Layer.mergeAll(
+        AuditLogLayer,
+        SessionTokensLayer,
+        ignoreEndings,
+        gatedSecrets,
+        buildHostLayer(gatedSecrets),
+      ),
     ),
     Layer.provideMerge(TestDatabase),
   );

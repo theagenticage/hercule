@@ -76,6 +76,7 @@ import { SessionTokens } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import { buildGitIdentity, type GitCredential } from "../workspaces";
 import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
+import { SessionEndings, type SessionEndReason } from "./endings";
 import { sessionRecordComposer } from "./records";
 import {
   readSessionOrFail,
@@ -135,6 +136,8 @@ export interface Opening {
   readonly permissionProfileId: string;
   /** The Agent the session was spawned from; `undefined` for a Thread. */
   readonly agentId: string | undefined;
+  /** The assistant's conversation the session answers; `undefined` for any other session. */
+  readonly conversationId: string | undefined;
   readonly runnerId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
@@ -225,6 +228,12 @@ export interface Applied {
   readonly worked?: { readonly workspaceId: string; readonly at: string };
   /** The session's new status, or `undefined` when this report did not change it. */
   readonly moved: SessionStatus | undefined;
+  /**
+   * `true` when the runner unloaded the idle session while it still had input
+   * waiting. The caller resumes the session after the commit, so the input
+   * runs.
+   */
+  readonly unloadedHoldingInput?: true;
 }
 
 /** Converts a page to the contract's shape, where a missing cursor is an absent key, not `null`. */
@@ -296,6 +305,7 @@ const make = Effect.gen(function* () {
   const one = readSessionOrFail(sessions);
   const tokens = yield* SessionTokens;
   const audit = yield* AuditLog;
+  const endings = yield* SessionEndings;
 
   /**
    * Each session's ingest state: its last sequence number and the delta text
@@ -363,22 +373,15 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Does the cleanup after any session moves to `exited`: cancels its waiting
-   * inputs, forgets its token and ingest state, and announces each session
-   * once. When a reason is given, it is stored on the cancelled inputs.
+   * Announces each session that moved to `exited` and forgets its token and
+   * ingest state, without touching its inputs. `endSessions` adds the rest of
+   * the cleanup; an unloaded session keeps its inputs for the resume.
    */
-  const endSessions = (
-    ids: ReadonlyArray<string>,
-    reason?: string,
-  ): Effect.Effect<void, SqlError> =>
+  const forgetSessions = (ids: ReadonlyArray<string>): Effect.Effect<void> =>
     Effect.gen(function* () {
       yield* Effect.forEach(
         ids,
-        (id) =>
-          Effect.gen(function* () {
-            yield* inputs.cancelQueued(id, reason);
-            yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
-          }),
+        (id) => announce({ _tag: "record", topic: "session", id, kind: "updated" }),
         { discard: true },
       );
       // From now on the row's status is what makes the token invalid. This
@@ -389,6 +392,64 @@ const make = Effect.gen(function* () {
         tokens.forgetSessions(ids);
         for (const id of ids) tracking.delete(id);
       });
+    });
+
+  /**
+   * Does the cleanup after sessions move to `exited`, whatever ended them.
+   * Every path that ends a session calls this, in the transaction that ended
+   * it. For each session, it:
+   *
+   * - tells `SessionEndings` that the session ended, with the inputs no turn
+   *   has started from;
+   * - cancels its inputs not yet sent, storing `cancelReason` on them when
+   *   one is given;
+   * - forgets its token and ingest state, and announces it once.
+   *
+   * `ended` holds the rows as they were just before the end. `message` is the
+   * runner's error for a workspace that could not be made.
+   */
+  /**
+   * Returns the inputs of a session that no turn has started from: the ones
+   * still queued, then the ones the runner accepted as a new turn's start
+   * whose turn the stored stream does not show started. Reads the session's
+   * whole stream once, so it is called only when the session ends.
+   */
+  const listUnansweredInputs = (
+    sessionId: string,
+  ): Effect.Effect<ReadonlyArray<StoredInput>, SqlError> =>
+    Effect.gen(function* () {
+      const queued = yield* inputs.listQueued(sessionId);
+      const opened = yield* inputs.listOpenedTurns(sessionId);
+      if (opened.length === 0) return queued;
+      // Each input the runner accepted as the start of a new turn has its
+      // own `turn.started`, in the same order, and nothing links the two.
+      // So when fewer turns started than inputs opened one, the newest of
+      // those inputs are the ones still waiting for theirs. A turn the
+      // harness starts by itself is counted too, which can only hide a
+      // waiting input, never invent one.
+      const started = yield* sessions.countStartedTurns(sessionId);
+      return [...queued, ...opened.slice(started)];
+    });
+
+  const endSessions = (
+    ended: ReadonlyArray<StoredSession>,
+    reason: SessionEndReason,
+    options: {
+      readonly message?: string | undefined;
+      readonly cancelReason?: string | undefined;
+    } = {},
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      for (const session of ended) {
+        yield* endings.sessionEnded({
+          session,
+          reason,
+          ...(options.message === undefined ? {} : { message: options.message }),
+          unansweredInputs: yield* listUnansweredInputs(session.id),
+        });
+        yield* inputs.cancelQueued(session.id, options.cancelReason);
+      }
+      yield* forgetSessions(ended.map((session) => session.id));
     });
 
   /**
@@ -406,8 +467,8 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const at = yield* nowIso;
-        const waiting = yield* sessions.liveInWorkspace(workspaceId);
-        for (const id of waiting) {
+        const ended = yield* sessions.endInWorkspace(workspaceId, at);
+        for (const { id } of ended) {
           yield* sessions.append(id, {
             seq: 0,
             at,
@@ -420,7 +481,6 @@ const make = Effect.gen(function* () {
               ...(message === null ? {} : { message }),
             },
           });
-          yield* sessions.moved(id, "exited", at);
           yield* audit.append({
             kind: "session.stopped",
             actor: SYSTEM_ACTOR,
@@ -431,7 +491,10 @@ const make = Effect.gen(function* () {
           // the session's transcript must be notified.
           yield* announce({ _tag: "transcript", sessionId: id });
         }
-        yield* endSessions(waiting, message ?? undefined);
+        yield* endSessions(ended, "workspace_failed", {
+          message: message ?? undefined,
+          cancelReason: message ?? undefined,
+        });
       }),
     );
 
@@ -439,8 +502,17 @@ const make = Effect.gen(function* () {
     query: (input: QueryInput): Effect.Effect<SessionPage, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.query");
-        const { limit, cursor, sort, status, runnerId, agentId, permissionProfileId, thread } =
-          yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
+        const {
+          limit,
+          cursor,
+          sort,
+          status,
+          runnerId,
+          agentId,
+          permissionProfileId,
+          conversationId,
+          thread,
+        } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         // A Thread is a session with no Agent behind it. `agentId` filters for
         // the sessions of one Agent, and `thread` filters for the sessions
         // with no Agent, so no session can match both. A query with both would
@@ -468,6 +540,7 @@ const make = Effect.gen(function* () {
             runnerId,
             agentId,
             permissionProfileId,
+            conversationId,
             thread,
           }),
         );
@@ -541,6 +614,7 @@ const make = Effect.gen(function* () {
           title: buildTitle(open.prompt),
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
+          conversationId: open.conversationId,
           instanceId: open.spec.instanceId,
           runnerId: open.runnerId,
           workspaceId: open.spec.workspaceId,
@@ -743,14 +817,18 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Ends a session that was never sent to a runner, so no runner needs to
-     * be told. Joins the caller's transaction, which also writes the audit
-     * entry.
+     * Stops a session that was never sent to a runner, so no runner needs to
+     * be told, and returns whether it did. Returns `false`, changing nothing,
+     * when the session is no longer `queued`: dispatch may have sent it to its
+     * runner since the caller read it, and then only the runner can end it.
+     * Joins the caller's transaction, which also writes the audit entry.
      */
-    endQueued: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+    endQueued: (sessionId: string, at: string): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
-        yield* sessions.moved(sessionId, "exited", at);
-        yield* endSessions([sessionId]);
+        const ended = yield* sessions.endQueued(sessionId, at);
+        if (Option.isNone(ended)) return false;
+        yield* endSessions([ended.value], "stopped");
+        return true;
       }),
 
     /**
@@ -766,11 +844,11 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
-          const { ended, toStop } = yield* sessions.endOnRunner(runnerId, at);
-          yield* endSessions(ended);
+          const ended = yield* sessions.endOnRunner(runnerId, at);
+          yield* endSessions(ended, "runner_retired");
           yield* Effect.forEach(
             ended,
-            (id) =>
+            ({ id }) =>
               audit.append({
                 kind: "session.stopped",
                 actor: SYSTEM_ACTOR,
@@ -779,7 +857,9 @@ const make = Effect.gen(function* () {
               }),
             { discard: true },
           );
-          return toStop;
+          // A queued session was never sent to the runner, so only the
+          // others have a process to stop.
+          return ended.filter((session) => session.status !== "queued").map(({ id }) => id);
         }),
       ),
 
@@ -798,18 +878,15 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = yield* nowIso;
         const ended = yield* sessions.endOnLostRunners(connected, at);
-        yield* endSessions(
-          ended.map((one) => one.sessionId),
-          RUNNER_LOST,
-        );
+        yield* endSessions(ended, "runner_lost", { cancelReason: RUNNER_LOST });
         yield* Effect.forEach(
           ended,
-          ({ sessionId, runnerId }) =>
+          ({ id, runnerId }) =>
             audit.append({
               kind: "session.reconciled",
               actor: SYSTEM_ACTOR,
-              record: { topic: "session" as const, id: sessionId },
-              payload: { sessionId, runnerId, reason: "runner_lost" },
+              record: { topic: "session" as const, id },
+              payload: { sessionId: id, runnerId, reason: "runner_lost" },
               at,
             }),
           { discard: true },
@@ -841,9 +918,6 @@ const make = Effect.gen(function* () {
     takeInput: (taking: Taking): Effect.Effect<StoredInput, SqlError> =>
       Effect.gen(function* () {
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
-        if (taking.resumeSpec !== undefined) {
-          yield* resume(taking.sessionId, taking.resumeSpec, taking.at, false);
-        }
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
           source: "user",
@@ -852,6 +926,11 @@ const make = Effect.gen(function* () {
           at: taking.at,
           ...(taking.claimed ? { sentAt: taking.at } : {}),
         });
+        // After the insert: a session is resumed only while it has input
+        // waiting, and this input is what it resumes for.
+        if (taking.resumeSpec !== undefined) {
+          yield* resume(taking.sessionId, taking.resumeSpec, taking.at, false);
+        }
         yield* announce({
           _tag: "record",
           topic: "session",
@@ -900,6 +979,34 @@ const make = Effect.gen(function* () {
         }
       }),
 
+    /**
+     * Cancels every input still waiting on the session with `reason`, and
+     * returns how many were cancelled. Joins the caller's transaction.
+     */
+    cancelWaitingInputs: (sessionId: string, reason: string): Effect.Effect<number, SqlError> =>
+      Effect.gen(function* () {
+        const cancelled = yield* inputs.cancelQueued(sessionId, reason);
+        if (cancelled > 0) {
+          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+        }
+        return cancelled;
+      }),
+
+    /**
+     * Cancels every queued input of every session that answers the
+     * conversation, sent or not, with `reason`, so none of those sessions is
+     * resumed to run it. Joins the caller's transaction.
+     */
+    cancelConversationInputs: (
+      conversationId: string,
+      reason: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        for (const sessionId of yield* inputs.cancelForConversation(conversationId, reason)) {
+          yield* announce({ _tag: "record", topic: "session", id: sessionId, kind: "updated" });
+        }
+      }),
+
     /** Returns the ids of the sessions that have a queued input not yet sent. */
     listSessionsAwaitingInput: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       inputs.listSessionsAwaitingInput(),
@@ -936,7 +1043,7 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          yield* inputs.delivered(row.id, delivery, yield* nowIso);
+          yield* inputs.delivered(row.id, row.sentAt, delivery, yield* nowIso);
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
         }),
       ),
@@ -953,9 +1060,9 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const now = yield* sessions.one(row.sessionId);
           if (Option.isSome(now) && now.value.status === "exited") {
-            yield* inputs.cancelWithReason(row.id, reason);
+            yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
           } else {
-            yield* inputs.requeue(row.id, reason);
+            yield* inputs.requeue(row.id, row.sentAt, reason);
           }
           yield* announce({ _tag: "record", topic: "session", id: row.sessionId, kind: "updated" });
         }),
@@ -1001,10 +1108,10 @@ const make = Effect.gen(function* () {
           // `exited`, which makes their tokens invalid, and anything cached
           // from those tokens while the sessions ran is dropped after the
           // commit.
-          yield* endSessions(gone);
+          yield* endSessions(gone, "runner_restart");
           yield* Effect.forEach(
             gone,
-            (id) =>
+            ({ id }) =>
               audit.append({
                 kind: "session.reconciled",
                 actor: SYSTEM_ACTOR,
@@ -1107,11 +1214,27 @@ const make = Effect.gen(function* () {
           folded.status === undefined || folded.status === before || before === "exited"
             ? undefined
             : folded.status;
+        let unloadedHoldingInput = false;
         if (moved !== undefined) {
           yield* sessions.moved(id, moved, at);
-          if (event._tag === "session.exited") {
+          if (event._tag === "session.exited" && event.reason === "idle_unload") {
+            // The runner took an idle process down to save memory. The
+            // session is resumable and its inputs were meant for it, so they
+            // are kept, and an input sent to the unloaded process goes back
+            // to waiting. The caller resumes the session after the commit.
+            yield* inputs.releaseSent(id);
+            yield* endings.sessionEnded({
+              session,
+              reason: "idle_unload",
+              unansweredInputs: yield* listUnansweredInputs(id),
+            });
+            yield* forgetSessions([id]);
+            unloadedHoldingInput = Option.isSome(yield* inputs.oldestWaiting(id));
+          } else if (event._tag === "session.exited") {
             // Nothing waits on a harness that has exited, so its queue is cancelled too.
-            yield* endSessions([id], describeExited(event.reason));
+            yield* endSessions([session], event.reason, {
+              cancelReason: describeExited(event.reason),
+            });
           } else {
             yield* announce({ _tag: "record", topic: "session", id, kind: "updated" });
           }
@@ -1147,6 +1270,7 @@ const make = Effect.gen(function* () {
             ? { worked: { workspaceId: session.workspaceId, at } }
             : {}),
           moved,
+          ...(unloadedHoldingInput ? { unloadedHoldingInput: true as const } : {}),
         };
       }),
 
@@ -1228,7 +1352,7 @@ export class SessionService extends Context.Service<SessionService, Effect.Succe
 export const SessionServiceLayer: Layer.Layer<
   SessionService,
   never,
-  SqlClient.SqlClient | AuditLog | SessionTokens | PluginHost
+  SqlClient.SqlClient | AuditLog | SessionTokens | PluginHost | SessionEndings
 > = Layer.effect(SessionService)(make);
 
 /**

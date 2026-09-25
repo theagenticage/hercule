@@ -76,6 +76,7 @@ export const AUDIT_KINDS = [
   "agent.deleted",
   "assistant.created",
   "assistant.updated",
+  "assistant.deleted",
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",

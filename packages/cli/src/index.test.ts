@@ -874,6 +874,7 @@ describe("hercule session spawn --agent", () => {
     resumable: false,
     permissionProfileId: AGENT.permissionProfileId,
     agentId: AGENT.id,
+    conversationId: null,
     instanceId: AGENT.instanceId,
     runnerId: buildId("ffffffff"),
     workspaceId: null,

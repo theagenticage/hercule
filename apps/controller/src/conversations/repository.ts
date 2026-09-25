@@ -92,6 +92,20 @@ const make = Effect.gen(function* () {
         };
       }),
 
+    /** Returns every conversation the assistant answers, oldest first. */
+    listForAssistant: (assistantId: string): Effect.Effect<ReadonlyArray<Conversation>, SqlError> =>
+      Effect.map(
+        sql<ConversationRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM conversations
+          WHERE assistant_id = ${uuidFromString(assistantId)}
+          ORDER BY created_at, id
+        `,
+        (rows) => rows.map(toConversation),
+      ),
+
+    delete: (id: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`DELETE FROM conversations WHERE id = ${uuidFromString(id)}`),
+
     list: (
       request: ConversationPageRequest,
     ): Effect.Effect<Page<Conversation>, CursorError | SqlError> =>

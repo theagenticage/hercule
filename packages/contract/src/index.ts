@@ -162,6 +162,10 @@ export {
   Conversation,
   ConversationChannel,
   ConversationFilter,
+  ConversationMessage,
+  ConversationSenderRole,
+  ConversationSendInput,
+  MESSAGE_SORT_FIELDS,
 } from "./groups/conversation";
 export {
   ApprovalDecision,

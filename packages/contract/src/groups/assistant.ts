@@ -1,10 +1,10 @@
 /**
- * Assistants: agents the user chats with.
+ * Assistants: agents the user talks to through conversations.
  *
  * An assistant is an Agent with three more things: a heartbeat that wakes it
  * on a schedule, a rotation that decides when its conversation moves to a
  * fresh session, and a reply mode that decides which of its words reach the
- * chat. Its id is the id of its Agent, so a session an assistant runs names
+ * conversation. Its id is the id of its Agent, so a session an assistant runs names
  * the assistant as its `agentId`.
  *
  * Every field but `name` is optional on create: the server fills in a
@@ -75,7 +75,7 @@ export const Rotation = Schema.Struct({
 export type Rotation = Schema.Schema.Type<typeof Rotation>;
 
 /**
- * Which of an assistant's words reach the chat: only the last text of each
+ * Which of an assistant's words reach the conversation: only the last text of each
  * turn (`turn-end`), or every text it writes as the turn goes (`segments`).
  */
 export const AssistantReply = Schema.Literals(["turn-end", "segments"]);
@@ -144,6 +144,11 @@ export const assistant = HttpApiGroup.make("assistant")
       payload: AssistantUpdateInput,
       success: Assistant,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.delete("delete", "/assistants/:id", {
+      params: { id: Id },
+      success: Schema.Struct({}),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

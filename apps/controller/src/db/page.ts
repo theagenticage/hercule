@@ -213,13 +213,16 @@ export const decodeOwnedCursor = (
       : undefined,
   );
 
-/** Encodes the cursor for a list sorted by integer id: the id of the page's last row. */
+/**
+ * Encodes the cursor for a list sorted by one unique integer column, such as
+ * an id or a position: that column's value on the page's last row.
+ */
 export const encodeIdCursor = (scope: CursorScope, id: number): string =>
   sealCursor(scope, ["id", id]);
 
 /**
- * Decodes a cursor from `encodeIdCursor` into its id. Fails with `CursorError`
- * if the cursor is malformed or belongs to another scope.
+ * Decodes a cursor from `encodeIdCursor` into its integer key. Fails with
+ * `CursorError` if the cursor is malformed or belongs to another scope.
  */
 export const decodeIdCursor = (
   cursor: string,

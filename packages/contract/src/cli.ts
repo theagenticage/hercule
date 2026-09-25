@@ -1911,7 +1911,7 @@ export const CLI = {
 
   "assistant.query": {
     command: "assistant list",
-    help: "Lists the assistants, oldest first. An assistant is an Agent you chat with, and it keeps one conversation per channel. Use it to find the id every other `hercule assistant` command takes.",
+    help: "Lists the assistants, oldest first. An assistant is an Agent you talk to through a conversation, and it keeps one conversation per channel. Use it to find the id every other `hercule assistant` command takes.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -1993,7 +1993,7 @@ export const CLI = {
       },
       reply: {
         flag: "reply",
-        help: "Which of its words reach the chat: turn-end for the last text of each turn, or segments for every text as it goes; leave it off for turn-end.",
+        help: "Which of its words reach the conversation: turn-end for the last text of each turn, or segments for every text as it goes; leave it off for turn-end.",
       },
     },
     errors: {
@@ -2057,8 +2057,26 @@ export const CLI = {
       },
       reply: {
         flag: "reply",
-        help: "Which of its words reach the chat: turn-end or segments.",
+        help: "Which of its words reach the conversation: turn-end or segments.",
       },
+    },
+  },
+
+  "assistant.delete": {
+    command: "assistant delete",
+    help: "Deletes an assistant, its conversations and their messages. A session still running for it is stopped first. Its sessions and their transcripts stay, and keep the assistant's id as a record of where they came from.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: "The assistant's id, or a tail of eight or more characters.",
+        resolves: "assistant.query",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the assistant's session did not stop in time, so nothing was deleted; the message names its runner, and the delete can be tried again once that runner is reachable",
     },
   },
 
@@ -2087,6 +2105,39 @@ export const CLI = {
       },
     },
   },
+  "conversation.queryMessages": {
+    command: "conversation message list",
+    help: "Lists a conversation's messages, newest first. They are what the owner said, what the assistant answered, and any notice that it could not answer.",
+    examples: [{ args: ["7b41d0a5"] }, { args: ["7b41d0a5", "--sort", "position:asc"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "conversation-id",
+        help: "The conversation's id, or a tail of eight or more characters.",
+        resolves: "conversation.query",
+      },
+    },
+  },
+  "conversation.send": {
+    command: "conversation send",
+    help: "Sends a message to a conversation as its owner. The assistant answers in its session: one is started if none is running, and one that went idle is resumed. Prints the stored message; the answer arrives later, and `hercule conversation message list` shows it.",
+    examples: [{ args: ["7b41d0a5"], stdin: "What is on my list for today?" }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "conversation-id",
+        help: "The conversation's id, or a tail of eight or more characters.",
+        resolves: "conversation.query",
+      },
+      text: { stdin: true, flag: "text", help: "The message to send." },
+    },
+    errors: {
+      forbidden:
+        "only a user credential may send: the message is recorded as the owner's, so an agent's session token is refused",
+      invalid_state:
+        "no runner can start the assistant's session; the error message gives the reason, such as no connected runner being logged in to its provider instance",
+    },
+  },
 
   "session.query": {
     command: "session list",
@@ -2095,6 +2146,7 @@ export const CLI = {
       { args: [] },
       { args: ["--status", "busy", "--status", "idle"] },
       { args: ["--thread", "true"] },
+      { args: ["--conversation", "7b41d0a5", "--limit", "1"] },
     ],
     fields: {
       status: { flag: "status", help: "queued, starting, idle, busy or exited; repeatable." },
@@ -2107,6 +2159,11 @@ export const CLI = {
         flag: "agent",
         help: "Only the sessions spawned from this Agent, by its id or a tail of eight or more characters; find it with `hercule agent list`.",
         resolves: "agent.query",
+      },
+      conversationId: {
+        flag: "conversation",
+        help: "Only the sessions of this conversation, by its id or a tail of eight or more characters; find it with `hercule conversation list`.",
+        resolves: "conversation.query",
       },
       permissionProfileId: {
         flag: "profile",
@@ -2549,7 +2606,7 @@ export const NOUNS = {
   },
   assistant: {
     summary:
-      "Assistants: Agents you chat with, each with a heartbeat, a rotation and a reply mode.",
+      "Assistants: Agents you talk to through conversations, each with a heartbeat, a rotation and a reply mode.",
     flow: "hercule assistant list to find one, hercule assistant read for the whole of it, hercule assistant create for a new one, hercule assistant update to change it.",
   },
   conversation: {

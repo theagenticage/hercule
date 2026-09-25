@@ -149,6 +149,19 @@ export const currentStamp: Effect.Effect<string> = Effect.flatMap(CurrentActor, 
 );
 
 /**
+ * Returns the actor stamp for the actor behind the current request, or
+ * `SYSTEM_ACTOR` when there is none.
+ *
+ * Use it only for a write that may legitimately run with no request behind
+ * it, such as work started by a runner's report or by boot. A write that only
+ * an operation can reach uses `currentStamp`, which treats a missing actor as
+ * a bug.
+ */
+export const currentStampOrSystem: Effect.Effect<string> = Effect.map(CurrentActor, (actor) =>
+  actor._tag === "none" ? SYSTEM_ACTOR : buildActorStamp(actor),
+);
+
+/**
  * Returns the grant an operation requires, or `undefined` when its requirement
  * is not a grant.
  */

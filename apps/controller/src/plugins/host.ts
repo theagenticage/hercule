@@ -45,7 +45,7 @@ import {
 } from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { CurrentActor, buildActorStamp, SYSTEM_ACTOR } from "../actor";
+import { currentStampOrSystem } from "../actor";
 import { Secrets, type SecretOwner } from "../secrets";
 // The types a plugin declares, and what it reaches its own connections through,
 // both live in the connections domain: everything they touch is there. This is
@@ -432,9 +432,7 @@ const make = Effect.gen(function* () {
       // Activation during boot has no actor, so the entry is stamped with the
       // system rather than blaming whoever logged in last. Every other call
       // comes from a request, and is stamped with its actor.
-      const actor = yield* Effect.map(CurrentActor, (who) =>
-        who._tag === "none" ? SYSTEM_ACTOR : buildActorStamp(who),
-      );
+      const actor = yield* currentStampOrSystem;
       yield* withTransaction(
         sql,
         audit.append({

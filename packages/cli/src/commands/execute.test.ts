@@ -30,6 +30,7 @@ const buildSession = (tail: string) => ({
   resumable: false,
   permissionProfileId: buildId("dddddddd"),
   agentId: null,
+  conversationId: null,
   instanceId: buildId("eeeeeeee"),
   runnerId: buildId("ffffffff"),
   workspaceId: null,

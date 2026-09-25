@@ -84,6 +84,7 @@ const BASE_SESSION: Session = {
   resumable: false,
   permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
   agentId: null,
+  conversationId: null,
   instanceId: "01a06d02-1000-7000-8000-000000000001",
   runnerId: MOSS.id,
   workspaceId: null,
