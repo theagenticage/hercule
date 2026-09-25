@@ -7,7 +7,10 @@ const api: Readonly<Record<string, Handler>> = {
   "GET /api/v1/settings": {
     body: {
       controller: {},
-      user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
+      user: {
+        "onboarding.completedSteps": ["timezone", "assistant"],
+        timezone: "Europe/Amsterdam",
+      },
     },
   },
   // Of the screens here, Tasks, Runs, Workflows, Fleet, Connections, Plugins

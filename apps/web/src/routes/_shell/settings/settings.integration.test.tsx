@@ -5,7 +5,7 @@ import { buildErrorBody, renderApp, stubApi, type Call, type Handler } from "../
 
 const stored = {
   controller: {},
-  user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
+  user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: "Europe/Amsterdam" },
 };
 
 /** Builds a stub controller that responds to `settings.update` with the settings after the patch. */

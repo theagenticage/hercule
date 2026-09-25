@@ -331,7 +331,10 @@ const openRunPage = async (
     "GET /api/v1/settings": {
       body: {
         controller: {},
-        user: { "onboarding.completedSteps": ["timezone"], timezone: "Europe/Amsterdam" },
+        user: {
+          "onboarding.completedSteps": ["timezone", "assistant"],
+          timezone: "Europe/Amsterdam",
+        },
       },
     },
     [`GET /api/v1/runs/${run.id}`]: () => ({ body: held }),

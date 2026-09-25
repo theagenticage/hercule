@@ -39,8 +39,13 @@ export const queryKeys = {
     id === undefined ? ["connection"] : ["connection", id],
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
-  sessions: (filter?: { readonly runnerId: string }): LiveQueryKey =>
-    filter === undefined ? ["sessions"] : ["sessions", filter],
+  /**
+   * A filtered listing is keyed on its filter: one runner's sessions for its
+   * page, or one conversation's sessions for its activity row.
+   */
+  sessions: (
+    filter?: { readonly runnerId: string } | { readonly conversationId: string },
+  ): LiveQueryKey => (filter === undefined ? ["sessions"] : ["sessions", filter]),
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
@@ -76,7 +81,9 @@ export const queryKeys = {
   agents: (): LiveQueryKey => ["agents"],
   assistants: (): LiveQueryKey => ["assistants"],
   assistant: (id?: string): LiveQueryKey => (id === undefined ? ["assistant"] : ["assistant", id]),
-  conversations: (): LiveQueryKey => ["conversations"],
+  /** Keyed on the assistant filter; without it, the prefix of every conversation list. */
+  conversations: (filter?: { readonly assistantId: string }): LiveQueryKey =>
+    filter === undefined ? ["conversations"] : ["conversations", filter],
   conversation: (id?: string): LiveQueryKey =>
     id === undefined ? ["conversation"] : ["conversation", id],
   /** Every page of one conversation's messages, whatever the sort. */

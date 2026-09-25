@@ -49,7 +49,7 @@ describe("the entry guard", () => {
       ...SETUP_COMPLETE,
       ...buildSettingsRoute({
         timezone: "Europe/Amsterdam",
-        "onboarding.completedSteps": ["timezone"],
+        "onboarding.completedSteps": ["timezone", "assistant"],
       }),
       "GET /api/v1/runs": { body: { items: [] } },
     });
@@ -60,7 +60,7 @@ describe("the entry guard", () => {
   it("takes a signed-in user off the login screen", async () => {
     const api = stubApi({
       ...SETUP_COMPLETE,
-      ...buildSettingsRoute({ "onboarding.completedSteps": ["timezone"] }),
+      ...buildSettingsRoute({ "onboarding.completedSteps": ["timezone", "assistant"] }),
     });
     const { router } = await renderApp({ path: "/login", api: api.fetch, token: "bearer" });
     await waitForPath(router, "/");
@@ -71,7 +71,7 @@ describe("the entry guard", () => {
     // only one that arrives without a navigation waiting for it.
     const api = stubApi({
       ...SETUP_COMPLETE,
-      ...buildSettingsRoute({ "onboarding.completedSteps": ["timezone"] }),
+      ...buildSettingsRoute({ "onboarding.completedSteps": ["timezone", "assistant"] }),
       "GET /api/v1/tasks": { body: { items: [] } },
       "POST /api/v1/auth/ws-ticket": {
         status: 401,

@@ -1,9 +1,8 @@
 /**
  * Groups sessions into the lanes of the check-in page, and builds its
- * headline. Nothing in this build produces a waiting decision or an assistant
- * session yet, so those two lanes are always empty. The lanes are still
- * returned in their fixed order, because that order is what the screen
- * renders.
+ * headline. Nothing in this build produces a waiting decision yet, so that
+ * lane is always empty. The lanes are still returned in their fixed order,
+ * because that order is what the screen renders.
  */
 import type { Session } from "@hercule/contract";
 import { isSettled, WORKING_STATUSES } from "./status";
@@ -25,16 +24,24 @@ const takesInput = (session: Session): boolean =>
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Returns the lanes of the check-in page in their fixed order. A session that
+ * answers an assistant's conversation goes in the assistants lane whatever its
+ * status, and in no other lane: the user talks to it on the conversation
+ * screen, not in the lanes.
+ */
 export const buildLanes = (sessions: readonly Session[]): readonly Lane[] => {
-  const running = sessions.filter((session) => WORKING_STATUSES.has(session.status));
-  const idle = sessions.filter(takesInput);
-  const settled = sessions.filter(isSettled);
+  const assistants = sessions.filter((session) => session.conversationId !== null);
+  const threads = sessions.filter((session) => session.conversationId === null);
+  const running = threads.filter((session) => WORKING_STATUSES.has(session.status));
+  const idle = threads.filter(takesInput);
+  const settled = threads.filter(isSettled);
 
   return [
     { kind: "waiting", sessions: [] },
     { kind: "running", sessions: running },
     { kind: "idle", sessions: idle },
-    { kind: "assistants", sessions: [] },
+    { kind: "assistants", sessions: assistants },
     { kind: "settled", sessions: settled },
   ];
 };

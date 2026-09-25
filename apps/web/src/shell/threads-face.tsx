@@ -6,6 +6,8 @@ import {
   decideDraftPlace,
   joinLabelText,
   buildThreadGroups,
+  decideAssistantPresence,
+  findAnsweredAssistantId,
   type DraftPlace,
   type HerculeClient,
   type Live,
@@ -16,6 +18,7 @@ import type { ThreadRows, ThreadWorkspace } from "@hercule/contract";
 import { cn, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../app/live-invalidation";
 import {
+  assistantsQuery,
   localRunnerQuery,
   projectsQuery,
   providersQuery,
@@ -24,6 +27,7 @@ import {
   sessionsQuery,
   workspacesQuery,
 } from "../app/queries";
+import { AssistantRow } from "../screens/assistant/assistant-row";
 import { ProjectDot } from "../screens/project-dot";
 import { NewProject } from "../screens/new-project";
 import { ProjectPicker } from "../screens/project-picker";
@@ -35,6 +39,11 @@ import { ThreadRowView } from "../screens/thread-row";
  * `buildThreadGroups` does the grouping; this component only draws it.
  *
  * The `ui.threadRows` setting (`rows`) decides how much each row shows.
+ *
+ * The Assistants group follows the thread groups: one row per assistant,
+ * oldest first, each linking to its conversation. An assistant's sessions are
+ * left out of the thread groups, because its conversation is where the user
+ * reaches them.
  */
 export function ThreadsFace({
   rows,
@@ -51,6 +60,7 @@ export function ThreadsFace({
   readonly live: Live;
 }): JSX.Element {
   useLiveInvalidation(live, queryClient, "session");
+  useLiveInvalidation(live, queryClient, "assistant");
   // Ages are computed from a clock that ticks every minute, not from the time
   // of the last refetch, so "2m" becomes "3m" without new data.
   const now = useMinuteClock();
@@ -59,6 +69,7 @@ export function ThreadsFace({
   const resources = useQuery(resourcesQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const runners = useQuery(runnersQuery(client)).data?.items ?? [];
+  const assistants = useQuery(assistantsQuery(client)).data?.items ?? [];
   // The provider catalogs let a meta row show the model's display name
   // (`Claude Sonnet 5`) instead of the slug a request uses.
   const instances = useQuery(providersQuery(client)).data ?? [];
@@ -75,6 +86,12 @@ export function ThreadsFace({
   // could.
   const currentId =
     useMatch({ from: "/_shell/threads/$sessionId", shouldThrow: false })?.params.sessionId ?? null;
+  // An assistant's row is marked on its conversation screen, and on the
+  // session view of one of its sessions, where the crumb leads back to it.
+  const openSession = sessions.find((session) => session.id === currentId);
+  const openAssistantId =
+    useMatch({ from: "/_shell/assistants/$assistantId", shouldThrow: false })?.params.assistantId ??
+    (openSession === undefined ? null : findAnsweredAssistantId(openSession));
   const drafted = useMatch({ from: "/_shell/threads/new", shouldThrow: false });
   const draft: DraftPlace | null =
     drafted === undefined
@@ -149,7 +166,10 @@ export function ThreadsFace({
         {groups.length === 0 ? (
           <>
             <p className="px-2.5 py-1 text-fine text-faint">No threads yet</p>
-            <p className="px-2.5 pt-1 text-fine text-faint">
+            {/* The bottom padding matches a thread row's, so the Assistants
+                header below sits as far from this text as it would from the
+                last row of a thread group. */}
+            <p className="px-2.5 pt-1 pb-[7px] text-fine text-faint">
               A thread needs a runner with a provider login on it.
             </p>
           </>
@@ -162,6 +182,26 @@ export function ThreadsFace({
               current={currentId}
             />
           ))
+        )}
+        {assistants.length === 0 ? null : (
+          <div>
+            {/* The same box as a project's header, so the group titles form
+                one column: the text is indented as far as a project's name,
+                which follows the project's colour dot, and the row is as tall
+                as a project header with its + button. */}
+            <div className="flex h-8 items-center pt-2.5 pr-1 pb-0.5 pl-6 text-meta font-emph text-ink">
+              Assistants
+            </div>
+            {assistants.map((assistant) => (
+              <AssistantRow
+                key={assistant.id}
+                assistantId={assistant.id}
+                name={assistant.name}
+                presence={decideAssistantPresence(assistant.id, sessions)}
+                selected={assistant.id === openAssistantId}
+              />
+            ))}
+          </div>
         )}
       </div>
       <Link

@@ -128,7 +128,7 @@ const PROFILE_WORKER: Profile = {
 const PROFILES: readonly Profile[] = [PROFILE_UNRESTRICTED, PROFILE_WORKER];
 
 const STORED_BASE = {
-  "onboarding.completedSteps": ["timezone"],
+  "onboarding.completedSteps": ["timezone", "assistant"],
   timezone: "Europe/Amsterdam",
   "thread.instanceId": INSTANCE_LOCAL.id,
   "thread.model": "claude-sonnet-5",

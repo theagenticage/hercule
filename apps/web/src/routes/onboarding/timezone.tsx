@@ -1,15 +1,16 @@
 import { useState, type FormEvent, type JSX } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { resolveBrowserTimezone } from "@hercule/client-core";
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { addCompletedStep, resolveBrowserTimezone } from "@hercule/client-core";
 import { Button, Field } from "@hercule/ui";
 import { HOME_PATH } from "../../app/entry-guard";
 import { settingsQuery } from "../../app/queries";
 import { CenteredScreen } from "../../screens/centered-screen";
+import { readErrorMessage } from "../../screens/save-status";
 import { TimezoneField } from "../../screens/timezone-field";
 
-/** The id this step records when it is done. */
-const STEP = "timezone";
+/** The key of this step's save, so a second submit can see that one is running. */
+const SAVE_KEY = ["onboarding-timezone"];
 
 export const Route = createFileRoute("/onboarding/timezone")({
   staticData: { title: "Confirm your timezone" },
@@ -22,32 +23,33 @@ function TimezoneStep(): JSX.Element {
   const settings = useSuspenseQuery(settingsQuery(client)).data;
 
   const [timezone, setTimezone] = useState(settings.user.timezone ?? resolveBrowserTimezone());
-  const [failure, setFailure] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
-    setFailure(null);
-    setSubmitting(true);
-
-    const completed = settings.user["onboarding.completedSteps"] ?? [];
-    try {
-      const updated = await client.settings.update({
+  const save = useMutation({
+    mutationKey: SAVE_KEY,
+    mutationFn: (zone: string) =>
+      client.settings.update({
         payload: {
           user: {
-            timezone,
-            "onboarding.completedSteps": [...completed, STEP],
+            timezone: zone,
+            "onboarding.completedSteps": addCompletedStep(
+              settings.user["onboarding.completedSteps"] ?? [],
+              "timezone",
+            ),
           },
         },
-      });
+      }),
+    onSuccess: async (updated) => {
       queryClient.setQueryData(settingsQuery(client).queryKey, updated);
-    } catch (error) {
-      setFailure(error instanceof Error ? error.message : String(error));
-      setSubmitting(false);
-      return;
-    }
+      await navigate({ to: HOME_PATH });
+    },
+  });
 
-    await navigate({ to: HOME_PATH });
+  const submit = (event: FormEvent): void => {
+    event.preventDefault();
+    // `save.isPending` reaches the render a tick after `mutate`, so a second
+    // Enter in the same tick would still see it false; the mutation cache
+    // knows at once.
+    if (queryClient.isMutating({ mutationKey: SAVE_KEY }) > 0) return;
+    save.mutate(timezone);
   };
 
   return (
@@ -55,19 +57,19 @@ function TimezoneStep(): JSX.Element {
       title="Confirm your timezone"
       lead="Hercule uses this zone for all times: schedules, ages, and what happened since you last looked."
     >
-      <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
+      <form className="flex flex-col gap-4" onSubmit={submit}>
         <Field id="timezone" label="Timezone">
           <TimezoneField value={timezone} onChange={setTimezone} />
         </Field>
-        {failure === null ? null : (
+        {save.isError ? (
           <p className="text-fine text-fail" role="alert">
-            {failure}
+            {readErrorMessage(save.error)}
           </p>
-        )}
+        ) : null}
         <Button
           type="submit"
           variant="form"
-          disabled={submitting}
+          disabled={save.isPending}
           className="mt-2 w-full justify-center py-2"
         >
           Continue

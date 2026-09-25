@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import type { Session } from "@hercule/contract";
 import { buildHeadline } from "@hercule/client-core";
-import { renderApp, stubApi, type Handler } from "../../../app/testing";
+import { readPageText, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 /**
  * Returns the screen's own Create new thread link, not the sidebar's. The
@@ -106,6 +106,37 @@ const SETTLED = buildSession({
 
 const THREE_STATUSES: readonly Session[] = [BUSY, IDLE, SETTLED];
 
+/** Sessions that answer an assistant's conversation, one working and one waiting for input. */
+const ANSWERING: readonly Session[] = [
+  buildSession({
+    id: "01a06d02-2000-7000-8000-00000000000a",
+    title: "Answer Ada's conversation",
+    status: "busy",
+    agentId: "01a06d02-a000-7000-8000-000000000001",
+    conversationId: "01a06d02-c000-7000-8000-000000000001",
+    lastActivityAt: "2026-09-08T11:55:00.000Z",
+  }),
+  buildSession({
+    id: "01a06d02-2000-7000-8000-00000000000b",
+    title: "Answer Bob's conversation",
+    status: "idle",
+    agentId: "01a06d02-a000-7000-8000-000000000002",
+    conversationId: "01a06d02-c000-7000-8000-000000000002",
+    lastActivityAt: "2026-09-08T11:00:00.000Z",
+  }),
+];
+
+/**
+ * Returns the lane on the screen whose heading is `label`, or null when the
+ * screen has no such lane. The sidebar is skipped, because it can show the
+ * same word.
+ */
+const findLane = (label: string): HTMLElement | null =>
+  screen
+    .queryAllByText(label)
+    .filter((el) => el.closest("nav") === null)[0]
+    ?.closest("section") ?? null;
+
 const buildController = (
   sessions: readonly Session[],
   extra: Readonly<Record<string, Handler>> = {},
@@ -114,11 +145,13 @@ const buildController = (
   "GET /api/v1/settings": {
     body: {
       controller: {},
-      user: { "onboarding.completedSteps": ["timezone"], timezone: ZONE },
+      user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: ZONE },
     },
   },
   "GET /api/v1/sessions": { body: { items: sessions } },
   "GET /api/v1/providers": { body: [buildClaudeCodeInstance()] },
+  // The sidebar's Assistants group reads this; no test here has an assistant.
+  "GET /api/v1/assistants": { body: { items: [] } },
   ...extra,
 });
 
@@ -185,6 +218,22 @@ describe("All sessions", () => {
     }
     // "Claude Code" is the provider display name for every session's instanceId.
     expect(screen.getAllByText("Claude Code").length).toBeGreaterThanOrEqual(THREE_STATUSES.length);
+  });
+
+  it("shows the sessions that answer a conversation in the Assistants lane and in no other", async () => {
+    await openApp([...THREE_STATUSES, ...ANSWERING]);
+
+    await waitFor(() => {
+      expect(findLane("Assistants")).not.toBeNull();
+    });
+    const assistants = readPageText(findLane("Assistants"));
+    const others = ["Running", "Idle", "Settled"].map((label) => readPageText(findLane(label)));
+    for (const session of ANSWERING) {
+      expect(assistants).toContain(session.title);
+      for (const other of others) expect(other).not.toContain(session.title);
+    }
+    expect(assistants).not.toContain(BUSY.title);
+    expect(assistants).not.toContain(IDLE.title);
   });
 
   it("shows No sessions yet, Create new thread and no lane headings when there are no sessions", async () => {

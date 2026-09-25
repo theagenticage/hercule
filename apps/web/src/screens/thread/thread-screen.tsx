@@ -1,10 +1,21 @@
 /**
  * The thread surface: a centred 800px column of turns that streams live, with
  * the composer floating at the bottom (spec 14 §The thread surface).
+ *
+ * An assistant's session uses the same surface with two changes: the crumb
+ * links back to the assistant's conversation, and a card pointing to that
+ * conversation takes the composer's place, because the user talks to an
+ * assistant in its conversation.
  */
 import { useLayoutEffect, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { buildSiblingTabs, buildTurns, type HerculeClient, type Live } from "@hercule/client-core";
+import {
+  buildSiblingTabs,
+  buildTurns,
+  findAnsweredAssistantId,
+  type HerculeClient,
+  type Live,
+} from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import {
   inputsQuery,
@@ -15,10 +26,13 @@ import {
   workspacesQuery,
 } from "../../app/queries";
 import { Composer } from "../composer/composer";
+import { ContentColumn } from "../content-column";
+import { AssistantCrumb } from "./assistant-crumb";
+import { ConversationSessionNotice } from "./conversation-session-notice";
 import { PermissionCard } from "./permission-card";
 import { QueuedInputs } from "./queued-inputs";
-import { ChromeAction, NewThreadHere, ThreadChrome, ThreadColumn } from "./thread-chrome";
-import { useStickToBottom } from "./use-stick-to-bottom";
+import { ChromeAction, NewThreadHere, ThreadChrome } from "./thread-chrome";
+import { useStickToBottom } from "../use-stick-to-bottom";
 import { useThreadLive } from "./use-thread-live";
 import { Turn } from "./turn";
 
@@ -66,10 +80,13 @@ export function ThreadScreen({
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
   const project = projects.find((each) => each.id === session.projectId);
+  const assistantId = findAnsweredAssistantId(session);
 
   // Runs after the DOM has updated with whatever just grew. A change in
   // `rows.length` or `queuedCount` triggers it, and `followIfAtBottom` decides
-  // whether the growth should move the scroll position.
+  // whether the growth should move the scroll position. The user counts as at
+  // the bottom until they scroll, so the first run opens the thread on its
+  // latest turn.
   useLayoutEffect(() => {
     followIfAtBottom();
     // A permission card docking above the composer takes space from the
@@ -79,7 +96,13 @@ export function ThreadScreen({
   return (
     <div className="flex flex-1 flex-col">
       <ThreadChrome
-        crumb={project?.name}
+        crumb={
+          assistantId === null ? (
+            project?.name
+          ) : (
+            <AssistantCrumb client={client} assistantId={assistantId} />
+          )
+        }
         title={session.title}
         tabs={buildSiblingTabs({ workspace, sessions, activeSessionId: session.id })}
         actions={
@@ -93,7 +116,7 @@ export function ThreadScreen({
           </>
         }
       />
-      <ThreadColumn className="gap-6">
+      <ContentColumn className="gap-6">
         {turns.map((turn, index) => {
           // Only the last turn of a busy session can still be running.
           //
@@ -130,10 +153,19 @@ export function ThreadScreen({
                 request={session.openRequest}
               />
             )}
-            <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
+            {assistantId === null ? (
+              <Composer thread={{ kind: "active", session }} onSend={scrollToBottom} />
+            ) : (
+              <ConversationSessionNotice
+                client={client}
+                sessionId={sessionId}
+                assistantId={assistantId}
+                busy={session.status === "busy"}
+              />
+            )}
           </div>
         </div>
-      </ThreadColumn>
+      </ContentColumn>
     </div>
   );
 }

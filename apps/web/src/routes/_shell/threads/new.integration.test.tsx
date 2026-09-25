@@ -215,7 +215,7 @@ const buildController = (
   "GET /api/v1/settings": {
     body: {
       controller: {},
-      user: { "onboarding.completedSteps": ["timezone"], timezone: ZONE, ...user },
+      user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: ZONE, ...user },
     },
   },
   "GET /api/v1/providers": { body: instances },

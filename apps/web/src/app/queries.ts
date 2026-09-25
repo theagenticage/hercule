@@ -14,12 +14,14 @@
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
+  isNotFound,
   listLoopbackEndpoints,
   queryKeys,
   RUNNING_STATUSES,
   type HerculeClient,
 } from "@hercule/client-core";
 import {
+  DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   type RunFilter,
   type Runner,
@@ -431,4 +433,104 @@ export const runQuery = (client: HerculeClient, id: string) =>
     queryKey: queryKeys.run(id),
     queryFn: () => client.run.read({ params: { id } }),
     retry: false,
+  });
+
+/**
+ * Reads every assistant in a single page, oldest first, for the sidebar's
+ * Assistants group and the onboarding step. A user keeps a handful of
+ * assistants, so one page of the largest size holds them all.
+ */
+export const assistantsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.assistants(),
+    queryFn: () => client.assistant.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * Reads one assistant, for its conversation screen and for the session view
+ * of its sessions. An error is not retried, because an assistant that returns 404
+ * once will keep returning 404.
+ */
+export const assistantQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.assistant(id),
+    queryFn: () => client.assistant.read({ params: { id } }),
+    retry: false,
+  });
+
+/**
+ * Reads the assistant a session answered, for the session view, or returns
+ * null when the assistant has been deleted since. The session outlives its
+ * assistant, so a not-found answer here is a fact to show, not a failure;
+ * any other error still fails the read.
+ *
+ * The key sits under the assistant's own key, so the `assistant` live nudge
+ * that renames or deletes it refetches this read too.
+ */
+export const answeredAssistantQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: [...queryKeys.assistant(id), "answered"],
+    queryFn: () =>
+      client.assistant.read({ params: { id } }).catch((error: unknown) => {
+        if (isNotFound(error)) return null;
+        throw error;
+      }),
+    retry: false,
+  });
+
+/**
+ * Reads one assistant's conversations in a single page. An assistant has one
+ * conversation per channel container, and the web is the only channel so far,
+ * so the page holds one.
+ */
+export const conversationsQuery = (client: HerculeClient, assistantId: string) =>
+  queryOptions({
+    queryKey: queryKeys.conversations({ assistantId }),
+    queryFn: () => client.conversation.query({ query: { assistantId, limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * Reads a conversation's messages newest first, one page of 50 at a time. The
+ * conversation screen opens on the latest page, and "Show earlier messages"
+ * fetches the next one. `flattenMessagePages` puts the pages back in reading
+ * order.
+ */
+export const conversationMessagesQuery = (client: HerculeClient, conversationId: string) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.conversationMessages(conversationId),
+    queryFn: ({ pageParam }) =>
+      client.conversation.queryMessages({
+        params: { id: conversationId },
+        query: {
+          sort: { field: "position", direction: "desc" },
+          limit: DEFAULT_PAGE_LIMIT,
+          ...(pageParam === undefined ? {} : { cursor: pageParam }),
+        },
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+    // A page that fails to load shows its error beside "Show earlier
+    // messages" at once, and the user decides whether to try again, rather
+    // than waiting through retries in the background.
+    retry: false,
+  });
+
+/**
+ * Reads a conversation's current session: the newest session that answers
+ * it, or null when none has started yet. The server applies the rule, because
+ * a list filtered in the browser could be cut off at its page size and then
+ * return an older session.
+ *
+ * The key sits under the `sessions` prefix, so every `session` push refetches
+ * it, as it does the runner page's list.
+ */
+export const currentConversationSessionQuery = (client: HerculeClient, conversationId: string) =>
+  queryOptions({
+    queryKey: queryKeys.sessions({ conversationId }),
+    queryFn: async () =>
+      (
+        await client.session.query({
+          query: { conversationId, sort: { field: "createdAt", direction: "desc" }, limit: 1 },
+        })
+      ).items[0] ?? null,
   });

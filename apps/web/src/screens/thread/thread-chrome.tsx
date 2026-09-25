@@ -2,11 +2,13 @@ import type { JSX, ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import type { ThreadTab } from "@hercule/client-core";
 import { DoneMark, WorkingMark, cn } from "@hercule/ui";
+import { HeaderRow } from "../header-row";
 
 /**
  * The thread's header row, as set by spec 14 §The thread surface: the project
  * crumb, then the title, then the actions on the right. A thread with no
- * project shows `Threads /` as its crumb.
+ * project shows `Threads /` as its crumb. An assistant's session shows
+ * `Assistants /`, linking to the assistant's conversation.
  *
  * When the thread's workspace holds more than one thread, the title becomes
  * the active tab, with the other threads beside it in the workspace's order.
@@ -21,28 +23,28 @@ export function ThreadChrome({
   tabs = [],
   actions,
 }: {
-  /** The name of the thread's project; the crumb shows `Threads` when undefined. */
-  readonly crumb?: string | undefined;
+  /** The project's name, or the assistant's crumb; the crumb shows `Threads` when undefined. */
+  readonly crumb?: ReactNode;
   readonly title: string;
   readonly tabs?: readonly ThreadTab[];
   readonly actions?: ReactNode;
 }): JSX.Element {
   return (
-    <div className="flex items-center gap-2.5 px-6 pt-3 pb-2 text-[16px] font-emph text-ink">
-      <span className="shrink-0 font-normal text-faint">{crumb ?? "Threads"} /</span>{" "}
-      {tabs.length === 0 ? (
-        <span className="truncate">{title}</span>
-      ) : (
-        <span className="flex min-w-0 items-center gap-1.5">
-          {tabs.map((tab) => (
-            <Tab key={tab.sessionId ?? "draft"} tab={tab} />
-          ))}
-        </span>
-      )}
-      {actions === undefined ? null : (
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</span>
-      )}
-    </div>
+    <HeaderRow
+      crumb={crumb ?? "Threads"}
+      title={
+        tabs.length === 0 ? (
+          <span className="truncate">{title}</span>
+        ) : (
+          <span className="flex min-w-0 items-center gap-1.5">
+            {tabs.map((tab) => (
+              <Tab key={tab.sessionId ?? "draft"} tab={tab} />
+            ))}
+          </span>
+        )
+      }
+      actions={actions}
+    />
   );
 }
 
@@ -68,7 +70,7 @@ function Tab({ tab }: { readonly tab: ThreadTab }): JSX.Element {
     </>
   );
   const shape = cn(
-    "flex min-w-0 items-center gap-1.5 rounded-[8px] px-2.5 py-[3px] text-[14px]",
+    "flex min-w-0 items-center gap-1.5 rounded-[8px] px-2.5 py-[3px] text-body",
     tab.active
       ? "border border-line bg-raised font-emph text-ink shadow-card"
       : "font-normal text-muted hover:text-ink",
@@ -134,20 +136,3 @@ export function NewThreadHere({
 
 const ACTION =
   "rounded-full border border-line bg-raised py-[3px] text-meta font-normal whitespace-nowrap text-muted";
-
-/** The content column below the header row: up to 800px wide and centred. */
-export function ThreadColumn({
-  className,
-  children,
-}: {
-  readonly className?: string;
-  readonly children: ReactNode;
-}): JSX.Element {
-  return (
-    <div className="flex flex-1 flex-col px-6 pt-2 pb-16">
-      <div className={cn("mx-auto flex w-full max-w-[800px] flex-1 flex-col", className)}>
-        {children}
-      </div>
-    </div>
-  );
-}

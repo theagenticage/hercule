@@ -68,7 +68,8 @@ describe("buildLanes", () => {
     ]);
     expect(byKind.idle!.map((s: Session) => s.id)).toEqual(["idle"]);
     expect(byKind.settled!.map((s: Session) => s.id)).toEqual(["exited"]);
-    // Nothing in this build produces a waiting or an assistants session.
+    // Nothing in this build produces a waiting session, and none of these
+    // sessions answers a conversation.
     expect(byKind.waiting).toEqual([]);
     expect(byKind.assistants).toEqual([]);
   });
@@ -87,6 +88,27 @@ describe("buildLanes", () => {
 
     expect(byKind.idle!.map((s: Session) => s.id)).toEqual(["resumable"]);
     expect(byKind.settled!.map((s: Session) => s.id)).toEqual(["gone"]);
+  });
+
+  it("places every session that answers a conversation in the assistants lane and in no other", () => {
+    const busy = buildSession({ id: "busy", status: "busy", agentId: "ada", conversationId: "c" });
+    const idle = buildSession({ id: "idle", status: "idle", agentId: "ada", conversationId: "c" });
+    const exited = buildSession({
+      id: "exited",
+      status: "exited",
+      agentId: "ada",
+      conversationId: "c",
+    });
+    const thread = buildSession({ id: "thread", status: "busy" });
+
+    const lanes = buildLanes([busy, idle, exited, thread]);
+    const byKind = Object.fromEntries(lanes.map((lane) => [lane.kind, lane.sessions]));
+
+    expect(byKind.assistants!.map((s: Session) => s.id).sort()).toEqual(["busy", "exited", "idle"]);
+    expect(byKind.running!.map((s: Session) => s.id)).toEqual(["thread"]);
+    expect(byKind.idle).toEqual([]);
+    expect(byKind.settled).toEqual([]);
+    expect(byKind.waiting).toEqual([]);
   });
 });
 
@@ -153,6 +175,16 @@ describe("buildHeadline", () => {
     ];
 
     expect(buildHeadline(sessions, now)).toBe("Nothing active this week");
+  });
+
+  it("counts a session that answers a conversation by its status, as it counts a thread", () => {
+    const sessions = [
+      buildSession({ id: "a1", status: "busy", agentId: "ada", conversationId: "c" }),
+      buildSession({ id: "a2", status: "idle", agentId: "bob", conversationId: "d" }),
+      buildSession({ id: "t1", status: "busy" }),
+    ];
+
+    expect(buildHeadline(sessions, now)).toBe("2 running · 1 idle");
   });
 
   it("returns No sessions yet only when there are no sessions", () => {

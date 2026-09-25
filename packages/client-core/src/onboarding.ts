@@ -11,10 +11,22 @@
  */
 
 /** The steps after the setup gate, in the order they are offered. */
-export const ONBOARDING_STEPS = ["timezone"] as const;
+export const ONBOARDING_STEPS = ["timezone", "assistant"] as const;
 
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 /** Returns the first step not yet completed, or `null` when every step is done. */
 export const findNextOnboardingStep = (completedSteps: readonly string[]): OnboardingStep | null =>
   ONBOARDING_STEPS.find((step) => !completedSteps.includes(step)) ?? null;
+
+/**
+ * Returns the completed-step list with `step` added at the end. The list is
+ * returned unchanged when it already holds `step`, so a step that is
+ * submitted twice (a retry after a refused write, or a second tab) is
+ * recorded once.
+ */
+export const addCompletedStep = (
+  completedSteps: readonly string[],
+  step: OnboardingStep,
+): readonly string[] =>
+  completedSteps.includes(step) ? completedSteps : [...completedSteps, step];

@@ -6,6 +6,13 @@
  * error classes below.
  */
 export { describeActor, type ActorReading } from "./actor-display";
+export { decideConversationActivity, type ConversationActivity } from "./assistants/activity";
+export {
+  findAnsweredAssistantId,
+  findWebConversation,
+  flattenMessagePages,
+} from "./assistants/conversation";
+export { decideAssistantPresence, type AssistantPresence } from "./assistants/presence";
 export { createClient, type FetchLike, type HerculeClient } from "./client";
 export {
   buildConfigDraft,
@@ -90,7 +97,7 @@ export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
 export { decideSessionsEmptyState } from "./sessions-empty-state";
-export { findNextOnboardingStep, type OnboardingStep } from "./onboarding";
+export { addCompletedStep, findNextOnboardingStep, type OnboardingStep } from "./onboarding";
 export { formatPreciseStamp, formatSince, formatStamp, formatTimeContext } from "./time-context";
 export {
   readPriorityGlyph,

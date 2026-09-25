@@ -10,6 +10,7 @@
  */
 import type { JSX, RefObject } from "react";
 import { formatStamp, type ThreadTurn } from "@hercule/client-core";
+import { OwnerBubble } from "../bubble";
 import { Markdown } from "./markdown";
 import { TurnDivider } from "./turn-divider";
 
@@ -35,9 +36,7 @@ export function Turn({
       )}
       {turn.user === "" ? null : (
         <div className="flex justify-end">
-          <div className="max-w-[80%] rounded-card border border-line-soft bg-surface px-3.5 py-2 text-row text-ink">
-            <Markdown text={turn.user} breaks />
-          </div>
+          <OwnerBubble text={turn.user} />
         </div>
       )}
       {turn.assistantText === "" && !live ? null : (
