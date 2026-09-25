@@ -46,17 +46,18 @@ export interface IndexedWorkflowGraphEdge {
   readonly planEdgeIndex: number | undefined;
 }
 
+/** A workflow graph whose edges carry their index in the definition's `edges`. */
+export interface IndexedWorkflowGraph {
+  readonly nodes: ReadonlyArray<WorkflowGraphNode>;
+  readonly edges: ReadonlyArray<IndexedWorkflowGraphEdge>;
+}
+
 /**
  * Builds the graph that `buildWorkflowGraph` returns, with each edge's index
  * in the definition's `edges`. A run counts how often it followed each edge
  * by that index.
  */
-export const buildIndexedWorkflowGraph = (
-  definition: WorkflowDefinition,
-): {
-  readonly nodes: ReadonlyArray<WorkflowGraphNode>;
-  readonly edges: ReadonlyArray<IndexedWorkflowGraphEdge>;
-} => {
+export const buildIndexedWorkflowGraph = (definition: WorkflowDefinition): IndexedWorkflowGraph => {
   const triggers = definition.triggers ?? [];
   const nodes: ReadonlyArray<WorkflowGraphNode> = [
     ...triggers.map(({ id, kind }) => ({ id, kind })),
