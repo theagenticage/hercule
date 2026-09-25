@@ -23,7 +23,7 @@
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
-import type { FailedEdge, Run, WorkflowDefinition } from "@hercule/contract";
+import { collectReachableSteps, type FailedEdge, type Run } from "@hercule/contract";
 import { evaluateCondition, type ExpressionError } from "../../expressions";
 import { isUnfinished } from "../../runs";
 
@@ -113,28 +113,6 @@ export const isStepConditionMet = (
 };
 
 /**
- * Returns every step that `from` holds or has a path of edges to, `from`
- * included.
- *
- * `@hercule/client-core`'s `run-graph.ts` keeps a copy of this function,
- * because the web app cannot import the controller.
- */
-const collectReachableSteps = (
-  plan: WorkflowDefinition,
-  from: Iterable<string>,
-): ReadonlySet<string> => {
-  const reached = new Set(from);
-  // A Set iterator also visits values added during the iteration, so this
-  // loop is a breadth-first search.
-  for (const stepId of reached) {
-    for (const edge of plan.edges ?? []) {
-      if (edge.from === stepId) reached.add(edge.to);
-    }
-  }
-  return reached;
-};
-
-/**
  * Returns the `join: all` steps that become ready, in the order their
  * records are to be created. A `join: all` step is ready once, when it has no
  * record yet, every incoming edge is settled, and at least one of them fired.
@@ -158,7 +136,7 @@ const listReadyJoins = (
   const nowLive = new Set(live);
   const ready: Array<string> = [];
   for (;;) {
-    const canStillRun = collectReachableSteps(run.plan, nowLive);
+    const canStillRun = collectReachableSteps(edges, nowLive);
     const candidates = waiting.filter((step) => {
       if (nowLive.has(step.id)) return false;
       const incoming = edges.flatMap((edge, index) => (edge.to === step.id ? [index] : []));
@@ -171,7 +149,7 @@ const listReadyJoins = (
       (candidate) =>
         !candidates.some(
           (other) =>
-            other !== candidate && collectReachableSteps(run.plan, [other.id]).has(candidate.id),
+            other !== candidate && collectReachableSteps(edges, [other.id]).has(candidate.id),
         ),
     );
     if (first === undefined) return ready;

@@ -6,7 +6,13 @@
  * happened. These functions join the two, so the graph, the step list and the
  * timeline agree on every step's state.
  */
-import type { Run, RunStatus, StepError, StepRecord } from "@hercule/contract";
+import {
+  collectReachableSteps,
+  type Run,
+  type RunStatus,
+  type StepError,
+  type StepRecord,
+} from "@hercule/contract";
 import {
   describeUnstartedStep,
   isRunLive,
@@ -104,29 +110,6 @@ const groupRecordsByStep = (
     else group.push(record);
   }
   return groups;
-};
-
-/**
- * Returns every step that `from` holds or has a path of edges to, `from`
- * included. Conditions and `maxTraversals` are ignored, as the controller
- * does when it decides whether a step can still run.
- *
- * A copy of `collectReachableSteps` in the controller's
- * `daemon/runs/routing.ts`, because the web app cannot import the controller.
- */
-const collectReachableSteps = (
-  edges: ReadonlyArray<WorkflowGraphEdge>,
-  from: Iterable<string>,
-): ReadonlySet<string> => {
-  const reached = new Set(from);
-  // A Set iterator also visits values added during the iteration, so this
-  // loop is a breadth-first search.
-  for (const stepId of reached) {
-    for (const edge of edges) {
-      if (edge.from === stepId) reached.add(edge.to);
-    }
-  }
-  return reached;
 };
 
 /**

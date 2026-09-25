@@ -310,6 +310,7 @@ export {
 } from "./groups/workflow";
 export {
   ANY_CONNECTION,
+  collectReachableSteps,
   decodeWorkflowDefinition,
   truncateIssues,
   listEntrySteps,
