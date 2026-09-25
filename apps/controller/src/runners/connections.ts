@@ -499,8 +499,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Publishes that this runner may now have room for work, for example
-     * because its cap was raised, it was undrained, or it is no longer
-     * reserved. This domain does not know whether any session or run is
+     * because its cap was raised, it was undrained, it is no longer reserved,
+     * or its watermark was lowered below its free disk. This domain does not know whether any session or run is
      * waiting for that room.
      */
     placementsChanged: (id: string): Effect.Effect<void> =>
@@ -575,13 +575,13 @@ const make = Effect.gen(function* () {
       watermark: RunnerWatermark,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        yield* withTransaction(
+        const freed = yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            if (reachable.get(id)?.connection !== connection) return;
+            if (reachable.get(id)?.connection !== connection) return false;
             const at = yield* nowIso;
             const result = yield* runners.recordWatermark(id, watermark, at);
-            if (!result.crossed) return;
+            if (!result.crossed) return false;
             yield* audit.append({
               kind: "runner.placementsChanged",
               actor: SYSTEM_ACTOR,
@@ -589,13 +589,16 @@ const make = Effect.gen(function* () {
               payload: { runnerId: id, acceptingPlacements: result.accepting },
               at,
             });
+            return result.accepting;
           }),
         );
-        // After the write, so whoever acts on this runner's room reads the disk
-        // space it just reported rather than the old value. A report that did
-        // not cross the watermark is still published, because placement reads
-        // the latest disk space.
-        yield* publish(id, connection, { _tag: "placementsChanged", runnerId: id });
+        // Placement reads the disk space only to compare it with the
+        // watermark. So only a report that brings the runner back above the
+        // watermark gives it room for work. Publishing every routine report
+        // would wake every run waiting for a runner once a minute per runner.
+        // Published after the write, so whoever acts on it reads the new disk
+        // space rather than the old value.
+        if (freed) yield* publish(id, connection, { _tag: "placementsChanged", runnerId: id });
       }),
 
     /**
